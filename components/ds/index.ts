@@ -1,5 +1,7 @@
 export { ModalShell } from './ModalShell';
 export type { ModalSize } from './ModalShell';
+export { Sheet } from './Sheet';
+export { StepNav } from './StepNav';
 export {
   FormCard,
   Field,

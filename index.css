@@ -715,6 +715,34 @@ body {
 @keyframes slideUpBehindNav { from { transform: translateY(100%); } to { transform: translateY(0); } }
 @keyframes tileIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
+/* ds/Sheet — the panel is anchored to the bottom edge on a phone and the right
+   edge from sm up, so the entrance has to swap with the anchoring. Done here
+   rather than with a Tailwind arbitrary value because the two directions need
+   different keyframes, and a class string cannot switch keyframes at a
+   breakpoint. Motion is dropped entirely for reduce-motion. */
+/* The live dot: a ring that expands and fades out from under a solid centre,
+   so the dot itself never dims. A dot that blinks off reads as "offline" for
+   half of every cycle — the opposite of what it is there to say. Motion is
+   dropped for reduce-motion; the solid dot alone still carries the state. */
+@keyframes ds-live-ping {
+  0%   { transform: scale(1);   opacity: 0.55; }
+  70%  { transform: scale(2.4); opacity: 0; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+.ds-live-dot { animation: ds-live-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .ds-live-dot { animation: none; opacity: 0; }
+}
+
+@keyframes slideInRight { from { transform: translateX(100%); } to { transform: translateX(0); } }
+.ds-sheet { animation: slideUpSheet 260ms cubic-bezier(0.32, 0.72, 0, 1) both; }
+@media (min-width: 640px) {
+  .ds-sheet { animation: slideInRight 260ms cubic-bezier(0.32, 0.72, 0, 1) both; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ds-sheet { animation: fadeIn 160ms ease-out both; }
+}
+
 /* ===========================================================================
    Print
    ========================================================================= */
@@ -932,6 +960,12 @@ body {
 .dark .ds-select {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239a9aa4' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
 }
+
+/* Compact variant for filter-bar selects: same drawn chevron, smaller box.
+   The gap is tighter than the full-size field but still clears the glyph —
+   at the standard 2.5rem a 9-character supplier name padded the pill wider
+   than the phone. */
+.ds-select-sm { padding-right: 1.875rem; background-position: right 0.625rem center; }
 
 /* Native date inputs: Android/iOS give the field an intrinsic min-width and
    generous internal chrome, so inside narrow two-column grids (~360px CSS

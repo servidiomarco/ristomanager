@@ -336,7 +336,20 @@ export const SectionHeader: React.FC<{
       // a transparent band reads as a caption; people scrolled past it without
       // realising the group collapses. Hover then deepens it rather than being
       // the only signal, which never existed on touch at all.
-      className="-mx-1 flex min-h-[44px] w-full items-center gap-2 rounded-[14px] bg-[var(--ds-surface-row)] px-3 py-1.5 text-left transition-colors hover:bg-[var(--ds-border)] active:bg-[var(--ds-border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+      //
+      // The tint alone was not enough: surface-row (#f4f4f5) sits within a few
+      // percent of both the canvas beneath it and the white card under it, so
+      // on a phone the band bled into the first row of the group. The hairline
+      // does the separating instead of a darker fill — deepening the fill would
+      // have dropped the muted meta text below 4.5:1 at 13px. It reads as an
+      // outlined band without touching the text contrast at all.
+      //
+      // The bottom margin only applies while the group is open, where it buys
+      // air before the first card. Collapsed, consecutive headers should stack
+      // tightly — an extra gap there would read as a missing group.
+      className={`-mx-1 flex min-h-[44px] w-full items-center gap-2 rounded-[14px] border border-[var(--ds-border)] bg-[var(--ds-surface-row)] px-3 py-1.5 text-left transition-colors hover:border-[var(--ds-border-strong)] hover:bg-[var(--ds-border)] active:bg-[var(--ds-border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+        expanded ? 'mb-2.5' : ''
+      }`}
     >
       {/* Label and meta wrap as a pair: on a wide column they share one line,
           and where the column is too narrow the meta drops beneath the label
@@ -474,9 +487,12 @@ export const Avatar: React.FC<{
   /** Shown instead of initials when there is no usable name. */
   icon?: React.ComponentType<{ className?: string }>;
   tone?: 'neutral' | 'critical' | 'info';
+  /** 'sm' is for a metadata line inside a row, where 40px would outweigh the
+   *  text it belongs to. 'md' stays the default for list leading positions. */
+  size?: 'sm' | 'md';
   badge?: React.ReactNode;
   className?: string;
-}> = ({ name, icon: Icon, tone = 'neutral', badge, className = '' }) => {
+}> = ({ name, icon: Icon, tone = 'neutral', size = 'md', badge, className = '' }) => {
   const initials = (name || '')
     .trim()
     .split(/\s+/)
@@ -491,8 +507,10 @@ export const Avatar: React.FC<{
     : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]';
   return (
     <div className={`relative flex-shrink-0 ${badge ? 'pb-1' : ''} ${className}`}>
-      <div className={`flex h-10 w-10 items-center justify-center rounded-full text-[13px] font-semibold ${shell}`}>
-        {initials && !Icon ? initials : Icon ? <Icon className="h-4 w-4" /> : '—'}
+      <div className={`flex items-center justify-center rounded-full font-semibold ${shell} ${
+        size === 'sm' ? 'h-6 w-6 text-[10px]' : 'h-10 w-10 text-[13px]'
+      }`}>
+        {initials && !Icon ? initials : Icon ? <Icon className={size === 'sm' ? 'h-3 w-3' : 'h-4 w-4'} /> : '—'}
       </div>
       {badge && (
         <span className="absolute -bottom-0.5 left-1/2 -translate-x-1/2">{badge}</span>

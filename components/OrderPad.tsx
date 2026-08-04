@@ -11,7 +11,7 @@ import {
   voidItem, setOrderDiscount, transferOrder,
   type MenuCatalogue, type NewOrderItem, type CloseOrderResult,
 } from '../services/ordersApiService';
-import { BillSheet } from './OpenBillsPanel';
+import { BillSheet } from './pagamenti/BillSheet';
 
 // ---------------------------------------------------------------------------
 // Palmare cameriere — la comanda si compone qui e parte con un tocco.

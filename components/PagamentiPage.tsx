@@ -1,504 +1,61 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  CreditCard, Search, X, Loader2, Calendar, Clock, AlertCircle, Filter,
-  ExternalLink, MessageSquare, MessageCircle, Mail, Users as UsersIcon,
-  CheckCircle2, XCircle, Hourglass, Ban, Copy, Check, RefreshCw, Armchair, Receipt, RotateCcw,
-} from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
 import { socketClient } from '../services/socketClient';
-import { billsApiService } from '../services/billsApiService';
-import { OpenBillsPanel } from './OpenBillsPanel';
-import { CookingPotLoader } from './CookingPotLoader';
 import { SkeletonPaymentList } from './SkeletonCards';
 import {
-  paymentsApiService,
-  PaymentRequest,
-  PaymentsListParams,
-  PaymentMessage,
+  paymentsApiService, type PaymentRequest, type PaymentsListParams,
 } from '../services/paymentsApiService';
-import { useAuth } from '../contexts/AuthContext';
-import { toTitleCase } from '../utils/text';
+import { getFeatureFlags } from '../services/apiService';
+import { getRomeDatePart } from '../utils/reservationTime';
+import { Callout, SearchField, SegmentedControl } from './ds';
+import { ContiAperti, type BillsSummary } from './pagamenti/ContiAperti';
+import { LinkDiPagamento, type StatusFilter } from './pagamenti/LinkDiPagamento';
+import { PaymentDetailSheet } from './pagamenti/PaymentDetailSheet';
+import { PeriodPicker, type Period } from './pagamenti/PeriodPicker';
+import { formatEuro } from './pagamenti/paymentsView';
 
-const formatDateTime = (iso: string | null | undefined): string => {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleString('it-IT', {
-      timeZone: 'Europe/Rome',
-      day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
-    });
-  } catch {
-    return iso;
-  }
-};
+/* ── Pagamenti ────────────────────────────────────────────────────────────
+   Two things the restaurant calls "pagamenti" and used to stack in one
+   column: the bills open on tables right now, and the payment links sent to
+   customers. They answer different questions on different clocks — one is the
+   service happening this minute, the other is a ledger over a period — so
+   they get a tab each rather than a shared scroll where the second always
+   started below the fold.
 
-const formatEuro = (cents: number, currency: string = 'EUR'): string => {
-  const symbol = currency === 'EUR' ? '€' : currency;
-  return `${symbol} ${(cents / 100).toFixed(2).replace('.', ',')}`;
-};
+   Their date scopes stay independent, exactly as they already were: Conti
+   aperti follows the current service the server reports, Link follows the
+   period filter. */
 
-// Map raw payment status → { label, badge classes, icon }. COMPLETED/PAID
-// collapse into the same "Pagato" bucket; AUTHORISED behaves like PENDING
-// visually (money not moved yet from the customer's account).
-type StatusView = { label: string; cls: string; Icon: React.ComponentType<{ className?: string }> };
-const paymentStatusView = (status: string | null | undefined): StatusView => {
-  const s = (status || '').toUpperCase();
-  switch (s) {
-    case 'COMPLETED':
-    case 'PAID':
-      return { label: 'Pagato', cls: 'bg-emerald-50 text-emerald-700 ring-emerald-200', Icon: CheckCircle2 };
-    case 'PENDING':
-      return { label: 'In attesa', cls: 'bg-amber-50 text-amber-700 ring-amber-200', Icon: Hourglass };
-    case 'AUTHORISED':
-      return { label: 'Autorizzato', cls: 'bg-sky-50 text-sky-700 ring-sky-200', Icon: Hourglass };
-    case 'FAILED':
-      return { label: 'Fallito', cls: 'bg-rose-50 text-rose-700 ring-rose-200', Icon: XCircle };
-    case 'CANCELLED':
-      return { label: 'Annullato', cls: 'bg-slate-100 text-slate-700 ring-slate-200', Icon: Ban };
-    case 'EXPIRED':
-      return { label: 'Scaduto', cls: 'bg-slate-100 text-slate-600 ring-slate-200', Icon: Ban };
-    case 'REFUNDED':
-      return { label: 'Rimborsato', cls: 'bg-violet-50 text-violet-700 ring-violet-200', Icon: RotateCcw };
-    default:
-      return { label: s || 'Sconosciuto', cls: 'bg-slate-100 text-slate-700 ring-slate-200', Icon: AlertCircle };
-  }
-};
+const KPI_LABELS = {
+  incassato: 'Incassato',
+  attesa: 'In attesa',
+  residuo: 'Residuo conti',
+} as const;
 
-// Rendering primitives for the message channels. WhatsApp isn't shipped as
-// a lucide icon; MessageCircle is the closest generic and gets a green tint
-// so it reads as WA in the timeline.
-type ChannelView = { label: string; Icon: React.ComponentType<{ className?: string }>; cls: string };
-const channelView = (channel: string): ChannelView => {
-  const c = (channel || '').toLowerCase();
-  if (c === 'sms') return { label: 'SMS', Icon: MessageSquare, cls: 'bg-sky-50 text-sky-700 ring-sky-200' };
-  if (c === 'whatsapp') return { label: 'WhatsApp', Icon: MessageCircle, cls: 'bg-emerald-50 text-emerald-700 ring-emerald-200' };
-  if (c === 'email') return { label: 'Email', Icon: Mail, cls: 'bg-violet-50 text-violet-700 ring-violet-200' };
-  return { label: channel || 'Altro', Icon: MessageSquare, cls: 'bg-slate-50 text-slate-700 ring-slate-200' };
-};
-
-const messageStatusBadge = (status: string | null | undefined): { label: string; cls: string } => {
-  const s = (status || '').toLowerCase();
-  if (s === 'delivered' || s === 'read') return { label: 'Consegnato', cls: 'bg-emerald-50 text-emerald-700 ring-emerald-200' };
-  if (s === 'sent' || s === 'queued' || s === 'accepted' || s === 'sending') return { label: 'Inviato', cls: 'bg-sky-50 text-sky-700 ring-sky-200' };
-  if (s === 'failed' || s === 'undelivered') return { label: 'Fallito', cls: 'bg-rose-50 text-rose-700 ring-rose-200' };
-  return { label: s || 'In coda', cls: 'bg-slate-50 text-slate-700 ring-slate-200' };
-};
-
-const reservationStatusBadge = (status: string | null | undefined): { label: string; cls: string } | null => {
-  if (!status) return null;
-  switch (status) {
-    case 'CONFIRMED': return { label: 'Confermata', cls: 'bg-emerald-50 text-emerald-700 ring-emerald-200' };
-    case 'CANCELLED': return { label: 'Annullata', cls: 'bg-rose-50 text-rose-700 ring-rose-200' };
-    case 'PENDING': return { label: 'In attesa', cls: 'bg-amber-50 text-amber-700 ring-amber-200' };
-    default: return { label: status, cls: 'bg-slate-50 text-slate-700 ring-slate-200' };
-  }
-};
-
-interface DetailModalProps {
-  payment: PaymentRequest;
-  onClose: () => void;
-  onReconciled?: (updated: PaymentRequest) => void;
-}
-
-const DetailModal: React.FC<DetailModalProps> = ({ payment: initialPayment, onClose, onReconciled }) => {
-  const { hasPermission } = useAuth();
-  const [payment, setPayment] = useState<PaymentRequest>(initialPayment);
-  const [messages, setMessages] = useState<PaymentMessage[]>([]);
-  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(initialPayment.checkout_url);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [reconciling, setReconciling] = useState(false);
-  const [reconcileFeedback, setReconcileFeedback] = useState<{ kind: 'ok' | 'info' | 'err'; text: string } | null>(null);
-  const [refundArmed, setRefundArmed] = useState(false);
-  const [refunding, setRefunding] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    paymentsApiService.listMessages(payment.id)
-      .then(r => {
-        if (cancelled) return;
-        setMessages(r.items);
-        if (r.checkout_url) setCheckoutUrl(r.checkout_url);
-      })
-      .catch((err: Error) => { if (!cancelled) setError(err.message); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [payment.id]);
-
-  const status = paymentStatusView(payment.status);
-  const StatusIcon = status.Icon;
-  const resBadge = reservationStatusBadge(payment.reservation_status);
-
-  const copyLink = () => {
-    if (!checkoutUrl) return;
-    navigator.clipboard.writeText(checkoutUrl).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    }).catch(() => {});
-  };
-
-  // Human name of the gateway that owns this payment, for button labels and
-  // feedback. Never hardcode "Revolut" here: a payment carries its own
-  // provider and SumUp orders are reconciled and refunded the same way.
-  const providerName =
-    payment.provider === 'sumup' ? 'SumUp'
-    : payment.provider === 'revolut' ? 'Revolut'
-    : (payment.provider || 'il gateway');
-
-  // Ask the server to poll the gateway for the authoritative order state and
-  // apply the transition — used when a webhook was missed or never delivered
-  // (SumUp's status callback is unsigned and best-effort).
-  const canReconcile =
-    hasPermission('payments:full') &&
-    ['revolut', 'sumup'].includes(payment.provider) &&
-    !!payment.provider_order_id;
-
-  // Two refund paths, both two-tap confirm:
-  //  - bill-split payments go through the split endpoint, which also reopens
-  //    the bill if the refund drops it below its total (and covers the
-  //    overpayment case, i.e. paid after the claim was abandoned);
-  //  - standalone payments (deposits / payment links) refund the order
-  //    directly. This second path used to be missing entirely, so a paid
-  //    deposit had no way back.
-  const isSplitPayment = payment.table_bill_split_id != null;
-  const canRefund =
-    hasPermission('payments:full') &&
-    ['revolut', 'sumup'].includes(payment.provider) &&
-    !!payment.provider_order_id &&
-    ['COMPLETED', 'PAID'].includes((payment.status || '').toUpperCase());
-
-  const refund = async () => {
-    if (!refundArmed) { setRefundArmed(true); return; }
-    setRefundArmed(false);
-    setRefunding(true);
-    setReconcileFeedback(null);
-    try {
-      if (isSplitPayment) {
-        const result = await billsApiService.refundSplit(payment.table_bill_split_id as number);
-        const updated = { ...payment, status: 'REFUNDED' };
-        setPayment(updated);
-        onReconciled?.(updated);
-        setReconcileFeedback({ kind: 'ok', text: result.reopened ? 'Rimborsato — conto riaperto per la parte mancante' : 'Rimborso eseguito' });
-      } else {
-        const result = await paymentsApiService.refund(payment.id);
-        if (result.payment_request) {
-          setPayment(result.payment_request);
-          onReconciled?.(result.payment_request);
-        }
-        setReconcileFeedback({ kind: 'ok', text: `Rimborso eseguito su ${providerName}` });
-      }
-    } catch (err) {
-      setReconcileFeedback({ kind: 'err', text: (err as Error).message });
-    } finally {
-      setRefunding(false);
-    }
-  };
-
-  const reconcile = async () => {
-    if (reconciling) return;
-    setReconciling(true);
-    setReconcileFeedback(null);
-    try {
-      const result = await paymentsApiService.reconcile(payment.id);
-      if (result.payment_request) {
-        setPayment(result.payment_request);
-        onReconciled?.(result.payment_request);
-      }
-      if (result.changed) {
-        setReconcileFeedback({ kind: 'ok', text: `Stato aggiornato da ${providerName}: ${result.provider_state ?? result.revolut_state ?? '—'}` });
-      } else if (result.message) {
-        setReconcileFeedback({ kind: 'info', text: result.message });
-      } else {
-        setReconcileFeedback({ kind: 'info', text: 'Nessun aggiornamento necessario' });
-      }
-    } catch (err) {
-      setReconcileFeedback({ kind: 'err', text: (err as Error).message });
-    } finally {
-      setReconciling(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div
-        className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-4 border-b border-[var(--color-line)] flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <CreditCard className="h-4 w-4 text-[var(--color-fg-muted)] shrink-0" />
-            <div className="flex flex-col min-w-0">
-              <h2 className="text-[15px] font-semibold text-[var(--color-fg)] truncate">
-                {formatEuro(payment.amount_cents, payment.currency)}
-                {payment.reservation_customer_name && (
-                  <span className="text-[var(--color-fg-muted)] font-normal"> · {toTitleCase(payment.reservation_customer_name)}</span>
-                )}
-              </h2>
-              <span className="text-[12px] text-[var(--color-fg-muted)] tabular truncate">
-                Ordine {payment.provider_order_id || '—'}
-              </span>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="h-8 w-8 inline-flex items-center justify-center rounded-full hover:bg-[var(--color-surface-hover)] text-[var(--color-fg-muted)]"
-            aria-label="Chiudi"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          <div className="grid grid-cols-2 gap-3 text-[13px]">
-            <div>
-              <div className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-medium">Stato</div>
-              <div className="mt-1 flex items-center gap-2 flex-wrap">
-                <span className={`inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset ${status.cls}`}>
-                  <StatusIcon className="h-3 w-3" />
-                  {status.label}
-                </span>
-                {canReconcile && (
-                  <button
-                    onClick={reconcile}
-                    disabled={reconciling}
-                    className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-full font-medium border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)] disabled:opacity-60 disabled:cursor-not-allowed"
-                    title={`Interroga ${providerName} e aggiorna lo stato`}
-                  >
-                    {reconciling
-                      ? <Loader2 className="h-3 w-3 animate-spin" />
-                      : <RefreshCw className="h-3 w-3" />}
-                    {reconciling ? 'Riconcilio…' : 'Riconcilia'}
-                  </button>
-                )}
-                {canRefund && (
-                  <button
-                    onClick={refund}
-                    onBlur={() => setRefundArmed(false)}
-                    disabled={refunding}
-                    className={`inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-full font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
-                      refundArmed
-                        ? 'bg-rose-600 text-white hover:bg-rose-700'
-                        : 'border border-rose-200 text-rose-600 hover:bg-rose-50 dark:border-rose-500/40 dark:hover:bg-rose-500/10'
-                    }`}
-                    title={refundArmed
-                      ? 'Clicca di nuovo per confermare'
-                      : `Rimborsa ${isSplitPayment ? 'la quota' : 'il pagamento'} via ${providerName}`}
-                  >
-                    {refunding
-                      ? <Loader2 className="h-3 w-3 animate-spin" />
-                      : <RotateCcw className="h-3 w-3" />}
-                    {refunding ? 'Rimborso…' : refundArmed ? 'Confermi il rimborso?' : 'Rimborsa'}
-                  </button>
-                )}
-              </div>
-              {reconcileFeedback && reconcileFeedback.kind !== 'err' && (
-                <div className={`mt-1.5 text-[11px] ${
-                  reconcileFeedback.kind === 'ok' ? 'text-emerald-700' : 'text-[var(--color-fg-muted)]'
-                }`}>
-                  {reconcileFeedback.text}
-                </div>
-              )}
-              </div>
-            {reconcileFeedback?.kind === 'err' && (
-              <div className="col-span-2 rounded-lg border border-rose-200 bg-rose-50 dark:border-rose-500/30 dark:bg-rose-500/10 px-3 py-2">
-                <div className="flex items-start gap-2">
-                  <AlertCircle className="h-3.5 w-3.5 text-rose-600 dark:text-rose-400 mt-0.5 shrink-0" />
-                  <div className="min-w-0">
-                    <div className="text-[12px] font-medium text-rose-700 dark:text-rose-300">Operazione non riuscita</div>
-                    <div className="text-[12px] text-rose-700/90 dark:text-rose-300/90 break-words">{reconcileFeedback.text}</div>
-                  </div>
-                </div>
-              </div>
-            )}
-            <div>
-              <div className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-medium">Creato</div>
-              <div className="text-[var(--color-fg)] mt-0.5">{formatDateTime(payment.created_at)}</div>
-            </div>
-            {payment.completed_at && (
-              <div>
-                <div className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-medium">Completato</div>
-                <div className="text-[var(--color-fg)] mt-0.5">{formatDateTime(payment.completed_at)}</div>
-              </div>
-            )}
-            <div>
-              <div className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-medium">Provider</div>
-              <div className="text-[var(--color-fg)] mt-0.5 capitalize">{payment.provider}</div>
-            </div>
-          </div>
-
-          {payment.table_bill_id != null && (
-            <div className="rounded-xl border border-sky-200 dark:border-sky-500/30 bg-sky-50/60 dark:bg-sky-500/10 p-3">
-              <div className="flex items-center gap-2 text-[13px] text-[var(--color-fg)] min-w-0 flex-wrap">
-                <Armchair className="h-4 w-4 text-sky-600 shrink-0" />
-                <span className="font-medium">
-                  {payment.table_name ? `Tavolo ${payment.table_name}` : `Conto #${payment.table_bill_id}`}
-                </span>
-                {payment.claimant_label && (
-                  <span className="text-[var(--color-fg-muted)]">· quota di {toTitleCase(payment.claimant_label)}</span>
-                )}
-                {payment.bill_total_cents != null && payment.bill_total_cents > 0 && (
-                  <span className="text-[12px] text-[var(--color-fg-muted)] tabular ml-auto">
-                    conto {formatEuro(payment.bill_total_cents)}
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
-
-          {payment.reservation_id != null && (
-            <div className="rounded-xl border border-[var(--color-line)] bg-[var(--color-bg)] p-3">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-[13px] text-[var(--color-fg)] min-w-0">
-                  <Calendar className="h-4 w-4 text-emerald-600 shrink-0" />
-                  <span className="font-medium truncate">
-                    {toTitleCase(payment.reservation_customer_name) || `Prenotazione #${payment.reservation_id}`}
-                  </span>
-                  {resBadge && (
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 ${resBadge.cls}`}>
-                      {resBadge.label}
-                    </span>
-                  )}
-                </div>
-                <a
-                  href={`/?view=RESERVATIONS&reservationId=${payment.reservation_id}`}
-                  className="text-[12px] text-indigo-600 hover:text-indigo-700 inline-flex items-center gap-1 shrink-0"
-                >
-                  Apri <ExternalLink className="h-3 w-3" />
-                </a>
-              </div>
-              <div className="text-[12px] text-[var(--color-fg-muted)] mt-1 flex items-center gap-3 flex-wrap">
-                {payment.reservation_time && <span>{formatDateTime(payment.reservation_time)}</span>}
-                {payment.reservation_guests != null && (
-                  <span className="inline-flex items-center gap-1"><UsersIcon className="h-3 w-3" /> {payment.reservation_guests}</span>
-                )}
-                {payment.reservation_phone && <span className="tabular">{payment.reservation_phone}</span>}
-              </div>
-            </div>
-          )}
-
-          {payment.description && (
-            <div>
-              <div className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-medium mb-1">Descrizione</div>
-              <p className="text-[13px] text-[var(--color-fg)] leading-relaxed">{payment.description}</p>
-            </div>
-          )}
-
-          <div>
-            <div className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-medium mb-2">Link di pagamento</div>
-            {checkoutUrl ? (
-              <div className="flex items-center gap-2 flex-wrap">
-                <a
-                  href={checkoutUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-[13px] font-medium hover:bg-indigo-700"
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  Apri checkout
-                </a>
-                <button
-                  onClick={copyLink}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--color-line)] text-[var(--color-fg)] text-[13px] font-medium hover:bg-[var(--color-surface-hover)]"
-                >
-                  {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
-                  {copied ? 'Copiato' : 'Copia link'}
-                </button>
-              </div>
-            ) : (
-              <p className="text-[12px] text-[var(--color-fg-subtle)] italic">Link non disponibile.</p>
-            )}
-            {(payment.delivery_channel || payment.delivery_error) && (
-              <div className="mt-2 text-[12px] text-[var(--color-fg-muted)] flex items-start gap-2">
-                {payment.delivery_channel && (
-                  <span className="inline-flex items-center gap-1">
-                    Inviato via <strong className="text-[var(--color-fg)] capitalize">{payment.delivery_channel}</strong>
-                  </span>
-                )}
-                {payment.delivery_error && (
-                  <span className="text-rose-600 inline-flex items-start gap-1">
-                    <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
-                    {payment.delivery_error}
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div>
-            <div className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-medium mb-2 flex items-center gap-1.5">
-              Comunicazioni con il cliente
-              {messages.length > 0 && (
-                <span className="text-[var(--color-fg-muted)] font-normal">· {messages.length}</span>
-              )}
-            </div>
-            {loading ? (
-              <div className="flex items-center gap-2 text-[12px] text-[var(--color-fg-muted)]">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                <span>Carico messaggi…</span>
-              </div>
-            ) : error ? (
-              <div className="flex items-start gap-2 p-2 rounded-lg bg-rose-50 text-rose-700 text-[12px]">
-                <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                <span>{error}</span>
-              </div>
-            ) : messages.length === 0 ? (
-              <p className="text-[12px] text-[var(--color-fg-subtle)] italic">Nessuna comunicazione registrata.</p>
-            ) : (
-              <div className="space-y-2">
-                {messages.map(msg => {
-                  const ch = channelView(msg.channel);
-                  const ChIcon = ch.Icon;
-                  const sBadge = messageStatusBadge(msg.status);
-                  return (
-                    <div
-                      key={msg.id}
-                      className={`rounded-xl border p-3 ${
-                        msg.is_payment_link
-                          ? 'border-indigo-200 bg-indigo-50/40 dark:border-indigo-500/30 dark:bg-indigo-500/5'
-                          : 'border-[var(--color-line)] bg-[var(--color-bg)]'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
-                        <div className="flex items-center gap-2 text-[12px] text-[var(--color-fg-muted)]">
-                          <span className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset ${ch.cls}`}>
-                            <ChIcon className="h-3 w-3" />
-                            {ch.label}
-                          </span>
-                          <span className="tabular">{formatDateTime(msg.sent_at)}</span>
-                          {msg.is_payment_link && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset bg-indigo-50 text-indigo-700 ring-indigo-200">
-                              Link pagamento
-                            </span>
-                          )}
-                        </div>
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 ${sBadge.cls}`}>
-                          {sBadge.label}
-                        </span>
-                      </div>
-                      {msg.subject && (
-                        <div className="text-[12px] font-medium text-[var(--color-fg)] mb-0.5">{msg.subject}</div>
-                      )}
-                      <p className="text-[13px] text-[var(--color-fg)] whitespace-pre-wrap leading-relaxed">{msg.body}</p>
-                      {msg.error_message && (
-                        <div className="mt-1.5 text-[11px] text-rose-600 flex items-start gap-1">
-                          <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
-                          <span>{msg.error_code ? `${msg.error_code}: ` : ''}{msg.error_message}</span>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
+const Kpi: React.FC<{ label: string; value: string; tone?: 'positive' | 'pending' | 'critical' }> = ({
+  label, value, tone,
+}) => (
+  // flex-1 + min-w-0: on a phone the three share the row evenly and the labels
+  // truncate rather than pushing the third figure onto a line of its own.
+  <div className="flex min-w-0 flex-1 flex-col gap-0.5 px-2.5 py-2 lg:flex-none lg:px-4 lg:py-2.5 lg:first:pl-0 lg:last:pr-0">
+    <span className={`text-[17px] leading-none font-semibold tracking-[-0.02em] tabular-nums sm:text-[20px] ${
+      tone === 'positive' ? 'text-[var(--ds-seated-text)]'
+      : tone === 'pending' ? 'text-[var(--ds-pending-text)]'
+      : tone === 'critical' ? 'text-[var(--ds-critical-text)]'
+      : 'text-[var(--ds-text-primary)]'
+    }`}>
+      {value}
+    </span>
+    {/* Sentence case, not the caps the mockup showed: at 12px capitals lose the
+        word shape that makes a label scannable, and screen readers spell short
+        ones out letter by letter. */}
+    <span className="truncate text-[11px] text-[var(--ds-text-muted)] sm:text-[12px]">{label}</span>
+  </div>
+);
 
 const PagamentiPage: React.FC = () => {
+  const [tab, setTab] = useState<'BILLS' | 'LINKS'>('BILLS');
+
   const [items, setItems] = useState<PaymentRequest[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -506,14 +63,42 @@ const PagamentiPage: React.FC = () => {
 
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
-  // Groups multiple raw Revolut statuses under one chip to keep the filter
-  // vocabulary simple (Pagati includes both COMPLETED and PAID; Falliti
-  // groups FAILED + CANCELLED — both terminal, both money-not-received).
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'paid' | 'failed' | 'expired'>('all');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
+  // Several raw gateway statuses group under one chip to keep the filter
+  // vocabulary simple: Pagati covers COMPLETED and PAID, Falliti covers
+  // FAILED and CANCELLED — both terminal, both money-not-received.
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [period, setPeriod] = useState<Period>({ from: '', to: '' });
+  const [periodOpen, setPeriodOpen] = useState(false);
 
   const [selected, setSelected] = useState<PaymentRequest | null>(null);
+  const [billsSummary, setBillsSummary] = useState<BillsSummary>({
+    openCount: 0, residualCents: 0,
+  });
+
+  // The bills tab only exists with pay-at-table on. null = flag not known yet,
+  // so the tab bar doesn't flash a section that is about to disappear.
+  const [payAtTableEnabled, setPayAtTableEnabled] = useState<boolean | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getFeatureFlags()
+      .then(f => { if (!cancelled) setPayAtTableEnabled(f.pay_at_table_enabled === true); })
+      .catch(() => { if (!cancelled) setPayAtTableEnabled(false); });
+    const socket = socketClient.getSocket();
+    const onFlags = (flags: any) => {
+      if (flags && typeof flags.pay_at_table_enabled === 'boolean') {
+        setPayAtTableEnabled(flags.pay_at_table_enabled);
+      }
+    };
+    socket?.on('features:updated', onFlags);
+    return () => { cancelled = true; socket?.off('features:updated', onFlags); };
+  }, []);
+
+  // With the module off there is nothing to put in the first tab, so the page
+  // is the links list and the tab bar has no job.
+  const billsAvailable = payAtTableEnabled === true;
+  useEffect(() => {
+    if (payAtTableEnabled === false) setTab('LINKS');
+  }, [payAtTableEnabled]);
 
   useEffect(() => {
     const t = setTimeout(() => setSearchDebounced(search), 350);
@@ -530,8 +115,8 @@ const PagamentiPage: React.FC = () => {
       else if (statusFilter === 'paid') params.status = 'COMPLETED,PAID';
       else if (statusFilter === 'failed') params.status = 'FAILED,CANCELLED';
       else if (statusFilter === 'expired') params.status = 'EXPIRED';
-      if (from) params.from = from;
-      if (to) params.to = to;
+      if (period.from) params.from = period.from;
+      if (period.to) params.to = period.to;
       const result = await paymentsApiService.list(params);
       setItems(result.items);
       setTotal(result.total);
@@ -540,22 +125,19 @@ const PagamentiPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [searchDebounced, statusFilter, from, to]);
+  }, [searchDebounced, statusFilter, period.from, period.to]);
 
-  useEffect(() => {
-    fetchItems();
-  }, [fetchItems]);
+  useEffect(() => { fetchItems(); }, [fetchItems]);
 
   // The operator is looking at the list: clear the sidebar badge. Re-marked
-  // after every live refresh so payments landing while the page is open
-  // don't pile up as "unseen".
+  // after every live refresh so payments landing while the page is open don't
+  // pile up as "unseen".
   useEffect(() => {
     if (!loading) paymentsApiService.markSeen().catch(() => {});
   }, [loading, items]);
 
-  // Live refresh: any payment created/updated (webhook, reconcile, altro
-  // dispositivo) refetches the list. Debounced so a burst of split payments
-  // triggers one request.
+  // Live refresh: any payment created or updated (webhook, reconcile, another
+  // device) refetches. Debounced so a burst of split payments is one request.
   const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const onEvent = () => {
@@ -584,15 +166,7 @@ const PagamentiPage: React.FC = () => {
     };
   }, [fetchItems]);
 
-  const hasActiveFilters = statusFilter !== 'all' || !!from || !!to || !!searchDebounced.trim();
-  const resetAll = () => {
-    setStatusFilter('all');
-    setFrom('');
-    setTo('');
-    setSearch('');
-  };
-
-  const totalsByStatus = useMemo(() => {
+  const totals = useMemo(() => {
     const acc = { paid: 0, pending: 0 };
     for (const p of items) {
       const s = (p.status || '').toUpperCase();
@@ -602,304 +176,129 @@ const PagamentiPage: React.FC = () => {
     return acc;
   }, [items]);
 
-  const statusChips = [
-    { v: 'all', l: 'Tutti', dot: null },
-    { v: 'pending', l: 'In attesa', dot: 'bg-amber-500' },
-    { v: 'paid', l: 'Pagati', dot: 'bg-emerald-500' },
-    { v: 'failed', l: 'Falliti', dot: 'bg-rose-500' },
-    { v: 'expired', l: 'Scaduti', dot: 'bg-slate-400' },
-  ] as const;
+  // Stable identity: ContiAperti reports its summary from an effect, and a
+  // fresh closure every render would make that effect fire in a loop.
+  const handleBillsSummary = useCallback((next: BillsSummary) => setBillsSummary(next), []);
 
-  // Split payments of the same table bill render as one visual group: the
-  // group takes the list position of its most recent payment (list is
-  // created_at DESC), standalone payments flow through untouched.
-  const grouped = useMemo(() => {
-    const byBill = new Map<number, PaymentRequest[]>();
-    const order: Array<{ billId: number | null; items: PaymentRequest[] }> = [];
+  // The span the loaded results actually cover. With no period filter set there
+  // is no chosen range to display, and naming the real first and last day beats
+  // a word like "sempre" that says nothing about what is on screen.
+  const loadedSpan = useMemo<Period | null>(() => {
+    if (items.length === 0) return null;
+    let min = '';
+    let max = '';
     for (const p of items) {
-      if (p.table_bill_id != null) {
-        const existing = byBill.get(p.table_bill_id);
-        if (existing) { existing.push(p); continue; }
-        const arr = [p];
-        byBill.set(p.table_bill_id, arr);
-        order.push({ billId: p.table_bill_id, items: arr });
-      } else {
-        order.push({ billId: null, items: [p] });
-      }
+      const day = getRomeDatePart(p.created_at);
+      if (!day) continue;
+      if (!min || day < min) min = day;
+      if (!max || day > max) max = day;
     }
-    return order;
+    return min && max ? { from: min, to: max } : null;
   }, [items]);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
-      {/* Conti al tavolo aperti. Sta qui e non dentro la prenotazione perche'
-          un walk-in un conto ce l'ha lo stesso, e prima non era raggiungibile
-          da nessuna schermata. */}
-      <div className="mb-6 -mx-4 sm:-mx-6 lg:-mx-8 border-b border-[var(--color-line)]">
-        <OpenBillsPanel />
+      <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        {/* Not the word "Pagamenti" — the sidebar already names the page and
+            shows it selected. What matters at a glance is that these numbers
+            are live: webhooks move them while you are looking at them, so the
+            dot is a standing answer to "is this current?". The service the
+            figures belong to drops to the line beneath. */}
+        <div className="min-w-0">
+          <h1 className="flex items-center gap-2.5 text-[22px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)] sm:text-[26px]">
+            <span className="relative flex h-2.5 w-2.5 flex-shrink-0" aria-hidden>
+              <span className="ds-live-dot absolute inset-0 rounded-full bg-[var(--ds-seated-solid)]" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[var(--ds-seated-solid)]" />
+            </span>
+            {/* Shortened below sm: the full sentence wraps to two lines on a
+                phone, and a title that wraps stops reading as a title. */}
+            <span className="sm:hidden">In tempo reale</span>
+            <span className="hidden sm:inline">Stato aggiornato in tempo reale</span>
+          </h1>
+        </div>
+        {/* Hairline-split figures rather than three cards: they are one reading
+            of the same money, and boxing each gave three competing objects. */}
+        {/* No wrapping: three figures that are one reading of the same money,
+            so a third dropping to its own line reads as a separate object.
+            They compress instead — full width on a phone, hugging on lg. */}
+        <div className="flex w-full flex-shrink-0 items-center divide-x divide-[var(--ds-border)] rounded-[18px] bg-[var(--ds-surface)] px-1 py-1 shadow-[var(--ds-shadow-card)] lg:w-auto lg:px-4">
+          <Kpi label={KPI_LABELS.incassato} value={formatEuro(totals.paid)} tone="positive" />
+          <Kpi label={KPI_LABELS.attesa} value={formatEuro(totals.pending)} tone="pending" />
+          {billsAvailable && (
+            <Kpi label={KPI_LABELS.residuo} value={formatEuro(billsSummary.residualCents)} tone="critical" />
+          )}
+        </div>
       </div>
 
-      <div className="space-y-4">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <h1 className="text-xl md:text-2xl font-semibold text-[var(--color-fg)]">Pagamenti</h1>
-            <p className="text-[13px] text-[var(--color-fg-muted)] mt-0.5">
-              Link Revolut inviati ai clienti · stato aggiornato via webhook
-            </p>
-          </div>
-          <div className="flex items-center gap-3 text-[12px] text-[var(--color-fg-muted)]">
-            <span>
-              Pagato: <strong className="text-emerald-700">{formatEuro(totalsByStatus.paid)}</strong>
-            </span>
-            <span>
-              In attesa: <strong className="text-amber-700">{formatEuro(totalsByStatus.pending)}</strong>
-            </span>
-          </div>
-        </div>
+      {/* Search leads, the section switch follows — the same order Menu &
+          Banchetti uses, so the two pages do not disagree about where the field
+          lives. The search applies to whichever tab is showing: bills match on
+          table number or the name that booked it, links on customer, phone and
+          order. */}
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row-reverse sm:items-center sm:gap-4">
+        {billsAvailable && (
+          <SegmentedControl<'BILLS' | 'LINKS'>
+            value={tab}
+            onChange={setTab}
+            ariaLabel="Sezione pagamenti"
+            equalWidth={false}
+            options={[
+              { value: 'BILLS', label: 'Conti aperti', badge: billsSummary.openCount || undefined },
+              { value: 'LINKS', label: 'Link di pagamento', badge: total || undefined },
+            ]}
+          />
+        )}
+        <SearchField
+          value={search}
+          onChange={setSearch}
+          placeholder={tab === 'BILLS' ? 'Cerca tavolo o cliente…' : 'Cerca cliente, telefono, ordine…'}
+          ariaLabel="Cerca"
+          className="min-w-0 sm:flex-1"
+        />
+      </div>
 
-        <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-3 md:p-4 space-y-3">
-          {/* Search */}
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-[var(--color-fg-subtle)] pointer-events-none" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Cerca cliente, telefono, ordine, descrizione…"
-              className="w-full pl-8 pr-8 py-2 text-[13px] rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+      {tab === 'BILLS' && billsAvailable && (
+        <ContiAperti query={search} onSummaryChange={handleBillsSummary} />
+      )}
+
+      {tab === 'LINKS' && (
+        <>
+          {error && (
+            <Callout tone="critical" icon={AlertCircle} className="mb-4">{error}</Callout>
+          )}
+          {loading ? (
+            <SkeletonPaymentList count={5} />
+          ) : (
+            <LinkDiPagamento
+              items={items}
+              total={total}
+              statusFilter={statusFilter}
+              onStatusFilter={setStatusFilter}
+              period={period}
+              span={loadedSpan}
+              onOpenPeriod={() => setPeriodOpen(true)}
+              onSelect={setSelected}
             />
-            {search && (
-              <button
-                type="button"
-                onClick={() => setSearch('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 h-5 w-5 inline-flex items-center justify-center rounded-full text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
-                aria-label="Svuota ricerca"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
+          )}
+        </>
+      )}
 
-          {/* Status chips — scroll horizontally on narrow screens */}
-          <div className="flex items-center gap-1.5 overflow-x-auto -mx-1 px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {statusChips.map(({ v, l, dot }) => {
-              const active = statusFilter === v;
-              return (
-                <button
-                  key={v}
-                  onClick={() => setStatusFilter(v)}
-                  className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-medium border transition-colors whitespace-nowrap ${
-                    active
-                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                      : 'bg-[var(--color-bg)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)]'
-                  }`}
-                >
-                  {dot && (
-                    <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-white/90' : dot}`} />
-                  )}
-                  {l}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Period + count + reset */}
-          <div className="flex items-center gap-2 flex-wrap text-[12px] text-[var(--color-fg-muted)] pt-1 border-t border-[var(--color-line)]">
-            <div className="flex items-center gap-2 flex-wrap pt-2">
-              <Filter className="h-3.5 w-3.5" />
-              <span>Periodo:</span>
-              <input
-                type="date"
-                value={from}
-                onChange={(e) => setFrom(e.target.value)}
-                className="px-2 py-1 rounded border border-[var(--color-line)] bg-[var(--color-bg)] text-[var(--color-fg)] text-[12px] tabular min-w-[120px]"
-              />
-              <span>→</span>
-              <input
-                type="date"
-                value={to}
-                onChange={(e) => setTo(e.target.value)}
-                className="px-2 py-1 rounded border border-[var(--color-line)] bg-[var(--color-bg)] text-[var(--color-fg)] text-[12px] tabular min-w-[120px]"
-              />
-              {(from || to) && (
-                <button
-                  onClick={() => { setFrom(''); setTo(''); }}
-                  className="text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]"
-                  aria-label="Svuota periodo"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-            <div className="ml-auto flex items-center gap-2 pt-2">
-              {hasActiveFilters && (
-                <button
-                  onClick={resetAll}
-                  className="text-indigo-600 hover:text-indigo-700 font-medium"
-                >
-                  Reimposta filtri
-                </button>
-              )}
-              <span className="tabular">{total} pagament{total === 1 ? 'o' : 'i'}</span>
-            </div>
-          </div>
-        </div>
-
-        {error && (
-          <div className="flex items-start gap-2 p-3 rounded-lg bg-rose-50 text-rose-700 text-sm">
-            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
-
-        {loading ? (
-          <SkeletonPaymentList count={5} />
-        ) : items.length === 0 ? (
-          <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] p-10 text-center">
-            <CreditCard className="h-8 w-8 text-[var(--color-fg-subtle)] mx-auto mb-2" />
-            <p className="text-[13px] text-[var(--color-fg-muted)]">
-              Nessun pagamento{statusFilter !== 'all' ? ' per questo filtro' : ''}.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {grouped.map(group => {
-              const renderRow = (item: PaymentRequest, inGroup: boolean) => {
-                const status = paymentStatusView(item.status);
-                const StatusIcon = status.Icon;
-                const resBadge = reservationStatusBadge(item.reservation_status);
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => setSelected(item)}
-                    className={`w-full text-left p-3 md:p-4 transition-all ${
-                      inGroup
-                        ? 'bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)]'
-                        : 'bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] hover:border-[var(--color-line-strong)] hover:shadow-sm'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <CreditCard className="h-4 w-4 text-[var(--color-fg-muted)] shrink-0" />
-                        <div className="flex flex-col min-w-0">
-                          <span className="font-medium text-[14px] text-[var(--color-fg)] truncate">
-                            {formatEuro(item.amount_cents, item.currency)}
-                            {inGroup && item.claimant_label ? (
-                              <span className="text-[var(--color-fg-muted)] font-normal"> · {toTitleCase(item.claimant_label)}</span>
-                            ) : item.reservation_customer_name && (
-                              <span className="text-[var(--color-fg-muted)] font-normal"> · {toTitleCase(item.reservation_customer_name)}</span>
-                            )}
-                          </span>
-                          {item.reservation_phone && !inGroup && (
-                            <span className="text-[11px] text-[var(--color-fg-muted)] tabular truncate">
-                              {item.reservation_phone}
-                            </span>
-                          )}
-                        </div>
-                        <span className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 ${status.cls}`}>
-                          <StatusIcon className="h-3 w-3" />
-                          {status.label}
-                        </span>
-                        {!inGroup && item.table_name && (
-                          <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 bg-sky-50 text-sky-700 ring-sky-200">
-                            <Armchair className="h-3 w-3" /> Tavolo {item.table_name}
-                          </span>
-                        )}
-                        {resBadge && !inGroup && (
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 ${resBadge.cls}`}>
-                            Prenotaz.: {resBadge.label}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3 text-[12px] text-[var(--color-fg-muted)] shrink-0">
-                        {item.delivery_channel && (
-                          <span className="inline-flex items-center gap-1 capitalize">
-                            {(() => {
-                              const ch = channelView(item.delivery_channel);
-                              const ChIcon = ch.Icon;
-                              return <ChIcon className="h-3 w-3" />;
-                            })()}
-                            {item.delivery_channel}
-                          </span>
-                        )}
-                        <span className="inline-flex items-center gap-1 tabular">
-                          <Clock className="h-3 w-3" />
-                          {formatDateTime(item.created_at)}
-                        </span>
-                      </div>
-                    </div>
-                    {item.description && !inGroup && (
-                      <p className="text-[13px] text-[var(--color-fg-muted)] mt-2 line-clamp-1">
-                        {item.description}
-                      </p>
-                    )}
-                    {item.delivery_error && (
-                      <p className="text-[12px] text-rose-600 mt-1 inline-flex items-start gap-1">
-                        <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
-                        Consegna fallita: {item.delivery_error}
-                      </p>
-                    )}
-                  </button>
-                );
-              };
-
-              if (group.billId == null) return renderRow(group.items[0], false);
-
-              // Grouped bill: header with table + progress, rows separated by
-              // hairlines inside one bordered container.
-              const first = group.items[0];
-              const paidCents = group.items.reduce((s, p) => {
-                const st = (p.status || '').toUpperCase();
-                return s + ((st === 'COMPLETED' || st === 'PAID') ? p.amount_cents : 0);
-              }, 0);
-              const billTotal = first.bill_total_cents || 0;
-              const pct = billTotal > 0 ? Math.min(100, Math.round(paidCents / billTotal * 100)) : 0;
-              return (
-                <div key={`bill-${group.billId}`} className="bg-[var(--color-surface)] rounded-xl border border-sky-200 dark:border-sky-500/30 overflow-hidden">
-                  <div className="px-3 md:px-4 py-2.5 bg-sky-50/60 dark:bg-sky-500/10 border-b border-sky-100 dark:border-sky-500/20">
-                    <div className="flex items-center justify-between gap-3 flex-wrap">
-                      <div className="flex items-center gap-2 min-w-0 text-[13px]">
-                        <Receipt className="h-4 w-4 text-sky-600 shrink-0" />
-                        <span className="font-semibold text-[var(--color-fg)]">
-                          {first.table_name ? `Tavolo ${first.table_name}` : `Conto #${group.billId}`}
-                        </span>
-                        {first.reservation_customer_name && (
-                          <span className="text-[var(--color-fg-muted)] truncate">· {toTitleCase(first.reservation_customer_name)}</span>
-                        )}
-                        <span className="text-[11px] text-[var(--color-fg-muted)]">
-                          · {group.items.length} pagament{group.items.length === 1 ? 'o' : 'i'}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 text-[12px] shrink-0">
-                        <span className="tabular text-[var(--color-fg-muted)]">
-                          <strong className="text-emerald-700 dark:text-emerald-400">{formatEuro(paidCents)}</strong>
-                          {billTotal > 0 && <> / {formatEuro(billTotal)}</>}
-                        </span>
-                        {billTotal > 0 && (
-                          <div className="w-20 h-1.5 rounded-full bg-[var(--color-line)] overflow-hidden">
-                            <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="divide-y divide-[var(--color-line)]">
-                    {group.items.map(p => renderRow(p, true))}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+      <PeriodPicker
+        open={periodOpen}
+        period={period}
+        span={loadedSpan}
+        summary={`${total} link · ${formatEuro(totals.paid)} incassati · ${formatEuro(totals.pending)} in attesa`}
+        onApply={(next) => { setPeriod(next); setPeriodOpen(false); }}
+        onClose={() => setPeriodOpen(false)}
+      />
 
       {selected && (
-        <DetailModal
+        <PaymentDetailSheet
           payment={selected}
           onClose={() => setSelected(null)}
-          onReconciled={(updated) => {
-            setItems(prev => prev.map(p => p.id === updated.id ? { ...p, ...updated } : p));
-            setSelected(prev => prev && prev.id === updated.id ? { ...prev, ...updated } : prev);
+          onUpdated={(updated) => {
+            setItems(prev => prev.map(p => (p.id === updated.id ? { ...p, ...updated } : p)));
+            setSelected(prev => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev));
           }}
         />
       )}
