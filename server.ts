@@ -1241,12 +1241,19 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
     // interpret as the server's configured timezone (Europe/Rome in prod).
     const reservationTime = `${normalizedDate}T${normalizedTime}:00`;
 
+    // Caparra automatica: stessa policy del canale web (€10 a persona sopra
+    // la soglia ospiti). La prenotazione nasce PENDING senza tavolo e il link
+    // di pagamento parte su WhatsApp con fallback SMS; la conferma arriva
+    // dal webhook di pagamento come per il web.
+    const voiceDepositRequired = await isAutoDepositRequired(Math.trunc(guests));
+
     try {
         console.log('[ElevenLabs] create-reservation start', {
             customer_name: customerName, raw_date: p.date, raw_time: p.time,
             normalized_date: normalizedDate, normalized_time: normalizedTime,
             shift: rawShift, guests, children, conversation_id: conversationId,
             location_preference: locationPreference, phone_source: phoneSource,
+            deposit_required: voiceDepositRequired,
         });
         const created = await createVoiceReservation({
             customer_name: customerName,
@@ -1258,7 +1265,72 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
             notes,
             conversation_id: conversationId,
             location_preference: locationPreference,
+            deposit_required: voiceDepositRequired,
         });
+
+        // Deposit link: order + payment_requests row + WhatsApp/SMS send.
+        // On any gateway failure we degrade to the plain requires-review flow
+        // (staff completes the caparra by hand from the booking card).
+        let depositCheckoutUrl: string | null = null;
+        let depositAmountCents = 0;
+        if (voiceDepositRequired) {
+            depositAmountCents = Math.trunc(guests) * 1000; // €10/person
+            const [yyyy, mm, dd] = normalizedDate.split('-');
+            const depositDateLabel = `${dd}/${mm}/${yyyy}`;
+            const depositGuestsLabel = `${Math.trunc(guests)} ${Math.trunc(guests) === 1 ? 'persona' : 'persone'}`;
+            const orderDescription = `Caparra prenotazione #${created.id} - ${depositGuestsLabel} ${depositDateLabel} ${normalizedTime}`;
+            try {
+                const order = await createPaymentOrder({
+                    amount: depositAmountCents,
+                    currency: 'EUR',
+                    description: orderDescription,
+                    reference: `reservation:${created.id}`,
+                });
+                const insertedPayment = await queryWithRetry(
+                    `INSERT INTO payment_requests
+                        (reservation_id, amount_cents, currency, description, status, provider,
+                         provider_order_id, checkout_url, metadata)
+                     VALUES ($1, $2, 'EUR', $3, $4, $5, $6, $7, $8)
+                     RETURNING *`,
+                    [
+                        created.id,
+                        depositAmountCents,
+                        orderDescription,
+                        order.status,
+                        order.provider,
+                        order.id,
+                        order.checkoutUrl,
+                        JSON.stringify({ ...order.metadata, source: 'voice_auto_deposit' }),
+                    ]
+                );
+                depositCheckoutUrl = order.checkoutUrl;
+                try { socketService?.broadcastToAll('paymentRequest:created', insertedPayment.rows[0]); }
+                catch (err) { console.warn('[ElevenLabs] payment socket broadcast failed:', err); }
+
+                const smsText = buildDepositRequestMessage(
+                    toTitleCase(created.customer_name),
+                    depositGuestsLabel,
+                    depositDateLabel,
+                    normalizedTime,
+                    depositAmountCents,
+                    order.checkoutUrl
+                );
+                const whatsappTemplate = buildBookingDepositRequestTemplate(
+                    toTitleCase(created.customer_name),
+                    depositGuestsLabel,
+                    depositDateLabel,
+                    normalizedTime,
+                    depositAmountCents,
+                    order.checkoutUrl
+                );
+                sendBookingConfirmation(created.phone, smsText, created.id, { whatsappTemplate }).catch(err =>
+                    console.error('[ElevenLabs] deposit link send failed:', err?.message || err)
+                );
+            } catch (err: any) {
+                console.error('[ElevenLabs] deposit link creation failed:', err?.message || err);
+                depositAmountCents = 0;
+            }
+        }
 
         // Link the (eventual) call audit row to this reservation. Fire-and-forget
         // so a missing voice_calls table (pre-migration) doesn't break booking.
@@ -1317,11 +1389,19 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
             { excludeUserId: null }
         ).catch(err => console.error('Push (voice reservation) failed:', err));
 
-        const confirmationPhrase = formatItalianConfirmation(created);
+        // Deposit branch swaps the closing phrase: the caller must know the
+        // table is guaranteed only after paying the link we just sent.
+        const firstName = toTitleCase(created.customer_name).split(' ')[0];
+        const confirmationPhrase = depositCheckoutUrl
+            ? `Registrato ${firstName}: per i gruppi numerosi chiediamo una caparra di ${formatEuroMinor(depositAmountCents)}. Le ho appena inviato il link di pagamento su WhatsApp, o via SMS. Il tavolo sarà confermato appena riceviamo il pagamento. Grazie!`
+            : voiceDepositRequired
+                ? `Registrato ${firstName}: per i gruppi numerosi è prevista una caparra. La ricontatteremo a breve per completare la prenotazione. Grazie!`
+                : formatItalianConfirmation(created);
         console.log('[ElevenLabs] create-reservation OK', {
             id: created.id, conversation_id: conversationId, customer: created.customer_name,
             table_id: created.table_id, table_name: created.table_name,
             room: created.room_name, location: created.room_location,
+            deposit_required: voiceDepositRequired, deposit_link_sent: !!depositCheckoutUrl,
         });
         res.json({
             success: true,
@@ -1335,6 +1415,9 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
             table_name: created.table_name,
             room_name: created.room_name,
             room_location: created.room_location,
+            deposit_required: voiceDepositRequired,
+            deposit_amount: voiceDepositRequired ? formatEuroMinor(Math.trunc(guests) * 1000) : undefined,
+            deposit_link_sent: voiceDepositRequired ? !!depositCheckoutUrl : undefined,
         });
     } catch (err: any) {
         console.error('[ElevenLabs] create-reservation error', err);
@@ -4562,6 +4645,28 @@ function buildPaymentMessage(customerName: string, amountCents: number, url: str
     return `${line}\nPuoi pagare in sicurezza qui: ${url}\n\nGrazie!`;
 }
 
+// Shared auto-deposit policy (Settings → Integrazioni): true when the policy
+// is enabled, the party is at/above the guest threshold, and a payment
+// provider is actually configured. Used by both self-service channels (web
+// booking + voice agent) so they can't drift on when a caparra is due.
+async function isAutoDepositRequired(guests: number): Promise<boolean> {
+    try {
+        const cfgRow = await queryWithRetry(
+            `SELECT auto_deposit_enabled, auto_deposit_min_guests
+               FROM integration_settings WHERE provider = 'revolut'`
+        );
+        const r = cfgRow.rows[0];
+        if (!r || !r.auto_deposit_enabled) return false;
+        const n = Number(r.auto_deposit_min_guests);
+        const minGuests = Number.isInteger(n) && n >= 1 ? n : 9;
+        if (guests < minGuests) return false;
+        return await isPaymentConfigured();
+    } catch (err) {
+        console.warn('[auto-deposit] policy lookup failed:', (err as any)?.message || err);
+        return false;
+    }
+}
+
 // Ack sent to the customer when a public web booking with >8 guests triggers
 // an automatic deposit request (€10/person). Combines the "richiesta ricevuta"
 // wording with the Revolut checkout link so the guest knows exactly what to
@@ -4916,10 +5021,24 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
         const paymentRequest = inserted.rows[0];
 
         // Fire-and-forget delivery: same channel policy as booking
-        // confirmations. Failures update delivery_error but don't fail the
-        // API call — the operator can still copy the link from the UI.
+        // confirmations — WhatsApp template first, SMS fallback (sync on
+        // send error, async via the status webhook on terminal WA errors).
+        // Failures update delivery_error but don't fail the API call — the
+        // operator can still copy the link from the UI.
+        const resvInstant = new Date(reservation.reservation_time);
+        const depositDateLabel = resvInstant.toLocaleDateString('it-IT', { timeZone: 'Europe/Rome', day: '2-digit', month: '2-digit', year: 'numeric' });
+        const depositTimeLabel = resvInstant.toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hour12: false });
+        const depositGuestsLabel = `${reservation.guests} ${Number(reservation.guests) === 1 ? 'persona' : 'persone'}`;
+        const whatsappTemplate = buildBookingDepositRequestTemplate(
+            reservation.customer_name,
+            depositGuestsLabel,
+            depositDateLabel,
+            depositTimeLabel,
+            amountCents,
+            order.checkoutUrl
+        );
         const message = buildPaymentMessage(reservation.customer_name, amountCents, order.checkoutUrl, orderDescription);
-        sendBookingConfirmation(reservation.phone, message, reservation.id).then(async (delivery) => {
+        sendBookingConfirmation(reservation.phone, message, reservation.id, { whatsappTemplate }).then(async (delivery) => {
             try {
                 await queryWithRetry(
                     `UPDATE payment_requests
@@ -10809,29 +10928,36 @@ function buildTableBillLinkTemplate(
     };
 }
 
-// The booking_deposit_request template on Twilio is a Call-to-Action card:
-// body has {{1}}..{{5}} (name, guests, date, time, amount), and the button
-// URL is hardcoded as https://checkout.revolut.com/pay/{{6}} — so {{6}} must
-// carry ONLY the trailing token, not the full URL. Returns undefined when
-// the token can't be parsed (e.g. sandbox / unrecognised host) so the
-// dispatcher can fall back to SMS instead of shipping a broken WA link.
-//
-// Because the host lives in the template and not in the variable, this MUST
-// reject any checkout URL that isn't Revolut's: a SumUp link
-// (checkout.sumup.com/pay/<id>) has the same path shape, and blindly lifting
-// its token would produce a button pointing at checkout.revolut.com with a
-// SumUp id — a dead link. Returning null instead degrades to SMS with the
-// full URL, which is exactly the fallback described above.
-const REVOLUT_CHECKOUT_HOSTS = new Set([
-    'checkout.revolut.com',
-    'sandbox-checkout.revolut.com',
-]);
-function extractRevolutCheckoutToken(checkoutUrl: string): string | null {
+// The deposit-request templates on Twilio are Call-to-Action cards: body has
+// {{1}}..{{5}} (name, guests, date, time, amount), and the button URL is
+// hardcoded per provider (https://checkout.revolut.com/pay/{{6}} vs
+// https://checkout.sumup.com/pay/{{6}}) — so {{6}} must carry ONLY the
+// trailing token, not the full URL. Because the host lives in the template
+// and not in the variable, the template is picked by the checkout URL's
+// host: lifting a SumUp token into the Revolut card (or vice versa) would
+// produce a button pointing at the wrong gateway — a dead link. Unknown
+// host, unparsable token, or missing env SID all return undefined so the
+// dispatcher falls back to SMS with the full URL.
+const DEPOSIT_REQUEST_TEMPLATES: Array<{ hosts: Set<string>; envKey: string }> = [
+    {
+        hosts: new Set(['checkout.revolut.com', 'sandbox-checkout.revolut.com']),
+        envKey: 'TWILIO_WA_CONTENT_SID_BOOKING_DEPOSIT_REQUEST',
+    },
+    {
+        hosts: new Set(['checkout.sumup.com', 'pay.sumup.com']),
+        envKey: 'TWILIO_WA_CONTENT_SID_BOOKING_DEPOSIT_REQUEST_SUMUP',
+    },
+];
+function resolveDepositRequestTemplate(checkoutUrl: string): { contentSid: string; token: string } | null {
     try {
         const u = new URL(checkoutUrl);
-        if (!REVOLUT_CHECKOUT_HOSTS.has(u.hostname.toLowerCase())) return null;
+        const entry = DEPOSIT_REQUEST_TEMPLATES.find(t => t.hosts.has(u.hostname.toLowerCase()));
+        if (!entry) return null;
+        const contentSid = process.env[entry.envKey];
+        if (!contentSid) return null;
         const match = u.pathname.match(/\/pay\/([^\/?#]+)/);
-        return match ? match[1] : null;
+        if (!match) return null;
+        return { contentSid, token: match[1] };
     } catch {
         return null;
     }
@@ -10844,19 +10970,17 @@ function buildBookingDepositRequestTemplate(
     amountCents: number,
     checkoutUrl: string
 ): WhatsAppTemplateOpts | undefined {
-    const contentSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_DEPOSIT_REQUEST;
-    if (!contentSid) return undefined;
-    const token = extractRevolutCheckoutToken(checkoutUrl);
-    if (!token) return undefined;
+    const resolved = resolveDepositRequestTemplate(checkoutUrl);
+    if (!resolved) return undefined;
     return {
-        contentSid,
+        contentSid: resolved.contentSid,
         contentVariables: {
             '1': templateName(customerName),
             '2': guestsLabel,
             '3': dateLabel,
             '4': timeLabel,
             '5': formatEuroMinor(amountCents),
-            '6': token,
+            '6': resolved.token,
         },
     };
 }
@@ -14962,24 +15086,8 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         // se la prenotazione può essere confermata subito. Finché la caparra
         // non è pagata il tavolo non è garantito, quindi in quel caso la
         // richiesta resta PENDING e la conferma arriva col pagamento.
-        let autoDepositEnabled = false;
-        let autoDepositMinGuests = 9;
-        try {
-            const cfgRow = await queryWithRetry(
-                `SELECT auto_deposit_enabled, auto_deposit_min_guests
-                   FROM integration_settings WHERE provider = 'revolut'`
-            );
-            if (cfgRow.rows[0]) {
-                autoDepositEnabled = Boolean(cfgRow.rows[0].auto_deposit_enabled);
-                const n = Number(cfgRow.rows[0].auto_deposit_min_guests);
-                if (Number.isInteger(n) && n >= 1) autoDepositMinGuests = n;
-            }
-        } catch (err) {
-            console.warn('[public-booking] auto-deposit config lookup failed:', (err as any)?.message || err);
-        }
-        const depositRequired = autoDepositEnabled
-            && guestsNum >= autoDepositMinGuests
-            && (await isPaymentConfigured());
+        // Stessa policy condivisa col canale vocale (isAutoDepositRequired).
+        const depositRequired = await isAutoDepositRequired(Math.trunc(guestsNum));
 
         // Conferma automatica: se la sala è ancora sotto il proprio limite di
         // occupazione assegniamo il tavolo e confermiamo subito; se il limite

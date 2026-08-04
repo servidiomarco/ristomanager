@@ -643,6 +643,11 @@ export interface VoiceReservationInput {
     notes?: string;
     conversation_id?: string;
     location_preference?: RoomLocation;
+    // Auto-deposit policy hit (large group + policy enabled): the booking is
+    // saved PENDING with no table — the table is guaranteed only when the
+    // deposit is paid, same rule as the web channel. The payment-completion
+    // webhook flips PENDING→CONFIRMED.
+    deposit_required?: boolean;
 }
 
 export interface VoiceReservationOutput {
@@ -699,7 +704,9 @@ export async function createVoiceReservation(
     const children = Math.max(0, Math.min(Number(input.children) || 0, input.guests));
     const reservationDate = input.reservation_time.slice(0, 10);
 
-    const assigned = await pickAutoAssignTable(
+    // No table while a deposit is pending: assigning one would guarantee the
+    // very thing the deposit exists to secure.
+    const assigned = input.deposit_required ? null : await pickAutoAssignTable(
         reservationDate,
         input.shift,
         input.guests,
@@ -709,9 +716,10 @@ export async function createVoiceReservation(
     const result = await queryWithRetry(`
         INSERT INTO reservations (
             customer_name, reservation_time, shift, guests, children, phone,
-            notes, payment_status, arrival_status, source, requires_review, table_id
+            notes, payment_status, arrival_status, source, requires_review, table_id,
+            reservation_status
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', 'WAITING', $8, true, $9)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', 'WAITING', $8, true, $9, $10)
         RETURNING *
     `, [
         input.customer_name.trim(),
@@ -722,7 +730,8 @@ export async function createVoiceReservation(
         phone,
         notes,
         ReservationSource.VOICE,
-        assigned?.id ?? null
+        assigned?.id ?? null,
+        input.deposit_required ? 'PENDING' : 'CONFIRMED'
     ]);
 
     const row = result.rows[0];
