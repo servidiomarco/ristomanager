@@ -1769,7 +1769,11 @@ const App: React.FC = () => {
       <main id="main" className="flex-1 min-w-0 flex flex-col min-h-0 relative bg-[var(--ds-canvas)]">
         {/* Header — floating rounded card on the canvas (no blur: the design
             system is opaque, see docs/risto-design-system.md §2.2). */}
-        <header className="flex-shrink-0 h-16 md:h-[72px] m-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] z-10 flex items-center justify-between px-3 md:px-4">
+        {/* z-10 → md:z-30: the "+" menu lives inside this stacking context, so
+            the header must outrank in-page toolbars (Sale & Tavoli rows are
+            z-20) or the dropdown paints behind them. Mobile stays z-10 — the
+            bottom-sheet backdrop (z-[29]) has to dim the header there. */}
+        <header className="flex-shrink-0 h-16 md:h-[72px] m-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] z-10 md:z-30 flex items-center justify-between px-3 md:px-4">
            <div className="flex items-center gap-2.5 lg:hidden">
               <div className="bg-[var(--ds-action-bg)] h-9 w-9 rounded-[12px] inline-flex items-center justify-center">
                 <ChefHat className="text-[var(--ds-action-fg)] h-[18px] w-[18px]" />
