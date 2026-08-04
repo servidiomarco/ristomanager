@@ -3,7 +3,7 @@ import type { Request } from 'express';
 import { queryWithRetry } from '../db.js';
 import { Shift, ReservationSource } from '../types.js';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime.js';
-import { getCappedRoomIds, pickSelfServiceTable } from './roomOccupancyService.js';
+import { getCappedRoomIds, pickSelfServiceTable, isTableStillAssignable } from './roomOccupancyService.js';
 
 // ============================================
 // HMAC SIGNATURE VERIFICATION
@@ -760,6 +760,9 @@ export interface CancelCandidate {
     reservation_time: string;
     shift: Shift;
     guests: number;
+    /** Presente solo nel `before` delle modifiche: serve all'audit log per
+     *  rendere visibile un eventuale cambio tavolo. */
+    table_id?: number | null;
 }
 
 export type CancelVoiceReservationOutput =
@@ -991,17 +994,28 @@ export async function modifyVoiceReservation(
         return { status: 'no_change' };
     }
 
-    // 3) If schedule changed we need a new table. Reuse pickAutoAssignTable.
+    // 3) If schedule changed the table has to hold the new schedule too.
+    // FIRST try to KEEP the table already on the booking — it's often the
+    // operator's hand-picked seating — and only re-assign when it no longer
+    // fits (occupied at the new time, too small for the new party) or the
+    // caller explicitly asked for a different area. Blind re-assignment used
+    // to silently free a table the staff had just placed (tavolo 56,
+    // 2026-08-04) and the floor plan lied until someone noticed.
     let assigned: { id: number; name: string; room_name: string | null; location: 'INDOOR' | 'OUTDOOR' | null } | null | undefined;
     if (scheduleChanged) {
-        assigned = await pickAutoAssignTable(
-            newDate,
-            newShift,
-            newGuests,
-            newLocation
-        );
-        if (!assigned) {
-            return { status: 'unavailable' };
+        const keepCurrentTable = current.table_id != null
+            && !newLocation
+            && await isTableStillAssignable(current.table_id, newDate, newShift, newGuests, current.id);
+        if (!keepCurrentTable) {
+            assigned = await pickAutoAssignTable(
+                newDate,
+                newShift,
+                newGuests,
+                newLocation
+            );
+            if (!assigned) {
+                return { status: 'unavailable' };
+            }
         }
     }
 
@@ -1049,6 +1063,7 @@ export async function modifyVoiceReservation(
             reservation_time: current.reservation_time,
             shift: current.shift,
             guests: current.guests,
+            table_id: current.table_id ?? null,
         },
         after,
     };

@@ -251,9 +251,12 @@ export interface SelfServiceTablePick {
  * `alias` è l'alias del tavolo nella query chiamante; `dateParam`/`shiftParam`
  * sono le posizioni dei placeholder di data e turno.
  */
-function assignableTableSql(alias: string, dateParam: number, shiftParam: number): string {
+function assignableTableSql(alias: string, dateParam: number, shiftParam: number, excludeReservationParam?: number): string {
     const d = `$${dateParam}`;
     const s = `$${shiftParam}`;
+    // Chi MODIFICA una prenotazione deve poter tenere il proprio tavolo: senza
+    // l'esclusione, la prenotazione stessa lo farebbe risultare occupato.
+    const excl = excludeReservationParam ? `AND res.id <> $${excludeReservationParam}` : '';
     return `
               ${alias}.id NOT IN (
                   SELECT table_id FROM table_hidden_overrides WHERE date = ${d} AND shift = ${s}
@@ -263,6 +266,7 @@ function assignableTableSql(alias: string, dateParam: number, shiftParam: number
                   WHERE res.table_id = ${alias}.id
                     AND DATE(res.reservation_time) = ${d}
                     AND res.shift = ${s}
+                    ${excl}
                     AND COALESCE(res.reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')
               )
               AND NOT EXISTS (
@@ -353,5 +357,37 @@ export async function pickSelfServiceTable(
         LIMIT 1
     `, params);
     return result.rows[0] ?? null;
+}
+
+/**
+ * Il tavolo già assegnato a una prenotazione regge anche il nuovo servizio?
+ * Stessa definizione di "assegnabile" di pickSelfServiceTable (sala aperta,
+ * capienza, niente doppie prenotazioni/accorpamenti/banchetti), più
+ * l'esclusione della prenotazione che si sta modificando. Usata dalle
+ * modifiche via agente vocale per non strappare un tavolo piazzato a mano
+ * dall'operatore quando basta tenerlo. Il tetto di occupazione self-service
+ * qui NON conta: il tavolo è già suo, tenerlo non aggiunge coperti alla sala.
+ */
+export async function isTableStillAssignable(
+    tableId: number,
+    date: string,
+    shift: Shift,
+    guests: number,
+    excludeReservationId: number
+): Promise<boolean> {
+    const result = await queryWithRetry(`
+        SELECT 1
+        FROM tables t
+        JOIN rooms r ON t.room_id = r.id
+        WHERE t.id = $4
+          AND r.is_closed = false
+          AND r.id NOT IN (
+              SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3
+          )
+          AND t.seats >= $1
+          AND ${assignableTableSql('t', 2, 3, 5)}
+        LIMIT 1
+    `, [Math.trunc(guests), date, shift, Math.trunc(tableId), Math.trunc(excludeReservationId)]);
+    return (result.rowCount ?? 0) > 0;
 }
 
