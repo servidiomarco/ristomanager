@@ -10938,14 +10938,21 @@ function buildTableBillLinkTemplate(
 // produce a button pointing at the wrong gateway — a dead link. Unknown
 // host, unparsable token, or missing env SID all return undefined so the
 // dispatcher falls back to SMS with the full URL.
-const DEPOSIT_REQUEST_TEMPLATES: Array<{ hosts: Set<string>; envKey: string }> = [
+// Token pattern is per provider because the checkout path differs and the
+// template button hardcodes it: Revolut Merchant API links are
+// /payment-link/<uuid> (observed on every order since 2026-07-13 — the
+// original /pay/{{6}} template never matched a real link, so deposit WA
+// silently degraded to SMS until booking_deposit_request_v2 fixed the path).
+const DEPOSIT_REQUEST_TEMPLATES: Array<{ hosts: Set<string>; envKey: string; tokenPattern: RegExp }> = [
     {
         hosts: new Set(['checkout.revolut.com', 'sandbox-checkout.revolut.com']),
         envKey: 'TWILIO_WA_CONTENT_SID_BOOKING_DEPOSIT_REQUEST',
+        tokenPattern: /\/payment-link\/([^\/?#]+)/,
     },
     {
         hosts: new Set(['checkout.sumup.com', 'pay.sumup.com']),
         envKey: 'TWILIO_WA_CONTENT_SID_BOOKING_DEPOSIT_REQUEST_SUMUP',
+        tokenPattern: /\/pay\/([^\/?#]+)/,
     },
 ];
 function resolveDepositRequestTemplate(checkoutUrl: string): { contentSid: string; token: string } | null {
@@ -10955,7 +10962,7 @@ function resolveDepositRequestTemplate(checkoutUrl: string): { contentSid: strin
         if (!entry) return null;
         const contentSid = process.env[entry.envKey];
         if (!contentSid) return null;
-        const match = u.pathname.match(/\/pay\/([^\/?#]+)/);
+        const match = u.pathname.match(entry.tokenPattern);
         if (!match) return null;
         return { contentSid, token: match[1] };
     } catch {
