@@ -449,6 +449,16 @@ body {
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 
+/* Scrollbar visibile solo col cursore dentro. Solo proprietà standard: in
+   Chrome basta un valore non-auto su scrollbar-width/color perché le regole
+   ::-webkit-scrollbar vengano ignorate, quindi mischiarle le annulla. Il
+   gutter "thin" resta riservato anche da trasparente, così il contenuto non
+   slitta all'hover: cambia solo il colore del pollice. (Safari ignora
+   scrollbar-color, ma su macOS le sue scrollbar sono già overlay a
+   scomparsa: il problema non si pone.) */
+.scrollbar-hover { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+.scrollbar-hover:hover { scrollbar-color: var(--ds-border-strong) transparent; }
+
 /* Edge fades for a horizontally scrolling track. Applied only to the side that
    still has content behind it — a fade that never lifts veils the option you
    just scrolled to and makes it read as disabled. */

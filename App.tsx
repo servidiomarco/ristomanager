@@ -1650,7 +1650,7 @@ const App: React.FC = () => {
           {sidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
         </button>
 
-        <nav id="sidebar-nav" ref={navFadeRef} className="flex-1 min-h-0 overflow-y-auto scroll-fade-y py-2 space-y-0.5 px-3">
+        <nav id="sidebar-nav" ref={navFadeRef} className="flex-1 min-h-0 overflow-y-auto scroll-fade-y scrollbar-hover py-2 space-y-0.5 px-3">
           {NAV_ITEMS.filter(item => item.group === null && canSeeNavItem(item)).map(item => (
             <SidebarItem
               key={item.label}
