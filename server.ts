@@ -1816,6 +1816,9 @@ app.post('/webhook/elevenlabs/modify-reservation', async (req, res) => {
                     reservation_time: before.reservation_time,
                     shift: before.shift,
                     guests: before.guests,
+                    // Senza il tavolo di partenza l'audit non mostrava che la
+                    // modifica lo aveva cambiato (indagine tavolo 56, 04/08).
+                    table_id: before.table_id ?? null,
                 },
                 after: {
                     reservation_time: after.reservation_time,
@@ -2534,7 +2537,8 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         // and without a race with concurrent updates.
         const result = await queryWithRetry(
             `WITH old AS (
-                SELECT reservation_status AS prev_status FROM reservations WHERE id = $14
+                SELECT reservation_status AS prev_status, table_id AS prev_table_id
+                FROM reservations WHERE id = $14
             ), upd AS (
                 UPDATE reservations
                 SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, children = $5, table_id = $6, notes = $7, email = $8, phone = $9, payment_status = $10, arrival_status = $11, reservation_status = $12, duration_minutes = $13,
@@ -2545,6 +2549,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 RETURNING *
             )
             SELECT upd.*, u.full_name AS created_by_user_name, (SELECT prev_status FROM old) AS prev_status,
+                   (SELECT prev_table_id FROM old) AS prev_table_id,
                    c.is_vip AS customer_is_vip,
                    c.preferred_table_id AS customer_preferred_table_id,
                    pt.name AS customer_preferred_table_name,
@@ -2583,11 +2588,16 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         );
         const updatedReservation = result.rows[0];
         const previousStatus: string | null = updatedReservation?.prev_status ?? null;
+        const previousTableId: number | null = updatedReservation?.prev_table_id ?? null;
         if (updatedReservation && 'prev_status' in updatedReservation) {
             delete (updatedReservation as any).prev_status;
         }
+        if (updatedReservation && 'prev_table_id' in updatedReservation) {
+            delete (updatedReservation as any).prev_table_id;
+        }
 
-        // Log activity
+        // Log activity. table_id/prev_table_id compresi: senza, i cambi di
+        // tavolo erano invisibili all'audit (indagine tavolo 56, 04/08).
         if (req.user) {
             LogService.logActivity(
                 req.user.userId,
@@ -2597,7 +2607,15 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 ResourceType.RESERVATION,
                 parseInt(id, 10),
                 customer_name,
-                { guests, reservation_time, shift, payment_status, arrival_status, reservation_status }
+                (() => {
+                    const prevT = previousTableId == null ? null : Number(previousTableId);
+                    const newT = effectiveTableId == null ? null : Number(effectiveTableId);
+                    return {
+                        guests, reservation_time, shift, payment_status, arrival_status, reservation_status,
+                        table_id: newT,
+                        ...(prevT !== newT ? { prev_table_id: prevT } : {}),
+                    };
+                })()
             );
         }
 
