@@ -1631,7 +1631,7 @@ const App: React.FC = () => {
           </button>
         )}
 
-        <nav ref={navFadeRef} className={`flex-1 min-h-0 overflow-y-auto scroll-fade-y py-2 space-y-0.5 ${sidebarCollapsed ? 'px-3' : 'px-3'}`}>
+        <nav ref={navFadeRef} className={`flex-1 min-h-0 overflow-y-auto scroll-fade-y scrollbar-hover py-2 space-y-0.5 ${sidebarCollapsed ? 'px-3' : 'px-3'}`}>
           {NAV_ITEMS.filter(item => item.group === null && canSeeNavItem(item)).map(item => (
             <SidebarItem
               key={item.label}
