@@ -24,6 +24,7 @@
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "express-rate-limit": "^8.5.2",
+    "fast-xml-parser": "^5.10.1",
     "imapflow": "^1.4.8",
     "jsonwebtoken": "^9.0.3",
     "jwt-decode": "^4.0.0",
