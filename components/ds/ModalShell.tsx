@@ -30,6 +30,10 @@ interface ModalShellProps {
   title: React.ReactNode;
   /** Optional line under the title — context, not instruction. */
   subtitle?: React.ReactNode;
+  /** Chrome that sits between the header and the scrolling body — a stepper, a
+   *  filter row, a tab bar. Pinned, so it stays put while the body scrolls and
+   *  does not shift as steps change length. Content belongs in `children`. */
+  subheader?: React.ReactNode;
   /** Rendered in the sticky footer. Omit for a modal with no actions. */
   footer?: React.ReactNode;
   /** Pulled to the left of the footer, opposite the actions. */
@@ -38,7 +42,16 @@ interface ModalShellProps {
   /** Escape-to-close. Off by default: on a long form it can discard work, so
    *  each modal opts in deliberately. */
   closeOnEscape?: boolean;
-  /** The body sits on the canvas tone so cards inside it read as raised. */
+  /** Pin the panel to a constant height instead of letting it size to its
+   *  content. For anything whose body changes length in place — a wizard's
+   *  steps, a list that filters down — where a panel that resizes under the
+   *  cursor moves the footer buttons out from under the thumb between clicks. */
+  fixedHeight?: boolean;
+  /** The body sits on the canvas tone so cards inside it read as raised, and
+   *  it ships with NO padding of its own — pass it here. Forgetting leaves the
+   *  content flush against the panel edge, which is what it looks like when a
+   *  modal "isn't breathing". Compose the body from FormCards rather than bare
+   *  fields: the canvas tone is only worth having if something is raised on it. */
   bodyClassName?: string;
   /** Merged onto the backdrop. For the rare modal that opens over another one
    *  and needs to say so explicitly rather than rely on paint order. */
@@ -51,10 +64,12 @@ export const ModalShell: React.FC<ModalShellProps> = ({
   onClose,
   title,
   subtitle,
+  subheader,
   footer,
   footerStart,
   size = 'md',
   closeOnEscape = false,
+  fixedHeight = false,
   bodyClassName = '',
   className = '',
   children,
@@ -86,7 +101,9 @@ export const ModalShell: React.FC<ModalShellProps> = ({
         role="dialog"
         aria-modal="true"
         onClick={e => e.stopPropagation()}
-        className={`flex w-full flex-col overflow-hidden bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] h-full rounded-none sm:h-auto sm:max-h-[92vh] sm:rounded-[24px] ${SIZE[size]}`}
+        // Full-height on mobile either way — a phone sheet already fills the
+        // screen, so only the desktop panel has a choice to make here.
+        className={`flex w-full flex-col overflow-hidden bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] h-full rounded-none sm:max-h-[92vh] sm:rounded-[24px] ${fixedHeight ? 'sm:h-[86vh]' : 'sm:h-auto'} ${SIZE[size]}`}
       >
         <header className="flex flex-shrink-0 items-start justify-between gap-4 px-5 py-5 sm:px-6 sm:py-6">
           <div className="min-w-0">
@@ -106,6 +123,15 @@ export const ModalShell: React.FC<ModalShellProps> = ({
             <X className="h-4 w-4" />
           </button>
         </header>
+
+        {subheader && (
+          // Carries the canvas tone so it reads as the top of the content area
+          // rather than a second header, but sits outside the scroll container
+          // so it cannot drift.
+          <div className="flex-shrink-0 bg-[var(--ds-canvas)] px-5 pt-5 pb-4 sm:px-6 sm:pt-6">
+            {subheader}
+          </div>
+        )}
 
         <div className={`min-h-0 flex-1 overflow-y-auto bg-[var(--ds-canvas)] ${bodyClassName}`}>
           {children}

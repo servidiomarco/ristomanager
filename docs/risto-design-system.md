@@ -192,7 +192,8 @@ intensity:
 # TYPOGRAPHY
 # ---------------------------------------------------------------------------
 typography:
-  fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif"
+  fontFamily: "'Hanken Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
+  fontWeights: [400, 500, 600, 700, 800]   # the only weights loaded; 300 is not available
   styles:
     metric-xl:  { fontSize: "56px", fontWeight: 700, lineHeight: "1.0",  letterSpacing: "-0.03em", numeric: "tabular-nums" }
     display:    { fontSize: "44px", fontWeight: 700, lineHeight: "1.05", letterSpacing: "-0.03em" }
@@ -505,9 +506,15 @@ label, not by asterisk convention alone.
 
 ## 5. Typography
 
-Eight styles. The stack leads with the system font so it renders natively on Apple hardware
-and degrades cleanly elsewhere — **never specify bare `SF Pro Display`**, which is not
-licensed for web distribution.
+Eight styles, all set in **Hanken Grotesk**, a webfont loaded from Google Fonts in
+`index.html` and exposed as `--font-sans` and `--font-display` — the two tokens resolve to the
+same family, so a style never changes face, only weight and size. The stack behind it is a
+plain system fallback that renders during the swap and if the font fails to load.
+
+Only weights **400, 500, 600, 700 and 800** are fetched. Asking for a weight outside that set
+does not fail visibly — the browser synthesises it, and a faux-bold 300 or 900 looks subtly
+wrong next to a real one. Every style in the table below sits inside the loaded range; keep it
+that way, or add the weight to the `index.html` link first.
 
 | Style | Size / weight | Used for |
 |---|---|---|

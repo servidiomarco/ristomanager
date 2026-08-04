@@ -332,7 +332,11 @@ export const SectionHeader: React.FC<{
       type="button"
       onClick={onToggle}
       aria-expanded={expanded}
-      className="-mx-1 flex min-h-[44px] w-full items-center gap-2 rounded-[14px] px-2 py-1.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] active:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+      // A resting tint, not just a hover one. On a page whose cards are white,
+      // a transparent band reads as a caption; people scrolled past it without
+      // realising the group collapses. Hover then deepens it rather than being
+      // the only signal, which never existed on touch at all.
+      className="-mx-1 flex min-h-[44px] w-full items-center gap-2 rounded-[14px] bg-[var(--ds-surface-row)] px-3 py-1.5 text-left transition-colors hover:bg-[var(--ds-border)] active:bg-[var(--ds-border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
     >
       {/* Label and meta wrap as a pair: on a wide column they share one line,
           and where the column is too narrow the meta drops beneath the label

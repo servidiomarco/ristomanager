@@ -84,7 +84,7 @@ export const TableGlyph: React.FC<TableGlyphProps> = React.memo(({ name, seats, 
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="block"
         style={fit ? { width: '100%', height: 'auto', maxWidth: size, margin: '0 auto' } : undefined}>
         {isSelected && (
-          <circle cx={cx} cy={cy} r={r + 3} fill="none" style={{ stroke: 'var(--color-fg)' }} strokeWidth={2} />
+          <circle cx={cx} cy={cy} r={r + 3} fill="none" style={{ stroke: 'var(--ds-text-primary)' }} strokeWidth={2} />
         )}
         {status === 'inarrivo' && (
           <circle className="tg-pulse" cx={cx} cy={cy} r={r + 5}
@@ -134,7 +134,7 @@ export const TableGlyph: React.FC<TableGlyphProps> = React.memo(({ name, seats, 
       style={fit ? { width: '100%', height: 'auto', maxWidth: svgW, margin: '0 auto' } : undefined}>
       {isSelected && (
         <rect x={bodyX - 3} y={bodyY - 3} width={bodyW + 6} height={BODY_H + 6} rx={BODY_R + 3}
-          fill="none" style={{ stroke: 'var(--color-fg)' }} strokeWidth={2} />
+          fill="none" style={{ stroke: 'var(--ds-text-primary)' }} strokeWidth={2} />
       )}
       {status === 'inarrivo' && (
         <rect className="tg-pulse" x={bodyX - 5} y={bodyY - 5} width={bodyW + 10} height={BODY_H + 10} rx={BODY_R + 5}
