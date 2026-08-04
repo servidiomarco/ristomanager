@@ -2227,7 +2227,7 @@ const App: React.FC = () => {
 
         {view === ViewState.COMANDE && (
           <CardErrorBoundary label="Comande">
-            <OrderPad dishes={dishes} tables={tables} reservations={reservations} />
+            <OrderPad dishes={dishes} tables={tables} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} />
           </CardErrorBoundary>
         )}
 

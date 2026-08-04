@@ -30,6 +30,11 @@ interface OrderPadProps {
   dishes: Dish[];
   tables: Table[];
   reservations: Reservation[];
+  /** Giorno selezionato nella barra globale — la griglia mostra le
+   *  prenotazioni di questo giorno, non fissa "oggi". */
+  globalDate: Date;
+  /** Turno selezionato nella barra globale ('ALL' = nessun filtro). */
+  globalShiftFilter: 'ALL' | 'LUNCH' | 'DINNER';
 }
 
 interface CartLine {
@@ -60,7 +65,7 @@ const COURSE_BADGE: Record<string, { text: string; cls: string }> = {
   PENDING: { text: 'in bozza',    cls: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' },
 };
 
-export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations }) => {
+export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations, globalDate, globalShiftFilter }) => {
   const [tableId, setTableId] = useState<number | null>(null);
   const [order, setOrder] = useState<OrderWithItems | null>(null);
   const [catalogue, setCatalogue] = useState<MenuCatalogue | null>(null);
@@ -107,20 +112,22 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
     return catalogue.modifier_groups.filter(g => ids.includes(g.id));
   }, [catalogue]);
 
-  // La prenotazione di OGGI per un tavolo: nome e allergeni arrivano dal CRM
-  // senza che nessuno li ridigiti. È il pezzo che un POS esterno non può fare.
-  // Il filtro sul giorno (in Europe/Rome) serve perché /reservations restituisce
-  // tutto lo storico: senza, una prenotazione di ieri mai marcata come partita
-  // ricomparirebbe in testata sulla comanda di stasera.
-  const todayRome = getRomeDatePart(new Date());
+  // La prenotazione del giorno/turno selezionati per un tavolo: nome e
+  // allergeni arrivano dal CRM senza che nessuno li ridigiti. È il pezzo che
+  // un POS esterno non può fare. Il filtro sul giorno (in Europe/Rome) serve
+  // perché /reservations restituisce tutto lo storico; quello sul turno
+  // perché con Pranzo selezionato le prenotazioni della cena in griglia
+  // leggono come coperti già arrivati.
+  const selectedDateRome = getRomeDatePart(globalDate);
   const reservationForTable = useCallback((id: number): Reservation | null =>
     reservations.find(r =>
       r.table_id === id
-      && getRomeDatePart(r.reservation_time) === todayRome
+      && getRomeDatePart(r.reservation_time) === selectedDateRome
+      && (globalShiftFilter === 'ALL' || r.shift === globalShiftFilter)
       && r.reservation_status !== ReservationStatus.CANCELLED
       && r.arrival_status !== ArrivalStatus.DEPARTED
     ) ?? null,
-  [reservations, todayRome]);
+  [reservations, selectedDateRome, globalShiftFilter]);
 
   const reservation = useMemo(
     () => (tableId ? reservationForTable(tableId) : null),
