@@ -134,11 +134,27 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
     [reservationForTable, tableId]
   );
 
+  // Il servizio che la griglia sta guardando: le comande si cercano LÌ, non
+  // nel servizio in corso — altrimenti la comanda appesa di un pranzo passato
+  // resta invisibile proprio nella schermata che dovrebbe farla riprendere.
+  const serviceQuery = useMemo(() => ({
+    date: selectedDateRome,
+    shift: globalShiftFilter === 'ALL' ? undefined : globalShiftFilter,
+  }), [selectedDateRome, globalShiftFilter]);
+  const isTodayRome = selectedDateRome === getRomeDatePart(new Date());
+
   const loadTable = useCallback(async (id: number) => {
     setBusy(true); setError(null);
     try {
-      let view = await ordersApiService.getOrderByTable(id);
+      let view = await ordersApiService.getOrderByTable(id, serviceQuery);
       if (!view) {
+        // Nei servizi passati si riprende, non si crea: il server marcherebbe
+        // comunque la comanda nuova sul servizio in corso, e il cameriere
+        // crederebbe di averla aperta il giorno che sta guardando.
+        if (!isTodayRome) {
+          setError('Nessuna comanda in questo servizio. Le nuove comande si aprono solo nel servizio corrente: torna a oggi per aprirne una.');
+          return;
+        }
         const res = reservationForTable(id);
         // I coperti arrivano dalla prenotazione; per un walk-in la stima
         // migliore sono i posti del tavolo. Uno è quasi sempre sbagliato, e
@@ -161,21 +177,22 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
     } finally {
       setBusy(false);
     }
-  }, [reservationForTable, tables]);
+  }, [reservationForTable, tables, serviceQuery, isTodayRome]);
 
-  // Segna quali tavoli hanno già una comanda aperta, così il cameriere sceglie
-  // consapevolmente invece di scoprirlo dopo.
+  // Segna quali tavoli hanno già una comanda aperta NEL SERVIZIO SELEZIONATO,
+  // così il cameriere sceglie consapevolmente invece di scoprirlo dopo — e
+  // navigando a un servizio passato vede subito i tavoli con comande appese.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const found = new Set<number>();
       await Promise.all(tables.slice(0, 60).map(async t => {
-        try { if (await ordersApiService.getOrderByTable(t.id)) found.add(t.id); } catch { /* ignora */ }
+        try { if (await ordersApiService.getOrderByTable(t.id, serviceQuery)) found.add(t.id); } catch { /* ignora */ }
       }));
       if (!cancelled) setOpenTables(found);
     })();
     return () => { cancelled = true; };
-  }, [tables]);
+  }, [tables, serviceQuery]);
 
   const addToCart = (dish: Dish, modifierIds: number[] = []) => {
     const groups = groupsForDish(dish.id);

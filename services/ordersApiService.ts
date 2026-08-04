@@ -78,9 +78,20 @@ export const newIdempotencyKey = (): string =>
 
 class OrdersApiService {
   /** 404 → nessuna comanda aperta sul tavolo. */
-  async getOrderByTable(tableId: number): Promise<OrderWithItems | null> {
+  /** 404 → nessuna comanda aperta sul tavolo. Senza `service` il server
+   *  guarda il servizio in corso; con data/turno espliciti guarda quello —
+   *  è ciò che permette di riprendere una comanda appesa di un servizio
+   *  passato navigando la griglia a quel giorno. */
+  async getOrderByTable(
+    tableId: number,
+    service?: { date?: string; shift?: 'LUNCH' | 'DINNER' }
+  ): Promise<OrderWithItems | null> {
+    const params = new URLSearchParams();
+    if (service?.date) params.set('date', service.date);
+    if (service?.shift) params.set('shift', service.shift);
+    const qs = params.toString();
     try {
-      return await apiRequest<OrderWithItems>(`${API_URL}/tables/${tableId}/order`, {
+      return await apiRequest<OrderWithItems>(`${API_URL}/tables/${tableId}/order${qs ? `?${qs}` : ''}`, {
         headers: getHeaders(),
       });
     } catch (err: any) {
