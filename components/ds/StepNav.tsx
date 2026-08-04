@@ -17,10 +17,13 @@ import { Check } from 'lucide-react';
    stays put while the body moves and does not shift as steps change length. */
 
 export const StepNav: React.FC<{
-  /** `label` and the optional `disabled` are read; extra keys are fine.
+  /** `label` and the optional `disabled`/`icon` are read; extra keys are fine.
    *  A disabled step still shows — it tells you the form has a Pagamenti
-   *  section without pretending you can fill it in before the record exists. */
-  steps: readonly { label: string; disabled?: boolean }[];
+   *  section without pretending you can fill it in before the record exists.
+   *  `icon` replaces the step number in the circle (done keeps the tick):
+   *  a glyph says what the step is about, a number only says how far it is —
+   *  and the rail already carries that. */
+  steps: readonly { label: string; disabled?: boolean; icon?: React.ComponentType<{ className?: string }> }[];
   current: number;
   onSelect: (index: number) => void;
   ariaLabel?: string;
@@ -55,7 +58,7 @@ export const StepNav: React.FC<{
                     ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                     : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)]'
             }`}>
-              {isDone ? <Check className="h-3.5 w-3.5" /> : i + 1}
+              {isDone ? <Check className="h-3.5 w-3.5" /> : step.icon ? <step.icon className="h-3.5 w-3.5" /> : i + 1}
             </span>
             <span className={`truncate text-[14px] ${
               step.disabled ? 'text-[var(--ds-text-subtle)]'

@@ -114,11 +114,11 @@ const banquetGroupFor = (menu: BanquetMenu, today: string, weekEnd: string, mont
    anywhere from the header, and the required-field check still runs once, on
    save, exactly as it did when this was a single scroll. */
 const BANQUET_STEPS = [
-  { label: 'Evento e cliente', hint: 'nome interno, data, turno e chi lo ha richiesto' },
-  { label: 'Coperti e tariffa', hint: 'un prezzo bambini separa il calcolo' },
-  { label: 'Composizione menù', hint: 'clicca un piatto per aggiungerlo all\'uscita attiva' },
-  { label: 'Tavoli assegnati', hint: 'i tavoli occupati nello stesso turno sono disabilitati' },
-  { label: 'Note operative', hint: 'compaiono nelle stampe per cucina e sala' },
+  { label: 'Evento e cliente', hint: 'nome interno, data, turno e chi lo ha richiesto', icon: BookUser },
+  { label: 'Coperti e tariffa', hint: 'un prezzo bambini separa il calcolo', icon: Users },
+  { label: 'Composizione menù', hint: 'clicca un piatto per aggiungerlo all\'uscita attiva', icon: Utensils },
+  { label: 'Tavoli assegnati', hint: 'i tavoli occupati nello stesso turno sono disabilitati', icon: LayoutGrid },
+  { label: 'Note operative', hint: 'compaiono nelle stampe per cucina e sala', icon: StickyNote },
 ] as const;
 
 // Category filters on Piatti alla carta. There are more of these than a

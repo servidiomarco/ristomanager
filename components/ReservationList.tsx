@@ -108,9 +108,9 @@ const OVERDUE_SNOOZE_MIN = 15;
    time and Salva stays live on all of them, because an edit is usually one
    field, not a journey. Validation still runs once, on save. */
 const RESERVATION_STEPS = [
-  { label: 'Dettagli' },
-  { label: 'Pagamenti' },
-  { label: 'Comunicazione' },
+  { label: 'Dettagli', icon: Calendar },
+  { label: 'Pagamenti', icon: CreditCard },
+  { label: 'Comunicazione', icon: MessageCircle },
 ] as const;
 
 // Sezione conto-al-tavolo nel modal prenotazione. Interruttore lato client
