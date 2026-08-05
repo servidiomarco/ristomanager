@@ -6,6 +6,7 @@ import {
     type AutoDepositSettings,
 } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
+import { PaymentProviderPicker } from './PaymentProviderPicker';
 
 interface Props {
     showToast: (msg: string, kind?: 'success' | 'error' | 'info') => void;
@@ -145,6 +146,10 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
                     </p>
                 )}
             </div>
+
+            {/* Provider preferito per le caparre: vale per la caparra automatica
+                E per i link manuali dal modal prenotazione — stessa pipeline. */}
+            <PaymentProviderPicker flow="deposit" showToast={showToast} canEdit={canEdit} />
 
             {canEdit && (
                 <div className="flex items-center justify-end gap-2 pt-2 border-t border-[var(--color-line)]">

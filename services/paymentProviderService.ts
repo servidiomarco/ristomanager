@@ -94,6 +94,78 @@ export async function isProviderConfigured(provider: PaymentProvider): Promise<b
     return provider === 'sumup' ? isSumUpConfigured() : isRevolutConfigured();
 }
 
+// ============================================
+// Per-flow overrides (caparre vs conti al tavolo)
+// ============================================
+// Le caparre e i conti al tavolo possono preferire gateway diversi (es.
+// caparre su Revolut per i bonifici, conti su SumUp per le fee). L'override
+// è opzionale: senza riga in app_settings il flusso segue il provider
+// globale, così le installazioni esistenti non cambiano comportamento.
+
+export type PaymentFlow = 'deposit' | 'bill';
+export const PAYMENT_FLOWS: PaymentFlow[] = ['deposit', 'bill'];
+
+export function isPaymentFlow(value: unknown): value is PaymentFlow {
+    return value === 'deposit' || value === 'bill';
+}
+
+const FLOW_KEYS: Record<PaymentFlow, string> = {
+    deposit: 'deposit_payment_provider',
+    bill: 'bill_payment_provider',
+};
+
+let flowCache: { loadedAt: number; overrides: Partial<Record<PaymentFlow, PaymentProvider>> } | null = null;
+
+export function invalidatePaymentProviderFlowCache(): void {
+    flowCache = null;
+}
+
+export async function getPaymentProviderOverrides(): Promise<Partial<Record<PaymentFlow, PaymentProvider>>> {
+    const now = Date.now();
+    if (flowCache && now - flowCache.loadedAt < CACHE_TTL_MS) return flowCache.overrides;
+    const overrides: Partial<Record<PaymentFlow, PaymentProvider>> = {};
+    try {
+        const result = await queryWithRetry(
+            'SELECT key, text_value FROM app_settings WHERE key = ANY($1::text[])',
+            [PAYMENT_FLOWS.map(f => FLOW_KEYS[f])]
+        );
+        for (const flow of PAYMENT_FLOWS) {
+            const raw = result.rows.find((r: any) => r.key === FLOW_KEYS[flow])?.text_value;
+            if (isPaymentProvider(raw)) overrides[flow] = raw;
+        }
+    } catch (err) {
+        console.warn('[payments] flow provider lookup failed, using global:', (err as any)?.message || err);
+    }
+    flowCache = { loadedAt: now, overrides };
+    return overrides;
+}
+
+export async function getPaymentProviderForFlow(flow: PaymentFlow): Promise<PaymentProvider> {
+    const overrides = await getPaymentProviderOverrides();
+    return overrides[flow] ?? getActivePaymentProvider();
+}
+
+// provider === null rimuove l'override: il flusso torna a seguire il globale.
+export async function setPaymentProviderForFlow(flow: PaymentFlow, provider: PaymentProvider | null): Promise<void> {
+    if (provider === null) {
+        await queryWithRetry('DELETE FROM app_settings WHERE key = $1', [FLOW_KEYS[flow]]);
+    } else {
+        await queryWithRetry(
+            `INSERT INTO app_settings (key, text_value, updated_at)
+             VALUES ($1, $2, CURRENT_TIMESTAMP)
+             ON CONFLICT (key) DO UPDATE SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+            [FLOW_KEYS[flow], provider]
+        );
+    }
+    invalidatePaymentProviderFlowCache();
+}
+
+// "Possiamo incassare adesso su QUESTO flusso?" — chiede al provider
+// effettivo del flusso (override o globale).
+export async function isPaymentConfiguredForFlow(flow: PaymentFlow): Promise<boolean> {
+    return isProviderConfigured(await getPaymentProviderForFlow(flow));
+}
+
 // "Can we take a payment right now?" — asks the ACTIVE provider only, which
 // is what every create-payment guard in server.ts wants.
 export async function isPaymentConfigured(): Promise<boolean> {
@@ -119,6 +191,9 @@ export interface CreatePaymentOrderInput {
     reference?: string;
     // Where the payer's browser lands once the hosted checkout finishes.
     redirectUrl?: string;
+    // Which flow this charge belongs to — resolves the per-flow provider
+    // override. Omitted → global active provider (backwards compatible).
+    flow?: PaymentFlow;
 }
 
 export interface NormalisedOrder {
@@ -189,9 +264,12 @@ async function sumupReturnUrl(): Promise<string | undefined> {
     return `${publicBaseUrl()}/webhook/sumup/${encodeURIComponent(secret)}`;
 }
 
-// Create a checkout with the ACTIVE provider.
+// Create a checkout with the provider effective for the flow (or the ACTIVE
+// provider when no flow is given).
 export async function createPaymentOrder(input: CreatePaymentOrderInput): Promise<NormalisedOrder> {
-    const provider = await getActivePaymentProvider();
+    const provider = input.flow
+        ? await getPaymentProviderForFlow(input.flow)
+        : await getActivePaymentProvider();
 
     if (provider === 'sumup') {
         const returnUrl = await sumupReturnUrl();

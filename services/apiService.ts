@@ -967,12 +967,17 @@ export const updateSumUpIntegration = async (
   });
 };
 
+export type PaymentFlowId = 'deposit' | 'bill';
+
 export interface ActivePaymentProvider {
   provider: PaymentProviderId;
   // Human name of the active gateway ("Revolut" / "SumUp"), for UI labels.
   label: string;
   providers: PaymentProviderId[];
   configured: Record<PaymentProviderId, boolean>;
+  // Preferenza per flusso: override esplicito (null = segue il globale) e
+  // provider effettivo che verrà usato per il prossimo incasso del flusso.
+  flows: Record<PaymentFlowId, { override: PaymentProviderId | null; effective: PaymentProviderId; label: string }>;
 }
 
 export const getActivePaymentProvider = async (): Promise<ActivePaymentProvider> => {
@@ -988,6 +993,19 @@ export const setActivePaymentProvider = async (
     method: 'PUT',
     headers: getHeaders(),
     body: JSON.stringify({ provider }),
+  });
+};
+
+// Preferenza provider per un singolo flusso (caparre o conti al tavolo).
+// provider null = rimuovi l'override, il flusso segue il predefinito.
+export const setPaymentProviderForFlow = async (
+  flow: PaymentFlowId,
+  provider: PaymentProviderId | null
+): Promise<{ flow: PaymentFlowId; provider: PaymentProviderId | null }> => {
+  return apiRequest<{ flow: PaymentFlowId; provider: PaymentProviderId | null }>(`${API_URL}/settings/payments/provider`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify({ flow, provider }),
   });
 };
 

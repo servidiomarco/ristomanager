@@ -52,6 +52,12 @@ import {
     setActivePaymentProvider,
     isProviderConfigured,
     isPaymentConfigured,
+    isPaymentConfiguredForFlow,
+    getPaymentProviderForFlow,
+    getPaymentProviderOverrides,
+    setPaymentProviderForFlow,
+    isPaymentFlow,
+    PAYMENT_FLOWS,
     providerLabel,
     createPaymentOrder,
     fetchPaymentOrder,
@@ -1294,6 +1300,7 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
                     currency: 'EUR',
                     description: orderDescription,
                     reference: `reservation:${created.id}`,
+                    flow: 'deposit',
                 });
                 const insertedPayment = await queryWithRetry(
                     `INSERT INTO payment_requests
@@ -4173,14 +4180,15 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         let checkoutUrl: string | null = null;
         let paymentRequestId: number | null = null;
         try {
-            if (!(await isPaymentConfigured())) {
-                throw new Error(`${providerLabel(await getActivePaymentProvider())} not configured`);
+            if (!(await isPaymentConfiguredForFlow('bill'))) {
+                throw new Error(`${providerLabel(await getPaymentProviderForFlow('bill'))} not configured`);
             }
             const order = await createPaymentOrder({
                 amount,
                 currency: 'EUR',
                 description: `Conto ${billLabel} - quota${claimantLabel ? ' ' + claimantLabel : ''}`,
                 reference: `bill_split:${splitId}`,
+                flow: 'bill',
                 // Back to the bill page after checkout (whatever method the
                 // guest picked), so they see the progress bar advance
                 // instead of landing on the provider default.
@@ -4749,7 +4757,7 @@ async function isAutoDepositRequired(guests: number): Promise<boolean> {
         const n = Number(r.auto_deposit_min_guests);
         const minGuests = Number.isInteger(n) && n >= 1 ? n : 9;
         if (guests < minGuests) return false;
-        return await isPaymentConfigured();
+        return await isPaymentConfiguredForFlow('deposit');
     } catch (err) {
         console.warn('[auto-deposit] policy lookup failed:', (err as any)?.message || err);
         return false;
@@ -5052,9 +5060,9 @@ app.get('/payments/requests', authenticate, requirePermission('reservations:view
 // after) mirrors reservation confirmations exactly.
 app.post('/payments/requests', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
-        if (!(await isPaymentConfigured())) {
-            const active = await getActivePaymentProvider();
-            return res.status(503).json({ error: `${providerLabel(active)} non è configurato (credenziali mancanti)` });
+        if (!(await isPaymentConfiguredForFlow('deposit'))) {
+            const effective = await getPaymentProviderForFlow('deposit');
+            return res.status(503).json({ error: `${providerLabel(effective)} non è configurato (credenziali mancanti)` });
         }
 
         const { reservation_id, amount, description } = req.body ?? {};
@@ -5087,6 +5095,7 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
             currency: 'EUR',
             description: orderDescription,
             reference: `reservation:${reservation.id}`,
+            flow: 'deposit',
         });
 
         const inserted = await queryWithRetry(
@@ -14304,11 +14313,21 @@ app.get('/settings/payments/provider', authenticate, async (_req, res) => {
         for (const provider of PAYMENT_PROVIDERS) {
             configured[provider] = await isProviderConfigured(provider);
         }
+        // Per-flow overrides (caparre e conti al tavolo): override = scelta
+        // esplicita o null (= segue il globale), effective = provider che
+        // verrà davvero usato per il prossimo incasso di quel flusso.
+        const overrides = await getPaymentProviderOverrides();
+        const flows: Record<string, { override: PaymentProvider | null; effective: PaymentProvider; label: string }> = {};
+        for (const flow of PAYMENT_FLOWS) {
+            const effective = overrides[flow] ?? active;
+            flows[flow] = { override: overrides[flow] ?? null, effective, label: providerLabel(effective) };
+        }
         res.json({
             provider: active,
             label: providerLabel(active),
             providers: PAYMENT_PROVIDERS,
             configured,
+            flows,
         });
     } catch (err: any) {
         console.error('GET /settings/payments/provider error:', err);
@@ -14319,6 +14338,40 @@ app.get('/settings/payments/provider', authenticate, async (_req, res) => {
 app.put('/settings/payments/provider', authenticate, requirePermission('settings:full'), async (req, res) => {
     try {
         const provider = req.body?.provider;
+        const flow = req.body?.flow;
+
+        // Con `flow` la scelta vale solo per quel flusso (caparre o conti);
+        // provider null rimuove l'override e il flusso torna al globale.
+        if (flow !== undefined) {
+            if (!isPaymentFlow(flow)) {
+                return res.status(400).json({ error: 'invalid_flow' });
+            }
+            if (provider !== null && !isPaymentProvider(provider)) {
+                return res.status(400).json({ error: 'invalid_provider' });
+            }
+            if (provider !== null && !(await isProviderConfigured(provider))) {
+                return res.status(400).json({
+                    error: `${providerLabel(provider)} non è configurato: completa le credenziali prima di attivarlo`,
+                });
+            }
+            await setPaymentProviderForFlow(flow, provider);
+            const flowLabel = flow === 'deposit' ? 'caparre' : 'conti al tavolo';
+            if (req.user) {
+                LogService.logActivity(
+                    req.user.userId,
+                    req.user.email,
+                    req.user.email,
+                    ActivityAction.UPDATE,
+                    ResourceType.SETTINGS,
+                    undefined,
+                    provider === null
+                        ? `Provider ${flowLabel}: segue il predefinito`
+                        : `Provider ${flowLabel}: ${providerLabel(provider)}`
+                );
+            }
+            return res.json({ flow, provider });
+        }
+
         if (!isPaymentProvider(provider)) {
             return res.status(400).json({ error: 'invalid_provider' });
         }
@@ -15340,6 +15393,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                     currency: 'EUR',
                     description: orderDescription,
                     reference: `reservation:${created.id}`,
+                    flow: 'deposit',
                 });
                 const insertedPayment = await queryWithRetry(
                     `INSERT INTO payment_requests

@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Receipt, Loader2, Clock, ShieldCheck, CreditCard, ChevronDown } from 'lucide-react';
+import { Receipt, Loader2, Clock, ShieldCheck, ChevronDown } from 'lucide-react';
 import { getFeatureFlags, updateFeatureFlags, FeatureFlags } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
+import { PaymentProviderPicker } from './PaymentProviderPicker';
 
 interface Props {
     showToast: (msg: string, kind?: 'success' | 'error' | 'info') => void;
@@ -101,8 +102,12 @@ export const PayAtTableSettingsManager: React.FC<Props> = ({ showToast }) => {
             </summary>
             <div className="px-4 pb-4 pt-3 border-t border-[var(--color-line)] space-y-3">
                 <p className="text-[13px] text-[var(--color-fg-muted)] leading-relaxed">
-                    Il cameriere apre un conto per la prenotazione e genera un QR effimero. Gli ospiti lo scansionano e pagano la propria quota via Revolut hosted checkout — split equo o importo libero. Quando la somma raggiunge il totale, il conto diventa <em>SETTLED</em>; se il cameriere chiude con un delta viene stampato un <em>SETTLED_PARTIAL</em> con l'ammanco per audit.
+                    Il cameriere apre un conto per la prenotazione e genera un QR effimero. Gli ospiti lo scansionano e pagano la propria quota via hosted checkout del provider scelto — split equo o importo libero. Quando la somma raggiunge il totale, il conto diventa <em>SETTLED</em>; se il cameriere chiude con un delta viene stampato un <em>SETTLED_PARTIAL</em> con l'ammanco per audit.
                 </p>
+
+                {/* Provider preferito per i conti al tavolo — indipendente da
+                    quello delle caparre. */}
+                <PaymentProviderPicker flow="bill" showToast={showToast} canEdit={canEdit} />
 
                 {/* Parametri tecnici — read-only. Sono costanti nel backend; qui
                     mostrati per trasparenza operativa (il gestore sa quando un
@@ -112,13 +117,6 @@ export const PayAtTableSettingsManager: React.FC<Props> = ({ showToast }) => {
                         Parametri tecnici (sola lettura)
                     </h5>
                     <ul className="space-y-2.5 text-[13px]">
-                        <li className="flex items-start gap-2.5">
-                            <CreditCard className="h-4 w-4 mt-0.5 text-[var(--color-fg-muted)] flex-shrink-0" />
-                            <div className="flex-1 min-w-0">
-                                <div className="text-[var(--color-fg)]">Provider di pagamento: <strong>Revolut</strong> (hosted checkout)</div>
-                                <div className="text-[12px] text-[var(--color-fg-muted)]">Prerequisito indispensabile. Configura chiavi API e webhook in Impostazioni → Integrazioni → Revolut.</div>
-                            </div>
-                        </li>
                         <li className="flex items-start gap-2.5">
                             <Clock className="h-4 w-4 mt-0.5 text-[var(--color-fg-muted)] flex-shrink-0" />
                             <div className="flex-1 min-w-0">
