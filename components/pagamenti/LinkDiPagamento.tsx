@@ -1,18 +1,24 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { CreditCard, Receipt } from 'lucide-react';
 import type { PaymentRequest } from '../../services/paymentsApiService';
 import { toTitleCase } from '../../utils/text';
 import { EmptyState, SectionHeader, StatusPill } from '../ds';
 import type { PillTone } from '../ds';
 import { PeriodTrigger, type Period } from './PeriodPicker';
-import { formatDateTime, formatEuro, paymentStatusView, reservationStatusView } from './paymentsView';
+import { formatDateTime, formatEuro, paymentStatusView } from './paymentsView';
 
 /* ── Link di pagamento ────────────────────────────────────────────────────
    Was a table with a Stato / Importo / Cliente / Prenotazione header. A table
    is the wrong instrument here: the columns were already collapsing on a
    tablet and on a phone the row wrapped into an unreadable block. Rows carry
-   the same four facts, ordered by what the operator scans for — the amount
-   first, then who owes it.
+   the same facts, ordered by what the operator scans for — the amount first,
+   then who owes it.
+
+   The row stacks rather than laying its facts across one line: the list lives
+   in the pane beside the detail now, roughly 340–440px, and the old
+   fixed-width amount column plus a trailing status stack left the customer
+   name about six characters of room. The booking state left the row entirely —
+   it is one line down in the detail, and it was the least-scanned fact here.
 
    Split payments of one table bill still render as a single group, exactly as
    before: they are one bill being settled by several people, and listing them
@@ -58,19 +64,29 @@ const PaymentRow: React.FC<{
   item: PaymentRequest;
   /** Inside a bill group the table and booking are already on the group header. */
   inGroup?: boolean;
+  active: boolean;
   onOpen: () => void;
-}> = ({ item, inGroup = false, onOpen }) => {
+}> = ({ item, inGroup = false, active, onOpen }) => {
   const status = paymentStatusView(item.status);
   const StatusIcon = status.Icon;
-  const resStatus = reservationStatusView(item.reservation_status);
   const who = inGroup ? item.claimant_label : item.reservation_customer_name;
+
+  const meta = [
+    item.reservation_phone,
+    !inGroup && item.table_name ? `tav. ${item.table_name}` : null,
+    formatDateTime(item.created_at),
+  ].filter(Boolean).join(' · ');
 
   return (
     <button
       type="button"
       onClick={onOpen}
-      className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] ${
-        inGroup ? '' : 'rounded-[16px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]'
+      className={`flex w-full items-start gap-3 px-3.5 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] ${
+        inGroup
+          ? active ? 'bg-[var(--ds-surface-row)]' : 'hover:bg-[var(--ds-surface-row)]'
+          : active
+            ? 'rounded-[16px] bg-[var(--ds-surface-row)] shadow-[var(--ds-shadow-card)]'
+            : 'rounded-[16px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] hover:bg-[var(--ds-surface-row)]'
       }`}
     >
       {/* The state, before the number. Scanning this list is looking for the
@@ -81,25 +97,20 @@ const PaymentRow: React.FC<{
       <span className={`inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[12px] ${STATUS_TILE[status.tone]}`}>
         <StatusIcon className="h-4 w-4" />
       </span>
-      <span className="w-[104px] flex-shrink-0 text-[17px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
-        {formatEuro(item.amount_cents, item.currency)}
-      </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[14px] font-medium text-[var(--ds-text-primary)]">
+        <span className="flex items-baseline justify-between gap-2">
+          <span className="text-[16px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+            {formatEuro(item.amount_cents, item.currency)}
+          </span>
+          <StatusPill tone={status.tone}>{status.label}</StatusPill>
+        </span>
+        <span className="mt-0.5 block truncate text-[14px] font-medium text-[var(--ds-text-primary)]">
           {who ? toTitleCase(who) : <span className="font-normal text-[var(--ds-text-muted)]">senza nominativo</span>}
         </span>
-        <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[13px] text-[var(--ds-text-muted)]">
-          {item.reservation_phone && <span className="tabular-nums">{item.reservation_phone}</span>}
-          {!inGroup && item.table_name && <span>tav. {item.table_name}</span>}
-          <span className="tabular-nums">{formatDateTime(item.created_at)}</span>
-        </span>
-      </span>
-      <span className="flex flex-shrink-0 flex-col items-end gap-1">
-        {/* Text only — the glyph now leads the row, and repeating it here
-            said the same thing twice within one line. */}
-        <StatusPill tone={status.tone}>{status.label}</StatusPill>
-        {!inGroup && resStatus && (
-          <span className="hidden text-[12px] text-[var(--ds-text-muted)] sm:block">{resStatus.label}</span>
+        {meta && (
+          <span className="mt-0.5 block truncate text-[12px] text-[var(--ds-text-muted)] tabular-nums">
+            {meta}
+          </span>
         )}
       </span>
     </button>
@@ -115,8 +126,12 @@ export const LinkDiPagamento: React.FC<{
   /** Span the loaded results cover — names the period chip when no filter is set. */
   span?: Period | null;
   onOpenPeriod: () => void;
+  /** Which payment the detail pane is showing. */
+  selectedId: number | null;
   onSelect: (p: PaymentRequest) => void;
-}> = ({ items, total, statusFilter, onStatusFilter, period, span, onOpenPeriod, onSelect }) => {
+}> = ({
+  items, total, statusFilter, onStatusFilter, period, span, onOpenPeriod, selectedId, onSelect,
+}) => {
   // Counts come from the loaded page, like the totals in the header — the list
   // request is capped at 200 and there is no aggregate endpoint to ask.
   const counts = useMemo(() => {
@@ -168,8 +183,8 @@ export const LinkDiPagamento: React.FC<{
 
   return (
     <div className="space-y-4">
-      {/* One scrolling row: period first, then the status filters. On a phone
-          this is the only horizontal scroll on the page and it is a short one. */}
+      {/* One scrolling row: period first, then the status filters. In a column
+          this narrow it is the only horizontal scroll on the page. */}
       <div className="-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <PeriodTrigger period={period} span={span} count={total} onClick={onOpenPeriod} />
         <span className="h-5 w-px flex-shrink-0 bg-[var(--ds-border)]" aria-hidden />
@@ -208,7 +223,14 @@ export const LinkDiPagamento: React.FC<{
               {day.groups.map(group => {
                 if (group.billId == null) {
                   const only = group.items[0];
-                  return <PaymentRow key={only.id} item={only} onOpen={() => onSelect(only)} />;
+                  return (
+                    <PaymentRow
+                      key={only.id}
+                      item={only}
+                      active={selectedId === only.id}
+                      onOpen={() => onSelect(only)}
+                    />
+                  );
                 }
                 const first = group.items[0];
                 const paid = group.items.reduce((s, p) => {
@@ -222,29 +244,39 @@ export const LinkDiPagamento: React.FC<{
                     key={`bill-${day.key}-${group.billId}`}
                     className="overflow-hidden rounded-[16px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]"
                   >
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 bg-[var(--ds-surface-row)] px-4 py-2.5">
-                      <span className="inline-flex items-center gap-2 text-[14px] font-semibold text-[var(--ds-text-primary)]">
-                        <Receipt className="h-4 w-4 text-[var(--ds-text-muted)]" aria-hidden />
-                        {first.table_name ? `Tavolo ${first.table_name}` : `Conto #${group.billId}`}
-                      </span>
-                      {first.reservation_customer_name && (
-                        <span className="min-w-0 truncate text-[13px] text-[var(--ds-text-muted)]">
-                          {toTitleCase(first.reservation_customer_name)}
+                    {/* Two lines, not one: the table, the customer, the running
+                        total and the bar do not fit across a pane this wide. */}
+                    <div className="bg-[var(--ds-surface-row)] px-3.5 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <Receipt className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
+                        <span className="flex-shrink-0 text-[14px] font-semibold text-[var(--ds-text-primary)]">
+                          {first.table_name ? `Tavolo ${first.table_name}` : `Conto #${group.billId}`}
                         </span>
-                      )}
-                      <span className="ml-auto flex items-center gap-2 text-[13px] tabular-nums text-[var(--ds-text-muted)]">
+                        {first.reservation_customer_name && (
+                          <span className="min-w-0 truncate text-[13px] text-[var(--ds-text-muted)]">
+                            {toTitleCase(first.reservation_customer_name)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1 flex items-center gap-2 text-[13px] tabular-nums text-[var(--ds-text-muted)]">
                         <span className="font-medium text-[var(--ds-seated-text)]">{formatEuro(paid)}</span>
                         {billTotal > 0 && <>/ {formatEuro(billTotal)}</>}
                         {billTotal > 0 && (
-                          <span className="h-1.5 w-16 overflow-hidden rounded-full bg-[var(--ds-border)]">
+                          <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-[var(--ds-border)]">
                             <span className="block h-full rounded-full bg-[var(--ds-seated-solid)]" style={{ width: `${pct}%` }} />
                           </span>
                         )}
-                      </span>
+                      </div>
                     </div>
                     <div className="divide-y divide-[var(--ds-border)]">
                       {group.items.map(p => (
-                        <PaymentRow key={p.id} item={p} inGroup onOpen={() => onSelect(p)} />
+                        <PaymentRow
+                          key={p.id}
+                          item={p}
+                          inGroup
+                          active={selectedId === p.id}
+                          onOpen={() => onSelect(p)}
+                        />
                       ))}
                     </div>
                   </div>
