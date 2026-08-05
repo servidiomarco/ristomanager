@@ -6,6 +6,7 @@ import {
   createPrinter, updatePrinter, deletePrinter, testPrinter,
   getSalaProfiles, createSalaProfile, updateSalaProfile,
   activateSalaProfile, detachSalaProfile, deleteSalaProfile,
+  updatePrintRoutes,
   type SalaConfig, type FireMode, type SalaProfile,
 } from '../services/salaApiService';
 import { useAuth } from '../contexts/AuthContext';
@@ -327,6 +328,49 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
               </div>
             )}
           </div>
+        </section>
+
+        {/* ---- Instradamento conto ---- */}
+        <section>
+          <h5 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-2">
+            Instradamento stampe del conto
+          </h5>
+          <div className="rounded-md border border-[var(--color-line)] divide-y divide-[var(--color-line)]">
+            {([
+              { fn: 'preconto' as const, label: 'Preconto', hint: 'dettaglio righe con QR in fondo' },
+              { fn: 'qr' as const, label: 'Foglietto QR', hint: 'solo codice, da appoggiare al tavolo' },
+            ]).map(({ fn, label, hint }) => (
+              <div key={fn} className="flex items-center gap-3 px-3 py-2">
+                <div className="flex-1 min-w-0">
+                  <span className="text-[13px] font-medium text-[var(--color-fg)]">{label}</span>
+                  <span className="text-[12px] text-[var(--color-fg-muted)] ml-2">{hint}</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-[var(--color-fg-muted)]">
+                  <Printer size={13} />
+                  <select
+                    value={config.print_routes?.[fn] ?? 'preconti'}
+                    disabled={!canEdit || saving}
+                    onChange={e => act(
+                      () => updatePrintRoutes({ [fn]: e.target.value === 'preconti' ? null : e.target.value }),
+                      `${label} → stampante "${e.target.value}"`
+                    )}
+                    className="text-[13px] rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1 disabled:opacity-60">
+                    {!thermal.some(pr => pr.is_active && pr.name === 'preconti') && (
+                      <option value="preconti">preconti (predefinita)</option>
+                    )}
+                    {thermal.filter(pr => pr.is_active).map(pr => (
+                      <option key={pr.id} value={pr.name}>
+                        {pr.name}{pr.name === 'preconti' ? ' (predefinita)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="text-[12px] text-[var(--color-fg-muted)] mt-1.5">
+            Le comande delle partite si instradano qui sopra, centro per centro. Qui scegli dove escono i documenti del conto al tavolo.
+          </p>
         </section>
 
         {/* ---- Fiscale (Fase 2) ---- */}

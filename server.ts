@@ -18029,8 +18029,12 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
             total_cents: Number(i.unit_price_cents ?? 0) * Number(i.qty ?? 1),
         }));
 
+        // Priorità: stampante esplicita nel body → instradamento configurato
+        // per la funzionalità → default storico 'preconti'.
+        const routes = await getPrintRoutes();
+        const routed = req.body?.kind === 'QR' ? routes.qr : routes.preconto;
         const printer = /^[a-z0-9_-]{1,30}$/i.test(String(req.body?.printer ?? ''))
-            ? String(req.body.printer) : 'preconti';
+            ? String(req.body.printer) : (routed ?? 'preconti');
 
         // 'QR' stampa il foglietto col solo codice da appoggiare al tavolo;
         // 'PRECONTO' (default) il dettaglio completo. Il solo-QR senza un QR
@@ -18123,19 +18127,40 @@ app.post('/print-agent/jobs/:id/ack', printAgentAuth, async (req, res) => {
 const PRINTER_NAME_RE = /^[a-z0-9_-]{1,30}$/;
 const FIRE_MODES = ['AUTO_ALL', 'AUTO_FIRST', 'MANUAL'];
 
+// Instradamento per funzionalità: su quale termica escono il preconto e il
+// foglietto QR del conto. Chiavi app_settings, NULL/assente = default
+// storico 'preconti'. Le comande hanno già il loro instradamento per
+// partita (stations.printer): qui vivono solo le funzioni trasversali.
+const PRINT_ROUTE_KEYS = {
+    preconto: 'print_route_preconto',
+    qr: 'print_route_qr',
+} as const;
+type PrintRouteFn = keyof typeof PRINT_ROUTE_KEYS;
+
+async function getPrintRoutes(): Promise<Record<PrintRouteFn, string | null>> {
+    const r = await queryWithRetry(
+        `SELECT key, text_value FROM app_settings WHERE key = ANY($1)`,
+        [Object.values(PRINT_ROUTE_KEYS)]
+    );
+    const val = (k: string) => r.rows.find((x: any) => x.key === k)?.text_value ?? null;
+    return { preconto: val(PRINT_ROUTE_KEYS.preconto), qr: val(PRINT_ROUTE_KEYS.qr) };
+}
+
 app.get('/sala/config', authenticate, async (_req, res) => {
     try {
-        const [fireMode, stations, printers, jobs] = await Promise.all([
+        const [fireMode, stations, printers, jobs, printRoutes] = await Promise.all([
             getCourseFireMode(),
             queryWithRetry(`SELECT id, name, color, sort_order, is_active, printer FROM stations ORDER BY sort_order, id`),
             queryWithRetry(`SELECT id, name, host, port, kind, is_active, notes FROM printers ORDER BY kind, name`),
             queryWithRetry(`SELECT status, COUNT(*)::int AS n FROM print_jobs WHERE status IN ('PENDING','FAILED') GROUP BY status`),
+            getPrintRoutes(),
         ]);
         const jobCount = (s: string) => jobs.rows.find((r: any) => r.status === s)?.n ?? 0;
         res.json({
             fire_mode: fireMode,
             stations: stations.rows,
             printers: printers.rows,
+            print_routes: printRoutes,
             agent: {
                 online: printAgentLastSeen != null && Date.now() - printAgentLastSeen < 30_000,
                 last_seen_seconds: printAgentLastSeen != null ? Math.round((Date.now() - printAgentLastSeen) / 1000) : null,
@@ -18167,6 +18192,43 @@ app.put('/sala/fire-mode', authenticate, requirePermission('settings:full'), asy
 
 // Partite: niente DELETE — una partita con storico di comande si disattiva,
 // non si cancella (le statistiche di cucina la referenziano per sempre).
+// Aggiorna l'instradamento. Sentinella "campo presente nel body" come per le
+// stations: assente = non toccare, null = torna al default 'preconti'.
+app.put('/sala/print-routes', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const updates: Array<[string, string | null]> = [];
+        for (const fn of Object.keys(PRINT_ROUTE_KEYS) as PrintRouteFn[]) {
+            if (!(fn in (req.body ?? {}))) continue;
+            const raw = req.body[fn];
+            if (raw == null || raw === '') { updates.push([PRINT_ROUTE_KEYS[fn], null]); continue; }
+            const name = String(raw).toLowerCase();
+            if (!PRINTER_NAME_RE.test(name)) return res.status(400).json({ error: `Nome stampante non valido per ${fn}` });
+            const pr = await queryWithRetry(
+                `SELECT 1 FROM printers WHERE name = $1 AND kind = 'THERMAL' AND is_active = true`, [name]);
+            if (pr.rows.length === 0) {
+                return res.status(400).json({ error: `Stampante '${name}' inesistente o non attiva` });
+            }
+            updates.push([PRINT_ROUTE_KEYS[fn], name]);
+        }
+        if (updates.length === 0) return res.status(400).json({ error: 'Nessun campo da aggiornare' });
+        for (const [key, value] of updates) {
+            if (value == null) {
+                await queryWithRetry(`DELETE FROM app_settings WHERE key = $1`, [key]);
+            } else {
+                await queryWithRetry(
+                    `INSERT INTO app_settings (key, text_value) VALUES ($1, $2)
+                     ON CONFLICT (key) DO UPDATE SET text_value = $2, updated_at = CURRENT_TIMESTAMP`,
+                    [key, value]
+                );
+            }
+        }
+        res.json({ ok: true, print_routes: await getPrintRoutes() });
+    } catch (err: any) {
+        console.error('PUT /sala/print-routes error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.post('/sala/stations', authenticate, requirePermission('settings:full'), async (req, res) => {
     try {
         const name = String(req.body?.name ?? '').trim();
@@ -18279,6 +18341,15 @@ app.delete('/sala/printers/:id', authenticate, requirePermission('settings:full'
         if (p.rows.length === 0) return res.status(404).json({ error: 'Stampante non trovata' });
         // Una stampante referenziata da una partita non si elimina: la partita
         // resterebbe a puntare un nome fantasma e i job si accoderebbero nel vuoto.
+        const usedRoute = await queryWithRetry(
+            `SELECT key FROM app_settings WHERE key = ANY($1) AND text_value = $2 LIMIT 1`,
+            [Object.values(PRINT_ROUTE_KEYS), p.rows[0].name]
+        );
+        if (usedRoute.rows.length > 0) {
+            return res.status(409).json({
+                error: `Stampante usata dall'instradamento stampe (${usedRoute.rows[0].key === 'print_route_qr' ? 'foglietto QR' : 'preconto'}): cambia prima la destinazione`,
+            });
+        }
         const used = await queryWithRetry(`SELECT name FROM stations WHERE printer = $1 LIMIT 1`, [p.rows[0].name]);
         if (used.rows.length > 0) {
             return res.status(409).json({
@@ -18328,7 +18399,7 @@ const salaSnapshot = async (): Promise<any> => {
         queryWithRetry(`SELECT name, color, printer, is_active FROM stations ORDER BY sort_order, id`),
         queryWithRetry(`SELECT name, host, port, kind, is_active, notes FROM printers ORDER BY id`),
     ]);
-    return { fire_mode: fireMode, stations: stations.rows, printers: printers.rows };
+    return { fire_mode: fireMode, stations: stations.rows, printers: printers.rows, print_routes: await getPrintRoutes() };
 };
 
 const getActiveSalaProfile = async (): Promise<string | null> => {
@@ -18425,6 +18496,19 @@ app.post('/sala/profiles/:id/activate', authenticate, requirePermission('setting
                  st.printer != null && PRINTER_NAME_RE.test(String(st.printer)) ? st.printer : null,
                  st.is_active !== false]
             );
+        }
+        for (const fn of Object.keys(PRINT_ROUTE_KEYS) as PrintRouteFn[]) {
+            const v = payload?.print_routes?.[fn];
+            if (v === undefined) continue;
+            if (v == null || !PRINTER_NAME_RE.test(String(v))) {
+                await client.query(`DELETE FROM app_settings WHERE key = $1`, [PRINT_ROUTE_KEYS[fn]]);
+            } else {
+                await client.query(
+                    `INSERT INTO app_settings (key, text_value) VALUES ($1, $2)
+                     ON CONFLICT (key) DO UPDATE SET text_value = $2, updated_at = CURRENT_TIMESTAMP`,
+                    [PRINT_ROUTE_KEYS[fn], String(v)]
+                );
+            }
         }
         await client.query(
             `INSERT INTO app_settings (key, text_value) VALUES ('sala_active_profile', $1)
