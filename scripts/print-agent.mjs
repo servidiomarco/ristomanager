@@ -98,24 +98,29 @@ function renderPreconto(p) {
   text('-'.repeat(COLS) + '\n');
   push(ESC, 0x61, 0);        // left
 
+  // Righe a doppia altezza (larghezza invariata: le 42 colonne di row()
+  // restano valide) — si legge senza occhiali sul tavolo in penombra.
+  push(GS, 0x21, 0x01);      // double height
   for (const i of p.items ?? []) {
     text(row(`${i.qty}x ${i.name}`, euro(i.total_cents)));
   }
+  push(GS, 0x21, 0x00);
   text('-'.repeat(COLS) + '\n');
   push(ESC, 0x45, 1);        // bold
+  push(GS, 0x21, 0x01);      // il totale alla stessa altezza delle righe
   text(row('TOTALE EUR', euro(p.total_cents)));
+  push(GS, 0x21, 0x00);
   push(ESC, 0x45, 0);
   text('\n');
 
   if (p.share_url) {
     push(ESC, 0x61, 1);
     const data = Buffer.from(p.share_url, 'latin1');
-    // Moduli grandi + correzione errore H (30%): con la testina che perde
-    // righe di punti, un modulo da 10 dot sopravvive dove uno da 6 sparisce,
-    // e la ridondanza H ricostruisce quello che manca. Senza, la fotocamera
-    // non aggancia il codice.
+    // Correzione errore H (30%) obbligatoria: la testina perde righe di
+    // punti. Modulo 8 e' il compromesso: piu' compatto del 10 originale ma
+    // ancora sopra la soglia (a 6 la fotocamera non aggancia il codice).
     push(GS, 0x28, 0x6b, 4, 0, 49, 65, 50, 0);   // QR model 2
-    push(GS, 0x28, 0x6b, 3, 0, 49, 67, 10);      // module size 10
+    push(GS, 0x28, 0x6b, 3, 0, 49, 67, 8);       // module size 8
     push(GS, 0x28, 0x6b, 3, 0, 49, 69, 51);      // error correction H
     const len = data.length + 3;
     push(GS, 0x28, 0x6b, len & 0xff, len >> 8, 49, 80, 48, ...data);
