@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, CreditCard, Receipt } from 'lucide-react';
 import { socketClient } from '../services/socketClient';
 import { SkeletonPaymentList } from './SkeletonCards';
 import {
@@ -7,20 +7,32 @@ import {
 } from '../services/paymentsApiService';
 import { getFeatureFlags } from '../services/apiService';
 import { getRomeDatePart } from '../utils/reservationTime';
-import { Callout, SearchField, SegmentedControl } from './ds';
-import { ContiAperti, type BillsSummary } from './pagamenti/ContiAperti';
+import {
+  Callout, PanePlaceholder, SearchField, SegmentedControl, SplitPane,
+} from './ds';
+import { ContiAperti } from './pagamenti/ContiAperti';
 import { LinkDiPagamento, type StatusFilter } from './pagamenti/LinkDiPagamento';
-import { PaymentDetailSheet } from './pagamenti/PaymentDetailSheet';
+import { BillDetail } from './pagamenti/BillSheet';
+import { PaymentDetail } from './pagamenti/PaymentDetail';
 import { PeriodPicker, type Period } from './pagamenti/PeriodPicker';
 import { formatEuro } from './pagamenti/paymentsView';
+import { useOpenBills } from './pagamenti/useOpenBills';
 
 /* ── Pagamenti ────────────────────────────────────────────────────────────
-   Two things the restaurant calls "pagamenti" and used to stack in one
-   column: the bills open on tables right now, and the payment links sent to
-   customers. They answer different questions on different clocks — one is the
-   service happening this minute, the other is a ledger over a period — so
-   they get a tab each rather than a shared scroll where the second always
-   started below the fold.
+   Two things the restaurant calls "pagamenti": the bills open on tables right
+   now, and the payment links sent to customers. They answer different
+   questions on different clocks — one is the service happening this minute,
+   the other is a ledger over a period — so they get a tab each rather than a
+   shared scroll where the second always started below the fold.
+
+   List and detail sit side by side, the same shape Prenotazioni and the three
+   Comunicazioni channels use. Working a service means going down a column of
+   near-identical rows, and as a sheet every one of them covered the list you
+   were working through: you opened a bill, read it, dismissed it, and had to
+   find your place again. The pane leaves the list standing.
+
+   Below md the pane is a full-screen sheet — SplitPane does that itself — so
+   on a phone this is the behaviour it always had.
 
    Their date scopes stay independent, exactly as they already were: Conti
    aperti follows the current service the server reports, Link follows the
@@ -70,10 +82,14 @@ const PagamentiPage: React.FC = () => {
   const [period, setPeriod] = useState<Period>({ from: '', to: '' });
   const [periodOpen, setPeriodOpen] = useState(false);
 
-  const [selected, setSelected] = useState<PaymentRequest | null>(null);
-  const [billsSummary, setBillsSummary] = useState<BillsSummary>({
-    openCount: 0, residualCents: 0,
-  });
+  // One selection per tab, kept while you switch: the two lists are different
+  // jobs and coming back to a tab should find it where you left it. Both are
+  // ids, not rows — the row objects are replaced on every refetch, and holding
+  // one would pin the pane to a stale copy.
+  const [selectedBillId, setSelectedBillId] = useState<number | null>(null);
+  const [selectedPaymentId, setSelectedPaymentId] = useState<number | null>(null);
+
+  const openBills = useOpenBills();
 
   // The bills tab only exists with pay-at-table on. null = flag not known yet,
   // so the tab bar doesn't flash a section that is about to disappear.
@@ -176,9 +192,12 @@ const PagamentiPage: React.FC = () => {
     return acc;
   }, [items]);
 
-  // Stable identity: ContiAperti reports its summary from an effect, and a
-  // fresh closure every render would make that effect fire in a loop.
-  const handleBillsSummary = useCallback((next: BillsSummary) => setBillsSummary(next), []);
+  // Every bill, not the filtered subset: the header figure is "what this
+  // service still owes", and it must not fall as you type a search.
+  const serviceResidual = useMemo(
+    () => openBills.bills.reduce((sum, b) => sum + Math.max(0, b.residual_cents), 0),
+    [openBills.bills],
+  );
 
   // The span the loaded results actually cover. With no period filter set there
   // is no chosen range to display, and naming the real first and last day beats
@@ -196,92 +215,157 @@ const PagamentiPage: React.FC = () => {
     return min && max ? { from: min, to: max } : null;
   }, [items]);
 
+  // Derived, never stored: a closed bill leaves the list and the pane empties
+  // with it, and a refetched payment carries its new status into the pane
+  // without anyone re-selecting it.
+  const selectedBill = useMemo(
+    () => openBills.bills.find(b => b.id === selectedBillId) ?? null,
+    [openBills.bills, selectedBillId],
+  );
+  const selectedPayment = useMemo(
+    () => items.find(p => p.id === selectedPaymentId) ?? null,
+    [items, selectedPaymentId],
+  );
+
+  const showingBills = tab === 'BILLS' && billsAvailable;
+  const detailOpen = showingBills ? selectedBill !== null : selectedPayment !== null;
+
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
-      <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        {/* Not the word "Pagamenti" — the sidebar already names the page and
-            shows it selected. What matters at a glance is that these numbers
-            are live: webhooks move them while you are looking at them, so the
-            dot is a standing answer to "is this current?". The service the
-            figures belong to drops to the line beneath. */}
-        <div className="min-w-0">
-          <h1 className="flex items-center gap-2.5 text-[22px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)] sm:text-[26px]">
-            <span className="relative flex h-2.5 w-2.5 flex-shrink-0" aria-hidden>
-              <span className="ds-live-dot absolute inset-0 rounded-full bg-[var(--ds-seated-solid)]" />
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[var(--ds-seated-solid)]" />
-            </span>
-            {/* Shortened below sm: the full sentence wraps to two lines on a
-                phone, and a title that wraps stops reading as a title. */}
-            <span className="sm:hidden">In tempo reale</span>
-            <span className="hidden sm:inline">Stato aggiornato in tempo reale</span>
-          </h1>
-        </div>
+    <div className="flex h-full min-h-0 flex-col">
+      {/* Above the split, and staying there: these are the totals for whatever
+          the two columns are showing, so they belong to the page rather than to
+          either side of it.
+
+          Not the word "Pagamenti" — the sidebar already names the page and
+          shows it selected. What matters at a glance is that these numbers are
+          live: webhooks move them while you are looking at them, so the dot is
+          a standing answer to "is this current?". */}
+      {/* Asymmetric gutters, deliberately: pl-4 matches the list column's own
+          padding so the title starts on the same line as the rows, and the
+          right ramp matches the detail pane, so the figures end where the
+          detail cards end. A uniform px-8 would have floated the title a
+          gutter's width off the list it belongs to.
+
+          pb below lg: there the toolbar underneath has no top padding of its
+          own — it sits directly under whatever precedes it — so the gap has to
+          come from here or the section switch touches the figures. */}
+      <div className="flex flex-shrink-0 flex-col gap-3 pb-3 pl-4 pr-4 pt-4 sm:pr-6 lg:flex-row lg:items-center lg:justify-between lg:gap-4 lg:pb-0 lg:pr-8">
+        <h1 className="flex items-center gap-2.5 text-[22px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)] sm:text-[26px]">
+          <span className="relative flex h-2.5 w-2.5 flex-shrink-0" aria-hidden>
+            <span className="ds-live-dot absolute inset-0 rounded-full bg-[var(--ds-seated-solid)]" />
+            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[var(--ds-seated-solid)]" />
+          </span>
+          {/* Shortened below sm: the full sentence wraps to two lines on a
+              phone, and a title that wraps stops reading as a title. */}
+          <span className="sm:hidden">In tempo reale</span>
+          <span className="hidden sm:inline">Stato aggiornato in tempo reale</span>
+        </h1>
         {/* Hairline-split figures rather than three cards: they are one reading
-            of the same money, and boxing each gave three competing objects. */}
-        {/* No wrapping: three figures that are one reading of the same money,
-            so a third dropping to its own line reads as a separate object.
-            They compress instead — full width on a phone, hugging on lg. */}
+            of the same money, and boxing each gave three competing objects.
+            No wrapping either — a third figure dropping to its own line reads
+            as a separate object. They compress instead. */}
         <div className="flex w-full flex-shrink-0 items-center divide-x divide-[var(--ds-border)] rounded-[18px] bg-[var(--ds-surface)] px-1 py-1 shadow-[var(--ds-shadow-card)] lg:w-auto lg:px-4">
           <Kpi label={KPI_LABELS.incassato} value={formatEuro(totals.paid)} tone="positive" />
           <Kpi label={KPI_LABELS.attesa} value={formatEuro(totals.pending)} tone="pending" />
           {billsAvailable && (
-            <Kpi label={KPI_LABELS.residuo} value={formatEuro(billsSummary.residualCents)} tone="critical" />
+            <Kpi label={KPI_LABELS.residuo} value={formatEuro(serviceResidual)} tone="critical" />
           )}
         </div>
       </div>
 
-      {/* Search leads, the section switch follows — the same order Menu &
-          Banchetti uses, so the two pages do not disagree about where the field
-          lives. The search applies to whichever tab is showing: bills match on
-          table number or the name that booked it, links on customer, phone and
-          order. */}
-      <div className="mb-5 flex flex-col gap-3 sm:flex-row-reverse sm:items-center sm:gap-4">
-        {billsAvailable && (
-          <SegmentedControl<'BILLS' | 'LINKS'>
-            value={tab}
-            onChange={setTab}
-            ariaLabel="Sezione pagamenti"
-            equalWidth={false}
-            options={[
-              { value: 'BILLS', label: 'Conti aperti', badge: billsSummary.openCount || undefined },
-              { value: 'LINKS', label: 'Link di pagamento', badge: total || undefined },
-            ]}
-          />
-        )}
-        <SearchField
-          value={search}
-          onChange={setSearch}
-          placeholder={tab === 'BILLS' ? 'Cerca tavolo o cliente…' : 'Cerca cliente, telefono, ordine…'}
-          ariaLabel="Cerca"
-          className="min-w-0 sm:flex-1"
+      <div className="min-h-0 flex-1">
+        <SplitPane
+          detailOpen={detailOpen}
+          toolbar={
+            // Section switch above the search, both full width: in a column this
+            // narrow they cannot sit on one line, and the switch decides what the
+            // search is even searching.
+            <div className="space-y-3">
+              {billsAvailable && (
+                <SegmentedControl<'BILLS' | 'LINKS'>
+                  value={tab}
+                  onChange={setTab}
+                  ariaLabel="Sezione pagamenti"
+                  equalWidth
+                  options={[
+                    { value: 'BILLS', label: 'Conti aperti', badge: openBills.bills.length || undefined },
+                    { value: 'LINKS', label: 'Link di pagamento', badge: total || undefined },
+                  ]}
+                />
+              )}
+              <SearchField
+                value={search}
+                onChange={setSearch}
+                placeholder={showingBills ? 'Cerca tavolo o cliente…' : 'Cerca cliente, telefono, ordine…'}
+                ariaLabel="Cerca"
+              />
+            </div>
+          }
+          list={
+            showingBills ? (
+              <ContiAperti
+                bills={openBills.bills}
+                stale={openBills.stale}
+                service={openBills.service}
+                loading={openBills.loading}
+                error={openBills.error}
+                closingId={openBills.closingId}
+                onCloseBill={openBills.closeBill}
+                selectedId={selectedBillId}
+                onSelect={(b) => setSelectedBillId(b.id)}
+                query={search}
+              />
+            ) : (
+              <>
+                {error && (
+                  <Callout tone="critical" icon={AlertCircle} className="mb-4">{error}</Callout>
+                )}
+                {loading ? (
+                  <SkeletonPaymentList count={5} />
+                ) : (
+                  <LinkDiPagamento
+                    items={items}
+                    total={total}
+                    statusFilter={statusFilter}
+                    onStatusFilter={setStatusFilter}
+                    period={period}
+                    span={loadedSpan}
+                    onOpenPeriod={() => setPeriodOpen(true)}
+                    selectedId={selectedPaymentId}
+                    onSelect={(p) => setSelectedPaymentId(p.id)}
+                  />
+                )}
+              </>
+            )
+          }
+          detail={
+            showingBills ? (
+              selectedBill ? (
+                <BillDetail
+                  key={selectedBill.id}
+                  bill={selectedBill}
+                  busy={openBills.closingId === selectedBill.id}
+                  onClose={() => setSelectedBillId(null)}
+                  onSettle={() => openBills.closeBill(selectedBill)}
+                />
+              ) : (
+                <PanePlaceholder icon={Receipt}>Seleziona un conto dalla lista</PanePlaceholder>
+              )
+            ) : selectedPayment ? (
+              <PaymentDetail
+                key={selectedPayment.id}
+                payment={selectedPayment}
+                onClose={() => setSelectedPaymentId(null)}
+                onUpdated={(updated) => {
+                  setItems(prev => prev.map(p => (p.id === updated.id ? { ...p, ...updated } : p)));
+                }}
+              />
+            ) : (
+              <PanePlaceholder icon={CreditCard}>Seleziona un pagamento dalla lista</PanePlaceholder>
+            )
+          }
         />
       </div>
-
-      {tab === 'BILLS' && billsAvailable && (
-        <ContiAperti query={search} onSummaryChange={handleBillsSummary} />
-      )}
-
-      {tab === 'LINKS' && (
-        <>
-          {error && (
-            <Callout tone="critical" icon={AlertCircle} className="mb-4">{error}</Callout>
-          )}
-          {loading ? (
-            <SkeletonPaymentList count={5} />
-          ) : (
-            <LinkDiPagamento
-              items={items}
-              total={total}
-              statusFilter={statusFilter}
-              onStatusFilter={setStatusFilter}
-              period={period}
-              span={loadedSpan}
-              onOpenPeriod={() => setPeriodOpen(true)}
-              onSelect={setSelected}
-            />
-          )}
-        </>
-      )}
 
       <PeriodPicker
         open={periodOpen}
@@ -291,17 +375,6 @@ const PagamentiPage: React.FC = () => {
         onApply={(next) => { setPeriod(next); setPeriodOpen(false); }}
         onClose={() => setPeriodOpen(false)}
       />
-
-      {selected && (
-        <PaymentDetailSheet
-          payment={selected}
-          onClose={() => setSelected(null)}
-          onUpdated={(updated) => {
-            setItems(prev => prev.map(p => (p.id === updated.id ? { ...p, ...updated } : p)));
-            setSelected(prev => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev));
-          }}
-        />
-      )}
     </div>
   );
 };
