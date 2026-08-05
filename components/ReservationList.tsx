@@ -978,6 +978,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
   // Draft restore banner — only shown while creating a new reservation
   const [draftBanner, setDraftBanner] = useState<{ savedAt: number } | null>(null);
+  // True while the open form was started as a walk-in. Walk-ins must never
+  // touch the RESERVATION_NEW draft: they open pre-filled ("Walk-in" + ora
+  // corrente), so the debounced save considered them "typed content" and the
+  // next standard booking restored a walk-in's current-time slot as its own.
+  const [openedAsWalkIn, setOpenedAsWalkIn] = useState(false);
 
   // Map-view: assign a free table to an unassigned reservation
   const [assignTableModal, setAssignTableModal] = useState<Table | null>(null);
@@ -1904,8 +1909,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         ? walkInShift
         : (selectedShift === 'ALL' ? Shift.DINNER : selectedShift);
       const dateOnly = selectedDate.split('T')[0];
+      // Walk-in = "adesso", ma dentro la finestra del turno: registrato alle
+      // 11:18 il tavolo parte all'apertura (13:00), non a metà mattina.
+      const clampToShiftWindow = (d: Date, shift: Shift): string => {
+        const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        const slots = shift === Shift.LUNCH ? LUNCH_TIMES : DINNER_TIMES;
+        return hhmm < slots[0] ? slots[0] : hhmm > slots[slots.length - 1] ? slots[slots.length - 1] : hhmm;
+      };
       const reservationTime = walkIn
-        ? formatLocalDateTime(now)
+        ? `${formatLocalDate(now)}T${clampToShiftWindow(now, walkInShift)}`
         : `${dateOnly}T${getDefaultTime(newShift)}`;
       setFormData({
         customer_name: prefill?.customer_name || (walkIn ? 'Walk-in' : ''),
@@ -1937,6 +1949,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setIsEditing(false);
       setIsFormOpen(true);
 
+      setOpenedAsWalkIn(walkIn);
+
       // Drafts only apply to standard bookings — a walk-in is always "now".
       if (!walkIn) {
         const existing = loadDraft<{
@@ -1944,7 +1958,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           selectedAllergens: string[];
           selectedQuickNotes: string[];
         }>(DRAFT_KEYS.RESERVATION_NEW);
-        setDraftBanner(existing ? { savedAt: existing.savedAt } : null);
+        // Una bozza nata da un walk-in (arrivo già segnato) non è una bozza:
+        // è lo stato iniziale di un altro flusso, salvato per sbaglio prima
+        // che i walk-in venissero esclusi dal salvataggio. Scartala invece
+        // di proporre "riprendi" con l'orario corrente di ieri.
+        const isWalkInRelic = existing?.data?.formData?.arrival_status === ArrivalStatus.ARRIVED;
+        if (isWalkInRelic) {
+          clearDraft(DRAFT_KEYS.RESERVATION_NEW);
+          setDraftBanner(null);
+        } else {
+          setDraftBanner(existing ? { savedAt: existing.savedAt } : null);
+        }
       } else {
         setDraftBanner(null);
       }
@@ -2330,9 +2354,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   };
 
   // Persist a draft of the new-reservation form (debounced).
-  // Only while creating (not editing) and only if the user has typed something meaningful.
+  // Only while creating (not editing) and only if the user has typed something
+  // meaningful. Walk-ins are excluded: open pre-filled, so "has content" is
+  // true dal primo render e la bozza inquinava le prenotazioni standard.
   useEffect(() => {
-    if (!isFormOpen || isEditing) return;
+    if (!isFormOpen || isEditing || openedAsWalkIn) return;
 
     const hasContent =
       (formData.customer_name && formData.customer_name.trim() !== '') ||
@@ -2353,7 +2379,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       });
     }, 400);
     return () => clearTimeout(timer);
-  }, [isFormOpen, isEditing, formData, selectedAllergens, selectedAllergies, selectedQuickNotes]);
+  }, [isFormOpen, isEditing, openedAsWalkIn, formData, selectedAllergens, selectedAllergies, selectedQuickNotes]);
 
   // The allergy/health-data consent is only relevant when the booking actually
   // records an allergen (special-category data, art. 9 GDPR). Auto-tick it the
