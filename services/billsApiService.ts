@@ -6,8 +6,13 @@ import { buildApiError } from './apiError';
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
 export interface OpenBillPayload {
-  total_cents: number;
+  /** Obbligatorio per l'apertura manuale; ignorato con source='passepartout'
+   *  (righe e totale arrivano dalla comanda del gestionale). */
+  total_cents?: number;
   covers?: number;
+  source?: 'passepartout';
+  /** Nome del tavolo sul gestionale Passepartout (es. "40", "204."). */
+  pp_tavolo?: string;
 }
 
 export interface CloseBillPayload {

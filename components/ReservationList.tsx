@@ -756,7 +756,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [billLoading, setBillLoading] = useState(false);
   const [billTotalInput, setBillTotalInput] = useState<string>('');
   const [billCoversInput, setBillCoversInput] = useState<string>('');
-  const [billActionLoading, setBillActionLoading] = useState<'open' | 'open-and-notify' | 'notify' | 'close' | 'void' | null>(null);
+  const [billActionLoading, setBillActionLoading] = useState<'open' | 'open-and-notify' | 'notify' | 'close' | 'void' | 'import-pp' | null>(null);
   // The QR and the pre-bill print live in the shared BillSheet rather than
   // inline in the card, so a bill looks and behaves the same here, on the
   // Pagamenti page and in OrderPad.
@@ -2182,6 +2182,31 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       }
     } catch (err: any) {
       showToast(err?.message || 'Errore apertura conto', 'error');
+    } finally {
+      setBillActionLoading(null);
+    }
+  };
+
+  // Fase 2 ibrida: il conto arriva già compilato dalla comanda Passepartout
+  // (righe + totale + coperti). Il nome tavolo del gestionale di norma
+  // coincide con quello del tavolo CRM assegnato alla prenotazione.
+  const handleImportBillFromPassepartout = async (ppTavolo: string) => {
+    if (!formData.id) return;
+    const tavolo = ppTavolo.trim();
+    if (!tavolo) {
+      showToast('Assegna un tavolo alla prenotazione per importare il conto', 'error');
+      return;
+    }
+    setBillActionLoading('import-pp');
+    try {
+      const created = await billsApiService.openBill(formData.id as number, {
+        source: 'passepartout',
+        pp_tavolo: tavolo,
+      });
+      setBill(created);
+      showToast(`Conto importato dal gestionale: €${(created.bill.total_cents / 100).toFixed(2).replace('.', ',')}`, 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Importazione dal gestionale non riuscita', 'error');
     } finally {
       setBillActionLoading(null);
     }
@@ -5497,7 +5522,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                           )}
 
                           {!billLoading && !bill && hasPermission('payments:full') && (() => {
-                            const busy = billActionLoading === 'open' || billActionLoading === 'open-and-notify';
+                            const busy = billActionLoading === 'open' || billActionLoading === 'open-and-notify' || billActionLoading === 'import-pp';
+                            // Fase 2 ibrida: righe e totale dalla comanda del
+                            // gestionale di sala. Visibile solo con un tavolo
+                            // assegnato — il nome è la chiave su Passepartout.
+                            const resvTableName = formData.table_id != null
+                              ? (tables.find(t => t.id === formData.table_id)?.name ?? null)
+                              : null;
                             return (
                               <div className="space-y-3">
                                 <p className="text-[14px] text-[var(--ds-text-muted)]">
@@ -5554,6 +5585,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                   {billActionLoading === 'open-and-notify' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                                   Apri e invia link al cliente
                                 </button>
+                                {resvTableName && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleImportBillFromPassepartout(resvTableName)}
+                                    disabled={busy}
+                                    className={`w-full ${dsButton.secondary}`}
+                                  >
+                                    {billActionLoading === 'import-pp' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Receipt className="h-4 w-4" />}
+                                    Importa dal gestionale (tav. {resvTableName})
+                                  </button>
+                                )}
                               </div>
                             );
                           })()}

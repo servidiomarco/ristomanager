@@ -15,11 +15,13 @@ import {
     getComandaTavolo,
     getComanda,
     getConto,
+    contoComanda,
     isPassepartoutConfigured,
     PassepartoutError,
+    type TipoDocumentoConto,
 } from '../services/passepartoutService.js';
 
-const [cmd, arg] = process.argv.slice(2);
+const [cmd, arg, arg2, arg3, arg4] = process.argv.slice(2);
 
 if (!isPassepartoutConfigured()) {
     console.error('Config mancante: servono PASSEPARTOUT_WS_URL e PASSEPARTOUT_WS_USER (più password).');
@@ -52,8 +54,24 @@ try {
         case 'conto':
             console.log(JSON.stringify(await getConto(Number(arg)), null, 2));
             break;
+        case 'chiudi': {
+            // ATTENZIONE: azione fiscale — può emettere lo scontrino sul RT.
+            // Uso: chiudi <idComanda> <tipoPagamento> [tipoDocumento] [importo]
+            if (!arg || !arg2) throw new Error('Uso: chiudi <idComanda> <tipoPagamento> [tipoDocumento] [importo]');
+            const params = {
+                idComanda: Number(arg),
+                noInvio: true,
+                tipoPagamento: arg2,
+                tipoDocumento: (arg3 || undefined) as TipoDocumentoConto | undefined,
+                importoPagato: arg4 != null ? Number(arg4) : undefined,
+            };
+            console.log('Chiusura con parametri:', JSON.stringify(params));
+            await contoComanda(params);
+            console.log('ContoComanda eseguito senza errori.');
+            break;
+        }
         default:
-            console.log('Comandi: versione | pagamenti | tavolo <nome> | comanda <id> | conto <id>');
+            console.log('Comandi: versione | pagamenti | sale | tavolo <nome> | comanda <id> | conto <id> | chiudi <id> <tipoPag> [tipoDoc] [importo]');
             process.exit(1);
     }
 } catch (err) {

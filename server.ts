@@ -14,6 +14,15 @@ import rateLimit from 'express-rate-limit';
 import QRCode from 'qrcode';
 import pool, { createSchema, queryWithRetry } from './db.js';
 import { SocketService } from './services/socketService.js';
+import {
+    setupPassepartoutBridge,
+    isPassepartoutAgentConfigured,
+    getPassepartoutAgentStatus,
+    callPassepartout,
+    comandaToBillPayload,
+    PassepartoutBridgeError,
+} from './services/passepartoutBridge.js';
+import type { PassepartoutComanda } from './services/passepartoutService.js';
 import { Shift, PaymentStatus, UserRole } from './types.js';
 import authRoutes from './auth/authRoutes.js';
 import logRoutes from './activityLogs/logRoutes.js';
@@ -3316,6 +3325,45 @@ app.get('/reservations/:id/bill', authenticate, requirePermission('payments:view
 // QR concorrenti — il cameriere deve prima chiudere o annullare quello
 // vecchio. Lo `share_token` è opaco (32 char base64url ≈ 192 bit di
 // entropia), va nell'URL pubblico che stampiamo sul QR.
+// --- Integrazione Passepartout (Fase 2 ibrida) -------------------------------
+// Il gestionale di sala è la fonte di verità del conto: da qui il cameriere
+// legge la comanda vera e apre un table_bill precompilato (righe + totale).
+// La chiusura fiscale resta manuale in cassa finché il rivenditore non
+// sblocca la finalizzazione via API (vedi services/passepartoutBridge.ts).
+
+function sendPassepartoutError(res: any, err: unknown): boolean {
+    if (!(err instanceof PassepartoutBridgeError)) return false;
+    const status = err.kind === 'agent_offline' ? 503 : err.kind === 'timeout' ? 504 : 502;
+    res.status(status).json({ error: `passepartout_${err.kind}`, message: err.message });
+    return true;
+}
+
+app.get('/passepartout/status', authenticate, requirePermission('payments:full'), (_req, res) => {
+    res.json(getPassepartoutAgentStatus());
+});
+
+// Anteprima della comanda attiva su un tavolo del gestionale, già mappata
+// nel formato items del conto CRM. Il nome tavolo è quello di Passepartout
+// (es. "40", "204.", "32bis"), non l'id del tavolo CRM.
+app.get('/passepartout/tavolo/:nome', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const nome = String(req.params.nome || '').trim();
+        if (!nome) return res.status(400).json({ error: 'Nome tavolo mancante' });
+        const comanda = await callPassepartout<PassepartoutComanda | null>('comandaTavolo', { tavolo: nome });
+        if (!comanda) {
+            return res.status(404).json({
+                error: 'no_comanda',
+                message: `Nessuna comanda attiva sul tavolo ${nome}`,
+            });
+        }
+        res.json(comandaToBillPayload(comanda));
+    } catch (err: any) {
+        if (sendPassepartoutError(res, err)) return;
+        console.error('GET /passepartout/tavolo error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 app.post('/reservations/:id/bill', authenticate, requirePermission('payments:full'), async (req, res) => {
     try {
         if (!(await getFeatureFlag('pay_at_table_enabled', false))) {
@@ -3328,7 +3376,24 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid reservation id' });
 
-        const totalCents = Number(req.body?.total_cents);
+        // Sorgente Passepartout: righe e totale arrivano dalla comanda del
+        // gestionale, non dal cameriere. total_cents nel body viene ignorato.
+        const fromPassepartout = req.body?.source === 'passepartout';
+        let ppPayload: ReturnType<typeof comandaToBillPayload> | null = null;
+        if (fromPassepartout) {
+            const tavolo = String(req.body?.pp_tavolo || '').trim();
+            if (!tavolo) return res.status(400).json({ error: 'pp_tavolo mancante per source=passepartout' });
+            const comanda = await callPassepartout<PassepartoutComanda | null>('comandaTavolo', { tavolo });
+            if (!comanda) {
+                return res.status(404).json({ error: 'no_comanda', message: `Nessuna comanda attiva sul tavolo ${tavolo}` });
+            }
+            ppPayload = comandaToBillPayload(comanda);
+            if (ppPayload.total_cents <= 0) {
+                return res.status(422).json({ error: 'empty_comanda', message: 'La comanda ha totale zero' });
+            }
+        }
+
+        const totalCents = fromPassepartout ? ppPayload!.total_cents : Number(req.body?.total_cents);
         if (!Number.isFinite(totalCents) || totalCents <= 0) {
             return res.status(400).json({ error: 'total_cents must be a positive integer' });
         }
@@ -3340,11 +3405,13 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
         );
         if (resRow.rows.length === 0) return res.status(404).json({ error: 'Reservation not found' });
 
-        // covers: usa quello passato dal cameriere se valido, altrimenti
-        // fallback ai guests della prenotazione. Serve al pubblico per
-        // proporre lo split equo di default.
+        // covers: usa quello passato dal cameriere se valido, poi i coperti
+        // della comanda Passepartout, poi i guests della prenotazione. Serve
+        // al pubblico per proporre lo split equo di default.
         const requestedCovers = req.body?.covers != null ? Number(req.body.covers) : NaN;
-        const fallbackCovers = Number(resRow.rows[0].guests);
+        const fallbackCovers = Number(ppPayload?.covers ?? NaN) > 0
+            ? Number(ppPayload!.covers)
+            : Number(resRow.rows[0].guests);
         const covers = Number.isFinite(requestedCovers) && requestedCovers > 0
             ? Math.round(requestedCovers)
             : (Number.isFinite(fallbackCovers) && fallbackCovers > 0 ? fallbackCovers : 1);
@@ -3370,13 +3437,16 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
 
         const inserted = await queryWithRetry(
             `INSERT INTO table_bills
-                (reservation_id, table_id, total_cents, covers, share_token, opened_by_user_id)
-             VALUES ($1, $2, $3, $4, $5, $6)
+                (reservation_id, table_id, total_cents, covers, share_token, opened_by_user_id,
+                 items, external_ref)
+             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
              RETURNING id, reservation_id, table_id, total_cents, covers, currency,
                        items, status, share_token, opened_at, closed_at,
                        opened_by_user_id, closed_by_user_id, external_ref,
                        cash_settled_cents, tip_cents, notes`,
-            [id, resRow.rows[0].table_id, totalRounded, covers, shareToken, req.user?.userId ?? null]
+            [id, resRow.rows[0].table_id, totalRounded, covers, shareToken, req.user?.userId ?? null,
+             ppPayload ? JSON.stringify(ppPayload.items) : null,
+             ppPayload?.external_ref ?? null]
         );
         const bill = inserted.rows[0];
 
@@ -3390,6 +3460,7 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
             residual_cents: bill.total_cents,
         });
     } catch (err: any) {
+        if (sendPassepartoutError(res, err)) return;
         console.error('POST /reservations/:id/bill error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
@@ -17247,30 +17318,53 @@ app.post('/tables/:id/bill', authenticate, requirePermission('payments:full'), a
         const tableId = parseInt(req.params.id, 10);
         if (!Number.isFinite(tableId)) return res.status(400).json({ error: 'id non valido' });
 
-        const tbl = await queryWithRetry(`SELECT id, seats FROM tables WHERE id = $1`, [tableId]);
+        const tbl = await queryWithRetry(`SELECT id, seats, name FROM tables WHERE id = $1`, [tableId]);
         if (tbl.rows.length === 0) return res.status(404).json({ error: 'Tavolo non trovato' });
 
-        const totalCents = Number(req.body?.total_cents);
+        // Sorgente Passepartout: righe e totale dalla comanda del gestionale.
+        // Se il cameriere non specifica il tavolo Passepartout, tentiamo con
+        // il nome del tavolo CRM (spesso coincidono, es. "40").
+        const fromPassepartout = req.body?.source === 'passepartout';
+        let ppPayload: ReturnType<typeof comandaToBillPayload> | null = null;
+        if (fromPassepartout) {
+            const tavolo = String(req.body?.pp_tavolo || tbl.rows[0].name || '').trim();
+            if (!tavolo) return res.status(400).json({ error: 'pp_tavolo mancante per source=passepartout' });
+            const comanda = await callPassepartout<PassepartoutComanda | null>('comandaTavolo', { tavolo });
+            if (!comanda) {
+                return res.status(404).json({ error: 'no_comanda', message: `Nessuna comanda attiva sul tavolo ${tavolo}` });
+            }
+            ppPayload = comandaToBillPayload(comanda);
+            if (ppPayload.total_cents <= 0) {
+                return res.status(422).json({ error: 'empty_comanda', message: 'La comanda ha totale zero' });
+            }
+        }
+
+        const totalCents = fromPassepartout ? ppPayload!.total_cents : Number(req.body?.total_cents);
         if (!Number.isFinite(totalCents) || totalCents <= 0) {
             return res.status(400).json({ error: 'total_cents deve essere un intero positivo' });
         }
         const requested = req.body?.covers != null ? Number(req.body.covers) : NaN;
         const covers = Number.isFinite(requested) && requested > 0
             ? Math.round(requested)
-            : Math.max(1, Number(tbl.rows[0].seats) || 1);
+            : (Number(ppPayload?.covers ?? 0) > 0
+                ? Number(ppPayload!.covers)
+                : Math.max(1, Number(tbl.rows[0].seats) || 1));
 
         const shareToken = crypto.randomBytes(24).toString('base64url');
         let inserted;
         try {
             inserted = await queryWithRetry(
                 `INSERT INTO table_bills
-                    (reservation_id, table_id, total_cents, covers, share_token, opened_by_user_id)
-                 VALUES (NULL, $1, $2, $3, $4, $5)
+                    (reservation_id, table_id, total_cents, covers, share_token, opened_by_user_id,
+                     items, external_ref)
+                 VALUES (NULL, $1, $2, $3, $4, $5, $6::jsonb, $7)
                  RETURNING id, reservation_id, table_id, total_cents, covers, currency,
                            items, status, share_token, opened_at, closed_at,
                            opened_by_user_id, closed_by_user_id, external_ref,
                            cash_settled_cents, tip_cents, notes`,
-                [tableId, Math.round(totalCents), covers, shareToken, req.user?.userId ?? null]
+                [tableId, Math.round(totalCents), covers, shareToken, req.user?.userId ?? null,
+                 ppPayload ? JSON.stringify(ppPayload.items) : null,
+                 ppPayload?.external_ref ?? null]
             );
         } catch (err: any) {
             // L'indice unico ha fatto il suo lavoro: c'è già un conto attivo.
@@ -17295,6 +17389,7 @@ app.post('/tables/:id/bill', authenticate, requirePermission('payments:full'), a
         try { socketService?.broadcastToAll('bill:opened', bill); } catch (_) {}
         res.status(201).json({ bill, splits: [], paid_cents: 0, claimed_cents: 0, residual_cents: bill.total_cents });
     } catch (err: any) {
+        if (sendPassepartoutError(res, err)) return;
         console.error('POST /tables/:id/bill error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
@@ -18286,6 +18381,10 @@ const startServer = async () => {
             try {
                 socketService = new SocketService(httpServer);
                 console.log('✅ Socket.IO initialized');
+                if (isPassepartoutAgentConfigured()) {
+                    setupPassepartoutBridge(socketService.getIO());
+                    console.log('✅ Passepartout agent bridge attivo su /pp-agent');
+                }
             } catch (socketError) {
                 console.error('Socket.IO initialization failed:', socketError);
             }

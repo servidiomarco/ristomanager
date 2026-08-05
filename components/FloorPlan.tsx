@@ -114,6 +114,11 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     return typeof firstRoom?.id === 'number' ? firstRoom.id : 0;
   });
   const [selectedTables, setSelectedTables] = useState<number[]>([]);
+  // Bozza locale del campo coperti: si digita liberamente e si applica su
+  // blur/Invio. Senza, l'input controllato combatte la digitazione — e sul
+  // tavolo unito (che mostra la SOMMA dei coperti) ogni tasto faceva saltare
+  // il numero della capienza dei tavoli agganciati.
+  const [seatsDraft, setSeatsDraft] = useState<{ id: number; value: string } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [isLegendOpen, setIsLegendOpen] = useState(false);
@@ -1167,6 +1172,21 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
   const singleSelectedTable = selectedTables.length === 1 ? displayTables.find(t => t.id === selectedTables[0]) : null;
 
+  // Applica la bozza coperti. Il campo mostra i coperti COMBINATI (tavolo +
+  // agganciati): il numero digitato va riportato al valore grezzo del tavolo
+  // principale sottraendo il contributo dei partner, altrimenti si scrive la
+  // somma come se fosse il valore del singolo tavolo.
+  const commitSeatsDraft = () => {
+    if (!seatsDraft || !singleSelectedTable || seatsDraft.id !== singleSelectedTable.id) { setSeatsDraft(null); return; }
+    const parsed = parseInt(seatsDraft.value, 10);
+    setSeatsDraft(null);
+    if (!Number.isFinite(parsed) || parsed < 1) return;
+    const raw = tables.find(t => t.id === singleSelectedTable.id);
+    if (!raw) return;
+    const partnersSeats = singleSelectedTable.seats - raw.seats;
+    handleSeatsChange(Math.max(1, Math.min(99, parsed - partnersSeats)));
+  };
+
   // Portrait orientation gate — block floor plan on mobile portrait
   if (isPortrait) {
     return (
@@ -1507,10 +1527,12 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                     <input
                         type="number"
                         min="1"
-                        max="20"
+                        max="99"
                         className="w-12 bg-transparent text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)] outline-none"
-                        value={singleSelectedTable.seats}
-                        onChange={(e) => handleSeatsChange(parseInt(e.target.value) || 1)}
+                        value={seatsDraft?.id === singleSelectedTable.id ? seatsDraft.value : String(singleSelectedTable.seats)}
+                        onChange={(e) => setSeatsDraft({ id: singleSelectedTable.id, value: e.target.value })}
+                        onBlur={commitSeatsDraft}
+                        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
                     />
                 </div>
             )}

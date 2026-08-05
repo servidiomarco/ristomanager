@@ -450,12 +450,11 @@ body {
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 
 /* Scrollbar visibile solo col cursore dentro. Solo proprietà standard: in
-   Chrome basta un valore non-auto su scrollbar-width/color perché le regole
-   ::-webkit-scrollbar vengano ignorate, quindi mischiarle le annulla. Il
-   gutter "thin" resta riservato anche da trasparente, così il contenuto non
-   slitta all'hover: cambia solo il colore del pollice. (Safari ignora
-   scrollbar-color, ma su macOS le sue scrollbar sono già overlay a
-   scomparsa: il problema non si pone.) */
+   Chrome un valore non-auto su scrollbar-width/color fa ignorare le regole
+   ::-webkit-scrollbar, quindi mischiarle le annulla. Il gutter "thin" resta
+   riservato anche da trasparente, così il contenuto non slitta all'hover:
+   cambia solo il colore del pollice. (Safari ignora scrollbar-color, ma su
+   macOS le sue scrollbar sono già overlay a scomparsa.) */
 .scrollbar-hover { scrollbar-width: thin; scrollbar-color: transparent transparent; }
 .scrollbar-hover:hover { scrollbar-color: var(--ds-border-strong) transparent; }
 
