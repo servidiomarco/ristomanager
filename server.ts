@@ -15113,6 +15113,45 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
             return res.status(400).json({ error: 'invalid_guests', message: 'Numero ospiti non valido' });
         }
 
+        // Idempotenza di fatto contro i doppi invii: la linea del cliente cade
+        // DOPO che la POST e' arrivata ma prima della risposta, il form mostra
+        // "riprova" e il secondo invio clonerebbe la prenotazione. Stessa
+        // persona (telefono o email), stesso giorno e ora, entro 30 minuti =
+        // stessa richiesta: rispondiamo con la prenotazione gia' creata.
+        // Il controllo sta PRIMA della verifica slot: se la prima richiesta ha
+        // preso l'ultimo posto, il retry non deve morire su "slot esaurito".
+        // Confronto telefoni sulle ultime 10 cifre: l'input arriva con o senza
+        // prefisso, a DB e' normalizzato E.164.
+        const dupPhoneDigits = phone ? phone.replace(/\D/g, '').slice(-10) : null;
+        const dupEmailLower = email ? email.toLowerCase() : null;
+        const dup = await queryWithRetry(
+            `SELECT r.id, r.reservation_status, ro.name AS room_name
+             FROM reservations r
+             LEFT JOIN tables t ON t.id = r.table_id
+             LEFT JOIN rooms ro ON ro.id = t.room_id
+             WHERE r.reservation_time = $1
+               AND r.reservation_status <> 'CANCELLED'
+               AND r.created_at > NOW() - INTERVAL '30 minutes'
+               AND (
+                    ($2::text IS NOT NULL AND r.phone IS NOT NULL
+                     AND RIGHT(regexp_replace(r.phone, '\D', '', 'g'), 10) = $2::text)
+                 OR ($3::text IS NOT NULL AND lower(r.email) = $3::text)
+               )
+             ORDER BY r.id DESC LIMIT 1`,
+            [`${date}T${time}:00`, dupPhoneDigits, dupEmailLower]
+        );
+        if (dup.rows.length > 0) {
+            const existing = dup.rows[0];
+            console.warn('[public-booking] doppio invio ignorato, restituita la prenotazione esistente', { id: existing.id, ip: req.ip });
+            return res.status(201).json({
+                ok: true,
+                id: existing.id,
+                confirmed: existing.reservation_status === 'CONFIRMED',
+                room: existing.room_name || null,
+                duplicate: true,
+            });
+        }
+
         // Operator-defined blocks for (date, shift) — takes precedence over
         // the availability grid so we refuse even if a slot happens to be
         // free. Prevents a race between the /public/availability call and
