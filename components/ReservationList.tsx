@@ -718,7 +718,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [billLoading, setBillLoading] = useState(false);
   const [billTotalInput, setBillTotalInput] = useState<string>('');
   const [billCoversInput, setBillCoversInput] = useState<string>('');
-  const [billActionLoading, setBillActionLoading] = useState<'open' | 'open-and-notify' | 'notify' | 'close' | 'void' | null>(null);
+  const [billActionLoading, setBillActionLoading] = useState<'open' | 'open-and-notify' | 'notify' | 'close' | 'void' | 'import-pp' | null>(null);
   const [copiedBillUrl, setCopiedBillUrl] = useState(false);
   // Whole pay-at-table UI is gated behind this flag; fetched once on mount.
   // Default false so we don't briefly flash the section before flags load.
@@ -2137,6 +2137,31 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       }
     } catch (err: any) {
       showToast(err?.message || 'Errore apertura conto', 'error');
+    } finally {
+      setBillActionLoading(null);
+    }
+  };
+
+  // Fase 2 ibrida: il conto arriva già compilato dalla comanda Passepartout
+  // (righe + totale + coperti). Il nome tavolo del gestionale di norma
+  // coincide con quello del tavolo CRM assegnato alla prenotazione.
+  const handleImportBillFromPassepartout = async (ppTavolo: string) => {
+    if (!formData.id) return;
+    const tavolo = ppTavolo.trim();
+    if (!tavolo) {
+      showToast('Assegna un tavolo alla prenotazione per importare il conto', 'error');
+      return;
+    }
+    setBillActionLoading('import-pp');
+    try {
+      const created = await billsApiService.openBill(formData.id as number, {
+        source: 'passepartout',
+        pp_tavolo: tavolo,
+      });
+      setBill(created);
+      showToast(`Conto importato dal gestionale: €${(created.bill.total_cents / 100).toFixed(2).replace('.', ',')}`, 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Importazione dal gestionale non riuscita', 'error');
     } finally {
       setBillActionLoading(null);
     }
@@ -5418,7 +5443,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 Apri il conto per generare un QR che gli ospiti possono scansionare per pagare la propria quota.
                               </p>
                               {(() => {
-                                const busy = billActionLoading === 'open' || billActionLoading === 'open-and-notify';
+                                const busy = billActionLoading === 'open' || billActionLoading === 'open-and-notify' || billActionLoading === 'import-pp';
+                                const resvTableName = formData.table_id != null
+                                  ? (tables.find(t => t.id === formData.table_id)?.name ?? null)
+                                  : null;
                                 return (
                                   <div className="space-y-2">
                                     <div className="grid grid-cols-1 sm:grid-cols-[120px_100px_auto] gap-2">
@@ -5466,6 +5494,21 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                       {billActionLoading === 'open-and-notify' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                                       Apri e invia link al cliente
                                     </button>
+                                    {/* Fase 2 ibrida: righe e totale dalla comanda del
+                                        gestionale di sala, con lo split per portata.
+                                        Visibile solo con un tavolo assegnato — il nome
+                                        è la chiave di lookup su Passepartout. */}
+                                    {resvTableName && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleImportBillFromPassepartout(resvTableName)}
+                                        disabled={busy}
+                                        className="w-full inline-flex items-center justify-center gap-1.5 h-9 px-4 rounded-full border border-[var(--ds-arriving-tint)] bg-[var(--ds-surface)] text-[var(--ds-arriving-text)] text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed dark:bg-transparent"
+                                      >
+                                        {billActionLoading === 'import-pp' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Receipt className="h-4 w-4" />}
+                                        Importa dal gestionale (tav. {resvTableName})
+                                      </button>
+                                    )}
                                   </div>
                                 );
                               })()}
