@@ -82,6 +82,7 @@ const SettleButton: React.FC<{
 const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
   const [copied, setCopied] = useState(false);
   const [printState, setPrintState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [printingKind, setPrintingKind] = useState<'PRECONTO' | 'QR'>('PRECONTO');
   const url = bill.share_token ? `${window.location.origin}/pay/${bill.share_token}` : null;
   const settled = isSettled(bill);
 
@@ -94,11 +95,12 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
     } catch { /* clipboard denied: the QR is the primary channel anyway */ }
   };
 
-  const print = async () => {
+  const print = async (kind: 'PRECONTO' | 'QR' = 'PRECONTO') => {
     if (printState === 'sending') return;
+    setPrintingKind(kind);
     setPrintState('sending');
     try {
-      await printBill(bill.id);
+      await printBill(bill.id, kind);
       // "queued", not "printed": the real confirmation is the thermal printer
       // making noise. If the agent is down the job waits and comes out later.
       setPrintState('sent');
@@ -129,10 +131,16 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
               <button type="button" onClick={copy} className={quiet}>
                 {copied ? <><Check className="h-4 w-4" /> Link copiato</> : <><Copy className="h-4 w-4" /> Copia link</>}
               </button>
-              <button type="button" onClick={print} disabled={printState === 'sending'} className={quiet}>
-                {printState === 'sending' ? <><Loader2 className="h-4 w-4 animate-spin" /> Invio…</>
-                  : printState === 'sent' ? <><Check className="h-4 w-4" /> In stampa</>
-                  : printState === 'error' ? <><X className="h-4 w-4" /> Stampa fallita</>
+              <button type="button" onClick={() => print('QR')} disabled={printState === 'sending'} className={quiet}>
+                {printingKind === 'QR' && printState === 'sending' ? <><Loader2 className="h-4 w-4 animate-spin" /> Invio…</>
+                  : printingKind === 'QR' && printState === 'sent' ? <><Check className="h-4 w-4" /> In stampa</>
+                  : printingKind === 'QR' && printState === 'error' ? <><X className="h-4 w-4" /> Stampa fallita</>
+                  : <><QrCode className="h-4 w-4" /> Stampa QR</>}
+              </button>
+              <button type="button" onClick={() => print('PRECONTO')} disabled={printState === 'sending'} className={quiet}>
+                {printingKind === 'PRECONTO' && printState === 'sending' ? <><Loader2 className="h-4 w-4 animate-spin" /> Invio…</>
+                  : printingKind === 'PRECONTO' && printState === 'sent' ? <><Check className="h-4 w-4" /> In stampa</>
+                  : printingKind === 'PRECONTO' && printState === 'error' ? <><X className="h-4 w-4" /> Stampa fallita</>
                   : <><Printer className="h-4 w-4" /> Stampa preconto</>}
               </button>
             </div>
