@@ -13,7 +13,7 @@ import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Roo
 import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, ListFilter, Map as MapIcon, List, MessageCircle, Mail, Armchair, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap } from '../services/apiService';
-import { billsApiService } from '../services/billsApiService';
+import { billsApiService, printBill } from '../services/billsApiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { CookingPotLoader } from './CookingPotLoader';
 import { getReservationNoteIcon } from './reservationNoteIcons';
@@ -756,7 +756,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [billLoading, setBillLoading] = useState(false);
   const [billTotalInput, setBillTotalInput] = useState<string>('');
   const [billCoversInput, setBillCoversInput] = useState<string>('');
-  const [billActionLoading, setBillActionLoading] = useState<'open' | 'open-and-notify' | 'notify' | 'close' | 'void' | 'import-pp' | null>(null);
+  const [billActionLoading, setBillActionLoading] = useState<'open' | 'open-and-notify' | 'notify' | 'close' | 'void' | 'import-pp' | 'print' | null>(null);
   // The QR and the pre-bill print live in the shared BillSheet rather than
   // inline in the card, so a bill looks and behaves the same here, on the
   // Pagamenti page and in OrderPad.
@@ -2220,6 +2220,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       showToast(`Link inviato al cliente via ${delivery.channel === 'whatsapp' ? 'WhatsApp' : 'SMS'}`, 'success');
     } catch (err: any) {
       showToast(err?.message || 'Invio del link non riuscito', 'error');
+    } finally {
+      setBillActionLoading(null);
+    }
+  };
+
+  // Stampa il preconto sulla termica in sala: contiene il QR grande del
+  // link pubblico ("inquadra per pagare il conto"), quindi e' il modo piu'
+  // rapido per portare il codice fisicamente al tavolo.
+  const handlePrintBillQr = async () => {
+    if (!bill) return;
+    setBillActionLoading('print');
+    try {
+      await printBill(bill.bill.id);
+      // "in coda", non "stampato": la conferma vera e' la termica che parte.
+      showToast('Preconto con QR inviato alla stampante', 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Stampa non riuscita', 'error');
     } finally {
       setBillActionLoading(null);
     }
@@ -5637,6 +5654,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     >
                                       {billActionLoading === 'notify' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                                       Invia link
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={handlePrintBillQr}
+                                      disabled={billActionLoading !== null || !bill.bill.share_token}
+                                      title={!bill.bill.share_token ? 'Conto chiuso: il QR non è più valido' : undefined}
+                                      className={dsButton.secondary}
+                                    >
+                                      {billActionLoading === 'print' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                                      Stampa QR
                                     </button>
                                     <button
                                       type="button"
