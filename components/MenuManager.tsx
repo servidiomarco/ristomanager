@@ -16,7 +16,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftService';
 import {
   SegmentedControl, SearchField, SectionHeader, StatusPill, Callout, EmptyState,
-  ModalShell, FormCard, Field, Stepper, useMediaQuery,
+  ModalShell, FormCard, Field, Stepper, StepNav, useMediaQuery,
   dsInput, dsSelect, dsTextarea, dsButton, dsIconButton,
 } from './ds';
 
@@ -114,11 +114,11 @@ const banquetGroupFor = (menu: BanquetMenu, today: string, weekEnd: string, mont
    anywhere from the header, and the required-field check still runs once, on
    save, exactly as it did when this was a single scroll. */
 const BANQUET_STEPS = [
-  { label: 'Evento e cliente', hint: 'nome interno, data, turno e chi lo ha richiesto' },
-  { label: 'Coperti e tariffa', hint: 'un prezzo bambini separa il calcolo' },
-  { label: 'Composizione menù', hint: 'clicca un piatto per aggiungerlo all\'uscita attiva' },
-  { label: 'Tavoli assegnati', hint: 'i tavoli occupati nello stesso turno sono disabilitati' },
-  { label: 'Note operative', hint: 'compaiono nelle stampe per cucina e sala' },
+  { label: 'Evento e cliente', hint: 'nome interno, data, turno e chi lo ha richiesto', icon: BookUser },
+  { label: 'Coperti e tariffa', hint: 'un prezzo bambini separa il calcolo', icon: Users },
+  { label: 'Composizione menù', hint: 'clicca un piatto per aggiungerlo all\'uscita attiva', icon: Utensils },
+  { label: 'Tavoli assegnati', hint: 'i tavoli occupati nello stesso turno sono disabilitati', icon: LayoutGrid },
+  { label: 'Note operative', hint: 'compaiono nelle stampe per cucina e sala', icon: StickyNote },
 ] as const;
 
 // Category filters on Piatti alla carta. There are more of these than a
@@ -290,7 +290,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
   useEffect(() => {
     if (autoOpenNewDish) {
-      setIsDishFormOpen(true);
+      handleOpenNewDish();
       onAutoOpenNewDishHandled?.();
     }
   }, [autoOpenNewDish]);
@@ -360,6 +360,19 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     } finally {
       setIsSavingDish(false);
     }
+  };
+
+  // Mirrors handleOpenNewBanquet: a create always starts from a blank form.
+  // Closing the modal with Annulla leaves the previous edit's values in place —
+  // only a successful save clears them — so without this reset "+ Nuovo piatto"
+  // could open prefilled and still in edit mode, and saving would have
+  // overwritten that dish instead of adding one.
+  const handleOpenNewDish = () => {
+    setIsEditingDish(false);
+    setEditingDishId(null);
+    setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '' });
+    setPhotoUploadError(null);
+    setIsDishFormOpen(true);
   };
 
   const handleEditDish = (dish: Dish) => {
@@ -768,17 +781,38 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   return (
     <div className="p-4 sm:p-6 lg:p-8">
       {/* Tabs + header figures */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 mb-5">
-        <SegmentedControl<'BANQUETS' | 'DISHES'>
-          value={activeTab}
-          onChange={setActiveTab}
-          ariaLabel="Sezione"
-          equalWidth={false}
-          options={[
-            { value: 'BANQUETS', label: 'Menu banchetti' },
-            { value: 'DISHES', label: 'Piatti alla carta' },
-          ]}
-        />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4 mb-5">
+        {/* The create button sits directly under the selector rather than among
+            the KPIs or the search: it acts on whichever section is showing, so
+            it belongs to the switch. One element for both tabs also keeps the
+            two labels identically sized — as separate buttons in separate rows
+            they had drifted to different heights and widths. */}
+        <div className="flex flex-col items-start gap-2.5">
+          <SegmentedControl<'BANQUETS' | 'DISHES'>
+            value={activeTab}
+            onChange={setActiveTab}
+            ariaLabel="Sezione"
+            equalWidth={false}
+            options={[
+              { value: 'BANQUETS', label: 'Menu banchetti' },
+              { value: 'DISHES', label: 'Piatti alla carta' },
+            ]}
+          />
+          {/* Phone only, and the breakpoint is not a guess: the global "+" menu
+              in the top bar is `hidden md:block`, so below md this is the only
+              route into either form. From md up it would be a second button for
+              a create the header already offers. */}
+          {canEdit && (
+            <button
+              type="button"
+              onClick={activeTab === 'BANQUETS' ? handleOpenNewBanquet : handleOpenNewDish}
+              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] md:hidden"
+            >
+              <Plus className="h-4 w-4" aria-hidden />
+              {activeTab === 'BANQUETS' ? 'Nuovo banchetto' : 'Nuovo piatto'}
+            </button>
+          )}
+        </div>
         {activeTab === 'BANQUETS' && (
           <div className="flex flex-wrap items-center gap-2">
             <StatusPill tone="info" className="h-8 px-3">
@@ -1670,37 +1704,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
             </>
           }
           subheader={
-            <div className="flex gap-2 overflow-x-auto scrollbar-hide">
-              {BANQUET_STEPS.map((step, i) => {
-                const isCurrent = i === banquetStep;
-                const isDone = i < banquetStep;
-                return (
-                  <button
-                    key={step.label}
-                    type="button"
-                    onClick={() => setBanquetStep(i)}
-                    className="group flex min-w-[150px] flex-1 flex-col gap-2 text-left focus-visible:outline-none"
-                    aria-current={isCurrent ? 'step' : undefined}
-                  >
-                    <span className={`h-[3px] w-full rounded-full ${isCurrent || isDone ? 'bg-[var(--ds-action-bg)]' : 'bg-[var(--ds-border)]'}`} />
-                    <span className="flex items-center gap-2">
-                      <span className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-[12px] font-semibold tabular-nums ${
-                        isDone
-                          ? 'bg-[var(--ds-seated-solid)] text-[#ffffff]'
-                          : isCurrent
-                            ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
-                            : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)]'
-                      }`}>
-                        {isDone ? <Check className="h-3.5 w-3.5" /> : i + 1}
-                      </span>
-                      <span className={`truncate text-[14px] ${isCurrent ? 'font-semibold text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)] group-hover:text-[var(--ds-text-primary)]'}`}>
-                        {step.label}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+            <StepNav
+              steps={BANQUET_STEPS}
+              current={banquetStep}
+              onSelect={setBanquetStep}
+              ariaLabel="Passi del menu banchetto"
+            />
           }
         >
           {/* Scroll anchor: each step starts at its own top. The shell owns the

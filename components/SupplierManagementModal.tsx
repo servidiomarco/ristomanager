@@ -1,7 +1,21 @@
 import React, { useMemo, useState } from 'react';
 import { useShopping } from '../contexts/ShoppingContext';
 import { ShoppingCategory, Supplier } from '../services/shoppingApiService';
-import { ChefHat, Coffee, Package, Plus, Loader2, X, Edit2, Trash2, Check } from 'lucide-react';
+import { Plus, Loader2, Edit2, Trash2, Check, Truck } from 'lucide-react';
+import {
+  Callout, EmptyState, Field, FormCard, ModalShell, StatusPill,
+  dsButton, dsInput, dsTextarea,
+} from './ds';
+
+/* ── Gestione fornitori ───────────────────────────────────────────────────
+   Reached from the shopping list, where it is the only way to create the
+   suppliers those items get assigned to. Restyled onto the shared modal
+   frame: on a phone it was a centred 90vh box with its own backdrop, its own
+   header and hand-rolled inputs, so it looked like a different application
+   from the page that opened it.
+
+   A supplier can serve more than one category, which is why the categories are
+   toggles rather than a single choice — and why at least one must stay on. */
 
 interface SupplierManagementModalProps {
   open: boolean;
@@ -17,27 +31,15 @@ const CATEGORY_LABELS: Record<ShoppingCategory, string> = {
   ALTRO: 'Altro',
 };
 
-const CATEGORY_ICONS: Record<ShoppingCategory, React.ReactNode> = {
-  CUCINA: <ChefHat className="h-3.5 w-3.5" />,
-  BAR: <Coffee className="h-3.5 w-3.5" />,
-  ALTRO: <Package className="h-3.5 w-3.5" />,
-};
-
 const sortedCategories = (cats: ShoppingCategory[]): ShoppingCategory[] =>
   CATEGORIES.filter(c => cats.includes(c));
 
 const CategoryChips: React.FC<{ categories: ShoppingCategory[] }> = ({ categories }) => (
-  <div className="flex flex-wrap items-center gap-1 mt-1">
+  <span className="flex flex-wrap items-center gap-1.5">
     {sortedCategories(categories).map(c => (
-      <span
-        key={c}
-        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-[var(--color-surface-2)] text-[var(--color-fg-muted)] border border-[var(--color-line)]"
-      >
-        {CATEGORY_ICONS[c]}
-        {CATEGORY_LABELS[c]}
-      </span>
+      <StatusPill key={c} tone="neutral">{CATEGORY_LABELS[c]}</StatusPill>
     ))}
-  </div>
+  </span>
 );
 
 const CategoryCheckboxes: React.FC<{
@@ -48,14 +50,14 @@ const CategoryCheckboxes: React.FC<{
   const toggle = (c: ShoppingCategory) => {
     if (value.includes(c)) {
       const next = value.filter(x => x !== c);
-      if (next.length === 0) return; // require at least one
+      if (next.length === 0) return; // a supplier serving nothing cannot be assigned
       onChange(next);
     } else {
       onChange([...value, c]);
     }
   };
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
+    <div className="flex flex-wrap items-center gap-2">
       {CATEGORIES.map(c => {
         const on = value.includes(c);
         return (
@@ -64,13 +66,13 @@ const CategoryCheckboxes: React.FC<{
             type="button"
             disabled={disabled}
             onClick={() => toggle(c)}
-            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+            aria-pressed={on}
+            className={`inline-flex h-10 items-center gap-1.5 rounded-full px-4 text-[14px] font-medium transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               on
-                ? 'bg-[var(--color-fg)] text-[var(--color-surface)] border-[var(--color-fg)]'
-                : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
-            } disabled:opacity-50`}
+                ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
+            }`}
           >
-            {CATEGORY_ICONS[c]}
             {CATEGORY_LABELS[c]}
           </button>
         );
@@ -198,218 +200,195 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
   };
 
   return (
-    <div
-      className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4"
-      onClick={onClose}
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      title="Gestione fornitori"
+      subtitle="Un fornitore può servire più categorie"
+      size="md"
+      closeOnEscape
+      bodyClassName="space-y-3 p-4 sm:p-5"
     >
-      <div
-        className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in duration-200"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
-          <div>
-            <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Gestione fornitori</h3>
-            <p className="text-xs text-[var(--color-fg-muted)]">Un fornitore può servire più categorie</p>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        {/* Supplier list */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-2">
-          {sortedSuppliers.length === 0 ? (
-            <p className="py-8 text-center text-sm text-[var(--color-fg-subtle)]">
-              Nessun fornitore. Aggiungine uno qui sotto.
-            </p>
-          ) : (
-            sortedSuppliers.map(s => {
-              const isEditing = editingId === s.id;
-              const isPendingDelete = pendingDeleteId === s.id;
-              if (isEditing) {
-                return (
-                  <div
-                    key={s.id}
-                    className="p-3 rounded-lg border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] space-y-2"
-                  >
-                    <input
-                      type="text"
-                      value={editName}
-                      onChange={e => setEditName(e.target.value)}
-                      placeholder="Nome"
-                      autoFocus
-                      className="w-full text-sm bg-[var(--color-surface)] border border-[var(--color-line)] rounded px-2 py-1.5 focus:outline-none focus:border-[var(--color-fg)]"
-                    />
-                    <div>
-                      <p className="text-[11px] font-medium text-[var(--color-fg-muted)] uppercase tracking-wide mb-1.5">
-                        Categorie servite
-                      </p>
-                      <CategoryCheckboxes
-                        value={editCategories}
-                        onChange={setEditCategories}
-                        disabled={isSaving}
-                      />
-                    </div>
-                    <input
-                      type="tel"
-                      value={editPhone}
-                      onChange={e => setEditPhone(e.target.value)}
-                      placeholder="Telefono (opzionale)"
-                      className="w-full text-sm bg-[var(--color-surface)] border border-[var(--color-line)] rounded px-2 py-1.5 focus:outline-none focus:border-[var(--color-fg)]"
-                    />
-                    <textarea
-                      value={editNote}
-                      onChange={e => setEditNote(e.target.value)}
-                      placeholder="Note (opzionali)"
-                      rows={2}
-                      className="w-full text-sm bg-[var(--color-surface)] border border-[var(--color-line)] rounded px-2 py-1.5 focus:outline-none focus:border-[var(--color-fg)] resize-none"
-                    />
-                    {editError && <p className="text-xs text-rose-600">{editError}</p>}
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        onClick={cancelEdit}
-                        disabled={isSaving}
-                        className="text-xs px-3 py-1.5 rounded-full border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
-                      >
-                        Annulla
-                      </button>
-                      <button
-                        onClick={saveEdit}
-                        disabled={!editName.trim() || editCategories.length === 0 || isSaving}
-                        className="text-xs px-3 py-1.5 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] inline-flex items-center gap-1.5 disabled:opacity-40 hover:opacity-90"
-                      >
-                        {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                        Salva
-                      </button>
-                    </div>
-                  </div>
-                );
-              }
-              return (
-                <div
-                  key={s.id}
-                  className="p-3 rounded-lg border border-[var(--color-line)] hover:bg-[var(--color-surface-hover)] transition-colors"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-[var(--color-fg)] truncate">{s.name}</p>
-                      <CategoryChips categories={s.categories} />
-                      {s.phone && (
-                        <p className="text-xs text-[var(--color-fg-muted)] tabular mt-1">{s.phone}</p>
-                      )}
-                      {s.note && (
-                        <p className="text-xs text-[var(--color-fg-subtle)] mt-1 whitespace-pre-wrap break-words">
-                          {s.note}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                      <button
-                        onClick={() => startEdit(s)}
-                        className="p-1.5 rounded text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
-                        title="Modifica"
-                      >
-                        <Edit2 className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        onClick={() => setPendingDeleteId(s.id)}
-                        className="p-1.5 rounded text-[var(--color-fg-subtle)] hover:text-rose-600"
-                        title="Elimina"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                  {isPendingDelete && (
-                    <div className="mt-2 p-2 rounded bg-rose-50 dark:bg-rose-500/15 border border-rose-100 dark:border-rose-500/30 flex items-center justify-between gap-2">
-                      <p className="text-xs text-rose-700 dark:text-rose-300">
-                        Eliminare? I prodotti collegati resteranno senza fornitore.
-                      </p>
-                      <div className="flex items-center gap-1.5 flex-shrink-0">
-                        <button
-                          onClick={() => setPendingDeleteId(null)}
-                          disabled={isDeleting}
-                          className="text-xs px-2 py-1 rounded text-[var(--color-fg-muted)] hover:bg-[var(--color-surface)]/70"
-                        >
-                          No
-                        </button>
-                        <button
-                          onClick={() => handleDelete(s.id)}
-                          disabled={isDeleting}
-                          className="text-xs px-2 py-1 rounded bg-rose-500 hover:bg-rose-600 text-white inline-flex items-center gap-1"
-                        >
-                          {isDeleting && <Loader2 className="h-3 w-3 animate-spin" />}
-                          Elimina
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        {/* Add form */}
-        <div className="border-t border-[var(--color-line)] p-3 sm:p-4 space-y-2 bg-[var(--color-surface-2)]">
-          <p className="text-xs font-medium text-[var(--color-fg-muted)] uppercase tracking-wide">
-            Aggiungi fornitore
-          </p>
-          <input
-            type="text"
-            value={newName}
-            onChange={e => setNewName(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                handleAdd();
-              }
-            }}
-            placeholder="Nome fornitore"
-            className="w-full text-sm bg-[var(--color-surface)] border border-[var(--color-line)] rounded px-2.5 py-2 focus:outline-none focus:border-[var(--color-fg)]"
-          />
-          <div>
-            <p className="text-[11px] font-medium text-[var(--color-fg-muted)] uppercase tracking-wide mb-1.5">
-              Categorie servite
-            </p>
-            <CategoryCheckboxes
-              value={newCategories}
-              onChange={setNewCategories}
-              disabled={isAdding}
-            />
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <input
-              type="tel"
-              value={newPhone}
-              onChange={e => setNewPhone(e.target.value)}
-              placeholder="Telefono (opzionale)"
-              className="w-full text-sm bg-[var(--color-surface)] border border-[var(--color-line)] rounded px-2.5 py-2 focus:outline-none focus:border-[var(--color-fg)]"
-            />
+      {/* Adding comes first: this modal is opened to create a supplier far more
+          often than to correct one, and on a phone a form pinned under a
+          scrolling list is a form nobody reaches. */}
+      <FormCard title="Aggiungi fornitore">
+        <div className="space-y-4">
+          <Field label="Nome">
             <input
               type="text"
-              value={newNote}
-              onChange={e => setNewNote(e.target.value)}
-              placeholder="Nota breve (opzionale)"
-              className="w-full text-sm bg-[var(--color-surface)] border border-[var(--color-line)] rounded px-2.5 py-2 focus:outline-none focus:border-[var(--color-fg)]"
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAdd(); } }}
+              placeholder="Nome fornitore"
+              className={dsInput}
             />
+          </Field>
+          <Field label="Categorie servite">
+            <CategoryCheckboxes value={newCategories} onChange={setNewCategories} disabled={isAdding} />
+          </Field>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Telefono">
+              <input
+                type="tel"
+                value={newPhone}
+                onChange={e => setNewPhone(e.target.value)}
+                placeholder="Opzionale"
+                className={dsInput}
+              />
+            </Field>
+            <Field label="Nota">
+              <input
+                type="text"
+                value={newNote}
+                onChange={e => setNewNote(e.target.value)}
+                placeholder="Opzionale"
+                className={dsInput}
+              />
+            </Field>
           </div>
-          {addError && <p className="text-xs text-rose-600">{addError}</p>}
+          {addError && <Callout tone="critical">{addError}</Callout>}
           <div className="flex justify-end">
             <button
+              type="button"
               onClick={handleAdd}
               disabled={!newName.trim() || newCategories.length === 0 || isAdding}
-              className="text-sm px-3 py-1.5 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] inline-flex items-center gap-2 disabled:opacity-40 hover:opacity-90"
+              className={`w-full sm:w-auto ${dsButton.primary}`}
             >
-              {isAdding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+              {isAdding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               Aggiungi
             </button>
           </div>
         </div>
-      </div>
-    </div>
+      </FormCard>
+
+      {sortedSuppliers.length === 0 ? (
+        <EmptyState icon={Truck}>Nessun fornitore. Aggiungine uno qui sopra.</EmptyState>
+      ) : (
+        sortedSuppliers.map(s => {
+          const isEditing = editingId === s.id;
+          const isPendingDelete = pendingDeleteId === s.id;
+
+          if (isEditing) {
+            return (
+              <FormCard key={s.id}>
+                <div className="space-y-4">
+                  <Field label="Nome">
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={e => setEditName(e.target.value)}
+                      autoFocus
+                      className={dsInput}
+                    />
+                  </Field>
+                  <Field label="Categorie servite">
+                    <CategoryCheckboxes value={editCategories} onChange={setEditCategories} disabled={isSaving} />
+                  </Field>
+                  <Field label="Telefono">
+                    <input
+                      type="tel"
+                      value={editPhone}
+                      onChange={e => setEditPhone(e.target.value)}
+                      placeholder="Opzionale"
+                      className={dsInput}
+                    />
+                  </Field>
+                  <Field label="Note">
+                    <textarea
+                      value={editNote}
+                      onChange={e => setEditNote(e.target.value)}
+                      placeholder="Opzionali"
+                      rows={2}
+                      className={`${dsTextarea} resize-none`}
+                    />
+                  </Field>
+                  {editError && <Callout tone="critical">{editError}</Callout>}
+                  <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                    <button type="button" onClick={cancelEdit} disabled={isSaving} className={dsButton.quiet}>
+                      Annulla
+                    </button>
+                    <button
+                      type="button"
+                      onClick={saveEdit}
+                      disabled={!editName.trim() || editCategories.length === 0 || isSaving}
+                      className={dsButton.primary}
+                    >
+                      {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                      Salva
+                    </button>
+                  </div>
+                </div>
+              </FormCard>
+            );
+          }
+
+          return (
+            <FormCard key={s.id} className="p-4 sm:p-4">
+              <div className="flex items-start gap-3">
+                <Truck className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">{s.name}</p>
+                  <div className="mt-1.5"><CategoryChips categories={s.categories} /></div>
+                  {s.phone && (
+                    <p className="mt-1.5 text-[13px] tabular-nums text-[var(--ds-text-muted)]">{s.phone}</p>
+                  )}
+                  {s.note && (
+                    <p className="mt-1 whitespace-pre-wrap break-words text-[13px] text-[var(--ds-text-muted)]">
+                      {s.note}
+                    </p>
+                  )}
+                </div>
+                <div className="flex flex-shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => startEdit(s)}
+                    aria-label={`Modifica ${s.name}`}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    <Edit2 className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingDeleteId(s.id)}
+                    aria-label={`Elimina ${s.name}`}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+
+              {isPendingDelete && (
+                <div className="mt-3 rounded-[16px] bg-[var(--ds-critical-tint)] p-3">
+                  <p className="text-[14px] text-[var(--ds-critical-text)]">
+                    Eliminare? I prodotti collegati resteranno senza fornitore.
+                  </p>
+                  <div className="mt-2.5 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPendingDeleteId(null)}
+                      disabled={isDeleting}
+                      className="inline-flex h-10 items-center rounded-full px-4 text-[14px] font-medium text-[var(--ds-critical-text)] transition-opacity hover:opacity-80 disabled:opacity-50"
+                    >
+                      Annulla
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(s.id)}
+                      disabled={isDeleting}
+                      className="inline-flex h-10 items-center gap-1.5 rounded-full bg-[var(--ds-critical-solid)] px-4 text-[14px] font-semibold text-[var(--ds-critical-fg)] transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    >
+                      {isDeleting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                      Elimina
+                    </button>
+                  </div>
+                </div>
+              )}
+            </FormCard>
+          );
+        })
+      )}
+    </ModalShell>
   );
 };

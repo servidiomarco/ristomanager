@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, PanelLeftClose, PanelLeft, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -127,7 +127,7 @@ const NAV_ITEMS: NavItem[] = [
   // Servizio
   { kind: 'link', label: 'Prenotazioni', Icon: Calendar, group: 'servizio', isTab: true, view: ViewState.RESERVATIONS, sidebarCollapse: true },
   { kind: 'link', label: 'Reception', Icon: ConciergeBell, group: 'servizio', isTab: false, view: ViewState.RECEPTION, sidebarCollapse: true },
-  { kind: 'link', label: 'Sale & Tavoli', Icon: Grid, group: 'servizio', isTab: false, view: ViewState.FLOOR_PLAN, sidebarCollapse: false },
+  { kind: 'link', label: 'Sale & Tavoli', Icon: Grid, group: 'servizio', isTab: false, view: ViewState.FLOOR_PLAN, sidebarCollapse: true },
   { kind: 'link', label: 'Menu & Banchetti', Icon: UtensilsCrossed, group: 'servizio', isTab: false, view: ViewState.MENU, sidebarCollapse: false, menuInitialTab: 'BANQUETS' },
   { kind: 'link', label: 'Comande', Icon: ClipboardList, group: 'servizio', isTab: false, view: ViewState.COMANDE, sidebarCollapse: true },
   { kind: 'link', label: 'Cucina', Icon: CookingPot, group: 'servizio', isTab: false, view: ViewState.CUCINA, sidebarCollapse: true },
@@ -166,6 +166,9 @@ const NAV_ITEMS: NavItem[] = [
 // the command palette, notifications and the sidebar are untouched.
 const COMMS_VIEWS: ViewState[] = [ViewState.CONVERSAZIONI, ViewState.MESSAGGI, ViewState.EMAIL];
 
+// Stato aperto/chiuso della sidebar desktop. Scritto solo dalla linguetta.
+const SIDEBAR_COLLAPSED_KEY = 'ristocrm_sidebar_collapsed';
+
 // Viste del modulo Sala & Cucina: oltre al permesso serve il modulo attivo
 // (flag table_orders_enabled) — spento, le voci spariscono dalla sidebar.
 const SALA_VIEWS: ViewState[] = [ViewState.COMANDE, ViewState.CUCINA, ViewState.PASSE];
@@ -184,7 +187,23 @@ const App: React.FC = () => {
   // Tracks whether we've already applied the user's preferred landing for this
   // session. Reset on logout so the next login re-applies it.
   const appliedPreferredLandingRef = useRef(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Sidebar aperta/chiusa. Le viste continuano a comandarla: le task-oriented
+  // (Prenotazioni, Reception, Sale & Tavoli, Comande, Cucina, Passe) la
+  // chiudono per guadagnare larghezza, le altre la riaprono — vedi
+  // NAV_ITEMS.sidebarCollapse. La linguetta è l'override manuale nel mezzo, e
+  // quello che sceglie viene persistito: al riavvio si riparte da lì, finché
+  // la prima navigazione non applica di nuovo il default della vista.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
+  });
+  const toggleSidebar = () => {
+    setSidebarCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? '1' : '0');
+      return next;
+    });
+  };
   // Modulo Sala & Cucina: governa la visibilità di Comande/Cucina/Passe in
   // sidebar. Si aggiorna in tempo reale via socket quando qualcuno tocca
   // l'interruttore in Impostazioni.
@@ -1597,41 +1616,41 @@ const App: React.FC = () => {
 
       {/* Sidebar — blends into page bg */}
       <aside
-        className={`hidden lg:flex ${sidebarCollapsed ? 'w-[88px]' : 'w-[264px]'} m-4 mr-0 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] flex-col transition-[width] duration-200 z-20 relative`}
+        className={`hidden lg:flex ${sidebarCollapsed ? 'w-[76px]' : 'w-[250px]'} m-4 mr-3 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] flex-col transition-[width] duration-200 z-20 relative`}
         aria-label="Navigazione principale"
       >
-        <div className={`h-16 flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between px-4'}`}>
+        <div className={`h-16 flex items-center ${sidebarCollapsed ? 'justify-center' : 'px-4'}`}>
           <div className="flex items-center">
             <div className="bg-[var(--ds-action-bg)] h-10 w-10 rounded-[14px] inline-flex items-center justify-center">
                <ChefHat className="text-[var(--ds-action-fg)] h-5 w-5" />
             </div>
             {!sidebarCollapsed && <span className="ml-3 font-semibold text-[19px] text-[var(--ds-text-primary)] tracking-[-0.015em]">RistoCRM</span>}
           </div>
-          {!sidebarCollapsed && (
-            <button
-              onClick={() => setSidebarCollapsed(true)}
-              className="p-2 text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] rounded-[12px] transition-colors"
-              title="Comprimi"
-              aria-label="Comprimi navigazione"
-            >
-              <PanelLeftClose size={18} />
-            </button>
-          )}
         </div>
 
-        {/* Expand button when collapsed */}
-        {sidebarCollapsed && (
-          <button
-            onClick={() => setSidebarCollapsed(false)}
-            className="mx-auto mt-2 p-2.5 text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] rounded-[12px] transition-colors"
-            title="Espandi"
-            aria-label="Espandi navigazione"
-          >
-            <PanelLeft size={18} />
-          </button>
-        )}
+        {/* Linguetta — unico comando per aprire e chiudere. Vive sul bordo
+            destro dell'aside, quindi viaggia insieme al bordo quando la
+            larghezza cambia: nessun secondo pulsante da cercare altrove, e
+            l'unica cosa che cambia fra i due stati è il verso della freccia.
+            Sporge di 18px dentro il corridoio da 28px fra sidebar e contenuto
+            (mr-3 qui + m-4 sull'header di main): resta staccata dalla card,
+            che con mr-0 e una linguetta da 22px finiva per toccare. Quei 18px
+            da soli sarebbero un bersaglio troppo stretto, così lo
+            pseudo-elemento ::before allarga l'area cliccabile a 44px senza
+            gonfiare la forma disegnata. */}
+        <button
+          type="button"
+          onClick={toggleSidebar}
+          aria-expanded={!sidebarCollapsed}
+          aria-controls="sidebar-nav"
+          title={sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
+          aria-label={sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
+          className="absolute top-1/2 -translate-y-1/2 -right-[18px] h-14 w-[18px] flex items-center justify-center rounded-r-[14px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-canvas)] before:content-[''] before:absolute before:inset-y-0 before:-left-[20px] before:-right-[6px]"
+        >
+          {sidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+        </button>
 
-        <nav ref={navFadeRef} className={`flex-1 min-h-0 overflow-y-auto scroll-fade-y scrollbar-hover py-2 space-y-0.5 ${sidebarCollapsed ? 'px-3' : 'px-3'}`}>
+        <nav id="sidebar-nav" ref={navFadeRef} className="flex-1 min-h-0 overflow-y-auto scroll-fade-y scrollbar-hover py-2 space-y-0.5 px-3">
           {NAV_ITEMS.filter(item => item.group === null && canSeeNavItem(item)).map(item => (
             <SidebarItem
               key={item.label}
@@ -1655,7 +1674,12 @@ const App: React.FC = () => {
             if (items.length === 0) return null;
             return (
               <React.Fragment key={group.id}>
-                {!sidebarCollapsed && (
+                {sidebarCollapsed ? (
+                  // Chiusa, l'eyebrow non entra: al suo posto un filetto, così
+                  // i gruppi restano leggibili come blocchi invece di
+                  // sciogliersi in una colonna unica di icone.
+                  <div aria-hidden className="mx-auto my-2 h-px w-6 bg-[var(--ds-border)]" />
+                ) : (
                   <div className="px-3 pt-4 pb-1 text-[13px] font-medium text-[var(--ds-text-muted)]">
                     {group.label}
                   </div>
@@ -1686,7 +1710,11 @@ const App: React.FC = () => {
                           <span className="text-[var(--ds-text-secondary)]">
                             {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
                           </span>
-                          <span className="font-medium text-[15px] tracking-[-0.01em]">{item.label}</span>
+                          {/* nowrap: è l'unica riga della nav che porta anche
+                              un toggle da 44px, quindi con la sidebar a 250px
+                              il flex la stringeva e "Modalità scura" andava a
+                              capo. */}
+                          <span className="font-medium text-[15px] tracking-[-0.01em] whitespace-nowrap">{item.label}</span>
                         </span>
                         <span
                           aria-hidden

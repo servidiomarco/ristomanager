@@ -1,15 +1,19 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  ModalShell, FormCard, Field, Stepper, SegmentedControl, dsInput, dsSelect, dsTextarea, dsButton,
+  ModalShell, FormCard, Field, Stepper, StepNav, SegmentedControl, dsInput, dsSelect, dsTextarea, dsButton,
   SearchField, SectionHeader, StatusPill, StatStrip, EmptyState, Callout, dsIconButton, CountBadge,
 } from './ds';
 import type { SectionTone, Stat } from './ds';
+import { BillSheet } from './pagamenti/BillSheet';
+import { BillFigures, billStateLabel } from './prenotazione/BillFigures';
+import { PaymentRequestRow } from './prenotazione/PaymentRequestRow';
+import { MessaggiPanel } from './prenotazione/MessaggiPanel';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, RoomClosedOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill } from '../types';
 import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, ListFilter, Map as MapIcon, List, MessageCircle, Mail, Armchair, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap } from '../services/apiService';
-import { billsApiService } from '../services/billsApiService';
+import { billsApiService, printBill } from '../services/billsApiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { CookingPotLoader } from './CookingPotLoader';
 import { getReservationNoteIcon } from './reservationNoteIcons';
@@ -93,6 +97,21 @@ const getSlotsForDateShift = (
 
 /** Minutes a dismissal quiets the overdue-table prompt on this device. */
 const OVERDUE_SNOOZE_MIN = 15;
+
+/* ── Form steps (edit only) ───────────────────────────────────────────────
+   The same three sections the edit form has always had, given a screen each.
+   Payments and the message log used to sit below the table grid, so reaching
+   them meant scrolling past the whole floor plan — on a phone that is a long
+   way to go for the two things you open a saved booking to do.
+
+   Steps never gate each other: any one is reachable from the header at any
+   time and Salva stays live on all of them, because an edit is usually one
+   field, not a journey. Validation still runs once, on save. */
+const RESERVATION_STEPS = [
+  { label: 'Dettagli', icon: Calendar },
+  { label: 'Pagamenti', icon: CreditCard },
+  { label: 'Comunicazione', icon: MessageCircle },
+] as const;
 
 // Sezione conto-al-tavolo nel modal prenotazione. Interruttore lato client
 // sopra al feature flag backend `pay_at_table_enabled`: con entrambi attivi
@@ -642,6 +661,25 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Modal/Form State
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  // Which screen of the edit form is showing. Editing only: a new booking is
+  // still one scroll, and its payment and message sections do not exist yet.
+  // Sections are never unmounted, only hidden — the table grid, the customer
+  // lookup and every field keep their state while you move between steps.
+  const [formStep, setFormStep] = useState(0);
+  const formStepScrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Every open starts on Dettagli. Reopening a booking on the step you left
+  // last time would put you on the message log with no idea why.
+  useEffect(() => {
+    if (isFormOpen) setFormStep(0);
+  }, [isFormOpen]);
+
+  // Each step starts at its own top. ModalShell owns the scroll container, so
+  // we bring a sentinel into view rather than reaching for a ref it does not
+  // expose — the same approach the banquet form uses.
+  useEffect(() => {
+    formStepScrollRef.current?.scrollIntoView({ block: 'start' });
+  }, [formStep]);
   const [isSavingReservation, setIsSavingReservation] = useState(false);
   // Preflight modal: future-date confirmation + duplicate-booking warnings.
   // Holds the warnings list and the already-prepared payload, so a confirm
@@ -718,8 +756,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [billLoading, setBillLoading] = useState(false);
   const [billTotalInput, setBillTotalInput] = useState<string>('');
   const [billCoversInput, setBillCoversInput] = useState<string>('');
-  const [billActionLoading, setBillActionLoading] = useState<'open' | 'open-and-notify' | 'notify' | 'close' | 'void' | 'import-pp' | null>(null);
-  const [copiedBillUrl, setCopiedBillUrl] = useState(false);
+  const [billActionLoading, setBillActionLoading] = useState<'open' | 'open-and-notify' | 'notify' | 'close' | 'void' | 'import-pp' | 'print' | null>(null);
+  // The QR and the pre-bill print live in the shared BillSheet rather than
+  // inline in the card, so a bill looks and behaves the same here, on the
+  // Pagamenti page and in OrderPad.
+  const [billSheetOpen, setBillSheetOpen] = useState(false);
+  // The bill stores a table_id; the card and the sheet want the number printed
+  // on the table in the room.
+  const billTableName = bill?.bill.table_id != null
+    ? (tables.find(t => t.id === bill.bill.table_id)?.name ?? null)
+    : null;
   // Whole pay-at-table UI is gated behind this flag; fetched once on mount.
   // Default false so we don't briefly flash the section before flags load.
   const [payAtTableEnabled, setPayAtTableEnabled] = useState(false);
@@ -760,7 +806,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Loaded on open (edit mode only). Same lifecycle as paymentRequests above.
   const [outboundMessages, setOutboundMessages] = useState<OutboundMessage[]>([]);
   const [outboundMessagesLoading, setOutboundMessagesLoading] = useState(false);
-  const [showCommsSection, setShowCommsSection] = useState(false);
   // Free-form email composer: opened from the "Nuova email" button in the
   // Comunicazione con il cliente section. State stays hoisted so the compose
   // draft survives accidental clicks outside the modal (we close only on
@@ -2180,6 +2225,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     }
   };
 
+  // Stampa il preconto sulla termica in sala: contiene il QR grande del
+  // link pubblico ("inquadra per pagare il conto"), quindi e' il modo piu'
+  // rapido per portare il codice fisicamente al tavolo.
+  const handlePrintBillQr = async () => {
+    if (!bill) return;
+    setBillActionLoading('print');
+    try {
+      await printBill(bill.bill.id);
+      // "in coda", non "stampato": la conferma vera e' la termica che parte.
+      showToast('Preconto con QR inviato alla stampante', 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Stampa non riuscita', 'error');
+    } finally {
+      setBillActionLoading(null);
+    }
+  };
+
   // Refund di una quota (PR 6): il bottone chiede conferma al secondo tap.
   const [refundConfirmSplitId, setRefundConfirmSplitId] = useState<number | null>(null);
   const [refundingSplitId, setRefundingSplitId] = useState<number | null>(null);
@@ -2230,16 +2292,6 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       showToast(err?.message || 'Errore annullamento conto', 'error');
     } finally {
       setBillActionLoading(null);
-    }
-  };
-
-  const copyBillUrl = async (url: string) => {
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopiedBillUrl(true);
-      setTimeout(() => setCopiedBillUrl(false), 1500);
-    } catch {
-      showToast('Copia non riuscita', 'error');
     }
   };
 
@@ -2688,13 +2740,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!formData.customer_name || !formData.reservation_time) return;
+      // Every field these checks guard lives on step 1, and Salva is live on
+      // all three. Without this jump, saving from Pagamenti or Comunicazione
+      // would refuse and leave the operator staring at a screen with nothing
+      // wrong on it — the first check does not even raise a toast.
+      if (!formData.customer_name || !formData.reservation_time) { setFormStep(0); return; }
       // Almeno un canale di contatto è richiesto (telefono OPPURE email).
       // Le prenotazioni web arrivano spesso con sola email — non forziamo il
       // telefono quando l'email è già presente.
       const hasPhone = !!(formData.phone && formData.phone.trim());
       const hasEmail = !!(formData.email && formData.email.trim());
       if (!hasPhone && !hasEmail) {
+          setFormStep(0);
           showToast('Inserisci un contatto (telefono o email).', 'error');
           return;
       }
@@ -3520,7 +3577,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const children = group.items.reduce((s, r) => s + (r.children || 0), 0);
       const expanded = expandedGroups.has(group.key);
       return (
-        <div key={group.key}>
+        // Groups were siblings with no gap of their own: collapsed, two headers
+        // sat flush against each other and read as one control. The margin is on
+        // the group rather than the inner list so it applies whether or not the
+        // group is open.
+        <div key={group.key} className="mb-3 last:mb-0">
           <SectionHeader
             tone={groupTone(group.key)}
             onToggle={() => toggleGroup(group.key)}
@@ -3532,7 +3593,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             {group.label}
           </SectionHeader>
           {expanded && (
-            <div className="space-y-2 pb-3">
+            <div className="space-y-2.5">
               {group.items.map(res => {
                 const card = renderReservationCard(res, group);
                 return wrapRow ? wrapRow(res, group, card) : card;
@@ -3553,7 +3614,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // without it the toolbar's shadow gets sliced off by a hard line.
   const renderGroupedList = () => (
     <>
-      <div className="flex-shrink-0 px-4 pb-3 pt-4">
+      <div className="flex-shrink-0 px-4 pb-4 pt-4">
         {renderListToolbar()}
       </div>
 
@@ -4235,7 +4296,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               ]}
             />
 
-            <div className="pb-1">{renderListToolbar()}</div>
+            {/* pb-1 left the search row all but touching the first group header
+                on a phone, which is where the toolbar and the list are closest. */}
+            <div className="pb-4">{renderListToolbar()}</div>
 
             {renderGroupedCards((res, group, card) => (
               <SwipeToCheckIn
@@ -4390,6 +4453,25 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           open={isFormOpen}
           onClose={closeBookingForm}
           size="fluid"
+          // The stepper shows on a new booking too, with Pagamenti and
+          // Comunicazione greyed: both need a saved reservation to attach to,
+          // and saying so up front beats a form that silently grows two extra
+          // sections the first time you reopen it.
+          //
+          // Height is pinned with the steps: the table grid makes Dettagli far
+          // taller than the other two, and a panel that resizes under the
+          // cursor moves the footer buttons out from under the thumb.
+          subheader={
+            <StepNav
+              steps={isEditing
+                ? RESERVATION_STEPS
+                : RESERVATION_STEPS.map((s, i) => ({ ...s, disabled: i > 0 }))}
+              current={formStep}
+              onSelect={setFormStep}
+              ariaLabel="Sezioni della prenotazione"
+            />
+          }
+          fixedHeight
           title={isEditing ? 'Modifica prenotazione' : 'Nuova prenotazione'}
           subtitle={(() => {
             // Restates what's about to be booked, straight from the form state,
@@ -4431,6 +4513,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           }
         >
                 <div>
+                    {/* Scroll sentinel: each step starts at its own top. */}
+                    <div ref={formStepScrollRef} aria-hidden />
+                    {/* The banners stay outside the steps on purpose. A no-show
+                        warning is about the customer, not about one section, and
+                        hiding it behind step 1 would let someone take a deposit
+                        on step 2 without ever having seen it. */}
                     {matchedCustomerNoShows > 0 && (
                         <div className="mx-4 sm:mx-5 mt-4 flex items-start gap-3 rounded-[16px] bg-[var(--ds-critical-tint)] p-4">
                             <UserX className="mt-0.5 h-5 w-5 flex-shrink-0 text-[var(--ds-critical-text)]" />
@@ -4471,6 +4559,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             </div>
                         </div>
                     )}
+                    {/* Step 1 — Dettagli. The wrapper carries the visibility so
+                        the form keeps its own `grid` display; putting `hidden`
+                        on the form itself would race the grid class. */}
+                    <section className={!isEditing || formStep === 0 ? 'block' : 'hidden'}>
                     <form id="reservation-form" onSubmit={handleSubmit} className="grid grid-cols-1 gap-5 p-4 sm:p-6 lg:grid-cols-12">
                         {/* Left Column: Details (5 cols) */}
                         <div className="lg:col-span-5 flex flex-col gap-5 min-w-0">
@@ -5414,521 +5506,371 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                              )}
                         </div>
                     </form>
+                    </section>
 
+                    {/* Step 2 — Pagamenti: the table bill, then the deposit
+                        request. Both were already edit-only, so this section
+                        renders nothing at all on a new booking. */}
+                    <section className={!isEditing || formStep === 1 ? 'block' : 'hidden'}>
                     {/* Conto al tavolo (pay-at-table + split bill) — edit mode only.
                         Hidden entirely when the feature flag is off; the toggle
                         lives in Settings → Conto al tavolo. */}
                     {isEditing && formData.id && hasPermission('payments:view') && payAtTableEnabled && (
-                      <div className="px-4 sm:px-6 pb-4 sm:pb-6">
-                        <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-4">
-                          <div className="flex items-center gap-2 mb-3">
-                            <Receipt className="h-4 w-4 text-[var(--ds-arriving-text)]" />
-                            <h4 className="text-[13px] font-semibold text-[var(--ds-text-primary)]">Conto al tavolo</h4>
+                      <div className="px-4 pb-4 sm:px-6">
+                        <FormCard>
+                          <div className="mb-4 flex flex-wrap items-center gap-2">
+                            <Receipt className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
+                            <h4 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Conto al tavolo</h4>
+                            {bill && (() => {
+                              const state = billStateLabel(bill.bill.total_cents, bill.paid_cents);
+                              return <StatusPill tone={state.tone}>{state.label}</StatusPill>;
+                            })()}
                             {bill && (
-                              <span className="ml-auto inline-flex items-center h-6 px-2.5 rounded-full text-[12px] font-semibold bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
-                                {bill.bill.status}
+                              <span className="ml-auto text-[13px] text-[var(--ds-text-muted)]">
+                                {billTableName ? `Tav. ${billTableName} · ` : ''}{bill.bill.covers} coperti
                               </span>
                             )}
                           </div>
 
                           {billLoading && !bill && (
-                            <div className="flex items-center gap-2 text-[12px] text-[var(--ds-text-muted)]">
+                            <div className="flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
                               <Loader2 className="h-3.5 w-3.5 animate-spin" /> Caricamento…
                             </div>
                           )}
 
-                          {!billLoading && !bill && hasPermission('payments:full') && (
-                            <>
-                              <p className="text-[12px] text-[var(--ds-text-muted)] mb-2">
-                                Apri il conto per generare un QR che gli ospiti possono scansionare per pagare la propria quota.
-                              </p>
-                              {(() => {
-                                const busy = billActionLoading === 'open' || billActionLoading === 'open-and-notify' || billActionLoading === 'import-pp';
-                                const resvTableName = formData.table_id != null
-                                  ? (tables.find(t => t.id === formData.table_id)?.name ?? null)
-                                  : null;
-                                return (
-                                  <div className="space-y-2">
-                                    <div className="grid grid-cols-1 sm:grid-cols-[120px_100px_auto] gap-2">
-                                      <div className="relative">
-                                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--ds-text-muted)] text-sm">€</span>
-                                        <input
-                                          type="text"
-                                          inputMode="decimal"
-                                          placeholder="Totale"
-                                          value={billTotalInput}
-                                          onChange={e => setBillTotalInput(e.target.value)}
-                                          disabled={busy}
-                                          className="h-9 w-full rounded-[10px] bg-[var(--ds-surface-row)] pl-6 pr-2 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                                        />
-                                      </div>
-                                      <input
-                                        type="number"
-                                        min={1}
-                                        placeholder={formData.guests ? `${formData.guests} cop.` : 'Coperti'}
-                                        value={billCoversInput}
-                                        onChange={e => setBillCoversInput(e.target.value)}
-                                        disabled={busy}
-                                        className="h-9 w-full rounded-[10px] bg-[var(--ds-surface-row)] px-3 text-[14px] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                                      />
-                                      <button
-                                        type="button"
-                                        onClick={() => handleOpenBill()}
-                                        disabled={busy}
-                                        className="inline-flex items-center justify-center gap-1.5 h-9 px-4 rounded-full bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)] text-[14px] font-semibold hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                                      >
-                                        {billActionLoading === 'open' ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
-                                        Apri conto
-                                      </button>
-                                    </div>
-                                    {/* One-tap combo: open the bill AND immediately push the link
-                                        to the customer (SMS today; WhatsApp when a template lands).
-                                        Disabled if the reservation has no phone. */}
-                                    <button
-                                      type="button"
-                                      onClick={() => handleOpenBill({ notify: true })}
-                                      disabled={busy || !formData.phone}
-                                      title={!formData.phone ? 'La prenotazione non ha un numero di telefono' : undefined}
-                                      className="w-full inline-flex items-center justify-center gap-1.5 h-9 px-4 rounded-full border border-[var(--ds-arriving-tint)] bg-[var(--ds-surface)] text-[var(--ds-arriving-text)] text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed dark:bg-transparent dark:"
-                                    >
-                                      {billActionLoading === 'open-and-notify' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                                      Apri e invia link al cliente
-                                    </button>
-                                    {/* Fase 2 ibrida: righe e totale dalla comanda del
-                                        gestionale di sala, con lo split per portata.
-                                        Visibile solo con un tavolo assegnato — il nome
-                                        è la chiave di lookup su Passepartout. */}
-                                    {resvTableName && (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleImportBillFromPassepartout(resvTableName)}
-                                        disabled={busy}
-                                        className="w-full inline-flex items-center justify-center gap-1.5 h-9 px-4 rounded-full border border-[var(--ds-arriving-tint)] bg-[var(--ds-surface)] text-[var(--ds-arriving-text)] text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed dark:bg-transparent"
-                                      >
-                                        {billActionLoading === 'import-pp' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Receipt className="h-4 w-4" />}
-                                        Importa dal gestionale (tav. {resvTableName})
-                                      </button>
-                                    )}
-                                  </div>
-                                );
-                              })()}
-                            </>
-                          )}
-
-                          {!billLoading && !bill && !hasPermission('payments:full') && (
-                            <p className="text-[12px] text-[var(--ds-text-muted)]">Nessun conto attivo.</p>
-                          )}
-
-                          {bill && (() => {
-                            const totalEur = (bill.bill.total_cents / 100).toFixed(2).replace('.', ',');
-                            const paidEur = (bill.paid_cents / 100).toFixed(2).replace('.', ',');
-                            const paidPct = bill.bill.total_cents > 0
-                              ? Math.min(100, Math.round((bill.paid_cents / bill.bill.total_cents) * 100))
-                              : 0;
-                            const publicUrl = bill.bill.share_token
-                              ? `${window.location.origin}/pay/${bill.bill.share_token}`
+                          {!billLoading && !bill && hasPermission('payments:full') && (() => {
+                            const busy = billActionLoading === 'open' || billActionLoading === 'open-and-notify' || billActionLoading === 'import-pp';
+                            // Fase 2 ibrida: righe e totale dalla comanda del
+                            // gestionale di sala. Visibile solo con un tavolo
+                            // assegnato — il nome è la chiave su Passepartout.
+                            const resvTableName = formData.table_id != null
+                              ? (tables.find(t => t.id === formData.table_id)?.name ?? null)
                               : null;
                             return (
                               <div className="space-y-3">
-                                <div className="flex items-center gap-3 text-[13px]">
-                                  <span className="font-semibold text-[var(--ds-text-primary)]">Totale: € {totalEur}</span>
-                                  <span className="text-[var(--ds-text-muted)]">·</span>
-                                  <span className="text-[var(--ds-text-muted)]">{bill.bill.covers} coperti</span>
+                                <p className="text-[14px] text-[var(--ds-text-muted)]">
+                                  Apri il conto per generare un QR che gli ospiti possono scansionare per pagare la propria quota.
+                                </p>
+                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,140px)_minmax(0,120px)_auto]">
+                                  <Field label="Totale">
+                                    <div className="relative">
+                                      <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">€</span>
+                                      <input
+                                        type="text"
+                                        inputMode="decimal"
+                                        placeholder="0,00"
+                                        value={billTotalInput}
+                                        onChange={e => setBillTotalInput(e.target.value)}
+                                        disabled={busy}
+                                        className={`${dsInput} pl-7`}
+                                      />
+                                    </div>
+                                  </Field>
+                                  <Field label="Coperti">
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      placeholder={formData.guests ? `${formData.guests}` : 'Coperti'}
+                                      value={billCoversInput}
+                                      onChange={e => setBillCoversInput(e.target.value)}
+                                      disabled={busy}
+                                      className={dsInput}
+                                    />
+                                  </Field>
+                                  <div className="flex items-end">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenBill()}
+                                      disabled={busy}
+                                      className={`w-full sm:w-auto ${dsButton.primary}`}
+                                    >
+                                      {billActionLoading === 'open' ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
+                                      Apri conto
+                                    </button>
+                                  </div>
                                 </div>
-
-                                <div>
-                                  <div className="flex items-center justify-between text-[11px] text-[var(--ds-text-muted)] mb-1">
-                                    <span>Pagato € {paidEur}</span>
-                                    <span>{paidPct}%</span>
-                                  </div>
-                                  <div className="h-2 overflow-hidden rounded-full bg-[var(--ds-surface-row)]">
-                                    <div className="h-full bg-[var(--ds-seated-solid)] transition-all" style={{ width: `${paidPct}%` }} />
-                                  </div>
-                                </div>
-
-                                {publicUrl && (
-                                  <div className="flex flex-col sm:flex-row gap-3 items-start">
-                                    <div className="p-2 bg-[var(--ds-surface)] rounded-[14px] border border-[var(--ds-border)] shrink-0">
-                                      <QRCodeSVG value={publicUrl} size={128} level="M" />
-                                    </div>
-                                    <div className="flex-1 min-w-0 w-full">
-                                      <div className="text-[11px] text-[var(--ds-text-muted)] mb-1">Link pubblico</div>
-                                      <div className="flex items-center gap-1.5">
-                                        <input
-                                          type="text"
-                                          readOnly
-                                          value={publicUrl}
-                                          onFocus={e => e.currentTarget.select()}
-                                          className="flex-1 min-w-0 h-8 px-3 text-[13px] rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] font-mono"
-                                        />
-                                        <button
-                                          type="button"
-                                          onClick={() => copyBillUrl(publicUrl)}
-                                          className="inline-flex items-center justify-center h-8 w-8 rounded-full text-[var(--ds-text-muted)] hover:text-[var(--ds-arriving-text)] hover:bg-[var(--ds-arriving-tint)]"
-                                          title="Copia link"
-                                        >
-                                          {copiedBillUrl ? <Check className="h-3.5 w-3.5 text-[var(--ds-seated-text)]" /> : <Copy className="h-3.5 w-3.5" />}
-                                        </button>
-                                      </div>
-                                    </div>
-                                  </div>
+                                {/* One-tap combo: open the bill AND immediately push the link
+                                    to the customer (SMS today; WhatsApp when a template lands).
+                                    Disabled if the reservation has no phone. */}
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenBill({ notify: true })}
+                                  disabled={busy || !formData.phone}
+                                  title={!formData.phone ? 'La prenotazione non ha un numero di telefono' : undefined}
+                                  className={`w-full ${dsButton.secondary}`}
+                                >
+                                  {billActionLoading === 'open-and-notify' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                                  Apri e invia link al cliente
+                                </button>
+                                {resvTableName && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleImportBillFromPassepartout(resvTableName)}
+                                    disabled={busy}
+                                    className={`w-full ${dsButton.secondary}`}
+                                  >
+                                    {billActionLoading === 'import-pp' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Receipt className="h-4 w-4" />}
+                                    Importa dal gestionale (tav. {resvTableName})
+                                  </button>
                                 )}
+                              </div>
+                            );
+                          })()}
 
-                                {bill.splits.filter(s => s.status === 'CLAIMED' || s.status === 'PAID').length > 0 && (
-                                  <div className="pt-1">
-                                    <div className="text-[11px] font-semibold text-[var(--ds-text-muted)] uppercase tracking-wide mb-1.5">
-                                      Quote ({bill.splits.filter(s => s.status === 'PAID').length} pagate)
-                                    </div>
-                                    <ul className="space-y-1">
-                                      {bill.splits.filter(s => s.status === 'CLAIMED' || s.status === 'PAID').map(s => {
-                                        const eur = (s.amount_cents / 100).toFixed(2).replace('.', ',');
-                                        return (
-                                          <li key={s.id} className="flex items-center gap-2 text-[12px]">
-                                            {s.status === 'PAID'
-                                              ? <Check className="h-3.5 w-3.5 text-[var(--ds-seated-text)] shrink-0" />
-                                              : <Loader2 className="h-3.5 w-3.5 text-[var(--ds-pending-text)] shrink-0 animate-spin" />}
-                                            <span className="text-[var(--ds-text-primary)] truncate flex-1">{s.claimant_label || 'Anonimo'}</span>
-                                            <span className="text-[10px] text-[var(--ds-text-muted)] uppercase tracking-wide">
-                                              {s.status === 'PAID' ? 'Pagata' : 'In attesa'}
-                                            </span>
-                                            <span className="text-[12px] font-medium tabular-nums">€ {eur}</span>
-                                            {s.status === 'PAID' && hasPermission('payments:full') && (
-                                              <button
-                                                type="button"
-                                                onClick={() => handleRefundSplit(s.id)}
-                                                onBlur={() => setRefundConfirmSplitId(prev => prev === s.id ? null : prev)}
-                                                disabled={refundingSplitId !== null}
-                                                title={refundConfirmSplitId === s.id ? 'Tocca di nuovo per confermare il rimborso' : 'Rimborsa quota'}
-                                                className={`inline-flex items-center gap-1 h-6 px-1.5 rounded-full text-[10px] font-semibold shrink-0 transition-colors disabled:opacity-50 ${
-                                                  refundConfirmSplitId === s.id
-                                                    ? 'bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] hover:brightness-95'
-                                                    : 'text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)]'
-                                                }`}
-                                              >
-                                                {refundingSplitId === s.id
-                                                  ? <Loader2 className="h-3 w-3 animate-spin" />
-                                                  : <RotateCcw className="h-3 w-3" />}
-                                                {refundConfirmSplitId === s.id && 'Confermi?'}
-                                              </button>
-                                            )}
-                                          </li>
-                                        );
-                                      })}
-                                    </ul>
-                                  </div>
+                          {!billLoading && !bill && !hasPermission('payments:full') && (
+                            <p className="text-[14px] text-[var(--ds-text-muted)]">Nessun conto attivo.</p>
+                          )}
+
+                          {bill && (
+                            <>
+                              <BillFigures
+                                totalCents={bill.bill.total_cents}
+                                paidCents={bill.paid_cents}
+                                residualCents={bill.residual_cents}
+                              />
+
+                              {/* The QR and the printed pre-bill moved behind this
+                                  button, into the same BillSheet the Pagamenti page
+                                  opens. One panel for a bill everywhere, and the card
+                                  leads with the figures instead of a 128px code. */}
+                              <div className="mt-4 flex flex-wrap items-center gap-2">
+                                {bill.bill.share_token && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setBillSheetOpen(true)}
+                                    className={dsButton.primary}
+                                  >
+                                    <QrCode className="h-4 w-4" /> Mostra QR al tavolo
+                                  </button>
                                 )}
-
                                 {hasPermission('payments:full') && (
-                                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                                  <>
                                     <button
                                       type="button"
                                       onClick={handleNotifyBill}
                                       disabled={billActionLoading !== null || !formData.phone}
                                       title={!formData.phone ? 'La prenotazione non ha un numero di telefono' : undefined}
-                                      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] text-[13px] font-semibold hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                                      className={dsButton.secondary}
                                     >
-                                      {billActionLoading === 'notify' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                                      Invia link al cliente
+                                      {billActionLoading === 'notify' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                                      Invia link
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={handlePrintBillQr}
+                                      disabled={billActionLoading !== null || !bill.bill.share_token}
+                                      title={!bill.bill.share_token ? 'Conto chiuso: il QR non è più valido' : undefined}
+                                      className={dsButton.secondary}
+                                    >
+                                      {billActionLoading === 'print' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                                      Stampa QR
                                     </button>
                                     <button
                                       type="button"
                                       onClick={handleCloseBill}
                                       disabled={billActionLoading !== null}
-                                      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-[var(--ds-seated-solid)] text-white text-[13px] font-semibold hover:brightness-95 disabled:opacity-50"
+                                      className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-[var(--ds-seated-tint)] px-5 text-[15px] font-semibold text-[var(--ds-seated-text)] transition-colors hover:brightness-95 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                                     >
-                                      {billActionLoading === 'close' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                                      {billActionLoading === 'close' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                                       Chiudi conto
                                     </button>
                                     <button
                                       type="button"
                                       onClick={handleVoidBill}
                                       disabled={billActionLoading !== null}
-                                      className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] text-[13px] font-semibold hover:brightness-95 disabled:opacity-50"
+                                      className="ml-auto inline-flex h-11 items-center justify-center gap-2 rounded-full px-4 text-[15px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                                     >
-                                      {billActionLoading === 'void' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />}
-                                      Annulla
+                                      {billActionLoading === 'void' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
+                                      Annulla conto
                                     </button>
-                                  </div>
+                                  </>
                                 )}
                               </div>
-                            );
-                          })()}
-                        </div>
+
+                              {bill.splits.filter(s => s.status === 'CLAIMED' || s.status === 'PAID').length > 0 && (
+                                <div className="mt-4 border-t border-[var(--ds-border)] pt-4">
+                                  <h5 className="mb-2 text-[13px] font-semibold text-[var(--ds-text-primary)]">
+                                    Quote
+                                    <span className="ml-1 font-normal text-[var(--ds-text-muted)]">
+                                      {bill.splits.filter(s => s.status === 'PAID').length} pagate
+                                    </span>
+                                  </h5>
+                                  <ul className="space-y-1.5">
+                                    {bill.splits.filter(s => s.status === 'CLAIMED' || s.status === 'PAID').map(s => {
+                                      const eur = (s.amount_cents / 100).toFixed(2).replace('.', ',');
+                                      return (
+                                        <li key={s.id} className="flex items-center gap-2 rounded-[12px] bg-[var(--ds-surface-row)] px-3 py-2 text-[14px]">
+                                          {s.status === 'PAID'
+                                            ? <Check className="h-4 w-4 shrink-0 text-[var(--ds-seated-text)]" />
+                                            : <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[var(--ds-pending-text)]" />}
+                                          <span className="min-w-0 flex-1 truncate text-[var(--ds-text-primary)]">{s.claimant_label || 'Anonimo'}</span>
+                                          <span className="text-[13px] text-[var(--ds-text-muted)]">
+                                            {s.status === 'PAID' ? 'Pagata' : 'In attesa'}
+                                          </span>
+                                          <span className="font-medium tabular-nums text-[var(--ds-text-primary)]">€ {eur}</span>
+                                          {s.status === 'PAID' && hasPermission('payments:full') && (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleRefundSplit(s.id)}
+                                              onBlur={() => setRefundConfirmSplitId(prev => prev === s.id ? null : prev)}
+                                              disabled={refundingSplitId !== null}
+                                              title={refundConfirmSplitId === s.id ? 'Tocca di nuovo per confermare il rimborso' : 'Rimborsa quota'}
+                                              className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-full px-2 text-[12px] font-semibold transition-colors disabled:opacity-50 ${
+                                                refundConfirmSplitId === s.id
+                                                  ? 'bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] hover:brightness-95'
+                                                  : 'text-[var(--ds-text-muted)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]'
+                                              }`}
+                                            >
+                                              {refundingSplitId === s.id
+                                                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                : <RotateCcw className="h-3.5 w-3.5" />}
+                                              {refundConfirmSplitId === s.id && 'Confermi?'}
+                                            </button>
+                                          )}
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </FormCard>
                       </div>
                     )}
 
                     {/* Payment link (active gateway) — only in edit mode (needs a saved reservation to attach to) */}
                     {isEditing && formData.id && (
-                      <div className="px-4 sm:px-6 pb-4 sm:pb-6">
-                        <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-4">
-                          <div className="flex items-center gap-2 mb-3">
-                            <CreditCard className="h-4 w-4 text-[var(--ds-seated-text)]" />
-                            <h4 className="text-[13px] font-semibold text-[var(--ds-text-primary)]">Richiedi acconto ({paymentProviderLabel})</h4>
-                            {formData.phone && (
-                              <span className="ml-auto text-[11px] text-[var(--ds-text-muted)]">Invio via {formData.phone}</span>
-                            )}
+                      <div className="px-4 pb-4 sm:px-6 sm:pb-6">
+                        <FormCard>
+                          <div className="mb-4 flex flex-wrap items-center gap-2">
+                            <CreditCard className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
+                            <h4 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Richiedi un acconto</h4>
+                            {/* Where the link goes, stated rather than chosen: delivery
+                                follows the booking's phone (WhatsApp, then SMS) and there
+                                is no second route to offer. */}
+                            <span className="ml-auto text-[13px] text-[var(--ds-text-muted)]">
+                              {paymentProviderLabel}{formData.phone ? ` · invio a ${formData.phone}` : ''}
+                            </span>
                           </div>
 
-                          {paymentRequests.length > 0 && (
-                            <ul className="mb-3 space-y-1.5">
-                              {paymentRequests.map(pr => {
-                                const euros = (pr.amount_cents / 100).toFixed(2).replace('.', ',');
-                                const statusColor =
-                                  pr.status === 'COMPLETED' ? 'bg-[var(--ds-seated-tint)] border-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] ' :
-                                  pr.status === 'AUTHORISED' ? 'bg-[var(--ds-arriving-tint)] border-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] ' :
-                                  pr.status === 'FAILED' || pr.status === 'CANCELLED' || pr.status === 'EXPIRED' ? 'bg-[var(--ds-critical-tint)] border-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] ' :
-                                  'bg-[var(--ds-pending-tint)] border-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] ';
-                                const statusLabel =
-                                  pr.status === 'PENDING' ? 'In attesa' :
-                                  pr.status === 'AUTHORISED' ? 'Autorizzato' :
-                                  pr.status === 'COMPLETED' ? 'Pagato' :
-                                  pr.status === 'CANCELLED' ? 'Annullato' :
-                                  pr.status === 'FAILED' ? 'Fallito' :
-                                  'Scaduto';
-                                return (
-                                  <li key={pr.id} className="flex items-center gap-2 rounded-[14px] bg-[var(--ds-surface)] px-2.5 py-1.5">
-                                    <span className="text-[13px] font-semibold text-[var(--ds-text-primary)]">€ {euros}</span>
-                                    <span className={`inline-flex items-center h-5 px-2 rounded-full border text-[10px] font-semibold ${statusColor}`}>
-                                      {statusLabel}
-                                    </span>
-                                    {pr.delivery_channel && (
-                                      <span className="text-[10px] text-[var(--ds-text-muted)] uppercase tracking-wide">
-                                        via {pr.delivery_channel}
-                                      </span>
-                                    )}
-                                    <div className="ml-auto flex items-center gap-1">
-                                      {pr.checkout_url && (
-                                        <>
-                                          <button
-                                            type="button"
-                                            onClick={() => copyPaymentLink(pr)}
-                                            className="inline-flex items-center justify-center h-7 w-7 rounded-full text-[var(--ds-text-muted)] hover:text-[var(--ds-seated-text)] hover:bg-[var(--ds-seated-tint)]"
-                                            title="Copia link"
-                                          >
-                                            {copiedPaymentId === pr.id ? <Check className="h-3.5 w-3.5 text-[var(--ds-seated-text)]" /> : <Copy className="h-3.5 w-3.5" />}
-                                          </button>
-                                          <a
-                                            href={pr.checkout_url}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="inline-flex items-center justify-center h-7 w-7 rounded-full text-[var(--ds-text-muted)] hover:text-[var(--ds-arriving-text)] hover:bg-[var(--ds-arriving-tint)]"
-                                            title="Apri link"
-                                          >
-                                            <ExternalLink className="h-3.5 w-3.5" />
-                                          </a>
-                                        </>
-                                      )}
-                                    </div>
-                                  </li>
-                                );
-                              })}
-                            </ul>
-                          )}
-
-                          <div className="grid grid-cols-1 sm:grid-cols-[110px_1fr_auto] gap-2">
-                            <div className="relative">
-                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--ds-text-muted)] text-sm">€</span>
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,150px)_1fr]">
+                            <Field label="Importo">
+                              <div className="relative">
+                                <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">€</span>
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  placeholder="0,00"
+                                  value={paymentAmount}
+                                  onChange={e => setPaymentAmount(e.target.value)}
+                                  disabled={isCreatingPayment}
+                                  className={`${dsInput} pl-7`}
+                                />
+                              </div>
+                            </Field>
+                            <Field label="Descrizione">
                               <input
                                 type="text"
-                                inputMode="decimal"
-                                placeholder="0,00"
-                                value={paymentAmount}
-                                onChange={e => setPaymentAmount(e.target.value)}
+                                placeholder="Es. acconto cena del 15/08"
+                                value={paymentDescription}
+                                onChange={e => setPaymentDescription(e.target.value)}
                                 disabled={isCreatingPayment}
-                                className="w-full h-9 pl-6 pr-3 text-[14px] rounded-full bg-[var(--ds-surface-row)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                                className={dsInput}
                               />
-                            </div>
-                            <input
-                              type="text"
-                              placeholder="Descrizione (opzionale)"
-                              value={paymentDescription}
-                              onChange={e => setPaymentDescription(e.target.value)}
-                              disabled={isCreatingPayment}
-                              className="w-full h-9 px-4 text-[14px] rounded-full bg-[var(--ds-surface-row)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                            />
+                            </Field>
+                          </div>
+
+                          <div className="mt-4 flex justify-end">
                             <button
                               type="button"
                               onClick={handleCreatePaymentRequest}
                               disabled={isCreatingPayment || !formData.phone}
-                              className="inline-flex items-center justify-center gap-1.5 h-9 px-4 rounded-full bg-[var(--ds-seated-solid)] text-white text-[14px] font-semibold hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                              className={`w-full sm:w-auto ${dsButton.primary}`}
                               title={!formData.phone ? 'La prenotazione non ha un numero di telefono' : 'Genera link e invia via WhatsApp/SMS'}
                             >
                               {isCreatingPayment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                               Invia link
                             </button>
                           </div>
+
                           {!formData.phone && (
-                            <p className="mt-2 text-[11px] text-[var(--ds-critical-text)]">
+                            <p className="mt-2 text-[13px] text-[var(--ds-critical-text)]">
                               Aggiungi un numero di telefono per inviare il link di pagamento.
                             </p>
                           )}
-                        </div>
-                      </div>
-                    )}
 
-                    {/* Unified customer-communication log — SMS, WhatsApp, and email history for this booking. Edit-mode only, same as the payment card. */}
-                    {isEditing && formData.id && (
-                      <div className="px-4 sm:px-6 pb-4 sm:pb-6">
-                        <div className="rounded-2xl border border-[var(--ds-border)] bg-[var(--ds-surface-row)] dark:bg-[var(--ds-surface)]/[0.02] overflow-hidden">
-                          <button
-                            type="button"
-                            onClick={() => setShowCommsSection(prev => !prev)}
-                            className="w-full flex items-center gap-2 p-4 hover:bg-[var(--ds-surface-row)] transition-colors"
-                            aria-expanded={showCommsSection}
-                          >
-                            <MessageCircle className="h-4 w-4 text-[var(--ds-arriving-text)]" />
-                            <h4 className="text-[13px] font-semibold text-[var(--ds-text-primary)]">Comunicazione con il cliente</h4>
-                            {outboundMessages.length > 0 && (
-                              <span className="text-[11px] text-[var(--ds-text-muted)]">· {outboundMessages.length}</span>
-                            )}
-                            <ChevronDown className={`ml-auto h-4 w-4 text-[var(--ds-text-muted)] transition-transform ${showCommsSection ? 'rotate-180' : ''}`} />
-                          </button>
-
-                          {showCommsSection && (
-                            <div className="px-4 pb-4 pt-0 border-t border-[var(--ds-border)] bg-[var(--ds-surface)]">
-                              {(formData.phone || formData.email) && (
-                                <div className="pt-3 pb-2 flex justify-end gap-2 flex-wrap">
-                                  {formData.email && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setCustomEmailSubject('');
-                                        setCustomEmailBody('');
-                                        setCustomEmailOpen(true);
-                                      }}
-                                      className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] text-[11px] font-medium hover:bg-[var(--ds-surface-row)]"
-                                      title="Componi un'email libera al cliente"
-                                    >
-                                      <Mail className="h-3 w-3" />
-                                      Nuova email
-                                    </button>
-                                  )}
-                                  <button
-                                    type="button"
-                                    onClick={() => setConfirmationPicker({
-                                      reservation: { ...(formData as Reservation) },
-                                      fromSave: false,
-                                    })}
-                                    className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)] text-[12px] font-semibold hover:brightness-95"
-                                    title="Invia una conferma prenotazione al cliente"
-                                  >
-                                    <Send className="h-3 w-3" />
-                                    Invia conferma
-                                  </button>
-                                </div>
-                              )}
-
-                              {outboundMessagesLoading ? (
-                                <div className="flex items-center gap-2 text-[12px] text-[var(--ds-text-secondary)] pt-3">
-                                  <Loader2 className="h-3 w-3 animate-spin" />
-                                  <span>Carico comunicazioni…</span>
-                                </div>
-                              ) : outboundMessages.length === 0 ? (
-                                <p className="text-[12px] text-[var(--ds-text-muted)] italic pt-3">
-                                  Nessuna comunicazione inviata per questa prenotazione.
-                                </p>
-                              ) : (
-                                <ol className="relative pt-2 pl-6">
-                                  {/* Vertical timeline rail */}
-                                  <div className="absolute left-2.5 top-4 bottom-4 w-px bg-[var(--ds-border)]" aria-hidden />
-                                  {outboundMessages.map(msg => {
-                                    const isInbound = msg.direction === 'inbound';
-                                    // A reply is an inbound message that carries an In-Reply-To
-                                    // header pointing at one of our outbound messages. Cold
-                                    // customer emails (no In-Reply-To) get the plain "Entrata"
-                                    // badge instead, so staff can tell "the customer replied
-                                    // to our confirmation" from "the customer wrote in fresh".
-                                    const isReply = isInbound && !!msg.in_reply_to;
-                                    const s = (msg.status || '').toLowerCase();
-                                    const badgeCls = isInbound
-                                      ? 'bg-[var(--ds-seated-tint)] border-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] '
-                                      : s === 'delivered' || s === 'read'
-                                        ? 'bg-[var(--ds-seated-tint)] border-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] '
-                                        : s === 'sent' || s === 'queued' || s === 'accepted' || s === 'sending'
-                                        ? 'bg-[var(--ds-arriving-tint)] border-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] '
-                                        : s === 'failed' || s === 'undelivered'
-                                        ? 'bg-[var(--ds-critical-tint)] border-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] '
-                                        : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]';
-                                    const badgeLabel = isReply
-                                      ? 'Risposta'
-                                      : isInbound
-                                      ? 'Entrata'
-                                      : s === 'delivered' || s === 'read' ? 'Consegnato'
-                                      : s === 'sent' || s === 'queued' || s === 'accepted' || s === 'sending' ? 'Inviato'
-                                      : s === 'failed' || s === 'undelivered' ? 'Fallito'
-                                      : (s || 'In coda');
-                                    const isEmail = msg.channel === 'email';
-                                    const channelLabel = msg.channel === 'sms' ? 'SMS' : msg.channel === 'whatsapp' ? 'WhatsApp' : isEmail ? 'Email' : msg.channel;
-                                    // Direction icon: outgoing → up-right arrow, incoming reply
-                                    // → the reply glyph, cold incoming → down-left arrow.
-                                    const ChannelIcon = isReply ? Reply : isInbound ? ArrowDownLeft : ArrowUpRight;
-                                    const counterparty = isInbound
-                                      ? (msg.from_email || msg.to_phone)
-                                      : (isEmail ? msg.to_email : msg.to_phone);
-                                    const counterpartyPrefix = isInbound ? 'Da: ' : 'A: ';
-                                    return (
-                                      <li key={msg.id} className="relative pb-3 last:pb-0">
-                                        {/* Timeline dot — emerald for inbound replies so the eye
-                                            can scan received-vs-sent at a glance. */}
-                                        <span className={`absolute -left-[18px] top-2 flex items-center justify-center w-5 h-5 rounded-full border ${
-                                          isInbound
-                                            ? 'bg-[var(--ds-seated-tint)] border-[var(--ds-seated-tint)] '
-                                            : 'bg-[var(--ds-arriving-tint)] border-[var(--ds-arriving-tint)] '
-                                        }`}>
-                                          <ChannelIcon className={`h-2.5 w-2.5 ${
-                                            isInbound
-                                              ? 'text-[var(--ds-seated-text)] '
-                                              : 'text-[var(--ds-arriving-text)] '
-                                          }`} />
-                                        </span>
-                                        <div className={`rounded-lg border p-2.5 ${
-                                          isInbound
-                                            ? 'bg-[var(--ds-seated-tint)] /[0.05] border-[var(--ds-seated-tint)] '
-                                            : 'bg-[var(--ds-surface-row)] dark:bg-[var(--ds-surface)]/[0.02] border-[var(--ds-border)]'
-                                        }`}>
-                                          <div className="flex items-center justify-between gap-2 mb-1">
-                                            <div className="flex items-center gap-2 text-[11px] text-[var(--ds-text-secondary)] min-w-0">
-                                              <span className="font-medium text-[var(--ds-text-primary)]">{channelLabel}</span>
-                                              {counterparty && (
-                                                <>
-                                                  <span>·</span>
-                                                  <span className="truncate max-w-[180px]" title={counterparty}>
-                                                    {counterpartyPrefix}{counterparty}
-                                                  </span>
-                                                </>
-                                              )}
-                                              <span>·</span>
-                                              <span className="tabular whitespace-nowrap">{formatDateTime(msg.sent_at)}</span>
-                                            </div>
-                                            <span className={`inline-flex items-center h-5 px-2 rounded-full border text-[10px] font-semibold shrink-0 ${badgeCls}`}>
-                                              {badgeLabel}
-                                            </span>
-                                          </div>
-                                          {isEmail && msg.subject && (
-                                            <p className="text-[12px] font-semibold text-[var(--ds-text-primary)] mb-0.5">
-                                              {msg.subject}
-                                            </p>
-                                          )}
-                                          <p className="text-[13px] text-[var(--ds-text-primary)] whitespace-pre-wrap leading-relaxed">
-                                            {msg.body}
-                                          </p>
-                                          {msg.error_message && (
-                                            <div className="mt-1 flex items-start gap-1 text-[11px] text-[var(--ds-critical-text)]">
-                                              <AlertCircle className="h-3 w-3 mt-0.5 shrink-0" />
-                                              <span>{msg.error_code ? `${msg.error_code}: ` : ''}{msg.error_message}</span>
-                                            </div>
-                                          )}
-                                        </div>
-                                      </li>
-                                    );
-                                  })}
-                                </ol>
-                              )}
+                          {paymentRequests.length > 0 && (
+                            <div className="mt-4 border-t border-[var(--ds-border)] pt-4">
+                              <h5 className="mb-2 text-[13px] font-semibold text-[var(--ds-text-primary)]">
+                                Richieste già inviate
+                                <span className="ml-1 font-normal text-[var(--ds-text-muted)] tabular-nums">
+                                  {paymentRequests.length}
+                                </span>
+                              </h5>
+                              <ul className="space-y-1.5">
+                                {paymentRequests.map(pr => (
+                                  <PaymentRequestRow
+                                    key={pr.id}
+                                    request={pr}
+                                    copied={copiedPaymentId === pr.id}
+                                    onCopy={() => copyPaymentLink(pr)}
+                                  />
+                                ))}
+                              </ul>
                             </div>
                           )}
-                        </div>
+                        </FormCard>
                       </div>
                     )}
+
+                    {/* Portals to <body>, so the hidden step wrapper around it
+                        does not affect it. */}
+                    {billSheetOpen && bill && (
+                      <BillSheet
+                        bill={{
+                          id: bill.bill.id,
+                          table_name: billTableName,
+                          total_cents: bill.bill.total_cents,
+                          covers: bill.bill.covers,
+                          share_token: bill.bill.share_token,
+                          items: bill.bill.items,
+                          paid_cents: bill.paid_cents,
+                          residual_cents: bill.residual_cents,
+                        }}
+                        busy={billActionLoading === 'close'}
+                        onClose={() => setBillSheetOpen(false)}
+                        onSettle={() => { setBillSheetOpen(false); handleCloseBill(); }}
+                      />
+                    )}
+                    </section>
+
+                    {/* Step 3 — Comunicazione. The SMS, WhatsApp and email
+                        history for this booking. The accordion this used to sit
+                        behind is gone: the step is the section, so a header you
+                        had to click to reveal the only thing on screen was one
+                        tap that bought nothing. */}
+                    <section className={!isEditing || formStep === 2 ? 'block' : 'hidden'}>
+                    {isEditing && formData.id && (
+                      <div className="px-4 pb-4 sm:px-6 sm:pb-6">
+                        <MessaggiPanel
+                          messages={outboundMessages}
+                          loading={outboundMessagesLoading}
+                          phone={formData.phone}
+                          email={formData.email}
+                          onNewEmail={() => {
+                            setCustomEmailSubject('');
+                            setCustomEmailBody('');
+                            setCustomEmailOpen(true);
+                          }}
+                          onSendConfirmation={() => setConfirmationPicker({
+                            reservation: { ...(formData as Reservation) },
+                            fromSave: false,
+                          })}
+                        />
+                      </div>
+                    )}
+                    </section>
                 </div>
 
         </ModalShell>
