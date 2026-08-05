@@ -26,10 +26,18 @@ export interface SalaPrinter {
   notes: string | null;
 }
 
+export interface SalaPrintRoutes {
+  /** Nome della termica per il preconto; null = default 'preconti'. */
+  preconto: string | null;
+  /** Nome della termica per il foglietto QR del conto; null = default 'preconti'. */
+  qr: string | null;
+}
+
 export interface SalaConfig {
   fire_mode: FireMode;
   stations: SalaStation[];
   printers: SalaPrinter[];
+  print_routes: SalaPrintRoutes;
   agent: { online: boolean; last_seen_seconds: number | null };
   pending_jobs: number;
   failed_jobs: number;
@@ -68,6 +76,14 @@ const apiRequest = async <T>(url: string, options: RequestInit = {}): Promise<T>
 
 export const getSalaConfig = (): Promise<SalaConfig> =>
   apiRequest(`${API_URL}/sala/config`, { headers: getHeaders() });
+
+/** Campo assente = non toccare; null = torna al default 'preconti'. */
+export const updatePrintRoutes = (routes: Partial<SalaPrintRoutes>): Promise<{ ok: true; print_routes: SalaPrintRoutes }> =>
+  apiRequest(`${API_URL}/sala/print-routes`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(routes),
+  });
 
 export const setFireMode = (mode: FireMode): Promise<{ fire_mode: FireMode }> =>
   apiRequest(`${API_URL}/sala/fire-mode`, {
