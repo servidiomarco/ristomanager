@@ -129,6 +129,44 @@ function renderPreconto(p) {
   return Buffer.from(bytes);
 }
 
+// Foglietto solo-QR da appoggiare al tavolo: niente righe, niente prezzi di
+// dettaglio — il codice grande, il totale e basta. Il preconto completo resta
+// il documento da consegnare in mano.
+function renderQr(p) {
+  const bytes = [];
+  const push = (...b) => bytes.push(...b);
+  const text = s => push(...Buffer.from(s.replace('…', '.'), 'latin1'));
+
+  push(ESC, 0x40);
+  push(ESC, 0x74, 16);
+  push(ESC, 0x47, 1);
+  push(ESC, 0x61, 1);        // tutto centrato
+  push(GS, 0x21, 0x11);      // double w+h
+  text('PAGA IL CONTO\n');
+  push(GS, 0x21, 0x00);
+  text(`Tavolo ${p.table_name ?? '-'}\n\n`);
+
+  if (p.share_url) {
+    const data = Buffer.from(p.share_url, 'latin1');
+    push(GS, 0x28, 0x6b, 4, 0, 49, 65, 50, 0);   // QR model 2
+    push(GS, 0x28, 0x6b, 3, 0, 49, 67, 10);      // module size 10
+    push(GS, 0x28, 0x6b, 3, 0, 49, 69, 51);      // error correction H
+    const len = data.length + 3;
+    push(GS, 0x28, 0x6b, len & 0xff, len >> 8, 49, 80, 48, ...data);
+    push(GS, 0x28, 0x6b, 3, 0, 49, 81, 48);      // print
+    text('\ninquadra per pagare il conto\n');
+  } else {
+    text('conto chiuso: QR non disponibile\n');
+  }
+
+  push(ESC, 0x45, 1);
+  text(`\nTOTALE EUR ${euro(p.total_cents)}\n`);
+  push(ESC, 0x45, 0);
+  text('\ndocumento non fiscale\n\n\n');
+  push(GS, 0x56, 0x42, 0x00);
+  return Buffer.from(bytes);
+}
+
 // Comanda di partita: cosa preparare, niente prezzi. Caratteri grandi e
 // quantità in evidenza — si legge da in piedi, col vapore in mezzo.
 function renderComanda(p) {
@@ -219,6 +257,7 @@ async function drainPrinter(name, dest, jobs) {
     let rendered;
     try {
       rendered = job.kind === 'PRECONTO' ? renderPreconto(job.payload)
+               : job.kind === 'QR' ? renderQr(job.payload)
                : job.kind === 'COMANDA' ? renderComanda(job.payload)
                : job.kind === 'TEST' ? renderTest(job.payload)
                : null;

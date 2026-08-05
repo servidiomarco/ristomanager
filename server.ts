@@ -17938,9 +17938,17 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
 
         const printer = /^[a-z0-9_-]{1,30}$/i.test(String(req.body?.printer ?? ''))
             ? String(req.body.printer) : 'preconti';
+
+        // 'QR' stampa il foglietto col solo codice da appoggiare al tavolo;
+        // 'PRECONTO' (default) il dettaglio completo. Il solo-QR senza un QR
+        // non ha senso: conto chiuso o origin mancante → 409, non un foglio vuoto.
+        const kind = req.body?.kind === 'QR' ? 'QR' : 'PRECONTO';
+        if (kind === 'QR' && !shareUrl) {
+            return res.status(409).json({ error: 'qr_unavailable', message: 'Il conto non ha più un QR valido' });
+        }
         const ins = await queryWithRetry(
             `INSERT INTO print_jobs (kind, payload, printer, created_by_user_id)
-             VALUES ('PRECONTO', $1, $3, $2) RETURNING id`,
+             VALUES ($4, $1, $3, $2) RETURNING id`,
             [JSON.stringify({
                 bill_id: bill.id,
                 table_name: bill.table_name ?? null,
@@ -17948,7 +17956,7 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
                 total_cents: bill.total_cents,
                 items,
                 share_url: shareUrl,
-            }), req.user?.userId ?? null, printer]
+            }), req.user?.userId ?? null, printer, kind]
         );
         res.status(201).json({ id: ins.rows[0].id, status: 'PENDING' });
     } catch (err: any) {

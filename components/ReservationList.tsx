@@ -756,7 +756,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [billLoading, setBillLoading] = useState(false);
   const [billTotalInput, setBillTotalInput] = useState<string>('');
   const [billCoversInput, setBillCoversInput] = useState<string>('');
-  const [billActionLoading, setBillActionLoading] = useState<'open' | 'open-and-notify' | 'notify' | 'close' | 'void' | 'import-pp' | 'print' | null>(null);
+  const [billActionLoading, setBillActionLoading] = useState<'open' | 'open-and-notify' | 'notify' | 'close' | 'void' | 'import-pp' | 'print-qr' | 'print-preconto' | null>(null);
   // The QR and the pre-bill print live in the shared BillSheet rather than
   // inline in the card, so a bill looks and behaves the same here, on the
   // Pagamenti page and in OrderPad.
@@ -2225,16 +2225,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     }
   };
 
-  // Stampa il preconto sulla termica in sala: contiene il QR grande del
-  // link pubblico ("inquadra per pagare il conto"), quindi e' il modo piu'
-  // rapido per portare il codice fisicamente al tavolo.
-  const handlePrintBillQr = async () => {
+  // Due stampe sulla termica in sala: il foglietto solo-QR da appoggiare al
+  // tavolo e il preconto completo con le righe (che il QR ce l'ha in fondo).
+  const handlePrintBill = async (kind: 'QR' | 'PRECONTO') => {
     if (!bill) return;
-    setBillActionLoading('print');
+    setBillActionLoading(kind === 'QR' ? 'print-qr' : 'print-preconto');
     try {
-      await printBill(bill.bill.id);
+      await printBill(bill.bill.id, kind);
       // "in coda", non "stampato": la conferma vera e' la termica che parte.
-      showToast('Preconto con QR inviato alla stampante', 'success');
+      showToast(kind === 'QR' ? 'QR inviato alla stampante' : 'Preconto inviato alla stampante', 'success');
     } catch (err: any) {
       showToast(err?.message || 'Stampa non riuscita', 'error');
     } finally {
@@ -5657,13 +5656,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     </button>
                                     <button
                                       type="button"
-                                      onClick={handlePrintBillQr}
+                                      onClick={() => handlePrintBill('QR')}
                                       disabled={billActionLoading !== null || !bill.bill.share_token}
                                       title={!bill.bill.share_token ? 'Conto chiuso: il QR non è più valido' : undefined}
                                       className={dsButton.secondary}
                                     >
-                                      {billActionLoading === 'print' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                                      {billActionLoading === 'print-qr' ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
                                       Stampa QR
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handlePrintBill('PRECONTO')}
+                                      disabled={billActionLoading !== null}
+                                      className={dsButton.secondary}
+                                    >
+                                      {billActionLoading === 'print-preconto' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                                      Stampa preconto
                                     </button>
                                     <button
                                       type="button"
