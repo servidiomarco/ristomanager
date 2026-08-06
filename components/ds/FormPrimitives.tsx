@@ -281,4 +281,11 @@ export const dsButton = {
     'inline-flex items-center justify-center gap-2 h-11 px-5 rounded-full text-[15px] font-medium bg-[var(--ds-surface)] text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] hover:bg-[var(--ds-surface-row)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]',
   quiet:
     'inline-flex items-center justify-center gap-2 h-11 px-5 rounded-full text-[15px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]',
+  /* The confirm button of a destructive dialog, and nowhere else. Everywhere
+     else a destructive action stays quiet — a pale-tinted icon button beside a
+     solid primary — because visual weight belongs to what someone wants, not to
+     what they might regret. Here the intent is already committed to, which is
+     the one place `critical` may carry full weight (§7.5, ConfirmDialog). */
+  critical:
+    'inline-flex items-center justify-center gap-2 h-11 px-5 rounded-full text-[15px] font-semibold bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]',
 } as const;

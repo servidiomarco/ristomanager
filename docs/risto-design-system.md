@@ -617,6 +617,7 @@ floor, but expect to refine them against real screens during the revamp.
 | `state-tint` | `states.X.tint` fill, `states.X.text` | Lower-emphasis coloured action |
 | `quiet` | `surface-row` fill, `text-secondary` | Low emphasis (Libera) |
 | `destructive-icon` | `critical.tint` fill, `critical.text` glyph | Cancel / dismiss (×) |
+| `critical` | `critical.solid` fill, `critical.fg` text | Confirm of a destructive dialog — **only** there |
 | `text` | No fill, `text-primary`, medium weight | Navigation (Apri →) |
 
 Minimum height 40px, horizontal padding 16px, 44px hit area. **`padding: 0` is never valid.**
@@ -632,6 +633,15 @@ regardless of visual size. Requires `aria-label`. Two fills: **bare** (transpare
 on hover) for controls inside a row or card, and **filled** (`surface-row`) for standalone
 controls in chrome, where a visible target matters more than restraint. Filled icon buttons
 sitting in a row with a `primary` action share its diameter so the cluster reads as one set.
+
+**StepArrow** [obs] — the two icon-only controls that walk a stepped form one step at a time:
+back at the far left of the footer, forward past the save button. A recessed `surface-row`
+fill, not the white-on-canvas icon button — a modal footer sits on the panel's own white, so a
+white button with a shadow has nothing to lift off. 44px, same geometry as the Modal close.
+
+They are deliberately **unlabelled**. "Indietro" / "Avanti" read as the way through the form,
+and no stepped form here gates its steps: the stepper in the subheader is the navigation, and
+these only nudge it.
 
 ### 7.2 Form controls
 
@@ -847,6 +857,12 @@ inset from the viewport by `chrome-inset`, sitting on the canvas. Not edge-to-ed
 Focus trapped, Escape closes, focus returns to the trigger. At `<md` becomes a bottom sheet:
 full-width, top corners only, slide up at `motion.slow`.
 
+**The footer stacks by default and stays in a row on request.** Below `sm` its two groups drop
+onto their own full-width rows, which is right for a footer of labelled buttons a thumb wants
+to be wide. A footer built around a single primary action flanked by icon-only controls — a
+stepped form's `StepArrow`s — asks for the row instead: stacked, three related controls become
+three separate rows and the one that matters ends up buried between the two that don't.
+
 **ConfirmDialog** [der] — a Modal with title, body, and an action row. **The safe action is
 the primary.** A destructive confirmation uses `state-solid` with the `critical` family for
 the confirm button and a `secondary` cancel — this is the one place `critical` may carry
@@ -895,6 +911,22 @@ hover, so anything essential belongs in visible text.
 **DropdownMenu** [der] — `surface` fill, `rounded.lg`, `elevation.raised`, at `z.dropdown`.
 Items are 40px rows with `surface-row` hover. Arrow-key navigation, type-ahead. Distinct from
 Popover: menus hold *actions*, popovers hold *content*.
+
+**A menu anchored to its trigger is the default at every width**, including touch — a short
+menu hanging off a header is easy to hit and easy to dismiss, and a sheet for two items is
+ceremony. It **becomes a bottom sheet below the screen's own breakpoint** in two cases:
+
+- the trigger is small and sits in something that scrolls — a calendar cell, a row in a long
+  list — where an anchored menu drifts off its own origin and there is nothing dimmed to say
+  where "outside" is;
+- the menu is long enough that an anchored panel would cover the thing it acts on.
+
+The sheet carries a grab handle, 56px rows and a backdrop that dismisses; it does **not**
+repeat the record's name, which is already on the card it was opened from, and it needs no
+"Annulla" — the handle, the backdrop and Escape all say the same thing three times over.
+
+This is a **container** choice, not a styling one: pick the tree with `useMediaQuery`, never
+render both and hide one — rule 13 in §8.
 
 ### 7.6 Data
 

@@ -62,11 +62,6 @@ const stockKey = (productId: number, locationId: number): string => `${productId
 // no category, so "Senza categoria" behaves like any other group.
 const UNCATEGORIZED = -1;
 
-// Destructive confirmations. dsButton has no critical weight — deleting is rare
-// enough that it stays a one-off rather than a fourth button in the barrel, and
-// this matches the inline confirm already used in SupplierManagementModal.
-const dsButtonCritical =
-  'inline-flex items-center justify-center gap-2 h-11 px-5 rounded-full text-[15px] font-semibold bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] transition-opacity hover:opacity-90 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 // The quiet round control that sits at the end of a row.
 const rowIconButton =
@@ -1706,7 +1701,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
             <button
               type="button"
               onClick={() => confirmDeleteCategoryId != null && handleDeleteCategory(confirmDeleteCategoryId)}
-              className={dsButtonCritical}
+              className={dsButton.critical}
             >
               Elimina
             </button>
@@ -1735,7 +1730,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
             <button
               type="button"
               onClick={() => confirmDeleteLocationId != null && handleDeleteLocation(confirmDeleteLocationId)}
-              className={dsButtonCritical}
+              className={dsButton.critical}
             >
               Elimina
             </button>
@@ -1763,7 +1758,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
             <button
               type="button"
               onClick={() => confirmDeleteProductId != null && handleDeleteProduct(confirmDeleteProductId)}
-              className={dsButtonCritical}
+              className={dsButton.critical}
             >
               Elimina
             </button>

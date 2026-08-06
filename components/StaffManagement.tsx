@@ -109,8 +109,6 @@ const plural = (n: number, one: string, many: string): string => `${n} ${n === 1
  *  'none'     nothing */
 type SlotState = 'present' | 'absent' | 'off' | 'rest' | 'implicit' | 'none';
 
-const dsButtonCritical =
-  'inline-flex items-center justify-center gap-2 h-11 px-5 rounded-full text-[15px] font-semibold bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] transition-opacity hover:opacity-90 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 const rowIconButton =
   'inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
