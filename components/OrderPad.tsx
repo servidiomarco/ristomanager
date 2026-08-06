@@ -167,6 +167,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
       }
       setOrder(view);
       setTableId(id);
+      setOpenTables(prev => new Set(prev).add(id));
       setCart([]);
       // Nuova uscita = quella dopo l'ultima già mandata, così il cameriere
       // non deve ricordarsi a che punto era.
@@ -182,7 +183,10 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
   // Segna quali tavoli hanno già una comanda aperta NEL SERVIZIO SELEZIONATO,
   // così il cameriere sceglie consapevolmente invece di scoprirlo dopo — e
   // navigando a un servizio passato vede subito i tavoli con comande appese.
+  // Rigira a OGNI ritorno in griglia (tableId → null): l'evidenza calcolata
+  // solo al mount restava blu anche dopo la chiusura del conto.
   useEffect(() => {
+    if (tableId != null) return; // griglia non a schermo: niente da scandire
     let cancelled = false;
     (async () => {
       const found = new Set<number>();
@@ -192,7 +196,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
       if (!cancelled) setOpenTables(found);
     })();
     return () => { cancelled = true; };
-  }, [tables, serviceQuery]);
+  }, [tables, serviceQuery, tableId]);
 
   const addToCart = (dish: Dish, modifierIds: number[] = []) => {
     const groups = groupsForDish(dish.id);
@@ -295,6 +299,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
       setClosing(false);
       if (res.bill) setJustClosed(res.bill);
       else setFlash('Comanda chiusa: non c\'era nulla da pagare');
+      // Ottimistico: il tavolo torna neutro subito, senza aspettare il rescan.
+      if (tableId != null) setOpenTables(prev => { const n = new Set(prev); n.delete(tableId); return n; });
       setTableId(null); setOrder(null); setCart([]);
     } catch (err: any) {
       const data = err?.data;
