@@ -12,6 +12,9 @@ import {
   type MenuCatalogue, type NewOrderItem, type CloseOrderResult,
 } from '../services/ordersApiService';
 import { BillSheet } from './pagamenti/BillSheet';
+import { billsApiService } from '../services/billsApiService';
+import { socketClient } from '../services/socketClient';
+import type { ServiceBill } from '../services/ordersApiService';
 
 // ---------------------------------------------------------------------------
 // Palmare cameriere — la comanda si compone qui e parte con un tocco.
@@ -84,9 +87,13 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
   // mentre il tavolo aspetta.
   const [justClosed, setJustClosed] = useState<CloseOrderResult['bill'] | null>(null);
   const [openTables, setOpenTables] = useState<Set<number>>(new Set());
-  // Tavoli con conto attivo non incassato nel servizio selezionato: la
-  // comanda è chiusa ma il tavolo non è libero finché non si paga.
-  const [billTables, setBillTables] = useState<Set<number>>(new Set());
+  // Conti attivi non incassati nel servizio selezionato, per tavolo: la
+  // comanda è chiusa ma il tavolo non è libero finché non si paga. Toccare
+  // un tavolo in questo stato apre IL CONTO (stato pagamenti compreso),
+  // non una comanda nuova.
+  const [serviceBills, setServiceBills] = useState<Map<number, ServiceBill>>(new Map());
+  const [viewBill, setViewBill] = useState<ServiceBill | null>(null);
+  const billTables = useMemo(() => new Set(serviceBills.keys()), [serviceBills]);
 
   useEffect(() => {
     getMenuCatalogue().then(setCatalogue).catch(() => setCatalogue(null));
@@ -146,11 +153,19 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
   }), [selectedDateRome, globalShiftFilter]);
   const isTodayRome = selectedDateRome === getRomeDatePart(new Date());
 
-  const loadTable = useCallback(async (id: number) => {
+  const loadTable = useCallback(async (id: number, opts?: { forceCreate?: boolean }) => {
     setBusy(true); setError(null);
     try {
       let view = await ordersApiService.getOrderByTable(id, serviceQuery);
       if (!view) {
+        // Tavolo con conto da incassare: si apre IL CONTO, con lo stato dei
+        // pagamenti. La comanda nuova solo da lì, su azione esplicita —
+        // toccare il tavolo per guardare il conto non deve crearne una.
+        const bill = serviceBills.get(id);
+        if (bill && !opts?.forceCreate) {
+          setViewBill(bill);
+          return;
+        }
         // Nei servizi passati si riprende, non si crea: il server marcherebbe
         // comunque la comanda nuova sul servizio in corso, e il cameriere
         // crederebbe di averla aperta il giorno che sta guardando.
@@ -181,7 +196,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
     } finally {
       setBusy(false);
     }
-  }, [reservationForTable, tables, serviceQuery, isTodayRome]);
+  }, [reservationForTable, tables, serviceQuery, isTodayRome, serviceBills]);
 
   // Segna quali tavoli hanno già una comanda aperta NEL SERVIZIO SELEZIONATO,
   // così il cameriere sceglie consapevolmente invece di scoprirlo dopo — e
@@ -200,8 +215,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
     })();
     (async () => {
       try {
-        const bills = await ordersApiService.getTablesBillsStatus(serviceQuery);
-        if (!cancelled) setBillTables(new Set(bills.tables.map(t => t.table_id)));
+        const res = await ordersApiService.getTablesBillsStatus(serviceQuery);
+        if (!cancelled) setServiceBills(new Map(res.bills.map(b => [b.table_id, b])));
       } catch { /* ignora: la griglia resta senza lo stato conti */ }
     })();
     return () => { cancelled = true; };
@@ -314,7 +329,14 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
         setOpenTables(prev => { const n = new Set(prev); n.delete(tableId); return n; });
         if (res.bill && res.bill.total_cents > 0) {
           const tid = tableId;
-          setBillTables(prev => new Set(prev).add(tid));
+          const b = res.bill;
+          setServiceBills(prev => new Map(prev).set(tid, {
+            id: b.id, table_id: tid,
+            table_name: tables.find(t => t.id === tid)?.name ?? null,
+            total_cents: b.total_cents, covers: b.covers, status: 'OPEN',
+            share_token: b.share_token, items: b.items ?? null,
+            paid_cents: 0, residual_cents: b.total_cents, open_orders: 0,
+          }));
         }
       }
       setTableId(null); setOrder(null); setCart([]);
@@ -382,6 +404,51 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
     }
   };
 
+  // Chiusura in cassa dal foglio conto aperto sul tavolo. Il residuo che
+  // resta è una decisione dell'operatore (SETTLED_PARTIAL), quindi dopo la
+  // chiusura il tavolo torna libero.
+  const settleViewBill = async () => {
+    if (!viewBill || busy) return;
+    setBusy(true); setError(null);
+    try {
+      await billsApiService.closeBill(viewBill.id);
+      setServiceBills(prev => { const n = new Map(prev); n.delete(viewBill.table_id); return n; });
+      setViewBill(null);
+      setFlash('Conto chiuso in cassa');
+    } catch (err: any) {
+      setError(err?.data?.error ?? err?.message ?? 'Chiusura non riuscita');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Lo stato dei pagamenti cambia sotto gli occhi (quote via QR, chiusure da
+  // altri dispositivi): il foglio conto e la griglia si riallineano da soli.
+  useEffect(() => {
+    const socket = socketClient.getSocket();
+    if (!socket) return;
+    const refresh = async () => {
+      try {
+        const res = await ordersApiService.getTablesBillsStatus(serviceQuery);
+        const map = new Map(res.bills.map(b => [b.table_id, b]));
+        setServiceBills(map);
+        setViewBill(prev => {
+          if (!prev) return prev;
+          const fresh = res.bills.find(b => b.id === prev.id);
+          if (fresh) return fresh;
+          setFlash('Conto saldato · tavolo libero');
+          return null;
+        });
+      } catch { /* al prossimo evento o rescan */ }
+    };
+    socket.on('bill:updated', refresh);
+    socket.on('bill:closed', refresh);
+    return () => {
+      socket.off('bill:updated', refresh);
+      socket.off('bill:closed', refresh);
+    };
+  }, [serviceQuery]);
+
   // ---------------- selezione tavolo ----------------
   if (!tableId || !order) {
     return (
@@ -391,6 +458,32 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
           Scegli il tavolo per aprire o riprendere la comanda.
         </p>
         {error && <ErrorBar message={error} onDismiss={() => setError(null)} />}
+        {viewBill && !justClosed && (
+          <BillSheet
+            bill={{
+              id: viewBill.id,
+              table_name: viewBill.table_name,
+              total_cents: viewBill.total_cents,
+              covers: viewBill.covers,
+              share_token: viewBill.share_token,
+              items: viewBill.items,
+              paid_cents: viewBill.paid_cents,
+              residual_cents: viewBill.residual_cents,
+              open_orders: viewBill.open_orders,
+            }}
+            busy={busy}
+            onClose={() => setViewBill(null)}
+            onSettle={settleViewBill}
+            footerExtra={
+              <button
+                onClick={() => { const tid = viewBill.table_id; setViewBill(null); loadTable(tid, { forceCreate: true }); }}
+                disabled={busy}
+                className="w-full py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 text-sm font-medium disabled:opacity-50">
+                Nuova comanda su questo tavolo
+              </button>
+            }
+          />
+        )}
         {justClosed && (
           <BillSheet
             bill={{

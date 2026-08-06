@@ -232,7 +232,9 @@ export const BillSheet: React.FC<{
   busy?: boolean;
   onClose: () => void;
   onSettle?: () => void;
-}> = ({ bill, busy, onClose, onSettle }) => (
+  /** Azione aggiuntiva in coda al footer (es. "nuova comanda" dal palmare). */
+  footerExtra?: React.ReactNode;
+}> = ({ bill, busy, onClose, onSettle, footerExtra }) => (
   <Sheet
     open
     onClose={onClose}
@@ -241,7 +243,12 @@ export const BillSheet: React.FC<{
     subtitle={billSubtitle(bill)}
     meta={<BillMeta bill={bill} />}
     bodyClassName="space-y-3 px-4 pb-5 pt-4 sm:px-5"
-    footer={onSettle && <SettleButton bill={bill} busy={busy} onSettle={onSettle} />}
+    footer={(onSettle || footerExtra) && (
+      <div className="space-y-2">
+        {onSettle && <SettleButton bill={bill} busy={busy} onSettle={onSettle} />}
+        {footerExtra}
+      </div>
+    )}
   >
     <BillBody bill={bill} />
   </Sheet>

@@ -100,10 +100,14 @@ class OrdersApiService {
     }
   }
 
-  /** Tavoli del servizio con un conto attivo non ancora incassato. */
+  /** Conti attivi non incassati del servizio, per la griglia e per il
+   *  foglio conto aperto dal tavolo. */
   async getTablesBillsStatus(
     service?: { date?: string; shift?: 'LUNCH' | 'DINNER' }
-  ): Promise<{ tables: { table_id: number; residual_cents: number }[] }> {
+  ): Promise<{
+    bills: ServiceBill[];
+    tables: { table_id: number; residual_cents: number }[];
+  }> {
     const params = new URLSearchParams();
     if (service?.date) params.set('date', service.date);
     if (service?.shift) params.set('shift', service.shift);
@@ -367,3 +371,18 @@ export const getKitchenReport = async (from?: string, to?: string): Promise<Kitc
   const qs = q.toString();
   return apiRequest<KitchenReport>(`${API_URL}/reports/kitchen${qs ? `?${qs}` : ''}`, { headers: getHeaders() });
 };
+
+/** Conto attivo del servizio, come lo restituisce /tables/bills-status. */
+export interface ServiceBill {
+  id: number;
+  table_id: number;
+  table_name: string | null;
+  total_cents: number;
+  covers: number;
+  status: string;
+  share_token: string | null;
+  items: { order_item_id?: number; name: string; qty: number; unit_price_cents: number }[] | null;
+  paid_cents: number;
+  residual_cents: number;
+  open_orders: number;
+}

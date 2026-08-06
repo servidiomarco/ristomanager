@@ -16199,21 +16199,39 @@ app.get('/tables/bills-status', authenticate, requirePermission('orders:view'), 
         if (!(await ordersEnabledGuard(res))) return;
         const service = serviceFromQuery(req.query);
         const rows = await queryWithRetry(
-            `SELECT b.table_id,
-                    (b.total_cents
-                     - COALESCE((SELECT SUM(s.amount_cents)::int FROM table_bill_splits s
-                                 WHERE s.table_bill_id = b.id AND s.status = 'PAID'), 0)
-                     - b.cash_settled_cents) AS residual_cents
+            `SELECT b.id, b.table_id, b.total_cents, b.covers, b.status,
+                    b.share_token, b.items, b.cash_settled_cents,
+                    t.name AS table_name,
+                    COALESCE((SELECT SUM(s.amount_cents)::int FROM table_bill_splits s
+                              WHERE s.table_bill_id = b.id AND s.status = 'PAID'), 0) AS paid_cents,
+                    (SELECT COUNT(*)::int FROM orders o
+                     WHERE o.table_bill_id = b.id AND o.status = 'OPEN') AS open_orders
              FROM table_bills b
+             LEFT JOIN tables t ON t.id = b.table_id
              WHERE b.table_id IS NOT NULL
                AND b.status IN ('OPEN','LOCKED')
                AND b.service_date = $1 AND b.shift = $2`,
             [service.service_date, service.shift]
         );
+        const bills = rows.rows
+            .map((r: any) => ({
+                id: r.id,
+                table_id: r.table_id,
+                table_name: r.table_name ?? null,
+                total_cents: Number(r.total_cents),
+                covers: r.covers,
+                status: r.status,
+                share_token: r.share_token,
+                items: r.items ?? null,
+                paid_cents: Number(r.paid_cents) + Number(r.cash_settled_cents),
+                residual_cents: Number(r.total_cents) - Number(r.paid_cents) - Number(r.cash_settled_cents),
+                open_orders: Number(r.open_orders),
+            }))
+            .filter((b: any) => b.residual_cents > 0);
         res.json({
-            tables: rows.rows
-                .filter((r: any) => Number(r.residual_cents) > 0)
-                .map((r: any) => ({ table_id: r.table_id, residual_cents: Number(r.residual_cents) })),
+            bills,
+            // retrocompatibilità col client della griglia
+            tables: bills.map((b: any) => ({ table_id: b.table_id, residual_cents: b.residual_cents })),
         });
     } catch (err: any) {
         console.error('GET /tables/bills-status error:', err);
