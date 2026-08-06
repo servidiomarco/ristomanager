@@ -4,6 +4,7 @@ import { getFeatureFlags, updateFeatureFlags, FeatureFlags } from '../services/a
 import {
   getSalaConfig, setFireMode, createStation, updateStation,
   createPrinter, updatePrinter, deletePrinter, testPrinter,
+  setCategoryStation,
   getSalaProfiles, createSalaProfile, updateSalaProfile,
   activateSalaProfile, detachSalaProfile, deleteSalaProfile,
   updatePrintRoutes,
@@ -256,6 +257,42 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
           </div>
           <p className="text-[12px] text-[var(--color-fg-muted)] mt-1.5">
             "Solo schermo" = la partita lavora dal monitor Cucina. Con una stampante, al lancio dell'uscita esce anche la comanda di carta.
+          </p>
+        </section>
+
+        {/* ---- Categorie → partite ---- */}
+        <section>
+          <h5 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-2">
+            Partita per categoria di menu
+          </h5>
+          <div className="rounded-md border border-[var(--color-line)] divide-y divide-[var(--color-line)]">
+            {config.categories.map(cat => (
+              <div key={cat} className="flex items-center gap-3 px-3 py-2">
+                <span className="flex-1 min-w-0 text-[13px] font-medium text-[var(--color-fg)] truncate">{cat}</span>
+                <select
+                  value={config.category_stations[cat] ?? ''}
+                  disabled={!canEdit || saving}
+                  onChange={e => act(
+                    () => setCategoryStation(cat, e.target.value ? Number(e.target.value) : null),
+                    e.target.value
+                      ? `${cat} → ${config.stations.find(s => s.id === Number(e.target.value))?.name ?? 'partita'}`
+                      : `${cat}: senza partita`
+                  )}
+                  className="text-[13px] rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1 disabled:opacity-60">
+                  <option value="">Senza partita</option>
+                  {config.stations.filter(s => s.is_active).map(s => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+            ))}
+            {config.categories.length === 0 && (
+              <p className="px-3 py-3 text-[13px] text-[var(--color-fg-muted)]">Nessuna categoria in anagrafica piatti.</p>
+            )}
+          </div>
+          <p className="text-[12px] text-[var(--color-fg-muted)] mt-1.5">
+            I piatti senza partita assegnata seguono la loro categoria — anche quelli creati in futuro.
+            Vale per le comande inviate da qui in poi; un'assegnazione esplicita sul singolo piatto vince sempre.
           </p>
         </section>
 

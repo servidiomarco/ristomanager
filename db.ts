@@ -2541,6 +2541,17 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
         `);
+        // Partita di default per categoria di menu: i piatti senza partita
+        // esplicita seguono la loro categoria (Antipasti → centro Antipasti…),
+        // compresi i piatti creati domani. Risolta al momento dell'invio della
+        // comanda, mai retroattiva.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS category_stations (
+                category VARCHAR(100) PRIMARY KEY,
+                station_id INTEGER NOT NULL REFERENCES stations(id) ON DELETE CASCADE
+            );
+        `);
+
         // Profili di configurazione Sala & Cucina: uno snapshot con nome di
         // fire mode + partite + stampanti. Il modulo resta generico; il
         // ristorante specifico è un profilo che si attiva (o si scollega)

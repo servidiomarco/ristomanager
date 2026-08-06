@@ -16271,8 +16271,16 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
             }
             const seatNo = raw?.seat_no != null ? Math.round(Number(raw.seat_no)) : null;
 
+            // La partita della riga: quella del piatto se assegnata, altrimenti
+            // quella mappata sulla sua CATEGORIA (Impostazioni → Sala & Cucina).
+            // Risolta e congelata qui: cambiare la mappa domani non deve
+            // spostare le comande di stasera fra i monitor.
             const dish = await client.query(
-                `SELECT id, name, price, station_id FROM dishes WHERE id = $1`, [dishId]
+                `SELECT d.id, d.name, d.price,
+                        COALESCE(d.station_id, cs.station_id) AS station_id
+                 FROM dishes d
+                 LEFT JOIN category_stations cs ON cs.category = d.category
+                 WHERE d.id = $1`, [dishId]
             );
             if (dish.rows.length === 0) {
                 await client.query('ROLLBACK'); client.release();
@@ -18148,12 +18156,14 @@ async function getPrintRoutes(): Promise<Record<PrintRouteFn, string | null>> {
 
 app.get('/sala/config', authenticate, async (_req, res) => {
     try {
-        const [fireMode, stations, printers, jobs, printRoutes] = await Promise.all([
+        const [fireMode, stations, printers, jobs, printRoutes, categories, catMap] = await Promise.all([
             getCourseFireMode(),
             queryWithRetry(`SELECT id, name, color, sort_order, is_active, printer FROM stations ORDER BY sort_order, id`),
             queryWithRetry(`SELECT id, name, host, port, kind, is_active, notes FROM printers ORDER BY kind, name`),
             queryWithRetry(`SELECT status, COUNT(*)::int AS n FROM print_jobs WHERE status IN ('PENDING','FAILED') GROUP BY status`),
             getPrintRoutes(),
+            queryWithRetry(`SELECT DISTINCT category FROM dishes WHERE category IS NOT NULL AND category <> '' ORDER BY category`),
+            queryWithRetry(`SELECT category, station_id FROM category_stations`),
         ]);
         const jobCount = (s: string) => jobs.rows.find((r: any) => r.status === s)?.n ?? 0;
         res.json({
@@ -18161,6 +18171,8 @@ app.get('/sala/config', authenticate, async (_req, res) => {
             stations: stations.rows,
             printers: printers.rows,
             print_routes: printRoutes,
+            categories: categories.rows.map((r: any) => r.category),
+            category_stations: Object.fromEntries(catMap.rows.map((r: any) => [r.category, r.station_id])),
             agent: {
                 online: printAgentLastSeen != null && Date.now() - printAgentLastSeen < 30_000,
                 last_seen_seconds: printAgentLastSeen != null ? Math.round((Date.now() - printAgentLastSeen) / 1000) : null,
@@ -18170,6 +18182,33 @@ app.get('/sala/config', authenticate, async (_req, res) => {
         });
     } catch (err: any) {
         console.error('GET /sala/config error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Mappa categoria → partita. station_id null = rimuovi la mappatura (i
+// piatti di quella categoria tornano "senza partita" salvo assegnazione
+// esplicita sul singolo piatto).
+app.put('/sala/category-stations', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const category = typeof req.body?.category === 'string' ? req.body.category.trim() : '';
+        if (!category || category.length > 100) return res.status(400).json({ error: 'Categoria non valida' });
+        const stationId = req.body?.station_id != null ? Number(req.body.station_id) : null;
+        if (stationId === null) {
+            await queryWithRetry(`DELETE FROM category_stations WHERE category = $1`, [category]);
+            return res.json({ category, station_id: null });
+        }
+        if (!Number.isFinite(stationId)) return res.status(400).json({ error: 'station_id non valido' });
+        const st = await queryWithRetry(`SELECT id FROM stations WHERE id = $1`, [stationId]);
+        if (st.rows.length === 0) return res.status(404).json({ error: 'Partita non trovata' });
+        await queryWithRetry(
+            `INSERT INTO category_stations (category, station_id) VALUES ($1, $2)
+             ON CONFLICT (category) DO UPDATE SET station_id = $2`,
+            [category, stationId]
+        );
+        res.json({ category, station_id: stationId });
+    } catch (err: any) {
+        console.error('PUT /sala/category-stations error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -18399,7 +18438,15 @@ const salaSnapshot = async (): Promise<any> => {
         queryWithRetry(`SELECT name, color, printer, is_active FROM stations ORDER BY sort_order, id`),
         queryWithRetry(`SELECT name, host, port, kind, is_active, notes FROM printers ORDER BY id`),
     ]);
-    return { fire_mode: fireMode, stations: stations.rows, printers: printers.rows, print_routes: await getPrintRoutes() };
+    const catMap = await queryWithRetry(
+        `SELECT cs.category, s.name AS station_name
+         FROM category_stations cs JOIN stations s ON s.id = cs.station_id`
+    );
+    return {
+        fire_mode: fireMode, stations: stations.rows, printers: printers.rows,
+        print_routes: await getPrintRoutes(),
+        category_stations: catMap.rows,
+    };
 };
 
 const getActiveSalaProfile = async (): Promise<string | null> => {
@@ -18509,6 +18556,17 @@ app.post('/sala/profiles/:id/activate', authenticate, requirePermission('setting
                     [PRINT_ROUTE_KEYS[fn], String(v)]
                 );
             }
+        }
+        for (const cm of Array.isArray(payload?.category_stations) ? payload.category_stations : []) {
+            const cat = String(cm?.category ?? '').trim();
+            const stName = String(cm?.station_name ?? '').trim();
+            if (!cat || !stName) continue;
+            await client.query(
+                `INSERT INTO category_stations (category, station_id)
+                 SELECT $1, id FROM stations WHERE lower(name) = lower($2)
+                 ON CONFLICT (category) DO UPDATE SET station_id = EXCLUDED.station_id`,
+                [cat, stName]
+            );
         }
         await client.query(
             `INSERT INTO app_settings (key, text_value) VALUES ('sala_active_profile', $1)

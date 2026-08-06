@@ -38,6 +38,10 @@ export interface SalaConfig {
   stations: SalaStation[];
   printers: SalaPrinter[];
   print_routes: SalaPrintRoutes;
+  /** Categorie di menu presenti in anagrafica piatti. */
+  categories: string[];
+  /** Mappa categoria → id partita (solo le categorie mappate). */
+  category_stations: Record<string, number>;
   agent: { online: boolean; last_seen_seconds: number | null };
   pending_jobs: number;
   failed_jobs: number;
@@ -149,3 +153,9 @@ export const detachSalaProfile = (): Promise<{ ok: true }> =>
 
 export const deleteSalaProfile = (id: number): Promise<{ ok: true }> =>
   apiRequest(`${API_URL}/sala/profiles/${id}`, { method: 'DELETE', headers: getHeaders() });
+
+/** Associa una categoria di menu a una partita; null rimuove la mappatura. */
+export const setCategoryStation = (category: string, stationId: number | null): Promise<{ category: string; station_id: number | null }> =>
+  apiRequest(`${API_URL}/sala/category-stations`, {
+    method: 'PUT', headers: getHeaders(), body: JSON.stringify({ category, station_id: stationId }),
+  });
