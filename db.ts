@@ -2260,19 +2260,13 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 CHECK (reservation_id IS NOT NULL OR table_id IS NOT NULL)
             );
         `);
-        // Una sola comanda aperta per tavolo e per prenotazione. È il vincolo
-        // che rende sicuri due camerieri sullo stesso tavolo: entrambi
-        // scrivono sulla stessa comanda invece di crearne due, e il socket li
-        // riallinea. Strutturale e non applicativo, così la race fra due
-        // richieste simultanee la perde il database e non i clienti.
-        await client.query(`
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_one_open_per_table
-                ON orders(table_id) WHERE status = 'OPEN' AND table_id IS NOT NULL;
-        `);
-        await client.query(`
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_one_open_per_reservation
-                ON orders(reservation_id) WHERE status = 'OPEN' AND reservation_id IS NOT NULL;
-        `);
+        // Una sola comanda aperta per tavolo e per prenotazione: gli indici
+        // parziali che lo garantiscono stanno più avanti, nel blocco PR 10
+        // (unicità per servizio). Le versioni originali della PR 2 NON vanno
+        // ricreate qui: la PR 10 le droppa, e ritentarne la CREATE a ogni
+        // boot esplodeva appena i dati contenevano — legittimamente — due
+        // comande aperte sullo stesso tavolo in servizi diversi, facendo
+        // fallire l'intera migrazione in rollback.
         await client.query(`
             CREATE INDEX IF NOT EXISTS idx_orders_bill ON orders(table_bill_id)
                 WHERE table_bill_id IS NOT NULL;
