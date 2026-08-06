@@ -3445,15 +3445,16 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
         const inserted = await queryWithRetry(
             `INSERT INTO table_bills
                 (reservation_id, table_id, total_cents, covers, share_token, opened_by_user_id,
-                 items, external_ref)
-             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+                 items, external_ref, service_date, shift)
+             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10)
              RETURNING id, reservation_id, table_id, total_cents, covers, currency,
                        items, status, share_token, opened_at, closed_at,
                        opened_by_user_id, closed_by_user_id, external_ref,
                        cash_settled_cents, tip_cents, notes`,
             [id, resRow.rows[0].table_id, totalRounded, covers, shareToken, req.user?.userId ?? null,
              ppPayload ? JSON.stringify(ppPayload.items) : null,
-             ppPayload?.external_ref ?? null]
+             ppPayload?.external_ref ?? null,
+             resolveService().service_date, resolveService().shift]
         );
         const bill = inserted.rows[0];
 
@@ -17333,16 +17334,19 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
 
         let billId: number | null = order.table_bill_id;
         if (!billId) {
-            // Un conto attivo può esistere già (aperto a mano dal pay-at-table
-            // prima che il modulo comande fosse acceso): lo riusiamo invece di
-            // crearne un secondo, che l'indice unico rifiuterebbe comunque.
+            // Un conto attivo può esistere già (aperto a mano dal pay-at-table):
+            // lo riusiamo SOLO se è dello stesso servizio della comanda. Il
+            // conto mai incassato di un servizio passato resta un credito a
+            // parte — riusarlo sommava i pasti di giorni diversi sullo stesso
+            // QR, con totali tipo 137€ per un tavolo da tre.
             const existing = await client.query(
                 `SELECT id FROM table_bills
                  WHERE status IN ('OPEN','LOCKED','SETTLED','SETTLED_PARTIAL')
                    AND ((reservation_id = $1 AND $1 IS NOT NULL)
                      OR (table_id = $2 AND $2 IS NOT NULL AND reservation_id IS NULL))
+                   AND service_date = $3 AND shift = $4
                  ORDER BY opened_at DESC LIMIT 1`,
-                [order.reservation_id, order.table_id]
+                [order.reservation_id, order.table_id, order.service_date, order.shift]
             );
             if (existing.rows.length > 0) {
                 billId = existing.rows[0].id;
@@ -17350,10 +17354,12 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
                 const shareToken = crypto.randomBytes(24).toString('base64url');
                 const ins = await client.query(
                     `INSERT INTO table_bills
-                        (reservation_id, table_id, total_cents, covers, share_token, opened_by_user_id)
-                     VALUES ($1, $2, 1, $3, $4, $5)
+                        (reservation_id, table_id, total_cents, covers, share_token, opened_by_user_id,
+                         service_date, shift)
+                     VALUES ($1, $2, 1, $3, $4, $5, $6, $7)
                      RETURNING id`,
-                    [order.reservation_id, order.table_id, order.covers, shareToken, req.user?.userId ?? null]
+                    [order.reservation_id, order.table_id, order.covers, shareToken, req.user?.userId ?? null,
+                     order.service_date, order.shift]
                 );
                 billId = ins.rows[0].id;
             }
@@ -17457,15 +17463,16 @@ app.post('/tables/:id/bill', authenticate, requirePermission('payments:full'), a
             inserted = await queryWithRetry(
                 `INSERT INTO table_bills
                     (reservation_id, table_id, total_cents, covers, share_token, opened_by_user_id,
-                     items, external_ref)
-                 VALUES (NULL, $1, $2, $3, $4, $5, $6::jsonb, $7)
+                     items, external_ref, service_date, shift)
+                 VALUES (NULL, $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9)
                  RETURNING id, reservation_id, table_id, total_cents, covers, currency,
                            items, status, share_token, opened_at, closed_at,
                            opened_by_user_id, closed_by_user_id, external_ref,
                            cash_settled_cents, tip_cents, notes`,
                 [tableId, Math.round(totalCents), covers, shareToken, req.user?.userId ?? null,
                  ppPayload ? JSON.stringify(ppPayload.items) : null,
-                 ppPayload?.external_ref ?? null]
+                 ppPayload?.external_ref ?? null,
+                 resolveService().service_date, resolveService().shift]
             );
         } catch (err: any) {
             // L'indice unico ha fatto il suo lavoro: c'è già un conto attivo.

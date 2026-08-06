@@ -2364,11 +2364,12 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 END IF;
             END $$;
         `);
-        await client.query(`
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_table_bills_one_active
-                ON table_bills(COALESCE(reservation_id, -table_id))
-                WHERE status IN ('OPEN','LOCKED','SETTLED','SETTLED_PARTIAL');
-        `);
+        // L'unicità del conto attivo è PER SERVIZIO: definita più avanti, nel
+        // blocco che aggiunge service_date/shift ai conti. La versione globale
+        // originale non va ricreata qui: verrebbe droppata subito dopo, e la
+        // CREATE fallirebbe appena esistono conti attivi legittimi dello
+        // stesso tavolo in servizi diversi (stessa trappola degli indici
+        // comande risolta il 6/08).
 
         // ============================================
         // GESTIONALE DI SALA — PR 10: servizio (data + turno)
@@ -2535,6 +2536,37 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
         `);
+        // ============================================
+        // CONTI PER SERVIZIO
+        // ============================================
+        // Il conto appartiene a un servizio (giorno + turno), come le comande:
+        // senza, la chiusura di stasera riusava il conto mai incassato di ieri
+        // sullo stesso tavolo e i totali si sommavano attraverso i giorni.
+        // Backfill dal servizio della prima comanda agganciata, altrimenti
+        // derivato da opened_at (stessa regola del servizio corrente: prima
+        // delle 5 è ancora la cena del giorno prima).
+        await client.query(`ALTER TABLE table_bills ADD COLUMN IF NOT EXISTS service_date DATE;`);
+        await client.query(`ALTER TABLE table_bills ADD COLUMN IF NOT EXISTS shift VARCHAR(10);`);
+        await client.query(`
+            UPDATE table_bills b SET
+                service_date = COALESCE(
+                    (SELECT o.service_date FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
+                    CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) < 5
+                         THEN ((b.opened_at AT TIME ZONE 'Europe/Rome')::date - 1)
+                         ELSE (b.opened_at AT TIME ZONE 'Europe/Rome')::date END),
+                shift = COALESCE(
+                    (SELECT o.shift FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
+                    CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
+                         THEN 'LUNCH' ELSE 'DINNER' END)
+            WHERE b.service_date IS NULL OR b.shift IS NULL;
+        `);
+        await client.query(`DROP INDEX IF EXISTS idx_table_bills_one_active;`);
+        await client.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_table_bills_one_active_service
+                ON table_bills(COALESCE(reservation_id, -table_id), service_date, shift)
+                WHERE status IN ('OPEN','LOCKED','SETTLED','SETTLED_PARTIAL');
+        `);
+
         // Partita di default per categoria di menu: i piatti senza partita
         // esplicita seguono la loro categoria (Antipasti → centro Antipasti…),
         // compresi i piatti creati domani. Risolta al momento dell'invio della
