@@ -1013,6 +1013,17 @@ defect at least once, and each is invisible in review until it renders.
 
 ## 10. Voice & content (Italian)
 
+- **Cut it to the shortest thing that still works.** This screen is read mid-service, one
+  hand on a tray. Every word is one the reader has to get past to reach the number or the
+  button they came for, so a label earns its place or it goes. Prefer the noun to the
+  sentence, the verb to the phrase: "Assenza", not "Registra un'assenza"; "Nessun prodotto",
+  not "Non è stato trovato alcun prodotto".
+- **Say it once.** If the heading, the placeholder and the hint below a field all describe the
+  same thing, two of them are noise. A sheet does not repeat the name of the record it was
+  opened from; a confirm dialog does not restate its own title in the body.
+- **Delete the reassurance.** "Puoi sempre modificarlo dopo", "Non preoccuparti" and
+  "Attenzione:" carry no information. Where a thing really is irreversible, say what it does
+  — "L'azione non è reversibile" — and stop there.
 - **Tone:** professional but warm, never patronizing.
 - **Buttons take the imperative:** "Salva", "Elimina", "Conferma" — never "Vuoi salvare?".
 - **Errors describe the problem and the fix:** "Email non valida. Controlla il formato

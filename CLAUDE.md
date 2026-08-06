@@ -99,6 +99,7 @@ Two token layers coexist in `index.css`:
 Working rules that are easy to violate:
 
 - **Never uppercase, anywhere** (§5.2) — including when a mockup shows caps. Word shapes vanish at 10–13px, screen readers spell short caps out, and Italian accented capitals degrade (`PIÙ` → `PIU`).
+- **Cut the copy to the shortest thing that still works** (§10). These screens are read mid-service; every word sits between the reader and the number they came for. Say it once — a sheet does not repeat the name of the record it opened from — and drop reassurance like "puoi sempre modificarlo dopo", which carries no information.
 - Import primitives from the `./ds` barrel (`components/ds/index.ts`), never from the individual files.
 - `PascalCase` exports from `ds/` are components; the `ds`-prefixed camelCase exports (`dsButton`, `dsInput`, `dsIconButton`) are **class-name strings** for cases where the element must stay native.
 - **Tailwind extracts class names statically.** A template-built class such as `` `bg-[var(--ds-${family}-tint)]` `` never ships. Write the full literal for every branch.
