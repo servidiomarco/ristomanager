@@ -84,6 +84,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
   // mentre il tavolo aspetta.
   const [justClosed, setJustClosed] = useState<CloseOrderResult['bill'] | null>(null);
   const [openTables, setOpenTables] = useState<Set<number>>(new Set());
+  // Tavoli con conto attivo non incassato nel servizio selezionato: la
+  // comanda è chiusa ma il tavolo non è libero finché non si paga.
+  const [billTables, setBillTables] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     getMenuCatalogue().then(setCatalogue).catch(() => setCatalogue(null));
@@ -195,6 +198,12 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
       }));
       if (!cancelled) setOpenTables(found);
     })();
+    (async () => {
+      try {
+        const bills = await ordersApiService.getTablesBillsStatus(serviceQuery);
+        if (!cancelled) setBillTables(new Set(bills.tables.map(t => t.table_id)));
+      } catch { /* ignora: la griglia resta senza lo stato conti */ }
+    })();
     return () => { cancelled = true; };
   }, [tables, serviceQuery, tableId]);
 
@@ -299,8 +308,15 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
       setClosing(false);
       if (res.bill) setJustClosed(res.bill);
       else setFlash('Comanda chiusa: non c\'era nulla da pagare');
-      // Ottimistico: il tavolo torna neutro subito, senza aspettare il rescan.
-      if (tableId != null) setOpenTables(prev => { const n = new Set(prev); n.delete(tableId); return n; });
+      // Ottimistico: la comanda sparisce subito; se è nato un conto, il
+      // tavolo passa a "conto da incassare" invece che a libero.
+      if (tableId != null) {
+        setOpenTables(prev => { const n = new Set(prev); n.delete(tableId); return n; });
+        if (res.bill && res.bill.total_cents > 0) {
+          const tid = tableId;
+          setBillTables(prev => new Set(prev).add(tid));
+        }
+      }
       setTableId(null); setOrder(null); setCart([]);
     } catch (err: any) {
       const data = err?.data;
@@ -407,9 +423,11 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
               className={`aspect-square rounded-2xl border-2 flex flex-col items-center justify-center gap-1 transition
                 ${openTables.has(t.id)
                   ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/40'
-                  : res
-                    ? 'border-amber-400 bg-amber-50/60 dark:border-amber-600 dark:bg-amber-950/30 hover:border-amber-500'
-                    : 'border-slate-200 dark:border-slate-700 hover:border-slate-400'}
+                  : billTables.has(t.id)
+                    ? 'border-violet-500 bg-violet-50/70 dark:border-violet-600 dark:bg-violet-950/30 hover:border-violet-600'
+                    : res
+                      ? 'border-amber-400 bg-amber-50/60 dark:border-amber-600 dark:bg-amber-950/30 hover:border-amber-500'
+                      : 'border-slate-200 dark:border-slate-700 hover:border-slate-400'}
                 disabled:opacity-50`}
             >
               <span className="text-xl font-semibold">{t.name}</span>
@@ -421,6 +439,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
               )}
               {openTables.has(t.id) && (
                 <span className="text-[10px] font-medium text-sky-700 dark:text-sky-300">comanda aperta</span>
+              )}
+              {!openTables.has(t.id) && billTables.has(t.id) && (
+                <span className="text-[10px] font-medium text-violet-700 dark:text-violet-300">conto da incassare</span>
               )}
             </button>
             );

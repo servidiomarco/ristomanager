@@ -16190,6 +16190,37 @@ app.get('/orders/:id', authenticate, requirePermission('orders:view'), async (re
 
 // Comanda aperta su un tavolo — l'ingresso naturale del palmare: il cameriere
 // tocca il tavolo sulla mappa, non conosce l'id della comanda.
+// Stato dei conti per la griglia comande: i tavoli del servizio selezionato
+// con un conto attivo non ancora incassato. Una chiamata sola per tutta la
+// griglia — il cameriere deve vedere chi sta ancora per pagare, non scoprirlo
+// aprendo il tavolo.
+app.get('/tables/bills-status', authenticate, requirePermission('orders:view'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(res))) return;
+        const service = serviceFromQuery(req.query);
+        const rows = await queryWithRetry(
+            `SELECT b.table_id,
+                    (b.total_cents
+                     - COALESCE((SELECT SUM(s.amount_cents)::int FROM table_bill_splits s
+                                 WHERE s.table_bill_id = b.id AND s.status = 'PAID'), 0)
+                     - b.cash_settled_cents) AS residual_cents
+             FROM table_bills b
+             WHERE b.table_id IS NOT NULL
+               AND b.status IN ('OPEN','LOCKED')
+               AND b.service_date = $1 AND b.shift = $2`,
+            [service.service_date, service.shift]
+        );
+        res.json({
+            tables: rows.rows
+                .filter((r: any) => Number(r.residual_cents) > 0)
+                .map((r: any) => ({ table_id: r.table_id, residual_cents: Number(r.residual_cents) })),
+        });
+    } catch (err: any) {
+        console.error('GET /tables/bills-status error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.get('/tables/:id/order', authenticate, requirePermission('orders:view'), async (req, res) => {
     try {
         if (!(await ordersEnabledGuard(res))) return;

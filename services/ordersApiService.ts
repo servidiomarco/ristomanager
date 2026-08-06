@@ -100,6 +100,17 @@ class OrdersApiService {
     }
   }
 
+  /** Tavoli del servizio con un conto attivo non ancora incassato. */
+  async getTablesBillsStatus(
+    service?: { date?: string; shift?: 'LUNCH' | 'DINNER' }
+  ): Promise<{ tables: { table_id: number; residual_cents: number }[] }> {
+    const params = new URLSearchParams();
+    if (service?.date) params.set('date', service.date);
+    if (service?.shift) params.set('shift', service.shift);
+    const qs = params.toString();
+    return apiRequest(`${API_URL}/tables/bills-status${qs ? `?${qs}` : ''}`, { headers: getHeaders() });
+  }
+
   async getOrder(orderId: number): Promise<OrderWithItems> {
     return apiRequest<OrderWithItems>(`${API_URL}/orders/${orderId}`, { headers: getHeaders() });
   }
