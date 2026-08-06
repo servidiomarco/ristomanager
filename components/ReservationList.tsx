@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  ModalShell, FormCard, Field, Stepper, StepNav, SegmentedControl, dsInput, dsSelect, dsTextarea, dsButton,
+  ModalShell, FormCard, Field, Stepper, StepNav, SegmentedControl, dsInput, dsSelect, dsTextarea, dsButton, dsStepArrow,
   SearchField, SectionHeader, StatusPill, StatStrip, EmptyState, Callout, dsIconButton, CountBadge,
 } from './ds';
 import type { SectionTone, Stat } from './ds';
@@ -4497,6 +4497,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             />
           }
           fixedHeight
+          // One row at every width: back, the save, forward. Stacked, the two
+          // arrows became two lonely rows around the button.
+          footerLayout="row"
           title={isEditing ? 'Modifica prenotazione' : 'Nuova prenotazione'}
           subtitle={(() => {
             // Restates what's about to be booked, straight from the form state,
@@ -4516,6 +4519,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             const shiftLabel = formData.shift === Shift.LUNCH ? 'Pranzo' : formData.shift === Shift.DINNER ? 'Cena' : null;
             return [dayLabel, shiftLabel, time].filter(Boolean).join(' · ');
           })()}
+          /* Same pair as the banquet form: back on the far left, forward past
+             the save. Only while editing — on a new booking Pagamenti and
+             Comunicazione are greyed in the stepper because they need a saved
+             reservation, so step 0 is the only reachable one and two dead
+             arrows would say otherwise. */
+          footerStart={isEditing ? (
+            <button
+              type="button"
+              onClick={() => setFormStep(s => Math.max(0, s - 1))}
+              disabled={formStep === 0}
+              aria-label="Sezione precedente"
+              title="Sezione precedente"
+              className={dsStepArrow}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+          ) : undefined}
           footer={
             <>
               {mergeMode && selectedTablesForMerge.length > 0 && (
@@ -4523,17 +4543,28 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   Conferma l'unione tavoli prima di salvare
                 </span>
               )}
-              <button type="button" onClick={closeBookingForm} className={`w-full sm:w-auto ${dsButton.quiet}`}>
-                Annulla
-              </button>
+              {/* No Annulla: the X in the header closes the modal, and one exit
+                  is enough. */}
               <button
                 onClick={handleSubmit}
                 disabled={(mergeMode && selectedTablesForMerge.length > 0) || isSavingReservation}
-                className={`w-full sm:w-auto ${dsButton.primary}`}
+                className={`min-w-0 flex-1 sm:w-auto sm:flex-none ${dsButton.primary}`}
               >
                 {isSavingReservation && <Loader2 className="h-4 w-4 animate-spin" />}
                 {isEditing ? 'Salva modifiche' : 'Crea prenotazione'}
               </button>
+              {isEditing && (
+                <button
+                  type="button"
+                  onClick={() => setFormStep(s => Math.min(RESERVATION_STEPS.length - 1, s + 1))}
+                  disabled={formStep === RESERVATION_STEPS.length - 1}
+                  aria-label="Sezione successiva"
+                  title="Sezione successiva"
+                  className={dsStepArrow}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              )}
             </>
           }
         >

@@ -7,11 +7,17 @@ import {
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { BanquetCompositionModal } from './BanquetCompositionModal';
 import {
-  Plus, Check, Trash2, Clock, Flag, X, AlertTriangle, CheckCircle2, Loader2,
-  ListTodo, UserCircle, UsersRound, Edit2, Search, Utensils,
+  Plus, Check, Trash2, Clock, Flag, AlertTriangle, Loader2, ListTodo, ListChecks,
+  ListFilter, RotateCcw, UserCircle, UsersRound, Edit2, Utensils, Sparkles, Package,
+  Wrench, CalendarDays, PartyPopper, Users, Tag, ChevronDown, Bell, Link2,
 } from 'lucide-react';
-import { CookingPotLoader } from './CookingPotLoader';
 import { SkeletonTaskList } from './SkeletonCards';
+import {
+  StatusPill, CountBadge, SearchField, SectionHeader, StatStrip, Avatar, Callout,
+  EmptyState, ModalShell, FormCard, Field, SegmentedControl, dsInput, dsTextarea,
+  dsButton, dsIconButton,
+} from './ds';
+import type { Stat } from './ds';
 
 interface AttivitaPageProps {
   banquetMenus: BanquetMenu[];
@@ -30,13 +36,31 @@ const CATEGORY_LABELS: Record<TodoCategory, string> = {
   [TodoCategory.EVENT]: 'Evento',
 };
 
-const CATEGORY_DOT_COLORS: Record<TodoCategory, string> = {
-  [TodoCategory.GENERAL]: 'bg-slate-400',
-  [TodoCategory.RESERVATION]: 'bg-indigo-500',
-  [TodoCategory.INVENTORY]: 'bg-amber-500',
-  [TodoCategory.STAFF]: 'bg-emerald-500',
-  [TodoCategory.MAINTENANCE]: 'bg-orange-500',
-  [TodoCategory.EVENT]: 'bg-purple-500',
+/* Categories are told apart by icon, not by hue. The design system's colour
+   families are states (§3.2) — seated, arriving, pending, critical — and there
+   are four of them for six categories, so painting "Inventario" gold and
+   "Manutenzione" red would both run out of colours and make a maintenance task
+   read as a failure on a page where red already means scaduta. Six icons
+   separate cleanly at 12px and leave colour to say one thing: urgency. */
+const CATEGORY_ICONS: Record<TodoCategory, React.ComponentType<{ className?: string }>> = {
+  [TodoCategory.GENERAL]: Tag,
+  [TodoCategory.RESERVATION]: CalendarDays,
+  [TodoCategory.INVENTORY]: Package,
+  [TodoCategory.STAFF]: Users,
+  [TodoCategory.MAINTENANCE]: Wrench,
+  [TodoCategory.EVENT]: PartyPopper,
+};
+
+const PRIORITY_LABELS: Record<TodoPriority, string> = {
+  [TodoPriority.HIGH]: 'Alta',
+  [TodoPriority.MEDIUM]: 'Media',
+  [TodoPriority.LOW]: 'Bassa',
+};
+
+const PRIORITY_DOTS: Record<TodoPriority, string> = {
+  [TodoPriority.HIGH]: 'bg-[var(--ds-critical-solid)]',
+  [TodoPriority.MEDIUM]: 'bg-[var(--ds-pending-solid)]',
+  [TodoPriority.LOW]: 'bg-[var(--ds-text-muted)]',
 };
 
 const TEAM_LABELS: Record<UserRole, string> = {
@@ -77,7 +101,34 @@ const addDays = (date: Date, days: number): Date => {
   return d;
 };
 
-type StatusTab = 'TODO' | 'DONE';
+/* A due date is a plain YYYY-MM-DD, not an instant. Parsing it at local noon
+   keeps it on the day it says: `new Date('2026-08-01')` is UTC midnight, which
+   in Rome is fine but flips a day west of Greenwich. */
+const parseDueDate = (iso: string): Date => new Date(`${iso}T12:00:00`);
+
+const formatDueShort = (iso: string, todayStr: string): string => {
+  if (iso === todayStr) return 'oggi';
+  return parseDueDate(iso).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
+};
+
+const formatDueLong = (iso: string): string =>
+  parseDueDate(iso).toLocaleDateString('it-IT', { day: 'numeric', month: 'short', year: 'numeric' });
+
+const daysLate = (iso: string, todayStr: string): number =>
+  Math.round((parseDueDate(todayStr).getTime() - parseDueDate(iso).getTime()) / 86400000);
+
+const formatCompleted = (iso: string, todayStr: string): string => {
+  const d = new Date(iso);
+  const time = d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' });
+  if (formatLocalDate(d) === todayStr) return `fatta alle ${time}`;
+  return `fatta il ${d.toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })} alle ${time}`;
+};
+
+/* Four tabs, not two: "Oggi" and "Scadute" used to be figures you read in the
+   strip and then had to go find. They are the two questions the page is opened
+   to answer, so they are filters. "Da fare" still holds all of them — it is
+   everything not yet done, overdue and due-today included. */
+type StatusTab = 'TODO' | 'TODAY' | 'OVERDUE' | 'DONE';
 type ScopeFilter = 'MINE' | 'ALL';
 type PriorityFilter = 'ALL' | TodoPriority;
 type CategoryFilter = 'ALL' | TodoCategory;
@@ -90,7 +141,16 @@ interface TodoForm {
   dueDate: string;
   assignedToUserId: number | undefined;
   assignedToTeam: UserRole | undefined;
+  linkedBanquetIds: number[];
 }
+
+const PRIORITY_RANK: Record<TodoPriority, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+const sortByPriorityThenDate = (a: TodoItem, b: TodoItem) => {
+  if (PRIORITY_RANK[a.priority] !== PRIORITY_RANK[b.priority]) {
+    return PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
+  }
+  return (a.dueDate || '').localeCompare(b.dueDate || '');
+};
 
 const emptyForm: TodoForm = {
   title: '',
@@ -100,6 +160,219 @@ const emptyForm: TodoForm = {
   dueDate: '',
   assignedToUserId: undefined,
   assignedToTeam: undefined,
+  linkedBanquetIds: [],
+};
+
+/* ── Chip ─────────────────────────────────────────────────────────────────
+   A single value out of a set, laid out as a wrapping row rather than a
+   segmented track. Six categories and six teams do not fit on one line, and a
+   <select> hides the options that matter — the whole point of the filter panel
+   is seeing what is on offer without opening anything else. 44px tall, because
+   on a phone this is the primary control. */
+const Chip: React.FC<{
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}> = ({ active, onClick, children }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    aria-pressed={active}
+    className={`inline-flex h-11 max-w-full items-center gap-1.5 rounded-full px-3.5 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+      active
+        ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+        : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
+    }`}
+  >
+    {children}
+  </button>
+);
+
+/* The row's own actions. Full 44px under a thumb, compact where there is a
+   cursor and they only appear on hover anyway. */
+const rowAction =
+  'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] md:h-9 md:w-9';
+
+/* ── AssigneePill ─────────────────────────────────────────────────────────
+   Who owns it. A person wins over a team when both are set, which is what the
+   server stores anyway — assigning to one clears the other. */
+const AssigneePill: React.FC<{ todo: TodoItem }> = ({ todo }) => {
+  if (todo.assignedToUserName) {
+    return (
+      <StatusPill title={`Assegnata a ${todo.assignedToUserName}`}>
+        <UserCircle className="h-3 w-3 flex-shrink-0" aria-hidden />
+        <span className="truncate">{todo.assignedToUserName}</span>
+      </StatusPill>
+    );
+  }
+  if (todo.assignedToTeam && !todo.assignedToUserId) {
+    return (
+      <StatusPill title={`Assegnata al team ${TEAM_LABELS[todo.assignedToTeam]}`}>
+        <UsersRound className="h-3 w-3 flex-shrink-0" aria-hidden />
+        <span className="truncate">{TEAM_LABELS[todo.assignedToTeam]}</span>
+      </StatusPill>
+    );
+  }
+  return null;
+};
+
+/* ── TodoRow ──────────────────────────────────────────────────────────────
+   A white card on the canvas. Red never touches the card itself, only the date
+   pill and the band above the group: a wall of pink rows says everything is
+   equally wrong and stops meaning anything. */
+const TodoRow: React.FC<{
+  todo: TodoItem;
+  todayStr: string;
+  banquetMenus: BanquetMenu[];
+  selectMode: boolean;
+  isSelected: boolean;
+  onToggleComplete: () => void;
+  onToggleSelect: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  onOpenBanquet: (banquet: BanquetMenu) => void;
+}> = ({
+  todo, todayStr, banquetMenus, selectMode, isSelected,
+  onToggleComplete, onToggleSelect, onEdit, onDelete, onOpenBanquet,
+}) => {
+  const isOverdue = !!(todo.dueDate && todo.dueDate < todayStr && !todo.completed);
+  const CategoryIcon = CATEGORY_ICONS[todo.category];
+  const linkedBanquets = (todo.linkedBanquetIds ?? [])
+    .map(id => banquetMenus.find(b => b.id === id))
+    .filter((b): b is BanquetMenu => !!b);
+  // In selection mode the leading circle picks rather than completes, so the
+  // two never fire from the same tap.
+  const ticked = selectMode ? isSelected : todo.completed;
+
+  return (
+    <div
+      onClick={selectMode ? onToggleSelect : undefined}
+      className={`group relative rounded-[18px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow ${
+        selectMode ? 'cursor-pointer' : ''
+      } ${isSelected ? 'ring-2 ring-[var(--ds-border-focus)]' : ''}`}
+    >
+      <div className="flex items-start gap-1">
+        <button
+          type="button"
+          onClick={e => { e.stopPropagation(); (selectMode ? onToggleSelect : onToggleComplete)(); }}
+          aria-label={
+            selectMode
+              ? isSelected ? 'Deseleziona' : 'Seleziona'
+              : todo.completed ? 'Segna come da fare' : 'Segna come fatta'
+          }
+          aria-pressed={selectMode ? isSelected : undefined}
+          className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        >
+          <span
+            className={`inline-flex h-5 w-5 items-center justify-center rounded-full transition-colors ${
+              ticked
+                ? selectMode
+                  ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                  : 'bg-[var(--ds-seated-solid)] text-white'
+                : 'ring-[1.5px] ring-inset ring-[var(--ds-border-strong)] group-hover:ring-[var(--ds-text-muted)]'
+            }`}
+          >
+            {ticked && <Check className="h-3 w-3" strokeWidth={3} aria-hidden />}
+          </span>
+        </button>
+
+        <div className="min-w-0 flex-1 pb-1 pt-2.5">
+          <div className="flex items-start gap-2">
+            <p
+              className={`min-w-0 flex-1 text-[15px] font-semibold leading-snug tracking-[-0.01em] ${
+                todo.completed
+                  ? 'text-[var(--ds-text-muted)] line-through'
+                  : 'text-[var(--ds-text-primary)]'
+              }`}
+            >
+              {todo.title}
+            </p>
+            {/* Nothing to edit or delete mid-selection, and a completed row
+                carries no actions either — a strikethrough line with three
+                controls invites tidying work that is already finished. */}
+            {!selectMode && !todo.completed && (
+              <div className="flex flex-shrink-0 items-center transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
+                <button type="button" onClick={onEdit} aria-label="Modifica" className={rowAction}>
+                  <Edit2 className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={onDelete}
+                  aria-label="Elimina"
+                  className={`${rowAction} hover:text-[var(--ds-critical-text)]`}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+          </div>
+
+          {todo.description && (
+            <p className="mt-0.5 text-[13px] leading-relaxed text-[var(--ds-text-muted)]">
+              {todo.description}
+            </p>
+          )}
+
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <AssigneePill todo={todo} />
+            {todo.completed && todo.completedAt ? (
+              <StatusPill tone="positive">
+                <Check className="h-3 w-3 flex-shrink-0" aria-hidden />
+                {formatCompleted(todo.completedAt, todayStr)}
+              </StatusPill>
+            ) : todo.dueDate ? (
+              <StatusPill tone={isOverdue ? 'critical' : 'neutral'}>
+                <Clock className="h-3 w-3 flex-shrink-0" aria-hidden />
+                {formatDueShort(todo.dueDate, todayStr)}
+              </StatusPill>
+            ) : null}
+            <StatusPill>
+              <CategoryIcon className="h-3 w-3 flex-shrink-0" aria-hidden />
+              <span className="truncate">{CATEGORY_LABELS[todo.category]}</span>
+            </StatusPill>
+            {!todo.completed && todo.priority !== TodoPriority.LOW && (
+              <StatusPill tone={todo.priority === TodoPriority.HIGH ? 'critical' : 'pending'}>
+                <Flag className="h-3 w-3 flex-shrink-0" aria-hidden />
+                {PRIORITY_LABELS[todo.priority]}
+              </StatusPill>
+            )}
+            {/* The reservation link was in the data all along and rendered
+                nowhere; the banquet chip still opens the composition. */}
+            {todo.linkedReservationId && (
+              <StatusPill tone="info" title="Prenotazione collegata">
+                <CalendarDays className="h-3 w-3 flex-shrink-0" aria-hidden />
+                Prenotazione
+              </StatusPill>
+            )}
+            {linkedBanquets.map(banquet => (
+              <button
+                key={banquet.id}
+                type="button"
+                onClick={e => { e.stopPropagation(); onOpenBanquet(banquet); }}
+                title="Visualizza composizione"
+                className="inline-flex h-6 max-w-full flex-shrink-0 items-center gap-1 rounded-full bg-[var(--ds-arriving-tint)] px-2 text-[12px] font-medium text-[var(--ds-arriving-text)] transition-[filter] hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              >
+                <Utensils className="h-3 w-3 flex-shrink-0" aria-hidden />
+                <span className="truncate">{banquet.name}</span>
+              </button>
+            ))}
+            {todo.banquetReminderHours != null && (
+              <StatusPill tone="pending">
+                <Bell className="h-3 w-3 flex-shrink-0" aria-hidden />
+                {todo.banquetReminderHours}h prima
+              </StatusPill>
+            )}
+            {todo.autoKind && (
+              <StatusPill title={`Creata automaticamente (${todo.autoKind})`}>
+                <Sparkles className="h-3 w-3 flex-shrink-0" aria-hidden />
+                auto
+              </StatusPill>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes, autoOpenNew, onAutoOpenNewHandled }) => {
@@ -111,15 +384,19 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
   const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>('ALL');
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('ALL');
   const [search, setSearch] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const [showModal, setShowModal] = useState(false);
   const [editingTodo, setEditingTodo] = useState<TodoItem | null>(null);
   const [form, setForm] = useState<TodoForm>(emptyForm);
+  const [banquetPickerOpen, setBanquetPickerOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<TodoItem | null>(null);
   const [banquetModal, setBanquetModal] = useState<BanquetMenu | null>(null);
-
-  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const todayStr = formatLocalDate(new Date());
 
@@ -133,18 +410,29 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     return todos.filter(t => {
-      if (statusTab === 'TODO' && t.completed) return false;
-      if (statusTab === 'DONE' && !t.completed) return false;
+      if (statusTab === 'DONE') {
+        if (!t.completed) return false;
+      } else {
+        if (t.completed) return false;
+        if (statusTab === 'TODAY' && t.dueDate !== todayStr) return false;
+        if (statusTab === 'OVERDUE' && !(t.dueDate && t.dueDate < todayStr)) return false;
+      }
       if (scope === 'MINE' && !(isAssignedToMe(t) || isAssignedToMyTeam(t))) return false;
       if (priorityFilter !== 'ALL' && t.priority !== priorityFilter) return false;
       if (categoryFilter !== 'ALL' && t.category !== categoryFilter) return false;
       if (query && !`${t.title} ${t.description ?? ''}`.toLowerCase().includes(query)) return false;
       return true;
     });
-  }, [todos, statusTab, scope, priorityFilter, categoryFilter, search, user]);
+  }, [todos, statusTab, scope, priorityFilter, categoryFilter, search, user, todayStr]);
 
   // Group by date bucket: Scadute / Oggi / Domani / Settimana / Future / Senza scadenza.
   const grouped = useMemo(() => {
+    // Oggi and Scadute are one day's worth of tasks by definition, and the tab
+    // already says which. A lone band over every card would just repeat it.
+    if (statusTab === 'TODAY' || statusTab === 'OVERDUE') {
+      return [{ key: 'flat', label: '', items: [...filtered].sort(sortByPriorityThenDate) }];
+    }
+
     const tomorrowStr = formatLocalDate(addDays(new Date(), 1));
     const endOfWeekStr = formatLocalDate(addDays(new Date(), 7));
 
@@ -169,14 +457,9 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
       else buckets[4].items.push(t);
     }
 
-    const sortByPriorityThenDate = (a: TodoItem, b: TodoItem) => {
-      const pRank: Record<TodoPriority, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
-      if (pRank[a.priority] !== pRank[b.priority]) return pRank[a.priority] - pRank[b.priority];
-      return (a.dueDate || '').localeCompare(b.dueDate || '');
-    };
     buckets.forEach(b => b.items.sort(sortByPriorityThenDate));
     return buckets.filter(b => b.items.length > 0);
-  }, [filtered, todayStr]);
+  }, [filtered, todayStr, statusTab]);
 
   const counts = useMemo(() => {
     const overdue = todos.filter(t => !t.completed && t.dueDate && t.dueDate < todayStr).length;
@@ -186,9 +469,57 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
     return { overdue, today, pending, done };
   }, [todos, todayStr]);
 
+  // The strip and the tabs show the same four numbers, so they are the same
+  // control: pressing a figure selects the tab that filters to it. Otherwise
+  // one of them is decoration and the eye has to work out which.
+  const selectTab = (tab: StatusTab) => { setStatusTab(tab); exitSelectMode(); };
+
+  const stats: Stat[] = [
+    { value: counts.pending, label: 'Da fare', onClick: () => selectTab('TODO'), title: 'Mostra tutte le attività da fare' },
+    {
+      value: counts.overdue,
+      label: 'Scadute',
+      // A zero here is good news, and a green or red zero both claim something
+      // that has not happened. Colour arrives with the first late task.
+      tone: counts.overdue > 0 ? 'critical' : 'neutral',
+      tint: counts.overdue > 0,
+      onClick: () => selectTab('OVERDUE'),
+      title: 'Mostra solo le attività scadute',
+    },
+    {
+      value: counts.today,
+      label: 'Oggi',
+      tone: counts.today > 0 ? 'pending' : 'neutral',
+      onClick: () => selectTab('TODAY'),
+      title: 'Mostra solo le attività in scadenza oggi',
+    },
+    {
+      value: counts.done,
+      label: 'Fatte',
+      tone: counts.done > 0 ? 'positive' : 'neutral',
+      onClick: () => selectTab('DONE'),
+      title: 'Mostra le attività completate',
+    },
+  ];
+
+  // Scope is deliberately not counted: switching to Tutte widens the list, and
+  // a badge that says "1 filtro" while you are seeing more reads backwards.
+  const activeFilterCount = (priorityFilter !== 'ALL' ? 1 : 0) + (categoryFilter !== 'ALL' ? 1 : 0);
+  const resetFilters = () => { setPriorityFilter('ALL'); setCategoryFilter('ALL'); };
+
+  const toggleGroup = (key: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
   const resetForm = () => {
     setForm(emptyForm);
     setEditingTodo(null);
+    setBanquetPickerOpen(false);
   };
 
   const openAdd = () => {
@@ -213,7 +544,9 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
       dueDate: t.dueDate || '',
       assignedToUserId: t.assignedToUserId,
       assignedToTeam: t.assignedToTeam,
+      linkedBanquetIds: t.linkedBanquetIds ?? [],
     });
+    setBanquetPickerOpen((t.linkedBanquetIds?.length ?? 0) > 0);
     setShowModal(true);
   };
 
@@ -232,8 +565,17 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
     };
     try {
       setIsSaving(true);
-      if (editingTodo) await updateTodo(editingTodo.id, payload);
-      else await addTodo(payload);
+      if (editingTodo) {
+        // Always sent on update: the route treats an empty array as "clear",
+        // so this is also how a link gets removed. Omitting it would leave the
+        // stored links untouched and make unlinking impossible.
+        await updateTodo(editingTodo.id, { ...payload, linkedBanquetIds: form.linkedBanquetIds });
+      } else {
+        await addTodo({
+          ...payload,
+          linkedBanquetIds: form.linkedBanquetIds.length ? form.linkedBanquetIds : undefined,
+        });
+      }
       resetForm();
       setShowModal(false);
     } finally {
@@ -249,436 +591,640 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
       return next;
     });
   };
-  const clearSelection = () => setSelected(new Set());
-  const bulkComplete = async () => {
+  const exitSelectMode = () => { setSelectMode(false); setSelected(new Set()); };
+  /* On the Fatte tab the bulk action is the reverse one. Selecting rows there
+     and offering "Completa" would be a button that provably does nothing, and
+     un-completing is already what the row's own circle does. */
+  const bulkApply = async () => {
     const ids = Array.from(selected);
-    clearSelection();
+    const wantCompleted = statusTab !== 'DONE';
+    exitSelectMode();
     await Promise.all(ids.map(id => {
       const todo = todos.find(t => t.id === id);
-      if (todo && !todo.completed) return toggleTodo(id);
+      if (todo && todo.completed !== wantCompleted) return toggleTodo(id);
       return Promise.resolve();
     }));
   };
 
+  const toggleBanquetLink = (id: number) => {
+    setForm(prev => ({
+      ...prev,
+      linkedBanquetIds: prev.linkedBanquetIds.includes(id)
+        ? prev.linkedBanquetIds.filter(b => b !== id)
+        : [...prev.linkedBanquetIds, id],
+    }));
+  };
+
+  const sortedBanquets = useMemo(
+    () => [...banquetMenus].sort((a, b) => (b.event_date || '').localeCompare(a.event_date || '')),
+    [banquetMenus]
+  );
+
+  const oldestOverdueDays = grouped.find(b => b.key === 'overdue')?.items
+    .reduce((max, t) => Math.max(max, t.dueDate ? daysLate(t.dueDate, todayStr) : 0), 0) ?? 0;
+
+  const newButton = (
+    <button type="button" onClick={openAdd} className={dsButton.primary}>
+      <Plus className="h-4 w-4" aria-hidden />
+      <span className="sm:hidden">Nuova</span>
+      <span className="hidden sm:inline">Nuova attività</span>
+    </button>
+  );
+
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
-      <div className="space-y-5">
-        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
-          <div>
-            <h1 className="text-[22px] sm:text-[28px] font-semibold text-[var(--color-fg)] tracking-tight">
-              Attività
-            </h1>
-            <p className="text-sm text-[var(--color-fg-muted)] mt-1 tabular">
-              {counts.pending} da fare · {counts.done} completate
-              {counts.overdue > 0 && (
-                <span className="text-rose-600 dark:text-rose-400 font-medium"> · {counts.overdue} scadute</span>
-              )}
-            </p>
-          </div>
-          <button
-            onClick={openAdd}
-            className="self-start sm:self-auto inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90"
-          >
-            <Plus className="h-4 w-4" />
-            Nuova attività
-          </button>
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex flex-shrink-0 flex-col gap-3 px-4 pb-3 pt-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:gap-4 lg:px-8">
+        <div className="flex items-center justify-between gap-3">
+          {/* No counts line under the title: the strip beside it and the tabs
+              below already carry every one of those numbers. */}
+          <h1 className="min-w-0 text-[22px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)] sm:text-[26px]">
+            Attività
+          </h1>
+          {/* Desktop creates from the header "+" — a second button for the same
+              thing on the same screen is just one more object to read. */}
+          <div className="flex-shrink-0 lg:hidden">{newButton}</div>
         </div>
+        <StatStrip stats={stats} layout="stacked" className="w-full lg:w-[440px] lg:flex-none" />
+      </div>
 
-        {counts.overdue > 0 && statusTab === 'TODO' && (
-          <div className="flex items-center gap-3 rounded-xl border border-rose-100 dark:border-rose-500/30 bg-rose-50 dark:bg-rose-500/15 px-4 py-3">
-            <AlertTriangle className="h-5 w-5 text-rose-600 dark:text-rose-400 flex-shrink-0" />
-            <p className="text-sm text-rose-700 dark:text-rose-300">
-              <span className="font-semibold tabular">{counts.overdue}</span> attività scadute richiedono attenzione.
-            </p>
-          </div>
-        )}
-
-        {/* Filters */}
-        <div className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-xl p-3 sm:p-4 space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-subtle)]" />
-              <input
-                type="text"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Cerca attività..."
-                className="w-full pl-9 pr-3 py-2 text-sm bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-lg focus:outline-none focus:border-[var(--color-fg)]"
+      {/* relative: the filter panel slides up inside this region, the way the
+          one on Prenotazioni does — it covers the list it applies to and leaves
+          the app header and the sidebar alone. */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        {/* Pinned while the cards scroll under it. The bottom padding is
+            load-bearing: the scrolling region below is opaque and paints later,
+            so without it the toolbar's shadow gets sliced off by a hard line. */}
+        <div className="flex flex-shrink-0 flex-col gap-2.5 px-4 pb-4 sm:px-6 lg:px-8">
+          <div className="flex items-center gap-3">
+            {/* The track scrolls rather than squeezing: four labels with counts
+                cannot share a phone's width, and equal-width segments would
+                clip "Da fare" to fit "Fatte". At lg it hugs its content and
+                Mie/Tutte takes the far end of the line. */}
+            <div className="min-w-0 flex-1 lg:w-fit lg:flex-none">
+              <SegmentedControl<StatusTab>
+                value={statusTab}
+                // Switching tab drops selection mode with it: a selection made
+                // of rows the list no longer shows is a trap.
+                onChange={selectTab}
+                ariaLabel="Stato attività"
+                equalWidth={false}
+                overflow="scroll"
+                options={[
+                  { value: 'TODO', label: 'Da fare', badge: counts.pending, badgeTone: 'neutral' },
+                  { value: 'TODAY', label: 'Oggi', badge: counts.today, badgeTone: 'neutral' },
+                  { value: 'OVERDUE', label: 'Scadute', badge: counts.overdue, badgeTone: 'neutral' },
+                  { value: 'DONE', label: 'Fatte', badge: counts.done, badgeTone: 'neutral' },
+                ]}
               />
             </div>
-            <div className="inline-flex rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-2)] p-0.5 text-sm self-start">
-              {(['TODO', 'DONE'] as const).map(tab => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setStatusTab(tab)}
-                  className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
-                    statusTab === tab
-                      ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-sm)]'
-                      : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                  }`}
-                >
-                  {tab === 'TODO' ? `Da fare (${counts.pending})` : `Fatte (${counts.done})`}
-                </button>
-              ))}
+            {/* Below lg this lives in the filter panel instead: it is a filter
+                like the other two, and it will not share the line there. */}
+            <div className="ml-auto hidden flex-shrink-0 lg:block lg:w-[168px]">
+              <SegmentedControl<ScopeFilter>
+                value={scope}
+                onChange={setScope}
+                ariaLabel="Ambito attività"
+                options={[
+                  { value: 'MINE', label: 'Mie' },
+                  { value: 'ALL', label: 'Tutte' },
+                ]}
+              />
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="inline-flex rounded-full border border-[var(--color-line)] bg-[var(--color-surface-2)] p-0.5 text-xs">
-              {(['MINE', 'ALL'] as const).map(s => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setScope(s)}
-                  className={`px-3 py-1 rounded-full font-medium transition-colors ${
-                    scope === s
-                      ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                      : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]'
-                  }`}
-                >
-                  {s === 'MINE' ? 'Mie' : 'Tutte'}
-                </button>
-              ))}
-            </div>
-            <span className="text-[var(--color-fg-subtle)]">·</span>
-            <select
-              value={priorityFilter}
-              onChange={e => setPriorityFilter(e.target.value as PriorityFilter)}
-              className="text-xs bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-full px-3 py-1 focus:outline-none focus:border-[var(--color-fg)]"
+          <div className="flex items-center gap-2">
+            <SearchField
+              value={search}
+              onChange={setSearch}
+              placeholder="Cerca attività…"
+              ariaLabel="Cerca attività"
+              className="min-w-0 flex-1"
+            />
+            <button
+              type="button"
+              onClick={() => setFiltersOpen(true)}
+              aria-label="Filtri"
+              title="Filtri"
+              className={activeFilterCount > 0
+                ? 'relative inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-card)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]'
+                : `relative ${dsIconButton}`}
             >
-              <option value="ALL">Tutte le priorità</option>
-              <option value={TodoPriority.HIGH}>Priorità alta</option>
-              <option value={TodoPriority.MEDIUM}>Priorità media</option>
-              <option value={TodoPriority.LOW}>Priorità bassa</option>
-            </select>
-            <select
-              value={categoryFilter}
-              onChange={e => setCategoryFilter(e.target.value as CategoryFilter)}
-              className="text-xs bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-full px-3 py-1 focus:outline-none focus:border-[var(--color-fg)]"
+              <ListFilter className="h-4 w-4" />
+              {activeFilterCount > 0 && (
+                <span className="absolute -right-0.5 -top-0.5">
+                  <CountBadge
+                    count={activeFilterCount}
+                    tone="alert"
+                    className="h-5 min-w-[20px] text-[11px] ring-2 ring-[var(--ds-canvas)]"
+                  />
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+              aria-pressed={selectMode}
+              aria-label={selectMode ? 'Annulla selezione' : 'Seleziona attività'}
+              title={selectMode ? 'Annulla selezione' : 'Seleziona attività'}
+              className={`inline-flex h-11 flex-shrink-0 items-center justify-center gap-2 rounded-full px-3 text-[15px] font-medium shadow-[var(--ds-shadow-card)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] sm:px-4 ${
+                selectMode
+                  ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                  : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]'
+              }`}
             >
-              <option value="ALL">Tutte le categorie</option>
-              {Object.entries(CATEGORY_LABELS).map(([key, label]) => (
-                <option key={key} value={key}>{label}</option>
-              ))}
-            </select>
+              <ListTodo className="h-4 w-4" aria-hidden />
+              {/* Label drops below sm, where it would squeeze the search field
+                  down to a few characters. */}
+              <span className="hidden sm:inline">{selectMode ? 'Annulla' : 'Seleziona'}</span>
+            </button>
           </div>
         </div>
 
-        {/* Bulk bar */}
-        {selected.size > 0 && (
-          <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]">
-            <span className="text-sm font-medium tabular">{selected.size} selezionate</span>
-            <div className="flex items-center gap-2">
-              <button onClick={clearSelection} className="text-xs px-2 py-1 rounded hover:bg-[var(--color-surface)]/10">
-                Annulla
-              </button>
-              <button onClick={bulkComplete} className="text-xs px-2 py-1 rounded bg-emerald-500 hover:bg-emerald-600 text-white inline-flex items-center gap-1.5">
-                <Check className="h-3.5 w-3.5" />
-                Completa tutte
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6 sm:px-6 lg:px-8">
+          {selectMode && (
+            <div className="mb-3 flex items-center justify-between gap-3 rounded-full bg-[var(--ds-action-bg)] py-1.5 pl-4 pr-1.5">
+              <span className="min-w-0 truncate text-[14px] font-medium text-[var(--ds-action-fg)] tabular-nums">
+                {selected.size === 0
+                  ? statusTab === 'DONE'
+                    ? 'Scegli le attività da riaprire'
+                    : 'Scegli le attività da completare'
+                  : `${selected.size} selezionate`}
+              </span>
+              <button
+                type="button"
+                onClick={bulkApply}
+                disabled={selected.size === 0}
+                className={`inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full px-3.5 text-[14px] font-semibold transition-[filter] hover:brightness-95 disabled:opacity-40 ${
+                  statusTab === 'DONE'
+                    ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)]'
+                    : 'bg-[var(--ds-seated-solid)] text-white'
+                }`}
+              >
+                {statusTab === 'DONE' ? (
+                  <>
+                    <ListChecks className="h-4 w-4" aria-hidden />
+                    Riporta da fare
+                  </>
+                ) : (
+                  <>
+                    <Check className="h-4 w-4" aria-hidden />
+                    Completa
+                  </>
+                )}
               </button>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* List */}
-        <div className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-xl">
           {loading ? (
-            <div className="p-3 sm:p-4">
-              <SkeletonTaskList count={5} />
-            </div>
+            <SkeletonTaskList count={6} />
           ) : filtered.length === 0 ? (
-            <div className="py-12 text-center">
-              <CheckCircle2 className="h-8 w-8 text-[var(--color-fg-subtle)] mx-auto mb-2" />
-              <p className="text-[var(--color-fg-subtle)] text-sm">
-                {scope === 'MINE' ? 'Nessuna attività assegnata a te' : 'Nessuna attività'}
-              </p>
-            </div>
+            <EmptyState icon={ListChecks} action={statusTab === 'DONE' ? undefined : newButton}>
+              {activeFilterCount > 0 || search.trim()
+                ? 'Nessuna attività con questi filtri'
+                : statusTab === 'DONE'
+                ? 'Nessuna attività completata'
+                : statusTab === 'OVERDUE'
+                ? 'Nessuna attività scaduta'
+                : statusTab === 'TODAY'
+                ? 'Nessuna attività in scadenza oggi'
+                : scope === 'MINE'
+                ? 'Nessuna attività assegnata a te'
+                : 'Nessuna attività'}
+            </EmptyState>
           ) : (
-            <div className="divide-y divide-[var(--color-line)]">
-              {grouped.map(bucket => (
-                <div key={bucket.key} className="p-3 sm:p-4">
-                  <h3 className={`text-[11px] uppercase tracking-[0.06em] font-semibold mb-2.5 ${
-                    bucket.key === 'overdue' ? 'text-rose-600 dark:text-rose-400' : 'text-[var(--color-fg-subtle)]'
-                  }`}>
-                    {bucket.label} <span className="tabular opacity-70">({bucket.items.length})</span>
-                  </h3>
-                  <div className="space-y-2">
-                    {bucket.items.map(todo => {
-                      const isOverdue = !!(todo.dueDate && todo.dueDate < todayStr && !todo.completed);
-                      const isSelected = selected.has(todo.id);
-                      return (
-                        <div
-                          key={todo.id}
-                          className={`group p-3 rounded-lg border transition-colors ${
-                            todo.completed
-                              ? 'bg-[var(--color-surface-3)] border-[var(--color-line)]'
-                              : isOverdue
-                              ? 'bg-rose-50 dark:bg-rose-500/15 border-rose-100 dark:border-rose-500/30'
-                              : isSelected
-                              ? 'bg-[var(--color-surface-hover)] border-[var(--color-line)]'
-                              : 'bg-[var(--color-surface)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'
+            grouped.map(bucket => {
+              const expanded = bucket.key === 'flat' || !collapsedGroups.has(bucket.key);
+              const meta = bucket.items.length === 1 ? '1 attività' : `${bucket.items.length} attività`;
+              return (
+                <div key={bucket.key} className="mb-3 last:mb-0">
+                  {/* Scadute keeps the red band the other groups do not get.
+                      It collapses like them, but through a chevron in the
+                      Callout's action slot rather than by turning the notice
+                      into a grey SectionHeader and losing the one place red
+                      earns its keep. */}
+                  {bucket.key === 'flat' ? null : bucket.key === 'overdue' ? (
+                    <Callout
+                      tone="critical"
+                      icon={AlertTriangle}
+                      className={expanded ? 'mb-2.5' : ''}
+                      action={
+                        <button
+                          type="button"
+                          onClick={() => toggleGroup(bucket.key)}
+                          aria-expanded={expanded}
+                          aria-label={expanded ? 'Comprimi le scadute' : 'Espandi le scadute'}
+                          className={`inline-flex h-9 w-9 items-center justify-center rounded-full text-[var(--ds-critical-text)] transition-transform hover:brightness-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                            expanded ? '' : '-rotate-90'
                           }`}
-                          onClick={() => { if (selected.size > 0) toggleSelect(todo.id); }}
                         >
-                          <div className="flex items-start gap-3">
-                            <button
-                              onClick={e => { e.stopPropagation(); toggleTodo(todo.id); }}
-                              className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${
-                                todo.completed
-                                  ? 'bg-emerald-500 border-emerald-500 text-[#ffffff]'
-                                  : 'border-[var(--color-line-strong)] hover:border-[var(--color-fg)]'
-                              }`}
-                            >
-                              {todo.completed && <Check className="h-2.5 w-2.5" />}
-                            </button>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-start justify-between gap-2">
-                                <p className={`text-sm font-medium ${todo.completed ? 'line-through text-[var(--color-fg-subtle)]' : 'text-[var(--color-fg)]'}`}>
-                                  {todo.title}
-                                </p>
-                                <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity flex-shrink-0">
-                                  <button
-                                    onClick={e => { e.stopPropagation(); toggleSelect(todo.id); }}
-                                    className="p-1 rounded text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
-                                    title="Seleziona"
-                                  >
-                                    <ListTodo className="h-3.5 w-3.5" />
-                                  </button>
-                                  <button
-                                    onClick={e => { e.stopPropagation(); openEdit(todo); }}
-                                    className="p-1 rounded text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors"
-                                  >
-                                    <Edit2 className="h-3.5 w-3.5" />
-                                  </button>
-                                  <button
-                                    onClick={e => { e.stopPropagation(); setDeleteConfirm(todo); }}
-                                    className="p-1 rounded text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-rose-600 transition-colors"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
-                                </div>
-                              </div>
+                          <ChevronDown className="h-4 w-4" />
+                        </button>
+                      }
+                    >
+                      <span className="font-semibold">Scadute</span>
+                      <span className="opacity-85"> · {meta}</span>
+                      {oldestOverdueDays > 0 && (
+                        <span className="opacity-85">
+                          {' '}— la più vecchia è di {oldestOverdueDays === 1 ? '1 giorno' : `${oldestOverdueDays} giorni`}
+                        </span>
+                      )}
+                    </Callout>
+                  ) : (
+                    <SectionHeader
+                      tone={bucket.key === 'today' ? 'pending' : 'muted'}
+                      onToggle={() => toggleGroup(bucket.key)}
+                      expanded={expanded}
+                      meta={meta}
+                    >
+                      {bucket.label}
+                    </SectionHeader>
+                  )}
+                  {expanded && (
+                    <div className="space-y-2">
+                      {bucket.items.map(todo => (
+                        <TodoRow
+                          key={todo.id}
+                          todo={todo}
+                          todayStr={todayStr}
+                          banquetMenus={banquetMenus}
+                          selectMode={selectMode}
+                          isSelected={selected.has(todo.id)}
+                          onToggleComplete={() => toggleTodo(todo.id)}
+                          onToggleSelect={() => toggleSelect(todo.id)}
+                          onEdit={() => openEdit(todo)}
+                          onDelete={() => setDeleteConfirm(todo)}
+                          onOpenBanquet={setBanquetModal}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
 
-                              {todo.description && (
-                                <p className="text-xs text-[var(--color-fg-muted)] mt-1">{todo.description}</p>
-                              )}
-
-                              <div className="flex items-center gap-2 mt-1.5 text-[var(--color-fg-muted)]">
-                                {todo.assignedToUserName && (
-                                  <span className="inline-flex items-center gap-1 text-xs">
-                                    <UserCircle className="h-3 w-3 flex-shrink-0" />
-                                    {todo.assignedToUserName}
-                                  </span>
-                                )}
-                                {todo.assignedToTeam && !todo.assignedToUserId && (
-                                  <span className="inline-flex items-center gap-1 text-xs">
-                                    <UsersRound className="h-3 w-3 flex-shrink-0" />
-                                    {TEAM_LABELS[todo.assignedToTeam]}
-                                  </span>
-                                )}
-                                {todo.dueDate && (
-                                  <span className={`inline-flex items-center gap-1 text-xs ${isOverdue ? 'text-rose-600 dark:text-rose-400 font-medium' : ''}`}>
-                                    <Clock className="h-3 w-3 flex-shrink-0" />
-                                    {new Date(todo.dueDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' })}
-                                  </span>
-                                )}
-                              </div>
-
-                              <div className="flex items-center gap-2 mt-2 flex-wrap">
-                                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-[var(--color-surface-3)] border border-[var(--color-line)] text-[var(--color-fg-muted)]">
-                                  <span className={`w-1.5 h-1.5 rounded-full ${CATEGORY_DOT_COLORS[todo.category]}`} />
-                                  {CATEGORY_LABELS[todo.category]}
-                                </span>
-                                {todo.priority !== TodoPriority.LOW && (
-                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border ${
-                                    todo.priority === TodoPriority.HIGH
-                                      ? 'bg-rose-50 dark:bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-100 dark:border-rose-500/30'
-                                      : 'bg-amber-50 dark:bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-100 dark:border-amber-500/30'
-                                  }`}>
-                                    <Flag className="h-3 w-3" />
-                                    {todo.priority === TodoPriority.HIGH ? 'Alta' : 'Media'}
-                                  </span>
-                                )}
-                                {todo.banquetReminderHours != null && (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-orange-50 dark:bg-orange-500/15 text-orange-700 dark:text-orange-300 border border-orange-100 dark:border-orange-500/30">
-                                    {todo.banquetReminderHours}h prima
-                                  </span>
-                                )}
-                              </div>
-
-                              {Array.isArray(todo.linkedBanquetIds) && todo.linkedBanquetIds.length > 0 && (
-                                <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                                  {todo.linkedBanquetIds.map(bid => {
-                                    const banquet = banquetMenus.find(b => b.id === bid);
-                                    if (!banquet) return null;
-                                    return (
-                                      <button
-                                        key={bid}
-                                        type="button"
-                                        onClick={e => { e.stopPropagation(); setBanquetModal(banquet); }}
-                                        className="inline-flex items-center gap-1 text-[11px] font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 hover:text-indigo-800 px-2 py-0.5 rounded-full border border-indigo-100 transition-colors"
-                                        title="Visualizza composizione"
-                                      >
-                                        <Utensils className="h-2.5 w-2.5" />
-                                        <span className="truncate max-w-[140px]">{banquet.name}</span>
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
+        {/* ── Filtri ───────────────────────────────────────────────────────
+            Slides up over the list, same as Prenotazioni: changes apply as you
+            make them and the backdrop dismisses. No apply button — there is
+            nothing to commit. */}
+        {filtersOpen && (
+          <div className="absolute inset-0 z-50 flex items-end" onClick={() => setFiltersOpen(false)}>
+            <div
+              className="absolute inset-0 bg-[var(--ds-backdrop)]"
+              style={{ animation: 'fadeIn 200ms ease-out both' }}
+            />
+            {/* The real keyframes, not the tailwindcss-animate classes used on
+                Prenotazioni — that plugin is not installed, so `animate-in
+                slide-in-from-bottom` there compiles to nothing. */}
+            <div
+              onClick={e => e.stopPropagation()}
+              style={{ animation: 'slideUpSheet 260ms cubic-bezier(0.32, 0.72, 0, 1) both' }}
+              className="relative max-h-full w-full overflow-y-auto rounded-t-[24px] bg-[var(--ds-surface)] pb-6 shadow-[var(--ds-shadow-raised)]"
+            >
+              <div className="flex justify-center pb-2 pt-3" aria-hidden>
+                <span className="h-1 w-9 rounded-full bg-[var(--ds-border-strong)]" />
+              </div>
+              <div className="flex items-center justify-between gap-3 px-5 pb-3 sm:px-6">
+                <h3 className="text-[17px] font-semibold text-[var(--ds-text-primary)]">Filtri</h3>
+                {activeFilterCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={resetFilters}
+                    className="inline-flex items-center gap-1.5 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)]"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+                    Reimposta
+                  </button>
+                )}
+              </div>
+              <div className="space-y-4 px-5 sm:px-6">
+                {/* Only below lg — above it Mie/Tutte is in the toolbar and
+                    repeating it here would give one setting two homes on the
+                    same screen. */}
+                <div className="lg:hidden">
+                  <span className="mb-2 block text-[13px] font-semibold text-[var(--ds-text-primary)]">Ambito</span>
+                  <div className="flex flex-wrap gap-2">
+                    <Chip active={scope === 'MINE'} onClick={() => setScope('MINE')}>Mie</Chip>
+                    <Chip active={scope === 'ALL'} onClick={() => setScope('ALL')}>Tutte</Chip>
+                  </div>
+                </div>
+                <div>
+                  <span className="mb-2 block text-[13px] font-semibold text-[var(--ds-text-primary)]">Priorità</span>
+                  <div className="flex flex-wrap gap-2">
+                    <Chip active={priorityFilter === 'ALL'} onClick={() => setPriorityFilter('ALL')}>
+                      Tutte
+                    </Chip>
+                    {[TodoPriority.HIGH, TodoPriority.MEDIUM, TodoPriority.LOW].map(p => (
+                      <Chip key={p} active={priorityFilter === p} onClick={() => setPriorityFilter(p)}>
+                        <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${PRIORITY_DOTS[p]}`} aria-hidden />
+                        {PRIORITY_LABELS[p]}
+                      </Chip>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <span className="mb-2 block text-[13px] font-semibold text-[var(--ds-text-primary)]">Categoria</span>
+                  <div className="flex flex-wrap gap-2">
+                    <Chip active={categoryFilter === 'ALL'} onClick={() => setCategoryFilter('ALL')}>
+                      Tutte
+                    </Chip>
+                    {(Object.keys(CATEGORY_LABELS) as TodoCategory[]).map(c => {
+                      const Icon = CATEGORY_ICONS[c];
+                      return (
+                        <Chip key={c} active={categoryFilter === c} onClick={() => setCategoryFilter(c)}>
+                          <Icon className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+                          {CATEGORY_LABELS[c]}
+                        </Chip>
                       );
                     })}
                   </div>
                 </div>
-              ))}
+              </div>
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
-      {/* Add/Edit Modal */}
-      {showModal && (
-        <div
-          className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4"
-          onClick={() => { setShowModal(false); resetForm(); }}
-        >
-          <div
-            className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)] flex-shrink-0">
-              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">
-                {editingTodo ? 'Modifica Attività' : 'Nuova Attività'}
-              </h3>
-              <button
-                onClick={() => { setShowModal(false); resetForm(); }}
-                className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="p-4 space-y-4 overflow-y-auto flex-1">
-              <div>
-                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Titolo</label>
-                <input
-                  type="text"
-                  value={form.title}
-                  onChange={e => setForm({ ...form, title: e.target.value })}
-                  placeholder="Es: Chiamare fornitore vini"
-                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-                  autoFocus
+      {/* ── Nuova / Modifica attività ──────────────────────────────────────
+          Groups in cards over two columns, the same shape as the reservation
+          form, so the whole thing fits one screen instead of six stacked
+          <select>s you scroll through. */}
+      <ModalShell
+        open={showModal}
+        onClose={() => { setShowModal(false); resetForm(); }}
+        title={editingTodo ? 'Modifica attività' : 'Nuova attività'}
+        subtitle={`${form.title.trim() || 'Titolo da inserire'} · ${PRIORITY_LABELS[form.priority].toLowerCase()} · ${CATEGORY_LABELS[form.category].toLowerCase()}`}
+        size="lg"
+        footerStart={
+          !form.title.trim() ? (
+            <span className="text-[var(--ds-critical-text)]">Il titolo è obbligatorio.</span>
+          ) : undefined
+        }
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => { setShowModal(false); resetForm(); }}
+              className={dsButton.secondary}
+            >
+              Annulla
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={!form.title.trim() || isSaving}
+              className={dsButton.primary}
+            >
+              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              {editingTodo ? 'Salva' : 'Aggiungi'}
+            </button>
+          </>
+        }
+      >
+        <div className="grid grid-cols-1 gap-4 p-4 sm:p-6 lg:grid-cols-2">
+          <div className="flex min-w-0 flex-col gap-4">
+            <FormCard title="Attività">
+              <div className="space-y-4">
+                <Field label="Titolo" htmlFor="attivita-titolo" required>
+                  <input
+                    id="attivita-titolo"
+                    type="text"
+                    value={form.title}
+                    onChange={e => setForm({ ...form, title: e.target.value })}
+                    placeholder="Es: Chiamare fornitore vini"
+                    className={dsInput}
+                    autoFocus
+                  />
+                </Field>
+                <Field label="Descrizione" htmlFor="attivita-descrizione" aside="opzionale">
+                  <textarea
+                    id="attivita-descrizione"
+                    value={form.description}
+                    onChange={e => setForm({ ...form, description: e.target.value })}
+                    placeholder="Aggiungi dettagli…"
+                    rows={4}
+                    className={`${dsTextarea} resize-none`}
+                  />
+                </Field>
+              </div>
+            </FormCard>
+
+            <FormCard title="Priorità e categoria" aside="la bassa non mostra etichetta">
+              <div className="space-y-4">
+                <SegmentedControl<TodoPriority>
+                  value={form.priority}
+                  onChange={priority => setForm({ ...form, priority })}
+                  ariaLabel="Priorità"
+                  options={[TodoPriority.HIGH, TodoPriority.MEDIUM, TodoPriority.LOW].map(p => ({
+                    value: p,
+                    label: PRIORITY_LABELS[p],
+                    icon: <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${PRIORITY_DOTS[p]}`} aria-hidden />,
+                  }))}
                 />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Descrizione (opzionale)</label>
-                <textarea
-                  value={form.description}
-                  onChange={e => setForm({ ...form, description: e.target.value })}
-                  placeholder="Aggiungi dettagli..."
-                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)] h-20 resize-none"
-                />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Priorità</label>
-                  <select
-                    value={form.priority}
-                    onChange={e => setForm({ ...form, priority: e.target.value as TodoPriority })}
-                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-                  >
-                    <option value={TodoPriority.LOW}>Bassa</option>
-                    <option value={TodoPriority.MEDIUM}>Media</option>
-                    <option value={TodoPriority.HIGH}>Alta</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Categoria</label>
-                  <select
-                    value={form.category}
-                    onChange={e => setForm({ ...form, category: e.target.value as TodoCategory })}
-                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-                  >
-                    {Object.entries(CATEGORY_LABELS).map(([key, label]) => (
-                      <option key={key} value={key}>{label}</option>
-                    ))}
-                  </select>
+                <div className="flex flex-wrap gap-2">
+                  {(Object.keys(CATEGORY_LABELS) as TodoCategory[]).map(c => {
+                    const Icon = CATEGORY_ICONS[c];
+                    return (
+                      <Chip
+                        key={c}
+                        active={form.category === c}
+                        onClick={() => setForm({ ...form, category: c })}
+                      >
+                        <Icon className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+                        {CATEGORY_LABELS[c]}
+                      </Chip>
+                    );
+                  })}
                 </div>
               </div>
-              <div>
-                <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Scadenza (opzionale)</label>
+            </FormCard>
+          </div>
+
+          <div className="flex min-w-0 flex-col gap-4">
+            <FormCard title="Scadenza">
+              <div className="space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  <Chip
+                    active={form.dueDate === todayStr}
+                    onClick={() => setForm({ ...form, dueDate: todayStr })}
+                  >
+                    Oggi
+                  </Chip>
+                  <Chip
+                    active={form.dueDate === formatLocalDate(addDays(new Date(), 1))}
+                    onClick={() => setForm({ ...form, dueDate: formatLocalDate(addDays(new Date(), 1)) })}
+                  >
+                    Domani
+                  </Chip>
+                  <Chip
+                    active={form.dueDate === formatLocalDate(addDays(new Date(), 7))}
+                    onClick={() => setForm({ ...form, dueDate: formatLocalDate(addDays(new Date(), 7)) })}
+                  >
+                    Fra una settimana
+                  </Chip>
+                  <Chip active={form.dueDate === ''} onClick={() => setForm({ ...form, dueDate: '' })}>
+                    Senza scadenza
+                  </Chip>
+                </div>
                 <input
                   type="date"
                   value={form.dueDate}
                   onChange={e => setForm({ ...form, dueDate: e.target.value })}
-                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+                  aria-label="Data di scadenza"
+                  className={dsInput}
                 />
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Assegna a persona</label>
-                  <select
-                    value={form.assignedToUserId || ''}
-                    onChange={e => setForm({
-                      ...form,
-                      assignedToUserId: e.target.value ? Number(e.target.value) : undefined,
-                      assignedToTeam: undefined,
-                    })}
-                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-                  >
-                    <option value="">Nessuno</option>
+            </FormCard>
+
+            <FormCard title="Assegnazione">
+              <div className="space-y-4">
+                <Field label="Persona">
+                  <div className="flex flex-wrap gap-2">
+                    <Chip
+                      active={form.assignedToUserId === undefined}
+                      onClick={() => setForm({ ...form, assignedToUserId: undefined })}
+                    >
+                      <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--ds-text-muted)]" aria-hidden />
+                      Nessuno
+                    </Chip>
                     {assignableUsers.map(u => (
-                      <option key={u.id} value={u.id}>{u.full_name} ({TEAM_LABELS[u.role]})</option>
+                      <Chip
+                        key={u.id}
+                        active={form.assignedToUserId === u.id}
+                        onClick={() => setForm({ ...form, assignedToUserId: u.id, assignedToTeam: undefined })}
+                      >
+                        <Avatar name={u.full_name} size="sm" className="-ml-1.5" />
+                        <span className="min-w-0 truncate">{u.full_name}</span>
+                      </Chip>
                     ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-[var(--color-fg-muted)] mb-1.5">Assegna a team</label>
-                  <select
-                    value={form.assignedToTeam || ''}
-                    onChange={e => setForm({
-                      ...form,
-                      assignedToTeam: e.target.value ? (e.target.value as UserRole) : undefined,
-                      assignedToUserId: undefined,
-                    })}
-                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md p-2.5 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-                  >
-                    <option value="">Nessun team</option>
+                  </div>
+                </Field>
+                <Field label="Team">
+                  <div className="flex flex-wrap gap-2">
+                    <Chip
+                      active={form.assignedToTeam === undefined}
+                      onClick={() => setForm({ ...form, assignedToTeam: undefined })}
+                    >
+                      <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--ds-text-muted)]" aria-hidden />
+                      Nessun team
+                    </Chip>
                     {(Object.entries(TEAM_LABELS) as [UserRole, string][])
                       .filter(([key]) => canAssignToRole(user?.role, key))
                       .map(([key, label]) => (
-                        <option key={key} value={key}>{label}</option>
+                        <Chip
+                          key={key}
+                          active={form.assignedToTeam === key}
+                          onClick={() => setForm({ ...form, assignedToTeam: key, assignedToUserId: undefined })}
+                        >
+                          <UsersRound className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+                          {label}
+                        </Chip>
                       ))}
-                  </select>
-                </div>
+                  </div>
+                </Field>
               </div>
-            </div>
-            <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row gap-2 sm:justify-end flex-shrink-0">
+            </FormCard>
+
+            {/* Collapsed by default: most activities hang off nothing, and a
+                list of every banquet on record is not what you want to scroll
+                past on the way to the save button. */}
+            <FormCard>
               <button
-                onClick={() => { setShowModal(false); resetForm(); }}
-                className="w-full sm:w-auto px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
+                type="button"
+                onClick={() => setBanquetPickerOpen(v => !v)}
+                aria-expanded={banquetPickerOpen}
+                className="flex w-full items-center gap-3 text-left focus-visible:outline-none focus-visible:underline"
               >
-                Annulla
+                <Link2 className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                    Collega a un banchetto
+                  </span>
+                  <span className="block text-[13px] text-[var(--ds-text-muted)]">
+                    {form.linkedBanquetIds.length === 0
+                      ? 'nessun collegamento'
+                      : form.linkedBanquetIds.length === 1
+                      ? '1 banchetto collegato'
+                      : `${form.linkedBanquetIds.length} banchetti collegati`}
+                  </span>
+                </span>
+                <span
+                  className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-transform ${
+                    banquetPickerOpen ? '' : '-rotate-90'
+                  }`}
+                  aria-hidden
+                >
+                  <ChevronDown className="h-4 w-4" />
+                </span>
               </button>
-              <button
-                onClick={handleSave}
-                disabled={!form.title.trim() || isSaving}
-                className="w-full sm:w-auto px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
-              >
-                {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-                {editingTodo ? 'Salva' : 'Aggiungi'}
-              </button>
-            </div>
+              {banquetPickerOpen && (
+                <div className="mt-4 max-h-64 space-y-1.5 overflow-y-auto">
+                  {sortedBanquets.length === 0 ? (
+                    <p className="text-[14px] text-[var(--ds-text-muted)]">Nessun banchetto in archivio.</p>
+                  ) : (
+                    sortedBanquets.map(b => {
+                      const linked = form.linkedBanquetIds.includes(b.id);
+                      return (
+                        <button
+                          key={b.id}
+                          type="button"
+                          onClick={() => toggleBanquetLink(b.id)}
+                          aria-pressed={linked}
+                          className={`flex w-full items-center gap-3 rounded-[16px] p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                            linked
+                              ? 'bg-[var(--ds-arriving-tint)]'
+                              : 'bg-[var(--ds-surface-row)] hover:bg-[var(--ds-border)]'
+                          }`}
+                        >
+                          <span
+                            className={`inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full ${
+                              linked
+                                ? 'bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)]'
+                                : 'ring-[1.5px] ring-inset ring-[var(--ds-border-strong)]'
+                            }`}
+                          >
+                            {linked && <Check className="h-3 w-3" strokeWidth={3} aria-hidden />}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span
+                              className={`block truncate text-[15px] font-medium ${
+                                linked ? 'text-[var(--ds-arriving-text)]' : 'text-[var(--ds-text-primary)]'
+                              }`}
+                            >
+                              {b.name}
+                            </span>
+                            <span
+                              className={`block text-[13px] ${
+                                linked ? 'text-[var(--ds-arriving-text)] opacity-80' : 'text-[var(--ds-text-muted)]'
+                              }`}
+                            >
+                              {b.event_date ? formatDueLong(b.event_date) : 'senza data'}
+                            </span>
+                          </span>
+                          {b.guests != null && (
+                            <span
+                              className={`flex-shrink-0 text-[13px] tabular-nums ${
+                                linked ? 'text-[var(--ds-arriving-text)] opacity-80' : 'text-[var(--ds-text-muted)]'
+                              }`}
+                            >
+                              {b.guests} coperti
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+            </FormCard>
           </div>
         </div>
-      )}
+      </ModalShell>
 
       <ConfirmDeleteModal
         isOpen={!!deleteConfirm}
-        title="Elimina Attività"
+        title="Elimina attività"
         message="Stai per eliminare l'attività:"
         itemName={deleteConfirm?.title}
         onCancel={() => setDeleteConfirm(null)}

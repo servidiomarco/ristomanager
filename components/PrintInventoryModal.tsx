@@ -7,8 +7,9 @@ import {
   InventoryStockRow,
   InventoryCategory,
 } from '../types';
-import { Printer, X } from 'lucide-react';
+import { Printer } from 'lucide-react';
 import { toTitleCase } from '../utils/text';
+import { ModalShell, FormCard, Field, dsSelect, dsButton } from './ds';
 
 interface Props {
   isOpen: boolean;
@@ -126,85 +127,81 @@ export const PrintInventoryModal: React.FC<Props> = ({
 
   return (
     <>
-      {/* Modal — visible on screen, hidden in print */}
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] p-4 no-print" onClick={onClose}>
-        <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
-          <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
-            <h3 className="text-[16px] font-semibold text-[var(--color-fg)] flex items-center gap-2">
-              <Printer className="h-4 w-4 text-[var(--color-fg-muted)]" />
-              Stampa inventario — {AREA_LABEL[area]}
-            </h3>
-            <button onClick={onClose} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]" aria-label="Chiudi">
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-
-          <div className="px-5 py-4 overflow-y-auto flex-1">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Area di stoccaggio</label>
-                <select
-                  value={locationId == null ? 'ALL' : String(locationId)}
-                  onChange={(e) => setLocationId(e.target.value === 'ALL' ? null : Number(e.target.value))}
-                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-                >
-                  <option value="ALL">Totale (tutte le aree)</option>
-                  {locations.map(loc => (
-                    <option key={loc.id} value={loc.id}>{toTitleCase(loc.name)}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Categoria</label>
-                <select
-                  value={categoryFilter == null ? 'ALL' : String(categoryFilter)}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setCategoryFilter(v === 'ALL' ? null : Number(v));
-                  }}
-                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-                >
-                  <option value="ALL">Tutte le categorie</option>
-                  {[...categories].sort((a, b) => a.sort_order - b.sort_order).map(cat => (
-                    <option key={cat.id} value={cat.id}>{cat.name}</option>
-                  ))}
-                  {products.some(p => p.category_id == null) && (
-                    <option value={UNCATEGORIZED_ID}>Senza categoria</option>
-                  )}
-                </select>
-              </div>
-            </div>
-
-            <div className="border-t border-[var(--color-line)] pt-4">
-              <p className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-2">Anteprima</p>
-              <div className="bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded-md p-3 text-sm space-y-1">
-                <p className="font-semibold text-[var(--color-fg)]">{AREA_LABEL[area]} · {locationLabel}</p>
-                <p className="text-[var(--color-fg-muted)]">{categoryLabel}</p>
-                <p className="text-[var(--color-fg-subtle)]">
-                  {totalProducts} prodotti · {groups.length} {groups.length === 1 ? 'sezione' : 'sezioni'}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-4 border-t border-[var(--color-line)] flex gap-2 justify-end">
-            <button
-              onClick={onClose}
-              className="rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)] transition"
-            >
+      {/* On screen only. The print stylesheet hides every direct body child
+          that is not .print-portal, and ModalShell portals to the body — so
+          this needs no no-print class of its own. */}
+      <ModalShell
+        open={isOpen}
+        onClose={onClose}
+        title="Stampa inventario"
+        subtitle={`${AREA_LABEL[area]} · ${new Date().toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' })}`}
+        size="sm"
+        closeOnEscape
+        bodyClassName="px-5 py-5 sm:px-6"
+        footer={
+          <>
+            <button type="button" onClick={onClose} className={dsButton.secondary}>
               Annulla
             </button>
             <button
+              type="button"
               onClick={handlePrint}
               disabled={totalProducts === 0}
-              className="rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              className={dsButton.primary}
             >
-              <Printer className="h-4 w-4" />
+              <Printer className="h-4 w-4" aria-hidden />
               Stampa
             </button>
+          </>
+        }
+      >
+        <FormCard className="space-y-4">
+          <Field label="Cosa stampare" htmlFor="print-location">
+            <select
+              id="print-location"
+              value={locationId == null ? 'ALL' : String(locationId)}
+              onChange={(e) => setLocationId(e.target.value === 'ALL' ? null : Number(e.target.value))}
+              className={dsSelect}
+            >
+              <option value="ALL">Tutta l'area (totale per prodotto)</option>
+              {locations.map(loc => (
+                <option key={loc.id} value={loc.id}>Solo {toTitleCase(loc.name)}</option>
+              ))}
+            </select>
+          </Field>
+
+          <Field label="Categoria" htmlFor="print-category">
+            <select
+              id="print-category"
+              value={categoryFilter == null ? 'ALL' : String(categoryFilter)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setCategoryFilter(v === 'ALL' ? null : Number(v));
+              }}
+              className={dsSelect}
+            >
+              <option value="ALL">Tutte le categorie</option>
+              {[...categories].sort((a, b) => a.sort_order - b.sort_order).map(cat => (
+                <option key={cat.id} value={cat.id}>{cat.name}</option>
+              ))}
+              {products.some(p => p.category_id == null) && (
+                <option value={UNCATEGORIZED_ID}>Senza categoria</option>
+              )}
+            </select>
+          </Field>
+
+          {/* What will come out of the printer, before the paper is spent. */}
+          <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-4">
+            <p className="text-[15px] font-medium text-[var(--ds-text-primary)]">
+              {AREA_LABEL[area]} · {locationId == null ? "Tutta l'area" : toTitleCase(locationLabel)}
+            </p>
+            <p className="mt-0.5 text-[14px] text-[var(--ds-text-muted)]">{categoryLabel}</p>
+            <p className="mt-0.5 text-[14px] text-[var(--ds-text-muted)]">
+              {totalProducts} {totalProducts === 1 ? 'prodotto' : 'prodotti'} · {groups.length} {groups.length === 1 ? 'sezione' : 'sezioni'}
+            </p>
           </div>
-        </div>
-      </div>
+        </FormCard>
+      </ModalShell>
 
       {/* Print-only area — portaled to <body> so it's a direct body child.
           Combined with the @media print CSS that hides every other body child,
@@ -251,7 +248,7 @@ export const PrintInventoryModal: React.FC<Props> = ({
                     return (
                       <tr key={p.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                         <td style={{ padding: '0.4rem 0.5rem' }}>{toTitleCase(p.name)}</td>
-                        <td style={{ padding: '0.4rem 0.5rem', textTransform: 'uppercase', fontSize: '0.75rem', color: '#475569' }}>{p.unit}</td>
+                        <td style={{ padding: '0.4rem 0.5rem', fontSize: '0.75rem', color: '#475569' }}>{p.unit}</td>
                         <td style={{ padding: '0.4rem 0.5rem', textAlign: 'right', fontWeight: 600 }}>{qty}</td>
                         {locationId == null && (
                           <td style={{ padding: '0.4rem 0.5rem', fontSize: '0.78rem', color: '#475569' }}>

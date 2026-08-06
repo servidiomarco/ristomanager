@@ -322,20 +322,23 @@ export const SkeletonHaccpSection: React.FC<{ rows?: number; className?: string 
     rows = 4,
     className,
 }) => (
+    // Stessa card della pagina vera — raggio 20, ombra al posto del bordo,
+    // pastiglia tonda per l'icona: caricando, il blocco non deve cambiare
+    // forma quando arrivano i dati.
     <div
         aria-hidden="true"
-        className={`bg-[var(--color-surface)] rounded-xl border border-[var(--color-line)] overflow-hidden motion-safe:animate-pulse ${className ?? ''}`}
+        className={`rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] motion-safe:animate-pulse sm:p-5 ${className ?? ''}`}
     >
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-[var(--color-line)]">
-            <div className="h-4 w-4 rounded bg-[var(--color-surface-3)]" />
-            <div className="h-4 w-40 rounded bg-[var(--color-surface-3)]" />
-            <div className="ml-auto h-4 w-24 rounded-full bg-[var(--color-surface-3)]" />
+        <div className="mb-3 flex items-center gap-2.5">
+            <div className="h-8 w-8 rounded-full bg-[var(--ds-surface-row)]" />
+            <div className="h-4 w-40 rounded-full bg-[var(--ds-surface-row)]" />
+            <div className="ml-auto h-6 w-24 rounded-full bg-[var(--ds-surface-row)]" />
         </div>
-        <div className="p-4 space-y-2.5">
+        <div className="space-y-2.5">
             {Array.from({ length: rows }).map((_, i) => (
                 <div key={i} className="flex items-center gap-3">
-                    <div className="h-3 w-1/3 rounded bg-[var(--color-surface-3)]" />
-                    <div className="h-8 w-24 rounded bg-[var(--color-surface-3)] ml-auto" />
+                    <div className="h-3 w-1/3 rounded-full bg-[var(--ds-surface-row)]" />
+                    <div className="ml-auto h-11 w-24 rounded-full bg-[var(--ds-surface-row)]" />
                 </div>
             ))}
         </div>

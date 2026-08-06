@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   InventoryArea,
   InventoryLocation,
@@ -26,12 +26,16 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { toTitleCase } from '../utils/text';
 import {
-  Loader2, Plus, Minus, Pencil, Trash2, X, Settings, Boxes,
-  ChefHat, Wine, GlassWater, AlertTriangle, Tag, Search, Printer,
+  Loader2, Plus, Pencil, Trash2, Boxes, GripVertical, Check, MoreVertical,
+  ChefHat, Wine, GlassWater, AlertTriangle, Tag, Search, Printer, Container,
 } from 'lucide-react';
 import { PrintInventoryModal } from './PrintInventoryModal';
-import { CookingPotLoader } from './CookingPotLoader';
 import { SkeletonProductList } from './SkeletonCards';
+import {
+  ModalShell, Sheet, SegmentedControl, SearchField, SectionHeader, StatStrip,
+  StatusPill, Callout, EmptyState, FormCard, Field, useMediaQuery,
+  dsButton, dsInput, dsSelect, dsTextarea,
+} from './ds';
 
 interface Props {
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
@@ -54,6 +58,25 @@ const AREA_ICON: Record<InventoryArea, React.ReactNode> = {
 // Compose a stable key for a (product, location) entry in the stock map.
 const stockKey = (productId: number, locationId: number): string => `${productId}:${locationId}`;
 
+// The category filter and the group list share this sentinel for products with
+// no category, so "Senza categoria" behaves like any other group.
+const UNCATEGORIZED = -1;
+
+// Destructive confirmations. dsButton has no critical weight — deleting is rare
+// enough that it stays a one-off rather than a fourth button in the barrel, and
+// this matches the inline confirm already used in SupplierManagementModal.
+const dsButtonCritical =
+  'inline-flex items-center justify-center gap-2 h-11 px-5 rounded-full text-[15px] font-semibold bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] transition-opacity hover:opacity-90 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+
+// The quiet round control that sits at the end of a row.
+const rowIconButton =
+  'inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+
+const rowIconButtonDanger =
+  'inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+
+const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+
 export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAutoOpenNewProductHandled }) => {
   const { hasPermission } = useAuth();
   const canEdit = hasPermission('inventory:full');
@@ -69,8 +92,11 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Category filter — null = all, -1 = "Senza categoria", number = category id
+  // Category filter — null = all, UNCATEGORIZED = "Senza categoria", number = category id
   const [categoryFilter, setCategoryFilter] = useState<number | null>(null);
+  // Narrows the list to what is about to run out. Client-side, over data that
+  // is already loaded — the same set the banner names.
+  const [onlyLowStock, setOnlyLowStock] = useState(false);
 
   // Locations modal
   const [locationsModalOpen, setLocationsModalOpen] = useState(false);
@@ -95,11 +121,51 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
   // Per-row pending state for the +/- stepper buttons so the user gets immediate
   // feedback while the request is in flight. Keyed by stockKey.
   const [pendingKeys, setPendingKeys] = useState<Set<string>>(new Set());
+  // Rows already touched in this counting pass. Kept until the cell or the area
+  // changes: during a count the useful question is "which shelves have I done",
+  // and a badge that fades after two seconds cannot answer it.
+  const [savedKeys, setSavedKeys] = useState<Set<string>>(new Set());
 
   const [search, setSearch] = useState('');
 
+  // Products from the other two areas, loaded only when someone asks for them
+  // from the no-results state. null = never asked.
+  const [crossArea, setCrossArea] = useState<{ loading: boolean; results: InventoryProduct[] } | null>(null);
+
+  // Drag-to-reorder inside the Categorie / Aree modals.
+  const [dragCat, setDragCat] = useState<{ from: number; over: number } | null>(null);
+  const [dragLoc, setDragLoc] = useState<{ from: number; over: number } | null>(null);
+
+  // Which area the Categorie / Aree modals are editing. It starts on the one you
+  // are looking at, but you can move to another without closing and losing your
+  // place on the page behind — reorganising Sala is not a reason to leave Cucina.
+  const [manageArea, setManageArea] = useState<InventoryArea>(InventoryArea.CUCINA);
+  // That other area's data, fetched on demand through the same endpoints the
+  // page uses. Empty while manageArea === activeArea, which reads from the page
+  // state instead so an edit shows up behind the modal immediately.
+  const [foreign, setForeign] = useState<{
+    categories: InventoryCategory[];
+    locations: InventoryLocation[];
+    products: InventoryProduct[];
+    stock: InventoryStockRow[];
+  }>({ categories: [], locations: [], products: [], stock: [] });
+  const [foreignLoading, setForeignLoading] = useState(false);
+
   // Print modal
   const [printModalOpen, setPrintModalOpen] = useState(false);
+
+  // The "gestisci" menu behind the ⋮ in the page head.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  // Picks the container, not the styling: a dropdown anchored to the trigger and
+  // a bottom sheet are different trees, which CSS cannot swap between.
+  const isWide = useMediaQuery('(min-width: 1024px)');
+
+  // Quantity fields in the counting view, in render order, so Enter can hand
+  // focus to the next product without the caller knowing the grouping.
+  const qtyInputs = useRef<Map<number, HTMLInputElement>>(new Map());
+  const orderedIds = useRef<number[]>([]);
 
   // Load everything for the active area whenever it changes.
   useEffect(() => {
@@ -119,6 +185,8 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
         setStock(st);
         setCategories(cats);
         setCategoryFilter(null);
+        setOnlyLowStock(false);
+        setSavedKeys(new Set());
         // If the previously active location is gone (or we changed area), reset
         // to Totale so the UI doesn't show an empty grid.
         setActiveLocationId(prev => {
@@ -137,6 +205,27 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       cancelled = true;
     };
   }, [activeArea]);
+
+  // A new search is a new question — the previous cross-area answer would be
+  // about a term nobody typed any more.
+  useEffect(() => { setCrossArea(null); }, [search, activeArea]);
+
+  // Dismiss the dropdown the way every other menu in the app does. Not needed
+  // for the sheet, which has its own backdrop.
+  useEffect(() => {
+    if (!menuOpen || !isWide) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!menuRef.current?.contains(t) && !menuTriggerRef.current?.contains(t)) setMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [menuOpen, isWide]);
 
   // Quick lookup map: stockKey → quantity
   const stockMap = useMemo(() => {
@@ -175,17 +264,163 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
       .filter(b => b.quantity !== 0);
   };
 
+  const lowStockProducts = useMemo(
+    () => products.filter(p => isLowStock(p.id)),
+    [products, stockMap, locations]
+  );
+
   const filteredProducts = useMemo(() => {
     const q = search.trim().toLowerCase();
     let list = products;
-    if (categoryFilter === -1) {
+    if (categoryFilter === UNCATEGORIZED) {
       list = list.filter(p => p.category_id == null);
     } else if (categoryFilter != null) {
       list = list.filter(p => p.category_id === categoryFilter);
     }
+    if (onlyLowStock) list = list.filter(p => isLowStock(p.id));
     if (q) list = list.filter(p => p.name.toLowerCase().includes(q));
     return list;
-  }, [products, search, categoryFilter]);
+  }, [products, search, categoryFilter, onlyLowStock, stockMap, locations]);
+
+  // The list, cut into category bands in the order the categories were arranged
+  // in the Categorie modal. Uncategorised products close the list rather than
+  // opening it — they are the leftovers, not the headline.
+  const groups = useMemo(() => {
+    const byCategory = new Map<number, InventoryProduct[]>();
+    for (const p of filteredProducts) {
+      const key = p.category_id ?? UNCATEGORIZED;
+      const bucket = byCategory.get(key);
+      if (bucket) bucket.push(p);
+      else byCategory.set(key, [p]);
+    }
+    const out: { id: number; name: string; products: InventoryProduct[] }[] = [];
+    for (const cat of categories) {
+      const items = byCategory.get(cat.id);
+      if (items?.length) out.push({ id: cat.id, name: cat.name, products: items });
+    }
+    const loose = byCategory.get(UNCATEGORIZED);
+    if (loose?.length) out.push({ id: UNCATEGORIZED, name: 'Senza categoria', products: loose });
+    return out;
+  }, [filteredProducts, categories]);
+
+  // Rebuilt on every render so Enter always walks the list you are looking at,
+  // not the one you filtered away.
+  orderedIds.current = groups.flatMap(g => g.products.map(p => p.id));
+
+  const productCountFor = (categoryId: number): number =>
+    products.filter(p => (p.category_id ?? UNCATEGORIZED) === categoryId).length;
+
+  // How many products actually sit in a cell. Zero-quantity rows are not "in"
+  // it — that is the number the cell tab promises.
+  const stockedCountFor = (locationId: number): number =>
+    products.filter(p => (stockMap.get(stockKey(p.id, locationId)) ?? 0) !== 0).length;
+
+  // Units already in use in this area, most common first. A fixed list would go
+  // stale the day someone starts counting something by the crate.
+  const unitSuggestions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of products) {
+      const u = (p.unit || '').trim();
+      if (u) counts.set(u, (counts.get(u) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([u]) => u);
+  }, [products]);
+
+  /* ── What the Categorie / Aree modals are looking at ───────────────────────
+     One switch, four lists. When the modal is on the area the page is showing,
+     it reads and writes the page's own state so an edit lands behind it without
+     a refetch; on any other area it works on the fetched copy. Every handler
+     below goes through these, so there is one place where that choice is made
+     rather than a branch in each. */
+  const isForeign = manageArea !== activeArea;
+  const mCategories = isForeign ? foreign.categories : categories;
+  const mLocations = isForeign ? foreign.locations : locations;
+  const mProducts = isForeign ? foreign.products : products;
+  const mStock = isForeign ? foreign.stock : stock;
+
+  const setMCategories = (updater: (prev: InventoryCategory[]) => InventoryCategory[]) => {
+    if (isForeign) setForeign(f => ({ ...f, categories: updater(f.categories) }));
+    else setCategories(updater);
+  };
+  const setMLocations = (updater: (prev: InventoryLocation[]) => InventoryLocation[]) => {
+    if (isForeign) setForeign(f => ({ ...f, locations: updater(f.locations) }));
+    else setLocations(updater);
+  };
+  const setMProducts = (updater: (prev: InventoryProduct[]) => InventoryProduct[]) => {
+    if (isForeign) setForeign(f => ({ ...f, products: updater(f.products) }));
+    else setProducts(updater);
+  };
+
+  const mStockMap = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of mStock) m.set(stockKey(s.product_id, s.location_id), s.quantity);
+    return m;
+  }, [mStock]);
+
+  const mProductCountFor = (categoryId: number): number =>
+    mProducts.filter(p => (p.category_id ?? UNCATEGORIZED) === categoryId).length;
+
+  const mStockedCountFor = (locationId: number): number =>
+    mProducts.filter(p => (mStockMap.get(stockKey(p.id, locationId)) ?? 0) !== 0).length;
+
+  const manageModalOpen = categoriesModalOpen || locationsModalOpen;
+
+  // Pull the other area in only when a modal is actually pointed at it.
+  useEffect(() => {
+    if (!manageModalOpen || !isForeign) return;
+    let cancelled = false;
+    setForeignLoading(true);
+    Promise.all([
+      getInventoryLocations(manageArea),
+      getInventoryProducts(manageArea),
+      getInventoryStock(manageArea),
+      getInventoryCategories(manageArea),
+    ])
+      .then(([locs, prods, st, cats]) => {
+        if (!cancelled) setForeign({ locations: locs, products: prods, stock: st, categories: cats });
+      })
+      .catch((err: any) => {
+        if (!cancelled) showToast(err?.message || 'Errore caricamento area', 'error');
+      })
+      .finally(() => {
+        if (!cancelled) setForeignLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [manageModalOpen, isForeign, manageArea]);
+
+  const openCategoriesModal = () => {
+    setManageArea(activeArea);
+    setEditingCategoryId(null);
+    setCategoryDraftName('');
+    setCategoriesModalOpen(true);
+  };
+  const openLocationsModal = () => {
+    setManageArea(activeArea);
+    setEditingLocationId(null);
+    setLocationDraftName('');
+    setLocationsModalOpen(true);
+  };
+  // Switching area inside a modal abandons whatever row was being renamed and
+  // whatever name was half-typed — both belong to the area you just left, and a
+  // draft carried over would be created in the wrong one.
+  const switchManageArea = (next: InventoryArea) => {
+    setManageArea(next);
+    setEditingCategoryId(null);
+    setEditingLocationId(null);
+    setCategoryDraftName('');
+    setLocationDraftName('');
+    setDragCat(null);
+    setDragLoc(null);
+    // Drop the previous area's rows in the same tick as the switch. The fetch
+    // below only starts after this render, so without it the list would show
+    // the area you just left for a frame before the spinner appears.
+    if (next !== activeArea) {
+      setForeign({ categories: [], locations: [], products: [], stock: [] });
+      setForeignLoading(true);
+    } else {
+      setForeignLoading(false);
+    }
+  };
 
   const applyMovement = async (productId: number, locationId: number, delta: number, reason: InventoryMovementReason) => {
     const key = stockKey(productId, locationId);
@@ -203,6 +438,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
         next[idx] = res.stock;
         return next;
       });
+      setSavedKeys(prev => new Set(prev).add(key));
     } catch (err: any) {
       showToast(err?.message || 'Errore aggiornamento stock', 'error');
     } finally {
@@ -236,16 +472,27 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
     await applyMovement(productId, activeLocationId, delta, InventoryMovementReason.RETTIFICA);
   };
 
+  // Enter commits the field and moves to the next product, so a count is one
+  // hand on the number pad instead of a reach for the mouse per shelf.
+  const focusNext = (productId: number) => {
+    const idx = orderedIds.current.indexOf(productId);
+    const nextId = idx >= 0 ? orderedIds.current[idx + 1] : undefined;
+    if (nextId == null) return;
+    const el = qtyInputs.current.get(nextId);
+    el?.focus();
+    el?.select();
+  };
+
   // ---------- Locations modal handlers ----------
   const handleAddLocation = async () => {
     if (!locationDraftName.trim()) return;
     try {
       const created = await createInventoryLocation({
-        area: activeArea,
+        area: manageArea,
         name: locationDraftName.trim(),
-        sort_order: locations.length,
+        sort_order: mLocations.length,
       });
-      setLocations(prev => [...prev, created]);
+      setMLocations(prev => [...prev, created]);
       setLocationDraftName('');
       showToast('Area creata', 'success');
     } catch (err: any) {
@@ -256,12 +503,12 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
   const handleSaveLocationEdit = async () => {
     if (editingLocationId == null || !editingLocationName.trim()) return;
     try {
-      const sortOrder = locations.find(l => l.id === editingLocationId)?.sort_order ?? 0;
+      const sortOrder = mLocations.find(l => l.id === editingLocationId)?.sort_order ?? 0;
       const updated = await updateInventoryLocation(editingLocationId, {
         name: editingLocationName.trim(),
         sort_order: sortOrder,
       });
-      setLocations(prev => prev.map(l => (l.id === updated.id ? updated : l)));
+      setMLocations(prev => prev.map(l => (l.id === updated.id ? updated : l)));
       setEditingLocationId(null);
       setEditingLocationName('');
       showToast('Area aggiornata', 'success');
@@ -273,9 +520,15 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
   const handleDeleteLocation = async (id: number) => {
     try {
       await deleteInventoryLocation(id);
-      setLocations(prev => prev.filter(l => l.id !== id));
-      setStock(prev => prev.filter(s => s.location_id !== id));
-      if (activeLocationId === id) setActiveLocationId(null);
+      setMLocations(prev => prev.filter(l => l.id !== id));
+      // The page's stock and cell tab only matter when the modal is editing the
+      // area the page is showing; the other area is reloaded when you go to it.
+      if (isForeign) {
+        setForeign(f => ({ ...f, stock: f.stock.filter(s => s.location_id !== id) }));
+      } else {
+        setStock(prev => prev.filter(s => s.location_id !== id));
+        if (activeLocationId === id) setActiveLocationId(null);
+      }
       setConfirmDeleteLocationId(null);
       showToast('Area eliminata', 'success');
     } catch (err: any) {
@@ -289,11 +542,11 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
     if (!categoryDraftName.trim()) return;
     try {
       const created = await createInventoryCategory({
-        area: activeArea,
+        area: manageArea,
         name: categoryDraftName.trim(),
-        sort_order: categories.length,
+        sort_order: mCategories.length,
       });
-      setCategories(prev => [...prev, created]);
+      setMCategories(prev => [...prev, created]);
       setCategoryDraftName('');
       showToast('Categoria creata', 'success');
     } catch (err: any) {
@@ -304,14 +557,14 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
   const handleSaveCategoryEdit = async () => {
     if (editingCategoryId == null || !editingCategoryName.trim()) return;
     try {
-      const sortOrder = categories.find(c => c.id === editingCategoryId)?.sort_order ?? 0;
+      const sortOrder = mCategories.find(c => c.id === editingCategoryId)?.sort_order ?? 0;
       const updated = await updateInventoryCategory(editingCategoryId, {
         name: editingCategoryName.trim(),
         sort_order: sortOrder,
       });
-      setCategories(prev => prev.map(c => (c.id === updated.id ? updated : c)));
+      setMCategories(prev => prev.map(c => (c.id === updated.id ? updated : c)));
       // Refresh products' category_name in-place where they referenced this category.
-      setProducts(prev => prev.map(p => p.category_id === updated.id ? { ...p, category_name: updated.name } : p));
+      setMProducts(prev => prev.map(p => p.category_id === updated.id ? { ...p, category_name: updated.name } : p));
       setEditingCategoryId(null);
       setEditingCategoryName('');
       showToast('Categoria aggiornata', 'success');
@@ -323,10 +576,10 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
   const handleDeleteCategory = async (id: number) => {
     try {
       await deleteInventoryCategory(id);
-      setCategories(prev => prev.filter(c => c.id !== id));
+      setMCategories(prev => prev.filter(c => c.id !== id));
       // Products keep existing — backend ON DELETE SET NULL clears their FK.
-      setProducts(prev => prev.map(p => p.category_id === id ? { ...p, category_id: null, category_name: null } : p));
-      if (categoryFilter === id) setCategoryFilter(null);
+      setMProducts(prev => prev.map(p => p.category_id === id ? { ...p, category_id: null, category_name: null } : p));
+      if (!isForeign && categoryFilter === id) setCategoryFilter(null);
       setConfirmDeleteCategoryId(null);
       showToast('Categoria eliminata', 'success');
     } catch (err: any) {
@@ -335,12 +588,61 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
     }
   };
 
+  // ---------- Reordering ----------
+  // The list is moved locally first, then every row whose position actually
+  // changed is written back through the same PUT that renames it. On failure the
+  // previous order is restored — a half-applied order is worse than none.
+  const reorder = <T,>(list: T[], from: number, to: number): T[] => {
+    const next = list.slice();
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    return next;
+  };
+
+  const handleDropCategory = async (to: number) => {
+    const from = dragCat?.from;
+    setDragCat(null);
+    if (from == null || from === to) return;
+    const previous = mCategories;
+    const next = reorder(mCategories, from, to);
+    setMCategories(() => next.map((c, i) => ({ ...c, sort_order: i })));
+    try {
+      await Promise.all(
+        next
+          .map((c, i) => (c.sort_order === i ? null : updateInventoryCategory(c.id, { name: c.name, sort_order: i })))
+          .filter(Boolean) as Promise<InventoryCategory>[]
+      );
+    } catch (err: any) {
+      setMCategories(() => previous);
+      showToast(err?.message || 'Errore riordino categorie', 'error');
+    }
+  };
+
+  const handleDropLocation = async (to: number) => {
+    const from = dragLoc?.from;
+    setDragLoc(null);
+    if (from == null || from === to) return;
+    const previous = mLocations;
+    const next = reorder(mLocations, from, to);
+    setMLocations(() => next.map((l, i) => ({ ...l, sort_order: i })));
+    try {
+      await Promise.all(
+        next
+          .map((l, i) => (l.sort_order === i ? null : updateInventoryLocation(l.id, { name: l.name, sort_order: i })))
+          .filter(Boolean) as Promise<InventoryLocation>[]
+      );
+    } catch (err: any) {
+      setMLocations(() => previous);
+      showToast(err?.message || 'Errore riordino aree', 'error');
+    }
+  };
+
   // ---------- Product modal handlers ----------
-  const openCreateProduct = () => {
+  const openCreateProduct = (presetName?: string) => {
     setProductEditing(null);
     // Pre-select the currently filtered category, if any, for fast bulk-add.
-    const presetCategory = (categoryFilter != null && categoryFilter !== -1) ? categoryFilter : null;
-    setProductForm({ name: '', unit: '', notes: '', category_id: presetCategory });
+    const presetCategory = (categoryFilter != null && categoryFilter !== UNCATEGORIZED) ? categoryFilter : null;
+    setProductForm({ name: presetName ?? '', unit: '', notes: '', category_id: presetCategory });
     setProductModalOpen(true);
   };
   useEffect(() => {
@@ -407,570 +709,972 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
     }
   };
 
+  // ---------- Cross-area search ----------
+  const searchEverywhere = async () => {
+    setCrossArea({ loading: true, results: [] });
+    try {
+      const all = await getInventoryProducts();
+      const q = search.trim().toLowerCase();
+      setCrossArea({
+        loading: false,
+        results: all.filter(p => p.area !== activeArea && p.name.toLowerCase().includes(q)),
+      });
+    } catch (err: any) {
+      setCrossArea(null);
+      showToast(err?.message || 'Errore ricerca', 'error');
+    }
+  };
+
   // ---------- Render ----------
 
   const isTotale = activeLocationId == null;
+  const activeLocation = locations.find(l => l.id === activeLocationId) ?? null;
+  const searchTerm = search.trim();
 
-  return (
-    <div className="p-4 sm:p-6 lg:p-8 pb-24 lg:pb-8 space-y-3">
-      {/* Filters row: area pills + location pills + management buttons */}
-      <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
-        <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full flex-shrink-0">
-          {(Object.values(InventoryArea) as InventoryArea[]).map(area => (
-            <button
-              key={area}
-              onClick={() => setActiveArea(area)}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition ${
-                activeArea === area
-                  ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                  : 'text-[var(--color-fg-muted)]'
+  const areaOptions = (Object.values(InventoryArea) as InventoryArea[]).map(area => ({
+    value: area,
+    label: AREA_LABEL[area],
+    icon: AREA_ICON[area],
+  }));
+
+  // Everything that manages the inventory rather than counts it. One list, two
+  // containers: a dropdown where there is a pointer, a bottom sheet where there
+  // is a thumb.
+  const manageActions = [
+    { icon: Printer, label: 'Stampa inventario', meta: null as string | null, onClick: () => setPrintModalOpen(true) },
+    ...(canEdit
+      ? [
+          { icon: Tag, label: 'Gestisci categorie', meta: String(categories.length), onClick: openCategoriesModal },
+          { icon: Container, label: 'Gestisci celle e aree', meta: String(locations.length), onClick: openLocationsModal },
+        ]
+      : []),
+  ];
+
+  // Sits in both management modals' subheader. Changing area here does not move
+  // the page behind: you can tidy up Sala's shelves and go back to counting
+  // Cucina exactly where you left off.
+  const manageAreaSwitcher = (
+    <SegmentedControl
+      value={manageArea}
+      onChange={(next: InventoryArea) => switchManageArea(next)}
+      options={areaOptions}
+      ariaLabel="Area da gestire"
+      equalWidth={false}
+    />
+  );
+
+  const menuTrigger = (
+    <button
+      ref={menuTriggerRef}
+      type="button"
+      onClick={() => setMenuOpen(v => !v)}
+      aria-haspopup="menu"
+      aria-expanded={menuOpen}
+      aria-label="Gestisci inventario"
+      title="Gestisci inventario"
+      className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+    >
+      <MoreVertical className="h-4 w-4" aria-hidden />
+    </button>
+  );
+
+  const cellOptions = [
+    { value: 'ALL', label: 'Totale', badge: products.length, badgeTone: 'neutral' as const },
+    ...locations.map(loc => ({
+      value: String(loc.id),
+      label: toTitleCase(loc.name),
+      badge: stockedCountFor(loc.id),
+      badgeTone: 'neutral' as const,
+    })),
+  ];
+
+  const categoryOptions = [
+    { value: 'ALL', label: 'Tutte', badge: products.length, badgeTone: 'neutral' as const },
+    ...categories.map(cat => ({
+      value: String(cat.id),
+      label: cat.name,
+      badge: productCountFor(cat.id),
+      badgeTone: 'neutral' as const,
+    })),
+    ...(products.some(p => p.category_id == null)
+      ? [{ value: String(UNCATEGORIZED), label: 'Senza categoria', badge: productCountFor(UNCATEGORIZED), badgeTone: 'neutral' as const }]
+      : []),
+  ];
+
+  const renderRow = (p: InventoryProduct, firstInGroup: boolean) => {
+    const qty = quantityFor(p.id);
+    const breakdown = isTotale ? breakdownFor(p.id) : [];
+    const key = activeLocationId != null ? stockKey(p.id, activeLocationId) : '';
+    const isPending = !!key && pendingKeys.has(key);
+    const isSaved = !!key && savedKeys.has(key);
+    const lowStock = isLowStock(p.id);
+
+    return (
+      <div
+        key={p.id}
+        className={`relative flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 sm:flex-nowrap sm:px-5 ${
+          firstInGroup ? '' : 'border-t border-[var(--ds-border)]'
+        } ${lowStock ? 'bg-[var(--ds-critical-tint)]' : ''}`}
+      >
+        {/* The marker is the second signal on a low-stock row, so the state
+            survives a colour-blind reader even before the pill is read. */}
+        {lowStock && (
+          <span className="absolute inset-y-0 left-0 w-[3px] bg-[var(--ds-critical-solid)]" aria-hidden />
+        )}
+
+        {/* In a cell view the name takes the whole first line on a phone: a
+            176px stepper and two round actions leave it about seventy pixels
+            otherwise, which is four characters of "Costine agnello tagliate". */}
+        <div className={`min-w-0 flex-1 ${isTotale ? '' : 'basis-full sm:basis-auto'}`}>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span
+              className={`truncate text-[15px] font-medium ${
+                lowStock ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-text-primary)]'
               }`}
             >
-              {AREA_ICON[area]}
-              {AREA_LABEL[area]}
-            </button>
-          ))}
+              {p.name}
+            </span>
+            {lowStock && (
+              <StatusPill tone="critical">
+                <AlertTriangle className="h-3 w-3" aria-hidden />
+                Scorta bassa
+              </StatusPill>
+            )}
+            {p.unit && (
+              <span className="text-[13px] text-[var(--ds-text-muted)]">{p.unit}</span>
+            )}
+            {isPending && <StatusPill tone="info">Salvo…</StatusPill>}
+            {!isPending && isSaved && (
+              <StatusPill tone="positive">
+                <Check className="h-3 w-3" aria-hidden />
+                Aggiornato
+              </StatusPill>
+            )}
+          </div>
+          {/* Category under the name in a cell view: the bands are gone there,
+              so it is the only thing saying what the product is. */}
+          {!isTotale && p.category_name && (
+            <div className="mt-0.5 truncate text-[13px] text-[var(--ds-text-muted)]">{p.category_name}</div>
+          )}
+          {/* Where the stock lives. A column of its own from md up; under the
+              name on a phone, where a third column would crush the name. */}
+          {isTotale && breakdown.length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-1 md:hidden">
+              {breakdown.map(b => (
+                <StatusPill key={b.locationName} tone="neutral">
+                  {toTitleCase(b.locationName)}
+                  <span className="font-semibold tabular-nums">{b.quantity}</span>
+                </StatusPill>
+              ))}
+            </div>
+          )}
+          {p.notes && !isTotale && (
+            <div className="mt-0.5 truncate text-[13px] text-[var(--ds-text-muted)]">{p.notes}</div>
+          )}
         </div>
 
-        <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full flex-shrink-0">
-          <button
-            onClick={() => setActiveLocationId(null)}
-            className={`px-3 py-1.5 text-xs font-medium rounded-full transition whitespace-nowrap ${
-              isTotale
-                ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                : 'text-[var(--color-fg-muted)]'
+        {isTotale && (
+          <div className="hidden min-w-0 flex-wrap items-center justify-end gap-1 md:flex md:w-[260px] lg:w-[320px]">
+            {breakdown.map(b => (
+              <StatusPill key={b.locationName} tone="neutral">
+                {toTitleCase(b.locationName)}
+                <span className="font-semibold tabular-nums">{b.quantity}</span>
+              </StatusPill>
+            ))}
+          </div>
+        )}
+
+        {isTotale ? (
+          <div
+            className={`w-14 flex-shrink-0 text-right text-[17px] font-semibold tabular-nums ${
+              lowStock ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-text-primary)]'
             }`}
           >
-            Totale
-          </button>
-          {locations.map(loc => (
+            {qty}
+          </div>
+        ) : (
+          // The counting control. Not ds/Stepper: that one owns its value and
+          // fires on every keystroke, and here each change is a movement posted
+          // to the server — the field has to commit on blur, not on typing.
+          <div className="flex flex-shrink-0 items-center gap-1.5" role="group" aria-label={`Quantità ${p.name}`}>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => handleStep(p.id, -1)}
+                disabled={isPending}
+                aria-label={`${p.name}: togli uno`}
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[20px] font-medium leading-none text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              >
+                −
+              </button>
+            )}
+            <input
+              type="number"
+              step="any"
+              inputMode="decimal"
+              defaultValue={qty}
+              key={`${p.id}-${activeLocationId}-${qty}`}
+              ref={el => {
+                if (el) qtyInputs.current.set(p.id, el);
+                else qtyInputs.current.delete(p.id);
+              }}
+              aria-label={`Quantità ${p.name}`}
+              onFocus={e => e.currentTarget.select()}
+              onBlur={(e) => {
+                if (canEdit) {
+                  handleSetQuantity(p.id, e.target.value);
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  e.currentTarget.blur();
+                  focusNext(p.id);
+                } else if (e.key === 'Escape') {
+                  // Put the served value back before blurring, so leaving the
+                  // row cannot post a movement you were in the middle of typing.
+                  e.currentTarget.value = String(qty);
+                  e.currentTarget.blur();
+                }
+              }}
+              readOnly={!canEdit || isPending}
+              className="ds-stepper-input h-11 w-[76px] rounded-full bg-[var(--ds-surface-row)] px-2 text-center text-[17px] font-semibold tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            />
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => handleStep(p.id, 1)}
+                disabled={isPending}
+                aria-label={`${p.name}: aggiungi uno`}
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[20px] font-medium leading-none text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              >
+                +
+              </button>
+            )}
+          </div>
+        )}
+
+        {canEdit && (
+          <div className="ml-auto flex w-[84px] flex-shrink-0 items-center justify-end gap-0.5">
             <button
-              key={loc.id}
-              onClick={() => setActiveLocationId(loc.id)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-full transition whitespace-nowrap ${
-                activeLocationId === loc.id
-                  ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                  : 'text-[var(--color-fg-muted)]'
-              }`}
+              type="button"
+              onClick={() => openEditProduct(p)}
+              className={rowIconButton}
+              aria-label={`Modifica ${p.name}`}
+              title="Modifica"
             >
-              {toTitleCase(loc.name)}
+              <Pencil className="h-4 w-4" />
             </button>
-          ))}
+            <button
+              type="button"
+              onClick={() => setConfirmDeleteProductId(p.id)}
+              className={rowIconButtonDanger}
+              aria-label={`Elimina ${p.name}`}
+              title="Elimina"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-4 p-4 sm:p-6 lg:p-8">
+      {/* Page head — what you are looking at, and the two numbers that decide
+          whether you need to do something about it. */}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 items-center justify-between gap-2 lg:flex-1">
+          <div className="min-w-0">
+            <h1 className="text-[22px] font-semibold tracking-[-0.02em] text-[var(--ds-text-primary)] sm:text-[26px]">
+              Inventario
+            </h1>
+          </div>
+          {/* On a phone the top bar's + is a reach away from where the thumb is
+              working, so the action you take most from this page sits with the
+              title. On desktop the + in the top bar is the only entry point. */}
+          {!isWide && (
+            <div className="flex flex-shrink-0 items-center gap-2">
+              {canEdit && (
+                <button type="button" onClick={() => openCreateProduct()} className={`${dsButton.primary} px-4`}>
+                  <Plus className="h-4 w-4" aria-hidden />
+                  Nuovo prodotto
+                </button>
+              )}
+              {menuTrigger}
+            </div>
+          )}
         </div>
 
-        <div className="hidden md:flex items-center gap-2 ml-auto flex-shrink-0">
-          <button
-            onClick={() => setPrintModalOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)] transition"
-            title="Stampa inventario"
-          >
-            <Printer className="h-3.5 w-3.5" />
-            Stampa
-          </button>
-          {canEdit && (
-            <>
-              <button
-                onClick={() => setCategoriesModalOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)] transition"
-                title="Gestione categorie"
-              >
-                <Tag className="h-3.5 w-3.5" />
-                Gestione categorie
-              </button>
-              <button
-                onClick={() => setLocationsModalOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)] transition"
-                title="Gestione aree"
-              >
-                <Settings className="h-3.5 w-3.5" />
-                Gestione aree
-              </button>
-            </>
+        <div className="flex flex-shrink-0 items-center gap-2">
+          <StatStrip
+            layout="stacked"
+            className="min-w-0 flex-1 lg:w-[300px] lg:flex-none"
+            stats={[
+              { value: products.length, label: 'prodotti' },
+              {
+                value: lowStockProducts.length,
+                label: 'scorta bassa',
+                tone: lowStockProducts.length > 0 ? 'critical' : 'neutral',
+                tint: lowStockProducts.length > 0,
+                onClick: lowStockProducts.length > 0 ? () => setOnlyLowStock(v => !v) : undefined,
+                title: onlyLowStock ? 'Mostra tutti i prodotti' : 'Mostra solo i prodotti sotto soglia',
+              },
+            ]}
+          />
+          {/* Everything you do to the inventory rather than in it. A dropdown on
+              a pointer, an action sheet on touch — the same entries either way. */}
+          {isWide && (
+            <div className="relative flex-shrink-0">
+              {menuTrigger}
+              {menuOpen && (
+                <div
+                  ref={menuRef}
+                  role="menu"
+                  className="absolute right-0 top-full z-30 mt-2 w-[264px] overflow-hidden rounded-[20px] bg-[var(--ds-surface)] py-1.5 shadow-[var(--ds-shadow-raised)]"
+                >
+                  {manageActions.map(a => (
+                    <button
+                      key={a.label}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => { setMenuOpen(false); a.onClick(); }}
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-[15px] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)]"
+                    >
+                      <a.icon className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
+                      <span className="min-w-0 flex-1 truncate">{a.label}</span>
+                      {a.meta != null && (
+                        <span className="flex-shrink-0 text-[14px] tabular-nums text-[var(--ds-text-muted)]">{a.meta}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>
 
-      {/* Category filter pills */}
-      {(categories.length > 0 || products.some(p => p.category_id == null)) && (
-        <div className="overflow-x-auto scrollbar-hide">
-          <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full">
-          <button
-            onClick={() => setCategoryFilter(null)}
-            className={`px-3 py-1.5 text-xs font-medium rounded-full transition whitespace-nowrap ${
-              categoryFilter === null
-                ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                : 'text-[var(--color-fg-muted)]'
-            }`}
-          >
-            Tutte
-          </button>
-          {categories.map(cat => (
-            <button
-              key={cat.id}
-              onClick={() => setCategoryFilter(cat.id)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-full transition whitespace-nowrap ${
-                categoryFilter === cat.id
-                  ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                  : 'text-[var(--color-fg-muted)]'
-              }`}
-            >
-              {cat.name}
-            </button>
-          ))}
-          {products.some(p => p.category_id == null) && (
-            <button
-              onClick={() => setCategoryFilter(-1)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-full transition whitespace-nowrap ${
-                categoryFilter === -1
-                  ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                  : 'text-[var(--color-fg-muted)]'
-              }`}
-            >
-              Senza categoria
-            </button>
-          )}
-          </div>
+      {/* The two scopes, at opposite ends: which area you are in, and which of
+          its cells you are looking at. Stacked full width on a phone. */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex-shrink-0">
+          <SegmentedControl
+            value={activeArea}
+            onChange={(next: InventoryArea) => setActiveArea(next)}
+            options={areaOptions}
+            ariaLabel="Area dell'inventario"
+            // Segments start from their own text width and share what is left
+            // over: with equal widths "Cucina" plus its icon is the longest of
+            // the three and gets clipped to fit "Bar".
+            equalWidth={false}
+          />
         </div>
-      )}
+        {/* min-w-0 so the track can actually shrink and scroll — a flex child
+            defaults to min-width:auto and would push the row wider instead. */}
+        <div className="min-w-0">
+          <SegmentedControl
+            value={activeLocationId == null ? 'ALL' : String(activeLocationId)}
+            onChange={v => setActiveLocationId(v === 'ALL' ? null : Number(v))}
+            options={cellOptions}
+            ariaLabel="Cella o ripiano"
+            equalWidth={false}
+            overflow="scroll"
+          />
+        </div>
+      </div>
 
-      {/* Search + mobile add + mobile management */}
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2">
-          <div className="relative flex-1 min-w-0">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--color-fg-subtle)]" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Cerca prodotto..."
-              className="w-full h-9 rounded-full border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] dark:bg-white/[0.04] pl-9 pr-3 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+      {/* Search and the category chips are one act — you narrow by name or by
+          course, rarely by both — so from lg they share a line. Below that the
+          field would be left with about a third of a phone's width, so they
+          stack. */}
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+        <SearchField
+          value={search}
+          onChange={setSearch}
+          placeholder="Cerca prodotto"
+          ariaLabel="Cerca prodotto"
+          className="min-w-0 lg:w-[260px] lg:flex-shrink-0"
+        />
+        {categoryOptions.length > 1 && (
+          <div className="min-w-0 lg:flex-1">
+            <SegmentedControl
+              value={categoryFilter == null ? 'ALL' : String(categoryFilter)}
+              onChange={v => setCategoryFilter(v === 'ALL' ? null : Number(v))}
+              options={categoryOptions}
+              ariaLabel="Filtra per categoria"
+              equalWidth={false}
+              overflow="scroll"
+              size="sm"
             />
           </div>
-          <div className="flex md:hidden items-center gap-1.5">
-            <button
-              onClick={() => setPrintModalOpen(true)}
-              className="p-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)] transition"
-              title="Stampa inventario"
-            >
-              <Printer className="h-4 w-4" />
-            </button>
-            {canEdit && (
-              <>
-                <button
-                  onClick={() => setCategoriesModalOpen(true)}
-                  className="p-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)] transition"
-                  title="Gestione categorie"
-                >
-                  <Tag className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => setLocationsModalOpen(true)}
-                  className="p-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-line-strong)] transition"
-                  title="Gestione aree"
-                >
-                  <Settings className="h-4 w-4" />
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-        {canEdit && (
+        )}
+        {/* Edits the row it sits at the end of. Dashed, so it reads as changing
+            the chips rather than as an eighth filter among them. Pointer only —
+            on touch the same thing lives in the sheet. */}
+        {canEdit && isWide && categoryOptions.length > 1 && (
           <button
-            onClick={openCreateProduct}
-            className="md:hidden w-full inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90"
+            type="button"
+            onClick={openCategoriesModal}
+            className="inline-flex h-10 flex-shrink-0 items-center gap-2 rounded-full border border-dashed border-[var(--ds-border-strong)] px-4 text-[14px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:border-solid hover:bg-[var(--ds-surface)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
-            <Plus className="h-4 w-4" />
-            Aggiungi prodotto
+            <Pencil className="h-3.5 w-3.5" aria-hidden />
+            Modifica
           </button>
         )}
       </div>
 
-      {/* Loading / Error / Empty */}
-      {isLoading && <SkeletonProductList count={7} />}
-      {!isLoading && error && (
-        <div className="p-4 rounded-lg bg-rose-50 text-rose-700 border border-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30">
-          <AlertTriangle className="inline h-4 w-4 mr-2" />
-          {error}
-        </div>
-      )}
-      {!isLoading && !error && filteredProducts.length === 0 && (
-        <div className="p-12 text-center text-[var(--color-fg-muted)] border border-dashed border-[var(--color-line)] rounded-lg">
-          <Boxes className="h-8 w-8 mx-auto mb-3 text-[var(--color-fg-subtle)]" />
-          <p className="text-[14px]">Nessun prodotto in {AREA_LABEL[activeArea]}.</p>
-          {canEdit && (
+      {/* What is about to run out, named. The list below can be scrolled past;
+          this cannot. */}
+      {!isLoading && !error && lowStockProducts.length > 0 && (
+        <Callout
+          tone="critical"
+          icon={AlertTriangle}
+          title={`${plural(lowStockProducts.length, 'prodotto', 'prodotti')} sotto soglia (≤ ${LOW_STOCK_THRESHOLD})`}
+          action={
             <button
-              onClick={openCreateProduct}
-              className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[13px] border border-[var(--color-line)] hover:border-[var(--color-fg)]"
+              type="button"
+              onClick={() => setOnlyLowStock(v => !v)}
+              className="inline-flex h-10 items-center rounded-full bg-[var(--ds-surface)] px-4 text-[14px] font-medium text-[var(--ds-critical-text)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
-              <Plus className="h-4 w-4" />
-              Aggiungi il primo
+              {onlyLowStock ? 'Mostra tutti' : 'Mostra solo questi'}
             </button>
+          }
+        >
+          <span className="text-[14px]">
+            {lowStockProducts.slice(0, 6).map(p => p.name).join(' · ')}
+            {lowStockProducts.length > 6 && ` · +${lowStockProducts.length - 6} altri`}
+          </span>
+        </Callout>
+      )}
+
+      {isLoading && <SkeletonProductList count={7} />}
+
+      {!isLoading && error && (
+        <Callout tone="critical" icon={AlertTriangle}>{error}</Callout>
+      )}
+
+      {/* Empty — nothing in the area at all */}
+      {!isLoading && !error && products.length === 0 && (
+        <EmptyState
+          icon={Boxes}
+          action={
+            canEdit ? (
+              <div className="flex flex-col items-stretch gap-2 sm:flex-row">
+                <button type="button" onClick={openLocationsModal} className={dsButton.secondary}>
+                  Gestisci aree
+                </button>
+                <button type="button" onClick={() => openCreateProduct()} className={dsButton.primary}>
+                  <Plus className="h-4 w-4" aria-hidden />
+                  Aggiungi il primo
+                </button>
+              </div>
+            ) : undefined
+          }
+        >
+          <span className="mb-1 block text-[16px] font-semibold text-[var(--ds-text-primary)]">
+            Nessun prodotto in {AREA_LABEL[activeArea]}
+          </span>
+          Crea le celle o i ripiani dell'area, poi aggiungi i primi prodotti da contare.
+        </EmptyState>
+      )}
+
+      {/* Empty — the search found nothing here */}
+      {!isLoading && !error && products.length > 0 && groups.length === 0 && searchTerm !== '' && (
+        <div className="space-y-3">
+          <EmptyState
+            icon={Search}
+            action={
+              <div className="flex flex-col items-stretch gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={searchEverywhere}
+                  disabled={crossArea?.loading}
+                  className={dsButton.secondary}
+                >
+                  {crossArea?.loading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+                  Cerca in tutte le aree
+                </button>
+                {canEdit && (
+                  <button type="button" onClick={() => openCreateProduct(searchTerm)} className={dsButton.primary}>
+                    <Plus className="h-4 w-4" aria-hidden />
+                    Crea “{searchTerm}”
+                  </button>
+                )}
+              </div>
+            }
+          >
+            <span className="mb-1 block text-[16px] font-semibold text-[var(--ds-text-primary)]">
+              Nessun risultato per “{searchTerm}”
+            </span>
+            In {AREA_LABEL[activeArea]} non c'è un prodotto con questo nome.
+          </EmptyState>
+
+          {crossArea && !crossArea.loading && (
+            crossArea.results.length === 0 ? (
+              <p className="text-center text-[14px] text-[var(--ds-text-muted)]">
+                Nemmeno nelle altre aree.
+              </p>
+            ) : (
+              <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+                {crossArea.results.map((p, i) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setActiveArea(p.area)}
+                    className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--ds-surface-row)] sm:px-5 ${
+                      i > 0 ? 'border-t border-[var(--ds-border)]' : ''
+                    }`}
+                  >
+                    <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-[var(--ds-text-primary)]">
+                      {p.name}
+                    </span>
+                    <StatusPill tone="neutral">{AREA_LABEL[p.area]}</StatusPill>
+                  </button>
+                ))}
+              </div>
+            )
           )}
         </div>
       )}
 
-      {/* Product list */}
-      {!isLoading && !error && filteredProducts.length > 0 && (
-        <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden">
-          {filteredProducts.map((p, idx) => {
-            const qty = quantityFor(p.id);
-            const breakdown = isTotale ? breakdownFor(p.id) : [];
-            const key = activeLocationId != null ? stockKey(p.id, activeLocationId) : '';
-            const isPending = key && pendingKeys.has(key);
-            const lowStock = isLowStock(p.id);
+      {/* Empty — the filters excluded everything */}
+      {!isLoading && !error && products.length > 0 && groups.length === 0 && searchTerm === '' && (
+        <EmptyState
+          icon={Boxes}
+          action={
+            <button
+              type="button"
+              onClick={() => { setCategoryFilter(null); setOnlyLowStock(false); }}
+              className={dsButton.secondary}
+            >
+              Rimuovi i filtri
+            </button>
+          }
+        >
+          Nessun prodotto con questi filtri.
+        </EmptyState>
+      )}
+
+      {/* The list */}
+      {!isLoading && !error && groups.length > 0 && (
+        <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+          {/* Column names, from md up. On a phone the row carries its own
+              labels, so a header would be a line of text with nothing under it. */}
+          <div className="hidden items-center gap-3 px-5 py-3 text-[13px] text-[var(--ds-text-muted)] md:flex">
+            <span className="min-w-0 flex-1">Prodotto</span>
+            {isTotale && <span className="w-[260px] text-right lg:w-[320px]">Dove</span>}
+            <span className={isTotale ? 'w-14 text-right' : canEdit ? 'w-[176px] text-right' : 'w-[76px] text-right'}>
+              {isTotale ? 'Totale' : `Quantità in ${toTitleCase(activeLocation?.name ?? '')}`}
+            </span>
+            {canEdit && <span className="w-[84px]" aria-hidden />}
+          </div>
+
+          {groups.map(group => {
+            const lowInGroup = group.products.filter(p => isLowStock(p.id)).length;
             return (
-              <div
-                key={p.id}
-                className={`flex items-center gap-3 p-3 sm:p-4 ${idx > 0 ? 'border-t border-[var(--color-line)]' : ''} ${lowStock ? 'bg-red-50 dark:bg-red-950/20' : ''}`}
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className={`font-medium text-[14px] truncate ${lowStock ? 'text-red-700 dark:text-red-300' : 'text-[var(--color-fg)]'}`}>{p.name}</span>
-                    {lowStock && (
-                      <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-900/40 border border-red-200 dark:border-red-800 rounded-full px-2 py-0.5">
-                        <AlertTriangle className="h-2.5 w-2.5" />
-                        Scorta bassa
-                      </span>
-                    )}
-                    {p.unit && (
-                      <span className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)]">{p.unit}</span>
-                    )}
-                    {p.category_name && (
-                      <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-[var(--color-fg-muted)] bg-[var(--color-surface-2)] border border-[var(--color-line)] rounded-full px-2 py-0.5">
-                        <Tag className="h-2.5 w-2.5" />
-                        {p.category_name}
-                      </span>
-                    )}
-                  </div>
-                  {isTotale && breakdown.length > 0 && (
-                    <div className="text-[12px] text-[var(--color-fg-muted)] mt-1 truncate">
-                      {breakdown.map(b => `${b.locationName}: ${b.quantity}`).join(' · ')}
-                    </div>
-                  )}
-                  {p.notes && !isTotale && (
-                    <div className="text-[12px] text-[var(--color-fg-muted)] mt-1 truncate">{p.notes}</div>
-                  )}
+              <div key={group.id}>
+                <div className="border-t border-[var(--ds-border)] bg-[var(--ds-surface-row)] px-4 sm:px-5">
+                  <SectionHeader
+                    tone={lowInGroup > 0 ? 'attention' : 'muted'}
+                    meta={plural(group.products.length, 'prodotto', 'prodotti')}
+                    action={
+                      lowInGroup > 0 ? (
+                        <StatusPill tone="critical">{lowInGroup} sotto soglia</StatusPill>
+                      ) : undefined
+                    }
+                  >
+                    {group.name}
+                  </SectionHeader>
                 </div>
-
-                {/* Quantity controls — stepper only when a specific location is selected */}
-                {!isTotale ? (
-                  <div className="flex items-center gap-1">
-                    {canEdit && (
-                      <button
-                        onClick={() => handleStep(p.id, -1)}
-                        disabled={!!isPending}
-                        className="h-9 w-9 flex items-center justify-center rounded-md border border-[var(--color-line)] hover:border-[var(--color-fg)] disabled:opacity-40"
-                        aria-label="Scarico (-1)"
-                      >
-                        <Minus className="h-4 w-4" />
-                      </button>
-                    )}
-                    <input
-                      type="number"
-                      step="any"
-                      defaultValue={qty}
-                      key={`${p.id}-${activeLocationId}-${qty}`}
-                      onBlur={(e) => {
-                        if (canEdit) {
-                          handleSetQuantity(p.id, e.target.value);
-                        }
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          (e.target as HTMLInputElement).blur();
-                        }
-                      }}
-                      readOnly={!canEdit || !!isPending}
-                      className="w-16 sm:w-20 text-center font-medium tabular-nums rounded-md border border-[var(--color-line)] bg-[var(--color-surface-2)] px-2 py-1.5 text-[14px] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]"
-                    />
-                    {canEdit && (
-                      <button
-                        onClick={() => handleStep(p.id, 1)}
-                        disabled={!!isPending}
-                        className="h-9 w-9 flex items-center justify-center rounded-md border border-[var(--color-line)] hover:border-[var(--color-fg)] disabled:opacity-40"
-                        aria-label="Carico (+1)"
-                      >
-                        <Plus className="h-4 w-4" />
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <div className="text-right">
-                    <div className={`font-semibold tabular-nums text-[15px] ${lowStock ? 'text-red-700 dark:text-red-300' : 'text-[var(--color-fg)]'}`}>{qty}</div>
-                    {p.unit && <div className="text-[11px] text-[var(--color-fg-subtle)] uppercase">{p.unit}</div>}
-                  </div>
-                )}
-
-                {canEdit && (
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => openEditProduct(p)}
-                      className="h-8 w-8 flex items-center justify-center rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]"
-                      title="Modifica"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => setConfirmDeleteProductId(p.id)}
-                      className="h-8 w-8 flex items-center justify-center rounded-md text-[var(--color-fg-muted)] hover:text-rose-600 hover:bg-[var(--color-surface-hover)]"
-                      title="Elimina"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                )}
+                {group.products.map((p, i) => renderRow(p, i === 0))}
               </div>
             );
           })}
+
+          {!isTotale && canEdit && (
+            <div className="border-t border-[var(--ds-border)] px-4 py-3 text-[13px] text-[var(--ds-text-muted)] sm:px-5">
+              Invio conferma e passa al prodotto successivo · Esc annulla la riga
+            </div>
+          )}
         </div>
       )}
+
+      {/* ----- Manage sheet (touch) ----- */}
+      <Sheet
+        open={menuOpen && !isWide}
+        onClose={() => setMenuOpen(false)}
+        title="Gestisci inventario"
+        subtitle={AREA_LABEL[activeArea]}
+        ariaLabel="Gestisci inventario"
+        bodyClassName="px-4 py-4"
+        footer={
+          <button type="button" onClick={() => setMenuOpen(false)} className={dsButton.secondary}>
+            Chiudi
+          </button>
+        }
+      >
+        <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+          {manageActions.map((a, i) => (
+            <button
+              key={a.label}
+              type="button"
+              onClick={() => { setMenuOpen(false); a.onClick(); }}
+              className={`flex min-h-[56px] w-full items-center gap-3 px-4 text-left text-[16px] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)] ${
+                i > 0 ? 'border-t border-[var(--ds-border)]' : ''
+              }`}
+            >
+              <a.icon className="h-5 w-5 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
+              <span className="min-w-0 flex-1 truncate">{a.label}</span>
+              {a.meta != null && (
+                <span className="flex-shrink-0 text-[15px] tabular-nums text-[var(--ds-text-muted)]">{a.meta}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      </Sheet>
 
       {/* ----- Locations modal ----- */}
-      {locationsModalOpen && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-0 sm:p-4" onClick={() => setLocationsModalOpen(false)}>
-          <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-md h-full sm:max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
-              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Aree — {AREA_LABEL[activeArea]}</h3>
-              <button onClick={() => setLocationsModalOpen(false)} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
-                <X className="h-5 w-5" />
+      <ModalShell
+        open={locationsModalOpen}
+        onClose={() => setLocationsModalOpen(false)}
+        title="Aree"
+        subtitle="Celle e ripiani in cui si conta la merce"
+        size="sm"
+        closeOnEscape
+        subheader={manageAreaSwitcher}
+        bodyClassName="px-5 pb-5 pt-1 sm:px-6"
+        footer={
+          canEdit ? (
+            <>
+              <input
+                type="text"
+                value={locationDraftName}
+                onChange={(e) => setLocationDraftName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleAddLocation(); }}
+                placeholder="Nome area (es. Cella 4)"
+                aria-label="Nome della nuova area"
+                className={`${dsInput} sm:w-56`}
+              />
+              <button
+                type="button"
+                onClick={handleAddLocation}
+                disabled={!locationDraftName.trim()}
+                className={dsButton.primary}
+              >
+                <Plus className="h-4 w-4" aria-hidden />
+                Aggiungi
               </button>
-            </div>
-            <div className="p-4 space-y-3 flex-1 overflow-y-auto">
-              {locations.length === 0 && (
-                <div className="text-[13px] text-[var(--color-fg-muted)] text-center py-2">
-                  Nessuna area. Aggiungine una qui sotto.
-                </div>
-              )}
-              {locations.map(loc => (
-                <div key={loc.id} className="flex items-center gap-2">
-                  {editingLocationId === loc.id ? (
-                    <>
-                      <input
-                        type="text"
-                        value={editingLocationName}
-                        onChange={(e) => setEditingLocationName(e.target.value)}
-                        className="flex-1 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-[14px]"
-                        autoFocus
+            </>
+          ) : undefined
+        }
+      >
+        {foreignLoading ? (
+          <p className="flex items-center justify-center gap-2 py-6 text-[14px] text-[var(--ds-text-muted)]">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            Carico {AREA_LABEL[manageArea]}…
+          </p>
+        ) : mLocations.length === 0 ? (
+          <p className="py-6 text-center text-[14px] text-[var(--ds-text-muted)]">
+            Nessuna area in {AREA_LABEL[manageArea]}. Aggiungine una qui sotto.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {mLocations.map((loc, i) => (
+              <li
+                key={loc.id}
+                draggable={canEdit && editingLocationId == null}
+                onDragStart={() => setDragLoc({ from: i, over: i })}
+                onDragOver={(e) => { e.preventDefault(); setDragLoc(d => (d ? { ...d, over: i } : d)); }}
+                onDrop={(e) => { e.preventDefault(); handleDropLocation(i); }}
+                onDragEnd={() => setDragLoc(null)}
+                className={`flex items-center gap-2 rounded-[16px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-colors ${
+                  dragLoc?.over === i && dragLoc.from !== i ? 'bg-[var(--ds-arriving-tint)]' : ''
+                }`}
+              >
+                {editingLocationId === loc.id ? (
+                  <>
+                    <input
+                      type="text"
+                      value={editingLocationName}
+                      onChange={(e) => setEditingLocationName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleSaveLocationEdit(); }}
+                      className={`${dsInput} min-w-0 flex-1`}
+                      aria-label={`Nuovo nome per ${loc.name}`}
+                      autoFocus
+                    />
+                    <button type="button" onClick={handleSaveLocationEdit} className={dsButton.primary}>Salva</button>
+                    <button
+                      type="button"
+                      onClick={() => { setEditingLocationId(null); setEditingLocationName(''); }}
+                      className={dsButton.quiet}
+                    >
+                      Annulla
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {canEdit && (
+                      <GripVertical
+                        className="h-4 w-4 flex-shrink-0 cursor-grab text-[var(--ds-text-subtle)] active:cursor-grabbing"
+                        aria-hidden
                       />
-                      <button onClick={handleSaveLocationEdit} className="px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90">Salva</button>
-                      <button onClick={() => { setEditingLocationId(null); setEditingLocationName(''); }} className="px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]">Annulla</button>
-                    </>
-                  ) : (
-                    <>
-                      <span className="flex-1 text-[14px] text-[var(--color-fg)]">{loc.name}</span>
-                      <button
-                        onClick={() => { setEditingLocationId(loc.id); setEditingLocationName(loc.name); }}
-                        className="h-8 w-8 flex items-center justify-center rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => setConfirmDeleteLocationId(loc.id)}
-                        className="h-8 w-8 flex items-center justify-center rounded-md text-[var(--color-fg-muted)] hover:text-rose-600 hover:bg-[var(--color-surface-hover)]"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </>
-                  )}
-                </div>
-              ))}
-
-              <div className="pt-3 border-t border-[var(--color-line)] flex items-center gap-2">
-                <input
-                  type="text"
-                  value={locationDraftName}
-                  onChange={(e) => setLocationDraftName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddLocation(); }}
-                  placeholder="Nome area (es. Area 1)"
-                  className="flex-1 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-[14px]"
-                />
-                <button
-                  onClick={handleAddLocation}
-                  disabled={!locationDraftName.trim()}
-                  className="px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium disabled:opacity-50 hover:opacity-90"
-                >
-                  <Plus className="h-4 w-4 inline" /> Aggiungi
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[15px] font-medium text-[var(--ds-text-primary)]">
+                        {toTitleCase(loc.name)}
+                      </div>
+                      <div className="truncate text-[13px] text-[var(--ds-text-muted)]">
+                        {plural(mStockedCountFor(loc.id), 'prodotto', 'prodotti')} con giacenza
+                      </div>
+                    </div>
+                    {canEdit && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => { setEditingLocationId(loc.id); setEditingLocationName(loc.name); }}
+                          className={rowIconButton}
+                          aria-label={`Modifica ${loc.name}`}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteLocationId(loc.id)}
+                          className={rowIconButtonDanger}
+                          aria-label={`Elimina ${loc.name}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </>
+                    )}
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </ModalShell>
 
       {/* ----- Categories modal ----- */}
-      {categoriesModalOpen && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-0 sm:p-4" onClick={() => setCategoriesModalOpen(false)}>
-          <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-md h-full sm:max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
-              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Categorie — {AREA_LABEL[activeArea]}</h3>
-              <button onClick={() => setCategoriesModalOpen(false)} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
-                <X className="h-5 w-5" />
+      <ModalShell
+        open={categoriesModalOpen}
+        onClose={() => setCategoriesModalOpen(false)}
+        title="Categorie"
+        subtitle="Trascina per riordinare l'elenco prodotti"
+        size="sm"
+        closeOnEscape
+        subheader={manageAreaSwitcher}
+        bodyClassName="px-5 pb-5 pt-1 sm:px-6"
+        footer={
+          canEdit ? (
+            <>
+              <input
+                type="text"
+                value={categoryDraftName}
+                onChange={(e) => setCategoryDraftName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleAddCategory(); }}
+                placeholder="Nome categoria (es. Verdure)"
+                aria-label="Nome della nuova categoria"
+                className={`${dsInput} sm:w-56`}
+              />
+              <button
+                type="button"
+                onClick={handleAddCategory}
+                disabled={!categoryDraftName.trim()}
+                className={dsButton.primary}
+              >
+                <Plus className="h-4 w-4" aria-hidden />
+                Aggiungi
               </button>
-            </div>
-            <div className="p-4 space-y-3 flex-1 overflow-y-auto">
-              {categories.length === 0 && (
-                <div className="text-[13px] text-[var(--color-fg-muted)] text-center py-2">
-                  Nessuna categoria. Aggiungine una qui sotto.
-                </div>
-              )}
-              {categories.map(cat => (
-                <div key={cat.id} className="flex items-center gap-2">
-                  {editingCategoryId === cat.id ? (
-                    <>
-                      <input
-                        type="text"
-                        value={editingCategoryName}
-                        onChange={(e) => setEditingCategoryName(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') handleSaveCategoryEdit(); }}
-                        className="flex-1 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-[14px]"
-                        autoFocus
+            </>
+          ) : undefined
+        }
+      >
+        {foreignLoading ? (
+          <p className="flex items-center justify-center gap-2 py-6 text-[14px] text-[var(--ds-text-muted)]">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            Carico {AREA_LABEL[manageArea]}…
+          </p>
+        ) : mCategories.length === 0 ? (
+          <p className="py-6 text-center text-[14px] text-[var(--ds-text-muted)]">
+            Nessuna categoria in {AREA_LABEL[manageArea]}. Aggiungine una qui sotto.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {mCategories.map((cat, i) => (
+              <li
+                key={cat.id}
+                draggable={canEdit && editingCategoryId == null}
+                onDragStart={() => setDragCat({ from: i, over: i })}
+                onDragOver={(e) => { e.preventDefault(); setDragCat(d => (d ? { ...d, over: i } : d)); }}
+                onDrop={(e) => { e.preventDefault(); handleDropCategory(i); }}
+                onDragEnd={() => setDragCat(null)}
+                className={`flex items-center gap-2 rounded-[16px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-colors ${
+                  dragCat?.over === i && dragCat.from !== i ? 'bg-[var(--ds-arriving-tint)]' : ''
+                }`}
+              >
+                {editingCategoryId === cat.id ? (
+                  <>
+                    <input
+                      type="text"
+                      value={editingCategoryName}
+                      onChange={(e) => setEditingCategoryName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleSaveCategoryEdit(); }}
+                      className={`${dsInput} min-w-0 flex-1`}
+                      aria-label={`Nuovo nome per ${cat.name}`}
+                      autoFocus
+                    />
+                    <button type="button" onClick={handleSaveCategoryEdit} className={dsButton.primary}>Salva</button>
+                    <button
+                      type="button"
+                      onClick={() => { setEditingCategoryId(null); setEditingCategoryName(''); }}
+                      className={dsButton.quiet}
+                    >
+                      Annulla
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {canEdit && (
+                      <GripVertical
+                        className="h-4 w-4 flex-shrink-0 cursor-grab text-[var(--ds-text-subtle)] active:cursor-grabbing"
+                        aria-hidden
                       />
-                      <button onClick={handleSaveCategoryEdit} className="px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90">Salva</button>
-                      <button onClick={() => { setEditingCategoryId(null); setEditingCategoryName(''); }} className="px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]">Annulla</button>
-                    </>
-                  ) : (
-                    <>
-                      <span className="flex-1 text-[14px] text-[var(--color-fg)]">{cat.name}</span>
-                      <button
-                        onClick={() => { setEditingCategoryId(cat.id); setEditingCategoryName(cat.name); }}
-                        className="h-8 w-8 flex items-center justify-center rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => setConfirmDeleteCategoryId(cat.id)}
-                        className="h-8 w-8 flex items-center justify-center rounded-md text-[var(--color-fg-muted)] hover:text-rose-600 hover:bg-[var(--color-surface-hover)]"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </>
-                  )}
-                </div>
-              ))}
-
-              <div className="pt-3 border-t border-[var(--color-line)] flex items-center gap-2">
-                <input
-                  type="text"
-                  value={categoryDraftName}
-                  onChange={(e) => setCategoryDraftName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddCategory(); }}
-                  placeholder="Nome categoria (es. Verdure)"
-                  className="flex-1 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-[14px]"
-                />
-                <button
-                  onClick={handleAddCategory}
-                  disabled={!categoryDraftName.trim()}
-                  className="px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium disabled:opacity-50 hover:opacity-90"
-                >
-                  <Plus className="h-4 w-4 inline" /> Aggiungi
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ----- Confirm delete category ----- */}
-      {confirmDeleteCategoryId != null && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={() => setConfirmDeleteCategoryId(null)}>
-          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
-            <h4 className="font-semibold text-[15px] text-[var(--color-fg)] mb-2">Eliminare la categoria?</h4>
-            <p className="text-[13px] text-[var(--color-fg-muted)] mb-4">
-              I prodotti associati resteranno, ma diventeranno "Senza categoria".
-            </p>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setConfirmDeleteCategoryId(null)} className="px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]">Annulla</button>
-              <button onClick={() => handleDeleteCategory(confirmDeleteCategoryId)} className="px-4 py-2 rounded-full bg-rose-600 text-[#ffffff] text-sm font-medium hover:bg-rose-700">Elimina</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ----- Confirm delete location ----- */}
-      {confirmDeleteLocationId != null && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={() => setConfirmDeleteLocationId(null)}>
-          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
-            <h4 className="font-semibold text-[15px] text-[var(--color-fg)] mb-2">Eliminare l'area?</h4>
-            <p className="text-[13px] text-[var(--color-fg-muted)] mb-4">
-              Tutte le quantità in quest'area verranno cancellate. L'azione non è reversibile.
-            </p>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setConfirmDeleteLocationId(null)} className="px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]">Annulla</button>
-              <button onClick={() => handleDeleteLocation(confirmDeleteLocationId)} className="px-4 py-2 rounded-full bg-rose-600 text-[#ffffff] text-sm font-medium hover:bg-rose-700">Elimina</button>
-            </div>
-          </div>
-        </div>
-      )}
+                    )}
+                    <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-[var(--ds-text-primary)]">
+                      {cat.name}
+                    </span>
+                    <span className="flex-shrink-0 text-[13px] text-[var(--ds-text-muted)]">
+                      {plural(mProductCountFor(cat.id), 'prodotto', 'prodotti')}
+                    </span>
+                    {canEdit && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => { setEditingCategoryId(cat.id); setEditingCategoryName(cat.name); }}
+                          className={rowIconButton}
+                          aria-label={`Modifica ${cat.name}`}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteCategoryId(cat.id)}
+                          className={rowIconButtonDanger}
+                          aria-label={`Elimina ${cat.name}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </>
+                    )}
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </ModalShell>
 
       {/* ----- Product modal ----- */}
-      {productModalOpen && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-0 sm:p-4" onClick={() => setProductModalOpen(false)}>
-          <div className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-md h-full sm:max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
-              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">
-                {productEditing ? 'Modifica prodotto' : `Nuovo prodotto — ${AREA_LABEL[activeArea]}`}
-              </h3>
-              <button onClick={() => setProductModalOpen(false)} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="p-4 space-y-3 flex-1 overflow-y-auto">
-              <div>
-                <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1">Nome *</label>
-                <input
-                  type="text"
-                  value={productForm.name}
-                  onChange={(e) => setProductForm(f => ({ ...f, name: e.target.value }))}
-                  placeholder="Es. Pomodori pelati"
-                  className="w-full rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-[14px]"
-                  autoFocus
-                />
-              </div>
-              <div>
-                <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1">Unità di misura</label>
-                <input
-                  type="text"
-                  value={productForm.unit}
-                  onChange={(e) => setProductForm(f => ({ ...f, unit: e.target.value }))}
-                  placeholder="kg, lt, pz, ..."
-                  className="w-full rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-[14px]"
-                />
-              </div>
-              <div>
-                <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1">Categoria</label>
-                <select
-                  value={productForm.category_id ?? ''}
-                  onChange={(e) => setProductForm(f => ({ ...f, category_id: e.target.value ? Number(e.target.value) : null }))}
-                  className="w-full rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-[14px]"
-                >
-                  <option value="">Senza categoria</option>
-                  {categories.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
+      <ModalShell
+        open={productModalOpen}
+        onClose={() => setProductModalOpen(false)}
+        title={productEditing ? 'Modifica prodotto' : 'Nuovo prodotto'}
+        subtitle={
+          productEditing
+            ? `${AREA_LABEL[activeArea]} · ${productEditing.name}`
+            : `${AREA_LABEL[activeArea]} · sarà disponibile in tutte le aree`
+        }
+        size="sm"
+        bodyClassName="px-5 py-5 sm:px-6"
+        footer={
+          <>
+            <button type="button" onClick={() => setProductModalOpen(false)} className={dsButton.secondary}>
+              Annulla
+            </button>
+            <button type="button" onClick={handleSaveProduct} className={dsButton.primary}>
+              Salva prodotto
+            </button>
+          </>
+        }
+      >
+        <FormCard className="space-y-4">
+          <Field label="Nome" htmlFor="inv-name" required>
+            <input
+              id="inv-name"
+              type="text"
+              value={productForm.name}
+              onChange={(e) => setProductForm(f => ({ ...f, name: e.target.value }))}
+              placeholder="Es. Pomodori pelati"
+              className={dsInput}
+              autoFocus
+            />
+          </Field>
+
+          {/* One per row, not side by side: at half the modal's width the unit
+              chips wrapped two to a line and the select clipped "Senza
+              categoria" mid-word. */}
+          <div className="space-y-4">
+            <Field label="Unità di misura" htmlFor="inv-unit">
+              <input
+                id="inv-unit"
+                type="text"
+                value={productForm.unit}
+                onChange={(e) => setProductForm(f => ({ ...f, unit: e.target.value }))}
+                placeholder="kg, lt, pz…"
+                className={dsInput}
+              />
+              {/* The units this area already uses — typing them again is how two
+                  spellings of the same thing end up in the list. */}
+              {unitSuggestions.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {unitSuggestions.map(u => (
+                    <button
+                      key={u}
+                      type="button"
+                      onClick={() => setProductForm(f => ({ ...f, unit: u }))}
+                      className="inline-flex h-8 items-center rounded-full bg-[var(--ds-surface-row)] px-3 text-[13px] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
+                    >
+                      {u}
+                    </button>
                   ))}
-                </select>
-                {categories.length === 0 && (
-                  <p className="text-[11px] text-[var(--color-fg-muted)] mt-1">
-                    Nessuna categoria. Aggiungine una da "Gestione categorie".
-                  </p>
-                )}
-              </div>
-              <div>
-                <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1">Note</label>
-                <textarea
-                  value={productForm.notes}
-                  onChange={(e) => setProductForm(f => ({ ...f, notes: e.target.value }))}
-                  rows={2}
-                  className="w-full rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-[14px]"
-                />
-              </div>
-            </div>
-            <div className="p-4 border-t border-[var(--color-line)] flex gap-2 justify-end">
-              <button onClick={() => setProductModalOpen(false)} className="px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]">Annulla</button>
-              <button onClick={handleSaveProduct} className="px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90">Salva</button>
-            </div>
+                </div>
+              )}
+            </Field>
+
+            <Field
+              label="Categoria"
+              htmlFor="inv-category"
+              hint={categories.length === 0 ? 'Nessuna categoria. Aggiungine una da "Categorie".' : undefined}
+            >
+              <select
+                id="inv-category"
+                value={productForm.category_id ?? ''}
+                onChange={(e) => setProductForm(f => ({ ...f, category_id: e.target.value ? Number(e.target.value) : null }))}
+                className={dsSelect}
+              >
+                <option value="">Senza categoria</option>
+                {categories.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </Field>
           </div>
-        </div>
-      )}
+
+          <Field label="Note" htmlFor="inv-notes">
+            <textarea
+              id="inv-notes"
+              value={productForm.notes}
+              onChange={(e) => setProductForm(f => ({ ...f, notes: e.target.value }))}
+              rows={3}
+              placeholder="Fornitore, soglia, dove si trova…"
+              className={dsTextarea}
+            />
+          </Field>
+        </FormCard>
+      </ModalShell>
 
       {/* ----- Print inventory modal ----- */}
       <PrintInventoryModal
@@ -985,21 +1689,91 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
         initialCategoryFilter={categoryFilter}
       />
 
+      {/* ----- Confirm delete category ----- */}
+      <ModalShell
+        open={confirmDeleteCategoryId != null}
+        onClose={() => setConfirmDeleteCategoryId(null)}
+        title="Eliminare la categoria?"
+        size="sm"
+        closeOnEscape
+        className="z-[60]"
+        bodyClassName="px-5 py-5 sm:px-6"
+        footer={
+          <>
+            <button type="button" onClick={() => setConfirmDeleteCategoryId(null)} className={dsButton.secondary}>
+              Annulla
+            </button>
+            <button
+              type="button"
+              onClick={() => confirmDeleteCategoryId != null && handleDeleteCategory(confirmDeleteCategoryId)}
+              className={dsButtonCritical}
+            >
+              Elimina
+            </button>
+          </>
+        }
+      >
+        <p className="text-[15px] text-[var(--ds-text-secondary)]">
+          I prodotti associati resteranno, ma diventeranno "Senza categoria".
+        </p>
+      </ModalShell>
+
+      {/* ----- Confirm delete location ----- */}
+      <ModalShell
+        open={confirmDeleteLocationId != null}
+        onClose={() => setConfirmDeleteLocationId(null)}
+        title="Eliminare l'area?"
+        size="sm"
+        closeOnEscape
+        className="z-[60]"
+        bodyClassName="px-5 py-5 sm:px-6"
+        footer={
+          <>
+            <button type="button" onClick={() => setConfirmDeleteLocationId(null)} className={dsButton.secondary}>
+              Annulla
+            </button>
+            <button
+              type="button"
+              onClick={() => confirmDeleteLocationId != null && handleDeleteLocation(confirmDeleteLocationId)}
+              className={dsButtonCritical}
+            >
+              Elimina
+            </button>
+          </>
+        }
+      >
+        <p className="text-[15px] text-[var(--ds-text-secondary)]">
+          Tutte le quantità in quest'area verranno cancellate. L'azione non è reversibile.
+        </p>
+      </ModalShell>
+
       {/* ----- Confirm delete product ----- */}
-      {confirmDeleteProductId != null && (
-        <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={() => setConfirmDeleteProductId(null)}>
-          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
-            <h4 className="font-semibold text-[15px] text-[var(--color-fg)] mb-2">Eliminare il prodotto?</h4>
-            <p className="text-[13px] text-[var(--color-fg-muted)] mb-4">
-              Verrà rimosso dall'inventario in tutte le aree. L'azione non è reversibile.
-            </p>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setConfirmDeleteProductId(null)} className="px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]">Annulla</button>
-              <button onClick={() => handleDeleteProduct(confirmDeleteProductId)} className="px-4 py-2 rounded-full bg-rose-600 text-[#ffffff] text-sm font-medium hover:bg-rose-700">Elimina</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ModalShell
+        open={confirmDeleteProductId != null}
+        onClose={() => setConfirmDeleteProductId(null)}
+        title="Eliminare il prodotto?"
+        size="sm"
+        closeOnEscape
+        bodyClassName="px-5 py-5 sm:px-6"
+        footer={
+          <>
+            <button type="button" onClick={() => setConfirmDeleteProductId(null)} className={dsButton.secondary}>
+              Annulla
+            </button>
+            <button
+              type="button"
+              onClick={() => confirmDeleteProductId != null && handleDeleteProduct(confirmDeleteProductId)}
+              className={dsButtonCritical}
+            >
+              Elimina
+            </button>
+          </>
+        }
+      >
+        <p className="text-[15px] text-[var(--ds-text-secondary)]">
+          Verrà rimosso dall'inventario in tutte le aree. L'azione non è reversibile.
+        </p>
+      </ModalShell>
     </div>
   );
 };

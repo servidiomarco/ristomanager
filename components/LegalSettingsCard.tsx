@@ -187,14 +187,14 @@ const DOC_TABS: { key: DocKey; label: string; Icon: React.ComponentType<{ classN
 // UI
 // ---------------------------------------------------------------------------
 const inputCls =
-  'w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-[14px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60';
+  'w-full rounded-lg border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 py-2 text-[14px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60';
 
 const Field: React.FC<{
   label: string; value: string; onChange: (v: string) => void; placeholder?: string;
   disabled?: boolean; textarea?: boolean; hint?: string; wide?: boolean;
 }> = ({ label, value, onChange, placeholder, disabled, textarea, hint, wide }) => (
   <div className={wide ? 'sm:col-span-2' : ''}>
-    <label className="block text-[13px] font-medium text-[var(--color-fg)] mb-1">{label}</label>
+    <label className="block text-[13px] font-medium text-[var(--ds-text-primary)] mb-1">{label}</label>
     {textarea ? (
       <textarea value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
         disabled={disabled} rows={3} className={`${inputCls} resize-y`} />
@@ -202,7 +202,7 @@ const Field: React.FC<{
       <input type="text" value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
         disabled={disabled} className={inputCls} />
     )}
-    {hint && <p className="text-[12px] text-[var(--color-fg-muted)] mt-1">{hint}</p>}
+    {hint && <p className="text-[12px] text-[var(--ds-text-muted)] mt-1">{hint}</p>}
   </div>
 );
 
@@ -282,75 +282,75 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
   };
 
   return (
-    <details className="group bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden"
+    <details className="group bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden"
       open={expanded} onToggle={e => setExpanded((e.target as HTMLDetailsElement).open)}>
-      <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--color-surface-2)] transition-colors">
+      <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center text-[var(--color-fg)] flex-shrink-0">
+          <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)] flex-shrink-0">
             <Scale className="w-5 h-5" />
           </div>
           <div className="min-w-0">
-            <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Documenti legali</h4>
-            <p className="text-[13px] text-[var(--color-fg-muted)]">Compila i dati del titolare per generare privacy policy, avviso vocale, cookie policy e termini di servizio.</p>
+            <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Documenti legali</h4>
+            <p className="text-[13px] text-[var(--ds-text-muted)]">Compila i dati del titolare per generare privacy policy, avviso vocale, cookie policy e termini di servizio.</p>
           </div>
         </div>
-        <ChevronDown className="w-5 h-5 text-[var(--color-fg-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
+        <ChevronDown className="w-5 h-5 text-[var(--ds-text-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
       </summary>
 
-      <div className="px-4 pb-4 pt-1 border-t border-[var(--color-line)]">
+      <div className="px-4 pb-4 pt-1 border-t border-[var(--ds-border)]">
         {loading ? (
           <div className="py-10 flex justify-center"><CookingPotLoader label="Carico…" size={40} /></div>
         ) : (
           <>
             {!canEdit && (
-              <div className="mb-4 text-[13px] text-[var(--color-fg-muted)] bg-[var(--color-surface-2)] rounded-lg p-3">
+              <div className="mb-4 text-[13px] text-[var(--ds-text-muted)] bg-[var(--ds-surface-row)] rounded-lg p-3">
                 Solo in lettura: la modifica richiede il permesso di gestione impostazioni.
               </div>
             )}
 
             {/* ---------- Legal mode toggle ---------- */}
             <div className="mb-6">
-              <h5 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-2">Modalità</h5>
+              <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2">Modalità</h5>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <button
                   type="button"
                   disabled={!canEdit}
                   onClick={() => setMode('simple')}
                   className={`text-left rounded-xl border p-3 transition-colors disabled:opacity-60 ${
-                    !isAdvanced ? 'border-[var(--color-fg)] bg-[var(--color-surface-2)]' : 'border-[var(--color-line)] hover:bg-[var(--color-surface-2)]'
+                    !isAdvanced ? 'border-[var(--ds-text-primary)] bg-[var(--ds-surface-row)]' : 'border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'
                   }`}
                 >
-                  <div className="flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
+                  <div className="flex items-center gap-2 text-[14px] font-medium text-[var(--ds-text-primary)]">
                     <ShieldCheck className="h-4 w-4" /> Semplice
-                    {!isAdvanced && <Check className="h-3.5 w-3.5 text-emerald-600 ml-auto" />}
+                    {!isAdvanced && <Check className="h-3.5 w-3.5 text-[var(--ds-seated-text)] ml-auto" />}
                   </div>
-                  <p className="text-[12px] text-[var(--color-fg-muted)] mt-1">Solo il minimo richiesto dalla legge. Nessun marketing né trattamenti non strettamente necessari.</p>
+                  <p className="text-[12px] text-[var(--ds-text-muted)] mt-1">Solo il minimo richiesto dalla legge. Nessun marketing né trattamenti non strettamente necessari.</p>
                 </button>
                 <button
                   type="button"
                   disabled={!canEdit}
                   onClick={() => setMode('advanced')}
                   className={`text-left rounded-xl border p-3 transition-colors disabled:opacity-60 ${
-                    isAdvanced ? 'border-[var(--color-fg)] bg-[var(--color-surface-2)]' : 'border-[var(--color-line)] hover:bg-[var(--color-surface-2)]'
+                    isAdvanced ? 'border-[var(--ds-text-primary)] bg-[var(--ds-surface-row)]' : 'border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'
                   }`}
                 >
-                  <div className="flex items-center gap-2 text-[14px] font-medium text-[var(--color-fg)]">
+                  <div className="flex items-center gap-2 text-[14px] font-medium text-[var(--ds-text-primary)]">
                     <Megaphone className="h-4 w-4" /> Avanzata
-                    {isAdvanced && <Check className="h-3.5 w-3.5 text-emerald-600 ml-auto" />}
+                    {isAdvanced && <Check className="h-3.5 w-3.5 text-[var(--ds-seated-text)] ml-auto" />}
                   </div>
-                  <p className="text-[12px] text-[var(--color-fg-muted)] mt-1">Include marketing, consensi, cookie analitici e termini di servizio. I clienti senza consenso restano esclusi dai flussi marketing.</p>
+                  <p className="text-[12px] text-[var(--ds-text-muted)] mt-1">Include marketing, consensi, cookie analitici e termini di servizio. I clienti senza consenso restano esclusi dai flussi marketing.</p>
                 </button>
               </div>
             </div>
 
             {/* ---------- Consenso allergie in prenotazione ---------- */}
-            <div className="mt-4 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] p-3">
-              <label className="flex items-start gap-2.5 text-[14px] text-[var(--color-fg)] cursor-pointer">
+            <div className="mt-4 rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-row)] p-3">
+              <label className="flex items-start gap-2.5 text-[14px] text-[var(--ds-text-primary)] cursor-pointer">
                 <input type="checkbox" checked={data.ask_health_consent} disabled={!canEdit}
                   onChange={e => setBool('ask_health_consent')(e.target.checked)} className="mt-0.5 h-4 w-4 rounded flex-shrink-0" />
                 <span>
                   Chiedi il consenso al trattamento di allergie / intolleranze in prenotazione
-                  <span className="block text-[12px] text-[var(--color-fg-muted)] mt-0.5">
+                  <span className="block text-[12px] text-[var(--ds-text-muted)] mt-0.5">
                     Se disattivato, la casella dei dati sanitari (art. 9 GDPR) non compare nel modal prenotazione. Utile se le allergie le raccogli solo a voce al tavolo, senza registrarle nel gestionale.
                   </span>
                 </span>
@@ -360,7 +360,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
             {/* ---------- Form fields ---------- */}
             <div className="space-y-6">
               <div>
-                <h5 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Identità del titolare</h5>
+                <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">Identità del titolare</h5>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <Field label="Ragione sociale" value={data.company_name} onChange={set('company_name')} placeholder="Ristorante Da Mario S.r.l." disabled={!canEdit} />
                   <Field label="Nome app / servizio" value={data.app_name} onChange={set('app_name')} placeholder="RistoManager" disabled={!canEdit} />
@@ -371,7 +371,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
               </div>
 
               <div>
-                <h5 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Contatti privacy e DPO</h5>
+                <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">Contatti privacy e DPO</h5>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <Field label="E-mail per richieste privacy" value={data.privacy_email} onChange={set('privacy_email')} placeholder="privacy@ristorante.it" disabled={!canEdit} />
                   <Field label="Telefono" value={data.privacy_phone} onChange={set('privacy_phone')} placeholder="+39 06 1234567" disabled={!canEdit} />
@@ -382,7 +382,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
               </div>
 
               <div>
-                <h5 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Fornitori e conservazione</h5>
+                <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">Fornitori e conservazione</h5>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <Field label="Responsabili / fornitori (uno per riga)" value={data.data_processors} onChange={set('data_processors')} textarea wide disabled={!canEdit}
                     placeholder={'Railway (hosting)\nElevenLabs (assistente vocale)\nMeta/WhatsApp (messaggistica)\nProvider SMTP (e-mail)'} />
@@ -395,19 +395,19 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
               </div>
 
               <div>
-                <h5 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Avviso vocale, cookie e termini</h5>
+                <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">Avviso vocale, cookie e termini</h5>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <Field label="Nome pronunciato nell'avviso vocale" value={data.voice_business_name} onChange={set('voice_business_name')} placeholder="Ristorante Da Mario" disabled={!canEdit} />
                   <Field label="Legge applicabile / foro (facoltativo)" value={data.governing_law} onChange={set('governing_law')} placeholder="Lascia vuoto per il testo standard (legge italiana)" disabled={!canEdit} />
                 </div>
                 <div className="mt-3 space-y-2">
-                  <label className="flex items-center gap-2.5 text-[14px] text-[var(--color-fg)] cursor-pointer">
+                  <label className="flex items-center gap-2.5 text-[14px] text-[var(--ds-text-primary)] cursor-pointer">
                     <input type="checkbox" checked={data.records_calls} disabled={!canEdit}
                       onChange={e => setBool('records_calls')(e.target.checked)} className="h-4 w-4 rounded" />
                     Le chiamate vengono registrate e trascritte
                   </label>
                   {isAdvanced && (
-                    <label className="flex items-center gap-2.5 text-[14px] text-[var(--color-fg)] cursor-pointer">
+                    <label className="flex items-center gap-2.5 text-[14px] text-[var(--ds-text-primary)] cursor-pointer">
                       <input type="checkbox" checked={data.uses_analytics_cookies} disabled={!canEdit}
                         onChange={e => setBool('uses_analytics_cookies')(e.target.checked)} className="h-4 w-4 rounded" />
                       Il sito usa cookie analitici / di terze parti
@@ -419,26 +419,26 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
               {canEdit && (
                 <div className="flex items-center gap-2">
                   <button onClick={handleSave} disabled={saving}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[14px] font-medium hover:opacity-90 disabled:opacity-50">
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[14px] font-medium hover:opacity-90 disabled:opacity-50">
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                     {saving ? 'Salvataggio…' : 'Salva'}
                   </button>
-                  {data.last_updated && <span className="text-[12px] text-[var(--color-fg-muted)]">Ultimo aggiornamento: {data.last_updated}</span>}
+                  {data.last_updated && <span className="text-[12px] text-[var(--ds-text-muted)]">Ultimo aggiornamento: {data.last_updated}</span>}
                 </div>
               )}
             </div>
 
             {/* ---------- Generated documents preview ---------- */}
-            <div className="mt-8 pt-6 border-t border-[var(--color-line)]">
-              <h5 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Documenti generati</h5>
+            <div className="mt-8 pt-6 border-t border-[var(--ds-border)]">
+              <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">Documenti generati</h5>
               <div className="flex items-center gap-1.5 overflow-x-auto pb-1 mb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {visibleDocs.map(({ key, label, Icon }) => {
                   const active = currentDoc.key === key;
                   return (
                     <button key={key} onClick={() => setActiveDoc(key)}
                       className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[12px] font-medium border transition-colors whitespace-nowrap ${
-                        active ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                               : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'}`}>
+                        active ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]'
+                               : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:text-[var(--ds-text-primary)]'}`}>
                       <Icon className="h-3.5 w-3.5" />
                       {label}
                     </button>
@@ -447,20 +447,20 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
               </div>
 
               <div className="flex items-center justify-end gap-2 mb-2">
-                <button onClick={copy} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--color-line)] text-[13px] text-[var(--color-fg)] hover:bg-[var(--color-surface-2)]">
-                  {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                <button onClick={copy} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--ds-border)] text-[13px] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]">
+                  {copied ? <Check className="h-3.5 w-3.5 text-[var(--ds-seated-text)]" /> : <Copy className="h-3.5 w-3.5" />}
                   {copied ? 'Copiato' : 'Copia'}
                 </button>
-                <button onClick={download} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--color-line)] text-[13px] text-[var(--color-fg)] hover:bg-[var(--color-surface-2)]">
+                <button onClick={download} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--ds-border)] text-[13px] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]">
                   <Download className="h-3.5 w-3.5" />
                   Scarica
                 </button>
               </div>
 
-              <pre className="whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-[var(--color-fg)] bg-[var(--color-bg)] border border-[var(--color-line)] rounded-lg p-4 max-h-[420px] overflow-y-auto font-[inherit]">
+              <pre className="whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-[var(--ds-text-primary)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] rounded-lg p-4 max-h-[420px] overflow-y-auto font-[inherit]">
 {generatedText}
               </pre>
-              <p className="text-[12px] text-[var(--color-fg-muted)] mt-2">
+              <p className="text-[12px] text-[var(--ds-text-muted)] mt-2">
                 Testi generati automaticamente dai dati inseriti. I campi tra parentesi quadre non sono ancora compilati. Fai validare i testi da un consulente privacy prima della pubblicazione.
               </p>
             </div>

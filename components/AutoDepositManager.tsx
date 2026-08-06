@@ -78,7 +78,7 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
 
     if (loading) {
         return (
-            <div className="flex items-center gap-2 text-[var(--color-fg-muted)] text-[13px] py-2">
+            <div className="flex items-center gap-2 text-[var(--ds-text-muted)] text-[13px] py-2">
                 <Loader2 className="w-4 h-4 animate-spin" /> Caricamento…
             </div>
         );
@@ -94,8 +94,8 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
         <div className="space-y-4">
             <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                    <p className="text-[13px] font-medium text-[var(--color-fg)]">Attiva caparra automatica</p>
-                    <p className="text-[12px] text-[var(--color-fg-muted)]">
+                    <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">Attiva caparra automatica</p>
+                    <p className="text-[12px] text-[var(--ds-text-muted)]">
                         Per le richieste dal modulo /prenota il sistema genera automaticamente un link di pagamento {providerLabel} (€10/persona) inviato via SMS al cliente.
                     </p>
                 </div>
@@ -106,8 +106,8 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
                     aria-label={effectiveEnabled ? 'Disattiva caparra automatica' : 'Attiva caparra automatica'}
                     onClick={() => canEdit && setDraftEnabled(!effectiveEnabled)}
                     disabled={!canEdit || saving}
-                    className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] focus:ring-offset-2 focus:ring-offset-[var(--color-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
-                        effectiveEnabled ? 'bg-emerald-500' : 'bg-[var(--color-surface-3)] border border-[var(--color-line)]'
+                    className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+                        effectiveEnabled ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
                     }`}
                 >
                     <span
@@ -120,7 +120,7 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
             </div>
 
             <div>
-                <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">
+                <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">
                     Richiedi caparra da (numero di coperti)
                 </label>
                 <div className="flex items-center gap-2">
@@ -133,15 +133,15 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
                         value={minGuestsInput}
                         onChange={(e) => setMinGuestsInput(e.target.value)}
                         disabled={!canEdit || saving || !effectiveEnabled}
-                        className="w-24 px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] font-mono text-[var(--color-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
+                        className="w-24 px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                     />
-                    <span className="text-[12px] text-[var(--color-fg-muted)]">coperti o più</span>
+                    <span className="text-[12px] text-[var(--ds-text-muted)]">coperti o più</span>
                 </div>
-                <p className="text-[11px] text-[var(--color-fg-subtle)] mt-1">
+                <p className="text-[11px] text-[var(--ds-text-subtle)] mt-1">
                     Le prenotazioni con almeno questo numero di persone riceveranno il link di pagamento. Sotto la soglia il flusso è invariato.
                 </p>
                 {!settings.revolut_configured && effectiveEnabled && (
-                    <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
+                    <p className="text-[11px] text-[var(--ds-pending-text)] mt-1">
                         {providerLabel} non è ancora configurato: configura le credenziali in Integrazioni → {providerLabel}, altrimenti il link non verrà generato.
                     </p>
                 )}
@@ -152,12 +152,12 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
             <PaymentProviderPicker flow="deposit" showToast={showToast} canEdit={canEdit} />
 
             {canEdit && (
-                <div className="flex items-center justify-end gap-2 pt-2 border-t border-[var(--color-line)]">
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-[var(--ds-border)]">
                     <button
                         type="button"
                         onClick={save}
                         disabled={!isDirty || saving}
-                        className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[13px] font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                         Salva modifiche
@@ -166,7 +166,7 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
             )}
 
             {!canEdit && (
-                <p className="text-[12px] text-[var(--color-fg-subtle)]">
+                <p className="text-[12px] text-[var(--ds-text-subtle)]">
                     Solo gli amministratori possono modificare questa impostazione.
                 </p>
             )}

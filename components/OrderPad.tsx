@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ArrowLeft, ArrowRightLeft, Ban, Check, ChevronDown, Clock, Loader2, Minus,
+  ArrowLeft, ArrowRightLeft, Ban, Check, ChevronDown, Loader2, Minus,
   Percent, Plus, Receipt, Send, Trash2, TriangleAlert, Users, Utensils, X,
 } from 'lucide-react';
 import type { Dish, Reservation, Table, OrderWithItems, OrderItem } from '../types';
@@ -15,6 +15,10 @@ import { BillSheet } from './pagamenti/BillSheet';
 import { billsApiService } from '../services/billsApiService';
 import { socketClient } from '../services/socketClient';
 import type { ServiceBill } from '../services/ordersApiService';
+import {
+  ModalShell, Sheet, Callout, StatusPill, SegmentedControl, dsInput, dsButton,
+} from './ds';
+import type { PillTone } from './ds';
 
 // ---------------------------------------------------------------------------
 // Palmare cameriere — la comanda si compone qui e parte con un tocco.
@@ -23,7 +27,7 @@ import type { ServiceBill } from '../services/ordersApiService';
 // interazioni fini, lo stato di ogni uscita scritto a lettere invece che
 // affidato al colore.
 //
-// Il carrello resta locale finché non si preme INVIA: il cameriere si corregge
+// Il carrello resta locale finché non si preme Invia: il cameriere si corregge
 // senza generare rumore in cucina, e il servizio parte con una sola chiamata
 // di rete invece di una per ogni piatto — che su un WiFi di sala è la
 // differenza fra usarlo e tornare al blocchetto.
@@ -60,13 +64,36 @@ const courseLabel = (n: number): string => `${ORDINALS[n] ?? `${n}ª`} uscita`;
 // Etichetta parlante per lo stato dell'uscita. Il cameriere deve sapere a
 // colpo d'occhio se la sua seconda uscita è partita o è ferma al passe:
 // altrimenti la ripropone, e in cucina arriva doppia.
-const COURSE_BADGE: Record<string, { text: string; cls: string }> = {
-  QUEUED:  { text: '⏸ al passe',  cls: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200' },
-  FIRED:   { text: '✓ in cucina', cls: 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-200' },
-  READY:   { text: '● pronta',    cls: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200' },
-  SERVED:  { text: 'servita',     cls: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' },
-  PENDING: { text: 'in bozza',    cls: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' },
+//
+// I toni sono quelli del design system, e ci cascano dentro senza forzature:
+// al passe qualcuno deve agire (pending), in cucina è informativo (arriving),
+// pronta è servizio vivo (seated), servita non è più uno stato (neutral).
+const COURSE_BADGE: Record<string, { text: string; tone: PillTone }> = {
+  QUEUED:  { text: 'al passe',  tone: 'pending' },
+  FIRED:   { text: 'in cucina', tone: 'info' },
+  READY:   { text: 'pronta',    tone: 'positive' },
+  SERVED:  { text: 'servita',   tone: 'neutral' },
+  PENDING: { text: 'in bozza',  tone: 'neutral' },
 };
+
+/* Lo stato del tavolo in griglia. Le quattro famiglie di stato del design
+   system coprono esattamente i quattro casi, quindi non serve inventare tinte:
+   una comanda aperta è servizio vivo, un conto da incassare chiede un'azione,
+   una prenotazione è imminente, un tavolo libero non è uno stato. */
+const TABLE_STATE = {
+  order: 'bg-[var(--ds-seated-tint)] ring-2 ring-[var(--ds-seated-solid)]',
+  bill: 'bg-[var(--ds-pending-tint)] ring-2 ring-[var(--ds-pending-solid)]',
+  booked: 'bg-[var(--ds-arriving-tint)] ring-1 ring-[var(--ds-arriving-solid)]',
+  free: 'bg-[var(--ds-surface)]',
+} as const;
+
+/* I bersagli del palmare: una mano sola, in piedi, poca luce. 44px non è un
+   arrotondamento, è il motivo per cui non si sbaglia riga. */
+const padButton =
+  'inline-flex h-11 flex-shrink-0 items-center justify-center gap-1.5 rounded-full px-4 text-[15px] font-medium transition-colors disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+const padQuiet = `${padButton} bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]`;
+const padStepper =
+  'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations, globalDate, globalShiftFilter }) => {
   const [tableId, setTableId] = useState<number | null>(null);
@@ -263,7 +290,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
     (s, l) => s + (Math.round(Number(l.dish.price) * 100) + l.modifier_delta_cents) * l.qty, 0
   );
 
-  // INVIA: crea le righe e le propone, in due chiamate consecutive con la
+  // Invia: crea le righe e le propone, in due chiamate consecutive con la
   // stessa chiave di idempotenza. Se la seconda fallisce le righe restano in
   // bozza sul server — recuperabili, mai perse.
   const submit = async () => {
@@ -452,12 +479,16 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
   // ---------------- selezione tavolo ----------------
   if (!tableId || !order) {
     return (
-      <div className="p-4 lg:p-8 max-w-3xl mx-auto">
-        <h1 className="text-2xl font-semibold mb-1">Comande</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
+      <div className="mx-auto max-w-3xl bg-[var(--ds-canvas)] p-4 lg:p-8">
+        <h1 className="text-[26px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">Comande</h1>
+        <p className="mb-5 mt-0.5 text-[14px] text-[var(--ds-text-muted)]">
           Scegli il tavolo per aprire o riprendere la comanda.
         </p>
-        {error && <ErrorBar message={error} onDismiss={() => setError(null)} />}
+        {error && (
+          <div className="mb-4">
+            <ErrorBar message={error} onDismiss={() => setError(null)} />
+          </div>
+        )}
         {viewBill && !justClosed && (
           <BillSheet
             bill={{
@@ -476,9 +507,11 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
             onSettle={settleViewBill}
             footerExtra={
               <button
+                type="button"
                 onClick={() => { const tid = viewBill.table_id; setViewBill(null); loadTable(tid, { forceCreate: true }); }}
                 disabled={busy}
-                className="w-full py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 text-sm font-medium disabled:opacity-50">
+                className={`w-full ${dsButton.secondary}`}
+              >
                 Nuova comanda su questo tavolo
               </button>
             }
@@ -501,46 +534,50 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
             torna alla scelta tavolo, e senza questo il cameriere non saprebbe
             se il conto è stato creato davvero. */}
         {flash && (
-          <div className="mb-4 px-3 py-2 rounded-lg bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200 text-sm flex items-center gap-2">
-            <Check size={16} /> {flash}
-          </div>
+          <Callout tone="positive" icon={Check} className="mb-4">{flash}</Callout>
         )}
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
+        <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6">
           {tables.map(t => {
             const res = reservationForTable(t.id);
+            const hasOrder = openTables.has(t.id);
+            const hasBill = !hasOrder && billTables.has(t.id);
             return (
-            <button
-              key={t.id}
-              onClick={() => loadTable(t.id)}
-              disabled={busy}
-              className={`aspect-square rounded-2xl border-2 flex flex-col items-center justify-center gap-1 transition
-                ${openTables.has(t.id)
-                  ? 'border-sky-500 bg-sky-50 dark:bg-sky-950/40'
-                  : billTables.has(t.id)
-                    ? 'border-violet-500 bg-violet-50/70 dark:border-violet-600 dark:bg-violet-950/30 hover:border-violet-600'
-                    : res
-                      ? 'border-amber-400 bg-amber-50/60 dark:border-amber-600 dark:bg-amber-950/30 hover:border-amber-500'
-                      : 'border-slate-200 dark:border-slate-700 hover:border-slate-400'}
-                disabled:opacity-50`}
-            >
-              <span className="text-xl font-semibold">{t.name}</span>
-              <span className="text-[11px] text-slate-500">{t.seats} cop.</span>
-              {res && (
-                <span className="text-[10px] font-medium text-amber-700 dark:text-amber-300 truncate max-w-full px-1">
-                  {getRomeTimePart(res.reservation_time)} · {res.customer_name}
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => loadTable(t.id)}
+                disabled={busy}
+                className={`flex aspect-square flex-col items-center justify-center gap-0.5 rounded-[20px] p-1 shadow-[var(--ds-shadow-card)] transition-shadow disabled:opacity-50 ${
+                  hasOrder ? TABLE_STATE.order
+                  : hasBill ? TABLE_STATE.bill
+                  : res ? TABLE_STATE.booked
+                  : TABLE_STATE.free
+                }`}
+              >
+                <span className="text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
+                  {t.name}
                 </span>
-              )}
-              {openTables.has(t.id) && (
-                <span className="text-[10px] font-medium text-sky-700 dark:text-sky-300">comanda aperta</span>
-              )}
-              {!openTables.has(t.id) && billTables.has(t.id) && (
-                <span className="text-[10px] font-medium text-violet-700 dark:text-violet-300">conto da incassare</span>
-              )}
-            </button>
+                <span className="text-[12px] text-[var(--ds-text-muted)] tabular-nums">{t.seats} cop.</span>
+                {res && (
+                  <span className="max-w-full truncate px-1 text-[11px] font-medium text-[var(--ds-arriving-text)]">
+                    {getRomeTimePart(res.reservation_time)} · {res.customer_name}
+                  </span>
+                )}
+                {hasOrder && (
+                  <span className="text-[11px] font-semibold text-[var(--ds-seated-text)]">comanda aperta</span>
+                )}
+                {hasBill && (
+                  <span className="text-[11px] font-semibold text-[var(--ds-pending-text)]">conto da incassare</span>
+                )}
+              </button>
             );
           })}
         </div>
-        {busy && <div className="mt-6 flex items-center gap-2 text-slate-500"><Loader2 size={16} className="animate-spin" /> Apertura…</div>}
+        {busy && (
+          <div className="mt-6 flex items-center gap-2 text-[14px] text-[var(--ds-text-muted)]">
+            <Loader2 size={16} className="animate-spin" /> Apertura…
+          </div>
+        )}
       </div>
     );
   }
@@ -550,67 +587,107 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
   const visibleDishes = dishes.filter(d => (category ? d.category === category : true));
 
   return (
-    <div className="flex flex-col h-full max-h-screen">
+    <div className="flex h-full max-h-screen flex-col bg-[var(--ds-canvas)]">
       {/* Testata: chi è al tavolo e cosa non può mangiare */}
-      <header className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 shrink-0">
-        <div className="flex items-center gap-3">
-          <button onClick={() => { setTableId(null); setOrder(null); setCart([]); }}
-                  className="p-2 -ml-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800">
-            <ArrowLeft size={20} />
-          </button>
-          <div className="min-w-0 flex-1">
-            <div className="font-semibold truncate">
-              Tav. {table?.name}
-              {reservation ? ` · ${reservation.customer_name}` : ''}
+      <header className="flex-shrink-0 px-4 pb-3 pt-4">
+        <div className="rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => { setTableId(null); setOrder(null); setCart([]); }}
+              aria-label="Torna alla scelta del tavolo"
+              className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
+            >
+              <ArrowLeft size={20} />
+            </button>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
+                Tav. {table?.name}
+                {reservation ? ` · ${reservation.customer_name}` : ''}
+              </div>
+              <div className="text-[13px] text-[var(--ds-text-muted)] tabular-nums">
+                Totale {euro(order.total_cents)}
+              </div>
             </div>
-            <div className="text-xs text-slate-500 flex items-center gap-2">
-              <span>Totale {euro(order.total_cents)}</span>
-              <span className="flex items-center gap-1">
-                <Users size={12} />
-                <button onClick={() => changeCovers(-1)} disabled={busy}
-                        className="px-1.5 rounded border border-slate-300 dark:border-slate-600">−</button>
-                <span className="tabular-nums w-4 text-center">{order.order.covers}</span>
-                <button onClick={() => changeCovers(+1)} disabled={busy}
-                        className="px-1.5 rounded border border-slate-300 dark:border-slate-600">+</button>
-                cop.
+            <button
+              type="button"
+              onClick={() => closeAndBill(false)}
+              disabled={busy}
+              title="Chiudi la comanda e apri il conto"
+              className={padQuiet}
+            >
+              <Receipt size={16} aria-hidden /> Conto
+            </button>
+          </div>
+
+          {/* I coperti su una riga propria: erano due bersagli da 20px in mezzo
+              a una riga di metadati, e sono il divisore del conto. */}
+          <div className="mt-2 flex items-center gap-2 border-t border-[var(--ds-border)] pt-2">
+            <span className="flex items-center gap-1.5 text-[14px] text-[var(--ds-text-muted)]">
+              <Users size={14} aria-hidden /> Coperti
+            </span>
+            <div className="ml-auto flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => changeCovers(-1)}
+                disabled={busy || order.order.covers <= 1}
+                aria-label="Un coperto in meno"
+                className={padStepper}
+              >
+                <Minus size={16} />
+              </button>
+              <span className="w-8 text-center text-[17px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                {order.order.covers}
               </span>
+              <button
+                type="button"
+                onClick={() => changeCovers(+1)}
+                disabled={busy}
+                aria-label="Un coperto in più"
+                className={padStepper}
+              >
+                <Plus size={16} />
+              </button>
             </div>
           </div>
-          <button onClick={() => closeAndBill(false)} disabled={busy}
-                  title="Chiudi la comanda e apri il conto"
-                  className="shrink-0 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm flex items-center gap-1.5">
-            <Receipt size={15} /> Conto
-          </button>
+
+          {allergens && (
+            <Callout tone="critical" icon={TriangleAlert} className="mt-2">{allergens}</Callout>
+          )}
         </div>
-        {allergens && (
-          <div className="mt-2 flex items-start gap-2 text-sm px-3 py-2 rounded-lg bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200">
-            <TriangleAlert size={16} className="mt-0.5 shrink-0" />
-            <span>{allergens}</span>
-          </div>
-        )}
       </header>
 
       {flash && (
-        <div className="mx-4 mt-3 px-3 py-2 rounded-lg bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200 text-sm flex items-center gap-2">
-          <Check size={16} /> {flash}
+        <div className="flex-shrink-0 px-4 pb-2">
+          <Callout tone="positive" icon={Check}>{flash}</Callout>
         </div>
       )}
-      {error && <div className="px-4 pt-3"><ErrorBar message={error} onDismiss={() => setError(null)} /></div>}
+      {error && (
+        <div className="flex-shrink-0 px-4 pb-2">
+          <ErrorBar message={error} onDismiss={() => setError(null)} />
+        </div>
+      )}
 
       {/* Uscite già mandate, con lo stato scritto in chiaro */}
       {order.courses.some(c => c.status !== 'PENDING') && (
-        <div className="px-4 pt-3 flex flex-wrap gap-2 shrink-0">
+        <div className="flex flex-shrink-0 flex-wrap gap-2 px-4 pb-2">
           {order.courses.filter(c => c.status !== 'PENDING').map(c => {
             const badge = COURSE_BADGE[c.status] ?? COURSE_BADGE.PENDING;
             return (
-              <div key={c.course_no} className={`px-2.5 py-1 rounded-full text-xs font-medium flex items-center gap-2 ${badge.cls}`}>
-                <span>{courseLabel(c.course_no)} · {badge.text}</span>
+              <StatusPill key={c.course_no} tone={badge.tone} className="h-8 px-3">
+                {courseLabel(c.course_no)} · {badge.text}
                 {c.status === 'QUEUED' && (
-                  <button onClick={() => recall(c.course_no)} disabled={busy}
-                          title="Richiama: torna in bozza"
-                          className="underline decoration-dotted hover:opacity-70">richiama</button>
+                  <button
+                    type="button"
+                    onClick={() => recall(c.course_no)}
+                    disabled={busy}
+                    title="Richiama: torna in bozza"
+                    className="ml-1 font-semibold underline decoration-dotted transition-opacity hover:opacity-70"
+                  >
+                    richiama
+                  </button>
                 )}
-              </div>
+              </StatusPill>
             );
           })}
         </div>
@@ -618,141 +695,212 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
 
       {/* Righe già in cucina: da qui si stornano, con motivazione */}
       {order.items.some(i => i.status !== 'DRAFT' && i.line_kind !== 'COVER' && i.line_kind !== 'SERVICE') && (
-        <details className="px-4 pt-2 shrink-0">
-          <summary className="text-xs uppercase tracking-wide text-slate-500 cursor-pointer">
+        <details className="flex-shrink-0 px-4 pb-2">
+          <summary className="cursor-pointer text-[13px] font-semibold text-[var(--ds-text-muted)]">
             Già ordinato ({order.items.filter(i => i.status !== 'DRAFT' && i.status !== 'VOIDED').length})
           </summary>
-          <div className="mt-2 max-h-40 overflow-y-auto space-y-1">
+          <div className="mt-2 max-h-40 space-y-1 overflow-y-auto rounded-[16px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
             {order.items.filter(i => i.status !== 'DRAFT').map(i => (
-              <div key={i.id} className="flex items-center gap-2 text-sm">
-                <span className={`flex-1 truncate ${i.status === 'VOIDED' ? 'line-through text-slate-400' : ''}`}>
+              <div key={i.id} className="flex items-center gap-2 text-[14px]">
+                <span
+                  className={`min-w-0 flex-1 truncate ${
+                    i.status === 'VOIDED'
+                      ? 'text-[var(--ds-text-muted)] line-through'
+                      : 'text-[var(--ds-text-primary)]'
+                  }`}
+                >
                   {i.qty}× {i.name_snapshot}
-                  {i.line_kind !== 'DISH' && <span className="text-xs text-slate-400"> · automatico</span>}
+                  {i.line_kind !== 'DISH' && (
+                    <span className="text-[13px] text-[var(--ds-text-muted)]"> · automatico</span>
+                  )}
                 </span>
-                <span className="text-xs text-slate-500 tabular-nums">{euro(i.line_total_cents ?? 0)}</span>
+                <span className="flex-shrink-0 text-[13px] tabular-nums text-[var(--ds-text-muted)]">
+                  {euro(i.line_total_cents ?? 0)}
+                </span>
                 {i.status !== 'VOIDED' && i.line_kind === 'DISH' && (
-                  <button onClick={() => setVoidTarget(i)} title="Storna"
-                          className="p-1 text-rose-600"><Ban size={14} /></button>
+                  <button
+                    type="button"
+                    onClick={() => setVoidTarget(i)}
+                    aria-label={`Storna ${i.name_snapshot}`}
+                    title="Storna"
+                    className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)]"
+                  >
+                    <Ban size={15} />
+                  </button>
                 )}
               </div>
             ))}
-          </div>
-          {order.discount_cents > 0 && (
-            <div className="mt-2 text-sm flex justify-between text-emerald-700 dark:text-emerald-300">
-              <span>Sconto{order.order.discount_reason ? ` · ${order.order.discount_reason}` : ''}</span>
-              <span>−{euro(order.discount_cents)}</span>
+            {order.discount_cents > 0 && (
+              <div className="flex justify-between border-t border-[var(--ds-border)] pt-2 text-[14px] font-medium text-[var(--ds-seated-text)]">
+                <span>Sconto{order.order.discount_reason ? ` · ${order.order.discount_reason}` : ''}</span>
+                <span className="tabular-nums">−{euro(order.discount_cents)}</span>
+              </div>
+            )}
+            <div className="flex gap-2 pt-1">
+              <button type="button" onClick={() => setDiscountOpen(true)} className={padQuiet}>
+                <Percent size={14} aria-hidden /> Sconto
+              </button>
+              <button type="button" onClick={() => setTransferOpen(true)} className={padQuiet}>
+                <ArrowRightLeft size={14} aria-hidden /> Sposta tavolo
+              </button>
             </div>
-          )}
-          <div className="mt-2 flex gap-2">
-            <button onClick={() => setDiscountOpen(true)}
-                    className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 flex items-center gap-1">
-              <Percent size={12} /> Sconto
-            </button>
-            <button onClick={() => setTransferOpen(true)}
-                    className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 flex items-center gap-1">
-              <ArrowRightLeft size={12} /> Sposta tavolo
-            </button>
           </div>
         </details>
       )}
 
       {/* Catalogo */}
-      <div className="px-4 pt-3 shrink-0 flex gap-2 overflow-x-auto pb-2">
+      <div className="flex flex-shrink-0 gap-2 overflow-x-auto px-4 pb-2">
         {categories.map(c => (
-          <button key={c} onClick={() => setCategory(c)}
-                  className={`px-3 py-1.5 rounded-full text-sm whitespace-nowrap border
-                    ${category === c ? 'bg-slate-900 text-white border-slate-900 dark:bg-white dark:text-slate-900'
-                                     : 'border-slate-300 dark:border-slate-600'}`}>
+          <button
+            key={c}
+            type="button"
+            onClick={() => setCategory(c)}
+            aria-pressed={category === c}
+            className={`inline-flex h-11 flex-shrink-0 items-center whitespace-nowrap rounded-full px-4 text-[15px] font-medium transition-colors ${
+              category === c
+                ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] hover:text-[var(--ds-text-primary)]'
+            }`}
+          >
             {c}
           </button>
         ))}
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 pb-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {visibleDishes.map(d => (
-            <button key={d.id} onClick={() => onDishTap(d)}
-                    className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-700 text-left hover:border-slate-400 active:scale-[0.99] transition">
-              <span className="font-medium truncate">{d.name}</span>
-              <span className="text-sm text-slate-500 shrink-0">
+            <button
+              key={d.id}
+              type="button"
+              onClick={() => onDishTap(d)}
+              className="flex min-h-[56px] items-center justify-between gap-3 rounded-[16px] bg-[var(--ds-surface)] px-4 py-3 text-left shadow-[var(--ds-shadow-card)] transition-transform hover:bg-[var(--ds-surface-row)] active:scale-[0.99]"
+            >
+              <span className="truncate text-[15px] font-medium text-[var(--ds-text-primary)]">{d.name}</span>
+              <span className="flex flex-shrink-0 items-center gap-1 text-[14px] tabular-nums text-[var(--ds-text-muted)]">
                 {euro(Math.round(Number(d.price) * 100))}
-                {groupsForDish(d.id).length > 0 && <ChevronDown size={14} className="inline ml-1" />}
+                {groupsForDish(d.id).length > 0 && <ChevronDown size={15} aria-hidden />}
               </span>
             </button>
           ))}
           {visibleDishes.length === 0 && (
-            <p className="text-sm text-slate-500 py-8 text-center col-span-full">Nessun piatto in questa categoria.</p>
+            <p className="col-span-full py-8 text-center text-[14px] text-[var(--ds-text-muted)]">
+              Nessun piatto in questa categoria.
+            </p>
           )}
         </div>
       </div>
 
       {/* Carrello: l'uscita in composizione */}
-      <div className="border-t border-slate-200 dark:border-slate-700 shrink-0 bg-white dark:bg-slate-900">
-        <div className="px-4 pt-3 flex items-center gap-2">
-          <span className="text-xs uppercase tracking-wide text-slate-500">Sto componendo</span>
-          <select value={course} onChange={e => setCourse(Number(e.target.value))}
-                  className="text-sm rounded-lg border border-slate-300 dark:border-slate-600 bg-transparent px-2 py-1">
-            {[1, 2, 3, 4, 5, 6].map(n => <option key={n} value={n}>{courseLabel(n)}</option>)}
-          </select>
-        </div>
+      <div className="flex-shrink-0 px-4 pb-4">
+        <div className="rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-raised)]">
+          <div className="flex items-center gap-2">
+            <span className="text-[13px] font-semibold text-[var(--ds-text-muted)]">Sto componendo</span>
+            <select
+              value={course}
+              onChange={e => setCourse(Number(e.target.value))}
+              aria-label="Uscita in composizione"
+              className="ds-select h-11 flex-1 rounded-full bg-[var(--ds-surface-row)] px-4 text-[15px] text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              {[1, 2, 3, 4, 5, 6].map(n => <option key={n} value={n}>{courseLabel(n)}</option>)}
+            </select>
+          </div>
 
-        <div className="px-4 py-2 max-h-48 overflow-y-auto">
-          {cart.length === 0 ? (
-            <p className="text-sm text-slate-400 py-3">Tocca un piatto per aggiungerlo.</p>
-          ) : cart.map(l => (
-            <div key={l.key} className="flex items-center gap-3 py-1.5">
-              <span className="text-xs text-slate-400 w-10 shrink-0">{ORDINALS[l.course_no] ?? l.course_no}</span>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm truncate">{l.dish.name}</div>
-                {l.modifier_labels.length > 0 && (
-                  <div className="text-xs text-slate-500 truncate">↳ {l.modifier_labels.join(', ')}</div>
-                )}
+          <div className="max-h-48 overflow-y-auto py-2">
+            {cart.length === 0 ? (
+              <p className="py-3 text-[14px] text-[var(--ds-text-muted)]">Tocca un piatto per aggiungerlo.</p>
+            ) : cart.map(l => (
+              <div key={l.key} className="flex items-center gap-2 py-1">
+                <span className="w-9 flex-shrink-0 text-[13px] text-[var(--ds-text-muted)]">
+                  {ORDINALS[l.course_no] ?? l.course_no}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[15px] text-[var(--ds-text-primary)]">{l.dish.name}</div>
+                  {l.modifier_labels.length > 0 && (
+                    <div className="truncate text-[13px] text-[var(--ds-text-muted)]">
+                      ↳ {l.modifier_labels.join(', ')}
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => bumpCart(l.key, -1)}
+                    aria-label={`Uno in meno di ${l.dish.name}`}
+                    className={padStepper}
+                  >
+                    <Minus size={15} />
+                  </button>
+                  <span className="w-7 text-center text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                    {l.qty}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => bumpCart(l.key, +1)}
+                    aria-label={`Uno in più di ${l.dish.name}`}
+                    className={padStepper}
+                  >
+                    <Plus size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCart(prev => prev.filter(x => x.key !== l.key))}
+                    aria-label={`Togli ${l.dish.name}`}
+                    className="ml-0.5 inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)]"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <button onClick={() => bumpCart(l.key, -1)} className="p-1.5 rounded-lg border border-slate-300 dark:border-slate-600"><Minus size={14} /></button>
-                <span className="w-6 text-center text-sm font-medium">{l.qty}</span>
-                <button onClick={() => bumpCart(l.key, +1)} className="p-1.5 rounded-lg border border-slate-300 dark:border-slate-600"><Plus size={14} /></button>
-                <button onClick={() => setCart(prev => prev.filter(x => x.key !== l.key))} className="p-1.5 ml-1 rounded-lg text-rose-600"><Trash2 size={14} /></button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-3 border-t border-[var(--ds-border)] pt-3">
+            <div className="min-w-0 flex-1">
+              <div className="text-[13px] text-[var(--ds-text-muted)]">Da inviare</div>
+              <div className="text-[20px] font-semibold tabular-nums tracking-[-0.015em] text-[var(--ds-text-primary)]">
+                {euro(cartTotal)}
               </div>
             </div>
-          ))}
-        </div>
-
-        <div className="px-4 py-3 flex items-center gap-3 border-t border-slate-100 dark:border-slate-800">
-          <div className="flex-1">
-            <div className="text-xs text-slate-500">Da inviare</div>
-            <div className="text-lg font-semibold">{euro(cartTotal)}</div>
+            {/* Non "INVIA": il maiuscolo non aggiunge peso che il corpo e il
+                grassetto non diano già, e si legge peggio (§5.2). */}
+            <button
+              type="button"
+              onClick={submit}
+              disabled={busy || cart.length === 0}
+              className="inline-flex h-12 flex-shrink-0 items-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-6 text-[17px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              {busy ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+              Invia
+            </button>
           </div>
-          <button onClick={submit} disabled={busy || cart.length === 0}
-                  className="px-6 py-3 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-semibold flex items-center gap-2 disabled:opacity-40">
-            {busy ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
-            INVIA
-          </button>
         </div>
       </div>
 
-      {closing && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
-             onClick={() => setClosing(false)}>
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 w-full max-w-sm" onClick={e => e.stopPropagation()}>
-            <h2 className="font-semibold mb-2">Righe non inviate</h2>
-            <p className="text-sm text-slate-500 mb-4">
-              Ci sono righe che non sono mai arrivate in cucina. Chiudendo ora
-              vengono eliminate e non finiranno sul conto.
-            </p>
-            <div className="flex gap-2">
-              <button onClick={() => setClosing(false)}
-                      className="flex-1 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600">
-                Annulla
-              </button>
-              <button onClick={() => closeAndBill(true)} disabled={busy}
-                      className="flex-1 py-2.5 rounded-xl bg-rose-600 text-white font-semibold">
-                Scarta e chiudi
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ModalShell
+        open={closing}
+        onClose={() => setClosing(false)}
+        title="Righe non inviate"
+        size="sm"
+        closeOnEscape
+        bodyClassName="p-5 sm:p-6"
+        footerLayout="row"
+        footer={
+          <button
+            type="button"
+            onClick={() => closeAndBill(true)}
+            disabled={busy}
+            className="inline-flex h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-[var(--ds-critical-solid)] px-5 text-[15px] font-semibold text-[var(--ds-critical-fg)] transition-[filter] hover:brightness-95 disabled:opacity-40 sm:flex-none"
+          >
+            Scarta e chiudi
+          </button>
+        }
+      >
+        <p className="text-[15px] leading-relaxed text-[var(--ds-text-secondary)]">
+          Ci sono righe che non sono mai arrivate in cucina. Chiudendo ora
+          vengono eliminate e non finiranno sul conto.
+        </p>
+      </ModalShell>
 
       {voidTarget && (
         <ReasonDialog
@@ -776,25 +924,29 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
         />
       )}
 
-      {transferOpen && order && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
-             onClick={() => setTransferOpen(false)}>
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 w-full max-w-sm" onClick={e => e.stopPropagation()}>
-            <h2 className="font-semibold mb-1">Sposta su quale tavolo?</h2>
-            <p className="text-xs text-slate-500 mb-4">
-              Comanda e conto si spostano insieme. Le quote già pagate restano attaccate al conto.
-            </p>
-            <div className="grid grid-cols-4 gap-2 max-h-64 overflow-y-auto">
-              {tables.filter(t => t.id !== tableId).map(t => (
-                <button key={t.id} onClick={() => doTransfer(t.id)} disabled={busy}
-                        className="py-3 rounded-xl border border-slate-300 dark:border-slate-600 font-semibold disabled:opacity-40">
-                  {t.name}
-                </button>
-              ))}
-            </div>
-          </div>
+      <ModalShell
+        open={transferOpen && !!order}
+        onClose={() => setTransferOpen(false)}
+        title="Sposta su quale tavolo?"
+        subtitle="Comanda e conto si spostano insieme. Le quote già pagate restano attaccate al conto."
+        size="sm"
+        closeOnEscape
+        bodyClassName="p-5 sm:p-6"
+      >
+        <div className="grid max-h-64 grid-cols-4 gap-2 overflow-y-auto">
+          {tables.filter(t => t.id !== tableId).map(t => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => doTransfer(t.id)}
+              disabled={busy}
+              className="h-14 rounded-[16px] bg-[var(--ds-surface-row)] text-[15px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+            >
+              {t.name}
+            </button>
+          ))}
         </div>
-      )}
+      </ModalShell>
 
       {variantFor && (
         <VariantSheet
@@ -809,11 +961,22 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
 };
 
 const ErrorBar: React.FC<{ message: string; onDismiss: () => void }> = ({ message, onDismiss }) => (
-  <div className="px-3 py-2 rounded-lg bg-rose-50 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200 text-sm flex items-start gap-2">
-    <TriangleAlert size={16} className="mt-0.5 shrink-0" />
-    <span className="flex-1">{message}</span>
-    <button onClick={onDismiss} className="shrink-0"><X size={16} /></button>
-  </div>
+  <Callout
+    tone="critical"
+    icon={TriangleAlert}
+    action={
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="Chiudi l'errore"
+        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--ds-critical-text)] transition-[filter] hover:brightness-90"
+      >
+        <X size={16} />
+      </button>
+    }
+  >
+    {message}
+  </Callout>
 );
 
 // Foglio varianti. I gruppi con max_select = 1 sono a scelta singola
@@ -840,48 +1003,67 @@ const VariantSheet: React.FC<{
     && g.modifiers.filter(m => selected.includes(m.id)).length < g.min_select);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40" onClick={onCancel}>
-      <div className="w-full sm:max-w-md bg-white dark:bg-slate-900 rounded-t-2xl sm:rounded-2xl p-4 max-h-[80vh] overflow-y-auto"
-           onClick={e => e.stopPropagation()}>
-        <div className="flex items-center gap-2 mb-3">
-          <Utensils size={18} />
-          <h2 className="font-semibold flex-1">{dish.name}</h2>
-          <button onClick={onCancel} className="p-1"><X size={18} /></button>
-        </div>
-
-        {groups.map(g => {
-          const single = g.max_select <= 1;
-          return (
-            <div key={g.id} className="mb-4">
-              <div className="text-xs uppercase tracking-wide text-slate-500 mb-2">
-                {g.name}{g.min_select > 0 && <span className="text-rose-500"> · obbligatorio</span>}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {g.modifiers.map(m => (
-                  <button key={m.id} onClick={() => toggle(g.id, m.id, single)}
-                          className={`px-3 py-2 rounded-xl border text-sm
-                            ${selected.includes(m.id)
-                              ? 'border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900'
-                              : 'border-slate-300 dark:border-slate-600'}`}>
+    <Sheet
+      open
+      onClose={onCancel}
+      title={dish.name}
+      subtitle={
+        <span className="inline-flex items-center gap-1.5">
+          <Utensils size={14} aria-hidden /> Varianti
+        </span>
+      }
+      ariaLabel={`Varianti per ${dish.name}`}
+      bodyClassName="space-y-5 px-5 py-5 sm:px-6"
+      footer={
+        <button
+          type="button"
+          onClick={() => onConfirm(selected)}
+          disabled={missing.length > 0}
+          className={`w-full ${dsButton.primary}`}
+        >
+          {missing.length > 0 ? `Scegli: ${missing.map(g => g.name).join(', ')}` : 'Aggiungi'}
+        </button>
+      }
+    >
+      {groups.map(g => {
+        const single = g.max_select <= 1;
+        return (
+          <div key={g.id}>
+            <div className="mb-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">
+              {g.name}
+              {g.min_select > 0 && (
+                <span className="text-[var(--ds-critical-text)]"> · obbligatorio</span>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {g.modifiers.map(m => {
+                const active = selected.includes(m.id);
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => toggle(g.id, m.id, single)}
+                    aria-pressed={active}
+                    className={`inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium transition-colors ${
+                      active
+                        ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                        : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
+                    }`}
+                  >
                     {m.name}
                     {m.price_delta_cents !== 0 && (
-                      <span className="ml-1 opacity-70">
+                      <span className="ml-1.5 tabular-nums opacity-75">
                         {m.price_delta_cents > 0 ? '+' : '−'}{euro(Math.abs(m.price_delta_cents))}
                       </span>
                     )}
                   </button>
-                ))}
-              </div>
+                );
+              })}
             </div>
-          );
-        })}
-
-        <button onClick={() => onConfirm(selected)} disabled={missing.length > 0}
-                className="w-full py-3 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-semibold disabled:opacity-40">
-          {missing.length > 0 ? `Scegli: ${missing.map(g => g.name).join(', ')}` : 'Aggiungi'}
-        </button>
-      </div>
-    </div>
+          </div>
+        );
+      })}
+    </Sheet>
   );
 };
 
@@ -898,32 +1080,52 @@ const ReasonDialog: React.FC<{
   const [reason, setReason] = useState('');
   const PRESETS = ['Errore di battitura', 'Cliente ha cambiato idea', 'Piatto non riuscito', 'Ingrediente finito'];
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onCancel}>
-      <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 w-full max-w-sm" onClick={e => e.stopPropagation()}>
-        <h2 className="font-semibold mb-1">{title}</h2>
-        <p className="text-xs text-slate-500 mb-3">{hint}</p>
-        <div className="flex flex-wrap gap-1.5 mb-3">
-          {PRESETS.map(pr => (
-            <button key={pr} onClick={() => setReason(pr)}
-                    className={`text-xs px-2 py-1 rounded-lg border ${reason === pr ? 'border-slate-900 dark:border-white' : 'border-slate-300 dark:border-slate-600'}`}>
-              {pr}
-            </button>
-          ))}
-        </div>
-        <input value={reason} onChange={e => setReason(e.target.value)} autoFocus
-               placeholder="Motivazione"
-               className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-transparent mb-3" />
-        <div className="flex gap-2">
-          <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600">
-            Annulla
+    <ModalShell
+      open
+      onClose={onCancel}
+      title={title}
+      subtitle={hint}
+      size="sm"
+      closeOnEscape
+      bodyClassName="space-y-3 p-5 sm:p-6"
+      footer={
+        <button
+          type="button"
+          onClick={() => onConfirm(reason.trim())}
+          disabled={busy || reason.trim().length < 3}
+          className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-[var(--ds-critical-solid)] px-5 text-[15px] font-semibold text-[var(--ds-critical-fg)] transition-[filter] hover:brightness-95 disabled:opacity-40"
+        >
+          {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+          {confirmLabel}
+        </button>
+      }
+    >
+      <div className="flex flex-wrap gap-2">
+        {PRESETS.map(pr => (
+          <button
+            key={pr}
+            type="button"
+            onClick={() => setReason(pr)}
+            aria-pressed={reason === pr}
+            className={`inline-flex h-11 items-center rounded-full px-3.5 text-[14px] font-medium transition-colors ${
+              reason === pr
+                ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
+            }`}
+          >
+            {pr}
           </button>
-          <button onClick={() => onConfirm(reason.trim())} disabled={busy || reason.trim().length < 3}
-                  className="flex-1 py-2.5 rounded-xl bg-rose-600 text-white font-semibold disabled:opacity-40">
-            {confirmLabel}
-          </button>
-        </div>
+        ))}
       </div>
-    </div>
+      <input
+        value={reason}
+        onChange={e => setReason(e.target.value)}
+        autoFocus
+        placeholder="Motivazione"
+        aria-label="Motivazione"
+        className={dsInput}
+      />
+    </ModalShell>
   );
 };
 
@@ -942,43 +1144,58 @@ const DiscountDialog: React.FC<{
   const valid = Number.isFinite(num) && num > 0 && (type !== 'PERCENT' || num <= 100) && reason.trim().length >= 3;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onCancel}>
-      <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 w-full max-w-sm" onClick={e => e.stopPropagation()}>
-        <h2 className="font-semibold mb-1">Sconto sulla comanda</h2>
-        <p className="text-xs text-slate-500 mb-3">
-          Resta a registro con il tuo nome: serve a spiegare la differenza a fine servizio.
-        </p>
-        <div className="flex gap-2 mb-3">
-          {(['PERCENT', 'AMOUNT'] as const).map(t => (
-            <button key={t} onClick={() => setType(t)}
-                    className={`flex-1 py-2 rounded-lg border ${type === t ? 'border-slate-900 dark:border-white font-semibold' : 'border-slate-300 dark:border-slate-600'}`}>
-              {t === 'PERCENT' ? 'Percentuale' : 'Importo €'}
-            </button>
-          ))}
-        </div>
-        <input value={value} onChange={e => setValue(e.target.value)} inputMode="decimal" autoFocus
-               placeholder={type === 'PERCENT' ? '10' : '5,00'}
-               className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-transparent mb-3" />
-        <input value={reason} onChange={e => setReason(e.target.value)}
-               placeholder="Motivazione (obbligatoria)"
-               className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-transparent mb-3" />
-        <div className="flex gap-2">
-          {hasDiscount && (
-            <button onClick={onClear} disabled={busy}
-                    className="px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 text-sm">
-              Rimuovi
-            </button>
-          )}
-          <button onClick={onCancel} className="flex-1 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600">
-            Annulla
+    <ModalShell
+      open
+      onClose={onCancel}
+      title="Sconto sulla comanda"
+      subtitle="Resta a registro con il tuo nome: serve a spiegare la differenza a fine servizio."
+      size="sm"
+      closeOnEscape
+      bodyClassName="space-y-3 p-5 sm:p-6"
+      footerStart={
+        hasDiscount ? (
+          <button type="button" onClick={onClear} disabled={busy} className={dsButton.quiet}>
+            Rimuovi
           </button>
-          <button onClick={() => onConfirm({ discount_type: type, discount_value: num, reason: reason.trim() })}
-                  disabled={busy || !valid}
-                  className="flex-1 py-2.5 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-semibold disabled:opacity-40">
-            Applica
-          </button>
-        </div>
-      </div>
-    </div>
+        ) : undefined
+      }
+      footer={
+        <button
+          type="button"
+          onClick={() => onConfirm({ discount_type: type, discount_value: num, reason: reason.trim() })}
+          disabled={busy || !valid}
+          className={dsButton.primary}
+        >
+          {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+          Applica
+        </button>
+      }
+    >
+      <SegmentedControl<'PERCENT' | 'AMOUNT'>
+        value={type}
+        onChange={setType}
+        ariaLabel="Tipo di sconto"
+        options={[
+          { value: 'PERCENT', label: 'Percentuale' },
+          { value: 'AMOUNT', label: 'Importo €' },
+        ]}
+      />
+      <input
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        inputMode="decimal"
+        autoFocus
+        placeholder={type === 'PERCENT' ? '10' : '5,00'}
+        aria-label={type === 'PERCENT' ? 'Percentuale di sconto' : 'Importo dello sconto'}
+        className={dsInput}
+      />
+      <input
+        value={reason}
+        onChange={e => setReason(e.target.value)}
+        placeholder="Motivazione (obbligatoria)"
+        aria-label="Motivazione dello sconto"
+        className={dsInput}
+      />
+    </ModalShell>
   );
 };

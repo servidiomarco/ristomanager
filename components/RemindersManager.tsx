@@ -47,9 +47,9 @@ const formatSchedule = (r: Reminder): string => {
 };
 
 const kindBadge = (r: Reminder): { label: string; cls: string } => {
-  if (r.system_key) return { label: 'Sistema', cls: 'bg-violet-50 text-violet-700 ring-violet-200 dark:bg-violet-500/15 dark:text-violet-300 dark:ring-violet-500/30' };
-  if (r.kind === 'ONE_OFF') return { label: 'Temporaneo', cls: 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-500/15 dark:text-amber-300 dark:ring-amber-500/30' };
-  return { label: 'Ricorrente', cls: 'bg-sky-50 text-sky-700 ring-sky-200 dark:bg-sky-500/15 dark:text-sky-300 dark:ring-sky-500/30' };
+  if (r.system_key) return { label: 'Sistema', cls: 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] ring-[var(--ds-arriving-solid)]' };
+  if (r.kind === 'ONE_OFF') return { label: 'Temporaneo', cls: 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] ring-[var(--ds-pending-solid)]' };
+  return { label: 'Ricorrente', cls: 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] ring-[var(--ds-arriving-solid)]' };
 };
 
 interface EditorState {
@@ -217,13 +217,18 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
     : false;
 
   return (
-    <div className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-sm">
-      <div className="flex items-start justify-between gap-3 p-4 sm:p-5 border-b border-[var(--color-line)]">
-        <div className="flex items-start gap-2">
-          <Bell className="h-5 w-5 text-indigo-600 mt-0.5" />
-          <div>
-            <h2 className="text-[15px] font-semibold text-[var(--color-fg)]">Promemoria</h2>
-            <p className="text-[12px] text-[var(--color-fg-muted)] mt-0.5">
+    <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)]">
+      <div className="flex items-start justify-between gap-3 p-3 sm:p-4 border-b border-[var(--ds-border)]">
+        {/* Stessa piastrella da 40px delle altre righe di Impostazioni: la
+            campanella era l'unica icona nuda della pagina, e in indaco quando
+            tutte le altre sono neutre. */}
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[12px] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]">
+            <Bell className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-[15px] font-semibold text-[var(--ds-text-primary)]">Promemoria</h2>
+            <p className="text-[13px] leading-snug text-[var(--ds-text-muted)]">
               Notifiche automatiche programmate — una volta o ricorrenti (giornaliere, settimanali, mensili).
             </p>
           </div>
@@ -231,7 +236,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
         <button
           type="button"
           onClick={openNew}
-          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-indigo-600 text-white text-[12px] font-semibold hover:bg-indigo-700 shrink-0"
+          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[12px] font-semibold hover:bg-[var(--ds-action-bg-hover)] shrink-0"
         >
           <Plus className="h-3.5 w-3.5" />
           Nuovo
@@ -239,20 +244,20 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
       </div>
 
       {error && (
-        <div className="p-3 mx-4 mt-3 rounded-lg bg-rose-50 text-rose-700 text-[12px] flex items-start gap-1.5">
+        <div className="p-3 mx-4 mt-3 rounded-lg bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] text-[12px] flex items-start gap-1.5">
           <AlertCircle className="h-3.5 w-3.5 mt-0.5" />
           <span>{error}</span>
         </div>
       )}
 
       {loading ? (
-        <div className="p-10 text-center text-[13px] text-[var(--color-fg-muted)]">Carico…</div>
+        <div className="p-10 text-center text-[13px] text-[var(--ds-text-muted)]">Carico…</div>
       ) : sorted.length === 0 ? (
-        <div className="p-10 text-center text-[13px] text-[var(--color-fg-muted)]">
+        <div className="p-10 text-center text-[13px] text-[var(--ds-text-muted)]">
           Nessun promemoria configurato.
         </div>
       ) : (
-        <ul className="divide-y divide-[var(--color-line)]">
+        <ul className="divide-y divide-[var(--ds-border)]">
           {sorted.map(r => {
             const badge = kindBadge(r);
             const roles = r.target_roles.map(rc => ROLE_OPTIONS.find(o => o.code === rc)?.label || rc).join(', ');
@@ -261,17 +266,17 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[14px] font-semibold text-[var(--color-fg)] truncate">{r.title}</span>
+                      <span className="text-[14px] font-semibold text-[var(--ds-text-primary)] truncate">{r.title}</span>
                       <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset shrink-0 ${badge.cls}`}>
                         {badge.label}
                       </span>
                       {!r.active && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset bg-slate-100 text-slate-700 ring-slate-200 shrink-0">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium ring-1 ring-inset bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] ring-[var(--ds-border)] shrink-0">
                           Disattivato
                         </span>
                       )}
                     </div>
-                    <div className="mt-1 flex items-center gap-3 text-[12px] text-[var(--color-fg-muted)] flex-wrap">
+                    <div className="mt-1 flex items-center gap-3 text-[12px] text-[var(--ds-text-muted)] flex-wrap">
                       <span className="inline-flex items-center gap-1">
                         {r.kind === 'RECURRING' ? <Repeat className="h-3 w-3" /> : <Calendar className="h-3 w-3" />}
                         {formatSchedule(r)}
@@ -279,12 +284,12 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                       <span className="inline-flex items-center gap-1">→ {roles}</span>
                     </div>
                     {r.description && (
-                      <p className="mt-1 text-[12px] text-[var(--color-fg-muted)] line-clamp-2">
+                      <p className="mt-1 text-[12px] text-[var(--ds-text-muted)] line-clamp-2">
                         {r.description}
                       </p>
                     )}
                     {r.last_run_at && (
-                      <p className="mt-1 text-[11px] text-[var(--color-fg-subtle)] inline-flex items-center gap-1">
+                      <p className="mt-1 text-[11px] text-[var(--ds-text-subtle)] inline-flex items-center gap-1">
                         <Clock className="h-3 w-3" />
                         Ultima esecuzione: {new Date(r.last_run_at).toLocaleString('it-IT', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
                       </p>
@@ -296,8 +301,8 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                       onClick={() => handleToggleActive(r)}
                       className={`h-7 px-2.5 rounded-full text-[11px] font-medium border transition-colors ${
                         r.active
-                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                          : 'border-[var(--color-line)] bg-[var(--color-bg)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+                          ? 'border-[var(--ds-seated-solid)] bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] hover:bg-[var(--ds-seated-tint)]'
+                          : 'border-[var(--ds-border)] bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
                       }`}
                       title={r.active ? 'Disattiva' : 'Attiva'}
                     >
@@ -306,7 +311,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                     <button
                       type="button"
                       onClick={() => openEdit(r)}
-                      className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:text-indigo-600 hover:bg-indigo-50"
+                      className="p-1.5 rounded-md text-[var(--ds-text-muted)] hover:text-[var(--ds-arriving-text)] hover:bg-[var(--ds-arriving-tint)]"
                       title="Modifica"
                     >
                       <Pencil className="h-3.5 w-3.5" />
@@ -314,7 +319,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                     <button
                       type="button"
                       onClick={() => setConfirmDeleteId(r.id)}
-                      className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:text-rose-600 hover:bg-rose-50"
+                      className="p-1.5 rounded-md text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)]"
                       title="Elimina"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -329,17 +334,17 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
 
       {/* Editor modal */}
       {editor && createPortal(
-        <div className="fixed inset-0 z-[80] bg-black/50 flex items-center justify-center p-4" onClick={closeEditor}>
-          <div className="bg-[var(--color-surface)] rounded-2xl shadow-[var(--shadow-xl)] w-full max-w-lg overflow-hidden flex flex-col max-h-[92vh]" onClick={e => e.stopPropagation()}>
-            <div className="p-4 sm:p-5 border-b border-[var(--color-line)] flex items-center justify-between gap-2">
-              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">
+        <div className="fixed inset-0 z-[80] bg-[var(--ds-backdrop)] flex items-center justify-center p-4" onClick={closeEditor}>
+          <div className="bg-[var(--ds-surface)] rounded-2xl shadow-[var(--ds-shadow-raised)] w-full max-w-lg overflow-hidden flex flex-col max-h-[92vh]" onClick={e => e.stopPropagation()}>
+            <div className="p-4 sm:p-5 border-b border-[var(--ds-border)] flex items-center justify-between gap-2">
+              <h3 className="text-[16px] font-semibold text-[var(--ds-text-primary)]">
                 {editor.id ? 'Modifica promemoria' : 'Nuovo promemoria'}
               </h3>
               <button
                 type="button"
                 onClick={closeEditor}
                 disabled={saving}
-                className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
+                className="p-1.5 rounded-lg text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -347,30 +352,30 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
             <div className="p-4 sm:p-5 space-y-4 overflow-y-auto">
               {/* Title */}
               <div>
-                <label className="block text-[11px] font-semibold text-[var(--color-fg-muted)] mb-1">Titolo *</label>
+                <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1">Titolo *</label>
                 <input
                   type="text"
                   value={editor.title}
                   onChange={e => setEditor({ ...editor, title: e.target.value.slice(0, 200) })}
                   placeholder="Es. Ordinare il pane per domani"
-                  className="w-full h-10 px-3 rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] text-[14px] text-[var(--color-fg)] focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                  className="w-full h-10 px-3 rounded-lg border border-[var(--ds-border)] bg-[var(--ds-surface-row)] text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]"
                   autoFocus
                 />
               </div>
               {/* Description */}
               <div>
-                <label className="block text-[11px] font-semibold text-[var(--color-fg-muted)] mb-1">Descrizione (opzionale)</label>
+                <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1">Descrizione (opzionale)</label>
                 <textarea
                   value={editor.description}
                   onChange={e => setEditor({ ...editor, description: e.target.value.slice(0, 500) })}
                   rows={2}
                   placeholder="Contenuto del messaggio inviato"
-                  className="w-full px-3 py-2 rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] text-[14px] text-[var(--color-fg)] resize-y focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                  className="w-full px-3 py-2 rounded-lg border border-[var(--ds-border)] bg-[var(--ds-surface-row)] text-[14px] text-[var(--ds-text-primary)] resize-y focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]"
                 />
               </div>
               {/* Kind */}
               <div>
-                <label className="block text-[11px] font-semibold text-[var(--color-fg-muted)] mb-1.5">Tipo</label>
+                <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1.5">Tipo</label>
                 <div className="grid grid-cols-2 gap-2">
                   {(['RECURRING', 'ONE_OFF'] as const).map(k => (
                     <button
@@ -379,8 +384,8 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                       onClick={() => setEditor({ ...editor, kind: k })}
                       className={`h-10 px-3 rounded-lg text-[13px] font-medium border transition-colors ${
                         editor.kind === k
-                          ? 'bg-indigo-600 text-white border-indigo-600'
-                          : 'bg-[var(--color-bg)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
+                          ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]'
+                          : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:text-[var(--ds-text-primary)]'
                       }`}
                     >
                       {k === 'RECURRING' ? 'Ricorrente' : 'Temporaneo'}
@@ -391,7 +396,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
               {/* Frequency (RECURRING) */}
               {editor.kind === 'RECURRING' && (
                 <div>
-                  <label className="block text-[11px] font-semibold text-[var(--color-fg-muted)] mb-1.5">Frequenza</label>
+                  <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1.5">Frequenza</label>
                   <div className="grid grid-cols-3 gap-2">
                     {(['DAILY', 'WEEKLY', 'MONTHLY'] as const).map(f => (
                       <button
@@ -400,8 +405,8 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                         onClick={() => setEditor({ ...editor, frequency: f })}
                         className={`h-9 px-2 rounded-lg text-[12px] font-medium border transition-colors ${
                           editor.frequency === f
-                            ? 'bg-indigo-600 text-white border-indigo-600'
-                            : 'bg-[var(--color-bg)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
+                            ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]'
+                            : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:text-[var(--ds-text-primary)]'
                         }`}
                       >
                         {f === 'DAILY' ? 'Giornaliero' : f === 'WEEKLY' ? 'Settimanale' : 'Mensile'}
@@ -413,7 +418,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
               {/* Weekdays (WEEKLY) */}
               {editor.kind === 'RECURRING' && editor.frequency === 'WEEKLY' && (
                 <div>
-                  <label className="block text-[11px] font-semibold text-[var(--color-fg-muted)] mb-1.5">Giorni</label>
+                  <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1.5">Giorni</label>
                   <div className="flex flex-wrap gap-1.5">
                     {WEEKDAYS.map(w => {
                       const on = editor.weekdays.includes(w.code);
@@ -429,8 +434,8 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                           })}
                           className={`h-8 px-3 rounded-full text-[12px] font-medium border transition-colors ${
                             on
-                              ? 'bg-indigo-600 text-white border-indigo-600'
-                              : 'bg-[var(--color-bg)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
+                              ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]'
+                              : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:text-[var(--ds-text-primary)]'
                           }`}
                           title={w.long}
                         >
@@ -444,15 +449,15 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
               {/* Month day (MONTHLY) */}
               {editor.kind === 'RECURRING' && editor.frequency === 'MONTHLY' && (
                 <div>
-                  <label className="block text-[11px] font-semibold text-[var(--color-fg-muted)] mb-1">Giorno del mese (1-28)</label>
+                  <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1">Giorno del mese (1-28)</label>
                   <input
                     type="number"
                     min={1} max={28}
                     value={editor.month_day}
                     onChange={e => setEditor({ ...editor, month_day: Math.max(1, Math.min(28, parseInt(e.target.value, 10) || 1)) })}
-                    className="w-28 h-10 px-3 rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] text-[14px] tabular text-[var(--color-fg)]"
+                    className="w-28 h-10 px-3 rounded-lg border border-[var(--ds-border)] bg-[var(--ds-surface-row)] text-[14px] tabular text-[var(--ds-text-primary)]"
                   />
-                  <p className="mt-1 text-[11px] text-[var(--color-fg-subtle)]">
+                  <p className="mt-1 text-[11px] text-[var(--ds-text-subtle)]">
                     Limitato a 28 per garantire l'esecuzione in tutti i mesi (incluso febbraio).
                   </p>
                 </div>
@@ -460,28 +465,28 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
               {/* Date (ONE_OFF) */}
               {editor.kind === 'ONE_OFF' && (
                 <div>
-                  <label className="block text-[11px] font-semibold text-[var(--color-fg-muted)] mb-1">Data</label>
+                  <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1">Data</label>
                   <input
                     type="date"
                     value={editor.schedule_date}
                     onChange={e => setEditor({ ...editor, schedule_date: e.target.value })}
-                    className="h-10 px-3 rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] text-[14px] tabular text-[var(--color-fg)]"
+                    className="h-10 px-3 rounded-lg border border-[var(--ds-border)] bg-[var(--ds-surface-row)] text-[14px] tabular text-[var(--ds-text-primary)]"
                   />
                 </div>
               )}
               {/* Time */}
               <div>
-                <label className="block text-[11px] font-semibold text-[var(--color-fg-muted)] mb-1">Orario (HH:MM)</label>
+                <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1">Orario (HH:MM)</label>
                 <input
                   type="time"
                   value={editor.schedule_time}
                   onChange={e => setEditor({ ...editor, schedule_time: e.target.value })}
-                  className="h-10 px-3 rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] text-[14px] tabular text-[var(--color-fg)]"
+                  className="h-10 px-3 rounded-lg border border-[var(--ds-border)] bg-[var(--ds-surface-row)] text-[14px] tabular text-[var(--ds-text-primary)]"
                 />
               </div>
               {/* Roles */}
               <div>
-                <label className="block text-[11px] font-semibold text-[var(--color-fg-muted)] mb-1.5">Destinatari</label>
+                <label className="block text-[11px] font-semibold text-[var(--ds-text-muted)] mb-1.5">Destinatari</label>
                 <div className="flex flex-wrap gap-1.5">
                   {ROLE_OPTIONS.map(o => {
                     const on = editor.target_roles.includes(o.code);
@@ -497,8 +502,8 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                         })}
                         className={`h-8 px-3 rounded-full text-[12px] font-medium border transition-colors ${
                           on
-                            ? 'bg-indigo-600 text-white border-indigo-600'
-                            : 'bg-[var(--color-bg)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
+                            ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]'
+                            : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border-[var(--ds-border)] hover:text-[var(--ds-text-primary)]'
                         }`}
                       >
                         {o.label}
@@ -513,23 +518,23 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                   type="checkbox"
                   checked={editor.active}
                   onChange={e => setEditor({ ...editor, active: e.target.checked })}
-                  className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  className="h-4 w-4 rounded border-[var(--ds-border-strong)] text-[var(--ds-arriving-text)] focus:ring-[var(--ds-border-focus)]"
                 />
-                <span className="text-[13px] text-[var(--color-fg)]">Attivo</span>
+                <span className="text-[13px] text-[var(--ds-text-primary)]">Attivo</span>
               </label>
               {saveError && (
-                <div className="p-2 rounded-lg bg-rose-50 text-rose-700 text-[12px] flex items-start gap-1.5">
+                <div className="p-2 rounded-lg bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] text-[12px] flex items-start gap-1.5">
                   <AlertCircle className="h-3.5 w-3.5 mt-0.5" />
                   <span>{saveError}</span>
                 </div>
               )}
             </div>
-            <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-[var(--color-line)] bg-[var(--color-surface-2)]">
+            <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-[var(--ds-border)] bg-[var(--ds-surface-row)]">
               <button
                 type="button"
                 onClick={closeEditor}
                 disabled={saving}
-                className="px-4 py-2 rounded-full text-[13px] font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
+                className="px-4 py-2 rounded-full text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50"
               >
                 Annulla
               </button>
@@ -537,7 +542,7 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
                 type="button"
                 onClick={handleSave}
                 disabled={!canSave}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-indigo-600 text-white text-[13px] font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
                 {editor.id ? 'Salva' : 'Crea'}
@@ -550,24 +555,24 @@ export const RemindersManager: React.FC<Props> = ({ showToast }) => {
 
       {/* Delete confirmation */}
       {confirmDeleteId !== null && createPortal(
-        <div className="fixed inset-0 z-[85] bg-black/50 flex items-center justify-center p-4" onClick={() => setConfirmDeleteId(null)}>
-          <div className="bg-[var(--color-surface)] rounded-2xl shadow-[var(--shadow-xl)] w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
-            <h4 className="font-semibold text-[15px] text-[var(--color-fg)] mb-2">Eliminare il promemoria?</h4>
-            <p className="text-[13px] text-[var(--color-fg-muted)] mb-4">
+        <div className="fixed inset-0 z-[85] bg-[var(--ds-backdrop)] flex items-center justify-center p-4" onClick={() => setConfirmDeleteId(null)}>
+          <div className="bg-[var(--ds-surface)] rounded-2xl shadow-[var(--ds-shadow-raised)] w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
+            <h4 className="font-semibold text-[15px] text-[var(--ds-text-primary)] mb-2">Eliminare il promemoria?</h4>
+            <p className="text-[13px] text-[var(--ds-text-muted)] mb-4">
               L'azione non è reversibile. Il promemoria non verrà più eseguito.
             </p>
             <div className="flex gap-2 justify-end">
               <button
                 type="button"
                 onClick={() => setConfirmDeleteId(null)}
-                className="px-4 py-2 rounded-full text-[13px] font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
+                className="px-4 py-2 rounded-full text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]"
               >
                 Annulla
               </button>
               <button
                 type="button"
                 onClick={() => handleDelete(confirmDeleteId)}
-                className="px-4 py-2 rounded-full bg-rose-600 text-white text-[13px] font-medium hover:bg-rose-700"
+                className="px-4 py-2 rounded-full bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] text-[13px] font-medium hover:bg-[var(--ds-critical-solid)]"
               >
                 Elimina
               </button>

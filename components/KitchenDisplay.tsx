@@ -6,6 +6,7 @@ import {
   getKdsQueue, setKdsItemStatus, getMenuCatalogue,
   type KdsItem, type KdsCourseState, type MenuCatalogue,
 } from '../services/ordersApiService';
+import { ModalShell, EmptyState, StatusPill, dsButton } from './ds';
 
 // ---------------------------------------------------------------------------
 // Monitor di partita — una istanza per postazione (Antipasti, Primi, Griglia).
@@ -36,11 +37,21 @@ const minutesUntil = (iso: string | null, now: number): number =>
   iso ? Math.ceil((new Date(iso).getTime() - now) / 60000) : 0;
 
 // Verde fino a 5', ambra fino a 10', poi rosso. Il colore non è l'unica
-// informazione: accanto c'è sempre il numero.
+// informazione: accanto c'è sempre il numero. Le famiglie del design system
+// invertono già da sole fra tema chiaro e scuro.
 const timerTone = (min: number): string =>
-  min >= 10 ? 'text-rose-600 dark:text-rose-400'
-  : min >= 5 ? 'text-amber-600 dark:text-amber-400'
-  : 'text-emerald-600 dark:text-emerald-400';
+  min >= 10 ? 'text-[var(--ds-critical-text)]'
+  : min >= 5 ? 'text-[var(--ds-pending-text)]'
+  : 'text-[var(--ds-seated-text)]';
+
+/* La scelta della partita: una riga per postazione, alta abbastanza da
+   prenderla con il pollice. Il bordo pieno segna quella attiva. */
+const stationOption = (active: boolean): string =>
+  `flex min-h-[56px] w-full items-center gap-3 rounded-[16px] px-4 py-3 text-left transition-colors ${
+    active
+      ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+      : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
+  }`;
 
 interface Column {
   key: string;
@@ -173,28 +184,48 @@ export const KitchenDisplay: React.FC = () => {
     : catalogue?.stations.find(s => s.id === stationId)?.name ?? `Partita ${stationId}`;
 
   if (loading) {
-    return <div className="p-10 flex items-center gap-2 text-slate-500"><Loader2 className="animate-spin" size={18} /> Caricamento coda…</div>;
+    return (
+      <div className="flex h-full items-center justify-center gap-2 p-10 text-[15px] text-[var(--ds-text-muted)]">
+        <Loader2 className="animate-spin" size={18} /> Caricamento coda…
+      </div>
+    );
   }
 
   return (
-    <div className="flex flex-col h-full">
-      <header className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-3 shrink-0">
-        <h1 className="text-xl font-bold tracking-wide uppercase">{stationName}</h1>
-        <span className="text-sm text-slate-500">{todo.length} in lavorazione</span>
-        {offline && (
-          <span className="flex items-center gap-1 text-sm text-amber-600"><WifiOff size={15} /> riconnessione…</span>
-        )}
-        <button onClick={() => setPicking(true)}
-                className="ml-auto text-sm px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600">
-          Cambia partita
-        </button>
-      </header>
+    <div className="flex h-full min-h-0 flex-col bg-[var(--ds-canvas)]">
+      {/* Una card che galleggia sulla tela, come le altre intestazioni di
+          pagina — non una barra a filo con una linea sotto. */}
+      <div className="flex-shrink-0 px-4 pb-3 pt-4">
+        <div className="flex items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 pl-4 shadow-[var(--ds-shadow-card)]">
+          {/* Il nome della partita in tondo, non in maiuscolo: a un metro di
+              distanza conta il corpo, e le maiuscole cancellano la forma della
+              parola invece di renderla più leggibile (§5.2). */}
+          <h1 className="min-w-0 truncate text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
+            {stationName}
+          </h1>
+          <span className="flex-shrink-0 text-[15px] text-[var(--ds-text-muted)] tabular-nums">
+            {todo.length} in lavorazione
+          </span>
+          {offline && (
+            <StatusPill tone="pending">
+              <WifiOff size={13} aria-hidden /> riconnessione…
+            </StatusPill>
+          )}
+          <button
+            type="button"
+            onClick={() => setPicking(true)}
+            className={`ml-auto flex-shrink-0 ${dsButton.quiet}`}
+          >
+            Cambia partita
+          </button>
+        </div>
+      </div>
 
-      <div className="flex-1 overflow-x-auto overflow-y-hidden p-4">
+      <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-4 pb-4">
         {todo.length === 0 && upcoming.length === 0 ? (
-          <p className="text-slate-400 text-lg">Nessuna comanda in coda.</p>
+          <EmptyState icon={Check}>Nessuna comanda in coda.</EmptyState>
         ) : (
-          <div className="flex gap-4 h-full items-start">
+          <div className="flex h-full items-start gap-4">
             {todo.map(col => (
               <CourseCard key={col.key} col={col} now={now} stationId={stationId} onAdvance={advance} />
             ))}
@@ -203,25 +234,36 @@ export const KitchenDisplay: React.FC = () => {
       </div>
 
       {upcoming.length > 0 && (
-        <div className="border-t border-slate-200 dark:border-slate-700 px-4 py-3 shrink-0">
-          <div className="text-xs uppercase tracking-wide text-slate-500 mb-2">In arrivo</div>
-          <div className="flex gap-3 overflow-x-auto">
+        <div className="flex-shrink-0 px-4 pb-4">
+          <div className="mb-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">In arrivo</div>
+          <div className="flex gap-3 overflow-x-auto pb-1">
             {upcoming.map(col => {
               const wait = minutesUntil(col.items[0]?.station_start_at ?? null, now);
               return (
-                <div key={col.key}
-                     className="shrink-0 px-3 py-2 rounded-xl border border-dashed border-slate-300 dark:border-slate-600 opacity-70">
-                  <div className="text-sm font-medium">
+                // Bordo tratteggiato invece di un'opacità: l'opacità porta il
+                // testo sotto il minimo di contrasto proprio sullo schermo che
+                // si legge da lontano.
+                <div
+                  key={col.key}
+                  className="flex-shrink-0 rounded-[16px] border-2 border-dashed border-[var(--ds-border-strong)] px-3 py-2"
+                >
+                  <div className="text-[15px] font-semibold text-[var(--ds-text-primary)]">
                     T{col.table_name} · {ORDINALS[col.course_no] ?? col.course_no} usc.
                   </div>
-                  <div className="text-xs text-slate-500">
+                  <div className="text-[13px] text-[var(--ds-text-muted)]">
                     {col.items.map(i => `${i.qty} ${i.name_snapshot}`).join(', ')}
                   </div>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-xs font-semibold">fra {Math.max(wait, 1)}′</span>
-                    <button onClick={() => col.items.forEach(i => advance(i, 'PREPARING'))}
-                            className="text-xs px-2 py-0.5 rounded-md border border-slate-300 dark:border-slate-600 flex items-center gap-1">
-                      <Play size={11} /> inizia ora
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <span className="text-[14px] font-semibold text-[var(--ds-text-primary)] tabular-nums">
+                      fra {Math.max(wait, 1)}′
+                    </span>
+                    {/* 44px: si preme con le mani sporche, non col mouse. */}
+                    <button
+                      type="button"
+                      onClick={() => col.items.forEach(i => advance(i, 'PREPARING'))}
+                      className="inline-flex h-11 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
+                    >
+                      <Play size={13} aria-hidden /> inizia ora
                     </button>
                   </div>
                 </div>
@@ -231,33 +273,44 @@ export const KitchenDisplay: React.FC = () => {
         </div>
       )}
 
-      {picking && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
-             onClick={() => setPicking(false)}>
-          <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 w-full max-w-sm" onClick={e => e.stopPropagation()}>
-            <h2 className="font-semibold mb-1">Partita di questo schermo</h2>
-            <p className="text-xs text-slate-500 mb-4">
-              Resta impostata anche dopo un riavvio del tablet.
-            </p>
-            <div className="flex flex-col gap-2">
-              {catalogue?.stations.map(s => (
-                <button key={s.id} onClick={() => chooseStation(s.id)}
-                        className={`px-4 py-3 rounded-xl border text-left font-medium
-                          ${s.id === stationId ? 'border-slate-900 dark:border-white' : 'border-slate-300 dark:border-slate-600'}`}>
-                  {s.name}
-                  {s.id === stationId && <Check size={16} className="inline ml-2" />}
-                </button>
-              ))}
-              <button onClick={() => chooseStation(null)}
-                      className={`px-4 py-3 rounded-xl border text-left
-                        ${stationId == null ? 'border-slate-900 dark:border-white' : 'border-slate-300 dark:border-slate-600'}`}>
-                Senza partita
-                <span className="block text-xs text-slate-500">piatti non ancora assegnati</span>
-              </button>
-            </div>
-          </div>
+      <ModalShell
+        open={picking}
+        onClose={() => setPicking(false)}
+        title="Partita di questo schermo"
+        subtitle="Resta impostata anche dopo un riavvio del tablet."
+        size="sm"
+        closeOnEscape
+        bodyClassName="p-5 sm:p-6"
+      >
+        <div className="flex flex-col gap-2">
+          {catalogue?.stations.map(s => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => chooseStation(s.id)}
+              aria-pressed={s.id === stationId}
+              className={stationOption(s.id === stationId)}
+            >
+              <span className="min-w-0 flex-1 text-[16px] font-semibold">{s.name}</span>
+              {s.id === stationId && <Check size={18} className="flex-shrink-0" aria-hidden />}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => chooseStation(null)}
+            aria-pressed={stationId == null}
+            className={stationOption(stationId == null)}
+          >
+            <span className="min-w-0 flex-1">
+              <span className="block text-[16px] font-semibold">Senza partita</span>
+              <span className={`block text-[13px] ${stationId == null ? 'opacity-80' : 'text-[var(--ds-text-muted)]'}`}>
+                piatti non ancora assegnati
+              </span>
+            </span>
+            {stationId == null && <Check size={18} className="flex-shrink-0" aria-hidden />}
+          </button>
         </div>
-      )}
+      </ModalShell>
     </div>
   );
 };
@@ -280,57 +333,93 @@ const CourseCard: React.FC<{
   const lampAlert = allReady && col.waitingOthers && readySince >= LAMP_ALERT_MIN;
 
   return (
-    <div className={`shrink-0 w-56 rounded-2xl border-2 flex flex-col max-h-full
-      ${lampAlert ? 'border-rose-500 animate-pulse'
-        : allReady ? 'border-emerald-500'
-        : 'border-slate-300 dark:border-slate-600'}`}>
-      <div className="px-3 py-2 border-b border-slate-200 dark:border-slate-700">
+    // Lo stato viaggia su un anello, non su un bordo: la card è una superficie
+    // bianca sulla tela come tutte le altre, e l'anello si disegna fuori dal
+    // riquadro senza spostare di due pixel il contenuto quando cambia stato.
+    <div
+      className={`flex max-h-full w-60 flex-shrink-0 flex-col overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] ${
+        lampAlert
+          ? 'animate-pulse ring-2 ring-[var(--ds-critical-solid)]'
+          : allReady
+          ? 'ring-2 ring-[var(--ds-seated-solid)]'
+          : ''
+      }`}
+    >
+      <div className="px-3 py-2.5">
         <div className="flex items-baseline gap-2">
-          <span className="text-lg font-bold">T{col.table_name ?? '—'}</span>
-          <span className={`text-lg font-bold tabular-nums ml-auto ${timerTone(elapsed)}`}>{elapsed}′</span>
+          <span className="text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
+            T{col.table_name ?? '—'}
+          </span>
+          <span className={`ml-auto text-[20px] font-semibold tabular-nums ${timerTone(elapsed)}`}>
+            {elapsed}′
+          </span>
         </div>
-        <div className="text-xs text-slate-500">
+        <div className="text-[13px] text-[var(--ds-text-muted)]">
           {ORDINALS[col.course_no] ?? col.course_no} uscita
           {col.customer_name ? ` · ${col.customer_name}` : ''}
         </div>
       </div>
 
       {col.allergens && (
-        <div className="px-3 py-1.5 bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-200 text-xs flex items-start gap-1.5">
-          <TriangleAlert size={13} className="mt-0.5 shrink-0" />
+        <div className="flex items-start gap-1.5 bg-[var(--ds-critical-tint)] px-3 py-2 text-[13px] font-medium text-[var(--ds-critical-text)]">
+          <TriangleAlert size={14} className="mt-0.5 flex-shrink-0" aria-hidden />
           <span>{col.allergens}</span>
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2.5">
         {col.items.map(i => (
-          <div key={i.id} className={i.status === 'READY' ? 'opacity-40' : ''}>
+          // Il fatto viene detto dal segno di spunta e dal testo attenuato, non
+          // da un'opacità che porta sotto contrasto anche la quantità.
+          <div key={i.id}>
             <div className="flex items-start gap-2">
-              <span className="font-bold tabular-nums">{i.qty}</span>
-              <span className="flex-1 leading-tight">{i.name_snapshot}</span>
-              {i.status === 'PREPARING' && <ChevronRight size={14} className="text-sky-500 mt-0.5" />}
-              {i.status === 'READY' && <Check size={14} className="text-emerald-600 mt-0.5" />}
+              <span
+                className={`font-semibold tabular-nums ${
+                  i.status === 'READY' ? 'text-[var(--ds-text-muted)]' : 'text-[var(--ds-text-primary)]'
+                }`}
+              >
+                {i.qty}
+              </span>
+              <span
+                className={`flex-1 text-[15px] leading-tight ${
+                  i.status === 'READY'
+                    ? 'text-[var(--ds-text-muted)] line-through'
+                    : 'text-[var(--ds-text-primary)]'
+                }`}
+              >
+                {i.name_snapshot}
+              </span>
+              {i.status === 'PREPARING' && (
+                <ChevronRight size={15} className="mt-0.5 flex-shrink-0 text-[var(--ds-arriving-text)]" aria-hidden />
+              )}
+              {i.status === 'READY' && (
+                <Check size={15} className="mt-0.5 flex-shrink-0 text-[var(--ds-seated-solid)]" aria-hidden />
+              )}
             </div>
             {i.modifiers && i.modifiers.length > 0 && (
-              <div className="text-xs text-amber-700 dark:text-amber-300 ml-6">
+              <div className="ml-6 text-[13px] font-medium text-[var(--ds-pending-text)]">
                 ↳ {i.modifiers.map(m => m.name).join(', ')}
               </div>
             )}
-            {i.note && <div className="text-xs text-slate-500 ml-6">↳ {i.note}</div>}
+            {i.note && <div className="ml-6 text-[13px] text-[var(--ds-text-muted)]">↳ {i.note}</div>}
           </div>
         ))}
       </div>
 
-      <div className="p-2 border-t border-slate-200 dark:border-slate-700">
+      <div className="p-2">
         {allReady ? (
-          <div className="text-center text-sm font-semibold text-emerald-700 dark:text-emerald-300 py-2">
+          <div className="py-2 text-center text-[14px] font-semibold text-[var(--ds-seated-text)]">
             {col.waitingOthers ? `pronto · attende le altre partite (${readySince}′)` : 'pronto'}
           </div>
         ) : (
+          // Non "PRONTO": il maiuscolo non aggiunge nulla che il corpo e il
+          // peso non dicano già, e a schermo lo si legge peggio (§5.2).
           <button
+            type="button"
             onClick={() => col.items.filter(i => i.status !== 'READY').forEach(i => onAdvance(i, 'READY'))}
-            className="w-full py-3 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-bold tracking-wide">
-            PRONTO
+            className="w-full rounded-[16px] bg-[var(--ds-action-bg)] py-3.5 text-[17px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            Pronto
           </button>
         )}
       </div>

@@ -71,8 +71,8 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
         if (!status) return null;
         if (!status.configured) {
             return (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border border-[var(--color-line)]">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-fg-subtle)]"></span>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border border-[var(--ds-border)]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--ds-border-strong)]"></span>
                     Non configurato
                 </span>
             );
@@ -81,17 +81,17 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
         // say so, otherwise "Attivo" would be a lie.
         if (!status.is_active_provider) {
             return (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border border-[var(--color-line)]">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-fg-subtle)]"></span>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border border-[var(--ds-border)]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--ds-border-strong)]"></span>
                     Pronto (non attivo)
                 </span>
             );
         }
         const label = status.environment === 'production' ? 'Attivo (Produzione)' : 'Attivo (Sandbox)';
         const color = status.environment === 'production'
-            ? 'bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30'
-            : 'bg-amber-50 text-amber-700 border-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30';
-        const dot = status.environment === 'production' ? 'bg-emerald-500' : 'bg-amber-500';
+            ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] border-[var(--ds-seated-solid)]'
+            : 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] border-[var(--ds-pending-solid)]';
+        const dot = status.environment === 'production' ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-pending-solid)]';
         return (
             <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border ${color}`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${dot}`}></span>
@@ -147,7 +147,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
 
     if (loading) {
         return (
-            <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-4 flex items-center gap-2 text-[13px] text-[var(--color-fg-muted)]">
+            <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
                 <CookingPotLoader label="Caricamento…" size={40} />
             </div>
         );
@@ -155,7 +155,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
     if (!status) return null;
 
     const inputClass =
-        'w-full px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] font-mono text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60';
+        'w-full px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60';
 
     // The environment the user is about to save decides which credential pair
     // has to be complete before SumUp can be switched on.
@@ -164,51 +164,51 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
         : status.sandbox_configured;
 
     return (
-        <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden">
+        <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden">
             <button
                 type="button"
                 onClick={() => setExpanded((v) => !v)}
                 aria-expanded={expanded}
-                className="w-full flex items-center justify-between gap-3 p-4 text-left hover:bg-[var(--color-surface-2)] transition-colors"
+                className="w-full flex items-center justify-between gap-3 p-4 text-left hover:bg-[var(--ds-surface-row)] transition-colors"
             >
                 <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center flex-shrink-0">
-                        <CreditCard className="w-5 h-5 text-[var(--color-fg)]" />
+                    <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0">
+                        <CreditCard className="w-5 h-5 text-[var(--ds-text-primary)]" />
                     </div>
                     <div className="min-w-0">
-                        <h4 className="font-medium text-[14px] text-[var(--color-fg)]">SumUp</h4>
-                        <p className="text-[13px] text-[var(--color-fg-muted)] truncate">Hosted Checkout per caparre e conto al tavolo</p>
+                        <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">SumUp</h4>
+                        <p className="text-[13px] text-[var(--ds-text-muted)] truncate">Hosted Checkout per caparre e conto al tavolo</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                     {statusPill}
                     <ChevronDown
-                        className={`w-4 h-4 text-[var(--color-fg-subtle)] transition-transform ${expanded ? 'rotate-180' : ''}`}
+                        className={`w-4 h-4 text-[var(--ds-text-subtle)] transition-transform ${expanded ? 'rotate-180' : ''}`}
                     />
                 </div>
             </button>
 
             {expanded && (
-                <div className="border-t border-[var(--color-line)] p-4 space-y-4">
+                <div className="border-t border-[var(--ds-border)] p-4 space-y-4">
                     {/* Environment switch */}
                     <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                            <p className="text-[13px] font-medium text-[var(--color-fg)]">Ambiente</p>
-                            <p className="text-[12px] text-[var(--color-fg-muted)]">
+                            <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">Ambiente</p>
+                            <p className="text-[12px] text-[var(--ds-text-muted)]">
                                 {effectiveEnv === 'production'
                                     ? 'Pagamenti reali sul merchant SumUp.'
                                     : 'Test sul merchant sandbox. Nessun addebito reale.'}
                             </p>
                         </div>
-                        <div className="inline-flex rounded-md border border-[var(--color-line)] overflow-hidden text-[12px] font-medium">
+                        <div className="inline-flex rounded-md border border-[var(--ds-border)] overflow-hidden text-[12px] font-medium">
                             <button
                                 type="button"
                                 onClick={() => canEdit && setDraftEnv('sandbox')}
                                 disabled={!canEdit}
                                 className={`px-3 py-1.5 transition-colors ${
                                     effectiveEnv === 'sandbox'
-                                        ? 'bg-amber-500 text-white'
-                                        : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)]'
+                                        ? 'bg-[var(--ds-pending-solid)] text-[var(--ds-pending-fg)]'
+                                        : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
                                 } disabled:opacity-60 disabled:cursor-not-allowed`}
                             >
                                 Sandbox
@@ -217,10 +217,10 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                 type="button"
                                 onClick={() => canEdit && setDraftEnv('production')}
                                 disabled={!canEdit}
-                                className={`px-3 py-1.5 transition-colors border-l border-[var(--color-line)] ${
+                                className={`px-3 py-1.5 transition-colors border-l border-[var(--ds-border)] ${
                                     effectiveEnv === 'production'
-                                        ? 'bg-emerald-600 text-white'
-                                        : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)]'
+                                        ? 'bg-[var(--ds-seated-solid)] text-white'
+                                        : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
                                 } disabled:opacity-60 disabled:cursor-not-allowed`}
                             >
                                 Produzione
@@ -228,10 +228,10 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                         </div>
                     </div>
 
-                    <div className="flex items-start gap-2 text-[12px] text-[var(--color-fg-subtle)] bg-[var(--color-surface-2)] rounded-md p-2.5">
+                    <div className="flex items-start gap-2 text-[12px] text-[var(--ds-text-subtle)] bg-[var(--ds-surface-row)] rounded-md p-2.5">
                         <Info className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
                         <span>
-                            SumUp usa lo stesso endpoint (<code className="text-[var(--color-fg-muted)]">{status.api_base}</code>) per
+                            SumUp usa lo stesso endpoint (<code className="text-[var(--ds-text-muted)]">{status.api_base}</code>) per
                             entrambi gli ambienti: a distinguerli è la chiave API. Le credenziali sandbox si creano dal
                             merchant sandbox nelle impostazioni sviluppatore SumUp. Qui restano salvate entrambe: cambiare
                             ambiente cambia solo quale coppia viene usata.
@@ -240,14 +240,14 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
 
                     {/* Production credentials */}
                     <div className="space-y-3">
-                        <p className="text-[12px] font-semibold text-[var(--color-fg)] flex items-center gap-2">
+                        <p className="text-[12px] font-semibold text-[var(--ds-text-primary)] flex items-center gap-2">
                             Produzione
                             {status.production_configured && (
-                                <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">completa</span>
+                                <span className="text-[10px] font-medium text-[var(--ds-seated-text)]">completa</span>
                             )}
                         </p>
                         <div>
-                            <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">API Key</label>
+                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">API Key</label>
                             <div className="relative">
                                 <input
                                     type={showApiKey ? 'text' : 'password'}
@@ -262,19 +262,19 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                 <button
                                     type="button"
                                     onClick={() => setShowApiKey((v) => !v)}
-                                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]"
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--ds-text-subtle)] hover:text-[var(--ds-text-primary)]"
                                     aria-label={showApiKey ? 'Nascondi' : 'Mostra'}
                                     tabIndex={-1}
                                 >
                                     {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                                 </button>
                             </div>
-                            <p className="text-[11px] text-[var(--color-fg-subtle)] mt-1">
+                            <p className="text-[11px] text-[var(--ds-text-subtle)] mt-1">
                                 Chiave segreta dalla dashboard SumUp. Lascia vuoto per mantenere quella attuale.
                             </p>
                         </div>
                         <div>
-                            <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">Merchant Code</label>
+                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Merchant Code</label>
                             <input
                                 type="text"
                                 value={merchantCodeInput}
@@ -290,14 +290,14 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
 
                     {/* Sandbox credentials */}
                     <div className="space-y-3 pt-1">
-                        <p className="text-[12px] font-semibold text-[var(--color-fg)] flex items-center gap-2">
+                        <p className="text-[12px] font-semibold text-[var(--ds-text-primary)] flex items-center gap-2">
                             Sandbox
                             {status.sandbox_configured && (
-                                <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">completa</span>
+                                <span className="text-[10px] font-medium text-[var(--ds-seated-text)]">completa</span>
                             )}
                         </p>
                         <div>
-                            <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">API Key sandbox</label>
+                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">API Key sandbox</label>
                             <div className="relative">
                                 <input
                                     type={showSandboxApiKey ? 'text' : 'password'}
@@ -312,7 +312,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                 <button
                                     type="button"
                                     onClick={() => setShowSandboxApiKey((v) => !v)}
-                                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]"
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--ds-text-subtle)] hover:text-[var(--ds-text-primary)]"
                                     aria-label={showSandboxApiKey ? 'Nascondi' : 'Mostra'}
                                     tabIndex={-1}
                                 >
@@ -321,7 +321,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             </div>
                         </div>
                         <div>
-                            <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">Merchant Code sandbox</label>
+                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Merchant Code sandbox</label>
                             <input
                                 type="text"
                                 value={sandboxMerchantCodeInput}
@@ -336,19 +336,19 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                     </div>
 
                     {/* Callback URL — generated on first save, shown masked. */}
-                    <div className="text-[12px] text-[var(--color-fg-subtle)]">
+                    <div className="text-[12px] text-[var(--ds-text-subtle)]">
                         {status.callback_url ? (
-                            <>Callback SumUp: <code className="text-[var(--color-fg-muted)]">{status.callback_url}</code></>
+                            <>Callback SumUp: <code className="text-[var(--ds-text-muted)]">{status.callback_url}</code></>
                         ) : (
                             'Il token per le notifiche di pagamento viene generato al primo salvataggio.'
                         )}
                     </div>
 
                     {/* Active provider */}
-                    <div className="flex items-center justify-between gap-3 mt-1 pt-3 border-t border-[var(--color-line)]">
+                    <div className="flex items-center justify-between gap-3 mt-1 pt-3 border-t border-[var(--ds-border)]">
                         <div className="min-w-0">
-                            <p className="text-[13px] font-medium text-[var(--color-fg)]">Usa SumUp per i nuovi pagamenti</p>
-                            <p className="text-[12px] text-[var(--color-fg-muted)]">
+                            <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">Usa SumUp per i nuovi pagamenti</p>
+                            <p className="text-[12px] text-[var(--ds-text-muted)]">
                                 {effectiveActive
                                     ? 'Caparre e conto al tavolo passano da SumUp.'
                                     : 'I pagamenti continuano a passare da Revolut.'}
@@ -363,7 +363,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             disabled={!canEdit || saving || (!effectiveActive && !targetEnvReady)}
                             title={!effectiveActive && !targetEnvReady ? 'Completa le credenziali di questo ambiente' : undefined}
                             className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                                effectiveActive ? 'bg-emerald-600' : 'bg-[var(--color-surface-3)]'
+                                effectiveActive ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)]'
                             }`}
                         >
                             <span
@@ -375,7 +375,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                     </div>
 
                     {status.updated_at && (
-                        <p className="text-[11px] text-[var(--color-fg-subtle)]">
+                        <p className="text-[11px] text-[var(--ds-text-subtle)]">
                             Ultima modifica: {new Date(status.updated_at).toLocaleString('it-IT')}
                             {status.updated_by ? ` · ${status.updated_by}` : ''}
                         </p>
@@ -386,7 +386,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             type="button"
                             onClick={handleSave}
                             disabled={!canEdit || saving || !hasChanges}
-                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[13px] font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                             Salva
@@ -394,7 +394,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                     </div>
 
                     {!canEdit && (
-                        <p className="text-[12px] text-[var(--color-fg-subtle)]">
+                        <p className="text-[12px] text-[var(--ds-text-subtle)]">
                             Solo gli amministratori possono modificare la configurazione.
                         </p>
                     )}

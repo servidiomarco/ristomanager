@@ -17,7 +17,7 @@ import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftS
 import {
   SegmentedControl, SearchField, SectionHeader, StatusPill, Callout, EmptyState,
   ModalShell, FormCard, Field, Stepper, StepNav, useMediaQuery,
-  dsInput, dsSelect, dsTextarea, dsButton, dsIconButton,
+  dsInput, dsSelect, dsTextarea, dsButton, dsIconButton, dsStepArrow,
 } from './ds';
 
 const BANQUET_DISH_CATEGORIES = ['Antipasti', 'Primi', 'Secondi', 'Contorni', 'Dolci', 'Bevande'] as const;
@@ -589,6 +589,20 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   }, [isBanquetFormOpen, isEditingBanquet, newBanquet]);
 
   const banquetFieldHasError = (field: string) => banquetFormErrors.includes(field);
+
+  /* Which required fields are still empty — the same three handleAddBanquetSubmit
+     checks, kept in step with it. The save button is disabled off this list, and
+     the footer names what is missing: a dead primary action with nothing to
+     explain it is the reason people click it twice and then leave. */
+  const banquetMissingRequired = useMemo(() => {
+    const missing: string[] = [];
+    if (!newBanquet.name || !newBanquet.name.trim()) missing.push('il nome del menù');
+    if (!newBanquet.event_date) missing.push('la data dell\'evento');
+    if (canViewBanquetPrice && (newBanquet.price_per_person == null || isNaN(Number(newBanquet.price_per_person)) || Number(newBanquet.price_per_person) <= 0)) {
+      missing.push('il prezzo adulti');
+    }
+    return missing;
+  }, [newBanquet.name, newBanquet.event_date, newBanquet.price_per_person, canViewBanquetPrice]);
 
   const addCourse = () => {
     setNewBanquet(prev => {
@@ -1659,48 +1673,57 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           open={isBanquetFormOpen}
           onClose={closeBanquetForm}
           title={isEditingBanquet ? 'Modifica menu banchetto' : 'Crea menu banchetto'}
-          subtitle={`Passo ${banquetStep + 1} di ${BANQUET_STEPS.length} · ${BANQUET_STEPS[banquetStep].label}`}
+          // The step counter said what the stepper below already shows, and
+          // selected. This line is the one thing the header could not say.
+          subtitle="Aggiungi almeno un piatto per completare il menù."
           size="lg"
           fixedHeight
           // No top padding: the pinned stepper above already supplies it.
           bodyClassName="px-5 pb-5 sm:px-6 sm:pb-6"
-          footerStart="Aggiungi almeno un piatto per completare il menù."
+          // One row at every width: back, the save, forward. Stacked, the two
+          // arrows became two lonely rows around the button.
+          footerLayout="row"
+          /* Step navigation is two bare arrows, parked at the two ends of the
+             footer: back on the far left, forward past the save. Labelled
+             Indietro/Avanti buttons read as the way through the form, and the
+             steps never gated each other — the stepper above is the real
+             navigation, these just walk it one at a time. */
+          footerStart={
+            <button
+              type="button"
+              onClick={() => setBanquetStep(s => Math.max(0, s - 1))}
+              disabled={banquetStep === 0}
+              aria-label="Passo precedente"
+              title="Passo precedente"
+              className={dsStepArrow}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+          }
           footer={
             <>
+              {/* No Annulla: the X in the header closes the modal, and one exit
+                  is enough. On every step, not just the last — there is nothing
+                  to advance through before saving becomes allowed. */}
               <button
+                onClick={handleAddBanquetSubmit}
                 type="button"
-                onClick={() => setBanquetStep(s => Math.max(0, s - 1))}
-                disabled={banquetStep === 0}
-                className={dsButton.quiet}
+                disabled={isSavingBanquet || banquetMissingRequired.length > 0}
+                className={`min-w-0 flex-1 sm:flex-none ${dsButton.primary}`}
               >
-                <ChevronLeft className="h-4 w-4" /> Indietro
+                {isSavingBanquet && <Loader2 className="h-4 w-4 animate-spin" />}
+                {isEditingBanquet ? 'Salva modifiche' : 'Crea menu'}
               </button>
               <button
                 type="button"
-                onClick={closeBanquetForm}
-                className={dsButton.quiet}
+                onClick={() => setBanquetStep(s => Math.min(BANQUET_STEPS.length - 1, s + 1))}
+                disabled={banquetStep === BANQUET_STEPS.length - 1}
+                aria-label="Passo successivo"
+                title="Passo successivo"
+                className={dsStepArrow}
               >
-                Annulla
+                <ChevronRight className="h-4 w-4" />
               </button>
-              {banquetStep < BANQUET_STEPS.length - 1 ? (
-                <button
-                  type="button"
-                  onClick={() => setBanquetStep(s => Math.min(BANQUET_STEPS.length - 1, s + 1))}
-                  className={dsButton.primary}
-                >
-                  Avanti <ChevronRight className="h-4 w-4" />
-                </button>
-              ) : (
-                <button
-                  onClick={handleAddBanquetSubmit}
-                  type="button"
-                  disabled={isSavingBanquet}
-                  className={dsButton.primary}
-                >
-                  {isSavingBanquet && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {isEditingBanquet ? 'Salva modifiche' : 'Crea menu'}
-                </button>
-              )}
             </>
           }
           subheader={

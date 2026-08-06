@@ -77,16 +77,16 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
         if (!status) return null;
         if (!status.configured) {
             return (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border border-[var(--color-line)]">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-fg-subtle)]"></span>
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border border-[var(--ds-border)]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--ds-border-strong)]"></span>
                     Non configurato
                 </span>
             );
         }
         const label = status.provider === 'resend' ? 'Attivo (Resend)' : 'Attivo (SMTP)';
         return (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] border-[var(--ds-seated-solid)]">
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--ds-seated-solid)]"></span>
                 {label}
             </span>
         );
@@ -170,7 +170,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
 
     if (loading) {
         return (
-            <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-4 flex items-center gap-2 text-[13px] text-[var(--color-fg-muted)]">
+            <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
                 <CookingPotLoader label="Caricamento…" size={40} />
             </div>
         );
@@ -178,51 +178,51 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
     if (!status) return null;
 
     return (
-        <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden">
+        <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden">
             <button
                 type="button"
                 onClick={() => setExpanded((v) => !v)}
                 aria-expanded={expanded}
-                className="w-full flex items-center justify-between gap-3 p-4 text-left hover:bg-[var(--color-surface-2)] transition-colors"
+                className="w-full flex items-center justify-between gap-3 p-4 text-left hover:bg-[var(--ds-surface-row)] transition-colors"
             >
                 <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center flex-shrink-0">
-                        <Mail className="w-5 h-5 text-[var(--color-fg)]" />
+                    <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0">
+                        <Mail className="w-5 h-5 text-[var(--ds-text-primary)]" />
                     </div>
                     <div className="min-w-0">
-                        <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Server Email</h4>
-                        <p className="text-[13px] text-[var(--color-fg-muted)] truncate">Invio conferme email ai clienti</p>
+                        <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Server Email</h4>
+                        <p className="text-[13px] text-[var(--ds-text-muted)] truncate">Invio conferme email ai clienti</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                     {statusPill}
                     <ChevronDown
-                        className={`w-4 h-4 text-[var(--color-fg-subtle)] transition-transform ${expanded ? 'rotate-180' : ''}`}
+                        className={`w-4 h-4 text-[var(--ds-text-subtle)] transition-transform ${expanded ? 'rotate-180' : ''}`}
                     />
                 </div>
             </button>
 
             {expanded && (
-                <div className="border-t border-[var(--color-line)] p-4 space-y-4">
+                <div className="border-t border-[var(--ds-border)] p-4 space-y-4">
                     {/* Provider switch */}
                     <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                            <p className="text-[13px] font-medium text-[var(--color-fg)]">Provider</p>
-                            <p className="text-[12px] text-[var(--color-fg-muted)]">
+                            <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">Provider</p>
+                            <p className="text-[12px] text-[var(--ds-text-muted)]">
                                 {effectiveProvider === 'resend'
                                     ? 'Invio via API HTTPS Resend. Consigliato in cloud.'
                                     : 'Invio SMTP diretto (Aruba, Gmail, server on-prem…).'}
                             </p>
                         </div>
-                        <div className="inline-flex rounded-md border border-[var(--color-line)] overflow-hidden text-[12px] font-medium">
+                        <div className="inline-flex rounded-md border border-[var(--ds-border)] overflow-hidden text-[12px] font-medium">
                             <button
                                 type="button"
                                 onClick={() => canEdit && setProviderInput('smtp')}
                                 disabled={!canEdit}
                                 className={`px-3 py-1.5 transition-colors ${
                                     effectiveProvider === 'smtp'
-                                        ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                                        : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)]'
+                                        ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                                        : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
                                 } disabled:opacity-60 disabled:cursor-not-allowed`}
                             >
                                 SMTP
@@ -231,10 +231,10 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                 type="button"
                                 onClick={() => canEdit && setProviderInput('resend')}
                                 disabled={!canEdit}
-                                className={`px-3 py-1.5 transition-colors border-l border-[var(--color-line)] ${
+                                className={`px-3 py-1.5 transition-colors border-l border-[var(--ds-border)] ${
                                     effectiveProvider === 'resend'
-                                        ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                                        : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)]'
+                                        ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                                        : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
                                 } disabled:opacity-60 disabled:cursor-not-allowed`}
                             >
                                 Resend
@@ -246,7 +246,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                         <>
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                 <div className="sm:col-span-2">
-                                    <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">Host SMTP</label>
+                                    <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Host SMTP</label>
                                     <input
                                         type="text"
                                         value={hostInput}
@@ -255,11 +255,11 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                         disabled={!canEdit || saving}
                                         autoComplete="off"
                                         spellCheck={false}
-                                        className="w-full px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] font-mono text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
+                                        className="w-full px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">Porta</label>
+                                    <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Porta</label>
                                     <input
                                         type="number"
                                         min={1}
@@ -268,29 +268,29 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                         onChange={(e) => setPortInput(e.target.value)}
                                         placeholder="465"
                                         disabled={!canEdit || saving}
-                                        className="w-full px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] font-mono text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
+                                        className="w-full px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                                     />
                                 </div>
                             </div>
 
                             <div className="flex items-center justify-between gap-3">
                                 <div className="min-w-0">
-                                    <p className="text-[13px] font-medium text-[var(--color-fg)]">Connessione sicura (TLS)</p>
-                                    <p className="text-[12px] text-[var(--color-fg-muted)]">
+                                    <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">Connessione sicura (TLS)</p>
+                                    <p className="text-[12px] text-[var(--ds-text-muted)]">
                                         {effectiveSecure
                                             ? 'SSL implicito (di solito porta 465).'
                                             : 'STARTTLS o non cifrato (di solito porta 587).'}
                                     </p>
                                 </div>
-                                <div className="inline-flex rounded-md border border-[var(--color-line)] overflow-hidden text-[12px] font-medium">
+                                <div className="inline-flex rounded-md border border-[var(--ds-border)] overflow-hidden text-[12px] font-medium">
                                     <button
                                         type="button"
                                         onClick={() => canEdit && setSecureInput(false)}
                                         disabled={!canEdit}
                                         className={`px-3 py-1.5 transition-colors ${
                                             !effectiveSecure
-                                                ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                                                : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)]'
+                                                ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                                                : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
                                         } disabled:opacity-60 disabled:cursor-not-allowed`}
                                     >
                                         STARTTLS
@@ -299,10 +299,10 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                         type="button"
                                         onClick={() => canEdit && setSecureInput(true)}
                                         disabled={!canEdit}
-                                        className={`px-3 py-1.5 transition-colors border-l border-[var(--color-line)] ${
+                                        className={`px-3 py-1.5 transition-colors border-l border-[var(--ds-border)] ${
                                             effectiveSecure
-                                                ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)]'
-                                                : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)]'
+                                                ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                                                : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
                                         } disabled:opacity-60 disabled:cursor-not-allowed`}
                                     >
                                         SSL
@@ -311,7 +311,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             </div>
 
                             <div>
-                                <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">Utente</label>
+                                <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Utente</label>
                                 <input
                                     type="text"
                                     value={userInput}
@@ -320,12 +320,12 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                     disabled={!canEdit || saving}
                                     autoComplete="off"
                                     spellCheck={false}
-                                    className="w-full px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] font-mono text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
+                                    className="w-full px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                                 />
                             </div>
 
                             <div>
-                                <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">Password</label>
+                                <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Password</label>
                                 <div className="relative">
                                     <input
                                         type={showPassword ? 'text' : 'password'}
@@ -335,19 +335,19 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                         disabled={!canEdit || saving}
                                         autoComplete="new-password"
                                         spellCheck={false}
-                                        className="w-full pr-10 px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] font-mono text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
+                                        className="w-full pr-10 px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                                     />
                                     <button
                                         type="button"
                                         onClick={() => setShowPassword((v) => !v)}
-                                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]"
+                                        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--ds-text-subtle)] hover:text-[var(--ds-text-primary)]"
                                         aria-label={showPassword ? 'Nascondi' : 'Mostra'}
                                         tabIndex={-1}
                                     >
                                         {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                                     </button>
                                 </div>
-                                <p className="text-[11px] text-[var(--color-fg-subtle)] mt-1">
+                                <p className="text-[11px] text-[var(--ds-text-subtle)] mt-1">
                                     Lascia vuoto per mantenere quella attuale.
                                 </p>
                             </div>
@@ -356,7 +356,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
 
                     {effectiveProvider === 'resend' && (
                         <div>
-                            <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">API Key Resend</label>
+                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">API Key Resend</label>
                             <div className="relative">
                                 <input
                                     type={showResendKey ? 'text' : 'password'}
@@ -366,19 +366,19 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                     disabled={!canEdit || saving}
                                     autoComplete="off"
                                     spellCheck={false}
-                                    className="w-full pr-10 px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] font-mono text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
+                                    className="w-full pr-10 px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                                 />
                                 <button
                                     type="button"
                                     onClick={() => setShowResendKey((v) => !v)}
-                                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]"
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--ds-text-subtle)] hover:text-[var(--ds-text-primary)]"
                                     aria-label={showResendKey ? 'Nascondi' : 'Mostra'}
                                     tabIndex={-1}
                                 >
                                     {showResendKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                                 </button>
                             </div>
-                            <p className="text-[11px] text-[var(--color-fg-subtle)] mt-1">
+                            <p className="text-[11px] text-[var(--ds-text-subtle)] mt-1">
                                 Ottieni la chiave da resend.com → API Keys. Il dominio del mittente deve essere verificato lì (SPF+DKIM).
                             </p>
                         </div>
@@ -386,7 +386,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                            <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">Email mittente</label>
+                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Email mittente</label>
                             <input
                                 type="email"
                                 value={fromEmailInput}
@@ -395,24 +395,24 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                 disabled={!canEdit || saving}
                                 autoComplete="off"
                                 spellCheck={false}
-                                className="w-full px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] font-mono text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
+                                className="w-full px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                             />
                         </div>
                         <div>
-                            <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">Nome mittente</label>
+                            <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Nome mittente</label>
                             <input
                                 type="text"
                                 value={fromNameInput}
                                 onChange={(e) => setFromNameInput(e.target.value)}
                                 placeholder="Vecchio Frantoio"
                                 disabled={!canEdit || saving}
-                                className="w-full px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
+                                className="w-full px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                             />
                         </div>
                     </div>
 
                     <div>
-                        <label className="block text-[12px] font-medium text-[var(--color-fg)] mb-1.5">Reply-To (dove ricevi le risposte)</label>
+                        <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Reply-To (dove ricevi le risposte)</label>
                         <input
                             type="email"
                             value={replyToInput}
@@ -421,15 +421,15 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             disabled={!canEdit || saving}
                             autoComplete="off"
                             spellCheck={false}
-                            className="w-full px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] font-mono text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
+                            className="w-full px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                         />
-                        <p className="text-[11px] text-[var(--color-fg-subtle)] mt-1">
+                        <p className="text-[11px] text-[var(--ds-text-subtle)] mt-1">
                             Quando il cliente clicca “Rispondi”, la mail va a questo indirizzo. Deve essere la casella pollata via IMAP.
                         </p>
                     </div>
 
                     {status.updated_at && (
-                        <p className="text-[11px] text-[var(--color-fg-subtle)]">
+                        <p className="text-[11px] text-[var(--ds-text-subtle)]">
                             Ultima modifica: {new Date(status.updated_at).toLocaleString('it-IT')}
                             {status.updated_by ? ` · ${status.updated_by}` : ''}
                         </p>
@@ -440,16 +440,16 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             type="button"
                             onClick={handleSave}
                             disabled={!canEdit || saving || !hasChanges}
-                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[13px] font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                             Salva
                         </button>
                     </div>
 
-                    <div className="border-t border-[var(--color-line)] pt-4">
-                        <p className="text-[12px] font-medium text-[var(--color-fg)] mb-1.5">Invia email di test</p>
-                        <p className="text-[11px] text-[var(--color-fg-subtle)] mb-2">
+                    <div className="border-t border-[var(--ds-border)] pt-4">
+                        <p className="text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">Invia email di test</p>
+                        <p className="text-[11px] text-[var(--ds-text-subtle)] mb-2">
                             Usa la configurazione attualmente salvata (le modifiche non ancora salvate non contano).
                         </p>
                         <div className="flex flex-col sm:flex-row gap-2">
@@ -459,27 +459,27 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                 onChange={(e) => setTestRecipient(e.target.value)}
                                 placeholder="destinatario@esempio.it"
                                 disabled={!canEdit || testing || !status.configured}
-                                className="flex-1 px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
+                                className="flex-1 px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                             />
                             <button
                                 type="button"
                                 onClick={handleTest}
                                 disabled={!canEdit || testing || !status.configured || !testRecipient.trim()}
-                                className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-2)] disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                                 Invia test
                             </button>
                         </div>
                         {!status.configured && (
-                            <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-2">
+                            <p className="text-[11px] text-[var(--ds-pending-text)] mt-2">
                                 Salva prima una configurazione completa per poter inviare un test.
                             </p>
                         )}
                     </div>
 
                     {!canEdit && (
-                        <p className="text-[12px] text-[var(--color-fg-subtle)]">
+                        <p className="text-[12px] text-[var(--ds-text-subtle)]">
                             Solo gli amministratori possono modificare la configurazione.
                         </p>
                     )}

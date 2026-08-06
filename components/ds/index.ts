@@ -11,6 +11,7 @@ export {
   dsSelect,
   dsTextarea,
   dsButton,
+  dsStepArrow,
 } from './FormPrimitives';
 export {
   SplitPane,

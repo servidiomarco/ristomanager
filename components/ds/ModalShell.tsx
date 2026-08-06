@@ -38,6 +38,15 @@ interface ModalShellProps {
   footer?: React.ReactNode;
   /** Pulled to the left of the footer, opposite the actions. */
   footerStart?: React.ReactNode;
+  /** How the footer behaves below sm. 'stack' (the default) drops the two
+   *  groups onto their own full-width rows — right for a modal whose actions
+   *  are labelled buttons, where a phone wants them thumb-wide.
+   *
+   *  'row' keeps everything on one line at every width. For a footer built
+   *  around a single primary action flanked by icon-only controls — a stepped
+   *  form's back and forward arrows — where stacking turns three related
+   *  controls into three separate rows and buries the one that matters. */
+  footerLayout?: 'stack' | 'row';
   size?: ModalSize;
   /** Escape-to-close. Off by default: on a long form it can discard work, so
    *  each modal opts in deliberately. */
@@ -67,6 +76,7 @@ export const ModalShell: React.FC<ModalShellProps> = ({
   subheader,
   footer,
   footerStart,
+  footerLayout = 'stack',
   size = 'md',
   closeOnEscape = false,
   fixedHeight = false,
@@ -138,9 +148,32 @@ export const ModalShell: React.FC<ModalShellProps> = ({
         </div>
 
         {(footer || footerStart) && (
-          <footer className="flex flex-shrink-0 flex-col items-stretch gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-5">
-            <div className="min-w-0 text-[14px] text-[var(--ds-text-muted)]">{footerStart}</div>
-            <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">{footer}</div>
+          <footer
+            className={`flex flex-shrink-0 gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-5 ${
+              footerLayout === 'row'
+                ? 'flex-row items-center justify-between'
+                : 'flex-col items-stretch'
+            }`}
+          >
+            <div
+              className={`text-[14px] text-[var(--ds-text-muted)] ${
+                footerLayout === 'row' ? 'flex-shrink-0' : 'min-w-0'
+              }`}
+            >
+              {footerStart}
+            </div>
+            {/* flex-wrap in row mode so a footer that also carries a warning
+                does not force the primary action off the edge on a phone —
+                the notice takes its own line and the buttons keep theirs. */}
+            <div
+              className={`flex gap-2 sm:flex-row sm:items-center ${
+                footerLayout === 'row'
+                  ? 'min-w-0 flex-1 flex-row flex-wrap items-center justify-end'
+                  : 'flex-col items-stretch'
+              }`}
+            >
+              {footer}
+            </div>
           </footer>
         )}
       </div>
