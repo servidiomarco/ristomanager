@@ -1,10 +1,15 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Customer, Reservation, BanquetMenu, Shift, Table, Room } from '../types';
 import { getCustomers, createCustomer, updateCustomer, deleteCustomer, getCustomerDuplicates, mergeCustomers, CustomerDuplicateGroup, getLegalSettings, getMarketingAudience } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
-import { Search, Plus, Pencil, Trash2, X, Phone, Mail, MapPin, BookUser, History, UtensilsCrossed, Calendar, Sun, Moon, Users as UsersIcon, Loader2, Star, Armchair, AlertTriangle, GitMerge, Download } from 'lucide-react';
+import { Search, Plus, Pencil, Trash2, Phone, Mail, MapPin, BookUser, History, UtensilsCrossed, Calendar, Sun, Moon, Users as UsersIcon, Loader2, Star, Armchair, AlertTriangle, GitMerge, Download, MessageCircle, User as UserIcon, MoreVertical, ArrowLeft } from 'lucide-react';
 import { toTitleCase } from '../utils/text';
-import { SkeletonCustomerGrid } from './SkeletonCards';
+import {
+  SplitPane, PanePlaceholder, SearchField, StatusPill, StatStrip, CountBadge,
+  Callout, EmptyState, ModalShell, StepNav, FormCard, Field,
+  SwipeRow, useFirstRunHint, useMediaQuery,
+  dsButton, dsInput, dsSelect, dsTextarea,
+} from './ds';
 
 interface Props {
   reservations: Reservation[];
@@ -61,13 +66,6 @@ const customerToForm = (c: Customer): FormState => ({
   dietary_notes: c.dietary_notes || '',
   is_vip: c.is_vip === true,
 });
-
-const formatLastVisit = (date: string | undefined): string => {
-  if (!date) return '';
-  const d = new Date(date);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short', year: 'numeric' });
-};
 
 // Format an ISO reservation_time without timezone shifts (the backend stores
 // the local wall clock; passing it through Date would interpret it as UTC).
@@ -523,839 +521,1162 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
     }
   };
 
-  return (
-    <div className="p-4 sm:p-6 lg:p-8">
-      <div className="mb-4 flex items-center gap-2">
-        <div className="flex-1 relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Cerca per nome, telefono, email, città..."
-            className="w-full h-9 pl-9 pr-3 text-sm rounded-full border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] dark:bg-white/[0.04] focus:outline-none focus:border-[var(--color-fg)]"
-          />
+  /* ── Cifre della scheda ─────────────────────────────────────────────────
+     Prenotazioni, media coperti e no-show: le tre che il dato regge davvero.
+     "Speso totale" del mockup resta fuori — reservation.total_amount esiste
+     in types.ts e in db.ts ma in tutta l'applicazione non lo scrive e non lo
+     legge nessuno, quindi la card avrebbe mostrato € 0,00 a ogni cliente, che
+     è peggio di una card in meno. Stessa ragione per la colonna € nello
+     storico e per la riga "Conto aperto". */
+  const figuresFor = (c: Customer) => {
+    const s = stats.get(c.id);
+    const list = s?.reservations ?? [];
+    const covers = list.reduce((sum, r) => sum + (r.guests || 0), 0);
+    return {
+      reservations: list.length,
+      banquets: s?.banquets.length ?? 0,
+      avgCovers: list.length ? covers / list.length : 0,
+      noShow: c.no_show_count ?? 0,
+      lastVisit: s?.lastVisit,
+    };
+  };
+
+  /* ── Pastiglia con le iniziali ──────────────────────────────────────────
+     VIP è un anello d'oro attorno al cerchio più una stella appoggiata in alto
+     a destra, non una stellina accanto al nome: a colpo d'occhio su una lista
+     lunga il cerchio si distingue, un glifo da 14px in mezzo al testo no.
+     L'oro è --ds-pending-solid, che il design system chiama "the reference
+     gold"; l'anello chiaro attorno alla stella è del colore della card, così
+     interrompe l'anello d'oro e la stella sembra appoggiata sopra invece che
+     incollata dentro. */
+  const CustomerAvatar: React.FC<{ name: string; vip?: boolean; size?: 'md' | 'lg' }> = ({ name, vip, size = 'md' }) => {
+    const initials = (name || '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map(w => w[0])
+      .join('')
+      .toUpperCase();
+    return (
+      <div className="relative flex-shrink-0">
+        <div
+          className={`flex items-center justify-center rounded-full font-semibold ${
+            size === 'lg' ? 'h-12 w-12 text-[15px]' : 'h-10 w-10 text-[13px]'
+          } ${
+            vip
+              ? 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] ring-2 ring-[var(--ds-pending-solid)]'
+              : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]'
+          }`}
+        >
+          {initials || '—'}
         </div>
-        {canEdit && duplicateGroups.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setDuplicatesOpen(true)}
-            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full border border-amber-200 bg-amber-50 text-amber-700 text-sm font-medium hover:bg-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30"
-            title="Clienti con lo stesso numero di telefono"
+        {vip && (
+          <span
+            title="Cliente VIP"
+            aria-label="Cliente VIP"
+            className="absolute -right-0.5 -top-0.5 inline-flex h-[18px] w-[18px] items-center justify-center rounded-full bg-[var(--ds-pending-solid)] ring-2 ring-[var(--ds-surface)]"
           >
-            <GitMerge className="h-4 w-4" />
-            <span>Duplicati</span>
-            <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-amber-600 text-white text-[11px] font-semibold">
-              {duplicatesCount}
-            </span>
-          </button>
-        )}
-        {marketingEnabled && marketingCount > 0 && (
-          <>
-            <button
-              type="button"
-              onClick={() => setMarketingOnly(v => !v)}
-              aria-pressed={marketingOnly}
-              className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-full border text-sm font-medium transition-colors ${
-                marketingOnly
-                  ? 'border-emerald-500 bg-emerald-600 text-white hover:bg-emerald-700'
-                  : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30'
-              }`}
-              title="Mostra solo i clienti con consenso marketing (contattabili)"
-            >
-              <Mail className="h-4 w-4" />
-              <span>Marketing</span>
-              <span className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[11px] font-semibold ${marketingOnly ? 'bg-white/25 text-white' : 'bg-emerald-600 text-white'}`}>
-                {marketingCount}
-              </span>
-            </button>
-            {canEdit && (
-              <button
-                type="button"
-                onClick={exportMarketingRecipients}
-                disabled={exporting}
-                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-full border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] text-sm font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
-                title="Esporta i destinatari con consenso marketing (CSV)"
-              >
-                {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                <span className="hidden sm:inline">Esporta</span>
-              </button>
-            )}
-          </>
+            <Star className="h-2.5 w-2.5 fill-[#ffffff] text-[#ffffff]" aria-hidden />
+          </span>
         )}
       </div>
+    );
+  };
 
-      {/* Horizontal alphabet filter. Hidden during search since results are
-          sorted by relevance. Tap a letter to keep only customers whose
-          name starts with it; tap it again to clear. Letters not present
-          in the address book are disabled. */}
-      {!isSearching && (
-        <div className="mb-4 -mx-1 px-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <div className="flex items-center gap-0.5 min-w-max">
-            {ALPHABET.map(letter => {
-              const has = availableLetters.has(letter);
-              const active = letterFilter === letter;
-              return (
+  // Stessa soglia di SplitPane: sopra, la scheda è una colonna accanto alla
+  // lista e il puntatore è un mouse, che non scorre le righe.
+  const isWide = useMediaQuery('(min-width: 768px)');
+
+  /* Il menu "…" della scheda. Modifica ed elimina stavano come icone sole in
+     testa alla card e, sotto md, come barra in fondo: due posti diversi per le
+     stesse due azioni, e il cestino a un dito dal nome. Ora stanno dietro un
+     solo bottone, dove elimina è staccata in fondo e in rosso invece che
+     appoggiata accanto alla matita. */
+  const [cardMenuOpen, setCardMenuOpen] = useState(false);
+  const cardMenuRef = useRef<HTMLDivElement | null>(null);
+  const cardMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (!cardMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!cardMenuRef.current?.contains(t) && !cardMenuTriggerRef.current?.contains(t)) setCardMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setCardMenuOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [cardMenuOpen]);
+
+  // Il menu appartiene alla scheda aperta: cambiando cliente si chiude, o
+  // resterebbe aperto puntando a qualcun altro.
+  useEffect(() => { setCardMenuOpen(false); }, [detailCustomer?.id]);
+  const swipeHint = useFirstRunHint('ristocrm_clienti_swipe');
+
+  /* Le due azioni di contatto, tonde e senza etichetta. Erano due bottoni a
+     tutta larghezza sotto il nome: occupavano la riga più preziosa della
+     scheda per dire due cose che la cornetta e il fumetto dicono da sole.
+     Chiamare è la primaria e prende il pieno scuro; WhatsApp resta quieto nel
+     verde della famiglia "seduto". */
+  const contactButtons = (c: Customer) => {
+    if (!c.phone) return null;
+    return (
+      <>
+        <a
+          href={telHref(c.phone)}
+          title={`Chiama ${c.phone}`}
+          aria-label={`Chiama ${toTitleCase(c.name)}`}
+          className="inline-flex aspect-square h-11 w-11 flex-none items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        >
+          <Phone className="h-4 w-4" aria-hidden />
+        </a>
+        <a
+          href={waHref(c.phone)}
+          target="_blank"
+          rel="noreferrer"
+          title={`Scrivi su WhatsApp a ${c.phone}`}
+          aria-label={`Scrivi su WhatsApp a ${toTitleCase(c.name)}`}
+          className="inline-flex aspect-square h-11 w-11 flex-none items-center justify-center rounded-full bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        >
+          <MessageCircle className="h-4 w-4" aria-hidden />
+        </a>
+      </>
+    );
+  };
+
+  /* Le voci del menu della scheda, una lista sola per il dropdown e per il
+     foglio. "Unisci duplicati" compare solo per chi un duplicato ce l'ha
+     davvero: altrove sarebbe una voce che apre un elenco in cui questa persona
+     non c'è. */
+  const cardMenuActions = (c: Customer) => {
+    const hasDuplicate = duplicateGroups.some(g => g.customers.some(x => x.id === c.id));
+    return [
+      { key: 'edit', label: 'Modifica scheda', icon: Pencil, run: () => openEdit(c) },
+      ...(hasDuplicate
+        ? [{ key: 'merge', label: 'Unisci duplicati', icon: GitMerge, run: () => setDuplicatesOpen(true) }]
+        : []),
+      { key: 'sep', separator: true as const },
+      { key: 'delete', label: 'Elimina cliente', icon: Trash2, danger: true, run: () => setConfirmDeleteId(c.id) },
+    ];
+  };
+
+  const cardMenuItem =
+    'flex w-full items-center gap-3 px-4 py-2.5 text-left text-[15px] transition-colors hover:bg-[var(--ds-surface-row)]';
+
+
+  const cardMenuTrigger = (c: Customer) => {
+    if (!canEdit) return null;
+    return (
+      <div className="relative flex-shrink-0">
+        <button
+          ref={cardMenuTriggerRef}
+          type="button"
+          onClick={() => setCardMenuOpen(v => !v)}
+          aria-haspopup="menu"
+          aria-expanded={cardMenuOpen}
+          aria-label={`Altre azioni su ${toTitleCase(c.name)}`}
+          title="Altre azioni"
+          className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        >
+          <MoreVertical className="h-4 w-4" />
+        </button>
+        {/* Una tendina ancorata al bottone a ogni larghezza, come la scheda di
+            Personale: il menu è corto e la card sta in alto, quindi non serve
+            il foglio dal basso nemmeno col pollice. */}
+        {cardMenuOpen && (
+          <div
+            ref={cardMenuRef}
+            role="menu"
+            className="absolute right-0 top-full z-30 mt-2 w-[236px] overflow-hidden rounded-[20px] bg-[var(--ds-surface)] py-1.5 shadow-[var(--ds-shadow-raised)]"
+          >
+            {cardMenuActions(c).map(a =>
+              'separator' in a ? (
+                <div key={a.key} className="my-1.5 h-px bg-[var(--ds-border)]" />
+              ) : (
                 <button
-                  key={letter}
+                  key={a.key}
                   type="button"
-                  onClick={() => has && setLetterFilter(active ? null : letter)}
-                  disabled={!has}
-                  aria-pressed={active}
-                  aria-label={
-                    has
-                      ? active
-                        ? `Rimuovi filtro lettera ${letter}`
-                        : `Filtra per lettera ${letter}`
-                      : `Nessun cliente con lettera ${letter}`
-                  }
-                  className={`inline-flex items-center justify-center h-7 min-w-[26px] px-1 rounded-md text-[12px] font-semibold tabular transition-colors ${
-                    active
-                      ? 'bg-indigo-600 text-white shadow-sm hover:bg-indigo-700'
-                      : has
-                        ? 'text-indigo-700 hover:bg-indigo-50 dark:text-indigo-300 dark:hover:bg-indigo-500/15 cursor-pointer'
-                        : 'text-slate-300 dark:text-slate-600 cursor-default'
-                  }`}
+                  role="menuitem"
+                  onClick={() => { setCardMenuOpen(false); a.run(); }}
+                  className={`${cardMenuItem} ${a.danger ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-text-primary)]'}`}
                 >
-                  {letter}
+                  <a.icon className={`h-4 w-4 flex-shrink-0 ${a.danger ? '' : 'text-[var(--ds-text-muted)]'}`} aria-hidden />
+                  {a.label}
                 </button>
-              );
-            })}
-            {letterFilter && (
-              <button
-                type="button"
-                onClick={() => setLetterFilter(null)}
-                className="ml-1 inline-flex items-center gap-1 h-7 px-2 rounded-md text-[11px] font-medium text-slate-500 hover:text-slate-800 hover:bg-slate-100 dark:hover:bg-white/[0.05]"
-                aria-label="Rimuovi filtro lettera"
-              >
-                <X className="h-3 w-3" />
-                Tutti
-              </button>
+              )
             )}
           </div>
+        )}
+      </div>
+    );
+  };
+
+  const telHref = (phone: string): string => `tel:${phone.replace(/\s+/g, '')}`;
+
+  /* wa.me vuole cifre e basta, prefisso internazionale incluso e senza il +.
+     Col + davanti il prefisso c'è già; senza, il numero in rubrica è quasi
+     sempre italiano scritto come lo si detta al telefono. */
+  const waHref = (phone: string): string => {
+    const raw = phone.trim();
+    const digits = raw.replace(/\D/g, '');
+    const full = raw.startsWith('+') || digits.startsWith('39')
+      ? digits
+      : `39${digits.replace(/^0+/, '')}`;
+    return `https://wa.me/${full}`;
+  };
+
+  // Passo corrente del form. Torna sempre al primo quando il modale si apre:
+  // riaprirlo e ritrovarsi a metà di una compilazione precedente disorienta.
+  const [step, setStep] = useState(0);
+  useEffect(() => { if (formOpen) setStep(0); }, [formOpen]);
+
+  const canSave = form.name.trim().length > 0 && form.phone.trim().length > 0;
+
+  // Dalla ricerca a vuoto: il nome già digitato diventa il nome del nuovo
+  // cliente. È il caso del cliente al telefono in questo momento.
+  const createFromSearch = () => {
+    setForm({ ...emptyForm, name: trimmedSearch });
+    setFormOpen(true);
+  };
+
+  // La primissima riga a schermo, qualunque ramo la stia disegnando: è quella
+  // che porta il richiamo del gesto.
+  const firstRowId = filtered[0]?.id;
+
+  /* Cambiando ricerca o lettera la colonna torna in cima. Senza, si scendeva
+     in fondo alla rubrica, si digitava un nome e il risultato — magari uno
+     solo — restava fuori campo sopra o sotto: la lista si accorciava ma lo
+     scorrimento no, e sembrava che la ricerca non avesse trovato niente.
+     Il contenitore che scorre non è sempre lo stesso — sotto md è l'intera
+     colonna, sopra è il riquadro della lista, e in entrambi i casi appartiene
+     a SplitPane — quindi lo si cerca risalendo dal primo nodo della lista. */
+  const listTopRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    let node = listTopRef.current?.parentElement ?? null;
+    while (node) {
+      const overflowY = window.getComputedStyle(node).overflowY;
+      if (overflowY === 'auto' || overflowY === 'scroll') {
+        if (node.scrollTop !== 0) node.scrollTop = 0;
+        return;
+      }
+      node = node.parentElement;
+    }
+  }, [trimmedSearch, letterFilter]);
+
+  const sortedLetters = useMemo(() => (
+    Array.from(groupedByLetter.keys()).sort((a, b) => {
+      if (a === '#') return 1;
+      if (b === '#') return -1;
+      return a.localeCompare(b);
+    })
+  ), [groupedByLetter]);
+
+  /* Le pastiglie della barra: Duplicati, Marketing ed Esporta. h-9 come i
+     segmenti del SegmentedControl — sono comandi di secondo piano sopra la
+     lista, non le azioni della pagina. */
+  const chip = 'inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+
+  /* ── Riga della lista ───────────────────────────────────────────────────
+     La scheda intera apre il dettaglio, e il numero è l'unica eccezione
+     cliccabile. Un <a> dentro un <button> non è HTML valido, quindi il
+     bersaglio grande è un bottone in posizione assoluta sotto il contenuto:
+     il contenuto è pointer-events-none e lascia passare il clic, il numero se
+     lo riprende. Niente matita e niente cestino qui — su duemila contatti due
+     bersagli da 28px accanto al nome sono una cancellazione per sbaglio che
+     aspetta di succedere. Modifica ed elimina vivono nel dettaglio, dove hai
+     il contesto per decidere. */
+  const renderRow = (c: Customer) => {
+    const f = figuresFor(c);
+    const active = detailCustomer?.id === c.id;
+    // Col telefono in mano la riga si scorre: a destra si chiama, a sinistra
+    // si apre WhatsApp. Il bottone verde fisso se ne va — occupava un angolo
+    // di ogni riga per un gesto che il pollice fa già da solo. Solo sotto md e
+    // solo se c'è un numero: senza, non ci sarebbe niente da rivelare.
+    // .trim(): un numero fatto di soli spazi passava il controllo e apriva due
+    // azioni che non avrebbero chiamato nessuno.
+    const swipeable = !isWide && !!c.phone?.trim();
+    const card = (
+      <div
+        // ring-inset, non ring: l'anello esterno cade fuori dal box della card
+        // e la colonna che scorre lo taglia ai due lati, perché overflow-y su
+        // un contenitore ritaglia anche in orizzontale. Disegnato dentro, il
+        // bordo resta intero. Dentro SwipeRow l'ombra e il raggio li mette il
+        // contenitore, sennò si sommano.
+        className={`relative bg-[var(--ds-surface)] ${
+          swipeable ? '' : 'rounded-[18px] shadow-[var(--ds-shadow-card)] transition-shadow'
+        } ${
+          active
+            ? 'ring-2 ring-inset ring-[var(--ds-action-bg)]'
+            : swipeable ? '' : 'hover:shadow-[var(--ds-shadow-raised)]'
+        }`}
+      >
+        <button
+          type="button"
+          onClick={() => setDetailCustomer(c)}
+          aria-label={`Apri la scheda di ${toTitleCase(c.name)}`}
+          className="absolute inset-0 rounded-[18px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)]"
+        />
+        <div className="pointer-events-none relative flex items-center gap-3 p-3">
+          <CustomerAvatar name={c.name} vip={c.is_vip} />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
+              {toTitleCase(c.name)}
+            </div>
+            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[13px] text-[var(--ds-text-muted)]">
+              {c.phone ? (
+                <a
+                  href={telHref(c.phone)}
+                  className="pointer-events-auto truncate tabular-nums transition-colors hover:text-[var(--ds-text-primary)] hover:underline"
+                  title={`Chiama ${c.phone}`}
+                >
+                  {c.phone}
+                </a>
+              ) : (
+                <span className="truncate">Senza numero</span>
+              )}
+              {f.reservations > 0 && (
+                <span className="flex-shrink-0 whitespace-nowrap">· {f.reservations} prenot.</span>
+              )}
+            </div>
+          </div>
         </div>
-      )}
+      </div>
+    );
 
-      {error && (
-        <div className="p-3 mb-3 rounded-lg bg-rose-50 text-rose-700 text-sm border border-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30">{error}</div>
-      )}
+    if (!swipeable) return <React.Fragment key={c.id}>{card}</React.Fragment>;
 
-      {isLoading ? (
-        <SkeletonCustomerGrid count={9} />
-      ) : filtered.length === 0 ? (
-        <div className="p-12 text-center bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-sm">
-          <BookUser className="h-10 w-10 text-slate-300 mx-auto mb-3" />
-          <p className="text-slate-500 text-sm">
-            {search ? 'Nessun cliente corrisponde alla ricerca.' : 'La rubrica è vuota.'}
-          </p>
-        </div>
-      ) : (
-        (() => {
-          const renderCard = (c: Customer) => {
-            const s = stats.get(c.id);
-            return (
-              <div
-                key={c.id}
-                className="bg-[var(--color-surface)] rounded-2xl border border-[var(--color-line)] shadow-sm p-4 flex flex-col gap-2 hover:shadow-md transition-shadow"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setDetailCustomer(c)}
-                    className="text-left flex-1 min-w-0"
-                  >
-                    <h3 className="font-bold text-slate-800 truncate flex items-center gap-1.5">
-                      {c.is_vip && <Star className="h-3.5 w-3.5 text-amber-500 fill-amber-400 flex-shrink-0" aria-label="VIP" />}
-                      {marketingEnabled && c.consent_marketing === true && <Mail className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0" aria-label="Consenso marketing" />}
-                      <span className="truncate">{toTitleCase(c.name)}</span>
-                    </h3>
-                    {c.city && <p className="text-xs text-slate-500 truncate">{c.city}</p>}
-                  </button>
-                  {canEdit && (
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => openEdit(c)}
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"
-                        title="Modifica"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setConfirmDeleteId(c.id)}
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:text-rose-400 dark:hover:bg-rose-500/15"
-                        title="Elimina"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  )}
-                </div>
+    return (
+      <SwipeRow
+        key={c.id}
+        // `left` è ciò che si scopre scorrendo verso destra, `right` scorrendo
+        // verso sinistra: chiamare a destra, WhatsApp a sinistra.
+        // flex-shrink-0 sulle icone: il pannello che si scopre è largo 112px
+        // fissi e "WhatsApp" è una parola che non si spezza — senza, la riga
+        // va in overstretch e l'unica cosa che può cedere è l'svg, che si
+        // schiaccia fino a sparire. "Chiama" è più corta e ci stava, ed è per
+        // questo che il telefono si vedeva e il fumetto no.
+        left={{
+          label: 'Chiama',
+          icon: <Phone className="h-4 w-4 flex-shrink-0" aria-hidden />,
+          tone: 'primary',
+          onAction: () => { window.location.href = telHref(c.phone!); },
+        }}
+        right={{
+          label: 'WhatsApp',
+          icon: <MessageCircle className="h-4 w-4 flex-shrink-0" aria-hidden />,
+          tone: 'confirm',
+          onAction: () => { window.open(waHref(c.phone!), '_blank', 'noopener,noreferrer'); },
+        }}
+        // Il richiamo parte una volta sola, sulla prima riga dell'elenco: serve
+        // a dire che il gesto esiste, non a ripeterlo a ogni scheda.
+        hint={swipeHint && c.id === firstRowId}
+      >
+        {card}
+      </SwipeRow>
+    );
+  };
 
-                <div className="space-y-1 text-sm">
-                  {c.phone && (
-                    <a
-                      href={`tel:${c.phone}`}
-                      className="flex items-center gap-1.5 text-slate-600 hover:text-indigo-600"
-                    >
-                      <Phone className="h-3.5 w-3.5 text-slate-400" />
-                      <span className="truncate">{c.phone}</span>
-                    </a>
-                  )}
-                  {c.email && (
-                    <a
-                      href={`mailto:${c.email}`}
-                      className="flex items-center gap-1.5 text-slate-600 hover:text-indigo-600"
-                    >
-                      <Mail className="h-3.5 w-3.5 text-slate-400" />
-                      <span className="truncate">{c.email}</span>
-                    </a>
-                  )}
-                </div>
+  /* Lettera accesa nell'indice: quella scelta col dito, oppure — mentre si
+     scorre — quella del gruppo che sta passando in cima alla colonna, così
+     l'indice dice sempre dove sei nella rubrica e non solo dove hai toccato. */
+  const [visibleLetter, setVisibleLetter] = useState<string | null>(null);
+  const sectionRefs = useRef(new Map<string, HTMLElement>());
 
-                {(c.preferred_table_id || (c.dietary_notes && c.dietary_notes.trim()) || (c.preferences_notes && c.preferences_notes.trim())) && (
-                  <div className="flex flex-wrap gap-1.5">
-                    {c.preferred_table_id != null && (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-indigo-50 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-500/30 px-2 py-0.5 rounded-full">
-                        <Armchair className="h-3 w-3" /> {tableLabel(c.preferred_table_id)}
-                      </span>
-                    )}
-                    {c.dietary_notes && c.dietary_notes.trim() && (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-100 dark:border-rose-500/30 px-2 py-0.5 rounded-full" title={c.dietary_notes}>
-                        <AlertTriangle className="h-3 w-3" /> Allergie
-                      </span>
-                    )}
-                  </div>
-                )}
+  const registerSection = useCallback((letter: string) => (el: HTMLElement | null) => {
+    if (el) sectionRefs.current.set(letter, el);
+    else sectionRefs.current.delete(letter);
+  }, []);
 
-                {(s && (s.reservations.length || s.banquets.length)) ? (
-                  <div className="mt-1 pt-2 border-t border-slate-100 flex items-center gap-3 text-xs text-slate-500">
-                    {s.reservations.length ? (
-                      <span className="inline-flex items-center gap-1">
-                        <History className="h-3.5 w-3.5" /> {s.reservations.length} prenot.
-                      </span>
-                    ) : null}
-                    {s.banquets.length ? (
-                      <span className="inline-flex items-center gap-1">
-                        <UtensilsCrossed className="h-3.5 w-3.5" /> {s.banquets.length} banch.
-                      </span>
-                    ) : null}
-                    {s.lastVisit && (
-                      <span className="ml-auto">Ultima: {formatLastVisit(s.lastVisit)}</span>
-                    )}
-                  </div>
-                ) : null}
-              </div>
-            );
-          };
+  useEffect(() => {
+    // Con una ricerca o una lettera già scelta non c'è niente da seguire: la
+    // colonna mostra un gruppo solo.
+    if (isSearching || letterFilter) { setVisibleLetter(null); return; }
+    const els = Array.from(sectionRefs.current.values());
+    if (els.length === 0) return;
+    // La fascia di osservazione è una striscia sottile in cima alla colonna:
+    // il gruppo che la attraversa è quello che si sta leggendo. Le
+    // intestazioni sono sticky e restano incollate lassù, quindi si osservano
+    // le sezioni, non le intestazioni.
+    const io = new IntersectionObserver(
+      entries => {
+        const top = entries
+          .filter(e => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+        if (top) setVisibleLetter((top.target as HTMLElement).dataset.letter ?? null);
+      },
+      { rootMargin: '-140px 0px -78% 0px' }
+    );
+    els.forEach(el => io.observe(el));
+    return () => io.disconnect();
+  }, [sortedLetters, isSearching, letterFilter]);
 
-          if (isSearching) {
-            // Search mode: flat list ordered by relevance. No section
-            // headers because letters lose meaning when sorted by score.
-            return (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {filtered.map(renderCard)}
-              </div>
-            );
-          }
+  const highlightedLetter = letterFilter ?? visibleLetter;
 
-          if (letterFilter) {
-            // Letter filter: only one initial visible, so a section header
-            // would just repeat the highlighted chip in the strip above.
-            return (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {filtered.map(renderCard)}
-              </div>
-            );
-          }
+  const pickLetter = (letter: string) => {
+    // Toccare una lettera mentre si cerca svuota la ricerca invece di non fare
+    // niente: le due selezioni si escludono a vicenda (l'effetto più sotto
+    // azzera la lettera appena si digita), e un comando visibile che non
+    // risponde è peggio di un comando nascosto.
+    if (isSearching) setSearch('');
+    setLetterFilter(letterFilter === letter ? null : letter);
+  };
 
-          const sortedLetters = Array.from(groupedByLetter.keys()).sort((a, b) => {
-            if (a === '#') return 1;
-            if (b === '#') return -1;
-            return a.localeCompare(b);
-          });
-
+  /* La scatola è alta quanto la colonna visibile — 13rem è quello che si
+     prendono barra in alto, ricerca e pastiglie — e le lettere ci stanno
+     dentro centrate. Prima era un top in vh su un elemento sticky, ma su un
+     elemento sticky l'offset si misura dalla cima della zona che scorre, non
+     da quella della finestra: sommato ai pixel che stanno sopra, spingeva
+     l'indice sotto il bordo inferiore e le ultime lettere sparivano. Con
+     un'altezza che segue la finestra il centro cade dove deve a ogni statura
+     di schermo. */
+  /* Due ancoraggi, uno per breakpoint, perché sono due impaginazioni diverse.
+     Da md in su la colonna ha la sua zona di scorrimento e la barra di ricerca
+     sta ferma fuori: l'indice parte da zero. Sotto md scorre tutta la colonna
+     e la barra è sticky dentro la stessa zona, sopra l'indice — con top-0 le
+     prime lettere finivano dietro la ricerca e le pastiglie. L'offset è
+     l'altezza di quella barra, e l'altezza della scatola scala di conseguenza
+     così l'indice non sfora in fondo. */
+  const alphabetRail = (
+    <div className="sticky top-[6.75rem] flex h-[calc(100dvh-10rem)] flex-shrink-0 items-center self-start md:top-0 md:h-[calc(100dvh-13rem)]">
+      <nav aria-label="Indice alfabetico" className="flex flex-col items-center">
+        {ALPHABET.map(letter => {
+          const has = availableLetters.has(letter);
+          const active = highlightedLetter === letter;
           return (
-            <div className="space-y-6">
+            <button
+              key={letter}
+              type="button"
+              onClick={() => has && pickLetter(letter)}
+              disabled={!has}
+              aria-pressed={letterFilter === letter}
+              aria-label={
+                has
+                  ? letterFilter === letter
+                    ? `Rimuovi filtro lettera ${letter}`
+                    : `Filtra per lettera ${letter}`
+                  : `Nessun cliente con lettera ${letter}`
+              }
+              className={`flex h-[18px] w-[18px] items-center justify-center rounded-full text-[11px] font-semibold leading-none tabular-nums transition-colors ${
+                active
+                  ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                  : has
+                    ? 'text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]'
+                    : 'text-[var(--ds-text-subtle)] opacity-40'
+              }`}
+            >
+              {letter}
+            </button>
+          );
+        })}
+      </nav>
+    </div>
+  );
+
+  /* pt-1 fino a lg: la fascia della barra parte incollata al bordo alto della
+     colonna, che sotto md è anche il bordo di ciò che scorre e quindi ritaglia.
+     L'anello di focus del campo di ricerca sporge di 2px sopra il suo box e
+     finiva tagliato di netto. Da lg in su lo spazio ce lo mette già SplitPane. */
+  const toolbar = (
+    <div className="space-y-2.5 pt-1 lg:pt-0">
+      {/* Solo la ricerca. Un cliente si crea dal "+" della barra in alto, che
+          è globale e sta sopra ogni pagina, oppure dalla ricerca a vuoto — che
+          è il momento in cui serve davvero, col cliente al telefono. */}
+      <SearchField
+        value={search}
+        onChange={setSearch}
+        placeholder="Nome, telefono…"
+        ariaLabel="Cerca cliente"
+      />
+
+      {(( canEdit && duplicateGroups.length > 0) || (marketingEnabled && marketingCount > 0)) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {canEdit && duplicateGroups.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setDuplicatesOpen(true)}
+              title="Clienti con lo stesso numero di telefono"
+              className={`${chip} bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] hover:opacity-80`}
+            >
+              <GitMerge className="h-4 w-4" aria-hidden />
+              Duplicati
+              <CountBadge count={duplicatesCount} />
+            </button>
+          )}
+          {marketingEnabled && marketingCount > 0 && (
+            <>
+              <button
+                type="button"
+                onClick={() => setMarketingOnly(v => !v)}
+                aria-pressed={marketingOnly}
+                title="Mostra solo i clienti con consenso marketing (contattabili)"
+                className={`${chip} ${
+                  marketingOnly
+                    ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                    : 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] hover:opacity-80'
+                }`}
+              >
+                <Mail className="h-4 w-4" aria-hidden />
+                Marketing
+                <CountBadge count={marketingCount} />
+              </button>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={exportMarketingRecipients}
+                  disabled={exporting}
+                  title="Esporta i destinatari con consenso marketing (CSV)"
+                  className={`${chip} bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] hover:text-[var(--ds-text-primary)] disabled:opacity-50`}
+                >
+                  {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" aria-hidden />}
+                  Esporta
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  const list = (
+    <>
+      <div ref={listTopRef} aria-hidden />
+      {error && (
+        <Callout tone="critical" icon={AlertTriangle} className="mb-3">
+          {error}
+        </Callout>
+      )}
+
+      {/* L'indice sta fuori da tutti i rami: qualunque cosa mostri la colonna
+          — caricamento, vuoto, ricerca, lettera scelta — resta al suo posto. */}
+      <div className="flex gap-2">
+        <div className="min-w-0 flex-1">
+          {isLoading ? (
+            <div className="space-y-2" aria-hidden>
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3 rounded-[18px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)] motion-safe:animate-pulse">
+                  <div className="h-10 w-10 flex-shrink-0 rounded-full bg-[var(--ds-surface-row)]" />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="h-3.5 w-2/5 rounded-full bg-[var(--ds-surface-row)]" />
+                    <div className="h-3 w-3/5 rounded-full bg-[var(--ds-surface-row)]" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
+            <EmptyState
+              icon={isSearching ? Search : BookUser}
+              action={isSearching && canEdit ? (
+                <button type="button" onClick={createFromSearch} className={dsButton.primary}>
+                  <Plus className="h-4 w-4" aria-hidden />
+                  Crea «{trimmedSearch}»
+                </button>
+              ) : undefined}
+            >
+              <span className="block text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                {isSearching ? 'Nessun cliente con questo nome' : 'La rubrica è vuota'}
+              </span>
+              <span className="mt-1 block">
+                {isSearching
+                  ? 'Se è al telefono adesso, aggiungilo con il nome già scritto e completa il resto dopo.'
+                  : 'I clienti salvati dalle prenotazioni compaiono qui.'}
+              </span>
+            </EmptyState>
+          ) : isSearching ? (
+            // Solo in ricerca niente intestazioni: l'ordine è per pertinenza e
+            // le lettere, mescolate, smetterebbero di voler dire qualcosa.
+            <div className="space-y-2">{filtered.map(renderRow)}</div>
+          ) : (
+            // Con una lettera scelta il ramo è lo stesso: resta un gruppo solo,
+            // che si porta dietro la sua intestazione e il suo conteggio.
+            <div className="space-y-4">
               {sortedLetters.map(letter => {
-                const list = groupedByLetter.get(letter)!;
+                const group = groupedByLetter.get(letter)!;
                 return (
-                  <section key={letter}>
+                  <section key={letter} ref={registerSection(letter)} data-letter={letter}>
                     <div
                       id={`cust-letter-${letter}`}
-                      className="sticky top-0 z-[1] -mx-1 px-3 py-1.5 mb-2 bg-[var(--color-bg)]/95 backdrop-blur-sm border-b border-[var(--color-line)] flex items-center gap-2"
+                      className="sticky top-0 z-[1] mb-2 flex items-center gap-2 bg-[var(--ds-canvas)] py-1.5"
                     >
-                      <span className="inline-flex items-center justify-center h-6 min-w-6 px-1.5 rounded-md bg-indigo-600 text-white text-[12px] font-semibold">
+                      <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[12px] font-semibold text-[var(--ds-action-fg)]">
                         {letter}
                       </span>
-                      <span className="text-[11px] text-[var(--color-fg-subtle)] font-normal">
-                        {list.length} client{list.length === 1 ? 'e' : 'i'}
+                      <span className="text-[13px] text-[var(--ds-text-muted)]">
+                        {group.length} client{group.length === 1 ? 'e' : 'i'}
                       </span>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                      {list.map(renderCard)}
-                    </div>
+                    <div className="space-y-2">{group.map(renderRow)}</div>
                   </section>
                 );
               })}
             </div>
-          );
-        })()
-      )}
-
-      {/* Edit/Create form modal */}
-      {formOpen && (
-        <div className="fixed inset-0 z-50 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center p-0 sm:p-4" onClick={() => !isSaving && setFormOpen(false)}>
-          <div
-            className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-lg h-full sm:max-h-[90vh] overflow-hidden flex flex-col"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
-              <h2 className="text-[16px] font-semibold text-[var(--color-fg)]">
-                {form.id ? 'Modifica cliente' : 'Nuovo cliente'}
-              </h2>
-              <button
-                type="button"
-                onClick={() => setFormOpen(false)}
-                disabled={isSaving}
-                className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto">
-              <div className="p-4 space-y-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Nome *</label>
-                  <input
-                    type="text"
-                    autoFocus
-                    required
-                    value={form.name}
-                    onChange={e => setForm({ ...form, name: e.target.value })}
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none"
-                  />
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">Telefono *</label>
-                    <input
-                      type="tel"
-                      required
-                      value={form.phone}
-                      onChange={e => setForm({ ...form, phone: e.target.value })}
-                      className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">Email</label>
-                    <input
-                      type="email"
-                      value={form.email}
-                      onChange={e => setForm({ ...form, email: e.target.value })}
-                      className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Indirizzo</label>
-                  <input
-                    type="text"
-                    value={form.address}
-                    onChange={e => setForm({ ...form, address: e.target.value })}
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none"
-                  />
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="sm:col-span-2">
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">Città</label>
-                    <input
-                      type="text"
-                      value={form.city}
-                      onChange={e => setForm({ ...form, city: e.target.value })}
-                      className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 mb-1">CAP</label>
-                    <input
-                      type="text"
-                      value={form.postal_code}
-                      onChange={e => setForm({ ...form, postal_code: e.target.value })}
-                      className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Note</label>
-                  <textarea
-                    rows={3}
-                    value={form.notes}
-                    onChange={e => setForm({ ...form, notes: e.target.value })}
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none resize-none"
-                  />
-                </div>
-
-                <div className="pt-3 mt-3 border-t border-[var(--color-line)]">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-subtle)] mb-2">Preferenze di servizio</div>
-                  <label className="flex items-center gap-2 cursor-pointer select-none mb-3">
-                    <input
-                      type="checkbox"
-                      checked={form.is_vip}
-                      onChange={e => setForm({ ...form, is_vip: e.target.checked })}
-                      className="h-4 w-4 rounded border-slate-300 text-amber-500 focus:ring-amber-200"
-                    />
-                    <Star className={`h-4 w-4 ${form.is_vip ? 'text-amber-500 fill-amber-400' : 'text-slate-400'}`} />
-                    <span className="text-sm font-medium text-slate-700">Cliente VIP</span>
-                    <span className="text-xs text-slate-400">— evidenzia la prenotazione in sala</span>
-                  </label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-600 mb-1">Tavolo preferito</label>
-                      <select
-                        value={form.preferred_table_id ?? ''}
-                        onChange={e => setForm({ ...form, preferred_table_id: e.target.value === '' ? null : Number(e.target.value) })}
-                        className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none bg-white dark:bg-[var(--color-surface)]"
-                      >
-                        <option value="">Nessuna preferenza</option>
-                        {tablesByRoom.map(group => (
-                          <optgroup key={group.roomId ?? 'none'} label={group.roomName}>
-                            {group.tables.map(t => (
-                              <option key={t.id} value={t.id}>
-                                {t.name} · {t.seats} posti
-                              </option>
-                            ))}
-                          </optgroup>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-600 mb-1">Note preferenze</label>
-                      <input
-                        type="text"
-                        placeholder="Es. vicino finestra, no rumore"
-                        value={form.preferences_notes}
-                        onChange={e => setForm({ ...form, preferences_notes: e.target.value })}
-                        className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Allergie / note alimentari <span className="text-slate-400 font-normal">— precompilate in ogni nuova prenotazione</span></label>
-                  <textarea
-                    rows={2}
-                    placeholder="Es. intolleranza glutine, no crostacei"
-                    value={form.dietary_notes}
-                    onChange={e => setForm({ ...form, dietary_notes: e.target.value })}
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none resize-none"
-                  />
-                </div>
-
-                {form.id && (() => {
-                  const s = stats.get(form.id);
-                  const list = s ? [...s.reservations].sort(
-                    (a, b) => b.reservation_time.localeCompare(a.reservation_time)
-                  ) : [];
-                  return (
-                    <div className="pt-3 mt-3 border-t border-[var(--color-line)]">
-                      <div className="flex items-center gap-1.5 mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-subtle)]">
-                        <History className="h-3.5 w-3.5" />
-                        Storico prenotazioni
-                        {list.length > 0 && (
-                          <span className="ml-1 inline-flex items-center justify-center h-4 min-w-[18px] px-1 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-semibold">
-                            {list.length}
-                          </span>
-                        )}
-                      </div>
-                      {list.length === 0 ? (
-                        <p className="text-xs text-slate-500 italic">Nessuna prenotazione registrata.</p>
-                      ) : (
-                        <ul className="space-y-1.5 max-h-52 overflow-y-auto">
-                          {list.map(r => {
-                            const { date, time } = formatReservationDateTime(r.reservation_time);
-                            const isLunch = r.shift === Shift.LUNCH;
-                            return (
-                              <li
-                                key={r.id}
-                                className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-100"
-                              >
-                                {isLunch ? (
-                                  <Sun className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
-                                ) : (
-                                  <Moon className="h-3.5 w-3.5 text-indigo-500 flex-shrink-0" />
-                                )}
-                                <div className="flex-1 min-w-0 flex items-center gap-2 text-xs">
-                                  <span className="font-semibold text-slate-700 whitespace-nowrap">{date}</span>
-                                  <span className="text-slate-500 whitespace-nowrap">{time}</span>
-                                  <span className="inline-flex items-center gap-0.5 text-slate-500 whitespace-nowrap ml-auto">
-                                    <UsersIcon className="h-3 w-3" />
-                                    {r.guests}
-                                  </span>
-                                </div>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      )}
-                    </div>
-                  );
-                })()}
-              </div>
-              <div className="p-4 border-t border-[var(--color-line)] flex gap-2 justify-end">
-                <button
-                  type="button"
-                  onClick={() => setFormOpen(false)}
-                  disabled={isSaving}
-                  className="px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
-                >
-                  Annulla
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSaving || !form.name.trim() || !form.phone.trim()}
-                  className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {isSaving ? 'Salvataggio...' : (form.id ? 'Salva modifiche' : 'Aggiungi alla rubrica')}
-                </button>
-              </div>
-            </form>
-          </div>
+          )}
         </div>
-      )}
+        {alphabetRail}
+      </div>
+    </>
+  );
 
-      {/* Delete confirmation */}
-      {confirmDeleteId !== null && (
-        <div className="fixed inset-0 z-[60] bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center p-4" onClick={() => setConfirmDeleteId(null)}>
-          <div
-            className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-sm p-5"
-            onClick={e => e.stopPropagation()}
-          >
-            <h4 className="font-semibold text-[15px] text-[var(--color-fg)] mb-2">Eliminare il cliente?</h4>
-            <p className="text-[13px] text-[var(--color-fg-muted)] mb-4">
-              I banchetti collegati manterranno la storia ma non saranno più associati al cliente.
-            </p>
-            <div className="flex gap-2 justify-end">
-              <button
-                type="button"
-                onClick={() => setConfirmDeleteId(null)}
-                className="px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
-              >
-                Annulla
-              </button>
-              <button
-                type="button"
-                onClick={() => handleDelete(confirmDeleteId)}
-                className="px-4 py-2 rounded-full bg-rose-600 text-[#ffffff] text-sm font-medium hover:bg-rose-700"
-              >
-                Elimina
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+  /* ── Scheda ─────────────────────────────────────────────────────────────
+     Di sola lettura: si guarda, si chiama, e per cambiare qualcosa si apre il
+     form, che è l'unico posto dove si scrive un cliente — sia che lo si stia
+     creando sia che lo si stia correggendo. */
+  const renderDetail = (c: Customer) => {
+    const f = figuresFor(c);
+    const s = stats.get(c.id);
+    const sortedReservations = [...(s?.reservations ?? [])].sort(
+      (a, b) => b.reservation_time.localeCompare(a.reservation_time)
+    );
+    const sortedBanquets = [...(s?.banquets ?? [])].sort(
+      (a, b) => (b.event_date || '').localeCompare(a.event_date || '')
+    );
+    const hasAddress = !!(c.address || c.city || c.postal_code);
 
-      {/* Detail panel */}
-      {detailCustomer && (
-        <div className="fixed inset-0 z-50 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center p-4" onClick={() => setDetailCustomer(null)}>
-          <div
-            className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
-              <div className="flex items-center gap-2 min-w-0">
-                <BookUser className="h-5 w-5 text-[var(--color-fg-muted)] flex-shrink-0" />
-                <h2 className="text-[16px] font-semibold text-[var(--color-fg)] truncate">{toTitleCase(detailCustomer.name)}</h2>
-              </div>
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex-shrink-0 px-4 pb-4 pt-4 sm:px-6 lg:px-8">
+          <div className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+            {/* items-center: sotto il nome non c'è più niente, quindi la riga
+                è alta quanto la pastiglia e il nome le va incontro a metà
+                invece di restare appeso in alto. Quello che c'è da dire in più
+                — tavolo, allergie, consenso — scende sulla riga sotto, a
+                tutta larghezza. */}
+            <div className="flex items-center gap-3">
+              {/* Il ritorno all'elenco apre la riga, come nella scheda di
+                  Personale: sotto md questa card copre la lista, e la freccia
+                  in testa è dove si va a cercarla. Sul desktop la lista è già
+                  lì accanto. */}
               <button
                 type="button"
                 onClick={() => setDetailCustomer(null)}
-                className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
+                aria-label="Torna all'elenco clienti"
+                className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] md:hidden"
               >
-                <X className="h-5 w-5" />
+                <ArrowLeft className="h-4 w-4" />
               </button>
-            </div>
-            <div className="p-4 overflow-y-auto space-y-3 text-sm">
-              {detailCustomer.phone && (
-                <div className="flex items-center gap-2 text-slate-700">
-                  <Phone className="h-4 w-4 text-slate-400" />
-                  <a href={`tel:${detailCustomer.phone}`} className="hover:text-indigo-600">{detailCustomer.phone}</a>
-                </div>
-              )}
-              {detailCustomer.email && (
-                <div className="flex items-center gap-2 text-slate-700">
-                  <Mail className="h-4 w-4 text-slate-400" />
-                  <a href={`mailto:${detailCustomer.email}`} className="hover:text-indigo-600 truncate">{detailCustomer.email}</a>
-                </div>
-              )}
-              {(detailCustomer.address || detailCustomer.city || detailCustomer.postal_code) && (
-                <div className="flex items-start gap-2 text-slate-700">
-                  <MapPin className="h-4 w-4 text-slate-400 mt-0.5" />
-                  <div>
-                    {detailCustomer.address && <div>{detailCustomer.address}</div>}
-                    {(detailCustomer.postal_code || detailCustomer.city) && (
-                      <div>{[detailCustomer.postal_code, detailCustomer.city].filter(Boolean).join(' ')}</div>
+              <CustomerAvatar name={c.name} vip={c.is_vip} size="lg" />
+              <div className="min-w-0 flex-1">
+                <h2 className="truncate text-[19px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
+                  {toTitleCase(c.name)}
+                </h2>
+                {/* Tavolo, allergie e consenso stanno in colonna col nome, non
+                    sotto la pastiglia: sono attributi di questa persona, e
+                    rientrati come il nome si leggono come una cosa sola invece
+                    che come una riga a sé che ricomincia dal bordo. */}
+                {(c.preferred_table_id != null || (c.dietary_notes && c.dietary_notes.trim()) || (marketingEnabled && c.consent_marketing === true)) && (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {c.preferred_table_id != null && (
+                      <StatusPill><Armchair className="h-3 w-3" aria-hidden />{tableLabel(c.preferred_table_id)}</StatusPill>
+                    )}
+                    {c.dietary_notes && c.dietary_notes.trim() && (
+                      <StatusPill tone="critical" title={c.dietary_notes}>
+                        <AlertTriangle className="h-3 w-3" aria-hidden />
+                        <span className="max-w-[14rem] truncate">{c.dietary_notes}</span>
+                      </StatusPill>
+                    )}
+                    {marketingEnabled && c.consent_marketing === true && (
+                      <StatusPill tone="positive"><Mail className="h-3 w-3" aria-hidden />Marketing</StatusPill>
                     )}
                   </div>
-                </div>
-              )}
-              {detailCustomer.notes && (
-                <div className="bg-slate-50 border border-slate-100 rounded-lg p-3 text-slate-700 whitespace-pre-wrap">
-                  {detailCustomer.notes}
-                </div>
-              )}
-
-              {marketingEnabled && detailCustomer.consent_marketing != null && (
-                <div className="flex items-center gap-2 text-slate-700">
-                  <Mail className={`h-4 w-4 ${detailCustomer.consent_marketing ? 'text-emerald-600' : 'text-slate-400'}`} />
-                  <span>
-                    Consenso marketing: <span className={detailCustomer.consent_marketing ? 'text-emerald-700 font-medium' : 'text-slate-500'}>{detailCustomer.consent_marketing ? 'concesso' : 'negato'}</span>
-                    {detailCustomer.consent_marketing_updated_at && (
-                      <span className="text-xs text-slate-400"> · {formatLastVisit(detailCustomer.consent_marketing_updated_at)}</span>
-                    )}
+                )}
+              </div>
+              {/* Da md in su il numero e i suoi due bottoni stanno qui, sulla
+                  riga del nome: c'è larghezza, e chiamare è la cosa che si fa
+                  più spesso da questa scheda. Sotto md scendono sotto una
+                  riga, dove il numero ci sta per intero. */}
+              {c.phone && (
+                <div className="hidden flex-shrink-0 items-center gap-2 md:flex">
+                  <span className="text-[16px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                    {c.phone}
                   </span>
+                  {contactButtons(c)}
                 </div>
               )}
-
-              {(() => {
-                const s = stats.get(detailCustomer.id);
-                if (!s || (!s.reservations.length && !s.banquets.length)) {
-                  return <p className="text-xs text-slate-500 italic">Nessuna prenotazione registrata.</p>;
-                }
-                const sortedReservations = [...s.reservations].sort(
-                  (a, b) => b.reservation_time.localeCompare(a.reservation_time)
-                );
-                return (
-                  <>
-                    <div className="border-t border-slate-100 pt-3 grid grid-cols-3 gap-2 text-center">
-                      <div className="bg-indigo-50 dark:bg-[#4f46e5]/15 rounded-lg py-2">
-                        <div className="text-xl font-bold text-indigo-700 dark:text-[#a5b4fc]">{s.reservations.length}</div>
-                        <div className="text-[11px] tracking-wide text-indigo-600 dark:text-[#818cf8]">Prenot.</div>
-                      </div>
-                      <div className="bg-emerald-50 dark:bg-emerald-500/15 rounded-lg py-2">
-                        <div className="text-xl font-bold text-emerald-700 dark:text-emerald-300">{s.banquets.length}</div>
-                        <div className="text-[11px] tracking-wide text-emerald-600 dark:text-emerald-400">Banch.</div>
-                      </div>
-                      <div className="bg-slate-50 rounded-lg py-2">
-                        <div className="text-xs font-bold text-slate-700 mt-1">{formatLastVisit(s.lastVisit) || '—'}</div>
-                        <div className="text-[11px] tracking-wide text-slate-500">Ultima</div>
-                      </div>
-                    </div>
-
-                    {sortedReservations.length > 0 && (
-                      <div className="border-t border-slate-100 pt-3">
-                        <div className="flex items-center gap-1.5 mb-2 text-xs font-semibold text-slate-600 tracking-wide">
-                          <History className="h-3.5 w-3.5" />
-                          Storico prenotazioni
-                        </div>
-                        <ul className="space-y-1.5">
-                          {sortedReservations.map(r => {
-                            const { date, time } = formatReservationDateTime(r.reservation_time);
-                            const isLunch = r.shift === Shift.LUNCH;
-                            return (
-                              <li
-                                key={r.id}
-                                className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-100"
-                              >
-                                {isLunch ? (
-                                  <Sun className="h-3.5 w-3.5 text-amber-500 flex-shrink-0" />
-                                ) : (
-                                  <Moon className="h-3.5 w-3.5 text-indigo-500 flex-shrink-0" />
-                                )}
-                                <div className="flex-1 min-w-0 flex items-center gap-2 text-xs">
-                                  <span className="font-semibold text-slate-700 whitespace-nowrap">{date}</span>
-                                  <span className="text-slate-500 whitespace-nowrap">{time}</span>
-                                  <span className="inline-flex items-center gap-0.5 text-slate-500 whitespace-nowrap ml-auto">
-                                    <UsersIcon className="h-3 w-3" />
-                                    {r.guests}
-                                  </span>
-                                </div>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      </div>
-                    )}
-
-                    {s.banquets.length > 0 && (
-                      <div className="border-t border-slate-100 pt-3">
-                        <div className="flex items-center gap-1.5 mb-2 text-xs font-semibold text-slate-600 tracking-wide">
-                          <UtensilsCrossed className="h-3.5 w-3.5" />
-                          Banchetti
-                        </div>
-                        <ul className="space-y-1.5">
-                          {[...s.banquets]
-                            .sort((a, b) => (b.event_date || '').localeCompare(a.event_date || ''))
-                            .map(b => (
-                              <li
-                                key={b.id}
-                                className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-emerald-50 border border-emerald-100 dark:bg-emerald-500/15 dark:border-emerald-500/30"
-                              >
-                                <Calendar className="h-3.5 w-3.5 text-emerald-600 flex-shrink-0" />
-                                <div className="flex-1 min-w-0 text-xs">
-                                  <span className="font-semibold text-slate-700">{b.name}</span>
-                                  {b.event_date && (
-                                    <span className="text-slate-500 ml-2">
-                                      {b.event_date.split('-').reverse().join('/')}
-                                    </span>
-                                  )}
-                                </div>
-                              </li>
-                            ))}
-                        </ul>
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
+              {c.phone && canEdit && (
+                <span className="hidden h-6 w-px flex-shrink-0 bg-[var(--ds-border)] md:block" aria-hidden />
+              )}
+              {cardMenuTrigger(c)}
             </div>
-            {canEdit && (
-              <div className="p-4 border-t border-[var(--color-line)] flex gap-2 justify-end">
-                <button
-                  type="button"
-                  onClick={() => { openEdit(detailCustomer); setDetailCustomer(null); }}
-                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
-                >
-                  <Pencil className="h-4 w-4" />
-                  Modifica
-                </button>
+
+            {c.phone && (
+              <div className="mt-3 flex items-center gap-2 border-t border-[var(--ds-border)] pt-3 md:hidden">
+                <span className="min-w-0 flex-1 truncate text-[17px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                  {c.phone}
+                </span>
+                {contactButtons(c)}
               </div>
             )}
           </div>
         </div>
-      )}
 
-      {/* Duplicates panel: groups customers sharing the same phone digits */}
-      {duplicatesOpen && (
-        <div className="fixed inset-0 z-50 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center p-0 sm:p-4" onClick={() => !isMerging && setDuplicatesOpen(false)}>
-          <div
-            className="bg-[var(--color-surface)] rounded-none sm:rounded-2xl shadow-2xl border border-[var(--color-line)] w-full sm:max-w-2xl h-full sm:max-h-[90vh] overflow-hidden flex flex-col"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
-              <div className="flex items-center gap-2">
-                <GitMerge className="h-5 w-5 text-amber-600" />
-                <h2 className="text-[16px] font-semibold text-[var(--color-fg)]">Clienti duplicati</h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setDuplicatesOpen(false)}
-                disabled={isMerging}
-                className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {duplicateGroups.length === 0 ? (
-                <div className="text-center text-sm text-slate-500 py-10">
-                  Nessun duplicato rilevato.
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-4 sm:px-6 lg:px-8">
+          <StatStrip
+            layout="stacked"
+            stats={[
+              { value: f.reservations, label: 'prenotazioni' },
+              {
+                value: f.avgCovers ? f.avgCovers.toLocaleString('it-IT', { maximumFractionDigits: 1 }) : '—',
+                label: 'coperti medi',
+              },
+              { value: f.noShow, label: 'no-show', tone: f.noShow > 0 ? 'critical' : 'neutral' },
+            ]}
+          />
+
+          {(c.email || hasAddress || c.notes) && (
+            <div className="space-y-3 rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+              {c.email && (
+                <div className="flex items-start gap-2.5 text-[15px]">
+                  <Mail className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
+                  <a href={`mailto:${c.email}`} className="min-w-0 truncate text-[var(--ds-text-primary)] hover:underline">
+                    {c.email}
+                  </a>
                 </div>
-              ) : (
-                <>
-                  <p className="text-xs text-slate-500">
-                    Ogni gruppo contiene clienti con lo stesso numero di telefono. Scegli quale voce mantenere: le altre verranno unite in essa (storico prenotazioni e banchetti inclusi).
-                  </p>
-                  {duplicateGroups.map(group => (
-                    <div key={group.key} className="border border-[var(--color-line)] rounded-xl p-3 bg-[var(--color-surface-2)] dark:bg-white/[0.03]">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 mb-2">
-                        {group.customers.length} voci · num. terminante {group.key}
+              )}
+              {hasAddress && (
+                <div className="flex items-start gap-2.5 text-[15px]">
+                  <MapPin className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
+                  <div className="min-w-0 text-[var(--ds-text-primary)]">
+                    {c.address && <div className="truncate">{c.address}</div>}
+                    {(c.postal_code || c.city) && (
+                      <div className="truncate text-[var(--ds-text-muted)]">
+                        {[c.postal_code, c.city].filter(Boolean).join(' ')}
                       </div>
-                      <div className="space-y-2">
-                        {group.customers.map(c => {
-                          const others = group.customers.filter(o => o.id !== c.id);
-                          return (
-                            <div key={c.id} className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-lg p-3 flex items-start gap-3">
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-1.5 font-semibold text-slate-800 truncate">
-                                  {c.is_vip && <Star className="h-3.5 w-3.5 text-amber-500 fill-amber-400 flex-shrink-0" />}
-                                  <span className="truncate">{toTitleCase(c.name)}</span>
-                                </div>
-                                <div className="text-xs text-slate-500 mt-0.5">
-                                  {c.phone && <span>{c.phone}</span>}
-                                  {c.email && <span className="ml-2">{c.email}</span>}
-                                </div>
-                                <div className="text-[11px] text-slate-400 mt-0.5">
-                                  ID #{c.id}
-                                </div>
-                              </div>
-                              <div className="flex flex-col gap-1.5 items-stretch">
-                                {others.map(other => {
-                                  const isThisPair = mergingIds?.source === other.id && mergingIds?.target === c.id;
-                                  return (
-                                    <button
-                                      key={other.id}
-                                      type="button"
-                                      onClick={() => runMerge(other.id, c.id)}
-                                      disabled={isMerging}
-                                      className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-600 text-white text-xs font-medium hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                                      title={`Unisci "${toTitleCase(other.name)}" (#${other.id}) in questo`}
-                                    >
-                                      {isThisPair ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <GitMerge className="h-3.5 w-3.5" />}
-                                      Unisci #{other.id} qui
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                </>
+                    )}
+                  </div>
+                </div>
+              )}
+              {c.notes && (
+                <p className="whitespace-pre-wrap text-[14px] text-[var(--ds-text-secondary)]">{c.notes}</p>
               )}
             </div>
-          </div>
-        </div>
-      )}
+          )}
 
-      {/* Phone-conflict merge prompt shown when the save endpoint returns 409 */}
-      {conflictPrompt && (
-        <div className="fixed inset-0 z-[70] bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center p-4" onClick={() => !isMerging && setConflictPrompt(null)}>
-          <div
-            className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md p-5"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <AlertTriangle className="h-5 w-5 text-amber-500" />
-              <h4 className="font-semibold text-[15px] text-[var(--color-fg)]">Numero già in rubrica</h4>
+          <div className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+            <div className="mb-3 flex items-center gap-2">
+              <History className="h-4 w-4 text-[var(--ds-text-muted)]" aria-hidden />
+              <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
+                Storico prenotazioni
+              </h3>
+              {sortedReservations.length > 0 && <CountBadge count={sortedReservations.length} />}
             </div>
-            <p className="text-[13px] text-[var(--color-fg-muted)] mb-4">
-              Questo numero è già associato a <strong>{conflictPrompt.targetName}</strong>.
-              {conflictPrompt.sourceId != null ? (
-                <> Vuoi unire <strong>{conflictPrompt.sourceName || 'questa voce'}</strong> in <strong>{conflictPrompt.targetName}</strong>? Storico prenotazioni e banchetti verranno mantenuti.</>
-              ) : (
-                <> Non è possibile creare un nuovo cliente con lo stesso numero.</>
-              )}
+            {sortedReservations.length === 0 ? (
+              <p className="py-2 text-[14px] text-[var(--ds-text-muted)]">Nessuna prenotazione registrata.</p>
+            ) : (
+              <ul className="divide-y divide-[var(--ds-border)]">
+                {sortedReservations.map(r => {
+                  const { date, time } = formatReservationDateTime(r.reservation_time);
+                  const isLunch = r.shift === Shift.LUNCH;
+                  return (
+                    <li key={r.id} className="flex items-center gap-2.5 py-2.5">
+                      {isLunch
+                        ? <Sun className="h-4 w-4 flex-shrink-0 text-[var(--ds-pending-text)]" aria-label="Pranzo" />
+                        : <Moon className="h-4 w-4 flex-shrink-0 text-[var(--ds-arriving-text)]" aria-label="Cena" />}
+                      <span className="flex-shrink-0 text-[15px] font-medium tabular-nums text-[var(--ds-text-primary)]">{date}</span>
+                      <span className="flex-shrink-0 text-[15px] tabular-nums text-[var(--ds-text-muted)]">{time}</span>
+                      <span className="ml-auto inline-flex flex-shrink-0 items-center gap-1 text-[14px] tabular-nums text-[var(--ds-text-secondary)]">
+                        <UsersIcon className="h-3.5 w-3.5" aria-hidden />
+                        {r.guests} cop.
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+
+          {sortedBanquets.length > 0 && (
+            <div className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+              <div className="mb-3 flex items-center gap-2">
+                <UtensilsCrossed className="h-4 w-4 text-[var(--ds-text-muted)]" aria-hidden />
+                <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Banchetti</h3>
+                <CountBadge count={sortedBanquets.length} />
+              </div>
+              <ul className="divide-y divide-[var(--ds-border)]">
+                {sortedBanquets.map(b => (
+                  <li key={b.id} className="flex items-center gap-2.5 py-2.5">
+                    <Calendar className="h-4 w-4 flex-shrink-0 text-[var(--ds-seated-text)]" aria-hidden />
+                    <span className="min-w-0 flex-1 truncate text-[15px] text-[var(--ds-text-primary)]">{b.name}</span>
+                    {b.event_date && (
+                      <span className="flex-shrink-0 text-[14px] tabular-nums text-[var(--ds-text-muted)]">
+                        {b.event_date.split('-').reverse().join('/')}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const stepFields = step === 0 ? (
+    <FormCard title="Contatto">
+      <div className="space-y-4">
+        <Field label="Nome" htmlFor="cust-name" required>
+          <input
+            id="cust-name"
+            type="text"
+            autoFocus
+            value={form.name}
+            onChange={e => setForm({ ...form, name: e.target.value })}
+            className={dsInput}
+          />
+        </Field>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label="Telefono" htmlFor="cust-phone" required>
+            <input
+              id="cust-phone"
+              type="tel"
+              value={form.phone}
+              onChange={e => setForm({ ...form, phone: e.target.value })}
+              className={`${dsInput} tabular-nums`}
+            />
+          </Field>
+          <Field label="Email" htmlFor="cust-email">
+            <input
+              id="cust-email"
+              type="email"
+              placeholder="nome@dominio.it"
+              value={form.email}
+              onChange={e => setForm({ ...form, email: e.target.value })}
+              className={dsInput}
+            />
+          </Field>
+        </div>
+        <Field label="Indirizzo" htmlFor="cust-address">
+          <input
+            id="cust-address"
+            type="text"
+            placeholder="Via, numero"
+            value={form.address}
+            onChange={e => setForm({ ...form, address: e.target.value })}
+            className={dsInput}
+          />
+        </Field>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <Field label="Città" htmlFor="cust-city" className="sm:col-span-2">
+            <input
+              id="cust-city"
+              type="text"
+              placeholder="Città"
+              value={form.city}
+              onChange={e => setForm({ ...form, city: e.target.value })}
+              className={dsInput}
+            />
+          </Field>
+          <Field label="CAP" htmlFor="cust-cap">
+            <input
+              id="cust-cap"
+              type="text"
+              placeholder="00000"
+              value={form.postal_code}
+              onChange={e => setForm({ ...form, postal_code: e.target.value })}
+              className={`${dsInput} tabular-nums`}
+            />
+          </Field>
+        </div>
+      </div>
+    </FormCard>
+  ) : (
+    <FormCard title="Preferenze di servizio">
+      <div className="space-y-4">
+        <label className="flex cursor-pointer select-none items-center gap-3 rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+          <input
+            type="checkbox"
+            checked={form.is_vip}
+            onChange={e => setForm({ ...form, is_vip: e.target.checked })}
+            className="h-5 w-5 flex-shrink-0 rounded-[6px] accent-[var(--ds-pending-solid)]"
+          />
+          <Star className={`h-4 w-4 flex-shrink-0 ${form.is_vip ? 'fill-[var(--ds-pending-solid)] text-[var(--ds-pending-solid)]' : 'text-[var(--ds-text-muted)]'}`} aria-hidden />
+          <span className="min-w-0">
+            <span className="block text-[15px] font-medium text-[var(--ds-text-primary)]">Cliente VIP</span>
+            <span className="block text-[13px] text-[var(--ds-text-muted)]">Evidenzia la prenotazione in sala</span>
+          </span>
+        </label>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label="Tavolo preferito" htmlFor="cust-table">
+            <select
+              id="cust-table"
+              value={form.preferred_table_id ?? ''}
+              onChange={e => setForm({ ...form, preferred_table_id: e.target.value === '' ? null : Number(e.target.value) })}
+              className={dsSelect}
+            >
+              <option value="">Nessuna preferenza</option>
+              {tablesByRoom.map(group => (
+                <optgroup key={group.roomId ?? 'none'} label={group.roomName}>
+                  {group.tables.map(t => (
+                    <option key={t.id} value={t.id}>{t.name} · {t.seats} posti</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </Field>
+          <Field label="Note preferenze" htmlFor="cust-prefs">
+            <input
+              id="cust-prefs"
+              type="text"
+              placeholder="Es. vicino finestra, no rumore"
+              value={form.preferences_notes}
+              onChange={e => setForm({ ...form, preferences_notes: e.target.value })}
+              className={dsInput}
+            />
+          </Field>
+        </div>
+        <Field
+          label="Allergie e note alimentari"
+          htmlFor="cust-diet"
+          hint="Precompilate in ogni nuova prenotazione di questo cliente."
+        >
+          <textarea
+            id="cust-diet"
+            rows={2}
+            placeholder="Es. intolleranza glutine, no crostacei"
+            value={form.dietary_notes}
+            onChange={e => setForm({ ...form, dietary_notes: e.target.value })}
+            className={`${dsTextarea} resize-none`}
+          />
+        </Field>
+        <Field label="Note" htmlFor="cust-notes">
+          <textarea
+            id="cust-notes"
+            rows={3}
+            value={form.notes}
+            onChange={e => setForm({ ...form, notes: e.target.value })}
+            className={`${dsTextarea} resize-none`}
+          />
+        </Field>
+      </div>
+    </FormCard>
+  );
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      {/* Solo sotto md. Sul desktop la colonna di sinistra è larga quanto la
+          lista e la voce "Clienti" è già selezionata nella barra laterale: il
+          titolo ripeterebbe l'unica cosa che lo schermo dice già, rubando la
+          riga alla ricerca. Col telefono la barra laterale non c'è. */}
+      <h1 className="flex-shrink-0 px-4 pt-4 text-[22px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)] md:hidden">
+        Clienti
+      </h1>
+      <SplitPane
+        detailOpen={!!detailCustomer}
+        toolbar={toolbar}
+        list={list}
+        detail={detailCustomer
+          ? renderDetail(detailCustomer)
+          : <PanePlaceholder icon={BookUser}>Scegli un cliente per vederne la scheda.</PanePlaceholder>}
+      />
+
+      {/* ── Nuovo / modifica cliente ─────────────────────────────────────
+          Due passi come Nuova prenotazione: contatto, poi preferenze. Nome e
+          telefono sono gli unici obbligatori e stanno entrambi nel primo, così
+          il cliente al telefono si salva senza arrivare in fondo. I passi non
+          si sbarrano a vicenda — StepNav li tiene tutti raggiungibili e la
+          validazione resta una sola, al salvataggio. */}
+      <ModalShell
+        open={formOpen}
+        onClose={() => !isSaving && setFormOpen(false)}
+        title={form.id ? 'Modifica cliente' : 'Nuovo cliente'}
+        subtitle={form.id ? 'Le modifiche valgono da subito in sala' : 'Nome e telefono bastano — il resto si aggiunge dopo'}
+        size="md"
+        fixedHeight
+        bodyClassName="px-5 pb-5 sm:px-6 sm:pb-6"
+        subheader={
+          <StepNav
+            steps={[{ label: 'Contatto', icon: UserIcon }, { label: 'Preferenze di servizio', icon: Star }]}
+            current={step}
+            onSelect={setStep}
+            ariaLabel="Passi del cliente"
+          />
+        }
+        // Una sola azione, sempre la stessa e sempre primaria: si salva da
+        // dove si è. Fra i due passi ci si muove dallo stepper qui sopra, che
+        // è già navigabile passo per passo — Avanti e Indietro erano un
+        // secondo modo di fare la stessa cosa, e mettevano tre pulsanti in
+        // riga attorno a quello che conta.
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setFormOpen(false)}
+              disabled={isSaving}
+              className={dsButton.quiet}
+            >
+              Annulla
+            </button>
+            <button
+              type="submit"
+              form="customer-form"
+              disabled={isSaving || !canSave}
+              className={dsButton.primary}
+            >
+              {isSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+              {isSaving ? 'Salvataggio…' : (form.id ? 'Salva modifiche' : 'Aggiungi alla rubrica')}
+            </button>
+          </>
+        }
+      >
+        <form
+          id="customer-form"
+          // I campi obbligatori vivono nel primo passo: se manca qualcosa
+          // mentre si è nel secondo, il required del browser non può puntare a
+          // un input smontato. Riportiamo lì noi invece di rifiutare in
+          // silenzio, che era quello che faceva il return secco di prima.
+          onSubmit={e => {
+            if (!form.name.trim() || !form.phone.trim()) {
+              e.preventDefault();
+              setStep(0);
+              return;
+            }
+            handleSubmit(e);
+          }}
+        >
+          {stepFields}
+        </form>
+      </ModalShell>
+
+      {/* Conferma di eliminazione */}
+      <ModalShell
+        open={confirmDeleteId !== null}
+        onClose={() => setConfirmDeleteId(null)}
+        title="Eliminare il cliente?"
+        size="sm"
+        closeOnEscape
+        bodyClassName="px-5 pb-5 sm:px-6 sm:pb-6"
+        footer={
+          <>
+            <button type="button" onClick={() => setConfirmDeleteId(null)} className={dsButton.quiet}>
+              Annulla
+            </button>
+            <button
+              type="button"
+              onClick={() => confirmDeleteId !== null && handleDelete(confirmDeleteId)}
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-[var(--ds-critical-solid)] px-5 text-[15px] font-semibold text-[var(--ds-critical-fg)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              <Trash2 className="h-4 w-4" aria-hidden />
+              Elimina
+            </button>
+          </>
+        }
+      >
+        <p className="text-[15px] text-[var(--ds-text-secondary)]">
+          I banchetti collegati manterranno la storia ma non saranno più associati al cliente.
+        </p>
+      </ModalShell>
+
+      {/* Duplicati: gruppi di clienti che condividono le stesse cifre di telefono */}
+      <ModalShell
+        open={duplicatesOpen}
+        onClose={() => !isMerging && setDuplicatesOpen(false)}
+        title="Clienti duplicati"
+        subtitle="Ogni gruppo ha lo stesso numero di telefono"
+        size="md"
+        bodyClassName="px-5 pb-5 sm:px-6 sm:pb-6"
+      >
+        {duplicateGroups.length === 0 ? (
+          <EmptyState icon={GitMerge}>Nessun duplicato rilevato.</EmptyState>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-[14px] text-[var(--ds-text-muted)]">
+              Scegli quale voce mantenere: le altre verranno unite in essa, storico prenotazioni e banchetti inclusi.
             </p>
-            <div className="flex gap-2 justify-end">
+            {duplicateGroups.map(group => (
+              <div key={group.key} className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+                <div className="mb-3 text-[13px] text-[var(--ds-text-muted)]">
+                  {group.customers.length} voci · numero terminante {group.key}
+                </div>
+                <div className="space-y-2">
+                  {group.customers.map(c => {
+                    const others = group.customers.filter(o => o.id !== c.id);
+                    return (
+                      <div key={c.id} className="flex items-start gap-3 rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            {c.is_vip && <Star className="h-3.5 w-3.5 flex-shrink-0 fill-[var(--ds-pending-solid)] text-[var(--ds-pending-solid)]" aria-label="VIP" />}
+                            <span className="truncate text-[15px] font-medium text-[var(--ds-text-primary)]">{toTitleCase(c.name)}</span>
+                          </div>
+                          <div className="mt-0.5 truncate text-[13px] text-[var(--ds-text-muted)]">
+                            {c.phone && <span className="tabular-nums">{c.phone}</span>}
+                            {c.email && <span className="ml-2">{c.email}</span>}
+                          </div>
+                          <div className="mt-0.5 text-[12px] tabular-nums text-[var(--ds-text-subtle)]">ID #{c.id}</div>
+                        </div>
+                        <div className="flex flex-shrink-0 flex-col gap-1.5">
+                          {others.map(other => {
+                            const isThisPair = mergingIds?.source === other.id && mergingIds?.target === c.id;
+                            return (
+                              <button
+                                key={other.id}
+                                type="button"
+                                onClick={() => runMerge(other.id, c.id)}
+                                disabled={isMerging}
+                                title={`Unisci "${toTitleCase(other.name)}" (#${other.id}) in questo`}
+                                className={`${chip} whitespace-nowrap bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] hover:opacity-80 disabled:opacity-50`}
+                              >
+                                {isThisPair ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <GitMerge className="h-3.5 w-3.5" aria-hidden />}
+                                Unisci #{other.id} qui
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </ModalShell>
+
+      {/* Conflitto di numero: il salvataggio è tornato 409 */}
+      <ModalShell
+        open={conflictPrompt !== null}
+        onClose={() => !isMerging && setConflictPrompt(null)}
+        title="Numero già in rubrica"
+        size="sm"
+        bodyClassName="px-5 pb-5 sm:px-6 sm:pb-6"
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setConflictPrompt(null)}
+              disabled={isMerging}
+              className={dsButton.quiet}
+            >
+              {conflictPrompt?.sourceId != null ? 'Annulla' : 'Chiudi'}
+            </button>
+            {conflictPrompt?.sourceId != null && (
               <button
                 type="button"
-                onClick={() => setConflictPrompt(null)}
+                onClick={() => runMerge(conflictPrompt.sourceId!, conflictPrompt.targetId)}
                 disabled={isMerging}
-                className="px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
+                className={dsButton.primary}
               >
-                {conflictPrompt.sourceId != null ? 'Annulla' : 'Chiudi'}
+                {isMerging ? <Loader2 className="h-4 w-4 animate-spin" /> : <GitMerge className="h-4 w-4" aria-hidden />}
+                Unisci
               </button>
-              {conflictPrompt.sourceId != null && (
-                <button
-                  type="button"
-                  onClick={() => runMerge(conflictPrompt.sourceId!, conflictPrompt.targetId)}
-                  disabled={isMerging}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isMerging ? <Loader2 className="h-4 w-4 animate-spin" /> : <GitMerge className="h-4 w-4" />}
-                  Unisci
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+            )}
+          </>
+        }
+      >
+        {conflictPrompt && (
+          <Callout tone="pending" icon={AlertTriangle}>
+            Questo numero è già associato a <strong>{conflictPrompt.targetName}</strong>.
+            {conflictPrompt.sourceId != null ? (
+              <> Vuoi unire <strong>{conflictPrompt.sourceName || 'questa voce'}</strong> in <strong>{conflictPrompt.targetName}</strong>? Storico prenotazioni e banchetti verranno mantenuti.</>
+            ) : (
+              <> Non è possibile creare un nuovo cliente con lo stesso numero.</>
+            )}
+          </Callout>
+        )}
+      </ModalShell>
     </div>
   );
 };

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Thermometer, Flame, Sparkles, Truck, Snowflake, Printer, Loader2,
+  Thermometer, Flame, Sparkles, Truck, Snowflake, Printer, CalendarDays,
   Check, X, Plus, Trash2, AlertTriangle, RefreshCw,
 } from 'lucide-react';
 import {
@@ -21,8 +21,8 @@ import {
   HaccpProductionLog,
 } from '../services/haccpApiService';
 import { printHaccpReport } from '../utils/printHaccpReport';
-import { CookingPotLoader } from './CookingPotLoader';
 import { SkeletonHaccpSections } from './SkeletonCards';
+import { Callout, SegmentedControl, StatusPill, dsButton, dsIconButton, dsSelect } from './ds';
 
 const todayISO = (): string => {
   const d = new Date();
@@ -44,29 +44,60 @@ const formatNumber = (n: number | null | undefined): string => {
   return String(n).replace('.', ',');
 };
 
-// Single-section heading row used at the top of each card.
-interface SectionHeaderProps {
+/* ── Vestizione ───────────────────────────────────────────────────────────
+   Le classi condivise stanno qui in cima invece che ripetute riga per riga:
+   questa pagina è cinque tabelle che chiedono la stessa cosa — un campo
+   piccolo accanto a un'etichetta — e finché erano stringhe copiate le cinque
+   sezioni divergevano a ogni ritocco.
+
+   h-11, non h-9: il registro si compila col telefono in mano davanti alla
+   cella frigo, e 44px è il minimo tattile del design system. */
+const field =
+  'h-11 w-full rounded-full bg-[var(--ds-surface-row)] px-4 text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+
+/** Etichetta di un campo nei form di coda. Minuscolo: le maiuscole a 13px
+ *  perdono la forma della parola e gli screen reader le compitano. */
+const fieldLabel = 'mb-1.5 block text-[13px] text-[var(--ds-text-muted)]';
+
+/** Firma di chi ha compilato la riga e quando. */
+const stamp = 'col-span-12 -mt-0.5 text-[12px] tabular-nums text-[var(--ds-text-subtle)]';
+
+const recordedLabel = (recordedBy: string, recordedAt: string): string =>
+  `${recordedBy.split('@')[0]} · ${new Date(recordedAt).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`;
+
+// Intestazione in cima a ogni card: icona in pastiglia, titolo, e a destra il
+// contatore di completamento come pill invece che come testo sciolto.
+interface CardHeaderProps {
   title: string;
   icon: React.ReactNode;
   status?: string;
 }
-const SectionHeader: React.FC<SectionHeaderProps> = ({ title, icon, status }) => (
-  <div className="flex items-center justify-between mb-3">
-    <div className="flex items-center gap-2">
-      <span className="text-[var(--color-fg-muted)]">{icon}</span>
-      <h2 className="text-[15px] font-semibold text-[var(--color-fg)]">{title}</h2>
+const CardHeader: React.FC<CardHeaderProps> = ({ title, icon, status }) => (
+  <div className="mb-3 flex items-center justify-between gap-3">
+    <div className="flex min-w-0 items-center gap-2.5">
+      <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]">
+        {icon}
+      </span>
+      <h2 className="truncate text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">{title}</h2>
     </div>
-    {status && (
-      <span className="text-[11px] tabular text-[var(--color-fg-subtle)] font-medium">{status}</span>
-    )}
+    {status && <StatusPill className="tabular-nums">{status}</StatusPill>}
   </div>
 );
 
 const Card: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <section className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-4">
+  <section className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5">
     {children}
   </section>
 );
+
+// Righe separate da un filetto sul token di bordo, non dalla riga legacy.
+const rowList = 'divide-y divide-[var(--ds-border)]';
+const row = 'grid grid-cols-12 items-center gap-2 py-2.5 sm:gap-3';
+
+const emptyNote = 'py-6 text-center text-[14px] text-[var(--ds-text-muted)]';
+
+const deleteButton =
+  'inline-flex h-9 w-9 items-center justify-center rounded-full text-[var(--ds-text-subtle)] transition-colors hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 // =============================================================================
 // HaccpPage
@@ -269,51 +300,89 @@ export const HaccpPage: React.FC = () => {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
-      <div className="space-y-5">
+      <div className="space-y-4">
 
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
-          <div>
-            <h1 className="text-[22px] sm:text-[28px] font-semibold text-[var(--color-fg)] tracking-tight">
-              HACCP
-            </h1>
-            <p className="text-sm text-[var(--color-fg-muted)] mt-1">
-              Controlli giornalieri di igiene e sicurezza alimentare.
-            </p>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
+        {/* Titolo da solo sulla sua riga, comandi sulla riga sotto: è la stessa
+            impalcatura di Spesa e Pagamenti. Il giorno e la stampa stanno
+            insieme a sinistra — si stampa il giorno che si sta guardando, sono
+            un gesto solo — mentre Ricarica se ne va in fondo a destra: non
+            cambia niente di quello che vedi, rilegge soltanto, e in mezzo agli
+            altri due si prendeva un peso che non ha. */}
+        <div className="min-w-0">
+          <h1 className="text-[22px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)] sm:text-[26px]">
+            HACCP
+          </h1>
+          <p className="mt-1 text-[15px] text-[var(--ds-text-muted)]">
+            Controlli giornalieri di igiene e sicurezza alimentare.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Il calendario nativo si apre solo cliccando la sua iconcina, che è
+              un bersaglio da pochi pixel in fondo al campo: qui la nascondiamo,
+              ne disegniamo una nostra a sinistra come nel campo di ricerca, e
+              apriamo il picker da qualunque punto della pillola. showPicker
+              vuole un gesto dell'utente e su qualche browser non c'è: se non
+              parte resta il campo nativo, che si compila comunque da tastiera. */}
+          <div className="relative flex-shrink-0">
+            <CalendarDays
+              className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ds-text-muted)]"
+              aria-hidden
+            />
             <input
               type="date"
               value={date}
               onChange={e => setDate(e.target.value)}
-              className="px-3 py-1.5 text-sm rounded-md bg-[var(--color-surface)] border border-[var(--color-line)] text-[var(--color-fg)] tabular"
+              onClick={e => { try { e.currentTarget.showPicker(); } catch { /* niente picker: resta il campo nativo */ } }}
+              aria-label="Giorno"
+              // Bianca e con l'ombra come il campo di ricerca delle altre
+              // schermate, non incassata: qui sta sulla tela, non dentro una card.
+              className="h-11 w-auto min-w-0 cursor-pointer rounded-full bg-[var(--ds-surface)] pl-10 pr-4 text-[15px] tabular-nums text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-date-and-time-value]:min-w-0 [&::-webkit-date-and-time-value]:text-left"
             />
-            <button
-              type="button"
-              onClick={() => reload(date)}
-              className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]"
-              title="Ricarica"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={onPrintReport}
-              disabled={loading}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-[var(--color-fg)] text-[var(--color-surface)] hover:opacity-90 disabled:opacity-50"
-            >
-              <Printer className="h-3.5 w-3.5" />
-              Stampa report
-            </button>
           </div>
+          {/* Sul telefono perde la parola e resta un cerchio: la scritta si
+              prendeva metà della riga. Un bottone solo, non due scambiati con
+              hidden/sm:inline-flex — collide con l'inline-flex che dsButton si
+              porta dentro, ed è display contro display. */}
+          <button
+            type="button"
+            onClick={onPrintReport}
+            disabled={loading}
+            title="Stampa report"
+            aria-label="Stampa report"
+            className={`${dsButton.primary} w-11 flex-shrink-0 px-0 sm:w-auto sm:px-5`}
+          >
+            <Printer className="h-4 w-4" aria-hidden />
+            <span className="hidden sm:inline">Stampa report</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => reload(date)}
+            className={`${dsIconButton} ml-auto`}
+            title="Ricarica"
+            aria-label="Ricarica"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </button>
         </div>
 
         {error && (
-          <div className="flex items-start gap-2 px-3 py-2 rounded-md border border-rose-200 dark:border-rose-500/30 bg-rose-50 dark:bg-rose-500/10 text-rose-800 dark:text-rose-200 text-xs">
-            <AlertTriangle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
-            <span className="flex-1">{error}</span>
-            <button type="button" onClick={() => setError(null)} className="opacity-70 hover:opacity-100"><X className="h-3.5 w-3.5" /></button>
-          </div>
+          <Callout
+            tone="critical"
+            icon={AlertTriangle}
+            action={
+              <button
+                type="button"
+                onClick={() => setError(null)}
+                aria-label="Chiudi avviso"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-full opacity-70 transition-opacity hover:opacity-100"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            }
+          >
+            {error}
+          </Callout>
         )}
 
         {loading ? (
@@ -321,7 +390,7 @@ export const HaccpPage: React.FC = () => {
         ) : (
           <>
             <Card>
-              <SectionHeader
+              <CardHeader
                 title="Temperature frigoriferi e congelatori"
                 icon={<Thermometer className="h-4 w-4" />}
                 status={`${tempCompleted}/${HACCP_TEMPERATURE_LOCATIONS.length} compilati`}
@@ -334,7 +403,7 @@ export const HaccpPage: React.FC = () => {
             </Card>
 
             <Card>
-              <SectionHeader
+              <CardHeader
                 title="Friggitrici — controllo olio"
                 icon={<Flame className="h-4 w-4" />}
                 status={`${oilCompleted}/${HACCP_FRYERS.length} compilati`}
@@ -343,7 +412,7 @@ export const HaccpPage: React.FC = () => {
             </Card>
 
             <Card>
-              <SectionHeader
+              <CardHeader
                 title="Pulizie attrezzature e superfici"
                 icon={<Sparkles className="h-4 w-4" />}
                 status={`${cleaningCompleted}/${HACCP_CLEANING_POINTS.length} eseguite`}
@@ -352,7 +421,7 @@ export const HaccpPage: React.FC = () => {
             </Card>
 
             <Card>
-              <SectionHeader
+              <CardHeader
                 title="Ricevimento merci"
                 icon={<Truck className="h-4 w-4" />}
                 status={`${receipts.length} ${receipts.length === 1 ? 'registrazione' : 'registrazioni'}`}
@@ -361,7 +430,7 @@ export const HaccpPage: React.FC = () => {
             </Card>
 
             <Card>
-              <SectionHeader
+              <CardHeader
                 title="Abbattimento / produzione"
                 icon={<Snowflake className="h-4 w-4" />}
                 status={`${production.length} ${production.length === 1 ? 'registrazione' : 'registrazioni'}`}
@@ -387,7 +456,7 @@ interface TempSectionProps {
 
 const TemperatureSection: React.FC<TempSectionProps> = ({ rows, byLocation, onSave }) => {
   return (
-    <div className="divide-y divide-[var(--color-line)]">
+    <div className={rowList}>
       {rows.map(({ location, targetMax }) => {
         const r = byLocation.get(location);
         return (
@@ -447,11 +516,21 @@ const TemperatureRow: React.FC<TempRowProps> = ({
     onSave(temp, note);
   };
 
+  // Tre stati, tre famiglie di colore del design system: fuori limite critico,
+  // ancora da confermare pending, confermato la pillola incassata neutra. Le
+  // classi sono scritte per esteso in ogni ramo perché Tailwind estrae i nomi
+  // staticamente e una stringa composta non arriverebbe mai nel bundle.
+  const tempFieldTone = overTarget
+    ? 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] ring-1 ring-inset ring-[var(--ds-critical-solid)]'
+    : touched
+      ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
+      : 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] ring-1 ring-inset ring-[var(--ds-pending-solid)]';
+
   return (
-    <div className="grid grid-cols-12 gap-2 sm:gap-3 items-center py-2">
-      <div className="col-span-12 sm:col-span-4">
-        <div className="text-sm font-medium text-[var(--color-fg)]">{location}</div>
-        <div className="text-[11px] tabular text-[var(--color-fg-subtle)]">
+    <div className={row}>
+      <div className="col-span-12 min-w-0 sm:col-span-4">
+        <div className="text-[15px] font-medium text-[var(--ds-text-primary)]">{location}</div>
+        <div className="text-[13px] tabular-nums text-[var(--ds-text-muted)]">
           Limite ≤ {formatNumber(targetMax)}°C
         </div>
       </div>
@@ -462,18 +541,13 @@ const TemperatureRow: React.FC<TempRowProps> = ({
             inputMode="decimal"
             value={temp}
             placeholder="—"
+            aria-label={`Temperatura ${location}`}
             onChange={e => { setTemp(e.target.value); setTouched(true); }}
             onFocus={e => { setTouched(true); e.target.select(); }}
             onBlur={commit}
-            className={`w-full pl-2 pr-7 py-1.5 text-sm rounded-md tabular text-right border bg-[var(--color-surface)] text-[var(--color-fg)] ${
-              overTarget
-                ? 'border-rose-400 dark:border-rose-500/60 bg-rose-50 dark:bg-rose-500/10'
-                : touched
-                  ? 'border-[var(--color-line)]'
-                  : 'border-amber-400 dark:border-amber-500/60 bg-amber-50/40 dark:bg-amber-500/[0.06]'
-            }`}
+            className={`h-11 w-full rounded-full pl-3 pr-9 text-right text-[15px] tabular-nums transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${tempFieldTone}`}
           />
-          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-[var(--color-fg-subtle)] pointer-events-none">°C</span>
+          <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-[13px] text-[var(--ds-text-muted)]">°C</span>
         </div>
       </div>
       <div className="col-span-8 sm:col-span-5">
@@ -481,24 +555,26 @@ const TemperatureRow: React.FC<TempRowProps> = ({
           type="text"
           value={note}
           placeholder="Note (opzionale)"
+          aria-label={`Note ${location}`}
           onChange={e => setNote(e.target.value)}
           onBlur={commit}
-          className="w-full px-2 py-1.5 text-sm rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)]"
+          className={field}
         />
       </div>
-      <div className="col-span-12 sm:col-span-1 text-right">
+      <div className="col-span-12 text-right sm:col-span-1">
         {overTarget ? (
-          <AlertTriangle className="h-4 w-4 text-rose-600 dark:text-rose-400 inline-block" />
+          <AlertTriangle className="inline-block h-4 w-4 text-[var(--ds-critical-text)]" />
         ) : filled ? (
-          <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-400 inline-block" />
+          <Check className="inline-block h-4 w-4 text-[var(--ds-seated-text)]" />
         ) : parsed !== null ? (
-          <span className="inline-block h-2 w-2 rounded-full bg-amber-500" title="Suggerimento — non confermato" />
+          <span
+            className="inline-block h-2 w-2 rounded-full bg-[var(--ds-pending-solid)]"
+            title="Suggerimento — non confermato"
+          />
         ) : null}
       </div>
       {(recordedAt && recordedBy) && (
-        <div className="col-span-12 text-[10px] text-[var(--color-fg-subtle)] -mt-1 tabular">
-          {recordedBy.split('@')[0]} · {new Date(recordedAt).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
-        </div>
+        <div className={stamp}>{recordedLabel(recordedBy, recordedAt)}</div>
       )}
     </div>
   );
@@ -520,15 +596,9 @@ const OIL_ACTION_LABELS: Record<HaccpOilAction, string> = {
   UTILIZZABILE: 'Utilizzabile',
 };
 
-const OIL_ACTION_STYLES: Record<HaccpOilAction, string> = {
-  SOSTITUITO: 'bg-emerald-600 text-white border-emerald-600',
-  FILTRATO: 'bg-amber-500 text-white border-amber-500',
-  UTILIZZABILE: 'bg-sky-600 text-white border-sky-600',
-};
-
 const OilSection: React.FC<OilSectionProps> = ({ rows, byFryer, onSave }) => {
   return (
-    <div className="divide-y divide-[var(--color-line)]">
+    <div className={rowList}>
       {rows.map(fryerLabel => {
         const r = byFryer.get(fryerLabel);
         return (
@@ -573,41 +643,38 @@ const OilRow: React.FC<OilRowProps> = ({
   };
 
   return (
-    <div className="grid grid-cols-12 gap-2 sm:gap-3 items-center py-2">
-      <div className="col-span-12 sm:col-span-3 text-sm font-medium text-[var(--color-fg)]">
+    <div className={row}>
+      <div className="col-span-12 text-[15px] font-medium text-[var(--ds-text-primary)] sm:col-span-3">
         {fryerLabel}
       </div>
-      <div className="col-span-12 sm:col-span-5 flex flex-wrap gap-1">
-        {HACCP_OIL_ACTIONS.map(a => (
-          <button
-            key={a}
-            type="button"
-            onClick={() => pick(a)}
-            className={`px-2 py-1 text-[11px] font-medium rounded-md border transition-colors ${
-              action === a
-                ? OIL_ACTION_STYLES[a]
-                : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)] hover:text-[var(--color-fg)]'
-            }`}
-          >
-            {OIL_ACTION_LABELS[a]}
-          </button>
-        ))}
+      {/* Tre scelte che si escludono: il controllo segmentato del design
+          system. Finché nessuna è stata presa il valore non corrisponde a
+          nessun segmento e la traccia resta vuota — che è esattamente lo stato
+          "friggitrice non ancora controllata". */}
+      <div className="col-span-12 min-w-0 sm:col-span-5">
+        <SegmentedControl<HaccpOilAction>
+          value={(action ?? '') as HaccpOilAction}
+          onChange={pick}
+          ariaLabel={`Controllo olio ${fryerLabel}`}
+          size="sm"
+          equalWidth={false}
+          options={HACCP_OIL_ACTIONS.map(a => ({ value: a, label: OIL_ACTION_LABELS[a] }))}
+        />
       </div>
       <div className="col-span-12 sm:col-span-4">
         <input
           type="text"
           value={note}
           placeholder="Note (opzionale)"
+          aria-label={`Note ${fryerLabel}`}
           onChange={e => setNote(e.target.value)}
           onBlur={commitNote}
           disabled={!action}
-          className="w-full px-2 py-1.5 text-sm rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] disabled:opacity-60"
+          className={`${field} disabled:opacity-50`}
         />
       </div>
       {(recordedAt && recordedBy) && (
-        <div className="col-span-12 text-[10px] text-[var(--color-fg-subtle)] -mt-1 tabular">
-          {recordedBy.split('@')[0]} · {new Date(recordedAt).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
-        </div>
+        <div className={stamp}>{recordedLabel(recordedBy, recordedAt)}</div>
       )}
     </div>
   );
@@ -625,7 +692,7 @@ interface CleaningSectionProps {
 
 const CleaningSection: React.FC<CleaningSectionProps> = ({ rows, byPoint, onSave }) => {
   return (
-    <div className="divide-y divide-[var(--color-line)]">
+    <div className={rowList}>
       {rows.map(point => {
         const r = byPoint.get(point);
         return (
@@ -671,40 +738,46 @@ const CleaningRow: React.FC<CleaningRowProps> = ({
   };
 
   return (
-    <div className="grid grid-cols-12 gap-2 sm:gap-3 items-center py-2">
-      <div className="col-span-8 sm:col-span-4 flex items-center gap-2">
+    <div className={row}>
+      <div className="col-span-8 flex items-center gap-2.5 sm:col-span-4">
+        {/* La casella disegnata resta 24px, ma il bottone che la contiene è
+            44: sotto il dito questa è la riga che si tocca più spesso di
+            tutta la pagina. */}
         <button
           type="button"
           onClick={toggle}
-          className={`h-6 w-6 rounded-md border flex items-center justify-center flex-shrink-0 transition-colors ${
-            done
-              ? 'bg-emerald-600 border-emerald-600 text-white'
-              : 'bg-[var(--color-surface)] border-[var(--color-line-strong)] text-transparent hover:border-[var(--color-fg-muted)]'
-          }`}
+          className="-my-2 inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           aria-pressed={done}
           aria-label={done ? 'Segna come non eseguito' : 'Segna come eseguito'}
         >
-          <Check className="h-4 w-4" />
+          <span
+            className={`flex h-6 w-6 items-center justify-center rounded-[8px] transition-colors ${
+              done
+                ? 'bg-[var(--ds-seated-solid)] text-white'
+                : 'bg-[var(--ds-surface-row)] text-transparent ring-1 ring-inset ring-[var(--ds-border-strong)]'
+            }`}
+          >
+            <Check className="h-4 w-4" />
+          </span>
         </button>
-        <span className="text-sm font-medium text-[var(--color-fg)]">{point}</span>
+        <span className="min-w-0 text-[15px] font-medium text-[var(--ds-text-primary)]">{point}</span>
       </div>
       <div className="col-span-4 sm:col-span-7">
         <input
           type="text"
           value={note}
           placeholder="Note (opzionale)"
+          aria-label={`Note ${point}`}
           onChange={e => setNote(e.target.value)}
           onBlur={commitNote}
-          className="w-full px-2 py-1.5 text-sm rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)]"
+          className={field}
         />
       </div>
-      <div className="col-span-12 sm:col-span-1 text-right">
-        {done && <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-400 inline-block" />}
+      <div className="col-span-12 text-right sm:col-span-1">
+        {done && <Check className="inline-block h-4 w-4 text-[var(--ds-seated-text)]" />}
       </div>
       {(recordedAt && recordedBy) && (
-        <div className="col-span-12 text-[10px] text-[var(--color-fg-subtle)] -mt-1 tabular">
-          {recordedBy.split('@')[0]} · {new Date(recordedAt).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
-        </div>
+        <div className={stamp}>{recordedLabel(recordedBy, recordedAt)}</div>
       )}
     </div>
   );
@@ -719,6 +792,19 @@ interface ReceiptsSectionProps {
   onAdd: (input: { product: string; lotNumber: string; temperature: string; accepted: boolean; note: string }) => void;
   onDelete: (id: string) => void;
 }
+
+/* Accettato / Respinto restano due pastiglie colorate invece di un controllo
+   segmentato: qui il colore è il dato: su un registro sanitario il verde e il
+   rosso si leggono prima della parola. L'anello marca la scelta fatta, la
+   coppia tinta+testo è quella già verificata a contrasto dal design system. */
+const outcomeChip = (active: boolean, tone: 'positive' | 'critical'): string => {
+  const base =
+    'inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full px-3 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+  if (!active) return `${base} bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]`;
+  return tone === 'positive'
+    ? `${base} bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] ring-2 ring-inset ring-[var(--ds-seated-solid)]`
+    : `${base} bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] ring-2 ring-inset ring-[var(--ds-critical-solid)]`;
+};
 
 const ReceiptsSection: React.FC<ReceiptsSectionProps> = ({ rows, onAdd, onDelete }) => {
   const [product, setProduct] = useState('');
@@ -739,63 +825,60 @@ const ReceiptsSection: React.FC<ReceiptsSectionProps> = ({ rows, onAdd, onDelete
 
   return (
     <div className="space-y-2">
-      <form onSubmit={submit} className="grid grid-cols-12 gap-2 items-end pb-2 border-b border-[var(--color-line)]">
+      <form onSubmit={submit} className="grid grid-cols-12 items-end gap-2 border-b border-[var(--ds-border)] pb-4">
         <div className="col-span-12 sm:col-span-4">
-          <label className="block text-[10px] uppercase tracking-wide text-[var(--color-fg-subtle)] mb-1">Prodotto</label>
+          <label className={fieldLabel} htmlFor="haccp-receipt-product">Prodotto</label>
           <input
+            id="haccp-receipt-product"
             ref={productInputRef}
             type="text"
             value={product}
             onChange={e => setProduct(e.target.value)}
             list="haccp-receipt-products"
             placeholder="es. Filetto V.One"
-            className="w-full px-2 py-1.5 text-sm rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)]"
+            className={field}
           />
           <datalist id="haccp-receipt-products">
             {HACCP_RECEIPT_PRODUCT_HINTS.map(h => <option key={h} value={h} />)}
           </datalist>
         </div>
         <div className="col-span-6 sm:col-span-2">
-          <label className="block text-[10px] uppercase tracking-wide text-[var(--color-fg-subtle)] mb-1">Lotto</label>
+          <label className={fieldLabel} htmlFor="haccp-receipt-lot">Lotto</label>
           <input
+            id="haccp-receipt-lot"
             type="text"
             value={lotNumber}
             onChange={e => setLotNumber(e.target.value)}
-            className="w-full px-2 py-1.5 text-sm rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular"
+            className={`${field} tabular-nums`}
           />
         </div>
         <div className="col-span-6 sm:col-span-2">
-          <label className="block text-[10px] uppercase tracking-wide text-[var(--color-fg-subtle)] mb-1">Temp. (°C)</label>
+          <label className={fieldLabel} htmlFor="haccp-receipt-temp">Temp. (°C)</label>
           <input
+            id="haccp-receipt-temp"
             type="text"
             inputMode="decimal"
             value={temperature}
             onChange={e => setTemperature(e.target.value)}
-            className="w-full px-2 py-1.5 text-sm rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular text-right"
+            className={`${field} text-right tabular-nums`}
           />
         </div>
         <div className="col-span-6 sm:col-span-2">
-          <label className="block text-[10px] uppercase tracking-wide text-[var(--color-fg-subtle)] mb-1">Esito</label>
-          <div className="flex gap-1">
+          <span className={fieldLabel}>Esito</span>
+          <div className="flex gap-1.5">
             <button
               type="button"
               onClick={() => setAccepted(true)}
-              className={`flex-1 px-2 py-1.5 text-[11px] font-medium rounded-md border transition-colors ${
-                accepted
-                  ? 'bg-emerald-600 text-white border-emerald-600'
-                  : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
-              }`}
+              aria-pressed={accepted}
+              className={outcomeChip(accepted, 'positive')}
             >
               Accettato
             </button>
             <button
               type="button"
               onClick={() => setAccepted(false)}
-              className={`flex-1 px-2 py-1.5 text-[11px] font-medium rounded-md border transition-colors ${
-                !accepted
-                  ? 'bg-rose-600 text-white border-rose-600'
-                  : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
-              }`}
+              aria-pressed={!accepted}
+              className={outcomeChip(!accepted, 'critical')}
             >
               Respinto
             </button>
@@ -805,9 +888,9 @@ const ReceiptsSection: React.FC<ReceiptsSectionProps> = ({ rows, onAdd, onDelete
           <button
             type="submit"
             disabled={!product.trim()}
-            className="w-full px-3 py-1.5 rounded-md text-sm font-medium bg-[var(--color-fg)] text-[var(--color-surface)] hover:opacity-90 disabled:opacity-50 inline-flex items-center justify-center gap-1"
+            className={`w-full ${dsButton.primary}`}
           >
-            <Plus className="h-3.5 w-3.5" />
+            <Plus className="h-4 w-4" aria-hidden />
             Aggiungi
           </button>
         </div>
@@ -817,49 +900,45 @@ const ReceiptsSection: React.FC<ReceiptsSectionProps> = ({ rows, onAdd, onDelete
             value={note}
             onChange={e => setNote(e.target.value)}
             placeholder="Note (opzionale)"
-            className="w-full px-2 py-1.5 text-sm rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)]"
+            aria-label="Note ricevimento"
+            className={field}
           />
         </div>
       </form>
 
       {rows.length === 0 ? (
-        <div className="text-[12px] text-[var(--color-fg-subtle)] py-3 text-center">
-          Nessuna registrazione per oggi.
-        </div>
+        <div className={emptyNote}>Nessuna registrazione per oggi.</div>
       ) : (
-        <ul className="divide-y divide-[var(--color-line)]">
+        <ul className={rowList}>
           {rows.map(r => (
-            <li key={r.id} className="grid grid-cols-12 gap-2 items-center py-2 text-sm">
-              <div className="col-span-12 sm:col-span-4 font-medium text-[var(--color-fg)] truncate">
+            <li key={r.id} className={row}>
+              <div className="col-span-12 min-w-0 truncate text-[15px] font-medium text-[var(--ds-text-primary)] sm:col-span-4">
                 {r.product}
                 {r.lotNumber && (
-                  <span className="ml-1 text-[11px] text-[var(--color-fg-subtle)] tabular">· lotto {r.lotNumber}</span>
+                  <span className="ml-1.5 text-[13px] tabular-nums text-[var(--ds-text-muted)]">· lotto {r.lotNumber}</span>
                 )}
               </div>
-              <div className="col-span-4 sm:col-span-2 tabular text-right text-[var(--color-fg-muted)]">
+              <div className="col-span-4 text-right text-[15px] tabular-nums text-[var(--ds-text-secondary)] sm:col-span-2">
                 {r.temperature !== null ? `${formatNumber(r.temperature)} °C` : '—'}
               </div>
               <div className="col-span-4 sm:col-span-2">
-                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium ${
-                  r.accepted
-                    ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300'
-                    : 'bg-rose-100 dark:bg-rose-500/20 text-rose-700 dark:text-rose-300'
-                }`}>
+                <StatusPill tone={r.accepted ? 'positive' : 'critical'}>
                   {r.accepted ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
                   {r.accepted ? 'Accettato' : 'Respinto'}
-                </span>
+                </StatusPill>
               </div>
-              <div className="col-span-4 sm:col-span-3 text-[12px] text-[var(--color-fg-subtle)] truncate">
+              <div className="col-span-4 truncate text-[14px] text-[var(--ds-text-muted)] sm:col-span-3">
                 {r.note || ''}
               </div>
-              <div className="col-span-12 sm:col-span-1 text-right">
+              <div className="col-span-12 text-right sm:col-span-1">
                 <button
                   type="button"
                   onClick={() => onDelete(r.id)}
-                  className="p-1 rounded text-[var(--color-fg-subtle)] hover:text-rose-600"
+                  className={deleteButton}
                   title="Elimina"
+                  aria-label={`Elimina ${r.product}`}
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
+                  <Trash2 className="h-4 w-4" />
                 </button>
               </div>
             </li>
@@ -899,58 +978,62 @@ const ProductionSection: React.FC<ProductionSectionProps> = ({ rows, onAdd, onDe
 
   return (
     <div className="space-y-2">
-      <form onSubmit={submit} className="grid grid-cols-12 gap-2 items-end pb-2 border-b border-[var(--color-line)]">
+      <form onSubmit={submit} className="grid grid-cols-12 items-end gap-2 border-b border-[var(--ds-border)] pb-4">
         <div className="col-span-12 sm:col-span-4">
-          <label className="block text-[10px] uppercase tracking-wide text-[var(--color-fg-subtle)] mb-1">Prodotto</label>
+          <label className={fieldLabel} htmlFor="haccp-production-product">Prodotto</label>
           <input
+            id="haccp-production-product"
             ref={productInputRef}
             type="text"
             value={product}
             onChange={e => setProduct(e.target.value)}
             list="haccp-production-products"
             placeholder="es. Salsa porcini"
-            className="w-full px-2 py-1.5 text-sm rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)]"
+            className={field}
           />
           <datalist id="haccp-production-products">
             {HACCP_PRODUCTION_PRODUCT_HINTS.map(h => <option key={h} value={h} />)}
           </datalist>
         </div>
         <div className="col-span-6 sm:col-span-2">
-          <label className="block text-[10px] uppercase tracking-wide text-[var(--color-fg-subtle)] mb-1">Range temp.</label>
+          <label className={fieldLabel} htmlFor="haccp-production-range">Range temp.</label>
           <select
+            id="haccp-production-range"
             value={blastTempRange}
             onChange={e => setBlastTempRange(e.target.value)}
-            className="w-full px-2 py-1.5 text-sm rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)]"
+            className={dsSelect}
           >
             {HACCP_BLAST_TEMP_RANGES.map(r => <option key={r} value={r}>{r}</option>)}
           </select>
         </div>
         <div className="col-span-6 sm:col-span-2">
-          <label className="block text-[10px] uppercase tracking-wide text-[var(--color-fg-subtle)] mb-1">Durata</label>
+          <label className={fieldLabel} htmlFor="haccp-production-duration">Durata</label>
           <select
+            id="haccp-production-duration"
             value={blastDuration}
             onChange={e => setBlastDuration(e.target.value)}
-            className="w-full px-2 py-1.5 text-sm rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)]"
+            className={dsSelect}
           >
             {HACCP_BLAST_DURATIONS.map(d => <option key={d} value={d}>{d}</option>)}
           </select>
         </div>
         <div className="col-span-6 sm:col-span-2">
-          <label className="block text-[10px] uppercase tracking-wide text-[var(--color-fg-subtle)] mb-1">Lotto interno</label>
+          <label className={fieldLabel} htmlFor="haccp-production-lot">Lotto interno</label>
           <input
+            id="haccp-production-lot"
             type="text"
             value={internalLot}
             onChange={e => setInternalLot(e.target.value)}
-            className="w-full px-2 py-1.5 text-sm rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular"
+            className={`${field} tabular-nums`}
           />
         </div>
         <div className="col-span-6 sm:col-span-2">
           <button
             type="submit"
             disabled={!product.trim()}
-            className="w-full px-3 py-1.5 rounded-md text-sm font-medium bg-[var(--color-fg)] text-[var(--color-surface)] hover:opacity-90 disabled:opacity-50 inline-flex items-center justify-center gap-1"
+            className={`w-full ${dsButton.primary}`}
           >
-            <Plus className="h-3.5 w-3.5" />
+            <Plus className="h-4 w-4" aria-hidden />
             Aggiungi
           </button>
         </div>
@@ -960,42 +1043,42 @@ const ProductionSection: React.FC<ProductionSectionProps> = ({ rows, onAdd, onDe
             value={note}
             onChange={e => setNote(e.target.value)}
             placeholder="Note (opzionale)"
-            className="w-full px-2 py-1.5 text-sm rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)]"
+            aria-label="Note produzione"
+            className={field}
           />
         </div>
       </form>
 
       {rows.length === 0 ? (
-        <div className="text-[12px] text-[var(--color-fg-subtle)] py-3 text-center">
-          Nessuna registrazione per oggi.
-        </div>
+        <div className={emptyNote}>Nessuna registrazione per oggi.</div>
       ) : (
-        <ul className="divide-y divide-[var(--color-line)]">
+        <ul className={rowList}>
           {rows.map(r => (
-            <li key={r.id} className="grid grid-cols-12 gap-2 items-center py-2 text-sm">
-              <div className="col-span-12 sm:col-span-4 font-medium text-[var(--color-fg)] truncate">
+            <li key={r.id} className={row}>
+              <div className="col-span-12 min-w-0 truncate text-[15px] font-medium text-[var(--ds-text-primary)] sm:col-span-4">
                 {r.product}
                 {r.internalLot && (
-                  <span className="ml-1 text-[11px] text-[var(--color-fg-subtle)] tabular">· lotto {r.internalLot}</span>
+                  <span className="ml-1.5 text-[13px] tabular-nums text-[var(--ds-text-muted)]">· lotto {r.internalLot}</span>
                 )}
               </div>
-              <div className="col-span-4 sm:col-span-2 tabular text-[var(--color-fg-muted)]">
+              <div className="col-span-4 text-[15px] tabular-nums text-[var(--ds-text-secondary)] sm:col-span-2">
                 {r.blastTempRange || '—'}
               </div>
-              <div className="col-span-4 sm:col-span-2 tabular text-[var(--color-fg-muted)]">
+              <div className="col-span-4 text-[15px] tabular-nums text-[var(--ds-text-secondary)] sm:col-span-2">
                 {r.blastDuration || '—'}
               </div>
-              <div className="col-span-4 sm:col-span-3 text-[12px] text-[var(--color-fg-subtle)] truncate">
+              <div className="col-span-4 truncate text-[14px] text-[var(--ds-text-muted)] sm:col-span-3">
                 {r.note || ''}
               </div>
-              <div className="col-span-12 sm:col-span-1 text-right">
+              <div className="col-span-12 text-right sm:col-span-1">
                 <button
                   type="button"
                   onClick={() => onDelete(r.id)}
-                  className="p-1 rounded text-[var(--color-fg-subtle)] hover:text-rose-600"
+                  className={deleteButton}
                   title="Elimina"
+                  aria-label={`Elimina ${r.product}`}
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
+                  <Trash2 className="h-4 w-4" />
                 </button>
               </div>
             </li>

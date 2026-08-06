@@ -1949,7 +1949,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             <select
               value={newItemCategory}
               onChange={e => setNewItemCategory(e.target.value as ShoppingCategory)}
-              className="flex-shrink-0 h-11 px-3 rounded-full bg-[var(--ds-surface-row)] text-[14px] font-medium text-[var(--ds-text-secondary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              // ds-select disegna la nostra freccia e le riserva lo spazio:
+              // quella nativa restava incollata al bordo della pillola.
+              className="flex-shrink-0 h-11 pl-3 pr-0 rounded-full bg-[var(--ds-surface-row)] text-[14px] font-medium text-[var(--ds-text-secondary)] cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ds-select ds-select-sm"
               aria-label="Categoria"
             >
               <option value="CUCINA">Cucina</option>
@@ -2085,7 +2087,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               {groups.length === 0 ? (
                 <p className="text-[14px] text-[var(--ds-text-muted)] py-2">Nessuno in turno</p>
               ) : (
-                <div className="flex flex-col gap-2">
+                // Sotto lg i due servizi si impilano e una brigata da diciotto
+                // spingeva il resto della dashboard fuori schermo. Il tetto sta
+                // sul singolo servizio, non sulla card: con il filtro su
+                // "Tutti" le intestazioni di Pranzo e Cena restano entrambe
+                // visibili e scorre solo l'elenco sotto. Sopra lg vanno
+                // affiancati e ci stanno, quindi il tetto sparisce.
+                <div className="flex flex-col gap-2 max-h-[340px] lg:max-h-none overflow-y-auto scrollbar-hide -mx-1 px-1">
                   {groups.map(g => (
                     <div key={g.label} className="flex items-start gap-3 min-w-0">
                       <span className="text-[13px] text-[var(--ds-text-muted)] w-20 flex-shrink-0 pt-2">

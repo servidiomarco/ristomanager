@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronLeft, ChevronDown, ChefHat, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -20,7 +20,7 @@ import { ShoppingListPage } from './components/ShoppingListPage';
 import { HaccpPage } from './components/HaccpPage';
 import ConversazioniPage from './components/ConversazioniPage';
 import InboxPage from './components/InboxPage';
-import { SegmentedControl, useMediaQuery } from './components/ds';
+import { SegmentedControl, StatusPill, useMediaQuery, dsSelect } from './components/ds';
 import { NotificationsPanel } from './components/NotificationsPanel';
 import EmailPage from './components/EmailPage';
 import NotifichePage from './components/NotifichePage';
@@ -172,6 +172,89 @@ const SIDEBAR_COLLAPSED_KEY = 'ristocrm_sidebar_collapsed';
 // Viste del modulo Sala & Cucina: oltre al permesso serve il modulo attivo
 // (flag table_orders_enabled) — spento, le voci spariscono dalla sidebar.
 const SALA_VIEWS: ViewState[] = [ViewState.COMANDE, ViewState.CUCINA, ViewState.PASSE];
+
+/* ── Impostazioni ─────────────────────────────────────────────────────────
+   Tre forme, ripetute quindici volte in quella pagina: un'etichetta di
+   sezione, una card che si apre, una card che porta altrove. Erano scritte a
+   mano ogni volta, con la stessa manciata di classi legacy ricopiate — e ogni
+   copia era un posto in cui la pagina poteva divergere da sola.
+
+   Le etichette restano in tondo: erano in maiuscolo con 0.08em di spaziatura,
+   che a 11px cancella la forma della parola senza renderla più leggibile
+   (§5.2). Peso e colore portano la gerarchia. */
+const SettingsSection: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
+  <section className="mb-6">
+    <h3 className="mb-2 px-1 text-[13px] font-semibold text-[var(--ds-text-muted)]">{label}</h3>
+    {children}
+  </section>
+);
+
+/** L'icona quadrata a sinistra di ogni riga di impostazioni. */
+const SettingsIcon: React.FC<{
+  icon: React.ComponentType<{ className?: string }>;
+  tone?: 'neutral' | 'pending' | 'positive';
+}> = ({ icon: Icon, tone = 'neutral' }) => (
+  <span
+    className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[12px] ${
+      tone === 'pending' ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
+      : tone === 'positive' ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
+      : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
+    }`}
+  >
+    <Icon className="h-5 w-5" />
+  </span>
+);
+
+/** Una card che si apre in posto. Resta un <details>: l'apertura non è stato
+ *  applicativo e non deve passare per React. */
+const SettingsDisclosure: React.FC<{
+  icon: React.ComponentType<{ className?: string }>;
+  iconTone?: 'neutral' | 'pending' | 'positive';
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}> = ({ icon, iconTone, title, description, children }) => (
+  <details className="group overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+    {/* min-h 44px e nessun marcatore nativo: la riga intera è il bersaglio. */}
+    <summary className="flex min-h-[64px] cursor-pointer select-none list-none items-center justify-between gap-3 p-3 transition-colors hover:bg-[var(--ds-surface-row)] [&::-webkit-details-marker]:hidden">
+      <span className="flex min-w-0 items-center gap-3">
+        <SettingsIcon icon={icon} tone={iconTone} />
+        <span className="min-w-0">
+          <span className="block text-[15px] font-semibold text-[var(--ds-text-primary)]">{title}</span>
+          <span className="block text-[13px] leading-snug text-[var(--ds-text-muted)]">{description}</span>
+        </span>
+      </span>
+      <span
+        className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-transform group-open:rotate-180"
+        aria-hidden
+      >
+        <ChevronDown className="h-4 w-4" />
+      </span>
+    </summary>
+    <div className="border-t border-[var(--ds-border)] px-3 pb-4 pt-3 sm:px-4">{children}</div>
+  </details>
+);
+
+/** Una card che porta da un'altra parte: stessa anatomia, chevron a destra. */
+const SettingsNavCard: React.FC<{
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  description: string;
+  onClick: () => void;
+}> = ({ icon, title, description, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className="flex min-h-[64px] items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+  >
+    <SettingsIcon icon={icon} />
+    <span className="min-w-0 flex-1">
+      <span className="block text-[15px] font-semibold text-[var(--ds-text-primary)]">{title}</span>
+      <span className="block text-[13px] leading-snug text-[var(--ds-text-muted)]">{description}</span>
+    </span>
+    <ChevronRight className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
+  </button>
+);
 
 const App: React.FC = () => {
   const { user, isAuthenticated, isLoading: authLoading, logout, canAccessView, canManageUsers, hasPermission, getAccessibleViews, canViewLogs, updatePreferences } = useAuth();
@@ -1578,12 +1661,15 @@ const App: React.FC = () => {
     [
       { label: 'Spesa', Icon: ShoppingCart, show: canAccessView(ViewState.LISTA_DELLA_SPESA), run: () => { setView(ViewState.LISTA_DELLA_SPESA); setAutoOpenNewShoppingItem(true); } },
       { label: 'Attività', Icon: ListChecks, show: canAccessView(ViewState.ATTIVITA), run: () => { setView(ViewState.ATTIVITA); setAutoOpenNewAttivita(true); } },
+      // Prodotto sta con la spesa e le attività, non con le anagrafiche: è
+      // roba di magazzino, la si crea nella stessa mezz'ora in cui si segna
+      // cosa manca. In fondo all'elenco era l'unica voce di quel gruppo.
+      { label: 'Prodotto', Icon: Boxes, show: hasPermission('inventory:full'), run: () => { setView(ViewState.INVENTARIO); setAutoOpenNewProduct(true); } },
     ],
     [
       { label: 'Cliente', Icon: BookUser, show: hasPermission('customers:full'), run: () => { setView(ViewState.CLIENTI); setAutoOpenNewCustomer(true); } },
       { label: 'Dipendente', Icon: UsersRound, show: hasPermission('staff:full'), run: () => { setView(ViewState.STAFF); setAutoOpenNewStaff(true); } },
       { label: 'Utente', Icon: Users, show: canManageUsers(), run: () => { setView(ViewState.USERS); setAutoOpenNewUser(true); } },
-      { label: 'Prodotto', Icon: Boxes, show: hasPermission('inventory:full'), run: () => { setView(ViewState.INVENTARIO); setAutoOpenNewProduct(true); } },
     ],
   ];
   const visibleCreateClusters = createMenuClusters
@@ -1614,41 +1700,45 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* Sidebar — blends into page bg */}
+      {/* Sidebar — blends into page bg.
+          mr-0, non mr-3: quei 12px erano la distanza di sicurezza della
+          vecchia linguetta, che sporgeva nel corridoio e con margine zero
+          finiva per toccare la card del contenuto. Ora nel corridoio non vive
+          più niente, e sommati al m-4 dell'header di main facevano 28px di
+          stacco fra le due card contro i 16px dei margini esterni: il
+          contenuto risultava spinto a destra. Con mr-0 il corridoio torna a
+          16px ed è uguale a tutti gli altri lati. */}
       <aside
-        className={`hidden lg:flex ${sidebarCollapsed ? 'w-[76px]' : 'w-[250px]'} m-4 mr-3 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] flex-col transition-[width] duration-200 z-20 relative`}
+        className={`hidden lg:flex ${sidebarCollapsed ? 'w-[76px]' : 'w-[250px]'} m-4 mr-0 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] flex-col transition-[width] duration-200 z-20 relative`}
         aria-label="Navigazione principale"
       >
-        <div className={`h-16 flex items-center ${sidebarCollapsed ? 'justify-center' : 'px-4'}`}>
-          <div className="flex items-center">
-            <div className="bg-[var(--ds-action-bg)] h-10 w-10 rounded-[14px] inline-flex items-center justify-center">
+        {/* Intestazione — logo e comando apri/chiudi sulla stessa riga, come
+            fanno gli editor a pannelli: il toggle sta dove sta il marchio,
+            non su una linguetta da cercare sul bordo. Aperta è in coda alla
+            riga (ml-auto); chiusa i 76px non reggono due elementi affiancati,
+            così scende sotto il logo e la testata diventa due righe. L'icona
+            non cambia fra i due stati — è sempre il pannello, non una freccia:
+            resta lo stesso bersaglio nello stesso punto, e lo stato lo dicono
+            aria-expanded e il title. */}
+        <div className={`flex ${sidebarCollapsed ? 'flex-col items-center gap-1 pt-4 pb-2' : 'h-16 items-center px-4'}`}>
+          <div className="flex items-center min-w-0">
+            <div className="bg-[var(--ds-action-bg)] h-10 w-10 rounded-[14px] inline-flex items-center justify-center flex-shrink-0">
                <ChefHat className="text-[var(--ds-action-fg)] h-5 w-5" />
             </div>
             {!sidebarCollapsed && <span className="ml-3 font-semibold text-[19px] text-[var(--ds-text-primary)] tracking-[-0.015em]">RistoCRM</span>}
           </div>
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            aria-expanded={!sidebarCollapsed}
+            aria-controls="sidebar-nav"
+            title={sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
+            aria-label={sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
+            className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[12px] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${sidebarCollapsed ? '' : 'ml-auto'}`}
+          >
+            <PanelLeft size={18} />
+          </button>
         </div>
-
-        {/* Linguetta — unico comando per aprire e chiudere. Vive sul bordo
-            destro dell'aside, quindi viaggia insieme al bordo quando la
-            larghezza cambia: nessun secondo pulsante da cercare altrove, e
-            l'unica cosa che cambia fra i due stati è il verso della freccia.
-            Sporge di 18px dentro il corridoio da 28px fra sidebar e contenuto
-            (mr-3 qui + m-4 sull'header di main): resta staccata dalla card,
-            che con mr-0 e una linguetta da 22px finiva per toccare. Quei 18px
-            da soli sarebbero un bersaglio troppo stretto, così lo
-            pseudo-elemento ::before allarga l'area cliccabile a 44px senza
-            gonfiare la forma disegnata. */}
-        <button
-          type="button"
-          onClick={toggleSidebar}
-          aria-expanded={!sidebarCollapsed}
-          aria-controls="sidebar-nav"
-          title={sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
-          aria-label={sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
-          className="absolute top-1/2 -translate-y-1/2 -right-[18px] h-14 w-[18px] flex items-center justify-center rounded-r-[14px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-canvas)] before:content-[''] before:absolute before:inset-y-0 before:-left-[20px] before:-right-[6px]"
-        >
-          {sidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
-        </button>
 
         <nav id="sidebar-nav" ref={navFadeRef} className="flex-1 min-h-0 overflow-y-auto scroll-fade-y scrollbar-hover py-2 space-y-0.5 px-3">
           {NAV_ITEMS.filter(item => item.group === null && canSeeNavItem(item)).map(item => (
@@ -2299,17 +2389,15 @@ const App: React.FC = () => {
 
         {view === ViewState.SETTINGS && (
           <CardErrorBoundary label="Impostazioni">
-          <div className="p-6 lg:p-10 max-w-4xl mx-auto">
-            <div className="mb-2" />
+          <div className="mx-auto max-w-4xl p-4 sm:p-6 lg:p-8">
 
             {/* Profile / Personal preferences */}
-            <div className="mb-8">
-              <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Profilo</h3>
-              <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-4">
-                <label htmlFor="preferred-landing" className="block text-[14px] font-medium text-[var(--color-fg)] mb-1">
+            <SettingsSection label="Profilo">
+              <div className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+                <label htmlFor="preferred-landing" className="mb-1 block text-[15px] font-semibold text-[var(--ds-text-primary)]">
                   Pagina di partenza
                 </label>
-                <p className="text-[13px] text-[var(--color-fg-muted)] mb-3">
+                <p className="mb-3 text-[13px] text-[var(--ds-text-muted)]">
                   La sezione che si apre dopo il login.
                 </p>
                 <select
@@ -2324,7 +2412,7 @@ const App: React.FC = () => {
                       addToast(err?.message || 'Errore aggiornamento preferenze', 'error');
                     }
                   }}
-                  className="w-full sm:max-w-sm rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-[14px] text-[var(--color-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]"
+                  className={`${dsSelect} sm:max-w-sm`}
                 >
                   <option value="">Predefinita (prima sezione disponibile)</option>
                   {getAccessibleViews().map(v => {
@@ -2358,217 +2446,132 @@ const App: React.FC = () => {
                   })}
                 </select>
               </div>
-            </div>
+            </SettingsSection>
 
             {/* Opening hours & closures — collapsible to keep the page compact */}
-            <div className="mb-8">
-              <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Orari di apertura</h3>
-              <details className="group bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden">
-                <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--color-surface-2)] transition-colors">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center text-[var(--color-fg)] flex-shrink-0">
-                      <Clock className="w-5 h-5" />
-                    </div>
-                    <div className="min-w-0">
-                      <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Orari settimanali e chiusure</h4>
-                      <p className="text-[13px] text-[var(--color-fg-muted)]">Gestisci servizi (pranzo/cena), giorni di chiusura e date speciali.</p>
-                    </div>
-                  </div>
-                  <ChevronDown className="w-5 h-5 text-[var(--color-fg-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
-                </summary>
-                <div className="px-4 pb-4 pt-1 border-t border-[var(--color-line)]">
-                  <OpeningHoursManager showToast={addToast} />
-                </div>
-              </details>
-            </div>
+            <SettingsSection label="Orari di apertura">
+              <SettingsDisclosure
+                icon={Clock}
+                title="Orari settimanali e chiusure"
+                description="Gestisci servizi (pranzo/cena), giorni di chiusura e date speciali."
+              >
+                <OpeningHoursManager showToast={addToast} />
+              </SettingsDisclosure>
+            </SettingsSection>
 
             {/* Chiusure programmate — per-shift closures of rooms and tables (future occurrences aggregated) */}
-            <div className="mb-8">
-              <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Chiusure programmate</h3>
-              <details className="group bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden">
-                <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--color-surface-2)] transition-colors">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center text-[var(--color-fg)] flex-shrink-0">
-                      <DoorClosed className="w-5 h-5" />
-                    </div>
-                    <div className="min-w-0">
-                      <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Sale chiuse e tavoli nascosti</h4>
-                      <p className="text-[13px] text-[var(--color-fg-muted)]">Programma o rimuovi chiusure per turno di sale e tavoli.</p>
-                    </div>
-                  </div>
-                  <ChevronDown className="w-5 h-5 text-[var(--color-fg-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
-                </summary>
-                <div className="px-4 pb-4 pt-1 border-t border-[var(--color-line)]">
-                  <ScheduledClosuresManager showToast={addToast} />
-                </div>
-              </details>
-            </div>
+            <SettingsSection label="Chiusure programmate">
+              <SettingsDisclosure
+                icon={DoorClosed}
+                title="Sale chiuse e tavoli nascosti"
+                description="Programma o rimuovi chiusure per turno di sale e tavoli."
+              >
+                <ScheduledClosuresManager showToast={addToast} />
+              </SettingsDisclosure>
+            </SettingsSection>
 
             {/* Promemoria — notifiche automatiche configurabili (una tantum,
                 giornaliere, settimanali, mensili). Include per default il
                 "Promemoria pane" che ora è modificabile ed eliminabile
                 come qualsiasi altro. */}
-            <div className="mb-8">
-              <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Promemoria</h3>
+            <SettingsSection label="Promemoria">
               <RemindersManager showToast={addToast} />
-            </div>
+            </SettingsSection>
 
             {/* Canali di prenotazione — collapsible per-channel cards: enable/disable
                 toggle in the header, channel-specific settings inside the body. */}
-            <div className="mb-8">
-              <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Canali di prenotazione</h3>
+            <SettingsSection label="Canali di prenotazione">
               <FeatureTogglesManager showToast={addToast} />
-            </div>
+            </SettingsSection>
 
             {/* Opzioni prenotazioni — customizable chip lists (note rapide + intolleranze) surfaced in the reservation modal */}
-            <div className="mb-8">
-              <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Opzioni prenotazioni</h3>
+            <SettingsSection label="Opzioni prenotazioni">
               <div className="space-y-3">
-                <details className="group bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden">
-                  <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--color-surface-2)] transition-colors">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center text-[var(--color-fg)] flex-shrink-0">
-                        <StickyNote className="w-5 h-5" />
-                      </div>
-                      <div className="min-w-0">
-                        <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Note rapide prenotazione</h4>
-                        <p className="text-[13px] text-[var(--color-fg-muted)]">Chip suggeriti nel modal di prenotazione. Ogni nota può avere un'icona che appare nella card. Trascina per riordinare.</p>
-                      </div>
-                    </div>
-                    <ChevronDown className="w-5 h-5 text-[var(--color-fg-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
-                  </summary>
-                  <div className="px-4 pb-4 pt-1 border-t border-[var(--color-line)]">
-                    <ReservationNotesManager showToast={addToast} />
-                  </div>
-                </details>
+                <SettingsDisclosure
+                  icon={StickyNote}
+                  title="Note rapide prenotazione"
+                  description="Chip suggeriti nel modal di prenotazione. Ogni nota può avere un'icona che appare nella card. Trascina per riordinare."
+                >
+                  <ReservationNotesManager showToast={addToast} />
+                </SettingsDisclosure>
 
-                <details className="group bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden">
-                  <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--color-surface-2)] transition-colors">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center text-amber-600 dark:text-amber-400 flex-shrink-0">
-                        <AlertTriangle className="w-5 h-5" />
-                      </div>
-                      <div className="min-w-0">
-                        <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Intolleranze</h4>
-                        <p className="text-[13px] text-[var(--color-fg-muted)]">Chip suggeriti nella sezione Intolleranze del modal prenotazione. Trascina per riordinare.</p>
-                      </div>
-                    </div>
-                    <ChevronDown className="w-5 h-5 text-[var(--color-fg-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
-                  </summary>
-                  <div className="px-4 pb-4 pt-1 border-t border-[var(--color-line)]">
-                    <ReservationAllergensManager showToast={addToast} />
-                  </div>
-                </details>
+                <SettingsDisclosure
+                  icon={AlertTriangle}
+                  iconTone="pending"
+                  title="Intolleranze"
+                  description="Chip suggeriti nella sezione Intolleranze del modal prenotazione. Trascina per riordinare."
+                >
+                  <ReservationAllergensManager showToast={addToast} />
+                </SettingsDisclosure>
 
-                <details className="group bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden">
-                  <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--color-surface-2)] transition-colors">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center text-emerald-600 dark:text-emerald-400 flex-shrink-0">
-                        <CreditCard className="w-5 h-5" />
-                      </div>
-                      <div className="min-w-0">
-                        <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Caparra automatica</h4>
-                        <p className="text-[13px] text-[var(--color-fg-muted)]">Per le prenotazioni web sopra una certa soglia di coperti invia un link Revolut per la caparra (€10/persona) via SMS.</p>
-                      </div>
-                    </div>
-                    <ChevronDown className="w-5 h-5 text-[var(--color-fg-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
-                  </summary>
-                  <div className="px-4 pb-4 pt-1 border-t border-[var(--color-line)]">
-                    <AutoDepositManager showToast={addToast} />
-                  </div>
-                </details>
+                <SettingsDisclosure
+                  icon={CreditCard}
+                  iconTone="positive"
+                  title="Caparra automatica"
+                  description="Per le prenotazioni web sopra una certa soglia di coperti invia un link Revolut per la caparra (€10/persona) via SMS."
+                >
+                  <AutoDepositManager showToast={addToast} />
+                </SettingsDisclosure>
               </div>
-            </div>
+            </SettingsSection>
 
             {/* Admin Section */}
             {canManageUsers() && (
-              <div className="mb-8">
-                <h3 className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-3">Amministrazione</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <button
+              <SettingsSection label="Amministrazione">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <SettingsNavCard
+                    icon={Users}
+                    title="Gestione utenti"
+                    description="Crea, modifica, elimina utenti"
                     onClick={() => setView(ViewState.USERS)}
-                    className="flex items-center gap-3 p-4 bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] hover:border-[var(--color-fg)] transition-colors text-left"
-                  >
-                    <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center">
-                      <Users className="w-5 h-5 text-[var(--color-fg)]" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Gestione Utenti</h4>
-                      <p className="text-[13px] text-[var(--color-fg-muted)]">Crea, modifica, elimina utenti</p>
-                    </div>
-                    <ChevronRight className="h-4 w-4 text-[var(--color-fg-subtle)]" />
-                  </button>
-
-                  <button
+                  />
+                  <SettingsNavCard
+                    icon={ShieldCheck}
+                    title="Permessi ruoli"
+                    description="Configura i permessi per ogni ruolo"
                     onClick={() => setShowRolePermissions(true)}
-                    className="flex items-center gap-3 p-4 bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] hover:border-[var(--color-fg)] transition-colors text-left"
-                  >
-                    <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center">
-                      <svg className="w-5 h-5 text-[var(--color-fg)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                      </svg>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Permessi Ruoli</h4>
-                      <p className="text-[13px] text-[var(--color-fg-muted)]">Configura i permessi per ogni ruolo</p>
-                    </div>
-                    <ChevronRight className="h-4 w-4 text-[var(--color-fg-subtle)]" />
-                  </button>
+                  />
                 </div>
-              </div>
+              </SettingsSection>
             )}
 
             {/* Monitoring Section */}
             {canViewLogs() && (
-              <div className="mb-8">
-                <h3 className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-3">Monitoraggio</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <button
+              <SettingsSection label="Monitoraggio">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <SettingsNavCard
+                    icon={FileText}
+                    title="Log attività"
+                    description="Operazioni degli utenti"
                     onClick={() => setShowActivityLogs(true)}
-                    className="flex items-center gap-3 p-4 bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] hover:border-[var(--color-fg)] transition-colors text-left"
-                  >
-                    <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center">
-                      <FileText className="w-5 h-5 text-[var(--color-fg)]" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Log Attività</h4>
-                      <p className="text-[13px] text-[var(--color-fg-muted)]">Operazioni degli utenti</p>
-                    </div>
-                    <ChevronRight className="h-4 w-4 text-[var(--color-fg-subtle)]" />
-                  </button>
+                  />
                 </div>
-              </div>
+              </SettingsSection>
             )}
 
             <PushNotificationsCard />
 
             {/* Legale — tenant identity + generated legal documents (SaaS-ready) */}
-            <div className="mb-8">
-              <h3 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)] mb-3">Legale</h3>
+            <SettingsSection label="Legale">
               <LegalSettingsCard showToast={addToast} />
-            </div>
+            </SettingsSection>
 
             {/* Integrations */}
-            <div className="mb-8">
-              <h3 className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-3">Integrazioni</h3>
+            <SettingsSection label="Integrazioni">
               <div className="space-y-3">
-                <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center">
-                        <svg className="w-5 h-5 text-[var(--color-fg)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-                        </svg>
-                      </div>
-                      <div>
-                        <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Stripe Connect</h4>
-                        <p className="text-[13px] text-[var(--color-fg-muted)]">Gateway di pagamento</p>
+                <div className="rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
+                  <div className="flex min-h-[40px] items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <SettingsIcon icon={CreditCard} />
+                      <div className="min-w-0">
+                        <h4 className="text-[15px] font-semibold text-[var(--ds-text-primary)]">Stripe Connect</h4>
+                        <p className="text-[13px] text-[var(--ds-text-muted)]">Gateway di pagamento</p>
                       </div>
                     </div>
-                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30">
-                      <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></div>
-                      Attivo (Simulato)
-                    </div>
+                    <StatusPill tone="positive" className="flex-shrink-0">
+                      <span className="h-1.5 w-1.5 rounded-full bg-[var(--ds-seated-solid)]" aria-hidden />
+                      Attivo (simulato)
+                    </StatusPill>
                   </div>
                 </div>
                 <CardErrorBoundary label="Revolut">
@@ -2590,7 +2593,7 @@ const App: React.FC = () => {
                   <ImapIntegrationCard showToast={addToast} />
                 </CardErrorBoundary>
               </div>
-            </div>
+            </SettingsSection>
           </div>
           </CardErrorBoundary>
         )}

@@ -260,6 +260,20 @@ export function SegmentedControl<T extends string>({
 /* ── Buttons ──────────────────────────────────────────────────────────────
    Three weights, one shape. Anything that isn't one of these should probably
    be one of these. */
+/* ── Step arrows ──────────────────────────────────────────────────────────
+   The two icon-only controls that walk a stepped form one step at a time, back
+   on the far left of the footer and forward past the save button.
+
+   A recessed fill, not the white-on-canvas icon button: a modal footer sits on
+   the panel's own white, so a white button with a shadow has nothing to lift
+   off. Same tone as `quiet`, geometry of ModalShell's close button, 44px.
+
+   They are deliberately unlabelled. "Indietro"/"Avanti" read as the way through
+   the form, and in every stepped form here the steps do not gate each other —
+   the stepper in the subheader is the navigation, these just nudge it. */
+export const dsStepArrow =
+  'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+
 export const dsButton = {
   primary:
     'inline-flex items-center justify-center gap-2 h-11 px-5 rounded-full text-[15px] font-semibold bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]',
@@ -267,4 +281,11 @@ export const dsButton = {
     'inline-flex items-center justify-center gap-2 h-11 px-5 rounded-full text-[15px] font-medium bg-[var(--ds-surface)] text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] hover:bg-[var(--ds-surface-row)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]',
   quiet:
     'inline-flex items-center justify-center gap-2 h-11 px-5 rounded-full text-[15px] font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]',
+  /* The confirm button of a destructive dialog, and nowhere else. Everywhere
+     else a destructive action stays quiet — a pale-tinted icon button beside a
+     solid primary — because visual weight belongs to what someone wants, not to
+     what they might regret. Here the intent is already committed to, which is
+     the one place `critical` may carry full weight (§7.5, ConfirmDialog). */
+  critical:
+    'inline-flex items-center justify-center gap-2 h-11 px-5 rounded-full text-[15px] font-semibold bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]',
 } as const;

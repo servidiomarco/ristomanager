@@ -215,7 +215,7 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
 
     if (loading) {
         return (
-            <div className="flex items-center gap-2 text-[13px] text-[var(--color-fg-muted)] py-4">
+            <div className="flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)] py-4">
                 <CookingPotLoader label="Caricamento orari…" size={40} />
             </div>
         );
@@ -228,11 +228,11 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
         <div className="space-y-6">
             {/* Opening hours grid */}
             <div>
-                <h4 className="text-[12px] font-semibold text-[var(--color-fg)] mb-2 flex items-center gap-1.5">
+                <h4 className="text-[12px] font-semibold text-[var(--ds-text-primary)] mb-2 flex items-center gap-1.5">
                     <Clock className="h-3.5 w-3.5" />
                     Orari settimanali
                 </h4>
-                <p className="text-[12px] text-[var(--color-fg-muted)] mb-3">
+                <p className="text-[12px] text-[var(--ds-text-muted)] mb-3">
                     Imposta apertura e chiusura per ogni turno. Lascia vuoti i campi per disattivare un turno.
                     Il passo degli slot determina la durata fra un orario prenotabile e il successivo.
                 </p>
@@ -245,10 +245,10 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                         return (
                             <div
                                 key={weekday}
-                                className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-3"
+                                className="bg-[var(--ds-surface)] rounded-lg border border-[var(--ds-border)] p-3"
                             >
                                 <div className="flex items-center justify-between mb-2">
-                                    <span className="text-[13px] font-semibold text-[var(--color-fg)]">
+                                    <span className="text-[13px] font-semibold text-[var(--ds-text-primary)]">
                                         {WEEKDAY_LABELS[weekday]}
                                     </span>
                                     {canEdit && (
@@ -256,7 +256,7 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                             type="button"
                                             disabled={!isDirty || saving}
                                             onClick={() => handleSave(weekday)}
-                                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12px] font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                                         >
                                             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
                                             Salva
@@ -264,8 +264,8 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                     )}
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                    <div className="border border-[var(--color-line)] rounded-md p-2 bg-amber-50/40 dark:bg-amber-500/5">
-                                        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300 mb-1.5">
+                                    <div className="border border-[var(--ds-border)] rounded-md p-2 bg-[var(--ds-pending-tint)]">
+                                        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[var(--ds-pending-text)] mb-1.5">
                                             <Sun className="h-3 w-3" /> Pranzo
                                         </div>
                                         <div className="flex items-center gap-1.5">
@@ -275,21 +275,21 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                                 disabled={!canEdit}
                                                 value={d.lunch_open ?? ''}
                                                 onChange={e => handleField(weekday, 'lunch_open', e.target.value)}
-                                                className="w-full rounded border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1 text-[13px] text-[var(--color-fg)]"
+                                                className="w-full rounded border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1 text-[13px] text-[var(--ds-text-primary)]"
                                             />
-                                            <span className="text-[12px] text-[var(--color-fg-muted)]">–</span>
+                                            <span className="text-[12px] text-[var(--ds-text-muted)]">–</span>
                                             <input
                                                 type="time"
                                                 step={60}
                                                 disabled={!canEdit}
                                                 value={d.lunch_close ?? ''}
                                                 onChange={e => handleField(weekday, 'lunch_close', e.target.value)}
-                                                className="w-full rounded border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1 text-[13px] text-[var(--color-fg)]"
+                                                className="w-full rounded border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1 text-[13px] text-[var(--ds-text-primary)]"
                                             />
                                         </div>
                                     </div>
-                                    <div className="border border-[var(--color-line)] rounded-md p-2 bg-indigo-50/40 dark:bg-indigo-500/5">
-                                        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 mb-1.5">
+                                    <div className="border border-[var(--ds-border)] rounded-md p-2 bg-[var(--ds-arriving-tint)]">
+                                        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[var(--ds-arriving-text)] mb-1.5">
                                             <Moon className="h-3 w-3" /> Cena
                                         </div>
                                         <div className="flex items-center gap-1.5">
@@ -299,22 +299,22 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                                 disabled={!canEdit}
                                                 value={d.dinner_open ?? ''}
                                                 onChange={e => handleField(weekday, 'dinner_open', e.target.value)}
-                                                className="w-full rounded border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1 text-[13px] text-[var(--color-fg)]"
+                                                className="w-full rounded border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1 text-[13px] text-[var(--ds-text-primary)]"
                                             />
-                                            <span className="text-[12px] text-[var(--color-fg-muted)]">–</span>
+                                            <span className="text-[12px] text-[var(--ds-text-muted)]">–</span>
                                             <input
                                                 type="time"
                                                 step={60}
                                                 disabled={!canEdit}
                                                 value={d.dinner_close ?? ''}
                                                 onChange={e => handleField(weekday, 'dinner_close', e.target.value)}
-                                                className="w-full rounded border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1 text-[13px] text-[var(--color-fg)]"
+                                                className="w-full rounded border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1 text-[13px] text-[var(--ds-text-primary)]"
                                             />
                                         </div>
                                     </div>
                                 </div>
                                 <div className="mt-2 flex items-center gap-2">
-                                    <label className="text-[12px] text-[var(--color-fg-muted)]">Passo slot (min)</label>
+                                    <label className="text-[12px] text-[var(--ds-text-muted)]">Passo slot (min)</label>
                                     <input
                                         type="number"
                                         min={5}
@@ -323,7 +323,7 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                         disabled={!canEdit}
                                         value={d.slot_minutes}
                                         onChange={e => handleField(weekday, 'slot_minutes', e.target.value)}
-                                        className="w-20 rounded border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1 text-[13px] text-[var(--color-fg)]"
+                                        className="w-20 rounded border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1 text-[13px] text-[var(--ds-text-primary)]"
                                     />
                                 </div>
                                 {(() => {
@@ -336,9 +336,9 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                         const enabled = !disabled;
                                         const base = 'text-[11px] font-medium rounded px-1.5 py-0.5 border transition-colors';
                                         const on = shift === Shift.LUNCH
-                                            ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-500/20 dark:text-amber-200 dark:border-amber-500/40'
-                                            : 'bg-indigo-100 text-indigo-800 border-indigo-300 dark:bg-indigo-500/20 dark:text-indigo-200 dark:border-indigo-500/40';
-                                        const off = 'bg-transparent text-[var(--color-fg-muted)] border-[var(--color-line)] line-through opacity-60';
+                                            ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] border-[var(--ds-pending-solid)]'
+                                            : 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] border-[var(--ds-border-strong)]';
+                                        const off = 'bg-transparent text-[var(--ds-text-muted)] border-[var(--ds-border)] line-through opacity-60';
                                         return (
                                             <button
                                                 key={`${shift}-${slot}`}
@@ -353,22 +353,22 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                         );
                                     };
                                     return (
-                                        <div className="mt-2 pt-2 border-t border-[var(--color-line)]">
+                                        <div className="mt-2 pt-2 border-t border-[var(--ds-border)]">
                                             <div className="flex items-center justify-between mb-1.5">
-                                                <span className="text-[11px] font-semibold text-[var(--color-fg-muted)] uppercase tracking-wide">
+                                                <span className="text-[12px] font-semibold text-[var(--ds-text-muted)] tracking-wide">
                                                     Slot prenotabili
                                                 </span>
-                                                <span className="text-[10px] text-[var(--color-fg-muted)]">
+                                                <span className="text-[10px] text-[var(--ds-text-muted)]">
                                                     Clicca per attivare/disattivare
                                                 </span>
                                             </div>
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                                 <div>
-                                                    <div className="flex items-center gap-1 text-[10px] font-semibold text-amber-700 dark:text-amber-300 mb-1 uppercase tracking-wide">
+                                                    <div className="flex items-center gap-1 text-[12px] font-semibold text-[var(--ds-pending-text)] mb-1 tracking-wide">
                                                         <Sun className="h-2.5 w-2.5" /> Pranzo
                                                     </div>
                                                     {lunchSlots.length === 0 ? (
-                                                        <p className="text-[11px] text-[var(--color-fg-muted)] italic">Turno non attivo</p>
+                                                        <p className="text-[11px] text-[var(--ds-text-muted)] italic">Turno non attivo</p>
                                                     ) : (
                                                         <div className="flex flex-wrap gap-1">
                                                             {lunchSlots.map(s => renderChip(s, Shift.LUNCH, disabledLunch.has(s)))}
@@ -376,11 +376,11 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                                     )}
                                                 </div>
                                                 <div>
-                                                    <div className="flex items-center gap-1 text-[10px] font-semibold text-indigo-700 dark:text-indigo-300 mb-1 uppercase tracking-wide">
+                                                    <div className="flex items-center gap-1 text-[12px] font-semibold text-[var(--ds-arriving-text)] mb-1 tracking-wide">
                                                         <Moon className="h-2.5 w-2.5" /> Cena
                                                     </div>
                                                     {dinnerSlots.length === 0 ? (
-                                                        <p className="text-[11px] text-[var(--color-fg-muted)] italic">Turno non attivo</p>
+                                                        <p className="text-[11px] text-[var(--ds-text-muted)] italic">Turno non attivo</p>
                                                     ) : (
                                                         <div className="flex flex-wrap gap-1">
                                                             {dinnerSlots.map(s => renderChip(s, Shift.DINNER, disabledDinner.has(s)))}
@@ -399,32 +399,32 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
 
             {/* Closures */}
             <div>
-                <h4 className="text-[12px] font-semibold text-[var(--color-fg)] mb-2 flex items-center gap-1.5">
+                <h4 className="text-[12px] font-semibold text-[var(--ds-text-primary)] mb-2 flex items-center gap-1.5">
                     <CalendarOff className="h-3.5 w-3.5" />
                     Chiusure straordinarie
                 </h4>
-                <p className="text-[12px] text-[var(--color-fg-muted)] mb-3">
+                <p className="text-[12px] text-[var(--ds-text-muted)] mb-3">
                     Date specifiche in cui il ristorante è chiuso (es. festività, ferie). Puoi chiudere l'intera giornata o solo un turno.
                 </p>
 
                 {canEdit && (
-                    <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] p-3 mb-3">
+                    <div className="bg-[var(--ds-surface)] rounded-lg border border-[var(--ds-border)] p-3 mb-3">
                         <div className="grid grid-cols-1 sm:grid-cols-[1fr,1fr,2fr,auto] gap-2 items-end">
                             <div>
-                                <label className="block text-[11px] font-medium text-[var(--color-fg-muted)] mb-1">Data</label>
+                                <label className="block text-[11px] font-medium text-[var(--ds-text-muted)] mb-1">Data</label>
                                 <input
                                     type="date"
                                     value={newDate}
                                     onChange={e => setNewDate(e.target.value)}
-                                    className="w-full rounded border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 text-[13px] text-[var(--color-fg)]"
+                                    className="w-full rounded border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 text-[13px] text-[var(--ds-text-primary)]"
                                 />
                             </div>
                             <div>
-                                <label className="block text-[11px] font-medium text-[var(--color-fg-muted)] mb-1">Turno</label>
+                                <label className="block text-[11px] font-medium text-[var(--ds-text-muted)] mb-1">Turno</label>
                                 <select
                                     value={newShift}
                                     onChange={e => setNewShift(e.target.value as any)}
-                                    className="w-full rounded border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 text-[13px] text-[var(--color-fg)]"
+                                    className="w-full rounded border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 text-[13px] text-[var(--ds-text-primary)]"
                                 >
                                     <option value="ALL">Tutto il giorno</option>
                                     <option value={Shift.LUNCH}>Solo pranzo</option>
@@ -432,20 +432,20 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-[11px] font-medium text-[var(--color-fg-muted)] mb-1">Motivo (opzionale)</label>
+                                <label className="block text-[11px] font-medium text-[var(--ds-text-muted)] mb-1">Motivo (opzionale)</label>
                                 <input
                                     type="text"
                                     value={newReason}
                                     onChange={e => setNewReason(e.target.value)}
                                     placeholder="es. Ferragosto, ferie"
-                                    className="w-full rounded border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 text-[13px] text-[var(--color-fg)]"
+                                    className="w-full rounded border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 text-[13px] text-[var(--ds-text-primary)]"
                                 />
                             </div>
                             <button
                                 type="button"
                                 onClick={handleAddClosure}
                                 disabled={!newDate || addingClosure}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[13px] font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                                 {addingClosure ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
                                 Aggiungi
@@ -455,41 +455,41 @@ export const OpeningHoursManager: React.FC<Props> = ({ showToast }) => {
                 )}
 
                 {closures.length === 0 ? (
-                    <p className="text-[13px] text-[var(--color-fg-muted)] italic">Nessuna chiusura programmata.</p>
+                    <p className="text-[13px] text-[var(--ds-text-muted)] italic">Nessuna chiusura programmata.</p>
                 ) : (
-                    <ul className="divide-y divide-[var(--color-line)] bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)]">
+                    <ul className="divide-y divide-[var(--ds-border)] bg-[var(--ds-surface)] rounded-lg border border-[var(--ds-border)]">
                         {closures.map(c => (
                             <li key={c.id} className="flex items-center justify-between gap-2 px-3 py-2">
                                 <div className="min-w-0 flex-1">
                                     <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="text-[13px] font-medium text-[var(--color-fg)]">
+                                        <span className="text-[13px] font-medium text-[var(--ds-text-primary)]">
                                             {formatItalianDate(c.date)}
                                         </span>
                                         {c.shift === null && (
-                                            <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300">
+                                            <span className="text-[12px] font-semibold px-1.5 py-0.5 rounded bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]">
                                                 Tutto il giorno
                                             </span>
                                         )}
                                         {c.shift === Shift.LUNCH && (
-                                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">
+                                            <span className="inline-flex items-center gap-1 text-[12px] font-semibold px-1.5 py-0.5 rounded bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]">
                                                 <Sun className="h-2.5 w-2.5" /> Pranzo
                                             </span>
                                         )}
                                         {c.shift === Shift.DINNER && (
-                                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300">
+                                            <span className="inline-flex items-center gap-1 text-[12px] font-semibold px-1.5 py-0.5 rounded bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
                                                 <Moon className="h-2.5 w-2.5" /> Cena
                                             </span>
                                         )}
                                     </div>
                                     {c.reason && (
-                                        <p className="text-[12px] text-[var(--color-fg-muted)] mt-0.5 truncate">{c.reason}</p>
+                                        <p className="text-[12px] text-[var(--ds-text-muted)] mt-0.5 truncate">{c.reason}</p>
                                     )}
                                 </div>
                                 {canEdit && (
                                     <button
                                         type="button"
                                         onClick={() => handleDeleteClosure(c.id)}
-                                        className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10"
+                                        className="p-1.5 rounded-md text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] dark:hover:bg-[var(--ds-critical-tint)]"
                                         title="Rimuovi"
                                     >
                                         <Trash2 className="h-4 w-4" />

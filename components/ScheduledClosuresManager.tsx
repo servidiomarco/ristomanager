@@ -151,7 +151,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
         <div>
             <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
                 <div className="flex items-center gap-2">
-                    <label className="flex items-center gap-2 text-sm text-[var(--color-fg-muted)]">
+                    <label className="flex items-center gap-2 text-sm text-[var(--ds-text-muted)]">
                         <input
                             type="checkbox"
                             checked={showPast}
@@ -164,7 +164,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                 {canEdit && (
                     <button
                         onClick={() => setShowForm(v => !v)}
-                        className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90"
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-sm font-medium hover:opacity-90"
                     >
                         <Plus className="h-4 w-4" />
                         Nuova chiusura
@@ -173,56 +173,56 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
             </div>
 
             {showForm && canEdit && (
-                <div className="mb-4 p-4 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-2)] space-y-3">
+                <div className="mb-4 p-4 rounded-lg border border-[var(--ds-border)] bg-[var(--ds-surface-row)] space-y-3">
                     <div className="flex gap-2">
                         <button
                             onClick={() => setFormKind('room')}
                             className={`flex-1 px-3 py-2 rounded-md text-sm font-medium border ${formKind === 'room'
-                                ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                                : 'bg-[var(--color-surface)] text-[var(--color-fg)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'}`}
+                                ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]'
+                                : 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
                         >
                             <DoorClosed className="h-4 w-4 inline mr-1" /> Sala
                         </button>
                         <button
                             onClick={() => setFormKind('table')}
                             className={`flex-1 px-3 py-2 rounded-md text-sm font-medium border ${formKind === 'table'
-                                ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                                : 'bg-[var(--color-surface)] text-[var(--color-fg)] border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]'}`}
+                                ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]'
+                                : 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
                         >
                             <EyeOff className="h-4 w-4 inline mr-1" /> Tavolo
                         </button>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div>
-                            <label className="block text-xs text-[var(--color-fg-muted)] mb-1">Data</label>
+                            <label className="block text-xs text-[var(--ds-text-muted)] mb-1">Data</label>
                             <input
                                 type="date"
                                 value={formDate}
                                 min={todayISO()}
                                 onChange={e => setFormDate(e.target.value)}
-                                className="w-full rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 text-sm"
+                                className="w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 text-sm"
                             />
                         </div>
                         <div>
-                            <label className="block text-xs text-[var(--color-fg-muted)] mb-1">Turno</label>
+                            <label className="block text-xs text-[var(--ds-text-muted)] mb-1">Turno</label>
                             <select
                                 value={formShift}
                                 onChange={e => setFormShift(e.target.value as Shift)}
-                                className="w-full rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 text-sm"
+                                className="w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 text-sm"
                             >
                                 <option value={Shift.LUNCH}>Pranzo</option>
                                 <option value={Shift.DINNER}>Cena</option>
                             </select>
                         </div>
                         <div>
-                            <label className="block text-xs text-[var(--color-fg-muted)] mb-1">
+                            <label className="block text-xs text-[var(--ds-text-muted)] mb-1">
                                 {formKind === 'room' ? 'Sala' : 'Tavolo'}
                             </label>
                             {formKind === 'room' ? (
                                 <select
                                     value={formRoomId}
                                     onChange={e => setFormRoomId(e.target.value ? Number(e.target.value) : '')}
-                                    className="w-full rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 text-sm"
+                                    className="w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 text-sm"
                                 >
                                     <option value="">Seleziona...</option>
                                     {rooms.map(r => (
@@ -233,7 +233,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                                 <select
                                     value={formTableId}
                                     onChange={e => setFormTableId(e.target.value ? Number(e.target.value) : '')}
-                                    className="w-full rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 text-sm"
+                                    className="w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 text-sm"
                                 >
                                     <option value="">Seleziona...</option>
                                     {tables.map(t => {
@@ -251,7 +251,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                     <div className="flex justify-end gap-2">
                         <button
                             onClick={() => { setShowForm(false); resetForm(); }}
-                            className="px-3 py-1.5 rounded-md text-sm text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]"
+                            className="px-3 py-1.5 rounded-md text-sm text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]"
                             disabled={saving}
                         >
                             Annulla
@@ -259,7 +259,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                         <button
                             onClick={handleAdd}
                             disabled={saving}
-                            className="px-3 py-1.5 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
+                            className="px-3 py-1.5 rounded-md bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-sm font-medium hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
                         >
                             {saving && <Loader2 className="h-4 w-4 animate-spin" />}
                             Conferma
@@ -269,16 +269,16 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
             )}
 
             {loading ? (
-                <div className="flex items-center justify-center py-8 text-[var(--color-fg-muted)]">
+                <div className="flex items-center justify-center py-8 text-[var(--ds-text-muted)]">
                     <CookingPotLoader label="Caricamento..." />
                 </div>
             ) : rows.length === 0 ? (
-                <div className="text-center py-8 text-sm text-[var(--color-fg-muted)]">
+                <div className="text-center py-8 text-sm text-[var(--ds-text-muted)]">
                     <Calendar className="h-8 w-8 mx-auto mb-2 opacity-50" />
                     Nessuna chiusura {showPast ? '' : 'futura'} programmata.
                 </div>
             ) : (
-                <ul className="divide-y divide-[var(--color-line)] border border-[var(--color-line)] rounded-lg overflow-hidden">
+                <ul className="divide-y divide-[var(--ds-border)] border border-[var(--ds-border)] rounded-lg overflow-hidden">
                     {rows.map(row => {
                         const label = row.kind === 'room'
                             ? `Sala: ${roomsById.get(row.room_id)?.name ?? `#${row.room_id}`}`
@@ -289,14 +289,14 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                             })();
                         const Icon = row.kind === 'room' ? DoorClosed : EyeOff;
                         return (
-                            <li key={`${row.kind}-${row.id}`} className="flex items-center justify-between gap-3 px-4 py-3 bg-[var(--color-surface)]">
+                            <li key={`${row.kind}-${row.id}`} className="flex items-center justify-between gap-3 px-4 py-3 bg-[var(--ds-surface)]">
                                 <div className="flex items-center gap-3 min-w-0">
-                                    <div className="w-8 h-8 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center flex-shrink-0">
-                                        <Icon className="h-4 w-4 text-[var(--color-fg)]" />
+                                    <div className="w-8 h-8 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0">
+                                        <Icon className="h-4 w-4 text-[var(--ds-text-primary)]" />
                                     </div>
                                     <div className="min-w-0">
-                                        <div className="text-sm font-medium text-[var(--color-fg)] truncate">{label}</div>
-                                        <div className="text-xs text-[var(--color-fg-muted)]">
+                                        <div className="text-sm font-medium text-[var(--ds-text-primary)] truncate">{label}</div>
+                                        <div className="text-xs text-[var(--ds-text-muted)]">
                                             {formatDate(row.date)} · {shiftLabel(row.shift)}
                                         </div>
                                     </div>
@@ -304,7 +304,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                                 {canEdit && (
                                     <button
                                         onClick={() => handleDelete(row)}
-                                        className="p-1.5 rounded-md text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/15 transition"
+                                        className="p-1.5 rounded-md text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] dark:hover:bg-[var(--ds-critical-tint)] transition"
                                         title="Rimuovi chiusura"
                                     >
                                         <Trash2 className="h-4 w-4" />

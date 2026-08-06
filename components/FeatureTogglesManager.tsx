@@ -378,10 +378,10 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
     // raggiunto il limite.
     const renderShiftFill = (shift: RoomOccupancyShift, percent: number, roomClosed: boolean) => {
         if (roomClosed || shift.closed_for_shift) {
-            return <em className="not-italic text-[var(--color-fg-subtle)]">chiusa</em>;
+            return <em className="not-italic text-[var(--ds-text-subtle)]">chiusa</em>;
         }
         return (
-            <strong className={shift.at_cap ? 'text-amber-600 dark:text-amber-400' : 'text-[var(--color-fg-muted)]'}>
+            <strong className={shift.at_cap ? 'text-[var(--ds-pending-text)]' : 'text-[var(--ds-text-muted)]'}>
                 {percent}%
             </strong>
         );
@@ -432,7 +432,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
 
     if (loading) {
         return (
-            <div className="flex items-center gap-2 text-[var(--color-fg-muted)] text-[13px] py-2">
+            <div className="flex items-center gap-2 text-[var(--ds-text-muted)] text-[13px] py-2">
                 <CookingPotLoader label="Caricamento…" size={40} />
             </div>
         );
@@ -462,20 +462,20 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                 return (
                     <details
                         key={meta.key}
-                        className="group bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden"
+                        className="group bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden"
                     >
-                        <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--color-surface-2)] transition-colors">
+                        <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
                             <div className="flex items-center gap-3 min-w-0">
-                                <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center text-[var(--color-fg)] flex-shrink-0">
+                                <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)] flex-shrink-0">
                                     {meta.icon}
                                 </div>
                                 <div className="min-w-0">
-                                    <h4 className="font-medium text-[14px] text-[var(--color-fg)]">{meta.title}</h4>
-                                    <p className="text-[12px] text-[var(--color-fg-muted)] truncate">{meta.description}</p>
+                                    <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">{meta.title}</h4>
+                                    <p className="text-[12px] text-[var(--ds-text-muted)] truncate">{meta.description}</p>
                                 </div>
                             </div>
                             <div className="flex items-center gap-2 flex-shrink-0">
-                                <span className={`text-[11px] font-medium uppercase tracking-wide ${enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-[var(--color-fg-subtle)]'}`}>
+                                <span className={`text-[12px] font-medium ${enabled ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-text-subtle)]'}`}>
                                     {enabled ? meta.onLabel : meta.offLabel}
                                 </span>
                                 {/* stopPropagation so clicking the switch doesn't toggle the accordion */}
@@ -486,8 +486,8 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                     aria-label={`${enabled ? 'Disattiva' : 'Attiva'} ${meta.title}`}
                                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggle(meta.key); }}
                                     disabled={!canEdit || isSaving}
-                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] focus:ring-offset-2 focus:ring-offset-[var(--color-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
-                                        enabled ? 'bg-emerald-500' : 'bg-[var(--color-surface-3)] border border-[var(--color-line)]'
+                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+                                        enabled ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
                                     }`}
                                 >
                                     <span
@@ -497,20 +497,20 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                         } translate-y-0.5`}
                                     />
                                 </button>
-                                <ChevronDown className="w-4 h-4 text-[var(--color-fg-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
+                                <ChevronDown className="w-4 h-4 text-[var(--ds-text-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
                             </div>
                         </summary>
-                        <div className="px-4 pb-4 pt-3 border-t border-[var(--color-line)] space-y-3">
-                            <p className="text-[13px] text-[var(--color-fg-muted)] leading-relaxed">{meta.description}</p>
+                        <div className="px-4 pb-4 pt-3 border-t border-[var(--ds-border)] space-y-3">
+                            <p className="text-[13px] text-[var(--ds-text-muted)] leading-relaxed">{meta.description}</p>
 
                             {isVoice && (
                                 <>
-                                    <div className="rounded-md bg-[var(--color-surface-2)] border border-[var(--color-line)] p-3">
-                                        <label className="flex items-start gap-2 text-[13px] text-[var(--color-fg)] font-medium">
-                                            <Users className="h-4 w-4 mt-0.5 text-[var(--color-fg-muted)] flex-shrink-0" />
+                                    <div className="rounded-md bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
+                                        <label className="flex items-start gap-2 text-[13px] text-[var(--ds-text-primary)] font-medium">
+                                            <Users className="h-4 w-4 mt-0.5 text-[var(--ds-text-muted)] flex-shrink-0" />
                                             <span>Soglia handoff gruppi grandi</span>
                                         </label>
-                                        <p className="text-[12px] text-[var(--color-fg-muted)] mt-1 mb-2 leading-relaxed">
+                                        <p className="text-[12px] text-[var(--ds-text-muted)] mt-1 mb-2 leading-relaxed">
                                             Fino a questo numero di ospiti Sofia prenota da sola; oltre passa la richiamata a un operatore. Il calcolo di disponibilità del backend non è affidabile per gruppi grandi (verifica per tavoli singoli), quindi la soglia esiste per evitare risposte sbagliate al cliente.
                                         </p>
                                         <div className="flex items-center gap-2">
@@ -521,16 +521,16 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                                 value={voiceThresholdDraft}
                                                 onChange={(e) => setVoiceThresholdDraft(e.target.value)}
                                                 disabled={!canEdit || savingVoiceThreshold}
-                                                className="w-20 h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                className="w-20 h-9 px-2 rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                             />
-                                            <span className="text-[12px] text-[var(--color-fg-muted)]">
-                                                Attualmente: prenotazioni fino a <strong className="text-[var(--color-fg)]">{channels.voice_large_group_threshold}</strong> ospiti gestite dall'agent.
+                                            <span className="text-[12px] text-[var(--ds-text-muted)]">
+                                                Attualmente: prenotazioni fino a <strong className="text-[var(--ds-text-primary)]">{channels.voice_large_group_threshold}</strong> ospiti gestite dall'agent.
                                             </span>
                                             <button
                                                 type="button"
                                                 onClick={saveVoiceThreshold}
                                                 disabled={!canEdit || savingVoiceThreshold || !voiceThresholdDirty}
-                                                className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                                                className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
                                             >
                                                 {savingVoiceThreshold && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                                                 Salva
@@ -540,16 +540,16 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
 
                                     <div className={`rounded-md border p-3 transition-colors ${
                                         suspended
-                                            ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-300 dark:border-amber-800'
-                                            : 'bg-[var(--color-surface-2)] border-[var(--color-line)]'
+                                            ? 'bg-[var(--ds-pending-tint)] border-[var(--ds-pending-solid)]'
+                                            : 'bg-[var(--ds-surface-row)] border-[var(--ds-border)]'
                                     }`}>
                                         <div className="flex items-start justify-between gap-3">
                                             <div className="min-w-0">
-                                                <label className="flex items-start gap-2 text-[13px] text-[var(--color-fg)] font-medium">
-                                                    <PauseCircle className={`h-4 w-4 mt-0.5 flex-shrink-0 ${suspended ? 'text-amber-600 dark:text-amber-400' : 'text-[var(--color-fg-muted)]'}`} />
+                                                <label className="flex items-start gap-2 text-[13px] text-[var(--ds-text-primary)] font-medium">
+                                                    <PauseCircle className={`h-4 w-4 mt-0.5 flex-shrink-0 ${suspended ? 'text-[var(--ds-pending-text)]' : 'text-[var(--ds-text-muted)]'}`} />
                                                     <span>Prenotazioni momentaneamente sospese</span>
                                                 </label>
-                                                <p className="text-[12px] text-[var(--color-fg-muted)] mt-1 leading-relaxed">
+                                                <p className="text-[12px] text-[var(--ds-text-muted)] mt-1 leading-relaxed">
                                                     Quando attivo, Sofia risponde alla chiamata dicendo che le prenotazioni sono sospese e invita a richiamare dopo l'orario configurato. I tool <em>check-availability</em> e <em>create-reservation</em> vengono anche disabilitati come rete di sicurezza.
                                                 </p>
                                             </div>
@@ -560,8 +560,8 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                                 aria-label={suspended ? 'Riattiva prenotazioni' : 'Sospendi prenotazioni'}
                                                 onClick={() => toggle('voice_bookings_suspended')}
                                                 disabled={!canEdit || suspensionSaving}
-                                                className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] focus:ring-offset-2 focus:ring-offset-[var(--color-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
-                                                    suspended ? 'bg-amber-500' : 'bg-[var(--color-surface-3)] border border-[var(--color-line)]'
+                                                className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+                                                    suspended ? 'bg-[var(--ds-pending-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
                                                 }`}
                                             >
                                                 <span
@@ -573,20 +573,20 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                             </button>
                                         </div>
                                         <div className="flex items-center gap-2 mt-3">
-                                            <Clock className="h-4 w-4 text-[var(--color-fg-muted)] flex-shrink-0" />
-                                            <span className="text-[12px] text-[var(--color-fg-muted)]">Richiamare dopo le</span>
+                                            <Clock className="h-4 w-4 text-[var(--ds-text-muted)] flex-shrink-0" />
+                                            <span className="text-[12px] text-[var(--ds-text-muted)]">Richiamare dopo le</span>
                                             <input
                                                 type="time"
                                                 value={suspensionCallbackDraft}
                                                 onChange={(e) => setSuspensionCallbackDraft(e.target.value)}
                                                 disabled={!canEdit || savingSuspensionCallback}
-                                                className="w-28 h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                className="w-28 h-9 px-2 rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                             />
                                             <button
                                                 type="button"
                                                 onClick={saveSuspensionCallback}
                                                 disabled={!canEdit || savingSuspensionCallback || !suspensionCallbackDirty}
-                                                className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                                                className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
                                             >
                                                 {savingSuspensionCallback && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                                                 Salva
@@ -594,36 +594,36 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                         </div>
                                     </div>
 
-                                    <div className="rounded-md bg-[var(--color-surface-2)] border border-[var(--color-line)] p-3">
-                                        <label className="flex items-start gap-2 text-[13px] text-[var(--color-fg)] font-medium">
-                                            <CalendarClock className="h-4 w-4 mt-0.5 text-[var(--color-fg-muted)] flex-shrink-0" />
+                                    <div className="rounded-md bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
+                                        <label className="flex items-start gap-2 text-[13px] text-[var(--ds-text-primary)] font-medium">
+                                            <CalendarClock className="h-4 w-4 mt-0.5 text-[var(--ds-text-muted)] flex-shrink-0" />
                                             <span>Sospensioni programmate</span>
                                         </label>
-                                        <p className="text-[12px] text-[var(--color-fg-muted)] mt-1 mb-3 leading-relaxed">
+                                        <p className="text-[12px] text-[var(--ds-text-muted)] mt-1 mb-3 leading-relaxed">
                                             Attiva la sospensione automaticamente in una o più finestre programmate: scegli il giorno e un turno intero (pranzo o cena), oppure una fascia oraria personalizzata. Quando l'orario corrente entra in una finestra, Sofia annuncia la sospensione e invita il cliente a richiamare dopo l'orario di fine di quella finestra. Il toggle immediato qui sopra ha comunque la precedenza se acceso.
                                         </p>
                                         {scheduleDraft.length === 0 ? (
-                                            <p className="text-[12px] text-[var(--color-fg-subtle)] italic mb-3">Nessuna sospensione programmata.</p>
+                                            <p className="text-[12px] text-[var(--ds-text-subtle)] italic mb-3">Nessuna sospensione programmata.</p>
                                         ) : (
                                             <div className="space-y-2 mb-3">
                                                 {scheduleDraft.map((row, idx) => {
                                                     const isPast = row.date < todayKey;
                                                     const rowShift = suspensionShiftOf(row);
                                                     return (
-                                                        <div key={idx} className={`flex flex-wrap items-center gap-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] p-2 ${isPast ? 'opacity-60' : ''}`}>
+                                                        <div key={idx} className={`flex flex-wrap items-center gap-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] p-2 ${isPast ? 'opacity-60' : ''}`}>
                                                             <input
                                                                 type="date"
                                                                 value={row.date}
                                                                 onChange={(e) => updateScheduleRow(idx, { date: e.target.value })}
                                                                 disabled={!canEdit || savingSchedule}
-                                                                className="h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                                className="h-9 px-2 rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                             />
                                                             <select
                                                                 value={rowShift}
                                                                 onChange={(e) => setScheduleRowShift(idx, e.target.value as SuspensionShift)}
                                                                 disabled={!canEdit || savingSchedule}
                                                                 aria-label="Turno della sospensione"
-                                                                className="h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                                className="h-9 px-2 rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                             >
                                                                 <option value="LUNCH">Pranzo</option>
                                                                 <option value="DINNER">Cena</option>
@@ -631,45 +631,45 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                                             </select>
                                                             {rowShift === 'CUSTOM' ? (
                                                                 <>
-                                                                    <span className="text-[12px] text-[var(--color-fg-muted)]">dalle</span>
+                                                                    <span className="text-[12px] text-[var(--ds-text-muted)]">dalle</span>
                                                                     <input
                                                                         type="time"
                                                                         value={row.start_time}
                                                                         onChange={(e) => updateScheduleRow(idx, { start_time: e.target.value })}
                                                                         disabled={!canEdit || savingSchedule}
-                                                                        className="w-24 h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                                        className="w-24 h-9 px-2 rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                                     />
-                                                                    <span className="text-[12px] text-[var(--color-fg-muted)]">alle</span>
+                                                                    <span className="text-[12px] text-[var(--ds-text-muted)]">alle</span>
                                                                     <input
                                                                         type="time"
                                                                         value={row.end_time}
                                                                         onChange={(e) => updateScheduleRow(idx, { end_time: e.target.value })}
                                                                         disabled={!canEdit || savingSchedule}
-                                                                        className="w-24 h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                                        className="w-24 h-9 px-2 rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                                     />
                                                                 </>
                                                             ) : (
-                                                                <span className="text-[12px] text-[var(--color-fg-muted)] tabular whitespace-nowrap" title="Finestra coperta dal turno">
+                                                                <span className="text-[12px] text-[var(--ds-text-muted)] tabular whitespace-nowrap" title="Finestra coperta dal turno">
                                                                     {row.start_time}–{row.end_time}
                                                                 </span>
                                                             )}
-                                                            <span className="text-[12px] text-[var(--color-fg-muted)] whitespace-nowrap" title="Orario che Sofia comunica al cliente per richiamare">richiamare dopo le</span>
+                                                            <span className="text-[12px] text-[var(--ds-text-muted)] whitespace-nowrap" title="Orario che Sofia comunica al cliente per richiamare">richiamare dopo le</span>
                                                             <input
                                                                 type="time"
                                                                 value={row.callback_time ?? row.end_time}
                                                                 onChange={(e) => updateScheduleRow(idx, { callback_time: e.target.value })}
                                                                 disabled={!canEdit || savingSchedule}
-                                                                className="w-24 h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                                className="w-24 h-9 px-2 rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                             />
                                                             {isPast && (
-                                                                <span className="text-[11px] text-[var(--color-fg-subtle)] italic">passata</span>
+                                                                <span className="text-[11px] text-[var(--ds-text-subtle)] italic">passata</span>
                                                             )}
                                                             <button
                                                                 type="button"
                                                                 onClick={() => removeScheduleRow(idx)}
                                                                 disabled={!canEdit || savingSchedule}
                                                                 aria-label="Rimuovi sospensione programmata"
-                                                                className="ml-auto inline-flex items-center justify-center h-9 w-9 rounded-md text-[var(--color-fg-muted)] hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                                                className="ml-auto inline-flex items-center justify-center h-9 w-9 rounded-md text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] dark:hover:bg-[var(--ds-critical-tint)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                                                             >
                                                                 <Trash2 className="h-4 w-4" />
                                                             </button>
@@ -683,7 +683,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                                 type="button"
                                                 onClick={addScheduleRow}
                                                 disabled={!canEdit || savingSchedule}
-                                                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] hover:bg-[var(--color-surface-3)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                                             >
                                                 <Plus className="h-3.5 w-3.5" />
                                                 Aggiungi
@@ -692,7 +692,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                                 type="button"
                                                 onClick={saveSchedule}
                                                 disabled={!canEdit || savingSchedule || !scheduleDirty}
-                                                className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                                                className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
                                             >
                                                 {savingSchedule && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                                                 Salva programma
@@ -700,14 +700,14 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                         </div>
                                     </div>
 
-                                    <div className="rounded-md bg-[var(--color-surface-2)] border border-[var(--color-line)] p-3">
+                                    <div className="rounded-md bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
                                         <div className="flex items-start justify-between gap-2">
                                             <div>
-                                                <div className="flex items-center gap-2 text-[13px] text-[var(--color-fg)] font-medium">
-                                                    <CalendarClock className="h-4 w-4 text-[var(--color-fg-muted)]" />
+                                                <div className="flex items-center gap-2 text-[13px] text-[var(--ds-text-primary)] font-medium">
+                                                    <CalendarClock className="h-4 w-4 text-[var(--ds-text-muted)]" />
                                                     <span>Giorni gestiti solo da operatore</span>
                                                 </div>
-                                                <p className="text-[12px] text-[var(--color-fg-muted)] mt-1 leading-relaxed">
+                                                <p className="text-[12px] text-[var(--ds-text-muted)] mt-1 leading-relaxed">
                                                     Sofia non prende prenotazioni <em>per</em> questi giorni (o turni), qualunque sia il momento della chiamata: utile quando c'è un menù fisso o un evento che vuoi gestire a mano. Al cliente che chiede una data bloccata Sofia dice che se ne occupa lo staff e lo invita a richiamare negli orari indicati. Le altre date restano prenotabili normalmente. I blocchi già passati spariscono da soli.
                                                 </p>
                                             </div>
@@ -715,7 +715,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                                 type="button"
                                                 onClick={addVoiceBlockRow}
                                                 disabled={!canEdit || savingVoiceBlocks}
-                                                className="inline-flex items-center gap-1 h-8 px-2.5 rounded-md text-[12px] font-medium border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+                                                className="inline-flex items-center gap-1 h-8 px-2.5 rounded-md text-[12px] font-medium border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
                                             >
                                                 <Plus className="h-3.5 w-3.5" />
                                                 Aggiungi
@@ -724,33 +724,33 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
 
                                         <div className="mt-3 space-y-2">
                                             {voiceBlocksDraft.length === 0 ? (
-                                                <p className="text-[12px] text-[var(--color-fg-subtle)] italic py-1">
+                                                <p className="text-[12px] text-[var(--ds-text-subtle)] italic py-1">
                                                     Nessun giorno bloccato. Sofia prenota per qualsiasi data.
                                                 </p>
                                             ) : (
                                                 voiceBlocksDraft.map((row, idx) => {
                                                     const inPast = row.date && row.date < todayKey;
                                                     return (
-                                                        <div key={idx} className={`flex flex-wrap items-center gap-2 rounded-md border p-2 ${inPast ? 'border-amber-300 bg-amber-50/60 dark:border-amber-500/40 dark:bg-amber-500/[0.08]' : 'border-[var(--color-line)] bg-[var(--color-surface)]'}`}>
+                                                        <div key={idx} className={`flex flex-wrap items-center gap-2 rounded-md border p-2 ${inPast ? 'border-[var(--ds-pending-solid)] bg-[var(--ds-pending-tint)]' : 'border-[var(--ds-border)] bg-[var(--ds-surface)]'}`}>
                                                             <input
                                                                 type="date"
                                                                 value={row.date}
                                                                 min={todayKey}
                                                                 onChange={(e) => updateVoiceBlockRow(idx, { date: e.target.value })}
                                                                 disabled={!canEdit || savingVoiceBlocks}
-                                                                className="h-8 px-2 rounded border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-[12px] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                                className="h-8 px-2 rounded border border-[var(--ds-border-strong)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] text-[12px] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                             />
                                                             <select
                                                                 value={row.shift}
                                                                 onChange={(e) => updateVoiceBlockRow(idx, { shift: e.target.value as VoiceDateBlock['shift'] })}
                                                                 disabled={!canEdit || savingVoiceBlocks}
-                                                                className="h-8 px-2 rounded border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                                className="h-8 px-2 rounded border border-[var(--ds-border-strong)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] text-[12px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                             >
                                                                 <option value="ALL">Intera giornata</option>
                                                                 <option value="LUNCH">Solo pranzo</option>
                                                                 <option value="DINNER">Solo cena</option>
                                                             </select>
-                                                            <span className="text-[12px] text-[var(--color-fg-muted)] whitespace-nowrap" title="Quando Sofia invita a richiamare per parlare con un operatore">richiamare</span>
+                                                            <span className="text-[12px] text-[var(--ds-text-muted)] whitespace-nowrap" title="Quando Sofia invita a richiamare per parlare con un operatore">richiamare</span>
                                                             <input
                                                                 type="text"
                                                                 value={row.callback_hours ?? ''}
@@ -758,16 +758,16 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                                                 placeholder="es. dalle 9:00 alle 12:00"
                                                                 maxLength={120}
                                                                 disabled={!canEdit || savingVoiceBlocks}
-                                                                className="flex-1 min-w-[160px] h-8 px-2 rounded border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50 placeholder:text-[var(--color-fg-subtle)]"
+                                                                className="flex-1 min-w-[160px] h-8 px-2 rounded border border-[var(--ds-border-strong)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] text-[12px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50 placeholder:text-[var(--ds-text-subtle)]"
                                                             />
                                                             {inPast && (
-                                                                <span className="text-[11px] text-amber-700 dark:text-amber-300">Data già passata</span>
+                                                                <span className="text-[11px] text-[var(--ds-pending-text)]">Data già passata</span>
                                                             )}
                                                             <button
                                                                 type="button"
                                                                 onClick={() => removeVoiceBlockRow(idx)}
                                                                 disabled={!canEdit || savingVoiceBlocks}
-                                                                className="ml-auto inline-flex items-center justify-center h-7 w-7 rounded-md text-[var(--color-fg-muted)] hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/15 disabled:opacity-50 transition-colors"
+                                                                className="ml-auto inline-flex items-center justify-center h-7 w-7 rounded-md text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] dark:hover:bg-[var(--ds-critical-tint)] disabled:opacity-50 transition-colors"
                                                                 aria-label="Rimuovi giorno bloccato"
                                                                 title="Rimuovi"
                                                             >
@@ -784,7 +784,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                                 type="button"
                                                 onClick={saveVoiceBlocks}
                                                 disabled={!canEdit || savingVoiceBlocks || !voiceBlocksDirty}
-                                                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                                                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
                                             >
                                                 {savingVoiceBlocks && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                                                 Salva blocchi
@@ -795,14 +795,14 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                             )}
 
                             {isWeb && (
-                                <div className="rounded-md bg-[var(--color-surface-2)] border border-[var(--color-line)] p-3">
+                                <div className="rounded-md bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
                                     <div className="flex items-start justify-between gap-2">
                                         <div>
-                                            <div className="flex items-center gap-2 text-[13px] text-[var(--color-fg)] font-medium">
-                                                <CalendarClock className="h-4 w-4 text-[var(--color-fg-muted)]" />
+                                            <div className="flex items-center gap-2 text-[13px] text-[var(--ds-text-primary)] font-medium">
+                                                <CalendarClock className="h-4 w-4 text-[var(--ds-text-muted)]" />
                                                 <span>Blocca prenotazioni web per giorni specifici</span>
                                             </div>
-                                            <p className="text-[12px] text-[var(--color-fg-muted)] mt-1 leading-relaxed">
+                                            <p className="text-[12px] text-[var(--ds-text-muted)] mt-1 leading-relaxed">
                                                 Chiudi il canale web per un turno (pranzo o cena) o per l'intera giornata. Il modulo /prenota nasconde gli slot bloccati e rifiuta eventuali tentativi POST diretti. I blocchi già scaduti vengono rimossi automaticamente al prossimo caricamento.
                                             </p>
                                         </div>
@@ -810,7 +810,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                             type="button"
                                             onClick={addBlockRow}
                                             disabled={!canEdit || savingBlocks}
-                                            className="inline-flex items-center gap-1 h-8 px-2.5 rounded-md text-[12px] font-medium border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+                                            className="inline-flex items-center gap-1 h-8 px-2.5 rounded-md text-[12px] font-medium border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
                                         >
                                             <Plus className="h-3.5 w-3.5" />
                                             Aggiungi
@@ -819,40 +819,40 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
 
                                     <div className="mt-3 space-y-2">
                                         {blocksDraft.length === 0 ? (
-                                            <p className="text-[12px] text-[var(--color-fg-subtle)] italic py-1">
+                                            <p className="text-[12px] text-[var(--ds-text-subtle)] italic py-1">
                                                 Nessun blocco programmato. Il canale web è aperto tutti i giorni.
                                             </p>
                                         ) : (
                                             blocksDraft.map((row, idx) => {
                                                 const inPast = row.date && row.date < todayKey;
                                                 return (
-                                                    <div key={idx} className={`flex flex-wrap items-center gap-2 rounded-md border p-2 ${inPast ? 'border-amber-300 bg-amber-50/60 dark:border-amber-500/40 dark:bg-amber-500/[0.08]' : 'border-[var(--color-line)] bg-[var(--color-surface)]'}`}>
+                                                    <div key={idx} className={`flex flex-wrap items-center gap-2 rounded-md border p-2 ${inPast ? 'border-[var(--ds-pending-solid)] bg-[var(--ds-pending-tint)]' : 'border-[var(--ds-border)] bg-[var(--ds-surface)]'}`}>
                                                         <input
                                                             type="date"
                                                             value={row.date}
                                                             min={todayKey}
                                                             onChange={(e) => updateBlockRow(idx, { date: e.target.value })}
                                                             disabled={!canEdit || savingBlocks}
-                                                            className="h-8 px-2 rounded border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-[12px] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                            className="h-8 px-2 rounded border border-[var(--ds-border-strong)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] text-[12px] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                         />
                                                         <select
                                                             value={row.shift}
                                                             onChange={(e) => updateBlockRow(idx, { shift: e.target.value as PublicBookingBlock['shift'] })}
                                                             disabled={!canEdit || savingBlocks}
-                                                            className="h-8 px-2 rounded border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] text-[var(--color-fg)] text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                            className="h-8 px-2 rounded border border-[var(--ds-border-strong)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] text-[12px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                         >
                                                             <option value="ALL">Intera giornata</option>
                                                             <option value="LUNCH">Solo pranzo</option>
                                                             <option value="DINNER">Solo cena</option>
                                                         </select>
                                                         {inPast && (
-                                                            <span className="text-[11px] text-amber-700 dark:text-amber-300">Data già passata</span>
+                                                            <span className="text-[11px] text-[var(--ds-pending-text)]">Data già passata</span>
                                                         )}
                                                         <button
                                                             type="button"
                                                             onClick={() => removeBlockRow(idx)}
                                                             disabled={!canEdit || savingBlocks}
-                                                            className="ml-auto inline-flex items-center justify-center h-7 w-7 rounded-md text-[var(--color-fg-muted)] hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/15 disabled:opacity-50 transition-colors"
+                                                            className="ml-auto inline-flex items-center justify-center h-7 w-7 rounded-md text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] dark:hover:bg-[var(--ds-critical-tint)] disabled:opacity-50 transition-colors"
                                                             aria-label="Rimuovi blocco"
                                                             title="Rimuovi"
                                                         >
@@ -869,7 +869,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                             type="button"
                                             onClick={saveBlocks}
                                             disabled={!canEdit || savingBlocks || !blocksDirty}
-                                            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                                            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
                                         >
                                             {savingBlocks && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                                             Salva blocchi
@@ -879,7 +879,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                             )}
 
                             {!isVoice && !isWeb && (
-                                <p className="text-[12px] text-[var(--color-fg-subtle)] italic">
+                                <p className="text-[12px] text-[var(--ds-text-subtle)] italic">
                                     Nessuna impostazione specifica al momento oltre a Attivo / Sospeso.
                                 </p>
                             )}
@@ -890,42 +890,42 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
 
             {/* Limiti di occupazione per sala — vale per entrambi i canali
                 self-service, quindi sta fuori dalle due schede canale. */}
-            <details className="group bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden">
-                <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--color-surface-2)] transition-colors">
+            <details className="group bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden">
+                <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
                     <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center text-[var(--color-fg)] flex-shrink-0">
+                        <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)] flex-shrink-0">
                             <Percent className="w-5 h-5" />
                         </div>
                         <div className="min-w-0">
-                            <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Limiti di occupazione per sala</h4>
-                            <p className="text-[12px] text-[var(--color-fg-muted)] truncate">
+                            <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Limiti di occupazione per sala</h4>
+                            <p className="text-[12px] text-[var(--ds-text-muted)] truncate">
                                 Quota di tavoli o coperti oltre la quale le prenotazioni automatiche passano dallo staff.
                             </p>
                         </div>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
-                        <span className={`text-[11px] font-medium uppercase tracking-wide ${capsDraft.length > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-[var(--color-fg-subtle)]'}`}>
+                        <span className={`text-[12px] font-medium ${capsDraft.length > 0 ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-text-subtle)]'}`}>
                             {capsDraft.length > 0 ? `${capsDraft.length} ${capsDraft.length === 1 ? 'attivo' : 'attivi'}` : 'Nessun limite'}
                         </span>
-                        <ChevronDown className="w-4 h-4 text-[var(--color-fg-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
+                        <ChevronDown className="w-4 h-4 text-[var(--ds-text-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
                     </div>
                 </summary>
-                <div className="px-4 pb-4 pt-3 border-t border-[var(--color-line)] space-y-3">
-                    <p className="text-[13px] text-[var(--color-fg-muted)] leading-relaxed">
+                <div className="px-4 pb-4 pt-3 border-t border-[var(--ds-border)] space-y-3">
+                    <p className="text-[13px] text-[var(--ds-text-muted)] leading-relaxed">
                         Riserva una quota di ogni sala ai canali gestiti da voi. Esempio con il 70% sulla sala Macine: finché
                         Macine sta sotto il 70%, le prenotazioni web di quella sala vengono confermate subito con il tavolo
                         assegnato in automatico; appena tocca il 70% le nuove richieste restano da confermare a mano e
                         l'agente telefonico smette di proporre la sala. Lo staff continua a prenotare senza limiti dal
                         gestionale.
                     </p>
-                    <p className="text-[12px] text-[var(--color-fg-subtle)] leading-relaxed">
-                        <strong className="text-[var(--color-fg-muted)]">Tavoli</strong>: tavoli occupati sul totale della sala (un tavolo accorpato o
-                        tenuto da un banchetto conta come occupato). <strong className="text-[var(--color-fg-muted)]">Coperti</strong>: ospiti prenotati
+                    <p className="text-[12px] text-[var(--ds-text-subtle)] leading-relaxed">
+                        <strong className="text-[var(--ds-text-muted)]">Tavoli</strong>: tavoli occupati sul totale della sala (un tavolo accorpato o
+                        tenuto da un banchetto conta come occupato). <strong className="text-[var(--ds-text-muted)]">Coperti</strong>: ospiti prenotati
                         sul totale dei posti. Le richieste web ancora senza tavolo pesano sulla sala che il cliente ha scelto.
                     </p>
 
                     {occupancy.length === 0 ? (
-                        <p className="text-[12px] text-[var(--color-fg-subtle)] italic">Nessuna sala configurata.</p>
+                        <p className="text-[12px] text-[var(--ds-text-subtle)] italic">Nessuna sala configurata.</p>
                     ) : (
                         <div className="space-y-2">
                             {occupancy.map(room => {
@@ -942,26 +942,26 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                 return (
                                     <div
                                         key={room.room_id}
-                                        className={`rounded-md border p-3 ${cap ? 'border-[var(--color-line-strong)] bg-[var(--color-surface-2)]' : 'border-[var(--color-line)] bg-[var(--color-surface)]'}`}
+                                        className={`rounded-md border p-3 ${cap ? 'border-[var(--ds-border-strong)] bg-[var(--ds-surface-row)]' : 'border-[var(--ds-border)] bg-[var(--ds-surface)]'}`}
                                     >
                                         <div className="flex items-start justify-between gap-3">
                                             <div className="min-w-0">
                                                 <div className="flex items-center gap-2 flex-wrap">
-                                                    <span className="text-[13px] font-medium text-[var(--color-fg)]">{room.room_name}</span>
+                                                    <span className="text-[13px] font-medium text-[var(--ds-text-primary)]">{room.room_name}</span>
                                                     {room.is_closed && (
-                                                        <span className="text-[11px] px-1.5 py-0.5 rounded bg-[var(--color-surface-3)] text-[var(--color-fg-subtle)]">chiusa</span>
+                                                        <span className="text-[11px] px-1.5 py-0.5 rounded bg-[var(--ds-surface-row)] text-[var(--ds-text-subtle)]">chiusa</span>
                                                     )}
                                                 </div>
-                                                <p className="text-[12px] text-[var(--color-fg-muted)] mt-0.5">
+                                                <p className="text-[12px] text-[var(--ds-text-muted)] mt-0.5">
                                                     {room.capacity_tables} tavoli · {room.capacity_seats} coperti
                                                 </p>
                                                 {/* Un turno chiuso dice "chiusa", non "0%": a zero per cento
                                                     la sala sembra vuota e disponibile, ed è l'opposto. */}
-                                                <p className="text-[12px] text-[var(--color-fg-subtle)] mt-0.5">
+                                                <p className="text-[12px] text-[var(--ds-text-subtle)] mt-0.5">
                                                     Oggi — pranzo {renderShiftFill(room.lunch, lunchPct, room.is_closed)}
                                                     {' · '}cena {renderShiftFill(room.dinner, dinnerPct, room.is_closed)}
                                                     {atCapShifts.length > 0 && (
-                                                        <span className="ml-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+                                                        <span className="ml-1.5 text-[11px] text-[var(--ds-pending-text)]">
                                                             limite raggiunto ({atCapShifts.join(' e ')})
                                                         </span>
                                                     )}
@@ -974,8 +974,8 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                                 aria-label={`${cap ? 'Disattiva' : 'Attiva'} limite per ${room.room_name}`}
                                                 onClick={() => toggleCap(room.room_id)}
                                                 disabled={!canEdit || savingCaps}
-                                                className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] focus:ring-offset-2 focus:ring-offset-[var(--color-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
-                                                    cap ? 'bg-emerald-500' : 'bg-[var(--color-surface-3)] border border-[var(--color-line)]'
+                                                className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+                                                    cap ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
                                                 }`}
                                             >
                                                 <span
@@ -989,7 +989,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
 
                                         {cap && (
                                             <div className="flex flex-wrap items-center gap-2 mt-3">
-                                                <span className="text-[12px] text-[var(--color-fg-muted)]">Limite</span>
+                                                <span className="text-[12px] text-[var(--ds-text-muted)]">Limite</span>
                                                 <input
                                                     type="number"
                                                     min={1}
@@ -1001,15 +1001,15 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                                     }}
                                                     disabled={!canEdit || savingCaps}
                                                     aria-label={`Percentuale massima per ${room.room_name}`}
-                                                    className="w-20 h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] tabular focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                    className="w-20 h-9 px-2 rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] tabular focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                 />
-                                                <span className="text-[12px] text-[var(--color-fg-muted)]">% dei</span>
+                                                <span className="text-[12px] text-[var(--ds-text-muted)]">% dei</span>
                                                 <select
                                                     value={cap.basis}
                                                     onChange={(e) => updateCap(room.room_id, { basis: e.target.value as RoomOccupancyCap['basis'] })}
                                                     disabled={!canEdit || savingCaps}
                                                     aria-label={`Base di calcolo per ${room.room_name}`}
-                                                    className="h-9 px-2 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-surface)] text-[var(--color-fg)] text-[13px] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20 disabled:opacity-50"
+                                                    className="h-9 px-2 rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] text-[13px] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                                 >
                                                     <option value="TABLES">tavoli</option>
                                                     <option value="SEATS">coperti</option>
@@ -1027,7 +1027,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                             type="button"
                             onClick={saveCaps}
                             disabled={!canEdit || savingCaps || !capsDirty}
-                            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
                         >
                             {savingCaps && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                             Salva limiti
@@ -1037,7 +1037,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
             </details>
 
             {!canEdit && (
-                <p className="text-[12px] text-[var(--color-fg-subtle)] mt-1">
+                <p className="text-[12px] text-[var(--ds-text-subtle)] mt-1">
                     Solo gli amministratori possono modificare queste impostazioni.
                 </p>
             )}

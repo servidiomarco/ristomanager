@@ -6,6 +6,7 @@ import {
   getExpediterBoard, fireCourse, refireCourse, callCourse, getKitchenReport,
   type ExpediterBoard, type ExpediterCourse, type KitchenReport,
 } from '../services/ordersApiService';
+import { SectionHeader, StatusPill, dsButton } from './ds';
 
 // ---------------------------------------------------------------------------
 // Passe — l'unico punto in cui qualcuno vede l'uscita intera.
@@ -25,6 +26,11 @@ const mmss = (seconds: number): string => {
   const m = Math.floor(Math.max(0, seconds) / 60);
   return `${m}′`;
 };
+
+/* I bersagli del passe restano a 44px: si preme in piedi, di fretta, guardando
+   il piano e non lo schermo. */
+const passeAction =
+  'inline-flex h-11 flex-shrink-0 items-center gap-1.5 rounded-full px-4 text-[14px] font-semibold transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 export const ExpediterDisplay: React.FC = () => {
   const now = useNow(10_000);
@@ -80,7 +86,11 @@ export const ExpediterDisplay: React.FC = () => {
   };
 
   if (loading) {
-    return <div className="p-10 flex items-center gap-2 text-slate-500"><Loader2 className="animate-spin" size={18} /> Caricamento passe…</div>;
+    return (
+      <div className="flex h-full items-center justify-center gap-2 p-10 text-[15px] text-[var(--ds-text-muted)]">
+        <Loader2 className="animate-spin" size={18} /> Caricamento passe…
+      </div>
+    );
   }
 
   const stations = board?.stations ?? [];
@@ -92,31 +102,46 @@ export const ExpediterDisplay: React.FC = () => {
     id == null ? '—' : stations.find(s => s.id === id)?.name ?? `#${id}`;
 
   return (
-    <div className="flex flex-col h-full">
-      <header className="px-5 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-3 shrink-0">
-        <h1 className="text-xl font-bold tracking-wide uppercase">Passe</h1>
-        <span className="text-sm text-slate-500">
-          {inCorso.length} in corso · {inAttesa.length} da lanciare
-        </span>
-        {offline && <span className="flex items-center gap-1 text-sm text-amber-600"><WifiOff size={15} /> riconnessione…</span>}
-        <button
-          onClick={() => {
-            const next = !showReport;
-            setShowReport(next);
-            if (next) getKitchenReport().then(setReport).catch(() => setReport(null));
-          }}
-          className="ml-auto text-sm px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 flex items-center gap-1.5">
-          <BarChart3 size={14} /> Statistiche
-        </button>
-      </header>
+    <div className="flex h-full min-h-0 flex-col bg-[var(--ds-canvas)]">
+      <div className="flex-shrink-0 px-4 pb-3 pt-4">
+        <div className="flex items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 pl-4 shadow-[var(--ds-shadow-card)]">
+          {/* Tondo, non maiuscolo (§5.2): il corpo e il peso bastano. */}
+          <h1 className="text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">Passe</h1>
+          <span className="text-[15px] text-[var(--ds-text-muted)] tabular-nums">
+            {inCorso.length} in corso · {inAttesa.length} da lanciare
+          </span>
+          {offline && (
+            <StatusPill tone="pending">
+              <WifiOff size={13} aria-hidden /> riconnessione…
+            </StatusPill>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              const next = !showReport;
+              setShowReport(next);
+              if (next) getKitchenReport().then(setReport).catch(() => setReport(null));
+            }}
+            aria-pressed={showReport}
+            className={`ml-auto flex-shrink-0 ${dsButton.quiet}`}
+          >
+            <BarChart3 size={15} aria-hidden /> Statistiche
+          </button>
+        </div>
+      </div>
 
-      {showReport && <KitchenStats report={report} />}
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6">
+        {showReport && <KitchenStats report={report} />}
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-6">
-        <section>
-          <h2 className="text-xs uppercase tracking-wide text-slate-500 mb-2">In corso</h2>
+        <section className="mb-5">
+          <SectionHeader
+            tone="muted"
+            meta={inCorso.length === 1 ? '1 uscita' : `${inCorso.length} uscite`}
+          >
+            In corso
+          </SectionHeader>
           {inCorso.length === 0 ? (
-            <p className="text-slate-400 text-sm py-2">Niente in preparazione.</p>
+            <p className="px-2 py-2 text-[14px] text-[var(--ds-text-muted)]">Niente in preparazione.</p>
           ) : (
             <div className="space-y-2">
               {inCorso.map(c => (
@@ -137,9 +162,14 @@ export const ExpediterDisplay: React.FC = () => {
         </section>
 
         <section>
-          <h2 className="text-xs uppercase tracking-wide text-slate-500 mb-2">In attesa di lancio</h2>
+          <SectionHeader
+            tone={inAttesa.some(c => c.stale_queued) ? 'attention' : 'muted'}
+            meta={inAttesa.length === 1 ? '1 proposta' : `${inAttesa.length} proposte`}
+          >
+            In attesa di lancio
+          </SectionHeader>
           {inAttesa.length === 0 ? (
-            <p className="text-slate-400 text-sm py-2">Nessuna proposta dalla sala.</p>
+            <p className="px-2 py-2 text-[14px] text-[var(--ds-text-muted)]">Nessuna proposta dalla sala.</p>
           ) : (
             <div className="space-y-2">
               {inAttesa.map(c => (
@@ -171,83 +201,112 @@ const CourseRow: React.FC<{
   const key = `${c.order_id}:${c.course_no}`;
   const busy = busyKey === key;
   const allReady = c.status === 'READY';
+  const alarm = c.lagging || c.stale_queued;
 
-  // L'urgenza si legge dal bordo, ma il motivo è sempre scritto accanto:
-  // il colore da solo non basta a due metri di distanza.
-  const tone = c.lagging || c.stale_queued
-    ? 'border-rose-500 bg-rose-50/60 dark:bg-rose-950/30'
+  // L'urgenza si legge dal fondo e dall'anello, ma il motivo è sempre scritto
+  // accanto: il colore da solo non basta a due metri di distanza. È l'unico
+  // posto della pagina in cui il rosso riempie una riga intera, ed è per una
+  // riga che sta costando un tavolo.
+  const tone = alarm
+    ? 'bg-[var(--ds-critical-tint)] ring-2 ring-[var(--ds-critical-solid)]'
     : allReady
-      ? 'border-emerald-500 bg-emerald-50/60 dark:bg-emerald-950/30'
-      : 'border-slate-200 dark:border-slate-700';
+      ? 'bg-[var(--ds-seated-tint)] ring-2 ring-[var(--ds-seated-solid)]'
+      : 'bg-[var(--ds-surface)]';
 
   return (
-    <div className={`rounded-xl border-2 px-4 py-3 flex items-center gap-4 ${tone}`}>
-      <div className="w-24 shrink-0">
-        <div className="text-lg font-bold">T{c.table_name ?? '—'}</div>
-        <div className="text-xs text-slate-500">{ORDINALS[c.course_no] ?? c.course_no} uscita</div>
+    <div className={`flex items-center gap-4 rounded-[18px] px-4 py-3 shadow-[var(--ds-shadow-card)] ${tone}`}>
+      <div className="w-24 flex-shrink-0">
+        <div className="text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
+          T{c.table_name ?? '—'}
+        </div>
+        <div className="text-[13px] text-[var(--ds-text-muted)]">
+          {ORDINALS[c.course_no] ?? c.course_no} uscita
+        </div>
       </div>
 
       {/* Un pallino per partita: lo stato di sincronia in un colpo d'occhio. */}
-      <div className="flex items-center gap-3 shrink-0">
+      <div className="flex flex-shrink-0 items-center gap-3">
         {stations.map(s => {
           const st = c.stations.find(x => x.station_id === s.id);
           return (
-            <div key={s.id} className="flex flex-col items-center w-14">
-              <span className={`text-xl leading-none ${
-                !st ? 'text-slate-300 dark:text-slate-700'
-                : st.ready ? 'text-emerald-600'
-                : 'text-slate-400'}`}>
+            <div key={s.id} className="flex w-14 flex-col items-center">
+              <span
+                className={`text-[22px] leading-none ${
+                  !st ? 'text-[var(--ds-border-strong)]'
+                  : st.ready ? 'text-[var(--ds-seated-solid)]'
+                  : 'text-[var(--ds-text-subtle)]'
+                }`}
+                aria-hidden
+              >
                 {!st ? '—' : st.ready ? '●' : '○'}
               </span>
-              <span className="text-[10px] uppercase tracking-wide text-slate-500 mt-0.5">
+              {/* Troncato a tre lettere, non messo in maiuscolo: la troncatura
+                  è per lo spazio, il maiuscolo non aggiungeva nulla. */}
+              <span className="mt-0.5 text-[11px] font-medium text-[var(--ds-text-muted)]">
                 {s.name.slice(0, 3)}
+              </span>
+              <span className="sr-only">
+                {s.name}: {!st ? 'non coinvolta' : st.ready ? 'pronta' : 'in corso'}
               </span>
             </div>
           );
         })}
       </div>
 
-      <div className="flex-1 min-w-0 text-sm">
+      <div className="min-w-0 flex-1 text-[14px]">
         {c.status === 'QUEUED' ? (
-          <span className={c.stale_queued ? 'text-rose-700 dark:text-rose-300 font-medium' : 'text-slate-500'}>
-            {c.stale_queued && <TriangleAlert size={14} className="inline mr-1 -mt-0.5" />}
+          <span className={c.stale_queued ? 'font-semibold text-[var(--ds-critical-text)]' : 'text-[var(--ds-text-muted)]'}>
+            {c.stale_queued && <TriangleAlert size={14} className="mr-1 -mt-0.5 inline" aria-hidden />}
             proposta da {mmss(c.age_seconds)}
           </span>
         ) : allReady ? (
-          <span className="text-emerald-700 dark:text-emerald-300 font-medium">pronta</span>
+          <span className="font-semibold text-[var(--ds-seated-text)]">pronta</span>
         ) : c.lagging ? (
-          <span className="text-rose-700 dark:text-rose-300 font-medium">
-            <TriangleAlert size={14} className="inline mr-1 -mt-0.5" />
+          <span className="font-semibold text-[var(--ds-critical-text)]">
+            <TriangleAlert size={14} className="mr-1 -mt-0.5 inline" aria-hidden />
             manca {c.waiting_station_ids.map(stationLabel).join(', ')} · {mmss(c.lamp_wait_seconds)} sotto la lampada
           </span>
         ) : (
-          <span className="text-slate-500">
+          <span className="text-[var(--ds-text-muted)]">
             in corso {mmss(c.age_seconds)}
             {c.waiting_station_ids.length > 0 && ` · manca ${c.waiting_station_ids.map(stationLabel).join(', ')}`}
           </span>
         )}
-        <div className="text-xs text-slate-400 truncate">
+        <div className={`truncate text-[13px] ${alarm || allReady ? 'opacity-80' : 'text-[var(--ds-text-muted)]'}`}>
           {c.items.map(i => `${i.qty} ${i.name_snapshot}`).join(', ')}
         </div>
       </div>
 
-      <div className="shrink-0 flex items-center gap-2">
+      <div className="flex flex-shrink-0 items-center gap-2">
         {onRefire && !allReady && (
-          <button onClick={onRefire} disabled={busy} title="Ricalcola i tempi di partenza da adesso"
-                  className="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm flex items-center gap-1.5">
-            <RotateCcw size={14} /> ri-lancia
+          <button
+            type="button"
+            onClick={onRefire}
+            disabled={busy}
+            title="Ricalcola i tempi di partenza da adesso"
+            className={`${passeAction} bg-[var(--ds-surface)] text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] hover:bg-[var(--ds-surface-row)]`}
+          >
+            <RotateCcw size={15} aria-hidden /> ri-lancia
           </button>
         )}
         {onCall && allReady && (
-          <button onClick={onCall} disabled={busy || called}
-                  className="px-4 py-2.5 rounded-lg bg-emerald-600 text-white font-semibold text-sm flex items-center gap-1.5 disabled:opacity-50">
-            <Bell size={15} /> {called ? 'chiamata' : 'CHIAMA'}
+          <button
+            type="button"
+            onClick={onCall}
+            disabled={busy || called}
+            className={`${passeAction} bg-[var(--ds-seated-solid)] text-white hover:brightness-95`}
+          >
+            <Bell size={15} aria-hidden /> {called ? 'chiamata' : 'Chiama'}
           </button>
         )}
         {onFire && (
-          <button onClick={onFire} disabled={busy}
-                  className="px-5 py-2.5 rounded-lg bg-slate-900 text-white dark:bg-white dark:text-slate-900 font-semibold text-sm flex items-center gap-1.5 disabled:opacity-50">
-            {busy ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />} LANCIA
+          <button
+            type="button"
+            onClick={onFire}
+            disabled={busy}
+            className={`${passeAction} bg-[var(--ds-action-bg)] px-5 text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]`}
+          >
+            {busy ? <Loader2 size={15} className="animate-spin" aria-hidden /> : <Play size={15} aria-hidden />} Lancia
           </button>
         )}
       </div>
@@ -260,12 +319,16 @@ const CourseRow: React.FC<{
 // sposta la media e non la mediana.
 const KitchenStats: React.FC<{ report: KitchenReport | null }> = ({ report }) => {
   if (!report) {
-    return <div className="px-5 py-3 text-sm text-slate-500 border-b border-slate-200 dark:border-slate-700">Caricamento statistiche…</div>;
+    return (
+      <div className="mb-5 rounded-[20px] bg-[var(--ds-surface)] px-5 py-4 text-[14px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)]">
+        Caricamento statistiche…
+      </div>
+    );
   }
   const s = report.sincronia;
   return (
-    <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+    <div className="mb-5 rounded-[20px] bg-[var(--ds-surface)] p-5 shadow-[var(--ds-shadow-card)]">
+      <div className="mb-5 grid grid-cols-2 gap-4 md:grid-cols-4">
         <Stat label="Uscite completate" value={String(s?.uscite ?? 0)} />
         <Stat label="Delta di sincronia (mediano)" value={s?.delta_mediano_min != null ? `${s.delta_mediano_min}′` : '—'}
               hint="fra la prima riga pronta e l'ultima" />
@@ -275,35 +338,45 @@ const KitchenStats: React.FC<{ report: KitchenReport | null }> = ({ report }) =>
       </div>
 
       <div className="overflow-x-auto">
-        <table className="text-sm w-full">
-          <thead className="text-xs uppercase tracking-wide text-slate-500">
-            <tr><th className="text-left py-1">Partita</th><th className="text-right">Righe</th>
-                <th className="text-right">Media</th><th className="text-right">Mediana</th></tr>
+        <table className="w-full text-[14px]">
+          <thead className="text-[13px] font-semibold text-[var(--ds-text-muted)]">
+            <tr>
+              <th className="py-1.5 text-left font-semibold">Partita</th>
+              <th className="text-right font-semibold">Righe</th>
+              <th className="text-right font-semibold">Media</th>
+              <th className="text-right font-semibold">Mediana</th>
+            </tr>
           </thead>
           <tbody>
             {report.partite.map(p => (
-              <tr key={p.station_id ?? 'none'} className="border-t border-slate-200 dark:border-slate-700">
-                <td className="py-1.5">{p.station_name ?? 'Senza partita'}</td>
-                <td className="text-right tabular-nums">{p.righe}</td>
-                <td className="text-right tabular-nums">{p.media_min ?? '—'}′</td>
-                <td className="text-right tabular-nums font-medium">{p.mediana_min ?? '—'}′</td>
+              <tr key={p.station_id ?? 'none'} className="border-t border-[var(--ds-border)]">
+                <td className="py-2 text-[var(--ds-text-primary)]">{p.station_name ?? 'Senza partita'}</td>
+                <td className="text-right tabular-nums text-[var(--ds-text-secondary)]">{p.righe}</td>
+                <td className="text-right tabular-nums text-[var(--ds-text-secondary)]">{p.media_min ?? '—'}′</td>
+                <td className="text-right font-semibold tabular-nums text-[var(--ds-text-primary)]">{p.mediana_min ?? '—'}′</td>
               </tr>
             ))}
             {report.partite.length === 0 && (
-              <tr><td colSpan={4} className="py-2 text-slate-400">Nessun dato nel periodo.</td></tr>
+              <tr>
+                <td colSpan={4} className="py-2 text-[var(--ds-text-muted)]">Nessun dato nel periodo.</td>
+              </tr>
             )}
           </tbody>
         </table>
       </div>
 
       {report.scarti.length > 0 && (
-        <div className="mt-4">
-          <div className="text-xs uppercase tracking-wide text-slate-500 mb-1">Scarti</div>
-          <ul className="text-sm space-y-0.5">
+        <div className="mt-5">
+          <div className="mb-1.5 text-[13px] font-semibold text-[var(--ds-text-muted)]">Scarti</div>
+          <ul className="space-y-1 text-[14px]">
             {report.scarti.map((sc, i) => (
-              <li key={i} className="flex justify-between">
-                <span className="text-slate-600 dark:text-slate-300">{sc.motivo ?? 'senza motivazione'} · {sc.righe}</span>
-                <span className="tabular-nums">{(sc.valore_cents / 100).toLocaleString('it-IT', { style: 'currency', currency: 'EUR' })}</span>
+              <li key={i} className="flex justify-between gap-3">
+                <span className="min-w-0 truncate text-[var(--ds-text-secondary)]">
+                  {sc.motivo ?? 'senza motivazione'} · {sc.righe}
+                </span>
+                <span className="flex-shrink-0 tabular-nums text-[var(--ds-text-primary)]">
+                  {(sc.valore_cents / 100).toLocaleString('it-IT', { style: 'currency', currency: 'EUR' })}
+                </span>
               </li>
             ))}
           </ul>
@@ -314,9 +387,11 @@ const KitchenStats: React.FC<{ report: KitchenReport | null }> = ({ report }) =>
 };
 
 const Stat: React.FC<{ label: string; value: string; hint?: string }> = ({ label, value, hint }) => (
-  <div>
-    <div className="text-2xl font-bold tabular-nums">{value}</div>
-    <div className="text-xs text-slate-500">{label}</div>
-    {hint && <div className="text-[10px] text-slate-400">{hint}</div>}
+  <div className="min-w-0">
+    <div className="text-[26px] font-semibold tabular-nums leading-tight tracking-[-0.015em] text-[var(--ds-text-primary)]">
+      {value}
+    </div>
+    <div className="text-[13px] text-[var(--ds-text-muted)]">{label}</div>
+    {hint && <div className="text-[12px] text-[var(--ds-text-subtle)]">{hint}</div>}
   </div>
 );

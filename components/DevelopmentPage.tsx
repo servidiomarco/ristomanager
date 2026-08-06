@@ -1,30 +1,51 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { Kanban, Plus, X, Trash2, Loader2, GripVertical, RefreshCw } from 'lucide-react';
+import { Plus, X, Trash2, Loader2, GripVertical, RefreshCw } from 'lucide-react';
 import {
   DevBoardCard, DevBoardColumnKey, DevBoardLabelKey,
   getDevBoardCards, createDevBoardCard, updateDevBoardCard, moveDevBoardCard, deleteDevBoardCard,
 } from '../services/devBoardApiService';
 import { socketClient } from '../services/socketClient';
+import {
+  ModalShell, Field, Callout, dsInput, dsTextarea, dsButton, dsIconButton,
+} from './ds';
+
+/* Le colonne prendono le famiglie di stato del design system, non cinque tinte
+   scelte a mano: in lavorazione è imminente (arriving), da rivedere chiede
+   un'azione (pending), fatte è chiuso bene (seated). "Nice to have" e "in pausa"
+   restano neutre — su una board la posizione è già la codifica principale, e
+   inventare due colori per distinguere due colonne che stanno una accanto
+   all'altra non aggiunge niente. */
+type ColumnTone = 'info' | 'pending' | 'positive' | 'muted';
+
+const COLUMN_TONE: Record<ColumnTone, { dot: string; text: string }> = {
+  info: { dot: 'bg-[var(--ds-arriving-solid)]', text: 'text-[var(--ds-arriving-text)]' },
+  pending: { dot: 'bg-[var(--ds-pending-solid)]', text: 'text-[var(--ds-pending-text)]' },
+  positive: { dot: 'bg-[var(--ds-seated-solid)]', text: 'text-[var(--ds-seated-text)]' },
+  muted: { dot: 'bg-[var(--ds-text-muted)]', text: 'text-[var(--ds-text-secondary)]' },
+};
 
 interface ColumnMeta {
   key: DevBoardColumnKey;
   label: string;
   hint: string;
-  dotClass: string;
-  headerClass: string;
+  tone: ColumnTone;
 }
 
 const COLUMNS: ColumnMeta[] = [
-  { key: 'in_progress',  label: 'In lavorazione', hint: 'Ci stiamo lavorando ora',            dotClass: 'bg-blue-500',    headerClass: 'text-blue-700 dark:text-blue-300' },
-  { key: 'review',       label: 'Da rivedere',    hint: 'Fatte, ma con revisioni da fare',    dotClass: 'bg-amber-500',   headerClass: 'text-amber-700 dark:text-amber-300' },
-  { key: 'nice_to_have', label: 'Nice to have',   hint: 'Idee e migliorie non urgenti',       dotClass: 'bg-violet-500',  headerClass: 'text-violet-700 dark:text-violet-300' },
-  { key: 'paused',       label: 'In pausa',       hint: 'Bloccate o rimandate',               dotClass: 'bg-slate-400',   headerClass: 'text-slate-600 dark:text-slate-300' },
-  { key: 'done',         label: 'Fatte',          hint: 'Implementate e in produzione',       dotClass: 'bg-emerald-500', headerClass: 'text-emerald-700 dark:text-emerald-300' },
+  { key: 'in_progress',  label: 'In lavorazione', hint: 'Ci stiamo lavorando ora',         tone: 'info' },
+  { key: 'review',       label: 'Da rivedere',    hint: 'Fatte, ma con revisioni da fare', tone: 'pending' },
+  { key: 'nice_to_have', label: 'Nice to have',   hint: 'Idee e migliorie non urgenti',    tone: 'muted' },
+  { key: 'paused',       label: 'In pausa',       hint: 'Bloccate o rimandate',            tone: 'muted' },
+  { key: 'done',         label: 'Fatte',          hint: 'Implementate e in produzione',    tone: 'positive' },
 ];
 
 // Etichette stile Trello: palette chiusa, il colore È il significato. Il
 // server sanitizza sulla stessa lista (DEV_BOARD_LABELS in server.ts).
+//
+// Sono sei etichette per quattro famiglie di stato, quindi Comande e
+// Prenotazioni condividono l'indaco: il nome è sempre stampato dentro il chip,
+// così la collisione non rende niente ambiguo, e resta tutto dentro al sistema
+// invece di pescare sky/violet/slate da fuori.
 interface LabelMeta {
   key: DevBoardLabelKey;
   name: string;
@@ -32,12 +53,12 @@ interface LabelMeta {
 }
 
 const LABELS: LabelMeta[] = [
-  { key: 'comande',      name: 'Comande',      chipClass: 'bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-300' },
-  { key: 'prenotazioni', name: 'Prenotazioni', chipClass: 'bg-violet-100 text-violet-800 dark:bg-violet-500/20 dark:text-violet-300' },
-  { key: 'pagamenti',    name: 'Pagamenti',    chipClass: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300' },
-  { key: 'stampa',       name: 'Stampa',       chipClass: 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300' },
-  { key: 'bug',          name: 'Bug',          chipClass: 'bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-300' },
-  { key: 'infra',        name: 'Infra',        chipClass: 'bg-slate-200 text-slate-700 dark:bg-slate-500/20 dark:text-slate-300' },
+  { key: 'comande',      name: 'Comande',      chipClass: 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]' },
+  { key: 'prenotazioni', name: 'Prenotazioni', chipClass: 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]' },
+  { key: 'pagamenti',    name: 'Pagamenti',    chipClass: 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]' },
+  { key: 'stampa',       name: 'Stampa',       chipClass: 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]' },
+  { key: 'bug',          name: 'Bug',          chipClass: 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]' },
+  { key: 'infra',        name: 'Infra',        chipClass: 'bg-[var(--ds-border)] text-[var(--ds-text-secondary)]' },
 ];
 
 const labelMeta = (key: DevBoardLabelKey): LabelMeta | undefined => LABELS.find(l => l.key === key);
@@ -218,76 +239,99 @@ export const DevelopmentPage: React.FC = () => {
   const totalCount = cards.length;
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex h-full flex-col bg-[var(--ds-canvas)]">
       {/* Page header */}
-      <div className="flex items-start justify-between gap-3 px-4 lg:px-6 pt-4 lg:pt-6 pb-3">
+      <div className="flex flex-shrink-0 items-start justify-between gap-3 px-4 pb-3 pt-4 lg:px-6 lg:pt-6">
         <div className="min-w-0">
-          <h2 className="text-lg font-semibold text-[var(--color-fg)] flex items-center gap-2">
-            <Kanban className="h-5 w-5 text-[var(--color-fg-muted)]" /> Development
+          <h2 className="text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
+            Development
           </h2>
-          <p className="text-xs text-[var(--color-fg-muted)] mt-0.5">
+          <p className="mt-0.5 text-[13px] text-[var(--ds-text-muted)]">
             Board di progetto · {totalCount} {totalCount === 1 ? 'card' : 'cards'} · visibile solo a questo account
           </p>
         </div>
         <button
           type="button"
           onClick={() => { setIsLoading(true); load(); }}
+          aria-label="Ricarica la board"
           title="Ricarica"
-          className="p-2 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors"
+          className={dsIconButton}
         >
           <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
         </button>
       </div>
 
       {error && (
-        <div className="mx-4 lg:mx-6 mb-2 px-3 py-2 rounded-lg text-sm bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 flex items-center justify-between gap-3">
-          <span className="min-w-0 truncate">{error}</span>
-          <button type="button" onClick={() => setError(null)} className="flex-none"><X className="h-4 w-4" /></button>
+        <div className="mx-4 mb-2 flex-shrink-0 lg:mx-6">
+          <Callout
+            tone="critical"
+            action={
+              <button
+                type="button"
+                onClick={() => setError(null)}
+                aria-label="Chiudi l'errore"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--ds-critical-text)] transition-[filter] hover:brightness-90"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            }
+          >
+            {error}
+          </Callout>
         </div>
       )}
 
       {/* Board */}
-      <div className="flex-1 min-h-0 flex gap-3 lg:gap-4 overflow-x-auto overflow-y-hidden px-4 lg:px-6 pb-4 snap-x snap-mandatory sm:snap-none">
+      <div className="flex min-h-0 flex-1 snap-x snap-mandatory gap-3 overflow-x-auto overflow-y-hidden px-4 pb-4 sm:snap-none lg:gap-4 lg:px-6">
         {COLUMNS.map(col => {
           const columnCards = cardsByColumn.get(col.key) || [];
           const isDropTarget = dropHint?.column === col.key;
+          const tone = COLUMN_TONE[col.tone];
           return (
+            // La corsia è la superficie bianca e le card sono tessere sopra:
+            // una corsia in grigio di secondo livello sulla tela misura circa
+            // 1.03:1 e sparirebbe, lasciando cinque liste senza contorno.
             <div
               key={col.key}
-              className={`w-[82vw] max-w-72 sm:w-72 lg:w-80 sm:max-w-none flex-none flex flex-col min-h-0 snap-center rounded-xl border bg-[var(--color-surface-2)] transition-colors ${
-                isDropTarget ? 'border-[var(--color-fg)]/40 bg-[var(--color-surface-hover)]' : 'border-[var(--color-line)]'
+              className={`flex min-h-0 w-[82vw] max-w-72 flex-none snap-center flex-col rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] transition-shadow sm:w-72 sm:max-w-none lg:w-80 ${
+                isDropTarget ? 'ring-2 ring-[var(--ds-border-focus)]' : ''
               }`}
               onDragOver={(e) => { e.preventDefault(); setDropHint(prev => (prev?.column === col.key ? prev : { column: col.key, index: null })); }}
               onDrop={(e) => { e.preventDefault(); handleDrop(col.key, dropHint?.column === col.key ? dropHint.index : null); }}
             >
               {/* Column header */}
-              <div className="flex items-center justify-between px-3 pt-3 pb-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className={`w-2 h-2 rounded-full flex-none ${col.dotClass}`} />
-                  <span className={`text-[13px] font-semibold truncate ${col.headerClass}`} title={col.hint}>{col.label}</span>
-                  <span className="text-[11px] font-medium text-[var(--color-fg-subtle)] tabular-nums">{columnCards.length}</span>
+              <div className="flex items-center justify-between gap-2 px-3 pb-2 pt-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className={`h-2 w-2 flex-none rounded-full ${tone.dot}`} aria-hidden />
+                  <span className={`truncate text-[14px] font-semibold ${tone.text}`} title={col.hint}>
+                    {col.label}
+                  </span>
+                  <span className="text-[13px] font-medium tabular-nums text-[var(--ds-text-muted)]">
+                    {columnCards.length}
+                  </span>
                 </div>
                 <button
                   type="button"
                   title={`Aggiungi in ${col.label}`}
+                  aria-label={`Aggiungi in ${col.label}`}
                   onClick={() => { setComposerColumn(col.key); setComposerTitle(''); }}
-                  className="p-1 rounded-md text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
+                  className="inline-flex h-9 w-9 flex-none items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
                   <Plus className="h-4 w-4" />
                 </button>
               </div>
 
               {/* Cards */}
-              <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-2 space-y-1.5">
+              <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto px-2 pb-2">
                 {isLoading && cards.length === 0 && (
-                  <div className="flex items-center justify-center py-8 text-[var(--color-fg-subtle)]">
+                  <div className="flex items-center justify-center py-8 text-[var(--ds-text-subtle)]">
                     <Loader2 className="h-4 w-4 animate-spin" />
                   </div>
                 )}
                 {columnCards.map((card, i) => (
                   <React.Fragment key={card.id}>
                     {isDropTarget && dropHint?.index === i && draggingId !== card.id && (
-                      <div className="h-0.5 rounded bg-[var(--color-fg)]/50 mx-1" />
+                      <div className="mx-1 h-0.5 rounded bg-[var(--ds-border-focus)]" />
                     )}
                     <div
                       draggable
@@ -296,30 +340,36 @@ export const DevelopmentPage: React.FC = () => {
                       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDropHint({ column: col.key, index: hoverIndex(e, i) }); }}
                       onDrop={(e) => { e.preventDefault(); e.stopPropagation(); handleDrop(col.key, hoverIndex(e, i)); }}
                       onClick={() => setEditDraft({ id: card.id, title: card.title, description: card.description || '', column_key: card.column_key, labels: card.labels ?? [] })}
-                      className={`group rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2.5 cursor-pointer shadow-sm hover:border-[var(--color-fg)]/30 transition-colors ${
+                      className={`group cursor-pointer rounded-[14px] bg-[var(--ds-surface-row)] px-3 py-2.5 transition-colors hover:bg-[var(--ds-border)] ${
                         draggingId === card.id ? 'opacity-40' : ''
                       }`}
                     >
                       <div className="flex items-start gap-2">
-                        <GripVertical className="h-3.5 w-3.5 mt-0.5 flex-none text-[var(--color-fg-subtle)] opacity-0 group-hover:opacity-100 cursor-grab" />
+                        <GripVertical className="mt-0.5 h-3.5 w-3.5 flex-none cursor-grab text-[var(--ds-text-subtle)] opacity-0 group-hover:opacity-100" aria-hidden />
                         <div className="min-w-0 flex-1">
                           {(card.labels?.length ?? 0) > 0 && (
-                            <div className="flex flex-wrap gap-1 mb-1">
+                            <div className="mb-1.5 flex flex-wrap gap-1">
                               {card.labels.map(key => {
                                 const meta = labelMeta(key);
                                 return meta ? (
-                                  <span key={key} className={`px-1.5 py-0.5 rounded text-[10px] font-semibold leading-none ${meta.chipClass}`}>
+                                  <span key={key} className={`rounded-full px-2 py-0.5 text-[11px] font-semibold leading-none ${meta.chipClass}`}>
                                     {meta.name}
                                   </span>
                                 ) : null;
                               })}
                             </div>
                           )}
-                          <p className="text-sm font-medium text-[var(--color-fg)] leading-snug break-words">{card.title}</p>
+                          <p className="break-words text-[14px] font-medium leading-snug text-[var(--ds-text-primary)]">
+                            {card.title}
+                          </p>
                           {card.description && (
-                            <p className="mt-1 text-xs text-[var(--color-fg-muted)] leading-snug line-clamp-3 whitespace-pre-line">{card.description}</p>
+                            <p className="mt-1 line-clamp-3 whitespace-pre-line text-[13px] leading-snug text-[var(--ds-text-muted)]">
+                              {card.description}
+                            </p>
                           )}
-                          <p className="mt-1.5 text-[10px] uppercase tracking-wide text-[var(--color-fg-subtle)]">
+                          {/* Non in maiuscolo: "05 ago" a 10px in capitali
+                              perde la forma della parola e non guadagna nulla. */}
+                          <p className="mt-1.5 text-[12px] text-[var(--ds-text-muted)]">
                             {formatCardDate(card.updated_at || card.created_at)}
                           </p>
                         </div>
@@ -328,13 +378,13 @@ export const DevelopmentPage: React.FC = () => {
                   </React.Fragment>
                 ))}
                 {isDropTarget && dropHint?.index != null && dropHint.index >= columnCards.length && columnCards.length > 0 && (
-                  <div className="h-0.5 rounded bg-[var(--color-fg)]/50 mx-1" />
+                  <div className="mx-1 h-0.5 rounded bg-[var(--ds-border-focus)]" />
                 )}
                 {!isLoading && columnCards.length === 0 && composerColumn !== col.key && (
                   <button
                     type="button"
                     onClick={() => { setComposerColumn(col.key); setComposerTitle(''); }}
-                    className="w-full rounded-lg border border-dashed border-[var(--color-line)] px-3 py-4 text-xs text-[var(--color-fg-subtle)] hover:text-[var(--color-fg-muted)] hover:border-[var(--color-fg)]/30 transition-colors"
+                    className="w-full rounded-[14px] border border-dashed border-[var(--ds-border-strong)] px-3 py-4 text-[13px] text-[var(--ds-text-muted)] transition-colors hover:border-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]"
                   >
                     {col.hint} — aggiungi la prima card
                   </button>
@@ -342,7 +392,7 @@ export const DevelopmentPage: React.FC = () => {
 
                 {/* Inline composer */}
                 {composerColumn === col.key && (
-                  <div className="rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] p-2 space-y-2">
+                  <div className="space-y-2 rounded-[14px] bg-[var(--ds-surface-row)] p-2">
                     <textarea
                       ref={composerInputRef}
                       value={composerTitle}
@@ -353,21 +403,22 @@ export const DevelopmentPage: React.FC = () => {
                       }}
                       rows={2}
                       placeholder="Titolo della card…"
-                      className="w-full px-2 py-1.5 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-sm text-[var(--color-fg)] resize-none focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20"
+                      className="w-full resize-none rounded-[12px] bg-[var(--ds-surface)] px-3 py-2 text-[14px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     />
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
                         onClick={submitComposer}
                         disabled={!composerTitle.trim() || isComposerSaving}
-                        className="inline-flex items-center gap-1.5 px-3 h-8 rounded-lg text-xs font-semibold bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-50"
+                        className="inline-flex h-10 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-4 text-[14px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
                       >
-                        {isComposerSaving && <Loader2 className="h-3 w-3 animate-spin" />} Aggiungi
+                        {isComposerSaving && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Aggiungi
                       </button>
                       <button
                         type="button"
                         onClick={() => setComposerColumn(null)}
-                        className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
+                        aria-label="Chiudi il compositore"
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
                       >
                         <X className="h-4 w-4" />
                       </button>
@@ -380,144 +431,131 @@ export const DevelopmentPage: React.FC = () => {
         })}
       </div>
 
-      {/* Edit/create modal — portaled like every overlay that must beat the
-          view container and the mobile bottom nav. */}
-      {editDraft && createPortal(
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] sm:px-4" onClick={() => setEditDraft(null)}>
-          <div className="bg-[var(--color-surface)] w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] overflow-hidden animate-in slide-in-from-bottom sm:slide-in-from-bottom-4 duration-200 pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-center pt-3 pb-1 sm:hidden">
-              <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
-            </div>
-            <div className="flex items-start justify-between p-4 border-b border-[var(--color-line)]">
-              <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">
-                {editDraft.id == null ? 'Nuova card' : 'Modifica card'}
-              </h3>
-              <button onClick={() => setEditDraft(null)}
-                className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="p-4 space-y-3">
-              <div>
-                <label className="text-xs font-medium text-[var(--color-fg-muted)] mb-1.5 block">Titolo</label>
-                <input
-                  type="text"
-                  value={editDraft.title}
-                  onChange={(e) => setEditDraft(d => d ? { ...d, title: e.target.value } : d)}
-                  autoFocus
-                  className="w-full h-10 px-3 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] text-sm text-[var(--color-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-[var(--color-fg-muted)] mb-1.5 block">Descrizione</label>
-                <textarea
-                  value={editDraft.description}
-                  onChange={(e) => setEditDraft(d => d ? { ...d, description: e.target.value } : d)}
-                  rows={4}
-                  placeholder="Dettagli, note, link…"
-                  className="w-full px-3 py-2 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] text-sm text-[var(--color-fg)] leading-relaxed resize-y focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)]/20"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-[var(--color-fg-muted)] mb-1.5 block">Colonna</label>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {COLUMNS.map(col => (
+      <ModalShell
+        open={!!editDraft}
+        onClose={() => setEditDraft(null)}
+        title={editDraft?.id == null ? 'Nuova card' : 'Modifica card'}
+        size="sm"
+        closeOnEscape
+        bodyClassName="space-y-4 p-5 sm:p-6"
+        footerStart={
+          editDraft?.id != null ? (
+            <button
+              type="button"
+              onClick={() => { const card = cards.find(c => c.id === editDraft.id); if (card) setDeleteCandidate(card); }}
+              className="inline-flex h-11 items-center gap-1.5 rounded-full px-4 text-[15px] font-medium text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)]"
+            >
+              <Trash2 className="h-4 w-4" aria-hidden /> Elimina
+            </button>
+          ) : undefined
+        }
+        footer={
+          <button
+            type="button"
+            onClick={submitDraft}
+            disabled={!editDraft?.title.trim() || isDraftSaving}
+            className={dsButton.primary}
+          >
+            {isDraftSaving && <Loader2 className="h-4 w-4 animate-spin" />} Salva
+          </button>
+        }
+      >
+        {editDraft && (
+          <>
+            <Field label="Titolo" htmlFor="devcard-title" required>
+              <input
+                id="devcard-title"
+                type="text"
+                value={editDraft.title}
+                onChange={(e) => setEditDraft(d => d ? { ...d, title: e.target.value } : d)}
+                autoFocus
+                className={dsInput}
+              />
+            </Field>
+            <Field label="Descrizione" htmlFor="devcard-description" aside="opzionale">
+              <textarea
+                id="devcard-description"
+                value={editDraft.description}
+                onChange={(e) => setEditDraft(d => d ? { ...d, description: e.target.value } : d)}
+                rows={4}
+                placeholder="Dettagli, note, link…"
+                className={`${dsTextarea} resize-y leading-relaxed`}
+              />
+            </Field>
+            <Field label="Colonna">
+              <div className="grid grid-cols-2 gap-2">
+                {COLUMNS.map(col => {
+                  const active = editDraft.column_key === col.key;
+                  return (
                     <button
                       key={col.key}
                       type="button"
                       onClick={() => setEditDraft(d => d ? { ...d, column_key: col.key } : d)}
-                      className={`flex items-center gap-2 px-2.5 h-9 rounded-lg border text-xs font-medium transition-colors ${
-                        editDraft.column_key === col.key
-                          ? 'border-[var(--color-fg)]/50 bg-[var(--color-surface-hover)] text-[var(--color-fg)]'
-                          : 'border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+                      aria-pressed={active}
+                      className={`flex h-11 items-center gap-2 rounded-full px-3 text-[14px] font-medium transition-colors ${
+                        active
+                          ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                          : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
                       }`}
                     >
-                      <span className={`w-2 h-2 rounded-full flex-none ${col.dotClass}`} />
+                      <span className={`h-2 w-2 flex-none rounded-full ${COLUMN_TONE[col.tone].dot}`} aria-hidden />
                       <span className="truncate">{col.label}</span>
                     </button>
-                  ))}
-                </div>
+                  );
+                })}
               </div>
-              <div>
-                <label className="text-xs font-medium text-[var(--color-fg-muted)] mb-1.5 block">Etichette</label>
-                <div className="flex flex-wrap gap-1.5">
-                  {LABELS.map(l => {
-                    const active = editDraft.labels.includes(l.key);
-                    return (
-                      <button
-                        key={l.key}
-                        type="button"
-                        onClick={() => setEditDraft(d => d ? {
-                          ...d,
-                          labels: active ? d.labels.filter(k => k !== l.key) : [...d.labels, l.key],
-                        } : d)}
-                        className={`px-2.5 h-8 rounded-lg text-xs font-semibold transition-all ${l.chipClass} ${
-                          active ? 'ring-2 ring-[var(--color-fg)]/40' : 'opacity-45 hover:opacity-100'
-                        }`}
-                      >
-                        {l.name}
-                      </button>
-                    );
-                  })}
-                </div>
+            </Field>
+            <Field label="Etichette">
+              <div className="flex flex-wrap gap-2">
+                {LABELS.map(l => {
+                  const active = editDraft.labels.includes(l.key);
+                  return (
+                    <button
+                      key={l.key}
+                      type="button"
+                      onClick={() => setEditDraft(d => d ? {
+                        ...d,
+                        labels: active ? d.labels.filter(k => k !== l.key) : [...d.labels, l.key],
+                      } : d)}
+                      aria-pressed={active}
+                      // Selezionata = anello. Prima le non selezionate stavano
+                      // al 45% di opacità, che portava il testo del chip sotto
+                      // il minimo di contrasto per leggere quello che offre.
+                      className={`inline-flex h-11 items-center rounded-full px-4 text-[14px] font-semibold transition-shadow ${l.chipClass} ${
+                        active ? 'ring-2 ring-[var(--ds-text-primary)]' : ''
+                      }`}
+                    >
+                      {l.name}
+                    </button>
+                  );
+                })}
               </div>
-              <div className="flex items-center justify-between gap-2 pt-1">
-                {editDraft.id != null ? (
-                  <button
-                    type="button"
-                    onClick={() => { const card = cards.find(c => c.id === editDraft.id); if (card) setDeleteCandidate(card); }}
-                    className="inline-flex items-center gap-1.5 px-3 h-9 rounded-lg text-sm font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition-colors"
-                  >
-                    <Trash2 className="h-4 w-4" /> Elimina
-                  </button>
-                ) : <span />}
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setEditDraft(null)}
-                    className="px-3 h-9 rounded-lg text-sm font-medium border border-[var(--color-line)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors"
-                  >
-                    Annulla
-                  </button>
-                  <button
-                    type="button"
-                    onClick={submitDraft}
-                    disabled={!editDraft.title.trim() || isDraftSaving}
-                    className="inline-flex items-center gap-1.5 px-4 h-9 rounded-lg text-sm font-semibold bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] hover:opacity-90 disabled:opacity-50"
-                  >
-                    {isDraftSaving && <Loader2 className="h-4 w-4 animate-spin" />} Salva
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+            </Field>
+          </>
+        )}
+      </ModalShell>
 
-      {/* Delete confirm */}
-      {deleteCandidate && createPortal(
-        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] sm:px-4" onClick={() => setDeleteCandidate(null)}>
-          <div className="bg-[var(--color-surface)] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] overflow-hidden pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(e) => e.stopPropagation()}>
-            <div className="p-4 space-y-3">
-              <p className="text-sm text-[var(--color-fg)]">
-                Eliminare la card <strong>{deleteCandidate.title}</strong>?
-              </p>
-              <div className="flex items-center justify-end gap-2">
-                <button type="button" onClick={() => setDeleteCandidate(null)}
-                  className="px-3 h-9 rounded-lg text-sm font-medium border border-[var(--color-line)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
-                  Annulla
-                </button>
-                <button type="button" onClick={confirmDelete}
-                  className="inline-flex items-center gap-1.5 px-3 h-9 rounded-lg text-sm font-semibold bg-rose-600 text-white hover:bg-rose-700 transition-colors">
-                  <Trash2 className="h-4 w-4" /> Elimina
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+      <ModalShell
+        open={!!deleteCandidate}
+        onClose={() => setDeleteCandidate(null)}
+        title="Elimina card"
+        size="sm"
+        closeOnEscape
+        bodyClassName="p-5 sm:p-6"
+        footer={
+          <button
+            type="button"
+            onClick={confirmDelete}
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-[var(--ds-critical-solid)] px-5 text-[15px] font-semibold text-[var(--ds-critical-fg)] transition-[filter] hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            <Trash2 className="h-4 w-4" aria-hidden /> Elimina
+          </button>
+        }
+      >
+        <p className="text-[15px] text-[var(--ds-text-primary)]">
+          Eliminare la card <strong className="font-semibold">{deleteCandidate?.title}</strong>?
+        </p>
+      </ModalShell>
     </div>
   );
 };
