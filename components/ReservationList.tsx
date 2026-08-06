@@ -2230,7 +2230,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setBill(created);
       showToast(`Conto importato dal gestionale: €${(created.bill.total_cents / 100).toFixed(2).replace('.', ',')}`, 'success');
     } catch (err: any) {
-      showToast(err?.message || 'Importazione dal gestionale non riuscita', 'error');
+      // Nome tavolo che non combacia col gestionale (il server ha già provato
+      // le varianti tipografiche): si chiede all'operatore il nome esatto e
+      // si ritenta, invece di lasciarlo davanti a un vicolo cieco.
+      if (err?.data?.error === 'no_comanda') {
+        const manual = window.prompt(
+          `Nessuna comanda trovata sul tavolo "${tavolo}" nel gestionale.\n` +
+          'Scrivi il nome ESATTO del tavolo come appare in Passepartout (punto e spazi compresi):',
+          tavolo
+        );
+        const retry = manual?.trim();
+        setBillActionLoading(null);
+        if (retry && retry !== tavolo) {
+          await handleImportBillFromPassepartout(retry);
+          return;
+        }
+      }
+      showToast(err?.data?.message || err?.message || 'Importazione dal gestionale non riuscita', 'error');
     } finally {
       setBillActionLoading(null);
     }

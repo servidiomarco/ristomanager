@@ -3345,6 +3345,25 @@ function sendPassepartoutError(res: any, err: unknown): boolean {
     return true;
 }
 
+// Il nome tavolo in Passepartout deve combaciare ESATTAMENTE, e in sala i
+// nomi hanno varianti tipografiche ("204.", "23 "): il CRM manda il proprio
+// nome tavolo, qui si prova anche con le varianti note prima di arrendersi.
+async function findComandaTavolo(tavolo: string): Promise<{ comanda: PassepartoutComanda; tavolo: string } | null> {
+    const base = tavolo.trim();
+    const variants = [...new Set([
+        base,
+        `${base}.`,
+        base.replace(/\.+$/, ''),
+        base.toUpperCase(),
+        base.toLowerCase(),
+    ])].filter(v => v.length > 0);
+    for (const v of variants) {
+        const comanda = await callPassepartout<PassepartoutComanda | null>('comandaTavolo', { tavolo: v });
+        if (comanda) return { comanda, tavolo: v };
+    }
+    return null;
+}
+
 app.get('/passepartout/status', authenticate, requirePermission('payments:full'), (_req, res) => {
     res.json(getPassepartoutAgentStatus());
 });
@@ -3356,14 +3375,14 @@ app.get('/passepartout/tavolo/:nome', authenticate, requirePermission('payments:
     try {
         const nome = String(req.params.nome || '').trim();
         if (!nome) return res.status(400).json({ error: 'Nome tavolo mancante' });
-        const comanda = await callPassepartout<PassepartoutComanda | null>('comandaTavolo', { tavolo: nome });
-        if (!comanda) {
+        const found = await findComandaTavolo(nome);
+        if (!found) {
             return res.status(404).json({
                 error: 'no_comanda',
-                message: `Nessuna comanda attiva sul tavolo ${nome}`,
+                message: `Nessuna comanda attiva sul tavolo "${nome}" nel gestionale. Il nome deve combaciare con quello di Passepartout (punto e spazi compresi).`,
             });
         }
-        res.json(comandaToBillPayload(comanda));
+        res.json(comandaToBillPayload(found.comanda));
     } catch (err: any) {
         if (sendPassepartoutError(res, err)) return;
         console.error('GET /passepartout/tavolo error:', err);
@@ -3390,11 +3409,11 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
         if (fromPassepartout) {
             const tavolo = String(req.body?.pp_tavolo || '').trim();
             if (!tavolo) return res.status(400).json({ error: 'pp_tavolo mancante per source=passepartout' });
-            const comanda = await callPassepartout<PassepartoutComanda | null>('comandaTavolo', { tavolo });
-            if (!comanda) {
-                return res.status(404).json({ error: 'no_comanda', message: `Nessuna comanda attiva sul tavolo ${tavolo}` });
+            const found = await findComandaTavolo(tavolo);
+            if (!found) {
+                return res.status(404).json({ error: 'no_comanda', message: `Nessuna comanda attiva sul tavolo "${tavolo}" nel gestionale. Il nome deve combaciare con quello di Passepartout (punto e spazi compresi).` });
             }
-            ppPayload = comandaToBillPayload(comanda);
+            ppPayload = comandaToBillPayload(found.comanda);
             if (ppPayload.total_cents <= 0) {
                 return res.status(422).json({ error: 'empty_comanda', message: 'La comanda ha totale zero' });
             }
@@ -17485,11 +17504,11 @@ app.post('/tables/:id/bill', authenticate, requirePermission('payments:full'), a
         if (fromPassepartout) {
             const tavolo = String(req.body?.pp_tavolo || tbl.rows[0].name || '').trim();
             if (!tavolo) return res.status(400).json({ error: 'pp_tavolo mancante per source=passepartout' });
-            const comanda = await callPassepartout<PassepartoutComanda | null>('comandaTavolo', { tavolo });
-            if (!comanda) {
-                return res.status(404).json({ error: 'no_comanda', message: `Nessuna comanda attiva sul tavolo ${tavolo}` });
+            const found = await findComandaTavolo(tavolo);
+            if (!found) {
+                return res.status(404).json({ error: 'no_comanda', message: `Nessuna comanda attiva sul tavolo "${tavolo}" nel gestionale. Il nome deve combaciare con quello di Passepartout (punto e spazi compresi).` });
             }
-            ppPayload = comandaToBillPayload(comanda);
+            ppPayload = comandaToBillPayload(found.comanda);
             if (ppPayload.total_cents <= 0) {
                 return res.status(422).json({ error: 'empty_comanda', message: 'La comanda ha totale zero' });
             }
