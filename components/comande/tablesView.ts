@@ -1,0 +1,112 @@
+import type { Reservation, Table } from '../../types';
+import type { SectionTone } from '../ds';
+
+// ---------------------------------------------------------------------------
+// La griglia tavoli, ordinata per quello che chiede un'azione.
+//
+// Prima erano sessanta riquadri nell'ordine in cui il database li restituisce,
+// e i due conti da incassare stavano in fondo fra i liberi. Qui i tavoli si
+// raggruppano per stato, e i gruppi hanno l'ordine del servizio: chi deve
+// pagare, chi sta mangiando, chi sta arrivando, chi non c'è.
+// ---------------------------------------------------------------------------
+
+/* Le quattro famiglie di stato del design system coprono esattamente i quattro
+   casi, quindi non serve inventare tinte: una comanda aperta è servizio vivo,
+   un conto da incassare chiede un'azione, una prenotazione è imminente, un
+   tavolo libero non è uno stato. */
+export type TableState = 'bill' | 'order' | 'booked' | 'free';
+
+export interface TableRow {
+  table: Table;
+  state: TableState;
+  reservation: Reservation | null;
+}
+
+export type TableFilter = 'ALL' | TableState;
+
+interface GroupSpec {
+  state: TableState;
+  /** Titolo del gruppo in griglia. Mai maiuscolo (§5.2). */
+  label: string;
+  /** Etichetta del chip filtro: dice cosa sono, non quanti sono. */
+  chip: string;
+  tone: SectionTone;
+  /** Riga di stato stampata sul riquadro. I liberi non ne hanno una: essere
+   *  liberi non è uno stato, è l'assenza di tutti gli altri. */
+  caption: string | null;
+}
+
+/* L'ordine di questa lista è l'ordine della pagina, ed è deliberato: si legge
+   dall'alto e la prima cosa che si incontra è quella che costa soldi se resta
+   lì. */
+export const TABLE_GROUPS: GroupSpec[] = [
+  { state: 'bill',   label: 'Conto da incassare', chip: 'Da incassare',   tone: 'pending',  caption: 'da incassare' },
+  { state: 'order',  label: 'Comande aperte',     chip: 'Comanda aperta', tone: 'positive', caption: 'comanda aperta' },
+  { state: 'booked', label: 'In arrivo',          chip: 'In arrivo',      tone: 'info',     caption: null },
+  { state: 'free',   label: 'Liberi',             chip: 'Liberi',         tone: 'muted',    caption: null },
+];
+
+/* Scritte per intero invece che composte: Tailwind estrae i nomi delle classi
+   staticamente, quindi un `bg-[var(--ds-${state}-tint)]` non arriva mai nel
+   foglio di stile. */
+export const TABLE_TILE: Record<TableState, string> = {
+  bill:   'bg-[var(--ds-pending-tint)] ring-2 ring-[var(--ds-pending-solid)]',
+  order:  'bg-[var(--ds-seated-tint)] ring-2 ring-[var(--ds-seated-solid)]',
+  booked: 'bg-[var(--ds-arriving-tint)] ring-1 ring-[var(--ds-arriving-solid)]',
+  free:   'bg-[var(--ds-surface)]',
+};
+
+export const TABLE_CAPTION: Record<TableState, string> = {
+  bill:   'text-[var(--ds-pending-text)]',
+  order:  'text-[var(--ds-seated-text)]',
+  booked: 'text-[var(--ds-arriving-text)]',
+  free:   'text-[var(--ds-text-muted)]',
+};
+
+/** «10» prima di «9» è il difetto che rende la griglia inutilizzabile: si
+ *  cerca un numero, non una stringa. Confronto naturale, con il pezzo non
+ *  numerico a fare da spareggio per i tavoli tipo «Dehors 2». */
+export const compareTableNames = (a: string, b: string): number => {
+  const na = parseInt(a.replace(/\D+/g, ''), 10);
+  const nb = parseInt(b.replace(/\D+/g, ''), 10);
+  const aNum = Number.isFinite(na);
+  const bNum = Number.isFinite(nb);
+  if (aNum && bNum && na !== nb) return na - nb;
+  if (aNum !== bNum) return aNum ? -1 : 1;
+  return a.localeCompare(b, 'it');
+};
+
+export const buildRows = (
+  tables: Table[],
+  openTables: Set<number>,
+  billTables: Set<number>,
+  reservationForTable: (id: number) => Reservation | null,
+): TableRow[] =>
+  tables
+    .map(table => {
+      const reservation = reservationForTable(table.id);
+      // Una comanda aperta batte il conto: se il tavolo ha ricominciato a
+      // ordinare, il conto vecchio non è più la cosa da fare.
+      const state: TableState =
+        openTables.has(table.id) ? 'order'
+        : billTables.has(table.id) ? 'bill'
+        : reservation ? 'booked'
+        : 'free';
+      return { table, state, reservation };
+    })
+    .sort((a, b) => compareTableNames(a.table.name, b.table.name));
+
+export const countByState = (rows: TableRow[]): Record<TableState, number> => {
+  const out: Record<TableState, number> = { bill: 0, order: 0, booked: 0, free: 0 };
+  for (const r of rows) out[r.state] += 1;
+  return out;
+};
+
+/** Filtra su numero di tavolo e nome dell'ospite: chi cerca un tavolo spesso
+ *  ricorda il nome e non il numero, e viceversa. */
+export const matchesQuery = (row: TableRow, query: string): boolean => {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  if (row.table.name.toLowerCase().includes(q)) return true;
+  return (row.reservation?.customer_name ?? '').toLowerCase().includes(q);
+};

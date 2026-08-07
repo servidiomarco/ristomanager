@@ -28,8 +28,19 @@ interface SheetProps {
   title: React.ReactNode;
   /** Context under the title — who, when, which provider. */
   subtitle?: React.ReactNode;
-  /** Status pills and the like, under the subtitle and above the scroll. */
+  /** Status pills and the like, under the subtitle and above the scroll. Sits
+   *  in the title column, so it is narrower than the sheet — for a few chips,
+   *  not for anything that wants the full width. */
   meta?: React.ReactNode;
+  /** Chrome between the header and the scrolling body — a tab bar, a filter
+   *  row. Full sheet width, unlike `meta`, and pinned, so it stays put while
+   *  the body scrolls. Same slot ModalShell offers, for the same reason: a
+   *  segmented control squeezed into the title column truncates its own labels.
+   *
+   *  Keeps the sheet's own white rather than ModalShell's canvas tone, so a
+   *  recessed control track has a level-1 surface under it instead of
+   *  disappearing into the canvas at 1.03:1 (§8.8). */
+  subheader?: React.ReactNode;
   /** Sticky actions at the bottom. The primary action of a sheet is nearly
    *  always one tap, so this stays a simple stack rather than a footer bar. */
   footer?: React.ReactNode;
@@ -45,6 +56,7 @@ export const Sheet: React.FC<SheetProps> = ({
   title,
   subtitle,
   meta,
+  subheader,
   footer,
   bodyClassName = '',
   ariaLabel,
@@ -108,6 +120,12 @@ export const Sheet: React.FC<SheetProps> = ({
             <X className="h-4 w-4" />
           </button>
         </header>
+
+        {subheader && (
+          <div className="flex-shrink-0 border-b border-[var(--ds-border)] px-5 pb-4 sm:px-6">
+            {subheader}
+          </div>
+        )}
 
         {/* Canvas tone, like ModalShell's body: the sections inside are cards,
             and a card is only raised if there is something for it to sit on.

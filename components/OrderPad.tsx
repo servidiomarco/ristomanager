@@ -1,11 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ArrowLeft, ArrowRightLeft, Ban, Check, ChevronDown, Loader2, Minus,
-  Percent, Plus, Receipt, Send, Trash2, TriangleAlert, Users, Utensils, X,
+  Check, Loader2, TriangleAlert, Utensils, X,
 } from 'lucide-react';
 import type { Dish, Reservation, Table, OrderWithItems, OrderItem } from '../types';
 import { ArrivalStatus, ReservationStatus } from '../types';
-import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
+import { getRomeDatePart } from '../utils/reservationTime';
 import {
   ordersApiService, getMenuCatalogue, newIdempotencyKey, closeOrder, updateOrder,
   voidItem, setOrderDiscount, transferOrder,
@@ -16,9 +15,21 @@ import { billsApiService } from '../services/billsApiService';
 import { socketClient } from '../services/socketClient';
 import type { ServiceBill } from '../services/ordersApiService';
 import {
-  ModalShell, Sheet, Callout, StatusPill, SegmentedControl, dsInput, dsButton,
+  ModalShell, Sheet, Callout, SectionHeader, SegmentedControl, useMediaQuery,
+  dsInput, dsButton,
 } from './ds';
-import type { PillTone } from './ds';
+import { TableGrid } from './comande/TableGrid';
+import { OrderTopBar } from './comande/OrderTopBar';
+import { DishBrowser } from './comande/DishBrowser';
+import { CourseChips } from './comande/CourseChips';
+import { CourseColumn, CourseList, SendFooter } from './comande/CourseColumn';
+import { ComandaSheet } from './comande/ComandaSheet';
+import { buildRows, type TableFilter } from './comande/tablesView';
+import {
+  MAX_COURSES, cartForCourse, cartKey, cartSum, courseLabel, euro,
+  isSent, isSystemLine, rowCount,
+  type CartLine, type RepeatLine,
+} from './comande/orderView';
 
 // ---------------------------------------------------------------------------
 // Palmare cameriere — la comanda si compone qui e parte con un tocco.
@@ -31,6 +42,11 @@ import type { PillTone } from './ds';
 // senza generare rumore in cucina, e il servizio parte con una sola chiamata
 // di rete invece di una per ogni piatto — che su un WiFi di sala è la
 // differenza fra usarlo e tornare al blocchetto.
+//
+// Questo file tiene lo stato e le chiamate; come si legge la comanda sta in
+// components/comande/. Su schermo largo il menu e la comanda stanno affiancati,
+// sul telefono la comanda è dietro il totale in fondo: è una differenza di
+// albero, non di stile, quindi la sceglie useMediaQuery (regola 13).
 // ---------------------------------------------------------------------------
 
 interface OrderPadProps {
@@ -42,66 +58,19 @@ interface OrderPadProps {
   globalDate: Date;
   /** Turno selezionato nella barra globale ('ALL' = nessun filtro). */
   globalShiftFilter: 'ALL' | 'LUNCH' | 'DINNER';
+  /** Chiede alla chrome dell'app di togliersi di mezzo: dentro un tavolo il
+   *  telefono serve tutto alla comanda. */
+  onImmersive?: (on: boolean) => void;
 }
 
-interface CartLine {
-  key: string;
-  dish: Dish;
-  qty: number;
-  course_no: number;
-  modifier_ids: number[];
-  modifier_labels: string[];
-  modifier_delta_cents: number;
-  note?: string;
-}
-
-const euro = (cents: number): string =>
-  (cents / 100).toLocaleString('it-IT', { style: 'currency', currency: 'EUR' });
-
-const ORDINALS = ['', '1ª', '2ª', '3ª', '4ª', '5ª', '6ª'];
-const courseLabel = (n: number): string => `${ORDINALS[n] ?? `${n}ª`} uscita`;
-
-// Etichetta parlante per lo stato dell'uscita. Il cameriere deve sapere a
-// colpo d'occhio se la sua seconda uscita è partita o è ferma al passe:
-// altrimenti la ripropone, e in cucina arriva doppia.
-//
-// I toni sono quelli del design system, e ci cascano dentro senza forzature:
-// al passe qualcuno deve agire (pending), in cucina è informativo (arriving),
-// pronta è servizio vivo (seated), servita non è più uno stato (neutral).
-const COURSE_BADGE: Record<string, { text: string; tone: PillTone }> = {
-  QUEUED:  { text: 'al passe',  tone: 'pending' },
-  FIRED:   { text: 'in cucina', tone: 'info' },
-  READY:   { text: 'pronta',    tone: 'positive' },
-  SERVED:  { text: 'servita',   tone: 'neutral' },
-  PENDING: { text: 'in bozza',  tone: 'neutral' },
-};
-
-/* Lo stato del tavolo in griglia. Le quattro famiglie di stato del design
-   system coprono esattamente i quattro casi, quindi non serve inventare tinte:
-   una comanda aperta è servizio vivo, un conto da incassare chiede un'azione,
-   una prenotazione è imminente, un tavolo libero non è uno stato. */
-const TABLE_STATE = {
-  order: 'bg-[var(--ds-seated-tint)] ring-2 ring-[var(--ds-seated-solid)]',
-  bill: 'bg-[var(--ds-pending-tint)] ring-2 ring-[var(--ds-pending-solid)]',
-  booked: 'bg-[var(--ds-arriving-tint)] ring-1 ring-[var(--ds-arriving-solid)]',
-  free: 'bg-[var(--ds-surface)]',
-} as const;
-
-/* I bersagli del palmare: una mano sola, in piedi, poca luce. 44px non è un
-   arrotondamento, è il motivo per cui non si sbaglia riga. */
-const padButton =
-  'inline-flex h-11 flex-shrink-0 items-center justify-center gap-1.5 rounded-full px-4 text-[15px] font-medium transition-colors disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
-const padQuiet = `${padButton} bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]`;
-const padStepper =
-  'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
-
-export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations, globalDate, globalShiftFilter }) => {
+export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations, globalDate, globalShiftFilter, onImmersive }) => {
   const [tableId, setTableId] = useState<number | null>(null);
   const [order, setOrder] = useState<OrderWithItems | null>(null);
   const [catalogue, setCatalogue] = useState<MenuCatalogue | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [course, setCourse] = useState(1);
   const [category, setCategory] = useState<string | null>(null);
+  const [dishQuery, setDishQuery] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
@@ -110,6 +79,10 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
   const [voidTarget, setVoidTarget] = useState<OrderItem | null>(null);
   const [discountOpen, setDiscountOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
+  const [comandaOpen, setComandaOpen] = useState(false);
+  // La griglia: che stato guardo e quale tavolo cerco.
+  const [gridFilter, setGridFilter] = useState<TableFilter>('ALL');
+  const [gridQuery, setGridQuery] = useState('');
   // Il conto appena aperto: il QR va mostrato subito, non cercato altrove
   // mentre il tavolo aspetta.
   const [justClosed, setJustClosed] = useState<CloseOrderResult['bill'] | null>(null);
@@ -122,6 +95,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
   const [viewBill, setViewBill] = useState<ServiceBill | null>(null);
   const billTables = useMemo(() => new Set(serviceBills.keys()), [serviceBills]);
 
+  const isWide = useMediaQuery('(min-width: 1024px)');
+
   useEffect(() => {
     getMenuCatalogue().then(setCatalogue).catch(() => setCatalogue(null));
   }, []);
@@ -131,6 +106,15 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
     const t = setTimeout(() => setFlash(null), 6000);
     return () => clearTimeout(t);
   }, [flash]);
+
+  // La barra di navigazione torna quando si torna in griglia e quando si esce
+  // dalla pagina: il ritorno nel cleanup non è pignoleria, senza quello uscire
+  // da Comande con un tavolo aperto lascerebbe l'app senza navigazione.
+  const inPad = tableId != null && order != null;
+  useEffect(() => {
+    onImmersive?.(inPad);
+    return () => onImmersive?.(false);
+  }, [inPad, onImmersive]);
 
   const categories = useMemo(() => {
     const seen = new Set<string>();
@@ -148,6 +132,11 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
     const ids = catalogue.dish_modifier_groups.filter(l => l.dish_id === dishId).map(l => l.group_id);
     return catalogue.modifier_groups.filter(g => ids.includes(g.id));
   }, [catalogue]);
+
+  const hasVariants = useCallback(
+    (dishId: number) => groupsForDish(dishId).length > 0,
+    [groupsForDish]
+  );
 
   // La prenotazione del giorno/turno selezionati per un tavolo: nome e
   // allergeni arrivano dal CRM senza che nessuno li ridigiti. È il pezzo che
@@ -214,10 +203,11 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
       setTableId(id);
       setOpenTables(prev => new Set(prev).add(id));
       setCart([]);
+      setDishQuery('');
       // Nuova uscita = quella dopo l'ultima già mandata, così il cameriere
       // non deve ricordarsi a che punto era.
       const maxSent = view.courses.filter(c => c.status !== 'PENDING').map(c => c.course_no);
-      setCourse(maxSent.length ? Math.max(...maxSent) + 1 : 1);
+      setCourse(maxSent.length ? Math.min(MAX_COURSES, Math.max(...maxSent) + 1) : 1);
     } catch (err: any) {
       setError(err?.message ?? 'Impossibile aprire la comanda');
     } finally {
@@ -249,32 +239,43 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
     return () => { cancelled = true; };
   }, [tables, serviceQuery, tableId]);
 
-  const addToCart = (dish: Dish, modifierIds: number[] = []) => {
-    const groups = groupsForDish(dish.id);
-    const all = groups.flatMap(g => g.modifiers);
-    const chosen = all.filter(m => modifierIds.includes(m.id));
-    const delta = chosen.reduce((s, m) => s + m.price_delta_cents, 0);
-    const key = `${dish.id}|${course}|${[...modifierIds].sort().join(',')}`;
+  /* ── Carrello ──────────────────────────────────────────────────────────── */
+
+  const pushLine = useCallback((
+    dish: Dish, courseNo: number, qty: number,
+    modifierIds: number[], modifierLabels: string[], modifierDelta: number,
+  ) => {
+    const key = cartKey(dish.id, courseNo, modifierIds);
     setCart(prev => {
       const at = prev.findIndex(l => l.key === key);
       if (at >= 0) {
         const next = [...prev];
-        next[at] = { ...next[at], qty: next[at].qty + 1 };
+        next[at] = { ...next[at], qty: next[at].qty + qty };
         return next;
       }
       return [...prev, {
-        key, dish, qty: 1, course_no: course,
+        key, dish, qty, course_no: courseNo,
         modifier_ids: modifierIds,
-        modifier_labels: chosen.map(m => m.name),
-        modifier_delta_cents: delta,
+        modifier_labels: modifierLabels,
+        modifier_delta_cents: modifierDelta,
       }];
     });
+  }, []);
+
+  const addToCart = (dish: Dish, modifierIds: number[] = []) => {
+    const all = groupsForDish(dish.id).flatMap(g => g.modifiers);
+    const chosen = all.filter(m => modifierIds.includes(m.id));
+    pushLine(
+      dish, course, 1, modifierIds,
+      chosen.map(m => m.name),
+      chosen.reduce((s, m) => s + m.price_delta_cents, 0),
+    );
   };
 
   const onDishTap = (dish: Dish) => {
     // Se il piatto ha varianti le chiediamo: «al sangue» o «ben cotta» non è
     // un dettaglio che si aggiusta a voce dopo.
-    if (groupsForDish(dish.id).length > 0) setVariantFor(dish);
+    if (hasVariants(dish.id)) setVariantFor(dish);
     else addToCart(dish);
   };
 
@@ -286,18 +287,47 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
     }));
   };
 
-  const cartTotal = cart.reduce(
-    (s, l) => s + (Math.round(Number(l.dish.price) * 100) + l.modifier_delta_cents) * l.qty, 0
-  );
+  const dropLine = (key: string) => setCart(prev => prev.filter(l => l.key !== key));
+
+  // Il meno sulla riga del menu tocca solo la riga senza varianti: quale delle
+  // due cotture togliere non lo sa nessuno, e quella si toglie dalla comanda.
+  const removeFromCart = (dish: Dish) => bumpCart(cartKey(dish.id, course, []), -1);
+
+  /** Ripete una riga già ordinata nell'uscita in composizione. Non tocca il
+   *  server: diventa una bozza come tutte le altre, e parte con Invia. */
+  const repeatLine = (line: RepeatLine, qty: number) => {
+    if (!line.dish) return;
+    pushLine(line.dish, course, qty, line.modifier_ids, line.modifier_labels, line.modifier_delta_cents);
+  };
+
+  const repeatAll = (lines: RepeatLine[]) => {
+    for (const l of lines) repeatLine(l, l.qty);
+    setComandaOpen(false);
+    setFlash(`Giro ripetuto nella ${courseLabel(course)} — controlla e invia`);
+  };
+
+  const clearDrafts = () => {
+    setCart([]);
+    setFlash('Righe non inviate svuotate');
+  };
+
+  const courseLines = cartForCourse(cart, course);
+  const cartTotal = cartSum(cart);
 
   // Invia: crea le righe e le propone, in due chiamate consecutive con la
   // stessa chiave di idempotenza. Se la seconda fallisce le righe restano in
   // bozza sul server — recuperabili, mai perse.
-  const submit = async () => {
-    if (!order || cart.length === 0 || busy) return;
+  //
+  // 'course' manda solo l'uscita in composizione, 'all' tutto quello che è in
+  // bozza. Sono due gesti diversi: il primo è il ritmo del servizio, il
+  // secondo è «il tavolo ha finito di ordinare».
+  const submit = async (scope: 'course' | 'all') => {
+    if (!order || busy) return;
+    const lines = scope === 'course' ? courseLines : cart;
+    if (lines.length === 0) return;
     setBusy(true); setError(null);
     try {
-      const payload: NewOrderItem[] = cart.map(l => ({
+      const payload: NewOrderItem[] = lines.map(l => ({
         dish_id: l.dish.id,
         qty: l.qty,
         course_no: l.course_no,
@@ -306,10 +336,16 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
       }));
       const key = newIdempotencyKey();
       await ordersApiService.addItems(order.order.id, payload, key);
-      const sent = await ordersApiService.send(order.order.id, undefined, key);
+      const sent = await ordersApiService.send(
+        order.order.id, scope === 'course' ? course : undefined, key,
+      );
       setOrder(sent);
-      setCart([]);
-      setCourse(c => c + 1);
+      setCart(prev => (scope === 'course' ? prev.filter(l => l.course_no !== course) : []));
+      setComandaOpen(false);
+      // Si riparte dalla prima uscita libera: il cameriere non deve ricordarsi
+      // dove era arrivato, e non riapre per sbaglio un'uscita già partita.
+      const maxSent = sent.courses.filter(c => c.status !== 'PENDING').map(c => c.course_no);
+      setCourse(Math.min(MAX_COURSES, (maxSent.length ? Math.max(...maxSent) : 0) + 1));
       const fired = sent.fired_courses.length;
       const queued = sent.queued_courses.length;
       setFlash(
@@ -476,430 +512,191 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
     };
   }, [serviceQuery]);
 
+  const notices = (
+    <>
+      {error && <ErrorBar message={error} onDismiss={() => setError(null)} />}
+      {flash && <Callout tone="positive" icon={Check}>{flash}</Callout>}
+    </>
+  );
+
+  const billSheets = (
+    <>
+      {viewBill && !justClosed && (
+        <BillSheet
+          bill={{
+            id: viewBill.id,
+            table_name: viewBill.table_name,
+            total_cents: viewBill.total_cents,
+            covers: viewBill.covers,
+            share_token: viewBill.share_token,
+            items: viewBill.items,
+            paid_cents: viewBill.paid_cents,
+            residual_cents: viewBill.residual_cents,
+            open_orders: viewBill.open_orders,
+          }}
+          busy={busy}
+          onClose={() => setViewBill(null)}
+          onSettle={settleViewBill}
+          footerExtra={
+            <button
+              type="button"
+              onClick={() => { const tid = viewBill.table_id; setViewBill(null); loadTable(tid, { forceCreate: true }); }}
+              disabled={busy}
+              className={`w-full ${dsButton.secondary}`}
+            >
+              Nuova comanda su questo tavolo
+            </button>
+          }
+        />
+      )}
+      {justClosed && (
+        <BillSheet
+          bill={{
+            id: justClosed.id,
+            table_name: tables.find(t => t.id === justClosed.table_id)?.name ?? null,
+            total_cents: justClosed.total_cents,
+            covers: justClosed.covers,
+            share_token: justClosed.share_token,
+            items: justClosed.items,
+          }}
+          onClose={() => setJustClosed(null)}
+        />
+      )}
+    </>
+  );
+
   // ---------------- selezione tavolo ----------------
   if (!tableId || !order) {
     return (
-      <div className="mx-auto max-w-3xl bg-[var(--ds-canvas)] p-4 lg:p-8">
-        <h1 className="text-[26px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">Comande</h1>
-        <p className="mb-5 mt-0.5 text-[14px] text-[var(--ds-text-muted)]">
-          Scegli il tavolo per aprire o riprendere la comanda.
-        </p>
-        {error && (
-          <div className="mb-4">
-            <ErrorBar message={error} onDismiss={() => setError(null)} />
-          </div>
-        )}
-        {viewBill && !justClosed && (
-          <BillSheet
-            bill={{
-              id: viewBill.id,
-              table_name: viewBill.table_name,
-              total_cents: viewBill.total_cents,
-              covers: viewBill.covers,
-              share_token: viewBill.share_token,
-              items: viewBill.items,
-              paid_cents: viewBill.paid_cents,
-              residual_cents: viewBill.residual_cents,
-              open_orders: viewBill.open_orders,
-            }}
-            busy={busy}
-            onClose={() => setViewBill(null)}
-            onSettle={settleViewBill}
-            footerExtra={
-              <button
-                type="button"
-                onClick={() => { const tid = viewBill.table_id; setViewBill(null); loadTable(tid, { forceCreate: true }); }}
-                disabled={busy}
-                className={`w-full ${dsButton.secondary}`}
-              >
-                Nuova comanda su questo tavolo
-              </button>
-            }
-          />
-        )}
-        {justClosed && (
-          <BillSheet
-            bill={{
-              id: justClosed.id,
-              table_name: tables.find(t => t.id === justClosed.table_id)?.name ?? null,
-              total_cents: justClosed.total_cents,
-              covers: justClosed.covers,
-              share_token: justClosed.share_token,
-              items: justClosed.items,
-            }}
-            onClose={() => setJustClosed(null)}
-          />
-        )}
-        {/* La conferma di chiusura arriva qui: dopo aver aperto il conto si
-            torna alla scelta tavolo, e senza questo il cameriere non saprebbe
-            se il conto è stato creato davvero. */}
-        {flash && (
-          <Callout tone="positive" icon={Check} className="mb-4">{flash}</Callout>
-        )}
-        <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6">
-          {tables.map(t => {
-            const res = reservationForTable(t.id);
-            const hasOrder = openTables.has(t.id);
-            const hasBill = !hasOrder && billTables.has(t.id);
-            return (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => loadTable(t.id)}
-                disabled={busy}
-                className={`flex aspect-square flex-col items-center justify-center gap-0.5 rounded-[20px] p-1 shadow-[var(--ds-shadow-card)] transition-shadow disabled:opacity-50 ${
-                  hasOrder ? TABLE_STATE.order
-                  : hasBill ? TABLE_STATE.bill
-                  : res ? TABLE_STATE.booked
-                  : TABLE_STATE.free
-                }`}
-              >
-                <span className="text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
-                  {t.name}
-                </span>
-                <span className="text-[12px] text-[var(--ds-text-muted)] tabular-nums">{t.seats} cop.</span>
-                {res && (
-                  <span className="max-w-full truncate px-1 text-[11px] font-medium text-[var(--ds-arriving-text)]">
-                    {getRomeTimePart(res.reservation_time)} · {res.customer_name}
-                  </span>
-                )}
-                {hasOrder && (
-                  <span className="text-[11px] font-semibold text-[var(--ds-seated-text)]">comanda aperta</span>
-                )}
-                {hasBill && (
-                  <span className="text-[11px] font-semibold text-[var(--ds-pending-text)]">conto da incassare</span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-        {busy && (
-          <div className="mt-6 flex items-center gap-2 text-[14px] text-[var(--ds-text-muted)]">
-            <Loader2 size={16} className="animate-spin" /> Apertura…
-          </div>
-        )}
-      </div>
+      <>
+        <TableGrid
+          rows={buildRows(tables, openTables, billTables, reservationForTable)}
+          filter={gridFilter}
+          onFilter={setGridFilter}
+          query={gridQuery}
+          onQuery={setGridQuery}
+          busy={busy}
+          onPick={loadTable}
+          notice={(error || flash) ? <div className="flex flex-col gap-2">{notices}</div> : undefined}
+        />
+        {billSheets}
+      </>
     );
   }
 
   const table = tables.find(t => t.id === tableId);
   const allergens = reservation?.customer_dietary_notes?.trim();
-  const visibleDishes = dishes.filter(d => (category ? d.category === category : true));
+  const rows = rowCount(order, cart);
+  const displayTotal = order.total_cents + cartTotal;
+  const sentCourses = order.courses.filter(c => isSent(c.status)).length;
 
-  return (
-    <div className="flex h-full max-h-screen flex-col bg-[var(--ds-canvas)]">
-      {/* Testata: chi è al tavolo e cosa non può mangiare */}
-      <header className="flex-shrink-0 px-4 pb-3 pt-4">
-        <div className="rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
-          <div className="flex items-center gap-2">
+  // Quante righe sparirebbero chiudendo ora: le bozze locali più quelle
+  // rimaste in bozza sul server dopo un invio interrotto.
+  const pendingRows =
+    cart.reduce((s, l) => s + l.qty, 0)
+    + order.items.reduce((s, i) => s + (i.status === 'DRAFT' && !isSystemLine(i) ? i.qty : 0), 0);
+
+  const qtyInCourse = new Map<number, number>();
+  for (const l of courseLines) {
+    qtyInCourse.set(l.dish.id, (qtyInCourse.get(l.dish.id) ?? 0) + l.qty);
+  }
+  const markedCategories = new Set<string>();
+  for (const l of courseLines) if (l.dish.category) markedCategories.add(l.dish.category);
+
+  const listProps = {
+    order, cart, course, onCourse: setCourse, busy,
+    onBump: bumpCart, onDrop: dropLine,
+    onVoid: (i: OrderItem) => setVoidTarget(i),
+    onRecall: recall,
+  };
+
+  const browser = (
+    <DishBrowser
+      dishes={dishes}
+      categories={categories}
+      category={category}
+      onCategory={setCategory}
+      query={dishQuery}
+      onQuery={setDishQuery}
+      qtyInCourse={qtyInCourse}
+      markedCategories={markedCategories}
+      hasVariants={hasVariants}
+      onAdd={onDishTap}
+      onRemove={removeFromCart}
+      layout={isWide ? 'grid' : 'list'}
+    />
+  );
+
+  const topBar = (
+    <OrderTopBar
+      tableName={table?.name ?? String(tableId)}
+      guestName={reservation?.customer_name ?? null}
+      totalCents={displayTotal}
+      rows={rows}
+      covers={order.order.covers}
+      sentCourses={sentCourses}
+      busy={busy}
+      billDisabled={displayTotal === 0 && rows === 0}
+      clearDisabled={cart.length === 0}
+      wide={isWide}
+      onBack={() => { setTableId(null); setOrder(null); setCart([]); setComandaOpen(false); }}
+      onCovers={changeCovers}
+      onBill={() => setClosing(true)}
+      onDiscount={() => setDiscountOpen(true)}
+      onTransfer={() => setTransferOpen(true)}
+      onClearDrafts={clearDrafts}
+    />
+  );
+
+  const dialogs = (
+    <>
+      <ModalShell
+        open={closing}
+        onClose={() => setClosing(false)}
+        title="Chiudere la comanda?"
+        size="sm"
+        closeOnEscape
+        bodyClassName="space-y-3 p-5 sm:p-6"
+        footerStart={
+          <button type="button" onClick={() => setClosing(false)} className={dsButton.quiet}>
+            Annulla
+          </button>
+        }
+        footer={
+          pendingRows > 0 ? (
             <button
               type="button"
-              onClick={() => { setTableId(null); setOrder(null); setCart([]); }}
-              aria-label="Torna alla scelta del tavolo"
-              className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
+              onClick={() => closeAndBill(true)}
+              disabled={busy}
+              className={dsButton.critical}
             >
-              <ArrowLeft size={20} />
+              {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+              Scarta e chiudi
             </button>
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
-                Tav. {table?.name}
-                {reservation ? ` · ${reservation.customer_name}` : ''}
-              </div>
-              <div className="text-[13px] text-[var(--ds-text-muted)] tabular-nums">
-                Totale {euro(order.total_cents)}
-              </div>
-            </div>
+          ) : (
             <button
               type="button"
               onClick={() => closeAndBill(false)}
               disabled={busy}
-              title="Chiudi la comanda e apri il conto"
-              className={padQuiet}
+              className={dsButton.primary}
             >
-              <Receipt size={16} aria-hidden /> Conto
+              {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+              Apri il conto
             </button>
-          </div>
-
-          {/* I coperti su una riga propria: erano due bersagli da 20px in mezzo
-              a una riga di metadati, e sono il divisore del conto. */}
-          <div className="mt-2 flex items-center gap-2 border-t border-[var(--ds-border)] pt-2">
-            <span className="flex items-center gap-1.5 text-[14px] text-[var(--ds-text-muted)]">
-              <Users size={14} aria-hidden /> Coperti
-            </span>
-            <div className="ml-auto flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => changeCovers(-1)}
-                disabled={busy || order.order.covers <= 1}
-                aria-label="Un coperto in meno"
-                className={padStepper}
-              >
-                <Minus size={16} />
-              </button>
-              <span className="w-8 text-center text-[17px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
-                {order.order.covers}
-              </span>
-              <button
-                type="button"
-                onClick={() => changeCovers(+1)}
-                disabled={busy}
-                aria-label="Un coperto in più"
-                className={padStepper}
-              >
-                <Plus size={16} />
-              </button>
-            </div>
-          </div>
-
-          {allergens && (
-            <Callout tone="critical" icon={TriangleAlert} className="mt-2">{allergens}</Callout>
-          )}
-        </div>
-      </header>
-
-      {flash && (
-        <div className="flex-shrink-0 px-4 pb-2">
-          <Callout tone="positive" icon={Check}>{flash}</Callout>
-        </div>
-      )}
-      {error && (
-        <div className="flex-shrink-0 px-4 pb-2">
-          <ErrorBar message={error} onDismiss={() => setError(null)} />
-        </div>
-      )}
-
-      {/* Uscite già mandate, con lo stato scritto in chiaro */}
-      {order.courses.some(c => c.status !== 'PENDING') && (
-        <div className="flex flex-shrink-0 flex-wrap gap-2 px-4 pb-2">
-          {order.courses.filter(c => c.status !== 'PENDING').map(c => {
-            const badge = COURSE_BADGE[c.status] ?? COURSE_BADGE.PENDING;
-            return (
-              <StatusPill key={c.course_no} tone={badge.tone} className="h-8 px-3">
-                {courseLabel(c.course_no)} · {badge.text}
-                {c.status === 'QUEUED' && (
-                  <button
-                    type="button"
-                    onClick={() => recall(c.course_no)}
-                    disabled={busy}
-                    title="Richiama: torna in bozza"
-                    className="ml-1 font-semibold underline decoration-dotted transition-opacity hover:opacity-70"
-                  >
-                    richiama
-                  </button>
-                )}
-              </StatusPill>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Righe già in cucina: da qui si stornano, con motivazione */}
-      {order.items.some(i => i.status !== 'DRAFT' && i.line_kind !== 'COVER' && i.line_kind !== 'SERVICE') && (
-        <details className="flex-shrink-0 px-4 pb-2">
-          <summary className="cursor-pointer text-[13px] font-semibold text-[var(--ds-text-muted)]">
-            Già ordinato ({order.items.filter(i => i.status !== 'DRAFT' && i.status !== 'VOIDED').length})
-          </summary>
-          <div className="mt-2 max-h-40 space-y-1 overflow-y-auto rounded-[16px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
-            {order.items.filter(i => i.status !== 'DRAFT').map(i => (
-              <div key={i.id} className="flex items-center gap-2 text-[14px]">
-                <span
-                  className={`min-w-0 flex-1 truncate ${
-                    i.status === 'VOIDED'
-                      ? 'text-[var(--ds-text-muted)] line-through'
-                      : 'text-[var(--ds-text-primary)]'
-                  }`}
-                >
-                  {i.qty}× {i.name_snapshot}
-                  {i.line_kind !== 'DISH' && (
-                    <span className="text-[13px] text-[var(--ds-text-muted)]"> · automatico</span>
-                  )}
-                </span>
-                <span className="flex-shrink-0 text-[13px] tabular-nums text-[var(--ds-text-muted)]">
-                  {euro(i.line_total_cents ?? 0)}
-                </span>
-                {i.status !== 'VOIDED' && i.line_kind === 'DISH' && (
-                  <button
-                    type="button"
-                    onClick={() => setVoidTarget(i)}
-                    aria-label={`Storna ${i.name_snapshot}`}
-                    title="Storna"
-                    className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)]"
-                  >
-                    <Ban size={15} />
-                  </button>
-                )}
-              </div>
-            ))}
-            {order.discount_cents > 0 && (
-              <div className="flex justify-between border-t border-[var(--ds-border)] pt-2 text-[14px] font-medium text-[var(--ds-seated-text)]">
-                <span>Sconto{order.order.discount_reason ? ` · ${order.order.discount_reason}` : ''}</span>
-                <span className="tabular-nums">−{euro(order.discount_cents)}</span>
-              </div>
-            )}
-            <div className="flex gap-2 pt-1">
-              <button type="button" onClick={() => setDiscountOpen(true)} className={padQuiet}>
-                <Percent size={14} aria-hidden /> Sconto
-              </button>
-              <button type="button" onClick={() => setTransferOpen(true)} className={padQuiet}>
-                <ArrowRightLeft size={14} aria-hidden /> Sposta tavolo
-              </button>
-            </div>
-          </div>
-        </details>
-      )}
-
-      {/* Catalogo */}
-      <div className="flex flex-shrink-0 gap-2 overflow-x-auto px-4 pb-2">
-        {categories.map(c => (
-          <button
-            key={c}
-            type="button"
-            onClick={() => setCategory(c)}
-            aria-pressed={category === c}
-            className={`inline-flex h-11 flex-shrink-0 items-center whitespace-nowrap rounded-full px-4 text-[15px] font-medium transition-colors ${
-              category === c
-                ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
-                : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] hover:text-[var(--ds-text-primary)]'
-            }`}
-          >
-            {c}
-          </button>
-        ))}
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {visibleDishes.map(d => (
-            <button
-              key={d.id}
-              type="button"
-              onClick={() => onDishTap(d)}
-              className="flex min-h-[56px] items-center justify-between gap-3 rounded-[16px] bg-[var(--ds-surface)] px-4 py-3 text-left shadow-[var(--ds-shadow-card)] transition-transform hover:bg-[var(--ds-surface-row)] active:scale-[0.99]"
-            >
-              <span className="truncate text-[15px] font-medium text-[var(--ds-text-primary)]">{d.name}</span>
-              <span className="flex flex-shrink-0 items-center gap-1 text-[14px] tabular-nums text-[var(--ds-text-muted)]">
-                {euro(Math.round(Number(d.price) * 100))}
-                {groupsForDish(d.id).length > 0 && <ChevronDown size={15} aria-hidden />}
-              </span>
-            </button>
-          ))}
-          {visibleDishes.length === 0 && (
-            <p className="col-span-full py-8 text-center text-[14px] text-[var(--ds-text-muted)]">
-              Nessun piatto in questa categoria.
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* Carrello: l'uscita in composizione */}
-      <div className="flex-shrink-0 px-4 pb-4">
-        <div className="rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-raised)]">
-          <div className="flex items-center gap-2">
-            <span className="text-[13px] font-semibold text-[var(--ds-text-muted)]">Sto componendo</span>
-            <select
-              value={course}
-              onChange={e => setCourse(Number(e.target.value))}
-              aria-label="Uscita in composizione"
-              className="ds-select h-11 flex-1 rounded-full bg-[var(--ds-surface-row)] px-4 text-[15px] text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-            >
-              {[1, 2, 3, 4, 5, 6].map(n => <option key={n} value={n}>{courseLabel(n)}</option>)}
-            </select>
-          </div>
-
-          <div className="max-h-48 overflow-y-auto py-2">
-            {cart.length === 0 ? (
-              <p className="py-3 text-[14px] text-[var(--ds-text-muted)]">Tocca un piatto per aggiungerlo.</p>
-            ) : cart.map(l => (
-              <div key={l.key} className="flex items-center gap-2 py-1">
-                <span className="w-9 flex-shrink-0 text-[13px] text-[var(--ds-text-muted)]">
-                  {ORDINALS[l.course_no] ?? l.course_no}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[15px] text-[var(--ds-text-primary)]">{l.dish.name}</div>
-                  {l.modifier_labels.length > 0 && (
-                    <div className="truncate text-[13px] text-[var(--ds-text-muted)]">
-                      ↳ {l.modifier_labels.join(', ')}
-                    </div>
-                  )}
-                </div>
-                <div className="flex flex-shrink-0 items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => bumpCart(l.key, -1)}
-                    aria-label={`Uno in meno di ${l.dish.name}`}
-                    className={padStepper}
-                  >
-                    <Minus size={15} />
-                  </button>
-                  <span className="w-7 text-center text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
-                    {l.qty}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => bumpCart(l.key, +1)}
-                    aria-label={`Uno in più di ${l.dish.name}`}
-                    className={padStepper}
-                  >
-                    <Plus size={15} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCart(prev => prev.filter(x => x.key !== l.key))}
-                    aria-label={`Togli ${l.dish.name}`}
-                    className="ml-0.5 inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)]"
-                  >
-                    <Trash2 size={15} />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-3 border-t border-[var(--ds-border)] pt-3">
-            <div className="min-w-0 flex-1">
-              <div className="text-[13px] text-[var(--ds-text-muted)]">Da inviare</div>
-              <div className="text-[20px] font-semibold tabular-nums tracking-[-0.015em] text-[var(--ds-text-primary)]">
-                {euro(cartTotal)}
-              </div>
-            </div>
-            {/* Non "INVIA": il maiuscolo non aggiunge peso che il corpo e il
-                grassetto non diano già, e si legge peggio (§5.2). */}
-            <button
-              type="button"
-              onClick={submit}
-              disabled={busy || cart.length === 0}
-              className="inline-flex h-12 flex-shrink-0 items-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-6 text-[17px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-            >
-              {busy ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
-              Invia
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <ModalShell
-        open={closing}
-        onClose={() => setClosing(false)}
-        title="Righe non inviate"
-        size="sm"
-        closeOnEscape
-        bodyClassName="p-5 sm:p-6"
-        footerLayout="row"
-        footer={
-          <button
-            type="button"
-            onClick={() => closeAndBill(true)}
-            disabled={busy}
-            className="inline-flex h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-[var(--ds-critical-solid)] px-5 text-[15px] font-semibold text-[var(--ds-critical-fg)] transition-[filter] hover:brightness-95 disabled:opacity-40 sm:flex-none"
-          >
-            Scarta e chiudi
-          </button>
+          )
         }
       >
         <p className="text-[15px] leading-relaxed text-[var(--ds-text-secondary)]">
-          Ci sono righe che non sono mai arrivate in cucina. Chiudendo ora
-          vengono eliminate e non finiranno sul conto.
+          Il totale di {euro(order.total_cents)} passa al conto del tavolo {table?.name}.
+          Dopo non si aggiungono piatti.
         </p>
+        {pendingRows > 0 && (
+          <Callout tone="pending" icon={TriangleAlert}>
+            {pendingRows === 1
+              ? '1 riga non è ancora andata in cucina e verrà eliminata.'
+              : `${pendingRows} righe non sono ancora andate in cucina e verranno eliminate.`}
+          </Callout>
+        )}
       </ModalShell>
 
       {voidTarget && (
@@ -913,7 +710,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
         />
       )}
 
-      {discountOpen && order && (
+      {discountOpen && (
         <DiscountDialog
           currentReason={order.order.discount_reason ?? null}
           hasDiscount={order.discount_cents > 0}
@@ -925,7 +722,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
       )}
 
       <ModalShell
-        open={transferOpen && !!order}
+        open={transferOpen}
         onClose={() => setTransferOpen(false)}
         title="Sposta su quale tavolo?"
         subtitle="Comanda e conto si spostano insieme. Le quote già pagate restano attaccate al conto."
@@ -956,6 +753,98 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
           onConfirm={ids => { addToCart(variantFor, ids); setVariantFor(null); }}
         />
       )}
+
+      {billSheets}
+    </>
+  );
+
+  // ---------------- schermo largo: menu e comanda affiancati ----------------
+  if (isWide) {
+    return (
+      <div className="flex h-full min-h-0 flex-col gap-3 bg-[var(--ds-canvas)] p-4">
+        <div className="flex-shrink-0">{topBar}</div>
+        {(allergens || error || flash) && (
+          <div className="flex flex-shrink-0 flex-col gap-2">
+            {allergens && (
+              <Callout tone="critical" icon={TriangleAlert}>{allergens}</Callout>
+            )}
+            {notices}
+          </div>
+        )}
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_380px] gap-3 xl:grid-cols-[minmax(0,1fr)_420px]">
+          {browser}
+          <CourseColumn
+            {...listProps}
+            onSend={() => submit('course')}
+            onSendAll={() => submit('all')}
+          />
+        </div>
+        {dialogs}
+      </div>
+    );
+  }
+
+  // ---------------- palmare: la comanda sta dietro il totale ----------------
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-[var(--ds-canvas)] px-4 pt-3">
+      <div className="flex-shrink-0">{topBar}</div>
+
+      <div className="mt-4 flex-shrink-0">
+        <SectionHeader>Uscita</SectionHeader>
+        <div className="mt-1">
+          <CourseChips order={order} cart={cart} course={course} onCourse={setCourse} />
+        </div>
+      </div>
+
+      {(allergens || error || flash) && (
+        <div className="mt-3 flex flex-shrink-0 flex-col gap-2">
+          {allergens && <Callout tone="critical" icon={TriangleAlert}>{allergens}</Callout>}
+          {notices}
+        </div>
+      )}
+
+      <div className="mt-4 flex min-h-0 flex-1 flex-col">{browser}</div>
+
+      {/* Un elemento fisso possiede lo spazio sotto di sé: il padding sta qui
+          dentro, non sulla zona che scorre, altrimenti quella dipinge sopra
+          l'ombra e la taglia con una linea netta (regola 10). */}
+      <div className="flex-shrink-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
+        <div className="rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-raised)]">
+          <SendFooter
+            course={course}
+            courseCount={courseLines.reduce((s, l) => s + l.qty, 0)}
+            courseTotal={cartSum(courseLines)}
+            allCount={cart.reduce((s, l) => s + l.qty, 0)}
+            allTotal={cartTotal}
+            busy={busy}
+            onSend={() => submit('course')}
+            onSendAll={() => submit('all')}
+            onExpand={() => setComandaOpen(true)}
+          />
+        </div>
+      </div>
+
+      <ComandaSheet
+        open={comandaOpen}
+        onClose={() => setComandaOpen(false)}
+        order={order}
+        cart={cart}
+        dishes={dishes}
+        categories={categories}
+        course={course}
+        onCourse={setCourse}
+        busy={busy}
+        onBump={bumpCart}
+        onDrop={dropLine}
+        onVoid={i => setVoidTarget(i)}
+        onRecall={recall}
+        onSend={() => submit('course')}
+        onSendAll={() => submit('all')}
+        onRepeat={repeatLine}
+        onRepeatAll={repeatAll}
+      />
+
+      {dialogs}
     </div>
   );
 };
@@ -1093,7 +982,7 @@ const ReasonDialog: React.FC<{
           type="button"
           onClick={() => onConfirm(reason.trim())}
           disabled={busy || reason.trim().length < 3}
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-[var(--ds-critical-solid)] px-5 text-[15px] font-semibold text-[var(--ds-critical-fg)] transition-[filter] hover:brightness-95 disabled:opacity-40"
+          className={dsButton.critical}
         >
           {busy && <Loader2 className="h-4 w-4 animate-spin" />}
           {confirmLabel}

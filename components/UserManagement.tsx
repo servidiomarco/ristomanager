@@ -295,8 +295,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
           {content}
         </ModalShell>
       ) : (
-        <div className="space-y-4 p-4 sm:p-6 lg:p-8">
-          {content}
+        // Scorrimento della pagina, non del contenitore dell'app: è quello che
+        // tiene il contenuto sopra la barra di navigazione flottante del
+        // telefono invece di lasciarlo passare dietro e ricomparire sotto. Vale
+        // solo per la versione a pagina — dentro il modal scorre il modal.
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-6 lg:p-8">
+            {content}
+          </div>
         </div>
       )}
 
