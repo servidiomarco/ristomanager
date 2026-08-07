@@ -850,6 +850,16 @@ Prefer "load more" or virtualised scroll on mobile.
 inset from the viewport by `chrome-inset`, sitting on the canvas. Not edge-to-edge rails. At
 `<md` the sidebar becomes a bottom tab bar.
 
+Because it floats, the bar overlaps the page rather than pushing it — every screen has to
+reserve the height itself, and the screen must own the box that reservation applies to. See
+§8.14; it is the rule most often missing.
+
+**A full-screen task hides the bar.** Where a screen opens something that takes over the whole
+phone — the order pad on a table — the bar goes for as long as that lasts, and the clearance
+goes with it: a hidden bar that still reserves its height leaves a dead strip under the primary
+action, which on the pad is the one that sends food to the kitchen. Only for a task with its own
+way back. A screen you can leave *only* through the tab bar never hides it.
+
 ### 7.5 Overlays
 
 **Modal** [der] — `surface` fill, `rounded.3xl`, `elevation.raised`, max-width 560px,
@@ -870,6 +880,14 @@ full visual weight, because the user has already committed to the intent.
 
 **Drawer / Sheet** [der] — side panel at `≥md` (max-width 420px, full height, `rounded.3xl` on
 the inner edge), bottom sheet at `<md`. Same focus rules as Modal.
+
+Its header carries three slots and they are not interchangeable. `subtitle` sits under the
+title; `meta` takes a few status chips; `subheader` takes full-width pinned chrome — a tab bar,
+a filter row. `meta` renders *inside the title column*, alongside the close button, so a
+segmented control put there truncates its own labels (`Tutto il ta…`) at the width where it
+matters most. That is what `subheader` is for. Unlike the Modal's, the sheet's subheader keeps
+the sheet's own white rather than the canvas tone: a recessed filter track needs a level-1
+surface beneath it, and on the canvas it measures 1.03:1 and disappears (§8.8).
 
 **SplitPane** [obs] — the list-plus-detail layout behind every two-column screen
 (Comunicazioni, Prenotazioni, Reception). List column at a fixed ladder — 340 / 400 / 440px by
@@ -980,10 +998,13 @@ defect at least once, and each is invisible in review until it renders.
     passing behind. This was diagnosed and fixed four separate times before it was written
     down.
 
-11. **`overflow-y: auto` clips horizontally too.** A vertical scroll container also establishes
-    horizontal clipping, so card shadows and focus rings inside it come out sliced flat at both
-    edges. Give the container a small horizontal bleed (negative margin plus equal padding) so
-    elevation has room to render.
+11. **A scroll container clips the other axis too.** `overflow-y: auto` also establishes
+    horizontal clipping — and `overflow-x: auto` vertical — so card shadows and focus rings
+    inside come out sliced flat at whichever edges do not scroll. Give the container a small
+    bleed on that axis (negative margin plus equal padding) so elevation has room to render.
+    A horizontal chip track is the case that hides longest: every chip keeps its shadow at the
+    sides and loses it top and bottom, which reads as a deliberately flat control rather than
+    as a bug.
 
 12. **A scroll container's own padding is eaten by its scrollbar.** Padding on the scrolling
     element sits *behind* the scrollbar, so content stops short of where the same padding puts
@@ -994,6 +1015,16 @@ defect at least once, and each is invisible in review until it renders.
     not by appearance — a sheet versus a pane, a dropdown versus a page — resolve it in
     JavaScript with a matchMedia hook and render one of them. CSS cannot express it, and
     rendering both while hiding one duplicates every mount, fetch and media element inside.
+
+14. **A screen owns its scroll region.** The clearance under the floating bottom bar
+    (`.pb-mobile-nav`) is padding at the bottom of a *box*, so it only does anything if that box
+    ends where the viewport does. A screen written as a plain growing `div` lets the app
+    container scroll instead: the padding rides down with the content, and the last rows run the
+    full viewport height — behind the bar and out below it, where they can be neither read nor
+    tapped. Wrap the screen in `h-full min-h-0 flex flex-col` and give the scrolling part
+    `min-h-0 flex-1 overflow-y-auto`. The header then stays put as a bonus, which is the tell
+    that a screen has it: if the title scrolls away on a phone, the bar is overlapping something
+    further down. Six screens shipped without it.
 
 ---
 
