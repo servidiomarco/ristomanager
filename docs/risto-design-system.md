@@ -928,6 +928,25 @@ The variable is a constant, not a measurement of the bar, so it does not follow 
 gone away: a toast raised inside a full-screen task (§7.4) floats above empty space. Screens
 that hide the bar pass their own offset.
 
+**A toast carrying a single action is a solid pill, not a card.** The Annulla on Lista della
+spesa: `action-bg` fill at `rounded.full`, `action-fg` text, `elevation.raised`, a leading icon
+naming what happened — a tick, a bin — and the action as a text button at the trailing end. It
+looks like a primary button because it is one with a sentence attached, and the inversion is
+what buys five seconds of attention on a screen whose content did not visibly change. Its
+wrapper takes `pointer-events: none` so the empty strip either side of the pill does not eat
+taps meant for the list underneath.
+
+**Undo runs forwards.** The action commits immediately and Annulla issues the compensating
+call. Holding the write until the countdown expires means closing the page mid-timer loses the
+*action*; this way it loses only the chance to undo it, which is the one of the two the user
+can live without.
+
+**The action label has to clear 4.5:1 against the pill in both themes**, and this is where the
+shipped one falls down: amber on the near-black pill is 5.45:1 in light, but the pill inverts to
+near-white in dark and the same amber measures **2.96:1**. Recorded so it is not copied as
+precedent. The fix is a label colour that inverts with the fill, not a darker amber — §3.3 has
+already been down that road.
+
 **Tooltip** [der] — `surface-inverted` fill, `surface-inverted-fg` text, `rounded.md`,
 `caption` type, max-width 240px. Never the sole carrier of information; touch devices get no
 hover, so anything essential belongs in visible text.
