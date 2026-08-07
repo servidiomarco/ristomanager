@@ -3,6 +3,7 @@ import type { Request } from 'express';
 import { queryWithRetry } from '../db.js';
 import { Shift, ReservationSource } from '../types.js';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime.js';
+import { getAvailableSlots } from '../utils/slots.js';
 import { getCappedRoomIds, pickSelfServiceTable, isTableStillAssignable } from './roomOccupancyService.js';
 
 // ============================================
@@ -510,6 +511,20 @@ export interface AvailabilityResult {
  * The agent uses the per-zone counts to negotiate with the caller when their
  * preferred zone is full but the other has space.
  */
+// True when `date` is today in Rome and the shift's service is already over
+// (every slot is in the past, or the shift has no slots that weekday). Guards
+// the alternative-shift suggestion so a caller at 18:00 whose dinner is full
+// isn't offered lunch "of the same day" — lunch has long ended. Only ever
+// true for today; future dates are never "over".
+async function isShiftAlreadyOverToday(date: string, shift: Shift): Promise<boolean> {
+    if (date !== getRomeDatePart(new Date())) return false;
+    const nowTime = getRomeTimePart(new Date()); // HH:MM, 24h Rome
+    const slots = await getAvailableSlots(date, shift);
+    // Zero-padded 24h strings compare correctly lexicographically. Empty slot
+    // list (shift closed that weekday) → nothing left to offer.
+    return slots.every(s => s <= nowTime);
+}
+
 export async function findAvailability(input: AvailabilityInput): Promise<AvailabilityResult> {
     const { date, shift, guests, location_preference } = input;
     const cappedRooms = await getCappedRoomIds(date, shift);
@@ -608,7 +623,10 @@ export async function findAvailability(input: AvailabilityInput): Promise<Availa
     `, [guests, date, otherShift, cappedRoomsAlt]);
     const altFree = altResult.rows[0]?.free ?? 0;
 
-    if (altFree > 0) {
+    // Only offer the other shift if it hasn't already passed today — otherwise
+    // a 18:00 caller with a full dinner would be told "posso proporle a pranzo
+    // dello stesso giorno?", which is nonsensical.
+    if (altFree > 0 && !(await isShiftAlreadyOverToday(date, otherShift))) {
         const altLabel = otherShift === Shift.LUNCH ? 'a pranzo' : 'a cena';
         return {
             available: false,
