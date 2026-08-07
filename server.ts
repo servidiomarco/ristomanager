@@ -5073,11 +5073,11 @@ app.get('/payments/requests', authenticate, requirePermission('reservations:view
     }
 });
 
-// Create a payment link for a reservation. Body: { reservation_id, amount, description? }
-// where `amount` is in euros (accepts decimal). Sends the link over
-// WhatsApp/SMS with the same dispatcher used for booking confirmations, so
-// the channel decision (SMS while Meta verification is pending, WhatsApp
-// after) mirrors reservation confirmations exactly.
+// Create a payment link for a reservation. Body: { reservation_id, amount, description?, channel? }
+// where `amount` is in euros (accepts decimal) and `channel` is one of
+// 'email' | 'whatsapp' | 'sms' | 'auto' (default 'auto'). The operator picks
+// the channel in the "Richiedi un acconto" section; 'auto' keeps the historical
+// behaviour (WhatsApp template first, SMS fallback) for any caller that omits it.
 app.post('/payments/requests', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         if (!(await isPaymentConfiguredForFlow('deposit'))) {
@@ -5094,15 +5094,29 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
         const amountCents = Math.round(amountEur * 100);
         if (amountCents < 50) return res.status(400).json({ error: 'importo minimo € 0,50' });
 
-        // Fetch the reservation so we can pre-fill the message and require a
-        // phone number (otherwise there's no channel to deliver the link).
+        const rawChannel = String(req.body?.channel ?? '').toLowerCase();
+        const channel: 'email' | 'whatsapp' | 'sms' | 'auto' =
+            rawChannel === 'email' || rawChannel === 'whatsapp' || rawChannel === 'sms' ? rawChannel : 'auto';
+
+        // Fetch the reservation so we can pre-fill the message and check that the
+        // chosen channel has somewhere to land (email address or phone number).
         const resvResult = await queryWithRetry(
-            'SELECT id, customer_name, phone, reservation_time, guests FROM reservations WHERE id = $1',
+            'SELECT id, customer_name, phone, email, reservation_time, guests FROM reservations WHERE id = $1',
             [reservationId]
         );
         if (resvResult.rowCount === 0) return res.status(404).json({ error: 'Prenotazione non trovata' });
         const reservation = resvResult.rows[0];
-        if (!reservation.phone) return res.status(400).json({ error: 'La prenotazione non ha un numero di telefono' });
+
+        // Per-channel gate: contact detail present, and (email) SMTP configured.
+        // WhatsApp/auto route through sendBookingConfirmation, which itself falls
+        // back to SMS when WhatsApp isn't configured — so no hard gate there.
+        if (channel === 'email') {
+            if (!reservation.email) return res.status(400).json({ error: 'La prenotazione non ha un indirizzo email' });
+            if (!(await isSmtpConfigured())) return res.status(400).json({ error: 'Email non configurata (server SMTP mancante)' });
+        } else {
+            if (!reservation.phone) return res.status(400).json({ error: 'La prenotazione non ha un numero di telefono' });
+            if (channel === 'sms' && !isTwilioSmsConfigured()) return res.status(400).json({ error: 'SMS non configurato' });
+        }
 
         // Create the gateway order first — if the API call fails we don't
         // want to persist a half-baked row. The `reference` is how the
@@ -5138,11 +5152,13 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
         );
         const paymentRequest = inserted.rows[0];
 
-        // Fire-and-forget delivery: same channel policy as booking
-        // confirmations — WhatsApp template first, SMS fallback (sync on
-        // send error, async via the status webhook on terminal WA errors).
-        // Failures update delivery_error but don't fail the API call — the
-        // operator can still copy the link from the UI.
+        // Fire-and-forget delivery on the chosen channel. Failures update
+        // delivery_error but don't fail the API call — the operator can still
+        // copy the link from the UI. Routing:
+        //   email          → payment-link email (no phone fallback possible)
+        //   sms            → SMS only (explicit choice, no WA)
+        //   whatsapp/auto  → WhatsApp template, SMS fallback on WA failure
+        //                    (sendBookingConfirmation's existing behaviour)
         const resvInstant = new Date(reservation.reservation_time);
         const depositDateLabel = resvInstant.toLocaleDateString('it-IT', { timeZone: 'Europe/Rome', day: '2-digit', month: '2-digit', year: 'numeric' });
         const depositTimeLabel = resvInstant.toLocaleTimeString('it-IT', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -5156,7 +5172,35 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
             order.checkoutUrl
         );
         const message = buildPaymentMessage(reservation.customer_name, amountCents, order.checkoutUrl, orderDescription);
-        sendBookingConfirmation(reservation.phone, message, reservation.id, { whatsappTemplate }).then(async (delivery) => {
+
+        const deliver = async (): Promise<{ channel: string | null; sid: string | null }> => {
+            if (channel === 'email') {
+                const { subject, text, html } = buildDepositRequestEmail({
+                    customerName: reservation.customer_name,
+                    amountCents,
+                    checkoutUrl: order.checkoutUrl,
+                    description: orderDescription,
+                });
+                const emailStatus = await getSmtpConfigStatus().catch(() => null);
+                const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
+                try {
+                    const sent = await sendMail({ to: String(reservation.email), subject, text, html });
+                    await logOutboundEmail({ provider: emailProvider, to: String(reservation.email), subject, body: text, messageId: sent.messageId || null, reservationId: reservation.id });
+                    return { channel: 'email', sid: sent.messageId || null };
+                } catch (sendErr: any) {
+                    await logOutboundEmail({ provider: emailProvider, to: String(reservation.email), subject, body: text, reservationId: reservation.id, errorMessage: sendErr?.message || String(sendErr) });
+                    throw sendErr;
+                }
+            }
+            if (channel === 'sms') {
+                const r = await sendTwilioSms(reservation.phone, message, reservation.id);
+                return { channel: r.channel, sid: r.sid ?? null };
+            }
+            const r = await sendBookingConfirmation(reservation.phone, message, reservation.id, { whatsappTemplate });
+            return { channel: r.channel, sid: r.sid ?? null };
+        };
+
+        deliver().then(async (delivery) => {
             try {
                 await queryWithRetry(
                     `UPDATE payment_requests
@@ -11372,6 +11416,37 @@ function buildBookingConfirmationEmail(params: {
       <p style="margin:16px 0 0;font-size:14px;">A presto!<br><em>Il Vecchio Frantoio</em></p>
     `;
     const html = wrapEmailHtml(`Prenotazione confermata per il ${dateLabel} alle ${timeLabel}`, detailsHtml);
+    return { subject, text, html };
+}
+
+// Email che porta il link per pagare l'acconto. Terzo canale del selettore in
+// "Richiedi un acconto" (accanto a WhatsApp e SMS). Il pulsante punta al
+// checkout del gateway (Revolut/SumUp); il testo plain ripete la URL così è
+// utilizzabile anche dai client che non rendono l'HTML.
+function buildDepositRequestEmail(params: {
+    customerName: string;
+    amountCents: number;
+    checkoutUrl: string;
+    description?: string | null;
+}): { subject: string; text: string; html: string } {
+    const amount = formatEuroMinor(params.amountCents);
+    const name = toTitleCase(params.customerName);
+    const desc = (params.description || '').trim();
+    const subject = `Acconto prenotazione — ${amount}`;
+    const text = buildPaymentMessage(params.customerName, params.amountCents, params.checkoutUrl, desc || null);
+
+    const detailsHtml = `
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Ciao ${escapeHtml(name)},` : 'Ciao,'}<br>per completare la prenotazione al Vecchio Frantoio serve un anticipo di <strong>${escapeHtml(amount)}</strong>.</p>
+      ${desc ? `<p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#57534e;">${escapeHtml(desc)}</p>` : ''}
+      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 16px;"><tr><td align="center">
+        <a href="${escapeHtml(params.checkoutUrl)}" style="display:inline-block;background:#065f46;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 28px;border-radius:10px;">Paga l'acconto — ${escapeHtml(amount)}</a>
+      </td></tr></table>
+      <p class="muted" style="margin:0 0 16px;font-size:13px;line-height:1.6;color:#57534e;">Se il pulsante non funziona, copia e incolla questo link nel browser:<br><a href="${escapeHtml(params.checkoutUrl)}" style="color:#065f46;word-break:break-all;">${escapeHtml(params.checkoutUrl)}</a></p>
+      <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Appena riceviamo il pagamento la prenotazione è confermata.</p>
+      ${contactBlockHtml()}
+      <p style="margin:16px 0 0;font-size:14px;">A presto!<br><em>Il Vecchio Frantoio</em></p>
+    `;
+    const html = wrapEmailHtml(`Acconto di ${amount} per la tua prenotazione`, detailsHtml);
     return { subject, text, html };
 }
 

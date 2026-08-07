@@ -462,7 +462,7 @@ export const getPaymentRequests = async (reservationId: number): Promise<Payment
 };
 
 export const createPaymentRequest = async (
-  input: { reservation_id: number; amount: number; description?: string }
+  input: { reservation_id: number; amount: number; description?: string; channel?: 'email' | 'whatsapp' | 'sms' }
 ): Promise<PaymentRequest> => {
   return apiRequest<PaymentRequest>(`${API_URL}/payments/requests`, {
     method: 'POST',

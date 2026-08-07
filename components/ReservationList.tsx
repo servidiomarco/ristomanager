@@ -746,6 +746,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [paymentProviderLabel, setPaymentProviderLabel] = useState('Revolut');
   const [paymentAmount, setPaymentAmount] = useState<string>('');
   const [paymentDescription, setPaymentDescription] = useState<string>('');
+  // Canale con cui inviare il link caparra. Un solo canale per invio: la scelta
+  // è dell'operatore, non più un automatismo silenzioso WhatsApp→SMS. Email
+  // esige un indirizzo, WhatsApp/SMS un telefono — vedi paymentChannelAvailable.
+  const [paymentChannel, setPaymentChannel] = useState<'email' | 'whatsapp' | 'sms'>('whatsapp');
   const [isCreatingPayment, setIsCreatingPayment] = useState(false);
   const [copiedPaymentId, setCopiedPaymentId] = useState<number | null>(null);
 
@@ -2057,11 +2061,34 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     return () => { socket.off('inboundEmail:received', onInbound); };
   }, [socket, isFormOpen, isEditing, formData.id]);
 
+  // Quali canali possono ricevere il link, dato ciò che la prenotazione ha in
+  // rubrica: email serve un indirizzo, WhatsApp/SMS un telefono. Il server
+  // rifiuta comunque un canale non configurato (SMTP/Twilio spenti) con un 400
+  // chiaro — qui muto solo ciò che l'operatore vede mancare.
+  const paymentChannelAvailable = {
+    email: !!(formData.email && formData.email.trim()),
+    whatsapp: !!(formData.phone && formData.phone.trim()),
+    sms: !!(formData.phone && formData.phone.trim()),
+  };
+
+  // Se il canale selezionato diventa indisponibile (l'operatore cancella il
+  // telefono o l'email mentre compila), ripiega sul primo disponibile invece
+  // di lasciare selezionato un canale che fallirebbe.
+  useEffect(() => {
+    if (paymentChannelAvailable[paymentChannel]) return;
+    const fallback = (['whatsapp', 'email', 'sms'] as const).find(c => paymentChannelAvailable[c]);
+    if (fallback) setPaymentChannel(fallback);
+  }, [paymentChannelAvailable.email, paymentChannelAvailable.whatsapp, paymentChannelAvailable.sms, paymentChannel]);
+
   const handleCreatePaymentRequest = async () => {
     if (!formData.id) return;
     const amount = Number(String(paymentAmount).replace(',', '.'));
     if (!Number.isFinite(amount) || amount <= 0) {
       showToast('Inserisci un importo valido', 'error');
+      return;
+    }
+    if (!paymentChannelAvailable[paymentChannel]) {
+      showToast('Canale di invio non disponibile per questa prenotazione', 'error');
       return;
     }
     setIsCreatingPayment(true);
@@ -2070,11 +2097,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         reservation_id: formData.id as number,
         amount,
         description: paymentDescription.trim() || undefined,
+        channel: paymentChannel,
       });
       setPaymentRequests(prev => [created, ...prev]);
       setPaymentAmount('');
       setPaymentDescription('');
-      showToast('Link di pagamento inviato', 'success');
+      const channelLabel = paymentChannel === 'email' ? 'via email' : paymentChannel === 'sms' ? 'via SMS' : 'via WhatsApp';
+      showToast(`Link di pagamento inviato ${channelLabel}`, 'success');
     } catch (err: any) {
       showToast(err?.message || 'Errore creazione link di pagamento', 'error');
     } finally {
@@ -5827,12 +5856,49 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                           <div className="mb-4 flex flex-wrap items-center gap-2">
                             <CreditCard className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
                             <h4 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Richiedi un acconto</h4>
-                            {/* Where the link goes, stated rather than chosen: delivery
-                                follows the booking's phone (WhatsApp, then SMS) and there
-                                is no second route to offer. */}
                             <span className="ml-auto text-[13px] text-[var(--ds-text-muted)]">
-                              {paymentProviderLabel}{formData.phone ? ` · invio a ${formData.phone}` : ''}
+                              {paymentProviderLabel}
                             </span>
+                          </div>
+
+                          {/* Canale di invio del link. Radio: un solo canale per
+                              invio. I canali senza recapito sul booking sono mutati
+                              (email→nessuna email, WhatsApp/SMS→nessun telefono). */}
+                          <div className="mb-4">
+                            <span className="mb-1.5 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Invia il link tramite</span>
+                            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                              {([
+                                { key: 'email' as const, label: 'Email', icon: Mail, target: formData.email, missing: 'Nessuna email sul contatto' },
+                                { key: 'whatsapp' as const, label: 'WhatsApp', icon: MessageCircle, target: formData.phone, missing: 'Nessun telefono sul contatto' },
+                                { key: 'sms' as const, label: 'SMS', icon: Phone, target: formData.phone, missing: 'Nessun telefono sul contatto' },
+                              ]).map(({ key, label, icon: Icon, target, missing }) => {
+                                const available = paymentChannelAvailable[key];
+                                const selected = paymentChannel === key && available;
+                                return (
+                                  <button
+                                    key={key}
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={selected}
+                                    disabled={!available || isCreatingPayment}
+                                    onClick={() => setPaymentChannel(key)}
+                                    title={available ? (target || undefined) : missing}
+                                    className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
+                                      selected
+                                        ? 'border-[var(--ds-accent)] bg-[var(--ds-accent-subtle)] ring-1 ring-[var(--ds-accent)]'
+                                        : 'border-[var(--ds-border)] bg-[var(--ds-surface-2)] hover:bg-[var(--ds-surface-hover)]'
+                                    }`}
+                                  >
+                                    <Icon className={`h-4 w-4 flex-shrink-0 ${selected ? 'text-[var(--ds-accent)]' : 'text-[var(--ds-text-muted)]'}`} aria-hidden />
+                                    <span className="min-w-0 flex-1">
+                                      <span className="block text-[13px] font-semibold text-[var(--ds-text-primary)]">{label}</span>
+                                      <span className="block truncate text-[11px] text-[var(--ds-text-muted)]">{available ? (target || '') : missing}</span>
+                                    </span>
+                                    {selected && <Check className="h-4 w-4 flex-shrink-0 text-[var(--ds-accent)]" aria-hidden />}
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
 
                           <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,150px)_1fr]">
@@ -5866,18 +5932,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             <button
                               type="button"
                               onClick={handleCreatePaymentRequest}
-                              disabled={isCreatingPayment || !formData.phone}
+                              disabled={isCreatingPayment || !paymentChannelAvailable[paymentChannel]}
                               className={`w-full sm:w-auto ${dsButton.primary}`}
-                              title={!formData.phone ? 'La prenotazione non ha un numero di telefono' : 'Genera link e invia via WhatsApp/SMS'}
+                              title={!paymentChannelAvailable[paymentChannel]
+                                ? 'Nessun canale disponibile: aggiungi email o telefono'
+                                : `Genera il link e invia ${paymentChannel === 'email' ? 'via email' : paymentChannel === 'sms' ? 'via SMS' : 'via WhatsApp'}`}
                             >
                               {isCreatingPayment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                               Invia link
                             </button>
                           </div>
 
-                          {!formData.phone && (
+                          {!formData.phone && !formData.email && (
                             <p className="mt-2 text-[13px] text-[var(--ds-critical-text)]">
-                              Aggiungi un numero di telefono per inviare il link di pagamento.
+                              Aggiungi un'email o un numero di telefono per inviare il link di pagamento.
                             </p>
                           )}
 
