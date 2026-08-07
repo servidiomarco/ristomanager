@@ -915,9 +915,18 @@ freezes the swipe half-open. Pair with a one-time hint that plays on first visit
 skipped for fine pointers and under `prefers-reduced-motion`.
 
 **Toast** [der] — `surface` fill, `rounded.lg`, `border` hairline, `elevation.raised`, at
-`z.toast`. Variants take state families via a leading icon and `tint-border`. Stacks
-bottom-right at `≥md`, top at `<md`. Auto-dismiss after 5s — **except errors, which persist
-until dismissed.** Announced via `aria-live="polite"`.
+`z.toast`. Variants take state families via a leading icon and `tint-border`. Auto-dismiss
+after 5s — **except errors, which persist until dismissed.** Announced via `aria-live="polite"`.
+
+**It stays at the bottom on a phone**, centred and inset, anchored to
+`--ds-bottom-nav-clear` — the same clearance the scroll regions use, so it clears the tab bar
+and the raised "+" instead of covering them. Bottom-right at `≥md`. A toast reports on the
+action just taken, with the thumb still where it took it; the top of a phone is the far corner
+from there, and an undo with five seconds on it cannot ask for a trip across the screen.
+
+The variable is a constant, not a measurement of the bar, so it does not follow a bar that has
+gone away: a toast raised inside a full-screen task (§7.4) floats above empty space. Screens
+that hide the bar pass their own offset.
 
 **Tooltip** [der] — `surface-inverted` fill, `surface-inverted-fg` text, `rounded.md`,
 `caption` type, max-width 240px. Never the sole carrier of information; touch devices get no
