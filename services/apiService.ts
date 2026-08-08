@@ -1127,6 +1127,8 @@ export const testImapConnection = async (): Promise<{ success: boolean }> => {
 export interface AutoDepositSettings {
   enabled: boolean;
   min_guests: number;
+  /** Quota di caparra per persona, in centesimi. Assente su backend vecchi. */
+  per_person_cents?: number;
   // True when the ACTIVE payment gateway has usable credentials (env or DB).
   // The toggle can still be enabled without them, but the deposit link won't
   // actually be generated — used by the UI to warn the operator. The name is
@@ -1147,7 +1149,7 @@ export const getAutoDepositSettings = async (): Promise<AutoDepositSettings> => 
 };
 
 export const updateAutoDepositSettings = async (
-  updates: Partial<Pick<AutoDepositSettings, 'enabled' | 'min_guests'>>
+  updates: Partial<Pick<AutoDepositSettings, 'enabled' | 'min_guests' | 'per_person_cents'>>
 ): Promise<AutoDepositSettings> => {
   return apiRequest<AutoDepositSettings>(`${API_URL}/settings/auto-deposit`, {
     method: 'PUT',
