@@ -3454,6 +3454,25 @@ async function creditPaidDepositsToBill(billId: number): Promise<{ credited: num
 // — già incluse in paid_cents e già scalate dal residuo; il campo serve solo a
 // far mostrare al client la voce dell'acconto senza reindovinare quali quote lo
 // siano.
+
+// Acconto TOTALE pagato su una prenotazione (importo pieno delle caparre
+// COMPLETED), a prescindere da quanto se ne è potuto applicare al conto. Serve
+// a mostrare l'acconto reale e a calcolare quanto va rimborsato al cliente
+// quando la caparra supera il totale del conto.
+async function depositPaidCentsForReservation(reservationId: number | null): Promise<number> {
+    if (!reservationId) return 0;
+    const r = await queryWithRetry(
+        `SELECT COALESCE(SUM(amount_cents), 0)::int AS s
+         FROM payment_requests
+         WHERE reservation_id = $1
+           AND table_bill_split_id IS NULL
+           AND UPPER(status) IN ('COMPLETED', 'PAID')
+           AND completed_at IS NOT NULL`,
+        [reservationId]
+    );
+    return r.rows[0].s;
+}
+
 async function loadBillView(billId: number): Promise<any | null> {
     const billResult = await queryWithRetry(
         `SELECT id, reservation_id, table_id, total_cents, covers, currency,
@@ -3485,12 +3504,18 @@ async function loadBillView(billId: number): Promise<any | null> {
         { paid_cents: 0, claimed_cents: 0, deposit_credit_cents: 0 }
     );
     const residual_cents = Math.max(0, bill.total_cents - totals.paid_cents - totals.claimed_cents);
+    // Acconto pieno versato e quota non assorbita dal conto (da rimborsare al
+    // cliente quando la caparra supera il totale).
+    const deposit_paid_cents = await depositPaidCentsForReservation(bill.reservation_id);
+    const refund_due_cents = Math.max(0, deposit_paid_cents - totals.deposit_credit_cents);
     return {
         bill,
         splits: splitsResult.rows,
         paid_cents: totals.paid_cents,
         claimed_cents: totals.claimed_cents,
         deposit_credit_cents: totals.deposit_credit_cents,
+        deposit_paid_cents,
+        refund_due_cents,
         residual_cents,
     };
 }
@@ -16487,6 +16512,9 @@ app.get('/tables/bills-status', authenticate, requirePermission('orders:view'), 
                               WHERE s.table_bill_id = b.id AND s.status = 'PAID'), 0) AS paid_cents,
                     COALESCE((SELECT SUM(s.amount_cents)::int FROM table_bill_splits s
                               WHERE s.table_bill_id = b.id AND s.status = 'PAID' AND s.kind = 'deposit'), 0) AS deposit_credit_cents,
+                    COALESCE((SELECT SUM(pr.amount_cents)::int FROM payment_requests pr
+                              WHERE pr.reservation_id = b.reservation_id AND pr.table_bill_split_id IS NULL
+                                AND UPPER(pr.status) IN ('COMPLETED','PAID') AND pr.completed_at IS NOT NULL), 0) AS deposit_paid_cents,
                     (SELECT COUNT(*)::int FROM orders o
                      WHERE o.table_bill_id = b.id AND o.status = 'OPEN') AS open_orders
              FROM table_bills b
@@ -16508,6 +16536,8 @@ app.get('/tables/bills-status', authenticate, requirePermission('orders:view'), 
                 items: r.items ?? null,
                 paid_cents: Number(r.paid_cents) + Number(r.cash_settled_cents),
                 deposit_credit_cents: Number(r.deposit_credit_cents),
+                deposit_paid_cents: Number(r.deposit_paid_cents),
+                refund_due_cents: Math.max(0, Number(r.deposit_paid_cents) - Number(r.deposit_credit_cents)),
                 residual_cents: Number(r.total_cents) - Number(r.paid_cents) - Number(r.cash_settled_cents),
                 open_orders: Number(r.open_orders),
             }))
@@ -17832,12 +17862,15 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
              FROM table_bill_splits WHERE table_bill_id = $1`,
             [billId]
         );
+        const depositPaid = await depositPaidCentsForReservation(synced.bill.reservation_id);
         res.json({
             order_id: orderId,
             bill: {
                 ...synced.bill,
                 paid_cents: fig.rows[0].paid_cents,
                 deposit_credit_cents: fig.rows[0].deposit_credit_cents,
+                deposit_paid_cents: depositPaid,
+                refund_due_cents: Math.max(0, depositPaid - fig.rows[0].deposit_credit_cents),
                 residual_cents: Math.max(0, synced.bill.total_cents - fig.rows[0].live),
             },
             released_split_ids: synced.released_split_ids,
@@ -18374,6 +18407,9 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                     COALESCE(SUM(s.amount_cents) FILTER (WHERE s.status = 'PAID'), 0)::int AS paid_cents,
                     COALESCE(SUM(s.amount_cents) FILTER (WHERE s.status = 'CLAIMED'), 0)::int AS claimed_cents,
                     COALESCE(SUM(s.amount_cents) FILTER (WHERE s.status = 'PAID' AND s.kind = 'deposit'), 0)::int AS deposit_credit_cents,
+                    COALESCE((SELECT SUM(pr.amount_cents)::int FROM payment_requests pr
+                              WHERE pr.reservation_id = b.reservation_id AND pr.table_bill_split_id IS NULL
+                                AND UPPER(pr.status) IN ('COMPLETED','PAID') AND pr.completed_at IS NOT NULL), 0) AS deposit_paid_cents,
                     COUNT(s.id) FILTER (WHERE s.status = 'PAID')::int AS paid_splits,
                     (SELECT COUNT(*) FROM orders o WHERE o.table_bill_id = b.id AND o.status = 'OPEN')::int AS open_orders
              FROM table_bills b
@@ -18419,6 +18455,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                         ? b.service_date.toISOString().slice(0, 10)
                         : b.service_date) === service.service_date
                     && b.shift === service.shift,
+                refund_due_cents: Math.max(0, Number(b.deposit_paid_cents) - Number(b.deposit_credit_cents)),
                 residual_cents: Math.max(0, b.total_cents - b.paid_cents - b.claimed_cents),
             })),
             stale_orders: stale.rows.map((o: any) => ({
@@ -18495,6 +18532,8 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
         );
         const depositCreditCents = billTotalsRs.rows[0].deposit_credit_cents;
         const residualCents = Math.max(0, bill.total_cents - billTotalsRs.rows[0].live_cents);
+        const depositPaidCents = await depositPaidCentsForReservation(bill.reservation_id);
+        const refundDueCents = Math.max(0, depositPaidCents - depositCreditCents);
 
         // Priorità: stampante esplicita nel body → instradamento configurato
         // per la funzionalità → default storico 'preconti'.
@@ -18519,6 +18558,8 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
                 covers: bill.covers,
                 total_cents: bill.total_cents,
                 deposit_credit_cents: depositCreditCents,
+                deposit_paid_cents: depositPaidCents,
+                refund_due_cents: refundDueCents,
                 residual_cents: residualCents,
                 items,
                 share_url: shareUrl,

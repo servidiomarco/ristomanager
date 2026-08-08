@@ -305,6 +305,8 @@ export interface CloseOrderResult {
     // Totali derivati aggiunti dalla chiusura per mostrare subito l'acconto.
     paid_cents?: number;
     deposit_credit_cents?: number;
+    deposit_paid_cents?: number;
+    refund_due_cents?: number;
     residual_cents?: number;
   };
   /** Claim non pagati rilasciati perché il totale è sceso. */
@@ -389,6 +391,10 @@ export interface ServiceBill {
   paid_cents: number;
   /** Acconto già versato sulla prenotazione, portato nel conto. Già in paid_cents. */
   deposit_credit_cents?: number;
+  /** Acconto TOTALE versato (importo pieno), a prescindere da quanto assorbito. */
+  deposit_paid_cents?: number;
+  /** Da rimborsare al cliente quando l'acconto supera il totale del conto. */
+  refund_due_cents?: number;
   residual_cents: number;
   open_orders: number;
 }

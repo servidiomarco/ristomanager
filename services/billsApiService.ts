@@ -137,6 +137,10 @@ export interface OpenBillRow {
   claimed_cents: number;
   /** Acconto già versato sulla prenotazione, portato nel conto. Già in paid_cents. */
   deposit_credit_cents?: number;
+  /** Acconto TOTALE versato (importo pieno), a prescindere da quanto assorbito dal conto. */
+  deposit_paid_cents?: number;
+  /** Da rimborsare al cliente quando l'acconto supera il totale del conto. */
+  refund_due_cents?: number;
   residual_cents: number;
   paid_splits: number;
   /** Comande ancora aperte su questo conto: il tavolo sta ancora ordinando. */

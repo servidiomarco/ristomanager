@@ -23,7 +23,7 @@ const euro = (cents: number) => formatEuro(cents);
 
 type BillLike =
   Pick<OpenBillRow, 'id' | 'table_name' | 'total_cents' | 'covers' | 'share_token' | 'items'>
-  & Partial<Pick<OpenBillRow, 'paid_cents' | 'residual_cents' | 'open_orders' | 'deposit_credit_cents'>>;
+  & Partial<Pick<OpenBillRow, 'paid_cents' | 'residual_cents' | 'open_orders' | 'deposit_credit_cents' | 'deposit_paid_cents' | 'refund_due_cents'>>;
 
 const isSettled = (bill: BillLike) => bill.residual_cents === 0;
 
@@ -175,23 +175,33 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
             <dt>Totale</dt>
             <dd className="tabular-nums">{euro(bill.total_cents)}</dd>
           </div>
-          {bill.deposit_credit_cents != null && bill.deposit_credit_cents > 0 && (
-            <div className="flex justify-between text-[var(--ds-seated-text)]">
-              <dt>Acconto già versato</dt>
-              <dd className="tabular-nums">−{euro(bill.deposit_credit_cents)}</dd>
+          {/* Acconto: si mostra l'importo PIENO versato dal cliente, non solo
+              la parte assorbita dal conto. Fallback al valore applicato per i
+              conti vecchi che non riportano ancora deposit_paid_cents. */}
+          {(() => {
+            const depositShown = bill.deposit_paid_cents ?? bill.deposit_credit_cents ?? 0;
+            return depositShown > 0 ? (
+              <div className="flex justify-between text-[var(--ds-seated-text)]">
+                <dt>Acconto già versato</dt>
+                <dd className="tabular-nums">−{euro(depositShown)}</dd>
+              </div>
+            ) : null;
+          })()}
+          {bill.paid_cents != null && (bill.paid_cents - (bill.deposit_credit_cents ?? 0)) > 0 && (
+            <div className="flex justify-between text-[var(--ds-text-muted)]">
+              <dt>Incassato dai clienti</dt>
+              <dd className="tabular-nums">−{euro(bill.paid_cents - (bill.deposit_credit_cents ?? 0))}</dd>
             </div>
           )}
-          {bill.paid_cents != null && (
-            <div className="flex justify-between text-[var(--ds-text-muted)]">
-              <dt>Incassato</dt>
-              {/* Al netto dell'acconto, già mostrato sopra: così
-                  Totale − Acconto − Incassato = Residuo si legge senza doppioni. */}
-              <dd className="tabular-nums">{euro(bill.paid_cents - (bill.deposit_credit_cents ?? 0))}</dd>
+          {bill.refund_due_cents != null && bill.refund_due_cents > 0 && (
+            <div className="flex justify-between font-semibold text-[var(--ds-seated-text)]">
+              <dt>Da rimborsare al cliente</dt>
+              <dd className="tabular-nums">{euro(bill.refund_due_cents)}</dd>
             </div>
           )}
           {bill.residual_cents != null && (
             <div className={`flex justify-between font-medium ${settled ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-critical-text)]'}`}>
-              <dt>Residuo</dt>
+              <dt>Da pagare</dt>
               <dd className="tabular-nums">{euro(bill.residual_cents)}</dd>
             </div>
           )}
