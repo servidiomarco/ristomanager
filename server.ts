@@ -1288,8 +1288,9 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
         // (staff completes the caparra by hand from the booking card).
         let depositCheckoutUrl: string | null = null;
         let depositAmountCents = 0;
+        const voiceDepositPolicy = voiceDepositRequired ? await getAutoDepositPolicy() : null;
         if (voiceDepositRequired) {
-            depositAmountCents = Math.trunc(guests) * 1000; // €10/person
+            depositAmountCents = Math.trunc(guests) * (voiceDepositPolicy?.perPersonCents ?? DEPOSIT_DEFAULTS.perPersonCents);
             const [yyyy, mm, dd] = normalizedDate.split('-');
             const depositDateLabel = `${dd}/${mm}/${yyyy}`;
             const depositGuestsLabel = `${Math.trunc(guests)} ${Math.trunc(guests) === 1 ? 'persona' : 'persone'}`;
@@ -1329,7 +1330,8 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
                     depositDateLabel,
                     normalizedTime,
                     depositAmountCents,
-                    order.checkoutUrl
+                    order.checkoutUrl,
+                    voiceDepositPolicy?.perPersonCents
                 );
                 const whatsappTemplate = buildBookingDepositRequestTemplate(
                     toTitleCase(created.customer_name),
@@ -1436,7 +1438,7 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
             room_name: created.room_name,
             room_location: created.room_location,
             deposit_required: voiceDepositRequired,
-            deposit_amount: voiceDepositRequired ? formatEuroMinor(Math.trunc(guests) * 1000) : undefined,
+            deposit_amount: voiceDepositRequired ? formatEuroMinor(depositAmountCents) : undefined,
             deposit_link_sent: voiceDepositRequired ? !!depositCheckoutUrl : undefined,
         });
     } catch (err: any) {
@@ -4923,23 +4925,45 @@ function buildPaymentMessage(customerName: string, amountCents: number, url: str
 // is enabled, the party is at/above the guest threshold, and a payment
 // provider is actually configured. Used by both self-service channels (web
 // booking + voice agent) so they can't drift on when a caparra is due.
-async function isAutoDepositRequired(guests: number): Promise<boolean> {
+const DEPOSIT_DEFAULTS = { minGuests: 9, perPersonCents: 1000 };
+
+// Politica caparra in un posto solo: soglia e importo servono anche alla
+// pagina pubblica e ai messaggi, non solo alla decisione "serve o no".
+async function getAutoDepositPolicy(): Promise<{ enabled: boolean; minGuests: number; perPersonCents: number }> {
     try {
         const cfgRow = await queryWithRetry(
-            `SELECT auto_deposit_enabled, auto_deposit_min_guests
+            `SELECT auto_deposit_enabled, auto_deposit_min_guests, auto_deposit_per_person_cents
                FROM integration_settings WHERE provider = 'revolut'`
         );
         const r = cfgRow.rows[0];
-        if (!r || !r.auto_deposit_enabled) return false;
-        const n = Number(r.auto_deposit_min_guests);
-        const minGuests = Number.isInteger(n) && n >= 1 ? n : 9;
-        if (guests < minGuests) return false;
-        return await isPaymentConfiguredForFlow('deposit');
+        const n = Number(r?.auto_deposit_min_guests);
+        const c = Number(r?.auto_deposit_per_person_cents);
+        return {
+            enabled: Boolean(r?.auto_deposit_enabled),
+            minGuests: Number.isInteger(n) && n >= 1 ? n : DEPOSIT_DEFAULTS.minGuests,
+            perPersonCents: Number.isInteger(c) && c > 0 ? c : DEPOSIT_DEFAULTS.perPersonCents,
+        };
     } catch (err) {
         console.warn('[auto-deposit] policy lookup failed:', (err as any)?.message || err);
+        return { enabled: false, ...DEPOSIT_DEFAULTS };
+    }
+}
+
+async function isAutoDepositRequired(guests: number): Promise<boolean> {
+    const policy = await getAutoDepositPolicy();
+    if (!policy.enabled || guests < policy.minGuests) return false;
+    try {
+        return await isPaymentConfiguredForFlow('deposit');
+    } catch (err) {
+        console.warn('[auto-deposit] provider check failed:', (err as any)?.message || err);
         return false;
     }
 }
+
+// Pagina pubblica con le condizioni della caparra (sezione ancorata del
+// modulo di prenotazione): un solo posto da aggiornare quando cambiano, e i
+// messaggi si limitano a linkarla.
+const DEPOSIT_TERMS_URL = `${(process.env.PUBLIC_BOOKING_BASE_URL || 'https://prenotazioni.vecchiofrantoio.com').replace(/\/$/, '')}/prenota#caparra`;
 
 // Ack sent to the customer when a public web booking with >8 guests triggers
 // an automatic deposit request (€10/person). Combines the "richiesta ricevuta"
@@ -4951,10 +4975,13 @@ function buildDepositRequestMessage(
     dateLabel: string,
     time: string,
     amountCents: number,
-    checkoutUrl: string
+    checkoutUrl: string,
+    perPersonCents: number = DEPOSIT_DEFAULTS.perPersonCents
 ): string {
     const amount = formatEuroMinor(amountCents);
-    return `Ciao ${toTitleCase(customerName)}, per confermare la prenotazione per ${guestsLabel} il ${dateLabel} alle ${time} serve una caparra di ${amount} (€ 10 a persona).\nPaga in sicurezza qui: ${checkoutUrl}\n\nAppena riceviamo il pagamento ti confermeremo il tavolo. Grazie!`;
+    const perPerson = formatEuroMinor(perPersonCents);
+    const termsShort = DEPOSIT_TERMS_URL.replace(/^https?:\/\//, '');
+    return `Ciao ${toTitleCase(customerName)}, per confermare la prenotazione per ${guestsLabel} il ${dateLabel} alle ${time} serve una caparra di ${amount} (${perPerson} a persona).\nPaga in sicurezza qui: ${checkoutUrl}\n\nAppena riceviamo il pagamento ti confermeremo il tavolo. Condizioni: ${termsShort}\n\nGrazie!`;
 }
 
 // Message sent to the customer as soon as the Revolut ORDER_COMPLETED webhook
@@ -11658,7 +11685,7 @@ function buildDepositRequestEmail(params: {
         <a href="${escapeHtml(params.checkoutUrl)}" style="display:inline-block;background:#065f46;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 28px;border-radius:10px;">Paga l'acconto — ${escapeHtml(amount)}</a>
       </td></tr></table>
       <p class="muted" style="margin:0 0 16px;font-size:13px;line-height:1.6;color:#57534e;">Se il pulsante non funziona, copia e incolla questo link nel browser:<br><a href="${escapeHtml(params.checkoutUrl)}" style="color:#065f46;word-break:break-all;">${escapeHtml(params.checkoutUrl)}</a></p>
-      <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Appena riceviamo il pagamento la prenotazione è confermata.</p>
+      <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Appena riceviamo il pagamento la prenotazione è confermata. La caparra viene scalata dal conto della serata: <a href="${escapeHtml(DEPOSIT_TERMS_URL)}" style="color:#065f46;">come funziona la caparra e come annullare</a> — con rimborso completo se annulli almeno 24 ore prima.</p>
       ${contactBlockHtml()}
       <p style="margin:16px 0 0;font-size:14px;">A presto!<br><em>Il Vecchio Frantoio</em></p>
     `;
@@ -15067,16 +15094,11 @@ app.get('/settings/auto-deposit', authenticate, async (_req, res) => {
     try {
         const activeProvider = await getActivePaymentProvider();
         const paymentConfigured = await isProviderConfigured(activeProvider);
-        const row = await queryWithRetry(
-            `SELECT auto_deposit_enabled, auto_deposit_min_guests
-               FROM integration_settings WHERE provider = 'revolut'`
-        );
-        const r = row.rows[0];
+        const policy = await getAutoDepositPolicy();
         res.json({
-            enabled: Boolean(r?.auto_deposit_enabled),
-            min_guests: Number.isInteger(Number(r?.auto_deposit_min_guests))
-                ? Number(r.auto_deposit_min_guests)
-                : 9,
+            enabled: policy.enabled,
+            min_guests: policy.minGuests,
+            per_person_cents: policy.perPersonCents,
             revolut_configured: paymentConfigured,
             payment_configured: paymentConfigured,
             active_provider: activeProvider,
@@ -15104,6 +15126,15 @@ app.put('/settings/auto-deposit', authenticate, requirePermission('settings:full
                 return res.status(400).json({ error: 'invalid_min_guests' });
             }
             updates.push({ col: 'auto_deposit_min_guests', val: n });
+        }
+        if (body.per_person_cents !== undefined) {
+            const c = Number(body.per_person_cents);
+            // Tetto a 200 euro/persona: oltre e' quasi certamente un errore di
+            // unita' (euro al posto di centesimi) e finirebbe su un cliente.
+            if (!Number.isInteger(c) || c < 100 || c > 20000) {
+                return res.status(400).json({ error: 'invalid_per_person_cents' });
+            }
+            updates.push({ col: 'auto_deposit_per_person_cents', val: c });
         }
         if (updates.length === 0) {
             return res.status(400).json({ error: 'no_updates' });
@@ -15140,16 +15171,11 @@ app.put('/settings/auto-deposit', authenticate, requirePermission('settings:full
 
         const activeProvider = await getActivePaymentProvider();
         const paymentConfigured = await isProviderConfigured(activeProvider);
-        const after = await queryWithRetry(
-            `SELECT auto_deposit_enabled, auto_deposit_min_guests
-               FROM integration_settings WHERE provider = 'revolut'`
-        );
-        const r = after.rows[0] || {};
+        const after = await getAutoDepositPolicy();
         res.json({
-            enabled: Boolean(r.auto_deposit_enabled),
-            min_guests: Number.isInteger(Number(r.auto_deposit_min_guests))
-                ? Number(r.auto_deposit_min_guests)
-                : 9,
+            enabled: after.enabled,
+            min_guests: after.minGuests,
+            per_person_cents: after.perPersonCents,
             revolut_configured: paymentConfigured,
             payment_configured: paymentConfigured,
             active_provider: activeProvider,
@@ -15413,7 +15439,18 @@ app.get('/public/contact', async (_req, res) => {
         }
         voice = { phone: e164, display };
     }
-    res.json({ voice, bookingsEnabled });
+    // La politica caparra serve alla pagina per scrivere importo e soglia
+    // nella sezione condizioni: un solo posto da cambiare in Impostazioni.
+    const depositPolicy = await getAutoDepositPolicy();
+    res.json({
+        voice,
+        bookingsEnabled,
+        deposit: {
+            enabled: depositPolicy.enabled,
+            minGuests: depositPolicy.minGuests,
+            perPersonCents: depositPolicy.perPersonCents,
+        },
+    });
 });
 
 // Maintenance message used by both the public form and the API safety net.
@@ -15695,8 +15732,9 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         // confirm manually.
         let depositCheckoutUrl: string | null = null;
         let depositAmountCents = 0;
+        const depositPolicy = depositRequired ? await getAutoDepositPolicy() : null;
         if (depositRequired) {
-            depositAmountCents = guestsNum * 1000; // €10 per person, in cents
+            depositAmountCents = guestsNum * (depositPolicy?.perPersonCents ?? DEPOSIT_DEFAULTS.perPersonCents);
             const orderDescription = `Caparra prenotazione #${created.id} - ${guestsLabel} ${dateLabel} ${time}`;
             try {
                 const order = await createPaymentOrder({
@@ -15743,7 +15781,8 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                 dateLabel,
                 time,
                 depositAmountCents,
-                depositCheckoutUrl
+                depositCheckoutUrl,
+                depositPolicy?.perPersonCents
               )
             : confirmedNow
                 ? buildConfirmationMessage(customer_name, created.reservation_time, guestsNum, ackRoomName)

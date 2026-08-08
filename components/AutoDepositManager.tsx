@@ -12,6 +12,9 @@ interface Props {
     showToast: (msg: string, kind?: 'success' | 'error' | 'info') => void;
 }
 
+const centsToInput = (cents: number): string =>
+    (cents / 100).toFixed(2).replace('.', ',').replace(/,00$/, '');
+
 export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
     const { hasPermission } = useAuth();
     const canEdit = hasPermission('settings:full');
@@ -21,6 +24,7 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
     const [saving, setSaving] = useState(false);
     const [draftEnabled, setDraftEnabled] = useState<boolean | null>(null);
     const [minGuestsInput, setMinGuestsInput] = useState('');
+    const [perPersonInput, setPerPersonInput] = useState('10');
 
     useEffect(() => {
         let cancelled = false;
@@ -30,6 +34,7 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
                 if (cancelled) return;
                 setSettings(data);
                 setMinGuestsInput(String(data.min_guests));
+                setPerPersonInput(centsToInput(data.per_person_cents ?? 1000));
             } catch (err: any) {
                 if (!cancelled) showToast(err?.message || 'Errore nel caricamento delle impostazioni', 'error');
             } finally {
@@ -38,6 +43,19 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
         })();
         return () => { cancelled = true; };
     }, [showToast]);
+
+    // L'operatore digita euro ("10", "7,50"); il backend vuole centesimi.
+    const parsedPerPersonCents = (() => {
+        const n = Number(perPersonInput.replace(',', '.'));
+        return Number.isFinite(n) ? Math.round(n * 100) : NaN;
+    })();
+    const perPersonValid = Number.isInteger(parsedPerPersonCents)
+        && parsedPerPersonCents >= 100 && parsedPerPersonCents <= 20000;
+    const perPersonChanged = settings
+        ? perPersonInput.trim() !== ''
+            && Number.isInteger(parsedPerPersonCents)
+            && parsedPerPersonCents !== (settings.per_person_cents ?? 1000)
+        : false;
 
     const parsedMinGuests = (() => {
         const n = parseInt(minGuestsInput, 10);
@@ -50,7 +68,7 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
             && parsedMinGuests !== settings.min_guests
         : false;
     const effectiveEnabled = draftEnabled ?? settings?.enabled ?? false;
-    const isDirty = draftEnabled !== null || minGuestsChanged;
+    const isDirty = draftEnabled !== null || minGuestsChanged || perPersonChanged;
 
     const save = async () => {
         if (!canEdit || saving || !settings) return;
@@ -58,9 +76,14 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
             showToast('Il numero di coperti deve essere un intero tra 1 e 100', 'error');
             return;
         }
-        const payload: Partial<Pick<AutoDepositSettings, 'enabled' | 'min_guests'>> = {};
+        if (perPersonInput.trim() !== '' && !perPersonValid) {
+            showToast('La caparra per persona deve essere tra € 1 e € 200', 'error');
+            return;
+        }
+        const payload: Partial<Pick<AutoDepositSettings, 'enabled' | 'min_guests' | 'per_person_cents'>> = {};
         if (draftEnabled !== null && draftEnabled !== settings.enabled) payload.enabled = draftEnabled;
         if (minGuestsChanged) payload.min_guests = parsedMinGuests;
+        if (perPersonChanged) payload.per_person_cents = parsedPerPersonCents;
         if (Object.keys(payload).length === 0) return;
         setSaving(true);
         try {
@@ -68,6 +91,7 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
             setSettings(updated);
             setDraftEnabled(null);
             setMinGuestsInput(String(updated.min_guests));
+            setPerPersonInput(centsToInput(updated.per_person_cents ?? 1000));
             showToast('Caparra automatica aggiornata', 'success');
         } catch (err: any) {
             showToast(err?.message || 'Errore aggiornamento caparra automatica', 'error');
@@ -96,7 +120,7 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
                 <div className="min-w-0">
                     <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">Attiva caparra automatica</p>
                     <p className="text-[12px] text-[var(--ds-text-muted)]">
-                        Per le richieste dal modulo /prenota il sistema genera automaticamente un link di pagamento {providerLabel} (€10/persona) inviato via SMS al cliente.
+                        Per le richieste dal modulo /prenota il sistema genera automaticamente un link di pagamento {providerLabel} inviato via SMS al cliente. Importo e soglia qui sotto valgono anche per le prenotazioni telefoniche e per le condizioni pubblicate su /prenota.
                     </p>
                 </div>
                 <button
@@ -117,6 +141,27 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
                         } translate-y-0.5`}
                     />
                 </button>
+            </div>
+
+            <div>
+                <label className="block text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">
+                    Caparra per persona
+                </label>
+                <div className="flex items-center gap-2">
+                    <span className="text-[13px] text-[var(--ds-text-muted)]">€</span>
+                    <input
+                        type="text"
+                        inputMode="decimal"
+                        value={perPersonInput}
+                        onChange={(e) => setPerPersonInput(e.target.value)}
+                        disabled={!canEdit || saving || !effectiveEnabled}
+                        className="w-24 px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                    />
+                    <span className="text-[12px] text-[var(--ds-text-muted)]">a persona</span>
+                </div>
+                <p className="text-[11px] text-[var(--ds-text-subtle)] mt-1">
+                    Moltiplicato per il numero di coperti. Compare nei messaggi al cliente e nella sezione "Caparra e cancellazioni" della pagina di prenotazione.
+                </p>
             </div>
 
             <div>
