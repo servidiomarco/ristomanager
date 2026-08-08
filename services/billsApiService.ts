@@ -135,6 +135,8 @@ export interface OpenBillRow {
   opened_at: string;
   paid_cents: number;
   claimed_cents: number;
+  /** Acconto già versato sulla prenotazione, portato nel conto. Già in paid_cents. */
+  deposit_credit_cents?: number;
   residual_cents: number;
   paid_splits: number;
   /** Comande ancora aperte su questo conto: il tavolo sta ancora ordinando. */

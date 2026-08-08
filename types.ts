@@ -271,7 +271,9 @@ export type TableBillStatus =
   | 'CLOSED'            // closed on the POS / archived
   | 'VOIDED';           // cancelled, share_token rotated
 
-export type SplitKind = 'equal_share' | 'fixed_amount' | 'per_item';
+// 'deposit' = l'acconto/caparra della prenotazione portato nel conto come quota
+// PAID: abbassa il residuo senza toccare il totale. Non è un claim di un cliente.
+export type SplitKind = 'equal_share' | 'fixed_amount' | 'per_item' | 'deposit';
 
 export type SplitStatus =
   | 'CLAIMED'     // guest reserved the amount, gateway order pending
@@ -329,6 +331,9 @@ export interface TableBillWithSplits {
   splits: TableBillSplit[];
   paid_cents: number;
   claimed_cents: number;
+  // Acconto già versato sulla prenotazione portato nel conto. Già incluso in
+  // paid_cents e già scalato dal residuo; esposto a parte per la riga "Acconto".
+  deposit_credit_cents?: number;
   residual_cents: number;
 }
 

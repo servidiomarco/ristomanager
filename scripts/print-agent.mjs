@@ -111,6 +111,15 @@ function renderPreconto(p) {
   text(row('TOTALE EUR', euro(p.total_cents)));
   push(GS, 0x21, 0x00);
   push(ESC, 0x45, 0);
+  // Acconto già versato: si mostra il credito e il residuo da pagare.
+  if (p.deposit_credit_cents > 0) {
+    text(row('Acconto', '-' + euro(p.deposit_credit_cents)));
+    push(ESC, 0x45, 1);
+    push(GS, 0x21, 0x01);
+    text(row('DA PAGARE EUR', euro(p.residual_cents ?? (p.total_cents - p.deposit_credit_cents))));
+    push(GS, 0x21, 0x00);
+    push(ESC, 0x45, 0);
+  }
   text('\n');
 
   if (p.share_url) {
