@@ -111,12 +111,19 @@ function renderPreconto(p) {
   text(row('TOTALE EUR', euro(p.total_cents)));
   push(GS, 0x21, 0x00);
   push(ESC, 0x45, 0);
-  // Acconto già versato: si mostra il credito e il residuo da pagare.
-  if (p.deposit_credit_cents > 0) {
-    text(row('Acconto', '-' + euro(p.deposit_credit_cents)));
+  // Acconto: importo PIENO versato dal cliente. Se supera il totale, si stampa
+  // anche quanto va rimborsato al cliente.
+  const depositShown = p.deposit_paid_cents ?? p.deposit_credit_cents ?? 0;
+  if (depositShown > 0) {
+    text(row('Acconto versato', '-' + euro(depositShown)));
+    if ((p.refund_due_cents ?? 0) > 0) {
+      push(ESC, 0x45, 1);
+      text(row('DA RIMBORSARE EUR', euro(p.refund_due_cents)));
+      push(ESC, 0x45, 0);
+    }
     push(ESC, 0x45, 1);
     push(GS, 0x21, 0x01);
-    text(row('DA PAGARE EUR', euro(p.residual_cents ?? (p.total_cents - p.deposit_credit_cents))));
+    text(row('DA PAGARE EUR', euro(p.residual_cents ?? Math.max(0, p.total_cents - depositShown))));
     push(GS, 0x21, 0x00);
     push(ESC, 0x45, 0);
   }

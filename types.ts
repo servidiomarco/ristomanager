@@ -334,6 +334,10 @@ export interface TableBillWithSplits {
   // Acconto già versato sulla prenotazione portato nel conto. Già incluso in
   // paid_cents e già scalato dal residuo; esposto a parte per la riga "Acconto".
   deposit_credit_cents?: number;
+  // Acconto TOTALE versato (importo pieno) e quota da rimborsare al cliente
+  // quando la caparra supera il totale del conto.
+  deposit_paid_cents?: number;
+  refund_due_cents?: number;
   residual_cents: number;
 }
 
