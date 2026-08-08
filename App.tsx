@@ -260,6 +260,10 @@ const App: React.FC = () => {
   const { user, isAuthenticated, isLoading: authLoading, logout, canAccessView, canManageUsers, hasPermission, getAccessibleViews, canViewLogs, updatePreferences } = useAuth();
 
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
+  // Una schermata che si prende tutto lo schermo sul telefono: la barra di
+  // navigazione in basso sparisce, e con lei il suo spazio di rispetto. Per ora
+  // la chiede solo la comanda aperta su un tavolo.
+  const [immersive, setImmersive] = useState(false);
   // Which Comunicazioni channel the mobile tab reopens on. Declared up here
   // with its effect: everything below the auth guards runs conditionally, so a
   // hook placed there changes the hook count once the user logs in.
@@ -2136,8 +2140,15 @@ const App: React.FC = () => {
         )}
 
         {/* .pb-mobile-nav clears the floating bottom bar (height + 16px offset
-            + safe-area inset) and collapses to 0 at lg, where the bar is gone. */}
-        <div key={view} className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pb-mobile-nav animate-view-in">
+            + safe-area inset) and collapses to 0 at lg, where the bar is gone.
+            In immersive mode the bar isn't there, so neither is the clearance —
+            leaving it would park the comanda's Invia above a strip of nothing. */}
+        <div
+          key={view}
+          className={`flex-1 min-h-0 overflow-y-auto overflow-x-hidden animate-view-in ${
+            immersive ? '' : 'pb-mobile-nav'
+          }`}
+        >
 
         {view === ViewState.DASHBOARD && (
           <Dashboard
@@ -2345,7 +2356,7 @@ const App: React.FC = () => {
 
         {view === ViewState.COMANDE && (
           <CardErrorBoundary label="Comande">
-            <OrderPad dishes={dishes} tables={tables} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} />
+            <OrderPad dishes={dishes} tables={tables} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} onImmersive={setImmersive} />
           </CardErrorBoundary>
         )}
 
@@ -2389,6 +2400,13 @@ const App: React.FC = () => {
 
         {view === ViewState.SETTINGS && (
           <CardErrorBoundary label="Impostazioni">
+          {/* Scorrimento della pagina, non del contenitore: è quello che tiene
+              il contenuto sopra la barra di navigazione flottante del telefono
+              invece di lasciarlo passare dietro e ricomparire sotto. La colonna
+              centrata sta DENTRO la zona che scorre, altrimenti la barra di
+              scorrimento finirebbe in mezzo alla pagina invece che al bordo. */}
+          <div className="flex h-full min-h-0 flex-col">
+          <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto max-w-4xl p-4 sm:p-6 lg:p-8">
 
             {/* Profile / Personal preferences */}
@@ -2595,6 +2613,8 @@ const App: React.FC = () => {
               </div>
             </SettingsSection>
           </div>
+          </div>
+          </div>
           </CardErrorBoundary>
         )}
 
@@ -2604,8 +2624,14 @@ const App: React.FC = () => {
         {/* Floating bottom bar — a card on the canvas, matching the desktop
             chrome. Offset by the safe-area inset so it clears the iOS home
             indicator instead of sitting under it. */}
+        {/* Sparisce quando una schermata chiede tutto lo schermo: dentro una
+            comanda il pollice lavora sul piatto e sull'Invia, e la barra di
+            navigazione sotto sarebbe solo un bersaglio per uscire per sbaglio
+            dal tavolo aperto. Si torna indietro con la freccia in testata. */}
         <nav
-          className="fixed left-4 right-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] lg:hidden z-30"
+          className={`fixed left-4 right-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] lg:hidden z-30 ${
+            immersive ? 'hidden' : ''
+          }`}
           style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
           aria-label="Navigazione mobile"
         >

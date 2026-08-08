@@ -976,7 +976,14 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
   };
 
   return (
-    <div className="space-y-4 p-4 sm:p-6 lg:p-8">
+    // La pagina possiede il proprio scorrimento invece di lasciar scorrere il
+    // contenitore dell'app: è quello che tiene il contenuto SOPRA la barra di
+    // navigazione flottante del telefono. Il contenitore dell'app le riserva il
+    // suo spazio (.pb-mobile-nav), quindi un riquadro alto quanto quel box
+    // finisce già sopra la barra e le card si tagliano lì, invece di passarle
+    // dietro e ricomparire sotto.
+    <div className="flex h-full min-h-0 flex-col">
+    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-6 lg:p-8">
       {/* Page head — what you are looking at, and the two numbers that decide
           whether you need to do something about it. */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -1769,6 +1776,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
           Verrà rimosso dall'inventario in tutte le aree. L'azione non è reversibile.
         </p>
       </ModalShell>
+    </div>
     </div>
   );
 };

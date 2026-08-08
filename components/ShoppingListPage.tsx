@@ -423,7 +423,11 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
   );
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    // Scorrimento della pagina, non del contenitore dell'app: è quello che
+    // tiene il contenuto sopra la barra di navigazione flottante del telefono
+    // invece di lasciarlo passare dietro e ricomparire sotto.
+    <div className="flex h-full min-h-0 flex-col">
+    <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1">
           <h1 className="text-[22px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)] sm:text-[26px]">
@@ -625,6 +629,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
           onClose={() => setSupplierModalOpen(false)}
         />
       )}
+    </div>
     </div>
   );
 };

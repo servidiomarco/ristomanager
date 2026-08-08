@@ -299,7 +299,11 @@ export const HaccpPage: React.FC = () => {
   };
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8">
+    // Scorrimento della pagina, non del contenitore dell'app: è quello che
+    // tiene il contenuto sopra la barra di navigazione flottante del telefono
+    // invece di lasciarlo passare dietro e ricomparire sotto.
+    <div className="flex h-full min-h-0 flex-col">
+    <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
       <div className="space-y-4">
 
         {/* Titolo da solo sulla sua riga, comandi sulla riga sotto: è la stessa
@@ -440,6 +444,7 @@ export const HaccpPage: React.FC = () => {
           </>
         )}
       </div>
+    </div>
     </div>
   );
 };

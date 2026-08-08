@@ -15,7 +15,7 @@ import { SkeletonKpiRow, SkeletonReservationCard } from './SkeletonCards';
 import { staffApiService } from '../services/staffApiService';
 import { DateNavigator } from './DateNavigator';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Sparkles, Loader2, ChevronRight, Calendar, Plus, Check, Clock, Flag, AlertTriangle, CheckCircle2, ListTodo, ShoppingCart, Coffee, ChefHat, Package, Sun, Sunset, Armchair, Trees, Mountain, Waves, TreePine, Tent, Columns3, MapPin, StickyNote, Wheat, ListChecks, Phone as PhoneIcon, Globe, Mic, MessageCircle, User as UserIcon, Users as UsersIcon, X, ArrowRight, Ban, HelpCircle, LayoutGrid, Utensils, BarChart3 } from 'lucide-react';
+import { Sparkles, Loader2, ChevronRight, Calendar, Plus, Check, Clock, Flag, AlertTriangle, CheckCircle2, ListTodo, ShoppingCart, Coffee, ChefHat, Package, Sun, Sunset, Armchair, Trees, Mountain, Waves, TreePine, Tent, Columns3, MapPin, StickyNote, Wheat, ListChecks, Phone as PhoneIcon, Globe, Mic, MessageCircle, User as UserIcon, Users as UsersIcon, X, ArrowRight, Ban, HelpCircle, LayoutGrid, UtensilsCrossed, BarChart3 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAuth } from '../contexts/AuthContext';
 import { useShopping } from '../contexts/ShoppingContext';
@@ -1148,7 +1148,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </KpiCard>
 
             {/* Banchetti */}
-            <KpiCard title="Banchetti" icon={<Utensils className="h-4 w-4" />} onClick={onNavigateToBanquets}>
+            {/* Stessa icona della voce "Menu & Banchetti" nella barra laterale:
+                la scheda porta lì, e due glifi diversi per la stessa
+                destinazione la fanno sembrare un'altra cosa. */}
+            <KpiCard title="Banchetti" icon={<UtensilsCrossed className="h-4 w-4" />} onClick={onNavigateToBanquets}>
               {banquetsShown.length > 0 ? (
                 <>
                   <div className="flex items-baseline gap-2 flex-wrap">
