@@ -3258,7 +3258,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <Users className="h-3.5 w-3.5" aria-hidden />
                 <span className="tabular-nums">{res.guests}</span>
                 {res.children && res.children > 0 ? (
-                  <span className="text-[var(--ds-text-muted)]">+{res.children}b</span>
+                  <span className="text-[var(--ds-text-muted)]">({res.children}b)</span>
                 ) : null}
               </span>
               {/* Operator folded into the info tooltip — the separate initials
