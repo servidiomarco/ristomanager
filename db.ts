@@ -596,6 +596,11 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`CREATE INDEX IF NOT EXISTS idx_table_bill_splits_bill ON table_bill_splits(table_bill_id);`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_table_bill_splits_expiring ON table_bill_splits(expires_at) WHERE status = 'CLAIMED';`);
         await client.query(`CREATE INDEX IF NOT EXISTS idx_table_bill_splits_payment ON table_bill_splits(payment_request_id) WHERE payment_request_id IS NOT NULL;`);
+        // Un acconto (payment_request) si accredita al più UNA volta sul conto,
+        // come quota PAID di kind='deposit'. Indice unico parziale: rende
+        // idempotente creditPaidDepositsToBill anche fra apertura-conto e
+        // webhook di pagamento concorrenti (target dell'ON CONFLICT).
+        await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_table_bill_splits_one_deposit_per_request ON table_bill_splits(payment_request_id) WHERE kind = 'deposit';`);
 
         // Retro-FK sul payment_request così partendo dal webhook Revolut si
         // risale allo split senza scan. ON DELETE SET NULL: se lo split

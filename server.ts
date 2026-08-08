@@ -3274,52 +3274,20 @@ app.get('/reservations/:id/bill', authenticate, requirePermission('payments:view
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
 
-        const billResult = await queryWithRetry(
-            `SELECT id, reservation_id, table_id, total_cents, covers, currency,
-                    items, status, share_token, opened_at, closed_at,
-                    opened_by_user_id, closed_by_user_id, external_ref,
-                    cash_settled_cents, tip_cents, notes
-             FROM table_bills
+        const billIdRs = await queryWithRetry(
+            `SELECT id FROM table_bills
              WHERE reservation_id = $1
                AND status IN ('OPEN', 'LOCKED', 'SETTLED', 'SETTLED_PARTIAL')
              ORDER BY opened_at DESC
              LIMIT 1`,
             [id]
         );
-        if (billResult.rows.length === 0) {
+        if (billIdRs.rows.length === 0) {
             return res.status(404).json({ error: 'No active bill for this reservation' });
         }
-        const bill = billResult.rows[0];
-
-        const splitsResult = await queryWithRetry(
-            `SELECT id, table_bill_id, kind, amount_cents, item_ids,
-                    claimant_label, claimed_at, expires_at,
-                    payment_request_id, status, paid_at, released_at
-             FROM table_bill_splits
-             WHERE table_bill_id = $1
-             ORDER BY claimed_at ASC`,
-            [bill.id]
-        );
-
-        // Compute totals server-side so the UI can render without touching
-        // the (possibly filtered) splits array.
-        const totals = splitsResult.rows.reduce(
-            (acc, s) => {
-                if (s.status === 'PAID') acc.paid_cents += s.amount_cents;
-                if (s.status === 'CLAIMED') acc.claimed_cents += s.amount_cents;
-                return acc;
-            },
-            { paid_cents: 0, claimed_cents: 0 }
-        );
-        const residual_cents = Math.max(0, bill.total_cents - totals.paid_cents - totals.claimed_cents);
-
-        res.json({
-            bill,
-            splits: splitsResult.rows,
-            paid_cents: totals.paid_cents,
-            claimed_cents: totals.claimed_cents,
-            residual_cents,
-        });
+        const view = await loadBillView(billIdRs.rows[0].id);
+        if (!view) return res.status(404).json({ error: 'No active bill for this reservation' });
+        res.json(view);
     } catch (err: any) {
         console.error('GET /reservations/:id/bill error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
@@ -3389,6 +3357,143 @@ app.get('/passepartout/tavolo/:nome', authenticate, requirePermission('payments:
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });
+
+// Porta gli acconti/caparre già PAGATI di una prenotazione dentro il suo conto
+// come quote PAID di kind='deposit'. Così l'importo abbassa il residuo (e la
+// barra di avanzamento, il SETTLED, la chiusura, il preconto e il self-pay) SENZA
+// toccare `total_cents`, che è immutabile e ricalcolato dalle comande.
+//
+// "Copre la coda": la quota a testa resta totale÷coperti; l'acconto è denaro già
+// nel conto che assorbe le ultime quote — non uno sconto spalmato su tutti.
+//
+// Idempotente (indice unico su payment_request_id WHERE kind='deposit' +
+// NOT EXISTS sotto lock): chiamabile ad ogni apertura conto e ad ogni webhook di
+// pagamento senza doppioni. Clampa alla capienza residua: un acconto più grande
+// del totale non sfonda il trigger di somma; l'eccedenza resta sull'acconto e va
+// rimborsata a mano (come un pagamento in eccesso).
+async function creditPaidDepositsToBill(billId: number): Promise<{ credited: number; splits: any[]; settled: boolean }> {
+    const client = await pool.connect();
+    const created: any[] = [];
+    let settled = false;
+    try {
+        await client.query('BEGIN');
+        const billRs = await client.query(
+            `SELECT id, reservation_id, total_cents, status FROM table_bills WHERE id = $1 FOR UPDATE`,
+            [billId]
+        );
+        if (billRs.rowCount === 0) { await client.query('ROLLBACK'); return { credited: 0, splits: [], settled: false }; }
+        const bill = billRs.rows[0];
+        // Solo conti ancora incassabili: su SETTLED/CLOSED/VOIDED non si tocca.
+        if (!bill.reservation_id || !['OPEN', 'LOCKED'].includes(bill.status)) {
+            await client.query('ROLLBACK');
+            return { credited: 0, splits: [], settled: false };
+        }
+
+        // Acconti PAGATI di questa prenotazione, che sono caparre standalone
+        // (non quote di conto) e non ancora accreditati su alcun conto.
+        const deposits = await client.query(
+            `SELECT pr.id, pr.amount_cents, pr.completed_at
+             FROM payment_requests pr
+             WHERE pr.reservation_id = $1
+               AND pr.table_bill_split_id IS NULL
+               AND UPPER(pr.status) IN ('COMPLETED', 'PAID')
+               AND pr.completed_at IS NOT NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM table_bill_splits s
+                   WHERE s.payment_request_id = pr.id AND s.kind = 'deposit'
+               )
+             ORDER BY pr.completed_at ASC`,
+            [bill.reservation_id]
+        );
+
+        for (const dep of deposits.rows) {
+            const capRs = await client.query(
+                `SELECT COALESCE(SUM(amount_cents), 0)::int AS live
+                 FROM table_bill_splits
+                 WHERE table_bill_id = $1 AND status IN ('CLAIMED', 'PAID')`,
+                [billId]
+            );
+            const capacity = bill.total_cents - capRs.rows[0].live;
+            const credit = Math.min(Number(dep.amount_cents), Math.max(0, capacity));
+            if (credit <= 0) continue; // conto già coperto: l'acconto resta eccedenza da rimborsare
+            const ins = await client.query(
+                `INSERT INTO table_bill_splits
+                    (table_bill_id, kind, amount_cents, claimant_label, claimed_at, expires_at, payment_request_id, status, paid_at)
+                 VALUES ($1, 'deposit', $2, 'Acconto', $3, NULL, $4, 'PAID', $3)
+                 ON CONFLICT (payment_request_id) WHERE kind = 'deposit' DO NOTHING
+                 RETURNING *`,
+                [billId, credit, dep.completed_at, dep.id]
+            );
+            if (ins.rowCount) created.push(ins.rows[0]);
+        }
+
+        // Se gli acconti da soli coprono il totale, il conto è già saldato.
+        const settledRs = await client.query(
+            `UPDATE table_bills SET status = 'SETTLED'
+             WHERE id = $1 AND status IN ('OPEN', 'LOCKED')
+               AND total_cents = (SELECT COALESCE(SUM(amount_cents), 0) FROM table_bill_splits WHERE table_bill_id = $1 AND status = 'PAID')
+             RETURNING id`,
+            [billId]
+        );
+        settled = (settledRs.rowCount ?? 0) > 0;
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        console.error('[deposit-credit] failed for bill', billId, (err as any)?.message || err);
+    } finally {
+        client.release();
+    }
+    const credited = created.reduce((s, r) => s + Number(r.amount_cents), 0);
+    return { credited, splits: created, settled };
+}
+
+// Vista completa del conto: riga bill + quote + totali già sommati. Fonte unica
+// per GET /reservations/:id/bill e per la risposta di apertura conto, così la
+// riga "Acconto −€X" (deposit_credit_cents) e il residuo sono calcolati in un
+// solo posto. deposit_credit_cents è la somma delle quote PAID di kind='deposit'
+// — già incluse in paid_cents e già scalate dal residuo; il campo serve solo a
+// far mostrare al client la voce dell'acconto senza reindovinare quali quote lo
+// siano.
+async function loadBillView(billId: number): Promise<any | null> {
+    const billResult = await queryWithRetry(
+        `SELECT id, reservation_id, table_id, total_cents, covers, currency,
+                items, status, share_token, opened_at, closed_at,
+                opened_by_user_id, closed_by_user_id, external_ref,
+                cash_settled_cents, tip_cents, notes
+         FROM table_bills WHERE id = $1`,
+        [billId]
+    );
+    if (billResult.rows.length === 0) return null;
+    const bill = billResult.rows[0];
+    const splitsResult = await queryWithRetry(
+        `SELECT id, table_bill_id, kind, amount_cents, item_ids,
+                claimant_label, claimed_at, expires_at,
+                payment_request_id, status, paid_at, released_at
+         FROM table_bill_splits WHERE table_bill_id = $1
+         ORDER BY claimed_at ASC`,
+        [billId]
+    );
+    const totals = splitsResult.rows.reduce(
+        (acc, s) => {
+            if (s.status === 'PAID') {
+                acc.paid_cents += s.amount_cents;
+                if (s.kind === 'deposit') acc.deposit_credit_cents += s.amount_cents;
+            }
+            if (s.status === 'CLAIMED') acc.claimed_cents += s.amount_cents;
+            return acc;
+        },
+        { paid_cents: 0, claimed_cents: 0, deposit_credit_cents: 0 }
+    );
+    const residual_cents = Math.max(0, bill.total_cents - totals.paid_cents - totals.claimed_cents);
+    return {
+        bill,
+        splits: splitsResult.rows,
+        paid_cents: totals.paid_cents,
+        claimed_cents: totals.claimed_cents,
+        deposit_credit_cents: totals.deposit_credit_cents,
+        residual_cents,
+    };
+}
 
 app.post('/reservations/:id/bill', authenticate, requirePermission('payments:full'), async (req, res) => {
     try {
@@ -3479,11 +3584,16 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
 
         try { socketService?.broadcastToAll('bill:opened', bill); } catch (_) {}
 
-        res.status(201).json({
-            bill,
-            splits: [],
-            paid_cents: 0,
-            claimed_cents: 0,
+        // Porta subito nel conto gli acconti già pagati sulla prenotazione (una
+        // caparra versata prima che il conto esistesse viene raccolta qui).
+        const credit = await creditPaidDepositsToBill(bill.id).catch(() => ({ credited: 0, settled: false }));
+        if (credit.credited > 0) {
+            try { socketService?.broadcastToAll('bill:updated', { id: bill.id, reservation_id: bill.reservation_id }); } catch (_) {}
+        }
+
+        const view = await loadBillView(bill.id);
+        res.status(201).json(view ?? {
+            bill, splits: [], paid_cents: 0, claimed_cents: 0, deposit_credit_cents: 0,
             residual_cents: bill.total_cents,
         });
     } catch (err: any) {
@@ -3754,7 +3864,7 @@ app.post('/bills/splits/:id/refund', authenticate, requirePermission('payments:f
         if (!Number.isFinite(splitId)) return res.status(400).json({ error: 'Invalid split id' });
 
         const rs = await queryWithRetry(
-            `SELECT s.id, s.status AS split_status, s.amount_cents, s.claimant_label, s.table_bill_id,
+            `SELECT s.id, s.kind, s.status AS split_status, s.amount_cents, s.claimant_label, s.table_bill_id,
                     b.status AS bill_status, b.reservation_id, b.total_cents, b.currency,
                     pr.id AS payment_request_id, pr.status AS pr_status, pr.provider,
                     pr.provider_order_id, pr.metadata AS pr_metadata
@@ -3766,6 +3876,16 @@ app.post('/bills/splits/:id/refund', authenticate, requirePermission('payments:f
         );
         if (rs.rowCount === 0) return res.status(404).json({ error: 'Quota non trovata' });
         const row = rs.rows[0];
+
+        // La quota 'deposit' è l'acconto della prenotazione portato nel conto:
+        // il suo rimborso passa dalla sezione Pagamenti (POST /payments/:id/refund),
+        // che storna anche il credito e riapre il conto. Qui lo blocchiamo così il
+        // cameriere non lo rimborsa scambiandolo per la quota di un cliente.
+        if (row.kind === 'deposit') {
+            return res.status(409).json({
+                error: 'Questa voce è l\'acconto della prenotazione: rimborsalo dalla sezione Pagamenti, non dal conto.',
+            });
+        }
 
         const prPaid = ['COMPLETED', 'PAID'].includes(String(row.pr_status || '').toUpperCase());
         const refundablePaid = row.split_status === 'PAID';
@@ -3941,6 +4061,13 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => {
             .filter((r: any) => r.status === 'CLAIMED' || r.status === 'PAID')
             .reduce((sum: number, r: any) => sum + Number(r.amount_cents || 0), 0);
         const residual = Math.max(0, bill.total_cents - claimedCents);
+        // Acconto già versato: quota PAID di kind='deposit'. Già dentro
+        // paidCents/claimedCents (quindi già scalato dal residuo e dalla barra);
+        // esposto a parte per la riga "Acconto −€X" e tolto dalla lista dei
+        // paganti, dove sarebbe letto come una persona che ha pagato la sua parte.
+        const depositCreditCents = splitsRows.rows
+            .filter((r: any) => r.status === 'PAID' && r.kind === 'deposit')
+            .reduce((sum: number, r: any) => sum + Number(r.amount_cents || 0), 0);
 
         // Righe del conto e quali sono già prese: sbloccano lo split per
         // piatto, che è il modo in cui la gente divide davvero il conto
@@ -3970,9 +4097,10 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => {
                 currency: bill.currency,
                 status: bill.status,
             },
-            splits: splitsRows.rows.map(publicSplitView),
+            splits: splitsRows.rows.filter((r: any) => r.kind !== 'deposit').map(publicSplitView),
             paid_cents: paidCents,
             claimed_cents: claimedCents,
+            deposit_credit_cents: depositCreditCents,
             residual_cents: residual,
             per_item_available: perItemAvailable,
             items: perItemAvailable
@@ -5537,6 +5665,36 @@ async function applyPaymentOrderTransition(
         })();
     }
 
+    // Se un conto è GIÀ aperto per questa prenotazione, porta subito dentro
+    // l'acconto appena incassato. Il caso normale (conto aperto dopo il
+    // pagamento) è coperto all'apertura conto; questo copre l'ordine inverso.
+    if (isFirstCompletion && row.reservation_id && !billSplitId) {
+        (async () => {
+            try {
+                const billRs = await queryWithRetry(
+                    `SELECT id FROM table_bills
+                     WHERE reservation_id = $1 AND status IN ('OPEN', 'LOCKED')
+                     ORDER BY opened_at DESC LIMIT 1`,
+                    [row.reservation_id]
+                );
+                if ((billRs.rowCount ?? 0) === 0) return;
+                const billId = billRs.rows[0].id;
+                const credit = await creditPaidDepositsToBill(billId);
+                if (credit.credited > 0 || credit.settled) {
+                    try {
+                        socketService?.broadcastToAll('bill:updated', { id: billId, reservation_id: row.reservation_id });
+                        if (credit.settled) {
+                            const v = await loadBillView(billId);
+                            if (v?.bill) socketService?.broadcastToAll('bill:settled', v.bill);
+                        }
+                    } catch (_) {}
+                }
+            } catch (err: any) {
+                console.error('[deposit-credit] post-completion crediting failed:', err?.message || err);
+            }
+        })();
+    }
+
     return { status: 'applied', row, isFirstCompletion };
 }
 
@@ -5790,6 +5948,35 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
         catch (err) { console.warn('[payments] refund broadcast failed:', (err as any)?.message || err); }
 
         if (row.reservation_id) broadcastReservationsUpdatedByIds([row.reservation_id]).catch(() => {});
+
+        // Se questo acconto era stato accreditato su un conto, storna il credito:
+        // la quota deposit torna REFUNDED (esce da paid_cents → il residuo risale)
+        // e se il conto era SETTLED solo grazie all'acconto, si riapre.
+        try {
+            const revoked = await queryWithRetry(
+                `UPDATE table_bill_splits
+                 SET status = 'REFUNDED', released_at = CURRENT_TIMESTAMP
+                 WHERE payment_request_id = $1 AND kind = 'deposit' AND status = 'PAID'
+                 RETURNING table_bill_id`,
+                [payment.id]
+            );
+            for (const s of revoked.rows) {
+                const reopened = await queryWithRetry(
+                    `UPDATE table_bills SET status = 'OPEN', closed_at = NULL
+                     WHERE id = $1 AND status = 'SETTLED'
+                       AND total_cents > (SELECT COALESCE(SUM(amount_cents), 0) FROM table_bill_splits WHERE table_bill_id = $1 AND status = 'PAID')
+                     RETURNING *`,
+                    [s.table_bill_id]
+                );
+                try {
+                    socketService?.broadcastToAll('bill:split-refunded', { bill_id: s.table_bill_id });
+                    if ((reopened.rowCount ?? 0) > 0) socketService?.broadcastToAll('bill:opened', reopened.rows[0]);
+                    else socketService?.broadcastToAll('bill:updated', { id: s.table_bill_id });
+                } catch (_) {}
+            }
+        } catch (err) {
+            console.error('[deposit-credit] refund reversal failed for payment', payment.id, (err as any)?.message || err);
+        }
 
         if (req.user) {
             LogService.logActivity(
@@ -18077,6 +18264,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                     ) AS shift,
                     COALESCE(SUM(s.amount_cents) FILTER (WHERE s.status = 'PAID'), 0)::int AS paid_cents,
                     COALESCE(SUM(s.amount_cents) FILTER (WHERE s.status = 'CLAIMED'), 0)::int AS claimed_cents,
+                    COALESCE(SUM(s.amount_cents) FILTER (WHERE s.status = 'PAID' AND s.kind = 'deposit'), 0)::int AS deposit_credit_cents,
                     COUNT(s.id) FILTER (WHERE s.status = 'PAID')::int AS paid_splits,
                     (SELECT COUNT(*) FROM orders o WHERE o.table_bill_id = b.id AND o.status = 'OPEN')::int AS open_orders
              FROM table_bills b
@@ -18187,6 +18375,18 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
             total_cents: Number(i.unit_price_cents ?? 0) * Number(i.qty ?? 1),
         }));
 
+        // Acconto già versato e residuo, così il preconto stampato mostra
+        // "Acconto −€X / Da pagare €Y" invece del solo totale.
+        const billTotalsRs = await queryWithRetry(
+            `SELECT
+                COALESCE(SUM(amount_cents) FILTER (WHERE status = 'PAID' AND kind = 'deposit'), 0)::int AS deposit_credit_cents,
+                COALESCE(SUM(amount_cents) FILTER (WHERE status IN ('CLAIMED','PAID')), 0)::int AS live_cents
+             FROM table_bill_splits WHERE table_bill_id = $1`,
+            [bill.id]
+        );
+        const depositCreditCents = billTotalsRs.rows[0].deposit_credit_cents;
+        const residualCents = Math.max(0, bill.total_cents - billTotalsRs.rows[0].live_cents);
+
         // Priorità: stampante esplicita nel body → instradamento configurato
         // per la funzionalità → default storico 'preconti'.
         const routes = await getPrintRoutes();
@@ -18209,6 +18409,8 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
                 table_name: bill.table_name ?? null,
                 covers: bill.covers,
                 total_cents: bill.total_cents,
+                deposit_credit_cents: depositCreditCents,
+                residual_cents: residualCents,
                 items,
                 share_url: shareUrl,
             }), req.user?.userId ?? null, printer, kind]

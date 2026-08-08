@@ -173,6 +173,13 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
             <span>{bill.bill.covers} coperti</span>
           </div>
 
+          {bill.deposit_credit_cents != null && bill.deposit_credit_cents > 0 && (
+            <div className="mt-3 flex items-baseline justify-between border-t border-slate-100 pt-3 text-sm">
+              <span className="text-emerald-700">Acconto già versato</span>
+              <span className="font-semibold text-emerald-700 tabular-nums">− € {formatEur(bill.deposit_credit_cents)}</span>
+            </div>
+          )}
+
           <div className="mt-4">
             <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
               <span>Pagato € {paidEur}</span>

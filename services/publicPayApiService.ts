@@ -33,6 +33,9 @@ export interface PublicBillView {
   splits: PublicSplitView[];
   paid_cents: number;
   claimed_cents: number;
+  /** Acconto già versato dal prenotante, portato nel conto: già scalato dal
+   *  residuo e dalla barra. Mostrato come riga "Acconto −€X". */
+  deposit_credit_cents?: number;
   residual_cents: number;
   /** Falso quando il dettaglio manca o c'è uno sconto: in quel caso pagare
    *  "la propria riga" addebiterebbe più del dovuto. */
