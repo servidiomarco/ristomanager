@@ -1390,6 +1390,10 @@ app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
             } catch (err) {
                 console.warn('[ElevenLabs] broadcastReservationCreated failed:', err);
             }
+            // Se la caparra vocale è stata creata, il row grezzo appena
+            // trasmesso non ha i campi latest_payment_*: rimanda la versione
+            // arricchita così l'icona acconto compare subito in dashboard.
+            if (depositCheckoutUrl) broadcastReservationsUpdatedByIds([created.id]).catch(() => {});
         }
 
         const reservationLabel = reservationPushLabel(asUtcInstant(created.reservation_time));
@@ -15697,6 +15701,10 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                 depositCheckoutUrl = order.checkoutUrl;
                 try { socketService?.broadcastToAll('paymentRequest:created', insertedPayment.rows[0]); }
                 catch (err) { console.warn('[public-booking] payment socket broadcast failed:', err); }
+                // reservation:created è già partito col row grezzo, senza i
+                // campi latest_payment_*: senza questo nudge l'icona acconto
+                // non compare in dashboard/card finché non si ricarica.
+                broadcastReservationsUpdatedByIds([created.id]).catch(() => {});
             } catch (err: any) {
                 console.error('[public-booking] deposit link creation failed:', err?.message || err);
                 depositAmountCents = 0;
