@@ -16485,6 +16485,8 @@ app.get('/tables/bills-status', authenticate, requirePermission('orders:view'), 
                     t.name AS table_name,
                     COALESCE((SELECT SUM(s.amount_cents)::int FROM table_bill_splits s
                               WHERE s.table_bill_id = b.id AND s.status = 'PAID'), 0) AS paid_cents,
+                    COALESCE((SELECT SUM(s.amount_cents)::int FROM table_bill_splits s
+                              WHERE s.table_bill_id = b.id AND s.status = 'PAID' AND s.kind = 'deposit'), 0) AS deposit_credit_cents,
                     (SELECT COUNT(*)::int FROM orders o
                      WHERE o.table_bill_id = b.id AND o.status = 'OPEN') AS open_orders
              FROM table_bills b
@@ -16505,10 +16507,14 @@ app.get('/tables/bills-status', authenticate, requirePermission('orders:view'), 
                 share_token: r.share_token,
                 items: r.items ?? null,
                 paid_cents: Number(r.paid_cents) + Number(r.cash_settled_cents),
+                deposit_credit_cents: Number(r.deposit_credit_cents),
                 residual_cents: Number(r.total_cents) - Number(r.paid_cents) - Number(r.cash_settled_cents),
                 open_orders: Number(r.open_orders),
             }))
-            .filter((b: any) => b.residual_cents > 0);
+            // Restano visibili anche i conti già coperti dall'acconto (residuo 0):
+            // il cameriere deve comunque vederli e chiuderli, e il caso "acconto
+            // ≥ totale" sparirebbe altrimenti dalla lista.
+            .filter((b: any) => b.residual_cents > 0 || b.deposit_credit_cents > 0);
         res.json({
             bills,
             // retrocompatibilità col client della griglia
@@ -17815,9 +17821,25 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
             { bill_id: billId, total_cents: synced.bill.total_cents, discarded_pending: pending.rows[0].n }
         ).catch(() => {});
 
+        // Arricchiamo la risposta coi totali calcolati (acconto/pagato/residuo)
+        // così l'order pad mostra subito la riga "Acconto −€X" senza dover
+        // rileggere /bills/open: synced.bill è la sola riga table_bills, senza
+        // questi campi derivati.
+        const fig = await queryWithRetry(
+            `SELECT COALESCE(SUM(amount_cents) FILTER (WHERE status = 'PAID'), 0)::int AS paid_cents,
+                    COALESCE(SUM(amount_cents) FILTER (WHERE status = 'PAID' AND kind = 'deposit'), 0)::int AS deposit_credit_cents,
+                    COALESCE(SUM(amount_cents) FILTER (WHERE status IN ('CLAIMED','PAID')), 0)::int AS live
+             FROM table_bill_splits WHERE table_bill_id = $1`,
+            [billId]
+        );
         res.json({
             order_id: orderId,
-            bill: synced.bill,
+            bill: {
+                ...synced.bill,
+                paid_cents: fig.rows[0].paid_cents,
+                deposit_credit_cents: fig.rows[0].deposit_credit_cents,
+                residual_cents: Math.max(0, synced.bill.total_cents - fig.rows[0].live),
+            },
             released_split_ids: synced.released_split_ids,
         });
     } catch (err: any) {

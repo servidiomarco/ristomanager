@@ -398,7 +398,12 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
             table_name: tables.find(t => t.id === tid)?.name ?? null,
             total_cents: b.total_cents, covers: b.covers, status: 'OPEN',
             share_token: b.share_token, items: b.items ?? null,
-            paid_cents: 0, residual_cents: b.total_cents, open_orders: 0,
+            // La chiusura comanda ora restituisce anche acconto/pagato/residuo:
+            // se assenti (compat) si ricade sui valori a conto pieno.
+            paid_cents: b.paid_cents ?? 0,
+            deposit_credit_cents: b.deposit_credit_cents ?? 0,
+            residual_cents: b.residual_cents ?? b.total_cents,
+            open_orders: 0,
           }));
         }
       }
@@ -531,6 +536,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
             share_token: viewBill.share_token,
             items: viewBill.items,
             paid_cents: viewBill.paid_cents,
+            deposit_credit_cents: viewBill.deposit_credit_cents,
             residual_cents: viewBill.residual_cents,
             open_orders: viewBill.open_orders,
           }}

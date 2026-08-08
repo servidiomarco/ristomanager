@@ -302,6 +302,10 @@ export interface CloseOrderResult {
     covers: number;
     share_token: string | null;
     items: { name: string; qty: number; unit_price_cents: number }[] | null;
+    // Totali derivati aggiunti dalla chiusura per mostrare subito l'acconto.
+    paid_cents?: number;
+    deposit_credit_cents?: number;
+    residual_cents?: number;
   };
   /** Claim non pagati rilasciati perché il totale è sceso. */
   released_split_ids: number[];
@@ -383,6 +387,8 @@ export interface ServiceBill {
   share_token: string | null;
   items: { order_item_id?: number; name: string; qty: number; unit_price_cents: number }[] | null;
   paid_cents: number;
+  /** Acconto già versato sulla prenotazione, portato nel conto. Già in paid_cents. */
+  deposit_credit_cents?: number;
   residual_cents: number;
   open_orders: number;
 }
