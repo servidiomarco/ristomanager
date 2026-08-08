@@ -1745,7 +1745,8 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`
             ALTER TABLE integration_settings
                 ADD COLUMN IF NOT EXISTS auto_deposit_enabled    BOOLEAN NOT NULL DEFAULT FALSE,
-                ADD COLUMN IF NOT EXISTS auto_deposit_min_guests INTEGER NOT NULL DEFAULT 9;
+                ADD COLUMN IF NOT EXISTS auto_deposit_min_guests INTEGER NOT NULL DEFAULT 9,
+                ADD COLUMN IF NOT EXISTS auto_deposit_per_person_cents INTEGER NOT NULL DEFAULT 1000;
         `);
         // Email config (SMTP or Resend). Both live on the same row
         // provider='smtp'; the `email_provider` column decides which backend

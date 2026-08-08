@@ -126,6 +126,14 @@
                     <button type="button" id="guestsInc" aria-label="Aumenta"
                         class="w-12 h-12 flex items-center justify-center rounded-lg text-2xl font-light text-stone-600 active:bg-stone-200 disabled:opacity-30">+</button>
                 </div>
+                <!-- Compare solo oltre la soglia: chi prenota in due non deve
+                     leggere di caparre che non lo riguardano. -->
+                <p id="caparraNotice" class="hidden mt-3 rounded-xl bg-amber-50 border border-amber-200 px-3.5 py-2.5 text-[13px] leading-relaxed text-amber-900">
+                    Per questa prenotazione è prevista una <strong>caparra di <span id="caparraNoticeTotale">€ 90</span></strong>
+                    (<span id="caparraNoticeQuota">€ 10</span> a persona): riceverai un link per pagarla dopo l'invio.
+                    La scaliamo dal conto della serata.
+                    <a href="#caparra" class="underline font-medium">Condizioni e cancellazioni</a>
+                </p>
             </section>
 
             <!-- Section 3: Shift + Slots -->
@@ -286,11 +294,45 @@
         <!-- Error toast -->
         <div id="errorBox" class="hidden mt-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-sm"></div>
 
+        <!-- Condizioni caparra: sempre nel documento (i messaggi linkano #caparra),
+             importo e soglia scritti da /public/contact. -->
+        <section id="caparra" class="mt-10 scroll-mt-6 rounded-2xl border border-stone-200 bg-white/60 px-5 py-5">
+            <h2 class="text-base font-semibold text-stone-800">Caparra e cancellazioni</h2>
+            <p class="mt-2 text-sm leading-relaxed text-stone-600">
+                Per i gruppi da <strong id="caparraSoglia">9</strong> persone in su chiediamo una
+                <strong>caparra di <span id="caparraImporto">€ 10</span> a persona</strong> per confermare il tavolo.
+                Dopo l'invio della richiesta ricevi un link per pagarla in sicurezza: il tavolo è confermato
+                appena riceviamo il pagamento.
+            </p>
+
+            <h3 class="mt-4 text-[13px] font-semibold uppercase tracking-wide text-stone-500">Cosa succede alla caparra</h3>
+            <ul class="mt-2 space-y-1.5 text-sm leading-relaxed text-stone-600">
+                <li><strong>Se vieni</strong>, la scaliamo dal conto della serata.</li>
+                <li><strong>Se annulli almeno 24 ore prima</strong>, ti rimborsiamo l'intero importo.</li>
+                <li><strong>Se annulli più tardi o non ti presenti</strong>, la caparra non viene restituita.</li>
+            </ul>
+
+            <h3 class="mt-4 text-[13px] font-semibold uppercase tracking-wide text-stone-500">Perché la chiediamo</h3>
+            <p class="mt-2 text-sm leading-relaxed text-stone-600">
+                La caparra confirmatoria è un istituto del Codice Civile italiano (art. 1385). Insieme alla
+                garanzia con carta di credito è lo strumento con cui i ristoranti si tutelano dal no-show:
+                un tavolo prenotato e lasciato vuoto significa spesa fatta, personale in servizio e altri
+                clienti a cui abbiamo detto di no. Tenere fede alla prenotazione, o disdirla per tempo,
+                ci permette di accogliere tutti al meglio.
+            </p>
+            <p class="mt-3 text-sm leading-relaxed text-stone-600">
+                Per annullare o spostare la prenotazione scrivici su WhatsApp o chiamaci: bastano due minuti
+                e, entro le 24 ore, non perdi nulla.
+            </p>
+        </section>
+
         <!-- Footer -->
         <footer class="mt-10 text-center text-[11px] uppercase tracking-[0.24em] text-stone-400">
             Il Vecchio Frantoio · Cucina Tradizionale
             <div class="mt-2 normal-case tracking-normal">
                 <a href="/privacy" target="_blank" rel="noopener" class="text-stone-500 hover:text-amber-800 underline">Informativa sulla privacy</a>
+                <span class="mx-1.5 text-stone-300">·</span>
+                <a href="#caparra" class="text-stone-500 hover:text-amber-800 underline">Caparra e cancellazioni</a>
             </div>
         </footer>
 
@@ -339,6 +381,28 @@
         if (numEl) numEl.textContent = contact.voice.display || contact.voice.phone;
         ctaEl.classList.remove('hidden');
     }
+
+    // Politica caparra dal server: importo e soglia si cambiano da
+    // Impostazioni, la pagina non li conosce a priori.
+    const deposit = contact?.deposit ?? null;
+    const euro = cents => '€ ' + (cents / 100).toFixed(2).replace('.', ',').replace(/,00$/, '');
+    if (deposit) {
+        const sogliaEl = document.getElementById('caparraSoglia');
+        const importoEl = document.getElementById('caparraImporto');
+        if (sogliaEl) sogliaEl.textContent = deposit.minGuests;
+        if (importoEl) importoEl.textContent = euro(deposit.perPersonCents);
+    }
+    const renderCaparraNotice = guests => {
+        const el = document.getElementById('caparraNotice');
+        if (!el) return;
+        const due = deposit?.enabled && guests >= deposit.minGuests;
+        el.classList.toggle('hidden', !due);
+        if (!due) return;
+        const tot = document.getElementById('caparraNoticeTotale');
+        const quota = document.getElementById('caparraNoticeQuota');
+        if (tot) tot.textContent = euro(guests * deposit.perPersonCents);
+        if (quota) quota.textContent = euro(deposit.perPersonCents);
+    };
 
     const state = {
         date: '',
@@ -461,6 +525,7 @@
     function renderGuests() {
         guestsValue.textContent = state.guests;
         guestsLabel.textContent = state.guests === 1 ? 'persona' : 'persone';
+        renderCaparraNotice(state.guests);
         guestsDec.disabled = state.guests <= 1;
         guestsInc.disabled = state.guests >= 20;
     }
