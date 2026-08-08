@@ -17414,9 +17414,83 @@ async function billItemsSnapshot(client: any, billId: number): Promise<any[]> {
 // Il conflitto vero: il totale può SCENDERE (uno storno) sotto quanto gli
 // ospiti hanno già impegnato. Il trigger esistente protegge dal caso opposto
 // (split che sfondano il totale) ma non da questo.
+// Tiene il credito acconto allineato al totale corrente del conto. A differenza
+// di creditPaidDepositsToBill (apertura conto manuale, totale fisso), qui il
+// totale cresce e cala con la comanda, quindi la quota 'deposit' va
+// RIDIMENSIONATA a min(acconto, totale − altre quote vive), non solo creata una
+// volta. Chiamata dentro syncBillTotalInTx col nuovo totale, PRIMA della guardia
+// "totale < già incassato", così un totale che cala non fa scattare un falso
+// "serve rimborso": è l'acconto (denaro nostro, non di un cliente) a rientrare.
+//
+// GATED: se la prenotazione non ha acconti idonei esce subito → per i tavoli
+// senza caparra syncBillTotalInTx si comporta esattamente come prima.
+// Non promuove a SETTLED: durante la composizione della comanda sarebbe
+// prematuro (la chiusura conto conteggia già l'acconto fra le quote PAID).
+async function maintainDepositCredit(client: any, billId: number, reservationId: number | null, newTotal: number): Promise<void> {
+    if (!reservationId) return;
+    const deposits = await client.query(
+        `SELECT pr.id, pr.amount_cents, pr.completed_at
+         FROM payment_requests pr
+         WHERE pr.reservation_id = $1
+           AND pr.table_bill_split_id IS NULL
+           AND UPPER(pr.status) IN ('COMPLETED', 'PAID')
+           AND pr.completed_at IS NOT NULL
+         ORDER BY pr.completed_at ASC`,
+        [reservationId]
+    );
+    if (deposits.rowCount === 0) return; // nessun acconto → nessun effetto
+
+    const otherLiveRs = await client.query(
+        `SELECT COALESCE(SUM(amount_cents), 0)::int AS s
+         FROM table_bill_splits
+         WHERE table_bill_id = $1 AND status IN ('CLAIMED', 'PAID') AND kind <> 'deposit'`,
+        [billId]
+    );
+    let remaining = Math.max(0, newTotal - otherLiveRs.rows[0].s);
+
+    for (const dep of deposits.rows) {
+        const want = Math.min(Number(dep.amount_cents), remaining);
+        remaining -= want;
+        const existRs = await client.query(
+            `SELECT id, amount_cents, status FROM table_bill_splits
+             WHERE payment_request_id = $1 AND kind = 'deposit' LIMIT 1`,
+            [dep.id]
+        );
+        const existing = existRs.rows[0];
+        if (existing) {
+            if (existing.status === 'REFUNDED') continue; // un rimborso non si resuscita mai
+            if (want > 0) {
+                if (existing.status !== 'PAID' || existing.amount_cents !== want) {
+                    await client.query(
+                        `UPDATE table_bill_splits
+                         SET status = 'PAID', amount_cents = $2, paid_at = COALESCE(paid_at, CURRENT_TIMESTAMP), released_at = NULL
+                         WHERE id = $1`,
+                        [existing.id, want]
+                    );
+                }
+            } else if (existing.status === 'PAID') {
+                // Il conto è sceso sotto le altre quote: l'acconto esce dal vivo.
+                await client.query(
+                    `UPDATE table_bill_splits SET status = 'RELEASED', released_at = CURRENT_TIMESTAMP WHERE id = $1`,
+                    [existing.id]
+                );
+            }
+        } else if (want > 0) {
+            await client.query(
+                `INSERT INTO table_bill_splits
+                    (table_bill_id, kind, amount_cents, claimant_label, claimed_at, expires_at, payment_request_id, status, paid_at)
+                 VALUES ($1, 'deposit', $2, 'Acconto', $3, NULL, $4, 'PAID', $3)
+                 ON CONFLICT (payment_request_id) WHERE kind = 'deposit'
+                 DO UPDATE SET amount_cents = EXCLUDED.amount_cents, status = 'PAID', released_at = NULL`,
+                [billId, want, dep.completed_at, dep.id]
+            );
+        }
+    }
+}
+
 async function syncBillTotalInTx(client: any, billId: number): Promise<any> {
     const billRs = await client.query(
-        `SELECT id, total_cents, status FROM table_bills WHERE id = $1 FOR UPDATE`,
+        `SELECT id, reservation_id, total_cents, status FROM table_bills WHERE id = $1 FOR UPDATE`,
         [billId]
     );
     if (billRs.rowCount === 0) throw new BillSyncError('Conto non trovato', { bill_id: billId });
@@ -17446,20 +17520,31 @@ async function syncBillTotalInTx(client: any, billId: number): Promise<any> {
         0
     );
 
+    // Aggiorniamo SUBITO il totale (CHECK > 0: minimo tecnico 1 centesimo) così
+    // il trigger di somma sulle quote vede il nuovo tetto quando, più sotto,
+    // ridimensioniamo l'acconto. Lo snapshot righe lo riscriviamo alla fine.
+    await client.query(
+        `UPDATE table_bills SET total_cents = GREATEST($2, 1) WHERE id = $1`,
+        [billId, newTotal]
+    );
+
+    // Guardia e rilasci ragionano sulle quote dei CLIENTI: l'acconto è denaro
+    // nostro e lo gestiamo noi (lo ridimensioniamo dopo), quindi va escluso.
     const splitsRs = await client.query(
-        `SELECT id, amount_cents, status, claimed_at
+        `SELECT id, amount_cents, status, claimed_at, kind
          FROM table_bill_splits
          WHERE table_bill_id = $1 AND status IN ('CLAIMED','PAID')
          ORDER BY claimed_at DESC`,
         [billId]
     );
-    const paid = splitsRs.rows.filter((s: any) => s.status === 'PAID')
-                              .reduce((n: number, s: any) => n + s.amount_cents, 0);
-    const claimed = splitsRs.rows.filter((s: any) => s.status === 'CLAIMED')
-                                 .reduce((n: number, s: any) => n + s.amount_cents, 0);
+    const guestRows = splitsRs.rows.filter((s: any) => s.kind !== 'deposit');
+    const paid = guestRows.filter((s: any) => s.status === 'PAID')
+                          .reduce((n: number, s: any) => n + s.amount_cents, 0);
+    const claimed = guestRows.filter((s: any) => s.status === 'CLAIMED')
+                             .reduce((n: number, s: any) => n + s.amount_cents, 0);
 
-    // Sotto il già pagato non si scende: la strada corretta è il rimborso
-    // Revolut, che esiste già ed è tracciato.
+    // Sotto il già pagato dai clienti non si scende: la strada corretta è il
+    // rimborso Revolut, che esiste già ed è tracciato.
     if (newTotal < paid) {
         throw new BillSyncError(
             'Il nuovo totale è inferiore a quanto già incassato: serve un rimborso',
@@ -17472,7 +17557,7 @@ async function syncBillTotalInTx(client: any, billId: number): Promise<any> {
     const released: number[] = [];
     if (newTotal < paid + claimed) {
         let excess = paid + claimed - newTotal;
-        for (const s of splitsRs.rows.filter((r: any) => r.status === 'CLAIMED')) {
+        for (const s of guestRows.filter((r: any) => r.status === 'CLAIMED')) {
             if (excess <= 0) break;
             await client.query(
                 `UPDATE table_bill_splits
@@ -17485,19 +17570,21 @@ async function syncBillTotalInTx(client: any, billId: number): Promise<any> {
         }
     }
 
-    // total_cents ha un CHECK > 0: una comanda svuotata non può azzerare il
-    // conto. Teniamo il minimo tecnico di 1 centesimo e lasciamo che sia il
-    // cameriere ad annullare il conto, che è la decisione giusta comunque.
+    // Ridimensiona l'acconto alla capienza residua (dopo i rilasci): la quota
+    // 'deposit' cresce/cala col conto invece di restare bloccata all'apertura.
+    // No-op se la prenotazione non ha acconti.
+    await maintainDepositCredit(client, billId, bill.reservation_id, newTotal);
+
     const items = await billItemsSnapshot(client, billId);
     const upd = await client.query(
         `UPDATE table_bills
-         SET total_cents = GREATEST($2, 1), items = $3::jsonb
+         SET items = $2::jsonb
          WHERE id = $1
          RETURNING id, reservation_id, table_id, total_cents, covers, currency,
                    items, status, share_token, opened_at, closed_at,
                    opened_by_user_id, closed_by_user_id, external_ref,
                    cash_settled_cents, tip_cents, notes`,
-        [billId, newTotal, JSON.stringify(items)]
+        [billId, JSON.stringify(items)]
     );
     return { bill: upd.rows[0], released_split_ids: released, computed_total_cents: newTotal };
 }
