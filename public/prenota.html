@@ -296,13 +296,18 @@
 
         <!-- Condizioni caparra: sempre nel documento (i messaggi linkano #caparra),
              importo e soglia scritti da /public/contact. -->
-        <section id="caparra" class="mt-10 scroll-mt-6 rounded-2xl border border-stone-200 bg-white/60 px-5 py-5">
-            <h2 class="text-base font-semibold text-stone-800">Caparra e cancellazioni</h2>
-            <p class="mt-2 text-sm leading-relaxed text-stone-600">
-                Per i gruppi da <strong id="caparraSoglia">9</strong> persone in su chiediamo una
+        <details id="caparra" class="group mt-10 scroll-mt-6 rounded-2xl border border-stone-200 bg-white/60 px-5 py-4">
+            <summary class="flex cursor-pointer list-none items-center justify-between gap-3 text-base font-semibold text-stone-800 [&::-webkit-details-marker]:hidden">
+                Caparra e cancellazioni
+                <svg class="h-4 w-4 flex-shrink-0 text-stone-400 transition-transform group-open:rotate-180" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                    <path d="M5 7.5 10 12.5 15 7.5" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+            </summary>
+            <p class="mt-3 text-sm leading-relaxed text-stone-600">
+                Per le prenotazioni di gruppo chiediamo una
                 <strong>caparra di <span id="caparraImporto">€ 10</span> a persona</strong> per confermare il tavolo.
-                Dopo l'invio della richiesta ricevi un link per pagarla in sicurezza: il tavolo è confermato
-                appena riceviamo il pagamento.
+                Quando è prevista, dopo l'invio della richiesta ricevi un link per pagarla in sicurezza:
+                il tavolo è confermato appena riceviamo il pagamento.
             </p>
 
             <h3 class="mt-4 text-[13px] font-semibold uppercase tracking-wide text-stone-500">Cosa succede alla caparra</h3>
@@ -324,7 +329,7 @@
                 Per annullare o spostare la prenotazione scrivici su WhatsApp o chiamaci: bastano due minuti
                 e, entro le 24 ore, non perdi nulla.
             </p>
-        </section>
+        </details>
 
         <!-- Footer -->
         <footer class="mt-10 text-center text-[11px] uppercase tracking-[0.24em] text-stone-400">
@@ -363,6 +368,20 @@
     // form + phone CTA before running the rest of the init. Doing this from
     // the server keeps "is it on?" in one place — Settings page can flip it
     // without an HTML edit or redeploy.
+    // La sezione condizioni e' richiudibile: chi ci arriva da un link
+    // (#caparra dal footer, dall'avviso caparra o dall'email) la deve trovare
+    // gia' aperta, altrimenti atterra su un titolo chiuso e deve cliccare di
+    // nuovo. Fuori dal ramo bookingsEnabled: vale anche a prenotazioni sospese.
+    const openCaparraFromHash = () => {
+        if (location.hash !== '#caparra') return;
+        const el = document.getElementById('caparra');
+        if (!el) return;
+        el.open = true;
+        el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    };
+    openCaparraFromHash();
+    window.addEventListener('hashchange', openCaparraFromHash);
+
     let contact = null;
     try {
         const r = await fetch('/public/contact');
@@ -387,9 +406,7 @@
     const deposit = contact?.deposit ?? null;
     const euro = cents => '€ ' + (cents / 100).toFixed(2).replace('.', ',').replace(/,00$/, '');
     if (deposit) {
-        const sogliaEl = document.getElementById('caparraSoglia');
         const importoEl = document.getElementById('caparraImporto');
-        if (sogliaEl) sogliaEl.textContent = deposit.minGuests;
         if (importoEl) importoEl.textContent = euro(deposit.perPersonCents);
     }
     const renderCaparraNotice = guests => {
