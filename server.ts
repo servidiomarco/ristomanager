@@ -4980,8 +4980,10 @@ function buildDepositRequestMessage(
 ): string {
     const amount = formatEuroMinor(amountCents);
     const perPerson = formatEuroMinor(perPersonCents);
-    const termsShort = DEPOSIT_TERMS_URL.replace(/^https?:\/\//, '');
-    return `Ciao ${toTitleCase(customerName)}, per confermare la prenotazione per ${guestsLabel} il ${dateLabel} alle ${time} serve una caparra di ${amount} (${perPerson} a persona).\nPaga in sicurezza qui: ${checkoutUrl}\n\nAppena riceviamo il pagamento ti confermeremo il tavolo. Condizioni: ${termsShort}\n\nGrazie!`;
+    // Niente link alle condizioni qui: l'SMS resta su due segmenti e il
+    // cliente le trova sulla pagina di prenotazione (l'email invece lo porta,
+    // dove non costa nulla).
+    return `Ciao ${toTitleCase(customerName)}, per confermare la prenotazione per ${guestsLabel} il ${dateLabel} alle ${time} serve una caparra di ${amount} (${perPerson} a persona).\nPaga in sicurezza qui: ${checkoutUrl}\n\nAppena riceviamo il pagamento ti confermeremo il tavolo. Grazie!`;
 }
 
 // Message sent to the customer as soon as the Revolut ORDER_COMPLETED webhook
