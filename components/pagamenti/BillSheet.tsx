@@ -1,9 +1,19 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { QRCodeSVG } from 'qrcode.react';
-import { Check, Copy, Loader2, Printer, QrCode, X } from 'lucide-react';
+import { Check, Copy, Loader2, Printer, QrCode, X, Banknote } from 'lucide-react';
 import { printBill, type OpenBillRow } from '../../services/billsApiService';
 import { FormCard, PaneHeader, Sheet, StatusPill } from '../ds';
 import { formatEuro } from './paymentsView';
+
+/** Chiusura conto: quanto incassato in contanti (totale sul conto) e mancia. */
+export type SettleOpts = { cash_settled_cents?: number; tip_cents?: number };
+
+// Parsing tollerante dell'importo digitato: "12,50" / "12.50" / "12" → cents.
+const eurToCents = (s: string): number => {
+  const n = parseFloat(String(s).replace(/[^\d.,]/g, '').replace(',', '.'));
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : 0;
+};
 
 /* ── Il conto di un tavolo ────────────────────────────────────────────────
    The QR is the point of this panel: the guest frames it and pays their share.
@@ -23,7 +33,7 @@ const euro = (cents: number) => formatEuro(cents);
 
 type BillLike =
   Pick<OpenBillRow, 'id' | 'table_name' | 'total_cents' | 'covers' | 'share_token' | 'items'>
-  & Partial<Pick<OpenBillRow, 'paid_cents' | 'residual_cents' | 'open_orders' | 'deposit_credit_cents' | 'deposit_paid_cents' | 'refund_due_cents'>>;
+  & Partial<Pick<OpenBillRow, 'paid_cents' | 'residual_cents' | 'open_orders' | 'deposit_credit_cents' | 'deposit_paid_cents' | 'refund_due_cents' | 'cash_settled_cents'>>;
 
 const isSettled = (bill: BillLike) => bill.residual_cents === 0;
 
@@ -48,33 +58,122 @@ const BillMeta: React.FC<{ bill: BillLike }> = ({ bill }) => (
   </>
 );
 
-/** Two-tap, and the second tap names what it is about to do: closing a bill
- *  with a residual writes off money that was never collected. */
+/** Dialog di chiusura conto: registra quanto incassato in contanti (il resto
+ *  non pagato via QR/carta) e l'eventuale mancia. Sostituisce la vecchia
+ *  chiusura a due tap, che scriveva il residuo come ammanco senza chiedere
+ *  nulla — l'unico modo di pagare era la carta. */
+const SettleDialog: React.FC<{
+  bill: BillLike;
+  busy?: boolean;
+  onCancel: () => void;
+  onConfirm: (opts: SettleOpts) => void;
+}> = ({ bill, busy, onCancel, onConfirm }) => {
+  const residual = bill.residual_cents ?? bill.total_cents;
+  const existingCash = bill.cash_settled_cents ?? 0;
+  // Pagato via QR/carta = tutto il pagato meno i contanti già registrati.
+  const paidCard = Math.max(0, (bill.paid_cents ?? 0) - existingCash);
+  // Default: il residuo tutto in contanti → conto saldato in un tap.
+  const [cash, setCash] = useState(residual > 0 ? (residual / 100).toFixed(2) : '0');
+  const [tip, setTip] = useState('');
+  const cashNow = eurToCents(cash);
+  const tipCents = eurToCents(tip);
+  const shortfall = Math.max(0, residual - cashNow);
+  const willSettle = shortfall === 0;
+
+  const field =
+    'h-11 w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-right text-[15px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
+
+  return createPortal(
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" onClick={busy ? undefined : onCancel}>
+      <div className="w-full max-w-sm overflow-hidden rounded-2xl bg-[var(--ds-surface)] shadow-[var(--shadow-xl)]" onClick={e => e.stopPropagation()}>
+        <div className="border-b border-[var(--ds-border)] p-5">
+          <h3 className="text-[16px] font-semibold text-[var(--ds-text-primary)]">Chiudi conto in cassa</h3>
+          <p className="mt-1 text-[13px] text-[var(--ds-text-muted)]">Tavolo {bill.table_name ?? '—'} · totale {euro(bill.total_cents)}</p>
+        </div>
+        <div className="space-y-3 p-5">
+          <dl className="space-y-1.5 text-[14px]">
+            {paidCard > 0 && (
+              <div className="flex justify-between text-[var(--ds-text-muted)]">
+                <dt>Già pagato (QR/carta)</dt><dd className="tabular-nums">{euro(paidCard)}</dd>
+              </div>
+            )}
+            {existingCash > 0 && (
+              <div className="flex justify-between text-[var(--ds-text-muted)]">
+                <dt>Contanti già registrati</dt><dd className="tabular-nums">{euro(existingCash)}</dd>
+              </div>
+            )}
+            <div className="flex justify-between font-medium text-[var(--ds-text-primary)]">
+              <dt>Residuo da incassare</dt><dd className="tabular-nums">{euro(residual)}</dd>
+            </div>
+          </dl>
+
+          <label className="block">
+            <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Incasso in contanti</span>
+            <div className="relative">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">€</span>
+              <input type="text" inputMode="decimal" value={cash} onChange={e => setCash(e.target.value)} disabled={busy} className={`${field} pl-7`} />
+            </div>
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Mancia <span className="font-normal text-[var(--ds-text-muted)]">(facoltativa)</span></span>
+            <div className="relative">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">€</span>
+              <input type="text" inputMode="decimal" placeholder="0,00" value={tip} onChange={e => setTip(e.target.value)} disabled={busy} className={`${field} pl-7`} />
+            </div>
+          </label>
+
+          <p className={`text-[13px] ${willSettle ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-critical-text)]'}`}>
+            {willSettle
+              ? `Il conto risulterà saldato${tipCents > 0 ? ` · mancia ${euro(tipCents)}` : ''}.`
+              : `Ammanco ${euro(shortfall)}: il conto resterà parziale.`}
+          </p>
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-4 py-3">
+          <button type="button" onClick={onCancel} disabled={busy} className="rounded-full px-4 py-2 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-hover)] disabled:opacity-40">Annulla</button>
+          <button
+            type="button"
+            onClick={() => onConfirm({ cash_settled_cents: existingCash + cashNow, tip_cents: tipCents })}
+            disabled={busy}
+            className="inline-flex items-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-5 py-2 text-[14px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+          >
+            {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+            Chiudi conto
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+};
+
+/** Bottone chiusura → apre il dialog di incasso (contanti + mancia). */
 const SettleButton: React.FC<{
   bill: BillLike;
   busy?: boolean;
-  onSettle: () => void;
+  onSettle: (opts?: SettleOpts) => void;
 }> = ({ bill, busy, onSettle }) => {
-  const [armed, setArmed] = useState(false);
-  const settled = isSettled(bill);
-
+  const [open, setOpen] = useState(false);
   return (
-    <button
-      type="button"
-      onClick={() => { if (armed) { onSettle(); setArmed(false); } else setArmed(true); }}
-      onBlur={() => setArmed(false)}
-      disabled={busy}
-      className={`inline-flex h-12 w-full items-center justify-center gap-2 rounded-full text-[15px] font-semibold transition-colors disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
-        armed
-          ? 'bg-[var(--ds-critical-solid)] text-[#ffffff]'
-          : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]'
-      }`}
-    >
-      {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-      {busy ? 'Chiusura…'
-        : armed ? (settled ? 'Confermi la chiusura?' : `Confermi? Restano ${euro(bill.residual_cents ?? 0)}`)
-        : 'Chiudi conto'}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        disabled={busy}
+        className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[var(--ds-action-bg)] text-[15px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+      >
+        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Banknote className="h-4 w-4" />}
+        Chiudi conto
+      </button>
+      {open && (
+        <SettleDialog
+          bill={bill}
+          busy={busy}
+          onCancel={() => setOpen(false)}
+          onConfirm={(opts) => { onSettle(opts); setOpen(false); }}
+        />
+      )}
+    </>
   );
 };
 
@@ -148,7 +247,9 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
         ) : (
           <p className="flex items-center gap-2 text-[14px] text-[var(--ds-text-muted)]">
             <QrCode className="h-4 w-4 flex-shrink-0" aria-hidden />
-            Conto chiuso: il codice non è più valido.
+            {(bill.residual_cents ?? 0) > 0
+              ? 'QR non più attivo: incassa il resto in cassa e chiudi il conto.'
+              : 'Conto saldato: il codice non è più attivo.'}
           </p>
         )}
       </FormCard>
@@ -223,7 +324,7 @@ export const BillDetail: React.FC<{
   bill: BillLike;
   busy?: boolean;
   onClose: () => void;
-  onSettle?: () => void;
+  onSettle?: (opts?: SettleOpts) => void;
 }> = ({ bill, busy, onClose, onSettle }) => (
   <>
     <PaneHeader
@@ -249,7 +350,7 @@ export const BillSheet: React.FC<{
   bill: BillLike;
   busy?: boolean;
   onClose: () => void;
-  onSettle?: () => void;
+  onSettle?: (opts?: SettleOpts) => void;
   /** Azione aggiuntiva in coda al footer (es. "nuova comanda" dal palmare). */
   footerExtra?: React.ReactNode;
 }> = ({ bill, busy, onClose, onSettle, footerExtra }) => (

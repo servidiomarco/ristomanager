@@ -23,7 +23,7 @@ export type OpenBills = {
   loading: boolean;
   error: string | null;
   closingId: number | null;
-  closeBill: (bill: OpenBillRow) => Promise<void>;
+  closeBill: (bill: OpenBillRow, opts?: { cash_settled_cents?: number; tip_cents?: number }) => Promise<void>;
   reload: () => Promise<void>;
 };
 
@@ -67,11 +67,11 @@ export const useOpenBills = (): OpenBills => {
     };
   }, [reload]);
 
-  const closeBill = useCallback(async (bill: OpenBillRow) => {
+  const closeBill = useCallback(async (bill: OpenBillRow, opts?: { cash_settled_cents?: number; tip_cents?: number }) => {
     setClosingId(bill.id);
     setError(null);
     try {
-      await billsApiService.closeBill(bill.id);
+      await billsApiService.closeBill(bill.id, opts);
       await reload();
     } catch (err: any) {
       setError(err?.data?.error ?? err?.message ?? 'Chiusura non riuscita');

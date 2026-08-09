@@ -395,6 +395,8 @@ export interface ServiceBill {
   deposit_paid_cents?: number;
   /** Da rimborsare al cliente quando l'acconto supera il totale del conto. */
   refund_due_cents?: number;
+  /** Contanti già registrati sul conto (chiusura in cassa). */
+  cash_settled_cents?: number;
   residual_cents: number;
   open_orders: number;
 }

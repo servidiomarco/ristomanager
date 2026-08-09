@@ -141,6 +141,8 @@ export interface OpenBillRow {
   deposit_paid_cents?: number;
   /** Da rimborsare al cliente quando l'acconto supera il totale del conto. */
   refund_due_cents?: number;
+  /** Contanti già registrati sul conto (chiusura in cassa). */
+  cash_settled_cents?: number;
   residual_cents: number;
   paid_splits: number;
   /** Comande ancora aperte su questo conto: il tavolo sta ancora ordinando. */

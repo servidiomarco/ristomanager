@@ -477,11 +477,11 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
   // Chiusura in cassa dal foglio conto aperto sul tavolo. Il residuo che
   // resta è una decisione dell'operatore (SETTLED_PARTIAL), quindi dopo la
   // chiusura il tavolo torna libero.
-  const settleViewBill = async () => {
+  const settleViewBill = async (opts?: { cash_settled_cents?: number; tip_cents?: number }) => {
     if (!viewBill || busy) return;
     setBusy(true); setError(null);
     try {
-      await billsApiService.closeBill(viewBill.id);
+      await billsApiService.closeBill(viewBill.id, opts);
       setServiceBills(prev => { const n = new Map(prev); n.delete(viewBill.table_id); return n; });
       setViewBill(null);
       setFlash('Conto chiuso in cassa');
@@ -538,6 +538,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
             share_token: viewBill.share_token,
             items: viewBill.items,
             paid_cents: viewBill.paid_cents,
+            cash_settled_cents: viewBill.cash_settled_cents,
             deposit_credit_cents: viewBill.deposit_credit_cents,
             deposit_paid_cents: viewBill.deposit_paid_cents,
             refund_due_cents: viewBill.refund_due_cents,

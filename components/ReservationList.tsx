@@ -10,7 +10,7 @@ import { BillFigures, billStateLabel } from './prenotazione/BillFigures';
 import { PaymentRequestRow } from './prenotazione/PaymentRequestRow';
 import { MessaggiPanel } from './prenotazione/MessaggiPanel';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, RoomClosedOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill } from '../types';
-import { Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, ListFilter, Map as MapIcon, List, MessageCircle, Mail, Armchair, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode } from 'lucide-react';
+import { Banknote, Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, ListFilter, Map as MapIcon, List, MessageCircle, Mail, Armchair, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap } from '../services/apiService';
 import { billsApiService, printBill } from '../services/billsApiService';
@@ -2334,11 +2334,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     }
   };
 
-  const handleCloseBill = async () => {
+  const handleCloseBill = async (opts?: { cash_settled_cents?: number; tip_cents?: number }) => {
     if (!bill) return;
     setBillActionLoading('close');
     try {
-      await billsApiService.closeBill(bill.bill.id);
+      await billsApiService.closeBill(bill.bill.id, opts);
       setBill(null);
       showToast('Conto chiuso', 'success');
     } catch (err: any) {
@@ -5777,12 +5777,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     </button>
                                     <button
                                       type="button"
-                                      onClick={handleCloseBill}
+                                      onClick={() => setBillSheetOpen(true)}
                                       disabled={billActionLoading !== null}
                                       className="inline-flex h-11 items-center justify-center gap-2 rounded-full bg-[var(--ds-seated-tint)] px-5 text-[15px] font-semibold text-[var(--ds-seated-text)] transition-colors hover:brightness-95 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                                     >
-                                      {billActionLoading === 'close' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                                      Chiudi conto
+                                      {billActionLoading === 'close' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Banknote className="h-4 w-4" />}
+                                      Incassa e chiudi
                                     </button>
                                     <button
                                       type="button"
@@ -5985,11 +5985,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                           share_token: bill.bill.share_token,
                           items: bill.bill.items,
                           paid_cents: bill.paid_cents,
+                          cash_settled_cents: bill.bill.cash_settled_cents,
+                          deposit_credit_cents: bill.deposit_credit_cents,
+                          deposit_paid_cents: bill.deposit_paid_cents,
+                          refund_due_cents: bill.refund_due_cents,
                           residual_cents: bill.residual_cents,
                         }}
                         busy={billActionLoading === 'close'}
                         onClose={() => setBillSheetOpen(false)}
-                        onSettle={() => { setBillSheetOpen(false); handleCloseBill(); }}
+                        onSettle={(opts) => { setBillSheetOpen(false); handleCloseBill(opts); }}
                       />
                     )}
                     </section>

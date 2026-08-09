@@ -346,7 +346,7 @@ const PagamentiPage: React.FC = () => {
                   bill={selectedBill}
                   busy={openBills.closingId === selectedBill.id}
                   onClose={() => setSelectedBillId(null)}
-                  onSettle={() => openBills.closeBill(selectedBill)}
+                  onSettle={(opts) => openBills.closeBill(selectedBill, opts)}
                 />
               ) : (
                 <PanePlaceholder icon={Receipt}>Seleziona un conto dalla lista</PanePlaceholder>
