@@ -5,6 +5,7 @@ import { toTitleCase } from '../../utils/text';
 import { Callout, EmptyState, SectionHeader, StatusPill } from '../ds';
 import { formatEuro, formatServiceDay, shiftLabel } from './paymentsView';
 import type { Service } from './useOpenBills';
+import { SettleDialog, type SettleOpts } from './BillSheet';
 
 /* ── Conti aperti ─────────────────────────────────────────────────────────
    Every open table bill, with and without a reservation. The bill UI used to
@@ -29,10 +30,10 @@ const BillCard: React.FC<{
   bill: OpenBillRow;
   active: boolean;
   onSelect: () => void;
-  onClose: () => void;
+  onClose: (opts?: SettleOpts) => void;
   closing: boolean;
 }> = ({ bill, active, onSelect, onClose, closing }) => {
-  const [armed, setArmed] = useState(false);
+  const [settleOpen, setSettleOpen] = useState(false);
   const pct = bill.total_cents > 0
     ? Math.min(100, Math.round((bill.paid_cents / bill.total_cents) * 100))
     : 0;
@@ -101,24 +102,27 @@ const BillCard: React.FC<{
         )}
       </button>
 
-      {/* Two-tap, and it says what the second tap does. Closing a bill with a
-          residual writes off money that was never collected, and this button
-          sits in a column of near-identical cards. */}
+      {/* Chiudi apre il dialog di incasso (contanti + mancia) invece di scrivere
+          il residuo come ammanco senza chiedere: era l'unico modo di pagare la
+          carta. */}
       <div className="px-4 pb-3">
         <button
           type="button"
-          onClick={() => { if (armed) { onClose(); setArmed(false); } else setArmed(true); }}
-          onBlur={() => setArmed(false)}
+          onClick={() => setSettleOpen(true)}
           disabled={closing}
-          className={`inline-flex h-10 w-full items-center justify-center rounded-full px-4 text-[14px] font-medium transition-colors disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
-            armed
-              ? 'bg-[var(--ds-critical-solid)] text-[#ffffff]'
-              : 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] hover:bg-[var(--ds-border)]'
-          }`}
+          className="inline-flex h-10 w-full items-center justify-center rounded-full bg-[var(--ds-seated-tint)] px-4 text-[14px] font-medium text-[var(--ds-seated-text)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         >
-          {closing ? <Loader2 className="h-4 w-4 animate-spin" /> : armed ? 'Confermi?' : 'Chiudi'}
+          {closing ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Chiudi'}
         </button>
       </div>
+      {settleOpen && (
+        <SettleDialog
+          bill={bill}
+          busy={closing}
+          onCancel={() => setSettleOpen(false)}
+          onConfirm={(opts) => { onClose(opts); setSettleOpen(false); }}
+        />
+      )}
     </div>
   );
 };
@@ -130,7 +134,7 @@ export const ContiAperti: React.FC<{
   loading: boolean;
   error: string | null;
   closingId: number | null;
-  onCloseBill: (bill: OpenBillRow) => void;
+  onCloseBill: (bill: OpenBillRow, opts?: SettleOpts) => void;
   /** Which bill the detail pane is showing. */
   selectedId: number | null;
   onSelect: (bill: OpenBillRow) => void;
@@ -237,7 +241,7 @@ export const ContiAperti: React.FC<{
                     active={selectedId === b.id}
                     closing={closingId === b.id}
                     onSelect={() => onSelect(b)}
-                    onClose={() => onCloseBill(b)}
+                    onClose={(opts) => onCloseBill(b, opts)}
                   />
                 ))}
               </div>

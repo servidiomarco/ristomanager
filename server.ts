@@ -18427,13 +18427,22 @@ app.get('/reports/kitchen', authenticate, requirePermission('orders:expedite'), 
 // quindi un conto walk-in — creato correttamente dal modulo comande — non era
 // raggiungibile da nessuna schermata: niente QR, niente chiusura. Questo
 // endpoint elenca i conti attivi per tavolo, con o senza prenotazione.
-app.get('/bills/open', authenticate, requirePermission('payments:view'), async (_req, res) => {
+app.get('/bills/open', authenticate, requirePermission('payments:view'), async (req, res) => {
     try {
         if (!(await getFeatureFlag('pay_at_table_enabled', false))) {
             return res.json({ bills: [] });
         }
 
-        const service = resolveService();
+        // La lista segue il datepicker + toggle turno della topbar: se arriva
+        // `date` mostra solo i conti di quel giorno (e, se `shift` è LUNCH/DINNER,
+        // di quel turno; assente = entrambi i turni). Senza `date` resta il
+        // comportamento storico (tutti i conti aperti). Il servizio del conto è
+        // quello della comanda, o dedotto dall'orario di apertura per i conti a mano.
+        const filterDate = typeof req.query?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date) ? req.query.date : null;
+        const filterShift = req.query?.shift === 'LUNCH' || req.query?.shift === 'DINNER' ? req.query.shift : null;
+        const resolved = resolveService();
+        const service = { service_date: filterDate ?? resolved.service_date, shift: filterShift ?? resolved.shift };
+
         const rows = await queryWithRetry(
             `SELECT b.id, b.reservation_id, b.table_id, b.total_cents, b.covers,
                     b.currency, b.items, b.status, b.share_token, b.opened_at,
@@ -18467,13 +18476,26 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
              LEFT JOIN reservations r ON r.id = b.reservation_id
              LEFT JOIN table_bill_splits s ON s.table_bill_id = b.id
              WHERE b.status IN ('OPEN','LOCKED','SETTLED','SETTLED_PARTIAL')
+               AND ($1::date IS NULL OR COALESCE(
+                        (SELECT o.service_date FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
+                        CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) < 5
+                             THEN ((b.opened_at AT TIME ZONE 'Europe/Rome') - INTERVAL '1 day')::date
+                             ELSE (b.opened_at AT TIME ZONE 'Europe/Rome')::date END) = $1::date)
+               AND ($2::varchar IS NULL OR COALESCE(
+                        (SELECT o.shift FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
+                        CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
+                             THEN 'LUNCH' ELSE 'DINNER' END) = $2::varchar)
              GROUP BY b.id, t.name, r.customer_name
-             ORDER BY b.opened_at DESC`
+             ORDER BY b.opened_at DESC`,
+            [filterDate, filterShift]
         );
 
-        // Comande rimaste aperte in servizi precedenti: non compaiono più in
-        // sala né in cucina, quindi devono comparire qui — altrimenti un
-        // tavolo mai chiuso sparisce senza che nessuno se ne accorga.
+        // Comande aperte in servizi DIVERSI da quello selezionato: restano come
+        // avviso (un tavolo mai chiuso non deve sparire), ma fuori dalla lista
+        // del servizio corrente. "Diverso" = altra data, oppure (se è stato
+        // scelto un turno) altro turno; col turno su "entrambi" conta solo la data.
+        const staleDate = filterDate ?? resolved.service_date;
+        const staleShift = filterDate ? filterShift : resolved.shift;
         const stale = await queryWithRetry(
             `SELECT o.id, o.table_id, t.name AS table_name, o.service_date, o.shift,
                     o.covers, o.opened_at,
@@ -18487,10 +18509,11 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
              LEFT JOIN tables t ON t.id = o.table_id
              LEFT JOIN order_items oi ON oi.order_id = o.id
              WHERE o.status = 'OPEN'
-               AND (o.service_date, o.shift) IS DISTINCT FROM ($1::date, $2::varchar)
+               AND (o.service_date <> $1::date
+                    OR ($2::varchar IS NOT NULL AND o.shift <> $2::varchar))
              GROUP BY o.id, t.name
              ORDER BY o.service_date DESC, o.opened_at DESC`,
-            [service.service_date, service.shift]
+            [staleDate, staleShift]
         );
 
         res.json({

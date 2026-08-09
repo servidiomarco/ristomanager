@@ -2373,7 +2373,7 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.PAGAMENTI && (
-          <PagamentiPage />
+          <PagamentiPage globalDate={globalDate} globalShiftFilter={globalShiftFilter} />
         )}
 
         {view === ViewState.DEVELOPMENT && (

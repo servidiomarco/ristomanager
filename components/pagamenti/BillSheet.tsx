@@ -62,7 +62,7 @@ const BillMeta: React.FC<{ bill: BillLike }> = ({ bill }) => (
  *  non pagato via QR/carta) e l'eventuale mancia. Sostituisce la vecchia
  *  chiusura a due tap, che scriveva il residuo come ammanco senza chiedere
  *  nulla — l'unico modo di pagare era la carta. */
-const SettleDialog: React.FC<{
+export const SettleDialog: React.FC<{
   bill: BillLike;
   busy?: boolean;
   onCancel: () => void;

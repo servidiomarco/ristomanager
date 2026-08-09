@@ -27,7 +27,9 @@ export type OpenBills = {
   reload: () => Promise<void>;
 };
 
-export const useOpenBills = (): OpenBills => {
+export const useOpenBills = (
+  serviceFilter?: { service_date?: string; shift?: 'LUNCH' | 'DINNER' },
+): OpenBills => {
   const [bills, setBills] = useState<OpenBillRow[]>([]);
   const [stale, setStale] = useState<StaleOrderRow[]>([]);
   const [service, setService] = useState<Service | null>(null);
@@ -35,9 +37,12 @@ export const useOpenBills = (): OpenBills => {
   const [error, setError] = useState<string | null>(null);
   const [closingId, setClosingId] = useState<number | null>(null);
 
+  // Chiave stabile: la lista si ricarica quando cambia il servizio scelto in
+  // topbar (data o turno), non ad ogni render.
+  const svcKey = `${serviceFilter?.service_date ?? ''}|${serviceFilter?.shift ?? ''}`;
   const reload = useCallback(async () => {
     try {
-      const res = await getOpenBills();
+      const res = await getOpenBills(serviceFilter);
       setBills(res.bills);
       setStale(res.stale_orders ?? []);
       setService(res.service ?? null);
@@ -46,7 +51,8 @@ export const useOpenBills = (): OpenBills => {
     } finally {
       setLoading(false);
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [svcKey]);
 
   useEffect(() => { reload(); }, [reload]);
 

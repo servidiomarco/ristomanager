@@ -65,8 +65,24 @@ const Kpi: React.FC<{ label: string; value: string; tone?: 'positive' | 'pending
   </div>
 );
 
-const PagamentiPage: React.FC = () => {
+const PagamentiPage: React.FC<{
+  globalDate?: Date;
+  globalShiftFilter?: 'ALL' | 'LUNCH' | 'DINNER';
+}> = ({ globalDate, globalShiftFilter }) => {
   const [tab, setTab] = useState<'BILLS' | 'LINKS'>('BILLS');
+
+  // La lista "Conti aperti" segue datepicker + toggle turno della topbar: mostra
+  // solo i conti di quel giorno/turno (turno "Tutti" = entrambi). Senza data la
+  // pagina non filtra (comportamento storico).
+  const serviceFilter = useMemo(
+    () => globalDate
+      ? {
+          service_date: getRomeDatePart(globalDate),
+          shift: globalShiftFilter && globalShiftFilter !== 'ALL' ? globalShiftFilter : undefined,
+        }
+      : undefined,
+    [globalDate, globalShiftFilter],
+  );
 
   const [items, setItems] = useState<PaymentRequest[]>([]);
   const [total, setTotal] = useState(0);
@@ -89,7 +105,7 @@ const PagamentiPage: React.FC = () => {
   const [selectedBillId, setSelectedBillId] = useState<number | null>(null);
   const [selectedPaymentId, setSelectedPaymentId] = useState<number | null>(null);
 
-  const openBills = useOpenBills();
+  const openBills = useOpenBills(serviceFilter);
 
   // The bills tab only exists with pay-at-table on. null = flag not known yet,
   // so the tab bar doesn't flash a section that is about to disappear.

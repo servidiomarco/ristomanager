@@ -165,11 +165,19 @@ export interface StaleOrderRow {
 }
 
 /** Conti attivi, con e senza prenotazione, più le comande rimaste appese. */
-export const getOpenBills = async (): Promise<{
+export const getOpenBills = async (
+  service?: { service_date?: string; shift?: 'LUNCH' | 'DINNER' },
+): Promise<{
   service: { service_date: string; shift: 'LUNCH' | 'DINNER' };
   bills: OpenBillRow[];
   stale_orders: StaleOrderRow[];
-}> => apiRequest(`${API_URL}/bills/open`, { headers: getHeaders() });
+}> => {
+  const qs = new URLSearchParams();
+  if (service?.service_date) qs.set('date', service.service_date);
+  if (service?.shift) qs.set('shift', service.shift);
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return apiRequest(`${API_URL}/bills/open${suffix}`, { headers: getHeaders() });
+};
 
 /** Accoda la stampa del preconto sulla termica in sala. L'origin serve al
  *  server per comporre l'URL del QR: solo il client sa da che host è servita
