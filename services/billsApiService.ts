@@ -143,6 +143,10 @@ export interface OpenBillRow {
   refund_due_cents?: number;
   /** Contanti già registrati sul conto (chiusura in cassa). */
   cash_settled_cents?: number;
+  /** Mancia registrata alla chiusura. */
+  tip_cents?: number;
+  /** Quando il conto è stato chiuso (solo per i conti chiusi). */
+  closed_at?: string | null;
   residual_cents: number;
   paid_splits: number;
   /** Comande ancora aperte su questo conto: il tavolo sta ancora ordinando. */
@@ -167,6 +171,7 @@ export interface StaleOrderRow {
 /** Conti attivi, con e senza prenotazione, più le comande rimaste appese. */
 export const getOpenBills = async (
   service?: { service_date?: string; shift?: 'LUNCH' | 'DINNER' },
+  opts?: { status?: 'open' | 'closed' },
 ): Promise<{
   service: { service_date: string; shift: 'LUNCH' | 'DINNER' };
   bills: OpenBillRow[];
@@ -175,6 +180,7 @@ export const getOpenBills = async (
   const qs = new URLSearchParams();
   if (service?.service_date) qs.set('date', service.service_date);
   if (service?.shift) qs.set('shift', service.shift);
+  if (opts?.status === 'closed') qs.set('status', 'closed');
   const suffix = qs.toString() ? `?${qs.toString()}` : '';
   return apiRequest(`${API_URL}/bills/open${suffix}`, { headers: getHeaders() });
 };

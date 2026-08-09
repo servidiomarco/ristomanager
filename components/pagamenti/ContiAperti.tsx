@@ -142,8 +142,11 @@ export const ContiAperti: React.FC<{
    *  number or by whoever booked it — the two things anyone actually knows
    *  when they walk up asking about a table. */
   query?: string;
+  /** Vista dei conti già chiusi (rivedere gli incassi del servizio): sola
+   *  lettura, con la ripartizione carta/contanti/mancia. */
+  closedView?: boolean;
 }> = ({
-  bills, stale, service, loading, error, closingId, onCloseBill, selectedId, onSelect, query = '',
+  bills, stale, service, loading, error, closingId, onCloseBill, selectedId, onSelect, query = '', closedView = false,
 }) => {
   const [onlyResidual, setOnlyResidual] = useState(false);
 
@@ -154,6 +157,80 @@ export const ContiAperti: React.FC<{
     || (b.customer_name ?? '').toLowerCase().includes(q);
 
   const visible = bills.filter(matches);
+
+  // --- Vista "Chiusi": elenco in sola lettura degli incassi del servizio. ---
+  if (closedView) {
+    const label = (st: string) => st === 'VOIDED' ? 'Annullato' : st === 'SETTLED_PARTIAL' ? 'Parziale' : 'Chiuso';
+    const tone = (st: string) => st === 'VOIDED' ? 'critical' : st === 'SETTLED_PARTIAL' ? 'pending' : 'positive';
+    const real = visible.filter(b => b.status !== 'VOIDED');
+    const incassato = real.reduce((s, b) => s + b.paid_cents + (b.cash_settled_cents ?? 0), 0);
+    const mance = real.reduce((s, b) => s + (b.tip_cents ?? 0), 0);
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[13px] text-[var(--ds-text-muted)]">
+            {service ? `Servizio ${shiftLabel(service.shift)} · ${formatServiceDay(service.service_date)}` : 'Servizio'}
+            {` · ${visible.length} cont${visible.length === 1 ? 'o' : 'i'} chius${visible.length === 1 ? 'o' : 'i'}`}
+          </p>
+          {(incassato > 0 || mance > 0) && (
+            <p className="text-[13px] text-[var(--ds-text-secondary)] tabular-nums">
+              Incassato {euro(incassato)}{mance > 0 && ` · mance ${euro(mance)}`}
+            </p>
+          )}
+        </div>
+        {loading ? (
+          <div className="flex items-center gap-2 p-8 text-[14px] text-[var(--ds-text-muted)]">
+            <Loader2 className="h-4 w-4 animate-spin" /> Carico i conti…
+          </div>
+        ) : visible.length === 0 ? (
+          <EmptyState icon={QrCode}>
+            {q ? 'Nessun conto per questa ricerca.' : 'Nessun conto chiuso in questo giorno/turno.'}
+          </EmptyState>
+        ) : (
+          <div className="space-y-2">
+            {visible.map(b => {
+              const carta = b.paid_cents;
+              const contanti = b.cash_settled_cents ?? 0;
+              const mancia = b.tip_cents ?? 0;
+              const ammanco = b.status === 'SETTLED_PARTIAL' ? Math.max(0, b.total_cents - carta - contanti) : 0;
+              return (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => onSelect(b)}
+                  className={`flex w-full flex-col gap-1.5 rounded-[16px] p-4 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                    selectedId === b.id ? 'bg-[var(--ds-surface-row)]' : 'bg-[var(--ds-surface)]'
+                  } ${b.status === 'VOIDED' ? 'opacity-70' : ''}`}
+                >
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="min-w-0 truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                      Tav. {b.table_name ?? '—'}
+                      {b.customer_name && <span className="ml-2 font-normal text-[var(--ds-text-muted)]">{toTitleCase(b.customer_name)}</span>}
+                    </span>
+                    <span className={`flex-shrink-0 text-[16px] font-semibold tabular-nums ${b.status === 'VOIDED' ? 'text-[var(--ds-text-muted)] line-through' : 'text-[var(--ds-text-primary)]'}`}>
+                      {euro(b.total_cents)}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-[var(--ds-text-muted)] tabular-nums">
+                    <StatusPill tone={tone(b.status) as any}>{label(b.status)}</StatusPill>
+                    {b.status !== 'VOIDED' && (
+                      <>
+                        {carta > 0 && <span>carta {euro(carta)}</span>}
+                        {contanti > 0 && <span>contanti {euro(contanti)}</span>}
+                        {mancia > 0 && <span className="text-[var(--ds-seated-text)]">mancia {euro(mancia)}</span>}
+                        {ammanco > 0 && <span className="text-[var(--ds-critical-text)]">ammanco {euro(ammanco)}</span>}
+                      </>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   const current = visible.filter(b => b.is_current_service);
   const previous = visible.filter(b => !b.is_current_service);
   const daChiudere = [...current, ...previous].filter(b => b.residual_cents > 0);

@@ -29,6 +29,7 @@ export type OpenBills = {
 
 export const useOpenBills = (
   serviceFilter?: { service_date?: string; shift?: 'LUNCH' | 'DINNER' },
+  status: 'open' | 'closed' = 'open',
 ): OpenBills => {
   const [bills, setBills] = useState<OpenBillRow[]>([]);
   const [stale, setStale] = useState<StaleOrderRow[]>([]);
@@ -39,10 +40,10 @@ export const useOpenBills = (
 
   // Chiave stabile: la lista si ricarica quando cambia il servizio scelto in
   // topbar (data o turno), non ad ogni render.
-  const svcKey = `${serviceFilter?.service_date ?? ''}|${serviceFilter?.shift ?? ''}`;
+  const svcKey = `${serviceFilter?.service_date ?? ''}|${serviceFilter?.shift ?? ''}|${status}`;
   const reload = useCallback(async () => {
     try {
-      const res = await getOpenBills(serviceFilter);
+      const res = await getOpenBills(serviceFilter, { status });
       setBills(res.bills);
       setStale(res.stale_orders ?? []);
       setService(res.service ?? null);

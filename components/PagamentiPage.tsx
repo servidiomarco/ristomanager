@@ -105,7 +105,9 @@ const PagamentiPage: React.FC<{
   const [selectedBillId, setSelectedBillId] = useState<number | null>(null);
   const [selectedPaymentId, setSelectedPaymentId] = useState<number | null>(null);
 
-  const openBills = useOpenBills(serviceFilter);
+  // Aperti (da incassare) vs chiusi (rivedere gli incassi del servizio).
+  const [billStatus, setBillStatus] = useState<'open' | 'closed'>('open');
+  const openBills = useOpenBills(serviceFilter, billStatus);
 
   // The bills tab only exists with pay-at-table on. null = flag not known yet,
   // so the tab bar doesn't flash a section that is about to disappear.
@@ -309,6 +311,20 @@ const PagamentiPage: React.FC<{
                   ]}
                 />
               )}
+              {/* Aperti (da incassare adesso) vs chiusi (rivedere gli incassi
+                  del giorno/turno selezionato in alto). */}
+              {showingBills && (
+                <SegmentedControl<'open' | 'closed'>
+                  value={billStatus}
+                  onChange={setBillStatus}
+                  ariaLabel="Aperti o chiusi"
+                  equalWidth
+                  options={[
+                    { value: 'open', label: 'Da incassare' },
+                    { value: 'closed', label: 'Chiusi' },
+                  ]}
+                />
+              )}
               <SearchField
                 value={search}
                 onChange={setSearch}
@@ -330,6 +346,7 @@ const PagamentiPage: React.FC<{
                 selectedId={selectedBillId}
                 onSelect={(b) => setSelectedBillId(b.id)}
                 query={search}
+                closedView={billStatus === 'closed'}
               />
             ) : (
               <>

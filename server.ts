@@ -18443,9 +18443,16 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
         const resolved = resolveService();
         const service = { service_date: filterDate ?? resolved.service_date, shift: filterShift ?? resolved.shift };
 
+        // `status=closed` mostra i conti già chiusi del servizio (rivedere gli
+        // incassi di un turno passato): chiusi, parziali e annullati. Default:
+        // solo quelli ancora incassabili.
+        const statuses = req.query?.status === 'closed'
+            ? ['CLOSED', 'SETTLED_PARTIAL', 'VOIDED']
+            : ['OPEN', 'LOCKED', 'SETTLED', 'SETTLED_PARTIAL'];
+
         const rows = await queryWithRetry(
             `SELECT b.id, b.reservation_id, b.table_id, b.total_cents, b.covers,
-                    b.currency, b.items, b.status, b.share_token, b.opened_at,
+                    b.currency, b.items, b.status, b.share_token, b.opened_at, b.closed_at,
                     b.cash_settled_cents, b.tip_cents,
                     t.name AS table_name,
                     r.customer_name,
@@ -18475,7 +18482,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
              LEFT JOIN tables t ON t.id = b.table_id
              LEFT JOIN reservations r ON r.id = b.reservation_id
              LEFT JOIN table_bill_splits s ON s.table_bill_id = b.id
-             WHERE b.status IN ('OPEN','LOCKED','SETTLED','SETTLED_PARTIAL')
+             WHERE b.status = ANY($3::varchar[])
                AND ($1::date IS NULL OR COALESCE(
                         (SELECT o.service_date FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
                         CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) < 5
@@ -18486,8 +18493,8 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                         CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
                              THEN 'LUNCH' ELSE 'DINNER' END) = $2::varchar)
              GROUP BY b.id, t.name, r.customer_name
-             ORDER BY b.opened_at DESC`,
-            [filterDate, filterShift]
+             ORDER BY b.closed_at DESC NULLS LAST, b.opened_at DESC`,
+            [filterDate, filterShift, statuses]
         );
 
         // Comande aperte in servizi DIVERSI da quello selezionato: restano come
@@ -18496,7 +18503,9 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
         // scelto un turno) altro turno; col turno su "entrambi" conta solo la data.
         const staleDate = filterDate ?? resolved.service_date;
         const staleShift = filterDate ? filterShift : resolved.shift;
-        const stale = await queryWithRetry(
+        // L'avviso sulle comande di altri servizi ha senso solo nella vista degli
+        // aperti; rivedendo i conti chiusi non serve.
+        const stale = req.query?.status === 'closed' ? { rows: [] } : await queryWithRetry(
             `SELECT o.id, o.table_id, t.name AS table_name, o.service_date, o.shift,
                     o.covers, o.opened_at,
                     COALESCE(SUM(
