@@ -347,3 +347,19 @@ export async function getConto(idGestionale: number): Promise<Record<string, unk
     if (result == null || isNil(result)) return null;
     return result as Record<string, unknown>;
 }
+
+/**
+ * Conti del giorno (archivio). È la FONTE DI VERITÀ dell'esito di una
+ * chiusura: la risposta di ContoComanda può dire errore anche a scontrino
+ * emesso — l'unico verdetto affidabile è la presenza del conto in archivio
+ * con NumeroScontrinoFiscale (lezione dei collaudi 04/08). `data` in formato
+ * YYYY-MM-DD; omessa = oggi.
+ */
+export async function getContiGiorno(data?: string): Promise<Record<string, unknown>[]> {
+    const giorno = data ?? new Date().toISOString().slice(0, 10);
+    // Il parametro WSDL si chiama `giorno` (xs:dateTime).
+    const result = (await soapCall('GetContiGiorno', `<giorno>${giorno}T00:00:00</giorno>`)) as Record<string, any> | null;
+    if (!result || isNil(result)) return [];
+    const entries = result.ContrattoConto ?? [];
+    return Array.isArray(entries) ? entries : [entries];
+}

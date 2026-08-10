@@ -15,13 +15,14 @@ import {
     getComandaTavolo,
     getComanda,
     getConto,
+    getContiGiorno,
     contoComanda,
     isPassepartoutConfigured,
     PassepartoutError,
     type TipoDocumentoConto,
 } from '../services/passepartoutService.js';
 
-const [cmd, arg, arg2, arg3, arg4] = process.argv.slice(2);
+const [cmd, arg, arg2, arg3, arg4, arg5] = process.argv.slice(2);
 
 if (!isPassepartoutConfigured()) {
     console.error('Config mancante: servono PASSEPARTOUT_WS_URL e PASSEPARTOUT_WS_USER (più password).');
@@ -54,16 +55,37 @@ try {
         case 'conto':
             console.log(JSON.stringify(await getConto(Number(arg)), null, 2));
             break;
+        case 'conti-giorno': {
+            // arg opzionale: YYYY-MM-DD (default oggi). Stampa i campi chiave
+            // per il verdetto post-chiusura.
+            const conti = await getContiGiorno(arg || undefined);
+            for (const c of conti) {
+                console.log(JSON.stringify({
+                    id: c.IdGestionale ?? c.idGestionale,
+                    idComanda: c.IdComanda ?? c.idComanda,
+                    tavolo: c.Tavolo ?? c.tavolo,
+                    totale: c.TotaleDaPagare ?? c.totaleDaPagare,
+                    pagato: c.TotalePagato ?? c.totalePagato,
+                    sospeso: c.Sospeso ?? c.sospeso,
+                    scontrino: c.NumeroScontrinoFiscale ?? c.numeroScontrinoFiscale,
+                    stato: c.Stato ?? c.stato,
+                }));
+            }
+            console.log(`${conti.length} conti`);
+            break;
+        }
         case 'chiudi': {
             // ATTENZIONE: azione fiscale — può emettere lo scontrino sul RT.
-            // Uso: chiudi <idComanda> <tipoPagamento> [tipoDocumento] [importo]
-            if (!arg || !arg2) throw new Error('Uso: chiudi <idComanda> <tipoPagamento> [tipoDocumento] [importo]');
+            // Uso: chiudi <idComanda> <tipoPagamento> [tipoDocumento] [importo] [invio]
+            // Il 5° argomento letterale "invio" imposta noInvio=false (le righe
+            // non ancora inviate partono in produzione alla chiusura).
+            if (!arg || !arg2) throw new Error('Uso: chiudi <idComanda> <tipoPagamento> [tipoDocumento] [importo] [invio]');
             const params = {
                 idComanda: Number(arg),
-                noInvio: true,
+                noInvio: arg5 !== 'invio',
                 tipoPagamento: arg2,
                 tipoDocumento: (arg3 || undefined) as TipoDocumentoConto | undefined,
-                importoPagato: arg4 != null ? Number(arg4) : undefined,
+                importoPagato: arg4 != null && arg4 !== '' && arg4 !== '-' ? Number(arg4) : undefined,
             };
             console.log('Chiusura con parametri:', JSON.stringify(params));
             await contoComanda(params);
