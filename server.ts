@@ -320,16 +320,23 @@ app.post('/webhook/twilio-whatsapp', twilioUrlEncoded, async (req, res) => {
         const sid = req.body?.MessageSid || req.body?.SmsMessageSid || null;
         const isWhatsApp = fromRaw.startsWith('whatsapp:');
         const channel: 'sms' | 'whatsapp' = isWhatsApp ? 'whatsapp' : 'sms';
+        // Foto, vocali e posizioni: prima venivano scartati insieme al
+        // messaggio (nessuna riga, nessuna notifica) perche' il body e' vuoto.
+        // Gli url Twilio richiedono autenticazione: si salvano cosi' come sono
+        // e si servono dal proxy /messages/:id/media/:index.
         const numMedia = Number(req.body?.NumMedia || 0);
-        if (numMedia > 0) {
-            console.log('[Twilio] Inbound has media attachments — text-only recorded');
+        const media: Array<{ url: string; content_type: string }> = [];
+        for (let i = 0; i < numMedia; i++) {
+            const url = String(req.body?.[`MediaUrl${i}`] || '');
+            if (!url) continue;
+            media.push({ url, content_type: String(req.body?.[`MediaContentType${i}`] || 'application/octet-stream') });
         }
-        if (!from || !body) {
-            console.log('[Twilio] Inbound: missing From or empty Body, ignoring');
+        if (!from || (!body && media.length === 0)) {
+            console.log('[Twilio] Inbound: missing From or empty message, ignoring');
             return;
         }
         const row = await logInboundMessage({
-            provider: 'twilio', channel, from, to, body, sid,
+            provider: 'twilio', channel, from, to, body, sid, media,
         });
         if (row && socketService) {
             socketService.broadcastToAll('message:inbound', row);
@@ -3259,7 +3266,7 @@ app.get('/reservations/:id/messages', authenticate, requirePermission('reservati
             `SELECT id, provider, channel, direction, to_phone, from_phone, to_email, from_email,
                     subject, body, status, provider_sid, message_id, in_reply_to,
                     reservation_id, sent_at, delivered_at, failed_at,
-                    error_code, error_message
+                    error_code, error_message, media
              FROM outbound_messages
              WHERE ${conditions.join(' OR ')}
              ORDER BY sent_at DESC
@@ -4581,7 +4588,7 @@ app.get('/messages/conversations/:phoneDigits', authenticate, requirePermission(
         const result = await queryWithRetry(
             `SELECT id, provider, channel, direction, from_phone, to_phone, body,
                     status, provider_sid, reservation_id, sent_at, delivered_at,
-                    failed_at, read_at, error_code, error_message
+                    failed_at, read_at, error_code, error_message, media
              FROM outbound_messages
              WHERE channel IN ('sms','whatsapp')
                AND (right(to_phone_digits, 10) = $1::text
@@ -4593,6 +4600,54 @@ app.get('/messages/conversations/:phoneDigits', authenticate, requirePermission(
         res.json({ messages: result.rows });
     } catch (err) {
         console.error('GET /messages/conversations/:phoneDigits error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Gli allegati stanno su Twilio dietro Basic auth: il browser non puo'
+// arrivarci (e le credenziali non escono di qui). Questo endpoint fa da
+// ponte — autenticato come il resto dell'inbox, streamma il contenuto e lo
+// fa mettere in cache al browser, che altrimenti riscarica la foto a ogni
+// apertura della conversazione.
+app.get('/messages/:id/media/:index', authenticate, requirePermission('reservations:view'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        const index = parseInt(req.params.index, 10);
+        if (!Number.isFinite(id) || !Number.isFinite(index) || index < 0) {
+            return res.status(400).json({ error: 'Parametri non validi' });
+        }
+        const row = await queryWithRetry(`SELECT media FROM outbound_messages WHERE id = $1`, [id]);
+        const media = Array.isArray(row.rows[0]?.media) ? row.rows[0].media : [];
+        const item = media[index];
+        if (!item?.url) return res.status(404).json({ error: 'Allegato non trovato' });
+
+        // Solo host Twilio: l'url arriva dal webhook, ma un domani una riga
+        // manomessa non deve trasformare questo endpoint in un proxy aperto.
+        let host: string;
+        try { host = new URL(String(item.url)).host; } catch { return res.status(400).json({ error: 'URL non valido' }); }
+        if (!/(^|\.)twilio\.com$/.test(host)) {
+            return res.status(400).json({ error: 'Host non consentito' });
+        }
+
+        const sid = process.env.TWILIO_ACCOUNT_SID;
+        const token = process.env.TWILIO_AUTH_TOKEN;
+        if (!sid || !token) return res.status(503).json({ error: 'Twilio non configurato' });
+
+        const upstream = await fetch(String(item.url), {
+            headers: { Authorization: 'Basic ' + Buffer.from(`${sid}:${token}`).toString('base64') },
+        });
+        if (!upstream.ok || !upstream.body) {
+            console.warn(`[media] Twilio ha risposto ${upstream.status} per il messaggio ${id}`);
+            return res.status(502).json({ error: 'Allegato non recuperabile' });
+        }
+        res.setHeader('Content-Type', upstream.headers.get('content-type') || item.content_type || 'application/octet-stream');
+        const len = upstream.headers.get('content-length');
+        if (len) res.setHeader('Content-Length', len);
+        res.setHeader('Cache-Control', 'private, max-age=86400');
+        const buf = Buffer.from(await upstream.arrayBuffer());
+        res.end(buf);
+    } catch (err: any) {
+        console.error('GET /messages/:id/media error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -11868,6 +11923,21 @@ async function logOutboundMessage(params: {
 // socket for the inbox UI. `to` is the account number the customer wrote to
 // (e.g. our whatsapp:+39389…). Errors are logged but never thrown — a logging
 // failure must not swallow the message.
+// Etichetta leggibile di un allegato, per la notifica push e per la lista
+// conversazioni: "ha inviato una foto" dice piu' di una riga vuota.
+function describeInboundMedia(media?: Array<{ content_type?: string }> | null): string {
+    if (!media || media.length === 0) return '';
+    const t = String(media[0]?.content_type || '');
+    const n = media.length;
+    const kind = t.startsWith('image/') ? (n > 1 ? `${n} foto` : 'una foto')
+        : t.startsWith('video/') ? (n > 1 ? `${n} video` : 'un video')
+        : t.startsWith('audio/') ? 'un messaggio vocale'
+        : t.includes('vcard') || t.includes('contact') ? 'un contatto'
+        : t === 'application/pdf' ? 'un PDF'
+        : n > 1 ? `${n} allegati` : 'un allegato';
+    return `ha inviato ${kind}`;
+}
+
 // Chiave di confronto fra telefoni: il numero NAZIONALE, non le ultime 10
 // cifre. `lastTenDigits` sbaglia sui cellulari vecchio stile a 9 cifre
 // (+39 335 423 066 -> "9335423066": pesca dentro il prefisso 39 e non
@@ -11932,6 +12002,7 @@ async function logInboundMessage(params: {
     to: string;
     body: string;
     sid?: string | null;
+    media?: Array<{ url: string; content_type: string }> | null;
 }): Promise<any | null> {
     try {
         const fromDigits = String(params.from).replace(/\D/g, '');
@@ -11944,8 +12015,8 @@ async function logInboundMessage(params: {
         const result = await queryWithRetry(
             `INSERT INTO outbound_messages
              (provider, channel, direction, from_phone, from_phone_digits,
-              to_phone, to_phone_digits, body, status, provider_sid, reservation_id)
-             VALUES ($1, $2, 'inbound', $3, $4, $5, $6, $7, 'received', $8, $9)
+              to_phone, to_phone_digits, body, status, provider_sid, reservation_id, media)
+             VALUES ($1, $2, 'inbound', $3, $4, $5, $6, $7, 'received', $8, $9, $10::jsonb)
              RETURNING *`,
             [
                 params.provider,
@@ -11957,6 +12028,7 @@ async function logInboundMessage(params: {
                 params.body,
                 params.sid ?? null,
                 reservationId,
+                params.media && params.media.length > 0 ? JSON.stringify(params.media) : null,
             ]
         );
         const row = result.rows[0] ?? null;
@@ -11968,7 +12040,9 @@ async function logInboundMessage(params: {
         // l'app.
         if (row) {
             const channelLabel = params.channel === 'whatsapp' ? 'WhatsApp' : 'SMS';
-            const preview = String(params.body || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+            const mediaLabel = describeInboundMedia(params.media);
+            const preview = String(params.body || '').replace(/\s+/g, ' ').trim().slice(0, 80)
+                || mediaLabel;
             const fromDisplay = params.from || 'sconosciuto';
             pushSendToRoles(
                 ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],

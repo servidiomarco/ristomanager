@@ -1874,6 +1874,11 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // `read_at` is set when an operator marks an inbound message read via
         // the inbox UI. Outbound rows leave it NULL.
         await client.query(`ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ;`);
+        // Allegati dei messaggi in arrivo (foto, vocali, posizione): array di
+        // { url, content_type }. L'url e' quello di Twilio, che richiede
+        // autenticazione — il browser non lo carica mai direttamente, passa
+        // sempre dal proxy GET /messages/:id/media/:index.
+        await client.query(`ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS media JSONB;`);
 
         // ============================================
         // RESERVATION NOTE PRESETS

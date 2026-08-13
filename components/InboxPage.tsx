@@ -7,6 +7,8 @@ import {
   ConversationSummary,
   InboxMessage,
   MessageChannel,
+  fetchMedia,
+  type MessageMedia,
 } from '../services/messagesApiService';
 import { socketClient } from '../services/socketClient';
 import { toTitleCase } from '../utils/text';
@@ -67,6 +69,55 @@ const windowRemainingLabel = (lastInboundAt: string | null | undefined): string 
 // WhatsApp keeps green, SMS takes indigo in place of the old sky blue.
 const channelTone = (channel: MessageChannel): PillTone =>
   channel === 'whatsapp' ? 'positive' : 'info';
+
+/** Un allegato in arrivo (foto, vocale, posizione). Il file sta su Twilio
+ *  dietro autenticazione: si scarica dal backend e si mostra da un object URL,
+ *  revocato allo smontaggio per non tenersi i blob in memoria. */
+const MediaAttachment: React.FC<{ messageId: number; index: number; media: MessageMedia }> = ({ messageId, index, media }) => {
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const type = media.content_type || '';
+  const isImage = type.startsWith('image/');
+  const isAudio = type.startsWith('audio/');
+  const isVideo = type.startsWith('video/');
+
+  useEffect(() => {
+    let revoked = false;
+    let objectUrl: string | null = null;
+    fetchMedia(messageId, index)
+      .then(blob => {
+        if (revoked) return;
+        objectUrl = URL.createObjectURL(blob);
+        setUrl(objectUrl);
+      })
+      .catch(() => { if (!revoked) setFailed(true); });
+    return () => {
+      revoked = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [messageId, index]);
+
+  if (failed) {
+    return <p className="text-[13px] italic opacity-70">Allegato non disponibile</p>;
+  }
+  if (!url) {
+    return <div className="h-32 w-44 animate-pulse rounded-[12px] bg-[var(--ds-surface-row)]" />;
+  }
+  if (isImage) {
+    return (
+      <a href={url} target="_blank" rel="noopener noreferrer">
+        <img src={url} alt="Allegato" className="max-h-64 w-auto rounded-[12px] object-cover" />
+      </a>
+    );
+  }
+  if (isAudio) return <audio controls src={url} className="max-w-[240px]" />;
+  if (isVideo) return <video controls src={url} className="max-h-64 rounded-[12px]" />;
+  return (
+    <a href={url} download target="_blank" rel="noopener noreferrer" className="text-[14px] underline">
+      Scarica allegato
+    </a>
+  );
+};
 
 // Delivery state on an outbound bubble. The bubble is already filled, so these
 // ride on currentColor rather than a second colour fighting the fill.
@@ -524,7 +575,16 @@ const InboxPage: React.FC = () => {
                                   : 'rounded-bl-[6px] bg-[var(--ds-surface)] text-[var(--ds-text-primary)]'
                               }`}
                             >
-                              <p className="whitespace-pre-wrap break-words text-[15px] leading-snug">{m.body}</p>
+                              {Array.isArray(m.media) && m.media.length > 0 && (
+                                <div className="mb-1.5 space-y-1.5">
+                                  {m.media.map((att, i) => (
+                                    <MediaAttachment key={i} messageId={m.id} index={i} media={att} />
+                                  ))}
+                                </div>
+                              )}
+                              {m.body && (
+                                <p className="whitespace-pre-wrap break-words text-[15px] leading-snug">{m.body}</p>
+                              )}
                               <div className={`mt-1 flex items-center justify-end gap-1.5 text-[12px] ${outbound ? 'text-white/75' : 'text-[var(--ds-text-muted)]'}`}>
                                 <span className="tabular-nums">{formatTime(m.sent_at)}</span>
                                 {statusIcon(m)}

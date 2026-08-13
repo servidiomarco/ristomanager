@@ -39,7 +39,19 @@ export interface InboxMessage {
   error_message: string | null;
   from_phone_digits?: string | null;
   to_phone_digits?: string | null;
+  /** Allegati del messaggio in arrivo (foto, vocali, posizione). */
+  media?: MessageMedia[] | null;
 }
+
+export interface MessageMedia {
+  url: string;
+  content_type: string;
+}
+
+/** Gli allegati stanno su Twilio dietro autenticazione: si passa dal backend. */
+export const mediaUrl = (messageId: number, index: number): string =>
+  `${API_URL}/messages/${messageId}/media/${index}`;
+
 
 const getHeaders = (): HeadersInit => {
   const headers: Record<string, string> = {};
@@ -61,6 +73,17 @@ const fetchWithAuth = async (url: string, options: RequestInit = {}, retried = f
     }
   }
   return response;
+};
+
+/**
+ * Scarica un allegato come blob. Serve il fetch autenticato: un <img src>
+ * non manda l'header Authorization, quindi l'immagine si mostra da un
+ * object URL creato qui (da revocare a smontaggio).
+ */
+export const fetchMedia = async (messageId: number, index: number): Promise<Blob> => {
+  const res = await fetchWithAuth(mediaUrl(messageId, index), { headers: getHeaders() });
+  if (!res.ok) throw new Error('Allegato non disponibile');
+  return res.blob();
 };
 
 const apiRequest = async <T>(url: string, options: RequestInit = {}): Promise<T> => {
