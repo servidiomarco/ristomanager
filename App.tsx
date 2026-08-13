@@ -2343,7 +2343,14 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.MESSAGGI && (
-          <InboxPage />
+          <InboxPage
+            onCreateReservationFromContact={({ customer_name, phone }) => {
+              setNewReservationPrefill({ customer_name, phone });
+              setNewReservationKind('standard');
+              setAutoOpenNewReservation(true);
+              setView(ViewState.RESERVATIONS);
+            }}
+          />
         )}
 
         {view === ViewState.EMAIL && (

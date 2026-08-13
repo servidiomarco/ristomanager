@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowRight, Check } from 'lucide-react';
+import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowRight, Check, CalendarPlus, Paperclip, X as XIcon } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
 import { SkeletonInboxList } from './SkeletonCards';
 import {
@@ -8,7 +8,9 @@ import {
   InboxMessage,
   MessageChannel,
   fetchMedia,
+  uploadAttachment,
   type MessageMedia,
+  type UploadedAttachment,
 } from '../services/messagesApiService';
 import { socketClient } from '../services/socketClient';
 import { toTitleCase } from '../utils/text';
@@ -132,7 +134,12 @@ const statusIcon = (m: InboxMessage) => {
 const displayName = (c: ConversationSummary): string =>
   (c.customer_name && c.customer_name.trim() && toTitleCase(c.customer_name)) || c.phone || `+${c.phone_digits}`;
 
-const InboxPage: React.FC = () => {
+interface InboxPageProps {
+  /** Apre il modulo nuova prenotazione col contatto già compilato. */
+  onCreateReservationFromContact?: (contact: { customer_name?: string; phone?: string }) => void;
+}
+
+const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact }) => {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [convLoading, setConvLoading] = useState(true);
   const [convError, setConvError] = useState<string | null>(null);
@@ -148,6 +155,9 @@ const InboxPage: React.FC = () => {
   const [msgError, setMsgError] = useState<string | null>(null);
 
   const [composerText, setComposerText] = useState('');
+  const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [preferredChannel, setPreferredChannel] = useState<MessageChannel>('whatsapp');
@@ -319,8 +329,33 @@ const InboxPage: React.FC = () => {
   );
   const waWindowOpen = !!windowRemaining;
 
+  // Carica subito il file scelto: al momento dell'invio serve solo il token,
+  // cosi' l'attesa dell'upload non si somma a quella dell'invio.
+  const handlePickFiles = useCallback(async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    setSendError(null);
+    try {
+      const uploaded: UploadedAttachment[] = [];
+      for (const file of Array.from(files).slice(0, 5)) {
+        uploaded.push(await uploadAttachment(file));
+      }
+      setAttachments(prev => [...prev, ...uploaded]);
+      // WhatsApp e' l'unico canale con gli allegati: evita che il primo
+      // invio fallisca solo perche' il canale era su SMS.
+      setPreferredChannel('whatsapp');
+    } catch (err: any) {
+      setSendError(err?.message || 'Caricamento allegato non riuscito');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }, []);
+
   const handleSend = useCallback(async () => {
-    if (!selected || !composerText.trim() || sending) return;
+    if (!selected || sending) return;
+    const hasText = composerText.trim().length > 0;
+    if (!hasText && attachments.length === 0) return;
     const phone = selected.phone || `+${selected.phone_digits}`;
     setSending(true);
     setSendError(null);
@@ -329,8 +364,10 @@ const InboxPage: React.FC = () => {
         phone,
         text: composerText.trim(),
         channel: preferredChannel,
+        attachment_tokens: attachments.map(a => a.token),
       });
       setComposerText('');
+      setAttachments([]);
       composerRef.current?.focus();
     } catch (err: any) {
       const data = (err as any)?.data;
@@ -342,7 +379,7 @@ const InboxPage: React.FC = () => {
     } finally {
       setSending(false);
     }
-  }, [selected, composerText, sending, preferredChannel]);
+  }, [selected, composerText, sending, preferredChannel, attachments]);
 
   const handleComposerKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -535,11 +572,31 @@ const InboxPage: React.FC = () => {
                   {selected.last_channel === 'whatsapp' ? 'WhatsApp' : 'SMS'}
                 </StatusPill>
               }
-              actions={waWindowOpen && preferredChannel === 'whatsapp' ? (
-                <StatusPill tone="positive" className="hidden sm:inline-flex">
-                  <Clock className="h-3 w-3" aria-hidden /> Finestra WA: {windowRemaining}
-                </StatusPill>
-              ) : undefined}
+              actions={
+                <div className="flex items-center gap-2">
+                  {waWindowOpen && preferredChannel === 'whatsapp' && (
+                    <StatusPill tone="positive" className="hidden sm:inline-flex">
+                      <Clock className="h-3 w-3" aria-hidden /> Finestra WA: {windowRemaining}
+                    </StatusPill>
+                  )}
+                  {/* Chi scrive senza avere una prenotazione e' un cliente da
+                      acquisire: il numero e' gia' qui, ricopiarlo a mano e'
+                      l'unico attrito fra il messaggio e il tavolo prenotato. */}
+                  {onCreateReservationFromContact && !selected.last_reservation_id && (
+                    <button
+                      type="button"
+                      onClick={() => onCreateReservationFromContact({
+                        customer_name: selected.customer_name || undefined,
+                        phone: selected.phone || selected.phone_digits,
+                      })}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    >
+                      <CalendarPlus className="h-4 w-4" aria-hidden />
+                      <span className="hidden sm:inline">Crea prenotazione</span>
+                    </button>
+                  )}
+                </div>
+              }
             />
 
             <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--ds-canvas)]">
@@ -624,6 +681,33 @@ const InboxPage: React.FC = () => {
                 )}
                 {sendError && <Callout tone="critical" icon={AlertTriangle}>{sendError}</Callout>}
 
+                {/* Allegati pronti: si vedono prima di premere invia, e si
+                    tolgono uno per uno se si sbaglia file. */}
+                {attachments.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {attachments.map(a => (
+                      <span
+                        key={a.token}
+                        className="inline-flex max-w-[220px] items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] py-1 pl-3 pr-1.5 text-[13px] text-[var(--ds-text-primary)]"
+                      >
+                        <Paperclip className="h-3.5 w-3.5 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
+                        <span className="truncate">{a.filename || a.content_type}</span>
+                        <span className="flex-shrink-0 text-[12px] text-[var(--ds-text-muted)]">
+                          {Math.max(1, Math.round(a.size_bytes / 1024))} KB
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setAttachments(prev => prev.filter(x => x.token !== a.token))}
+                          aria-label={`Togli ${a.filename || 'allegato'}`}
+                          className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
+                        >
+                          <XIcon className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
                 {/* Channel toggle. The raised-pill treatment is the app's
                     segmented control; the coloured dot keeps the channel
                     legible without repainting the whole pill. */}
@@ -648,6 +732,24 @@ const InboxPage: React.FC = () => {
 
                 {/* Composer: one card, send button inside the field. */}
                 <div className="flex items-end gap-2 rounded-[24px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,audio/mpeg,audio/ogg,application/pdf"
+                    multiple
+                    hidden
+                    onChange={e => handlePickFiles(e.target.files)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading || sending}
+                    aria-label="Allega un file"
+                    title="Allega foto, PDF o audio (solo WhatsApp)"
+                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                  </button>
                   <textarea
                     ref={composerRef}
                     value={composerText}
@@ -662,7 +764,7 @@ const InboxPage: React.FC = () => {
                   />
                   <button
                     onClick={handleSend}
-                    disabled={!composerText.trim() || sending || (preferredChannel === 'whatsapp' && !waWindowOpen)}
+                    disabled={(!composerText.trim() && attachments.length === 0) || sending || uploading || (preferredChannel === 'whatsapp' && !waWindowOpen)}
                     aria-label="Invia messaggio"
                     className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-white transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ds-surface-row)] disabled:text-[var(--ds-text-subtle)] ${
                       preferredChannel === 'whatsapp'

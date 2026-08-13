@@ -147,10 +147,27 @@ app.use(cors(corsOptions));
 // `verify` stashes the raw payload so HMAC-signed webhooks (e.g. ElevenLabs)
 // can validate against the exact bytes sent by the caller — JSON.stringify
 // would reorder keys and break the signature.
-app.use(express.json({
-    limit: '2mb',
-    verify: (req: any, _res, buf) => { req.rawBody = buf; }
-}));
+// Un allegato da 5 MB diventa ~6.7 MB in base64: con il limite globale a 2 MB
+// il parser risponderebbe con una pagina HTML di errore prima ancora di
+// arrivare alla rotta, che non potrebbe spiegare cosa e' andato storto.
+// Limite piu' alto solo dove serve, invece di alzarlo per tutti (fra cui le
+// rotte pubbliche).
+const jsonVerify = (req: any, _res: any, buf: Buffer) => { req.rawBody = buf; };
+const standardJson = express.json({ limit: '2mb', verify: jsonVerify });
+const largeJson = express.json({ limit: '8mb', verify: jsonVerify });
+app.use((req, res, next) => (
+    req.path === '/messages/attachments' ? largeJson(req, res, next) : standardJson(req, res, next)
+));
+
+// Un body oltre il limite fa fallire il parser PRIMA della rotta: senza
+// questo, il client riceve la pagina HTML di errore di Express e mostra
+// "Unexpected token <" invece del motivo vero.
+app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err?.type === 'entity.too.large') {
+        return res.status(413).json({ error: 'File troppo grande' });
+    }
+    return next(err);
+});
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -4891,11 +4908,75 @@ app.post('/email/send', authenticate, requirePermission('reservations:full'), as
 // for WhatsApp freeform (needs an inbound < 24h ago); SMS has no constraint.
 // The customer-service window check is deliberately done server-side so the
 // UI can render a "window closed" banner without duplicating the rule.
+// Allegati in uscita: il file arriva in base64 dal browser, resta a DB e
+// viene servito a Twilio da un URL pubblico con token non indovinabile.
+// 5 MB e' il limite pratico di WhatsApp per immagini e video; oltre, Meta
+// rifiuta comunque.
+const OUTBOUND_MEDIA_MAX_BYTES = 5 * 1024 * 1024;
+const OUTBOUND_MEDIA_TYPES = /^(image\/(jpeg|png|webp|gif)|video\/(mp4|3gpp)|audio\/(mpeg|ogg|amr|aac)|application\/pdf)$/;
+
+app.post('/messages/attachments', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    try {
+        const contentType = String(req.body?.content_type || '').toLowerCase().split(';')[0].trim();
+        const dataB64 = String(req.body?.data || '');
+        const filename = req.body?.filename ? String(req.body.filename).slice(0, 200) : null;
+        if (!contentType || !dataB64) {
+            return res.status(400).json({ error: 'content_type e data sono obbligatori' });
+        }
+        if (!OUTBOUND_MEDIA_TYPES.test(contentType)) {
+            return res.status(415).json({ error: `Tipo non supportato da WhatsApp: ${contentType}` });
+        }
+        const buf = Buffer.from(dataB64.replace(/^data:[^,]+,/, ''), 'base64');
+        if (buf.length === 0) return res.status(400).json({ error: 'File vuoto' });
+        if (buf.length > OUTBOUND_MEDIA_MAX_BYTES) {
+            return res.status(413).json({ error: 'File troppo grande: massimo 5 MB' });
+        }
+        const token = crypto.randomBytes(32).toString('base64url');
+        const ins = await queryWithRetry(
+            `INSERT INTO outbound_media (token, content_type, filename, bytes, size_bytes, created_by_user_id)
+             VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, token, content_type, filename, size_bytes`,
+            [token, contentType, filename, buf, buf.length, req.user?.userId ?? null]
+        );
+        res.status(201).json(ins.rows[0]);
+    } catch (err: any) {
+        console.error('POST /messages/attachments error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Pubblico per forza: e' Twilio a scaricare il file, e non ha le nostre
+// credenziali. La protezione e' il token da 32 byte nel path.
+app.get('/public/media/:token', async (req, res) => {
+    try {
+        const token = String(req.params.token || '');
+        if (!/^[A-Za-z0-9_-]{20,64}$/.test(token)) return res.status(404).send('Not found');
+        const r = await queryWithRetry(
+            `SELECT content_type, bytes, size_bytes FROM outbound_media WHERE token = $1`,
+            [token]
+        );
+        const row = r.rows[0];
+        if (!row) return res.status(404).send('Not found');
+        res.setHeader('Content-Type', row.content_type);
+        res.setHeader('Content-Length', String(row.size_bytes));
+        res.setHeader('Cache-Control', 'public, max-age=3600');
+        res.end(row.bytes);
+    } catch (err: any) {
+        console.error('GET /public/media error:', err);
+        res.status(500).send('Internal server error');
+    }
+});
+
 app.post('/messages/send', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const { phone, text, channel } = req.body || {};
-        if (!phone || !text || typeof text !== 'string' || !text.trim()) {
-            return res.status(400).json({ error: 'phone and non-empty text required' });
+        // Gli allegati sono referenziati per token: il file e' gia' a DB
+        // (POST /messages/attachments) e qui diventa l'URL che Twilio scarica.
+        const attachmentTokens: string[] = Array.isArray(req.body?.attachment_tokens)
+            ? req.body.attachment_tokens.map((t: any) => String(t)).filter(Boolean).slice(0, 10)
+            : [];
+        const hasText = typeof text === 'string' && text.trim().length > 0;
+        if (!phone || (!hasText && attachmentTokens.length === 0)) {
+            return res.status(400).json({ error: 'Servono un telefono e almeno un testo o un allegato' });
         }
         const desiredChannel: 'whatsapp' | 'sms' = channel === 'sms' ? 'sms' : 'whatsapp';
         const key = String(phone).replace(/\D/g, '').slice(-10);
@@ -4920,8 +5001,31 @@ app.post('/messages/send', authenticate, requirePermission('reservations:full'),
             }
         }
 
-        const send = desiredChannel === 'whatsapp' ? sendWhatsAppText : sendTwilioSms;
-        const result = await send(phone, text.trim());
+        let mediaUrls: string[] = [];
+        if (attachmentTokens.length > 0) {
+            if (desiredChannel !== 'whatsapp') {
+                return res.status(400).json({ error: 'Gli allegati si inviano solo via WhatsApp' });
+            }
+            const found = await queryWithRetry(
+                `SELECT token FROM outbound_media WHERE token = ANY($1)`,
+                [attachmentTokens]
+            );
+            const known = new Set(found.rows.map((r: any) => r.token));
+            const missing = attachmentTokens.filter(t => !known.has(t));
+            if (missing.length > 0) return res.status(400).json({ error: 'Allegato non trovato' });
+            const base = publicBaseUrl().replace(/\/$/, '');
+            // Twilio deve poter risolvere l'URL da internet: in locale non
+            // funziona, ed e' bene dirlo subito invece di far fallire il send.
+            if (/localhost|127\.0\.0\.1/.test(base)) {
+                return res.status(503).json({ error: 'Allegati non inviabili da ambiente locale: Twilio non raggiunge questo host' });
+            }
+            mediaUrls = attachmentTokens.map(t => `${base}/public/media/${t}`);
+        }
+
+        const body = hasText ? text.trim() : '';
+        const result = desiredChannel === 'whatsapp'
+            ? await sendWhatsAppText(phone, body, null, undefined, mediaUrls)
+            : await sendTwilioSms(phone, body);
 
         let row: any = null;
         if (result.sid) {
@@ -4930,6 +5034,20 @@ app.post('/messages/send', authenticate, requirePermission('reservations:full'),
                 [result.sid]
             );
             row = r.rows[0] ?? null;
+        }
+        // La bolla in uscita deve mostrare quello che e' partito: gli allegati
+        // finiscono sulla riga come per gli inbound, con l'URL pubblico.
+        if (row && mediaUrls.length > 0) {
+            const media = attachmentTokens.map((t, i) => ({ url: mediaUrls[i], token: t }));
+            const enriched = await queryWithRetry(
+                `UPDATE outbound_messages SET media = $2::jsonb WHERE id = $1 RETURNING *`,
+                [row.id, JSON.stringify(media)]
+            );
+            row = enriched.rows[0] ?? row;
+            await queryWithRetry(
+                `UPDATE outbound_media SET message_id = $1 WHERE token = ANY($2)`,
+                [row.id, attachmentTokens]
+            ).catch(() => {});
         }
         if (row && socketService) {
             socketService.broadcastToAll('message:outbound', row);
@@ -12113,7 +12231,8 @@ async function sendTwilioWhatsApp(
     to: string,
     text: string,
     reservationId?: number | null,
-    template?: WhatsAppTemplateOpts
+    template?: WhatsAppTemplateOpts,
+    mediaUrls?: string[]
 ): Promise<OutboundConfirmationResult> {
     const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
     const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
@@ -12143,7 +12262,10 @@ async function sendTwilioWhatsApp(
         body.set('ContentSid', template.contentSid);
         body.set('ContentVariables', JSON.stringify(template.contentVariables));
     } else {
-        body.set('Body', text);
+        // Con un allegato il testo diventa la didascalia e puo' mancare:
+        // Twilio rifiuta un Body vuoto, quindi lo si mette solo se c'e'.
+        if (text) body.set('Body', text);
+        for (const url of mediaUrls ?? []) body.append('MediaUrl', url);
     }
     const callback = twilioStatusCallbackUrl();
     if (callback) body.set('StatusCallback', callback);
@@ -12193,12 +12315,14 @@ async function sendWhatsAppText(
     to: string,
     text: string,
     reservationId?: number | null,
-    template?: WhatsAppTemplateOpts
+    template?: WhatsAppTemplateOpts,
+    mediaUrls?: string[]
 ): Promise<OutboundConfirmationResult> {
     if (isTwilioWhatsAppConfigured()) {
-        return sendTwilioWhatsApp(to, text, reservationId, template);
+        return sendTwilioWhatsApp(to, text, reservationId, template, mediaUrls);
     }
     if (template) throw new Error('WhatsApp template requires Twilio (Vonage unsupported)');
+    if (mediaUrls?.length) throw new Error('Gli allegati richiedono Twilio (Vonage non supportato)');
     try {
         await sendVonageWhatsApp(to, text);
         await logOutboundMessage({ provider: 'vonage', channel: 'whatsapp', to, body: text, reservationId });
