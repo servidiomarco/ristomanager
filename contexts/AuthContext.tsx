@@ -30,6 +30,7 @@ const VIEW_PERMISSIONS: Record<ViewState, string> = {
   [ViewState.PAGAMENTI]: 'payments:view',
   [ViewState.EMAIL]: 'reservations:view',
   [ViewState.NOTIFICHE]: 'dashboard:view',
+  [ViewState.MONITORING]: '', // gated by account email, not by permission — see canAccessView
   [ViewState.DEVELOPMENT]: '' // gated by account email, not by permission — see canAccessView
 };
 
@@ -125,7 +126,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [permissions]);
 
   const canAccessView = useCallback((view: ViewState): boolean => {
-    if (view === ViewState.DEVELOPMENT) {
+    if (view === ViewState.DEVELOPMENT || view === ViewState.MONITORING) {
       return (user?.email || '').toLowerCase() === DEV_BOARD_ADMIN_EMAIL;
     }
     const requiredPermission = VIEW_PERMISSIONS[view];

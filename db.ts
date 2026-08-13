@@ -2082,6 +2082,33 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         }
 
         // ============================================
+        // CONSUMI AI — token Gemini
+        // ============================================
+        // Ogni chiamata a Gemini (report Dashboard, e in futuro i messaggi AI)
+        // scrive qui un evento con i token dichiarati da usageMetadata. È una
+        // tabella append-only di sola telemetria: la pagina "Consumi AI"
+        // (riservata all'account admin) la aggrega per giorno / feature.
+        // ElevenLabs NON finisce qui: i suoi consumi si leggono live dall'API
+        // /user/subscription e dagli aggregati di voice_calls.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS ai_token_usage (
+                id            BIGSERIAL PRIMARY KEY,
+                provider      VARCHAR(20) NOT NULL,     -- 'gemini'
+                feature       VARCHAR(60) NOT NULL,     -- 'dashboard_report' | 'banquet_menu' | ...
+                model         VARCHAR(80),
+                prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                total_tokens  INTEGER NOT NULL DEFAULT 0,
+                user_email    VARCHAR(255),
+                created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_ai_token_usage_provider_created
+                ON ai_token_usage(provider, created_at DESC);
+        `);
+
+        // ============================================
         // GESTIONALE DI SALA — PR 1: listini, varianti, partite
         // ============================================
         // Fondamenta dello schema comande (vedi docs/gestionale-sala-plan.md).
