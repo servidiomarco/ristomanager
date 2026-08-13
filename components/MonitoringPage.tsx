@@ -19,6 +19,7 @@ type WindowDays = (typeof WINDOWS)[number];
 const FEATURE_LABELS: Record<string, string> = {
   dashboard_report: 'Report Dashboard',
   banquet_menu: 'Proposta menu banchetto',
+  suggest_reply: 'Risposta suggerita messaggi',
 };
 const featureLabel = (key: string): string => FEATURE_LABELS[key] || key;
 
