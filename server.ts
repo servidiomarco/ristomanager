@@ -408,7 +408,7 @@ app.post('/webhook/twilio-whatsapp-status', twilioUrlEncoded, async (req, res) =
         // Also update the outbound_messages log so the SMS section in the
         // conversation modal reflects the final delivery state.
         try {
-            await queryWithRetry(
+            const updatedMsg = await queryWithRetry(
                 `UPDATE outbound_messages
                  SET status = $1::text,
                      delivered_at = CASE
@@ -423,9 +423,16 @@ app.post('/webhook/twilio-whatsapp-status', twilioUrlEncoded, async (req, res) =
                      END,
                      error_code = $2,
                      error_message = $3
-                 WHERE provider_sid = $4`,
+                 WHERE provider_sid = $4
+                 RETURNING *`,
                 [status, ErrorCode || null, errText, MessageSid]
             );
+            // L'esito arriva dopo l'invio: senza questo evento la bolla resta
+            // con l'orologio anche quando il messaggio e' fallito, e chi l'ha
+            // mandato crede sia partito finche' non ricarica la pagina.
+            if (updatedMsg.rows[0] && socketService) {
+                socketService.broadcastToAll('message:status', updatedMsg.rows[0]);
+            }
         } catch (err: any) {
             console.warn('[Twilio] outbound_messages update failed:', err?.message || err);
         }
@@ -4638,6 +4645,23 @@ app.get('/messages/:id/media/:index', authenticate, requirePermission('reservati
         const item = media[index];
         if (!item?.url) return res.status(404).json({ error: 'Allegato non trovato' });
 
+        // Allegati NOSTRI (messaggi in uscita): il file e' a DB, non su
+        // Twilio. Senza questo ramo finivano nel controllo host piu' sotto e
+        // la bolla mostrava "Allegato non disponibile" a chi lo aveva appena
+        // inviato.
+        if (item.token) {
+            const own = await queryWithRetry(
+                `SELECT content_type, bytes, size_bytes FROM outbound_media WHERE token = $1`,
+                [String(item.token)]
+            );
+            const file = own.rows[0];
+            if (!file) return res.status(404).json({ error: 'Allegato non trovato' });
+            res.setHeader('Content-Type', file.content_type);
+            res.setHeader('Content-Length', String(file.size_bytes));
+            res.setHeader('Cache-Control', 'private, max-age=86400');
+            return res.end(file.bytes);
+        }
+
         // Solo host Twilio: l'url arriva dal webhook, ma un domani una riga
         // manomessa non deve trasformare questo endpoint in un proxy aperto.
         let host: string;
@@ -5013,9 +5037,15 @@ app.post('/messages/send', authenticate, requirePermission('reservations:full'),
             const known = new Set(found.rows.map((r: any) => r.token));
             const missing = attachmentTokens.filter(t => !known.has(t));
             if (missing.length > 0) return res.status(400).json({ error: 'Allegato non trovato' });
-            const base = publicBaseUrl().replace(/\/$/, '');
-            // Twilio deve poter risolvere l'URL da internet: in locale non
-            // funziona, ed e' bene dirlo subito invece di far fallire il send.
+            // ATTENZIONE: qui serve il dominio del BACKEND, non quello della
+            // SPA. publicBaseUrl() punta a crm.vecchiofrantoio.com (Vercel),
+            // che su un path sconosciuto risponde 200 con l'index.html: Twilio
+            // scaricava una pagina HTML al posto del file e falliva con 63019
+            // "Media failed to download", senza che nulla arrivasse al cliente.
+            const base = backendBaseUrl();
+            if (!base) {
+                return res.status(503).json({ error: 'Allegati non inviabili: manca PUBLIC_WEBHOOK_BASE_URL sul backend' });
+            }
             if (/localhost|127\.0\.0\.1/.test(base)) {
                 return res.status(503).json({ error: 'Allegati non inviabili da ambiente locale: Twilio non raggiunge questo host' });
             }
@@ -12221,10 +12251,18 @@ async function logOutboundEmail(params: {
 // Public URL used as StatusCallback for Twilio outbound messages so Twilio can
 // notify us of delivery/failure. Falls back to VITE_API_URL, then null (no
 // callback attached — messages still send, just no delivery tracking).
-function twilioStatusCallbackUrl(): string | null {
+// Base pubblica del BACKEND (questo processo), da non confondere con
+// publicBaseUrl() che punta alla SPA su Vercel. Serve a tutto cio' che un
+// servizio esterno deve poter chiamare o scaricare da noi: callback Twilio e
+// allegati in uscita.
+function backendBaseUrl(): string | null {
     const base = process.env.PUBLIC_WEBHOOK_BASE_URL || process.env.VITE_API_URL;
-    if (!base) return null;
-    return `${base.replace(/\/+$/, '')}/webhook/twilio-whatsapp-status`;
+    return base ? base.replace(/\/+$/, '') : null;
+}
+
+function twilioStatusCallbackUrl(): string | null {
+    const base = backendBaseUrl();
+    return base ? `${base}/webhook/twilio-whatsapp-status` : null;
 }
 
 async function sendTwilioWhatsApp(

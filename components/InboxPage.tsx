@@ -278,6 +278,14 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
       }
     };
 
+    // Esito di consegna dal callback Twilio: arriva dopo l'invio, quindi
+    // senza questo la bolla resta con l'orologio anche quando il messaggio e'
+    // fallito e chi l'ha mandato crede sia partito.
+    const onStatus = (msg: InboxMessage) => {
+      if (!msg?.id) return;
+      setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, ...msg } : m)));
+    };
+
     const onOutbound = (msg: InboxMessage) => {
       const key = digitsMatch(msg);
       if (!key) return;
@@ -308,11 +316,13 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
       if (attached) {
         attached.off('message:inbound', onInbound);
         attached.off('message:outbound', onOutbound);
+        attached.off('message:status', onStatus);
       }
       attached = s;
       if (attached) {
         attached.on('message:inbound', onInbound);
         attached.on('message:outbound', onOutbound);
+        attached.on('message:status', onStatus);
       }
     };
     attach(socketClient.getSocket());
