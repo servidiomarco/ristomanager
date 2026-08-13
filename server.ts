@@ -3236,14 +3236,19 @@ app.get('/reservations/:id/messages', authenticate, requirePermission('reservati
         if (resRow.rows.length === 0) return res.status(404).json({ error: 'Not found' });
         const phone: string | null = resRow.rows[0].phone;
         const email: string | null = resRow.rows[0].email;
-        const digits = phone ? String(phone).replace(/\D/g, '') : '';
-        const suffix = digits.length >= 8 ? digits.slice(-10) : null;
+        // Chiave nazionale (vedi phoneMatchKey): sugli uscenti guarda il
+        // destinatario, sugli entranti il mittente — altrimenti le risposte
+        // del cliente non comparirebbero mai qui.
+        const key = phone ? phoneMatchKey(phone) : '';
+        const matchKey = key.length >= 6 ? key : null;
 
         const conditions: string[] = ['reservation_id = $1'];
         const params: any[] = [id];
-        if (suffix) {
-            params.push(suffix);
-            conditions.push(`right(to_phone_digits, 10) = $${params.length}`);
+        if (matchKey) {
+            params.push(matchKey);
+            const n = params.length;
+            conditions.push(`(direction <> 'inbound' AND ${PHONE_MATCH_KEY_SQL('to_phone_digits')} = $${n})`);
+            conditions.push(`(direction = 'inbound' AND ${PHONE_MATCH_KEY_SQL('from_phone_digits')} = $${n})`);
         }
         if (email) {
             params.push(email);
@@ -3251,7 +3256,7 @@ app.get('/reservations/:id/messages', authenticate, requirePermission('reservati
         }
 
         const result = await queryWithRetry(
-            `SELECT id, provider, channel, direction, to_phone, to_email, from_email,
+            `SELECT id, provider, channel, direction, to_phone, from_phone, to_email, from_email,
                     subject, body, status, provider_sid, message_id, in_reply_to,
                     reservation_id, sent_at, delivered_at, failed_at,
                     error_code, error_message
@@ -11863,6 +11868,63 @@ async function logOutboundMessage(params: {
 // socket for the inbox UI. `to` is the account number the customer wrote to
 // (e.g. our whatsapp:+39389…). Errors are logged but never thrown — a logging
 // failure must not swallow the message.
+// Chiave di confronto fra telefoni: il numero NAZIONALE, non le ultime 10
+// cifre. `lastTenDigits` sbaglia sui cellulari vecchio stile a 9 cifre
+// (+39 335 423 066 -> "9335423066": pesca dentro il prefisso 39 e non
+// combacia mai con il "335423066" salvato in prenotazione). Qui il prefisso
+// italiano si toglie solo quando la lunghezza lo rende inequivocabile:
+// 11 cifre = 39 + 9, 12 cifre = 39 + 10. Un nazionale che inizia per 39
+// (prefisso 393…, 10 cifre) resta intatto.
+function phoneMatchKey(input: string | null | undefined): string {
+    const d = String(input ?? '').replace(/\D/g, '');
+    if (d.startsWith('00')) return phoneMatchKey(d.slice(2));
+    if ((d.length === 11 || d.length === 12) && d.startsWith('39')) return d.slice(2);
+    return d;
+}
+
+// Espressione SQL equivalente a phoneMatchKey, per confrontare in query una
+// colonna telefono senza doverla normalizzare a monte.
+const PHONE_MATCH_KEY_SQL = (col: string) => `
+    CASE
+      WHEN length(regexp_replace(${col}, '[^0-9]', '', 'g')) IN (11, 12)
+       AND left(regexp_replace(${col}, '[^0-9]', '', 'g'), 2) = '39'
+      THEN substr(regexp_replace(${col}, '[^0-9]', '', 'g'), 3)
+      ELSE regexp_replace(${col}, '[^0-9]', '', 'g')
+    END`;
+
+/**
+ * Prenotazione a cui appartiene un messaggio in arrivo da `phone`.
+ *
+ * Un cliente abituale ha piu' prenotazioni: quella giusta e' la piu' vicina
+ * nel tempo al messaggio — chi scrive alle 19 sta parlando della cena di
+ * stasera, non di quella di marzo. Le annullate restano candidabili (spesso
+ * il messaggio E' la disdetta), ma perdono contro una prenotazione viva a
+ * parita' di distanza.
+ */
+async function resolveReservationByPhone(
+    phone: string,
+    when: Date = new Date()
+): Promise<number | null> {
+    const key = phoneMatchKey(phone);
+    if (key.length < 6) return null;
+    try {
+        const r = await queryWithRetry(
+            `SELECT id
+               FROM reservations
+              WHERE phone IS NOT NULL AND phone <> ''
+                AND ${PHONE_MATCH_KEY_SQL('phone')} = $1
+              ORDER BY (reservation_status = 'CANCELLED') ASC,
+                       abs(extract(epoch FROM (reservation_time - $2::timestamptz))) ASC
+              LIMIT 1`,
+            [key, when.toISOString()]
+        );
+        return r.rows[0]?.id ?? null;
+    } catch (err: any) {
+        console.warn('[inbound-log] lookup prenotazione fallito:', err?.message || err);
+        return null;
+    }
+}
+
 async function logInboundMessage(params: {
     provider: 'twilio' | 'vonage' | 'meta';
     channel: 'sms' | 'whatsapp';
@@ -11874,11 +11936,16 @@ async function logInboundMessage(params: {
     try {
         const fromDigits = String(params.from).replace(/\D/g, '');
         const toDigits = String(params.to).replace(/\D/g, '');
+        // Aggancio alla prenotazione: senza, la risposta del cliente resta
+        // solo in Inbox e non compare sulla scheda dove il cameriere guarda.
+        // Se non c'e' nessuna prenotazione (cliente nuovo) resta NULL e il
+        // messaggio vive comunque in Inbox — mai un filtro, solo un'aggiunta.
+        const reservationId = await resolveReservationByPhone(params.from);
         const result = await queryWithRetry(
             `INSERT INTO outbound_messages
              (provider, channel, direction, from_phone, from_phone_digits,
-              to_phone, to_phone_digits, body, status, provider_sid)
-             VALUES ($1, $2, 'inbound', $3, $4, $5, $6, $7, 'received', $8)
+              to_phone, to_phone_digits, body, status, provider_sid, reservation_id)
+             VALUES ($1, $2, 'inbound', $3, $4, $5, $6, $7, 'received', $8, $9)
              RETURNING *`,
             [
                 params.provider,
@@ -11889,6 +11956,7 @@ async function logInboundMessage(params: {
                 toDigits,
                 params.body,
                 params.sid ?? null,
+                reservationId,
             ]
         );
         const row = result.rows[0] ?? null;
