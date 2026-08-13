@@ -755,6 +755,8 @@ export interface FeatureFlags {
   voice_bookings_suspended: boolean;
   pay_at_table_enabled: boolean;
   table_orders_enabled: boolean;
+  /** Risposte suggerite ai messaggi dei clienti. */
+  ai_messages_enabled: boolean;
 }
 
 export const getFeatureFlags = async (): Promise<FeatureFlags> => {
