@@ -9772,8 +9772,11 @@ app.post('/dev-board/cards', authenticate, requireDevBoardAdmin, async (req, res
         const column = DEV_BOARD_COLUMNS.includes(column_key) ? column_key : 'in_progress';
         const labels = sanitizeDevBoardLabels(req.body?.labels) ?? [];
         const result = await queryWithRetry(
+            // $3 (column_key) compare sia nella VALUES sia nella subquery: senza
+            // cast espliciti Postgres 16 rifiuta con "inconsistent types deduced
+            // for parameter $3". Stesso motivo per cui la PUT usa $3::varchar.
             `INSERT INTO dev_board_cards (title, description, column_key, position, labels)
-             VALUES ($1, $2, $3, (SELECT COALESCE(MAX(position), -1) + 1 FROM dev_board_cards WHERE column_key = $3), $4)
+             VALUES ($1, $2, $3::varchar, (SELECT COALESCE(MAX(position), -1) + 1 FROM dev_board_cards WHERE column_key = $3::varchar), $4)
              RETURNING id, title, description, column_key, position, labels, created_at, updated_at`,
             [String(title).trim(), description ? String(description).trim() || null : null, column, labels]
         );
