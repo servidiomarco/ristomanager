@@ -4,6 +4,11 @@ import { authApiService } from "./authApiService";
 
 const API_URL = import.meta.env.VITE_API_URL || "https://ristomanager-production.up.railway.app";
 
+// gemini-2.5-flash restituisce 404 "no longer available to new users" con le
+// chiavi API recenti (stesso motivo per cui aiReplyService usa gemini-3.5-flash,
+// verificato il 2026-08-13). Tenere allineati i due percorsi.
+const GEMINI_MODEL = 'gemini-3.5-flash';
+
 const getAiClient = () => {
   return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
@@ -73,11 +78,11 @@ export const generateRestaurantReport = async (
     `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: GEMINI_MODEL,
       contents: prompt,
     });
 
-    reportGeminiUsage('dashboard_report', 'gemini-2.5-flash', response);
+    reportGeminiUsage('dashboard_report', GEMINI_MODEL, response);
     return response.text || "Impossibile generare il report al momento.";
   } catch (error) {
     console.error("Errore Gemini:", error);
@@ -93,12 +98,12 @@ export const suggestBanquetMenu = async (
     try {
         const ai = getAiClient();
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: GEMINI_MODEL,
             contents: `Crea una proposta di menu per un banchetto di ${guests} persone con un budget di €${budget} a persona.
             Preferenze cliente: ${preferences}.
             Restituisci il menu formattato bene in Markdown con antipasti, primi, secondi e dolci, includendo i prezzi stimati per piatto.`
         });
-        reportGeminiUsage('banquet_menu', 'gemini-2.5-flash', response);
+        reportGeminiUsage('banquet_menu', GEMINI_MODEL, response);
         return response.text || "Nessun suggerimento disponibile.";
     } catch (e) {
         console.error(e);

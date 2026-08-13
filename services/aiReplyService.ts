@@ -117,12 +117,32 @@ rispondi esattamente con: NON_SO
 Scrivi solo il testo del messaggio da inviare, senza virgolette e senza spiegazioni.`;
 }
 
+/** Consumo token di una singola generazione, per la telemetria in ai_token_usage. */
+export interface AiReplyUsage {
+    model: string;
+    promptTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+}
+
+export interface GenerateSuggestedReplyOptions {
+    /**
+     * Chiamata (best-effort) con i token consumati appena il modello risponde,
+     * anche quando poi il suggerimento è NON_SO: i token si pagano comunque. Il
+     * service non ha accesso al DB, quindi la persistenza avviene nel chiamante.
+     */
+    onUsage?: (usage: AiReplyUsage) => void;
+}
+
 /**
  * Genera la risposta suggerita. Ritorna null quando il modello dichiara di non
  * sapere: meglio nessun suggerimento che uno inventato, e il cameriere scrive
  * di suo come farebbe comunque oggi.
  */
-export async function generateSuggestedReply(ctx: AiReplyContext): Promise<string | null> {
+export async function generateSuggestedReply(
+    ctx: AiReplyContext,
+    opts: GenerateSuggestedReplyOptions = {}
+): Promise<string | null> {
     const apiKey = (process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim();
     if (!apiKey) {
         throw new AiReplyError('GEMINI_API_KEY non configurata sul backend', 'not_configured');
@@ -140,6 +160,18 @@ export async function generateSuggestedReply(ctx: AiReplyContext): Promise<strin
             model: MODEL,
             contents: buildPrompt(ctx),
         });
+        // Segnala il consumo prima di ogni return: i token del NON_SO si pagano.
+        if (opts.onUsage) {
+            const u = response.usageMetadata;
+            if (u) {
+                opts.onUsage({
+                    model: MODEL,
+                    promptTokens: u.promptTokenCount ?? 0,
+                    outputTokens: u.candidatesTokenCount ?? 0,
+                    totalTokens: u.totalTokenCount ?? 0,
+                });
+            }
+        }
         const text = String(response.text || '').trim();
         if (!text || /^NON_SO\b/i.test(text)) return null;
         // Il modello ogni tanto incornicia la frase fra virgolette nonostante

@@ -5048,6 +5048,17 @@ app.post('/messages/suggest-reply', authenticate, requirePermission('reservation
             messages: messages as any,
             reservation: resv.rows[0] ?? null,
             knowledge: kb.rows as any,
+        }, {
+            // Telemetria consumi Gemini dei "messaggi AI": la stessa tabella
+            // che alimenta la pagina Consumi AI (feature 'suggest_reply').
+            // Best-effort — un errore qui non deve rompere il suggerimento.
+            onUsage: (u) => {
+                queryWithRetry(
+                    `INSERT INTO ai_token_usage (provider, feature, model, prompt_tokens, output_tokens, total_tokens, user_email)
+                     VALUES ('gemini', 'suggest_reply', $1, $2, $3, $4, $5)`,
+                    [u.model, u.promptTokens, u.outputTokens, u.totalTokens || (u.promptTokens + u.outputTokens), (req.user?.email || null)]
+                ).catch(err => console.error('ai_token_usage insert (suggest_reply) failed:', err));
+            },
         });
 
         res.json({
