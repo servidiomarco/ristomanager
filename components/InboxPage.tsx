@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowRight, Check, CalendarPlus, Paperclip, X as XIcon } from 'lucide-react';
+import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowRight, Check, CalendarPlus, Paperclip, X as XIcon, Sparkles } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
 import { SkeletonInboxList } from './SkeletonCards';
 import {
@@ -13,6 +13,8 @@ import {
   type UploadedAttachment,
 } from '../services/messagesApiService';
 import { socketClient } from '../services/socketClient';
+import { suggestReply } from '../services/aiMessagesApiService';
+import { getFeatureFlags } from '../services/apiService';
 import { toTitleCase } from '../utils/text';
 import {
   SearchField, StatusPill, Callout, SegmentedControl, SplitPane, SectionHeader,
@@ -156,6 +158,8 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
 
   const [composerText, setComposerText] = useState('');
   const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [sending, setSending] = useState(false);
@@ -361,6 +365,37 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }, []);
+
+  // Il pulsante compare solo a funzione attiva: senza, sarebbe un bottone che
+  // risponde sempre "disattivato".
+  useEffect(() => {
+    let cancelled = false;
+    getFeatureFlags()
+      .then(f => { if (!cancelled) setAiEnabled(f.ai_messages_enabled === true); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  // Il suggerimento finisce NEL CAMPO DI SCRITTURA, non in chat: da lì si
+  // legge, si corregge e si invia — o si cancella. Non parte niente da solo.
+  const handleSuggest = useCallback(async () => {
+    if (!selected || suggesting) return;
+    setSuggesting(true);
+    setSendError(null);
+    try {
+      const r = await suggestReply(selected.phone_digits);
+      if (r.suggestion) {
+        setComposerText(r.suggestion);
+        composerRef.current?.focus();
+      } else {
+        setSendError(r.reason || 'Nessun suggerimento: rispondi tu.');
+      }
+    } catch (err: any) {
+      setSendError(err?.data?.message || err?.message || 'Suggerimento non riuscito');
+    } finally {
+      setSuggesting(false);
+    }
+  }, [selected, suggesting]);
 
   const handleSend = useCallback(async () => {
     if (!selected || sending) return;
@@ -750,6 +785,18 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
                     hidden
                     onChange={e => handlePickFiles(e.target.files)}
                   />
+                  {aiEnabled && (
+                    <button
+                      type="button"
+                      onClick={handleSuggest}
+                      disabled={suggesting || sending}
+                      aria-label="Suggerisci una risposta"
+                      title="Proponi una risposta in base alla conversazione e alle regole della casa"
+                      className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-violet-600 transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] dark:text-violet-400"
+                    >
+                      {suggesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}

@@ -176,6 +176,8 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
         pay_at_table_enabled: { title: 'Conto al tavolo', on: 'attivo', off: 'disattivato' },
         // Idem: gestito dalla sezione Comande, etichetta qui per type safety.
         table_orders_enabled: { title: 'Comande', on: 'attive', off: 'disattivate' },
+        // Idem: gestito da AiMessagesSettingsManager.
+        ai_messages_enabled: { title: 'Messaggi con AI', on: 'attivi', off: 'disattivati' },
     };
 
     const toggle = async (key: FlagKey) => {

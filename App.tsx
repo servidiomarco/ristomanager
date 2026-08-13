@@ -38,6 +38,7 @@ import { ReservationAllergensManager } from './components/ReservationAllergensMa
 import { AutoDepositManager } from './components/AutoDepositManager';
 import { PayAtTableSettingsManager } from './components/PayAtTableSettingsManager';
 import { SalaCucinaSettingsManager } from './components/SalaCucinaSettingsManager';
+import { AiMessagesSettingsManager } from './components/AiMessagesSettingsManager';
 import { RevolutIntegrationCard } from './components/RevolutIntegrationCard';
 import { SumUpIntegrationCard } from './components/SumUpIntegrationCard';
 import { SmtpIntegrationCard } from './components/SmtpIntegrationCard';
@@ -2610,6 +2611,9 @@ const App: React.FC = () => {
                 </CardErrorBoundary>
                 <CardErrorBoundary label="Sala & Cucina">
                   <SalaCucinaSettingsManager showToast={addToast} />
+                </CardErrorBoundary>
+                <CardErrorBoundary label="Messaggi con AI">
+                  <AiMessagesSettingsManager showToast={addToast} />
                 </CardErrorBoundary>
                 <CardErrorBoundary label="Server Email (SMTP)">
                   <SmtpIntegrationCard showToast={addToast} />

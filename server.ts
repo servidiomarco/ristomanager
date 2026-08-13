@@ -15,6 +15,11 @@ import QRCode from 'qrcode';
 import pool, { createSchema, queryWithRetry } from './db.js';
 import { SocketService } from './services/socketService.js';
 import {
+    generateSuggestedReply,
+    isAiConfigured,
+    AiReplyError,
+} from './services/aiReplyService.js';
+import {
     setupPassepartoutBridge,
     isPassepartoutAgentConfigured,
     getPassepartoutAgentStatus,
@@ -4987,6 +4992,79 @@ app.get('/public/media/:token', async (req, res) => {
     } catch (err: any) {
         console.error('GET /public/media error:', err);
         res.status(500).send('Internal server error');
+    }
+});
+
+// Risposta suggerita per una conversazione. Non invia nulla: restituisce il
+// testo che il cameriere trova nel campo di scrittura, da leggere e mandare
+// (o cestinare). Vedi services/aiReplyService.ts per il perche'.
+app.post('/messages/suggest-reply', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    try {
+        if (!(await getFeatureFlag('ai_messages_enabled', false))) {
+            return res.status(403).json({
+                error: 'feature_disabled',
+                message: 'Messaggi con AI disattivato. Attivalo da Impostazioni → Messaggi con AI.',
+            });
+        }
+        if (!isAiConfigured()) {
+            return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY non configurata sul backend' });
+        }
+        const key = String(req.body?.phone_digits ?? '').replace(/\D/g, '').slice(-10);
+        if (!key) return res.status(400).json({ error: 'phone_digits mancante' });
+
+        const [msgs, kb] = await Promise.all([
+            queryWithRetry(
+                `SELECT direction, body, sent_at
+                   FROM outbound_messages
+                  WHERE channel IN ('sms','whatsapp')
+                    AND (right(to_phone_digits, 10) = $1::text OR right(from_phone_digits, 10) = $1::text)
+                  ORDER BY sent_at DESC
+                  LIMIT 15`,
+                [key]
+            ),
+            queryWithRetry(
+                `SELECT title, content FROM ai_knowledge_entries WHERE is_active ORDER BY sort_order, id`
+            ),
+        ]);
+        const messages = msgs.rows.reverse();
+        if (messages.length === 0) return res.status(404).json({ error: 'Conversazione vuota' });
+
+        // Prenotazione dello stesso numero, la piu' vicina a oggi: e' quella
+        // di cui il cliente sta quasi sempre parlando.
+        const resv = await queryWithRetry(
+            `SELECT r.customer_name, r.reservation_time, r.guests, r.notes, r.reservation_status AS status,
+                    ro.name AS room_name
+               FROM reservations r
+               LEFT JOIN tables t ON t.id = r.table_id
+               LEFT JOIN rooms ro ON ro.id = t.room_id
+              WHERE r.phone IS NOT NULL AND r.phone <> ''
+                AND ${PHONE_MATCH_KEY_SQL('r.phone')} = ${PHONE_MATCH_KEY_SQL('$1')}
+              ORDER BY abs(extract(epoch FROM (r.reservation_time - CURRENT_TIMESTAMP))) ASC
+              LIMIT 1`,
+            [key]
+        );
+
+        const suggestion = await generateSuggestedReply({
+            messages: messages as any,
+            reservation: resv.rows[0] ?? null,
+            knowledge: kb.rows as any,
+        });
+
+        res.json({
+            suggestion,
+            // Trasparenza sul perche' non c'e' un suggerimento: senza, sembra
+            // che la funzione sia rotta.
+            reason: suggestion ? null : 'Serve una verifica umana o l\'informazione non e\' fra le regole',
+            knowledge_count: kb.rows.length,
+            reservation_linked: resv.rows.length > 0,
+        });
+    } catch (err: any) {
+        if (err instanceof AiReplyError) {
+            const status = err.kind === 'not_configured' ? 503 : err.kind === 'no_knowledge' ? 400 : 502;
+            return res.status(status).json({ error: err.kind, message: err.message });
+        }
+        console.error('POST /messages/suggest-reply error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
@@ -13900,8 +13978,8 @@ app.post('/voice-calls/sync', authenticate, voiceCallsAuthorize, async (_req, re
 // directly — the endpoints they gate are low-volume (a handful per minute
 // at most), so caching isn't worth the complexity.
 
-type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'pay_at_table_enabled' | 'table_orders_enabled';
-const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'pay_at_table_enabled', 'table_orders_enabled'];
+type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled';
+const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled'];
 
 async function getFeatureFlag(key: FeatureFlagKey, fallback: boolean): Promise<boolean> {
     try {
@@ -13925,6 +14003,9 @@ const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, boolean> = {
     // Off by default: il modulo comande resta spento finché non c'è una UI
     // che lo usi (PR 3). Gli endpoint esistono ma rispondono 403.
     table_orders_enabled: false,
+    // Spento finché il gestore non scrive le regole della casa: senza base di
+    // conoscenza il modello non avrebbe da cosa rispondere.
+    ai_messages_enabled: false,
 };
 
 app.get('/settings/features', authenticate, async (_req, res) => {
@@ -15490,6 +15571,94 @@ app.put('/settings/auto-deposit', authenticate, requirePermission('settings:full
     } catch (err: any) {
         console.error('PUT /settings/auto-deposit error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// ============================================
+// BASE DI CONOSCENZA PER LE RISPOSTE AI
+// ============================================
+// Le regole della casa in italiano, scritte dal gestore. Lettura per chiunque
+// possa vedere i messaggi (serve a mostrare il contesto del suggerimento),
+// scrittura solo settings:full.
+
+app.get('/settings/ai-knowledge', authenticate, requirePermission('reservations:view'), async (_req, res) => {
+    try {
+        const r = await queryWithRetry(
+            `SELECT id, title, content, is_active, sort_order, updated_at
+               FROM ai_knowledge_entries ORDER BY sort_order, id`
+        );
+        res.json({ entries: r.rows });
+    } catch (err: any) {
+        console.error('GET /settings/ai-knowledge error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/settings/ai-knowledge', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const title = String(req.body?.title ?? '').trim();
+        const content = String(req.body?.content ?? '').trim();
+        if (!title || title.length > 120) return res.status(400).json({ error: 'Titolo mancante o troppo lungo' });
+        if (!content) return res.status(400).json({ error: 'Contenuto mancante' });
+        if (content.length > 2000) return res.status(400).json({ error: 'Contenuto troppo lungo (max 2000 caratteri)' });
+        const r = await queryWithRetry(
+            `INSERT INTO ai_knowledge_entries (title, content, sort_order, updated_by_user_id)
+             VALUES ($1, $2, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM ai_knowledge_entries), $3)
+             RETURNING id, title, content, is_active, sort_order, updated_at`,
+            [title, content, req.user?.userId ?? null]
+        );
+        res.status(201).json(r.rows[0]);
+    } catch (err: any) {
+        console.error('POST /settings/ai-knowledge error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/settings/ai-knowledge/:id', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        const sets: string[] = [];
+        const params: any[] = [id];
+        if (req.body?.title !== undefined) {
+            const t = String(req.body.title).trim();
+            if (!t || t.length > 120) return res.status(400).json({ error: 'Titolo non valido' });
+            params.push(t); sets.push(`title = $${params.length}`);
+        }
+        if (req.body?.content !== undefined) {
+            const c = String(req.body.content).trim();
+            if (!c || c.length > 2000) return res.status(400).json({ error: 'Contenuto non valido' });
+            params.push(c); sets.push(`content = $${params.length}`);
+        }
+        if (req.body?.is_active !== undefined) {
+            params.push(Boolean(req.body.is_active)); sets.push(`is_active = $${params.length}`);
+        }
+        if (sets.length === 0) return res.status(400).json({ error: 'Nessuna modifica' });
+        params.push(req.user?.userId ?? null);
+        sets.push(`updated_by_user_id = $${params.length}`, `updated_at = CURRENT_TIMESTAMP`);
+        const r = await queryWithRetry(
+            `UPDATE ai_knowledge_entries SET ${sets.join(', ')} WHERE id = $1
+             RETURNING id, title, content, is_active, sort_order, updated_at`,
+            params
+        );
+        if (r.rows.length === 0) return res.status(404).json({ error: 'Regola non trovata' });
+        res.json(r.rows[0]);
+    } catch (err: any) {
+        console.error('PUT /settings/ai-knowledge/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/settings/ai-knowledge/:id', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        const r = await queryWithRetry(`DELETE FROM ai_knowledge_entries WHERE id = $1 RETURNING id`, [id]);
+        if (r.rows.length === 0) return res.status(404).json({ error: 'Regola non trovata' });
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('DELETE /settings/ai-knowledge/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 

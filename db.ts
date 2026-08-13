@@ -1901,6 +1901,26 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`CREATE INDEX IF NOT EXISTS idx_outbound_media_token ON outbound_media(token);`);
 
         // ============================================
+        // BASE DI CONOSCENZA PER LE RISPOSTE AI
+        // ============================================
+        // Le "regole della casa" che il gestore scrive a mano (torte da fuori,
+        // parcheggio, seggioloni...). Il modello risponde SOLO da qui: senza
+        // una regola pertinente deve dire che gira la domanda allo staff,
+        // invece di inventare una risposta plausibile su cose che non sa.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS ai_knowledge_entries (
+                id          SERIAL PRIMARY KEY,
+                title       VARCHAR(120) NOT NULL,
+                content     TEXT NOT NULL,
+                is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+                sort_order  INTEGER NOT NULL DEFAULT 0,
+                created_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+            );
+        `);
+
+        // ============================================
         // RESERVATION NOTE PRESETS
         // ============================================
         // Configurable quick-notes list shown as chips in the reservation
