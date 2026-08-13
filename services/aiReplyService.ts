@@ -17,7 +17,10 @@
 
 import { GoogleGenAI } from '@google/genai';
 
-const MODEL = 'gemini-2.5-flash';
+// gemini-2.5-flash non e' piu' disponibile per le chiavi API create di
+// recente (404 "no longer available to new users"): verificato con la chiave
+// in produzione il 2026-08-13.
+const MODEL = 'gemini-3.5-flash';
 
 export interface AiReplyContext {
     /** Messaggi della conversazione, dal più vecchio al più recente. */
