@@ -13454,6 +13454,192 @@ const VOICE_CALLS_ROLES: UserRole[] = [UserRole.OWNER, UserRole.GENERAL_MANAGER,
 
 const voiceCallsAuthorize = authorize(...VOICE_CALLS_ROLES);
 
+// ============================================
+// CONSUMI AI — telemetria token (pagina "Consumi AI", solo account admin)
+// ============================================
+// Due sorgenti, una per provider:
+//  - Gemini: la tabella ai_token_usage, alimentata dal client a ogni chiamata
+//    (usageMetadata). Nessuno storico prima dell'introduzione del tracking.
+//  - ElevenLabs (Sofia): consumo live dall'API /user/subscription (crediti/
+//    caratteri e reset) + aggregati dalle nostre voice_calls (n° chiamate,
+//    secondi). Non serve una tabella nostra: ElevenLabs è la fonte di verità.
+
+// Numero giorni della finestra, default 30, limitato a 1..365.
+const parseUsageWindowDays = (raw: unknown): number => {
+    const n = parseInt(String(raw ?? '30'), 10);
+    if (!Number.isFinite(n)) return 30;
+    return Math.min(Math.max(n, 1), 365);
+};
+
+// Registrazione di un evento d'uso token. Qualsiasi utente autenticato può
+// scrivere: è il client (es. il report Dashboard) a segnalare il proprio
+// consumo appena Gemini risponde. La lettura/aggregazione resta admin-only.
+app.post('/ai-usage', authenticate, async (req: any, res) => {
+    try {
+        const clampToken = (v: any): number => {
+            const n = Math.round(Number(v));
+            if (!Number.isFinite(n) || n < 0) return 0;
+            // Tetto di sicurezza contro valori assurdi da un client compromesso.
+            return Math.min(n, 100_000_000);
+        };
+        const provider = String(req.body?.provider || '').trim().toLowerCase().slice(0, 20);
+        const feature = String(req.body?.feature || '').trim().slice(0, 60);
+        // Per ora accettiamo solo 'gemini': ElevenLabs si legge live, non si logga qui.
+        if (provider !== 'gemini') {
+            return res.status(400).json({ error: 'Provider non supportato' });
+        }
+        if (!feature) {
+            return res.status(400).json({ error: 'Feature obbligatoria' });
+        }
+        const model = req.body?.model ? String(req.body.model).trim().slice(0, 80) : null;
+        const promptTokens = clampToken(req.body?.prompt_tokens);
+        const outputTokens = clampToken(req.body?.output_tokens);
+        // Se il client non manda il totale, lo ricaviamo dai due parziali.
+        const totalTokens = clampToken(req.body?.total_tokens) || (promptTokens + outputTokens);
+
+        await queryWithRetry(
+            `INSERT INTO ai_token_usage (provider, feature, model, prompt_tokens, output_tokens, total_tokens, user_email)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [provider, feature, model, promptTokens, outputTokens, totalTokens, (req.user?.email || null)]
+        );
+        res.status(201).json({ ok: true });
+    } catch (err) {
+        console.error('POST /ai-usage error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Aggregati d'uso Gemini per la finestra richiesta.
+app.get('/ai-usage/gemini', authenticate, requireDevBoardAdmin, async (req, res) => {
+    try {
+        const days = parseUsageWindowDays(req.query.days);
+
+        const totalsQ = queryWithRetry(
+            `SELECT COALESCE(SUM(prompt_tokens),0)::int AS prompt_tokens,
+                    COALESCE(SUM(output_tokens),0)::int AS output_tokens,
+                    COALESCE(SUM(total_tokens),0)::int  AS total_tokens,
+                    COUNT(*)::int                        AS calls,
+                    MAX(created_at)                      AS last_at
+             FROM ai_token_usage
+             WHERE provider = 'gemini'
+               AND created_at >= NOW() - make_interval(days => $1::int)`,
+            [days]
+        );
+        const dailyQ = queryWithRetry(
+            `SELECT to_char(created_at AT TIME ZONE 'Europe/Rome', 'YYYY-MM-DD') AS day,
+                    COALESCE(SUM(prompt_tokens),0)::int AS prompt_tokens,
+                    COALESCE(SUM(output_tokens),0)::int AS output_tokens,
+                    COALESCE(SUM(total_tokens),0)::int  AS total_tokens,
+                    COUNT(*)::int                        AS calls
+             FROM ai_token_usage
+             WHERE provider = 'gemini'
+               AND created_at >= NOW() - make_interval(days => $1::int)
+             GROUP BY day
+             ORDER BY day`,
+            [days]
+        );
+        const byFeatureQ = queryWithRetry(
+            `SELECT feature,
+                    COALESCE(MAX(model), '') AS model,
+                    COALESCE(SUM(total_tokens),0)::int AS total_tokens,
+                    COUNT(*)::int AS calls
+             FROM ai_token_usage
+             WHERE provider = 'gemini'
+               AND created_at >= NOW() - make_interval(days => $1::int)
+             GROUP BY feature
+             ORDER BY total_tokens DESC`,
+            [days]
+        );
+
+        const [totals, daily, byFeature] = await Promise.all([totalsQ, dailyQ, byFeatureQ]);
+        res.json({
+            days,
+            totals: totals.rows[0],
+            daily: daily.rows,
+            byFeature: byFeature.rows,
+        });
+    } catch (err) {
+        console.error('GET /ai-usage/gemini error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Consumo Sofia/ElevenLabs: quota live dall'API + statistiche chiamate locali.
+app.get('/ai-usage/elevenlabs', authenticate, requireDevBoardAdmin, async (req, res) => {
+    try {
+        const days = parseUsageWindowDays(req.query.days);
+
+        // --- Quota live dall'API ElevenLabs (crediti/caratteri e reset) ------
+        let subscription: any = null;
+        let subscriptionError: string | null = null;
+        if (!ELEVENLABS_API_KEY) {
+            subscriptionError = 'ELEVENLABS_API_KEY non configurata';
+        } else {
+            try {
+                const r = await fetch(`${ELEVENLABS_API_BASE}/user/subscription`, {
+                    headers: { 'xi-api-key': ELEVENLABS_API_KEY },
+                });
+                if (r.ok) {
+                    const d: any = await r.json();
+                    subscription = {
+                        tier: d.tier ?? null,
+                        status: d.status ?? null,
+                        character_count: d.character_count ?? null,
+                        character_limit: d.character_limit ?? null,
+                        next_reset_unix: d.next_character_count_reset_unix ?? null,
+                        currency: d.currency ?? null,
+                    };
+                } else {
+                    subscriptionError = `ElevenLabs ha risposto ${r.status}`;
+                }
+            } catch (e) {
+                console.error('ElevenLabs subscription fetch error:', e);
+                subscriptionError = 'Impossibile contattare ElevenLabs';
+            }
+        }
+
+        // --- Statistiche chiamate dalla nostra tabella voice_calls ------------
+        const callTotalsQ = queryWithRetry(
+            `SELECT COUNT(*)::int AS calls,
+                    COALESCE(SUM(duration_seconds),0)::int AS seconds,
+                    MAX(created_at) AS last_at
+             FROM voice_calls
+             WHERE created_at >= NOW() - make_interval(days => $1::int)`,
+            [days]
+        );
+        const callDailyQ = queryWithRetry(
+            `SELECT to_char(created_at AT TIME ZONE 'Europe/Rome', 'YYYY-MM-DD') AS day,
+                    COUNT(*)::int AS calls,
+                    COALESCE(SUM(duration_seconds),0)::int AS seconds
+             FROM voice_calls
+             WHERE created_at >= NOW() - make_interval(days => $1::int)
+             GROUP BY day
+             ORDER BY day`,
+            [days]
+        );
+        const callAllTimeQ = queryWithRetry(
+            `SELECT COUNT(*)::int AS calls,
+                    COALESCE(SUM(duration_seconds),0)::int AS seconds
+             FROM voice_calls`
+        );
+
+        const [callTotals, callDaily, callAllTime] = await Promise.all([callTotalsQ, callDailyQ, callAllTimeQ]);
+        res.json({
+            days,
+            subscription,
+            subscriptionError,
+            calls: {
+                window: callTotals.rows[0],
+                daily: callDaily.rows,
+                allTime: callAllTime.rows[0],
+            },
+        });
+    } catch (err) {
+        console.error('GET /ai-usage/elevenlabs error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // List with optional filters. Default newest-first, capped to 200 rows.
 app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
     try {

@@ -198,9 +198,10 @@ const VIEW_PERMISSIONS: Record<ViewState, Permission[]> = {
   [ViewState.EMAIL]: ['reservations:view'],
   // Notifiche is a personal centre — dashboard-level visibility is enough.
   [ViewState.NOTIFICHE]: ['dashboard:view'],
-  // Development (dev board) is gated by account email, not by role
-  // permissions — see requireDevBoardAdmin in server.ts. No role can reach
-  // it through the permission system.
+  // Consumi AI (token monitoring) and Development (dev board) are gated by
+  // account email, not by role permissions — see requireDevBoardAdmin in
+  // server.ts. No role can reach them through the permission system.
+  [ViewState.MONITORING]: [],
   [ViewState.DEVELOPMENT]: []
 };
 

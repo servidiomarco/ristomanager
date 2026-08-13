@@ -1,8 +1,43 @@
 import { GoogleGenAI } from "@google/genai";
 import { Reservation, Dish, Table } from "../types";
+import { authApiService } from "./authApiService";
+
+const API_URL = import.meta.env.VITE_API_URL || "https://ristomanager-production.up.railway.app";
 
 const getAiClient = () => {
   return new GoogleGenAI({ apiKey: process.env.API_KEY });
+};
+
+/**
+ * Telemetria consumi Gemini. Legge usageMetadata dalla risposta e lo manda al
+ * backend (tabella ai_token_usage), che la pagina "Consumi AI" aggrega.
+ * Fire-and-forget: non deve mai far fallire né rallentare la generazione, quindi
+ * ogni errore viene silenziato. `response` è il ritorno di generateContent.
+ */
+const reportGeminiUsage = (feature: string, model: string, response: any): void => {
+  try {
+    const usage = response?.usageMetadata;
+    if (!usage) return;
+    const token = authApiService.getAccessToken();
+    if (!token) return; // Senza sessione non c'è dove/come registrarlo.
+    const body = {
+      provider: 'gemini',
+      feature,
+      model,
+      prompt_tokens: usage.promptTokenCount ?? 0,
+      output_tokens: usage.candidatesTokenCount ?? 0,
+      total_tokens: usage.totalTokenCount ?? 0,
+    };
+    // keepalive: il POST sopravvive anche se l'utente naviga via subito dopo.
+    void fetch(`${API_URL}/ai-usage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+      keepalive: true,
+    }).catch(() => { /* telemetria best-effort */ });
+  } catch {
+    /* mai propagare: la telemetria non deve rompere la feature */
+  }
 };
 
 export const generateRestaurantReport = async (
@@ -42,6 +77,7 @@ export const generateRestaurantReport = async (
       contents: prompt,
     });
 
+    reportGeminiUsage('dashboard_report', 'gemini-2.5-flash', response);
     return response.text || "Impossibile generare il report al momento.";
   } catch (error) {
     console.error("Errore Gemini:", error);
@@ -62,6 +98,7 @@ export const suggestBanquetMenu = async (
             Preferenze cliente: ${preferences}.
             Restituisci il menu formattato bene in Markdown con antipasti, primi, secondi e dolci, includendo i prezzi stimati per piatto.`
         });
+        reportGeminiUsage('banquet_menu', 'gemini-2.5-flash', response);
         return response.text || "Nessun suggerimento disponibile.";
     } catch (e) {
         console.error(e);
