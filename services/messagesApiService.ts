@@ -1,6 +1,7 @@
 import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
 import { buildApiError } from './apiError';
+import { resizeImageToDataUrl } from '../utils/resizeImage';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
@@ -45,7 +46,17 @@ export interface InboxMessage {
 
 export interface MessageMedia {
   url: string;
+  content_type?: string;
+  /** Presente sugli allegati in uscita: riferimento al file che abbiamo caricato. */
+  token?: string;
+}
+
+export interface UploadedAttachment {
+  id: number;
+  token: string;
   content_type: string;
+  filename: string | null;
+  size_bytes: number;
 }
 
 /** Gli allegati stanno su Twilio dietro autenticazione: si passa dal backend. */
@@ -80,6 +91,34 @@ const fetchWithAuth = async (url: string, options: RequestInit = {}, retried = f
  * non manda l'header Authorization, quindi l'immagine si mostra da un
  * object URL creato qui (da revocare a smontaggio).
  */
+/** Carica un allegato: il file resta sul nostro backend e Twilio lo scarica
+ *  dall'URL pubblico col token restituito qui. */
+export const uploadAttachment = async (file: File): Promise<UploadedAttachment> => {
+  // Le foto dal telefono pesano 3-5 MB e non servono a quella risoluzione su
+  // WhatsApp: ridimensionate stanno sotto il mezzo mega e partono subito.
+  let contentType = file.type;
+  let filename = file.name;
+  let data: string;
+  if (file.type.startsWith('image/') && file.type !== 'image/gif') {
+    const dataUrl = await resizeImageToDataUrl(file, 1600, 0.82);
+    data = dataUrl.split(',')[1] || '';
+    contentType = 'image/jpeg';
+    filename = filename.replace(/\.[^.]+$/, '') + '.jpg';
+  } else {
+    data = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
+      reader.onerror = () => reject(new Error('Lettura del file fallita'));
+      reader.readAsDataURL(file);
+    });
+  }
+  return apiRequest<UploadedAttachment>(`${API_URL}/messages/attachments`, {
+    method: 'POST',
+    headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content_type: contentType, filename, data }),
+  });
+};
+
 export const fetchMedia = async (messageId: number, index: number): Promise<Blob> => {
   const res = await fetchWithAuth(mediaUrl(messageId, index), { headers: getHeaders() });
   if (!res.ok) throw new Error('Allegato non disponibile');
@@ -121,6 +160,8 @@ class MessagesApiService {
     phone: string;
     text: string;
     channel?: MessageChannel;
+    /** Token restituiti da uploadAttachment: solo WhatsApp. */
+    attachment_tokens?: string[];
   }): Promise<{ ok: true; message: InboxMessage | null; channel: MessageChannel; sid: string | null }> {
     return apiRequest(`${API_URL}/messages/send`, {
       method: 'POST',

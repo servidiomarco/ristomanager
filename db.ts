@@ -1879,6 +1879,26 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // autenticazione — il browser non lo carica mai direttamente, passa
         // sempre dal proxy GET /messages/:id/media/:index.
         await client.query(`ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS media JSONB;`);
+        // Allegati in USCITA. Twilio non accetta un upload: vuole un URL
+        // pubblico da cui scaricare il file, quindi lo teniamo noi e lo
+        // serviamo da /public/media/:token (token lungo e non indovinabile —
+        // e' l'unica difesa, l'endpoint non puo' essere autenticato perche'
+        // a chiamarlo e' Twilio). Il file sta a DB e non su disco: il
+        // filesystem di Railway e' effimero e sparisce a ogni deploy.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS outbound_media (
+                id           SERIAL PRIMARY KEY,
+                token        VARCHAR(64) UNIQUE NOT NULL,
+                content_type VARCHAR(100) NOT NULL,
+                filename     TEXT,
+                bytes        BYTEA NOT NULL,
+                size_bytes   INTEGER NOT NULL,
+                message_id   INTEGER REFERENCES outbound_messages(id) ON DELETE SET NULL,
+                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                created_at   TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_outbound_media_token ON outbound_media(token);`);
 
         // ============================================
         // RESERVATION NOTE PRESETS
