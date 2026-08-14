@@ -823,6 +823,9 @@ export interface ChannelSettings {
   public_bookings_blocks: PublicBookingBlock[];
   voice_bookings_date_blocks: VoiceDateBlock[];
   room_occupancy_caps: RoomOccupancyCap[];
+  // Messaggio iniziale di Sofia; '' = default di sistema. {nome} → nome del
+  // chiamante quando noto.
+  voice_first_message: string;
 }
 
 // Occupazione corrente per sala, mostrata accanto al limite in Impostazioni.

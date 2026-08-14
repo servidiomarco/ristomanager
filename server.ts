@@ -808,6 +808,21 @@ const VOICE_FIRST_MESSAGE_FALLBACK =
     'Per altre richieste chiama dalle 10:30 alle 14:30 o dalle 18:45 alle 23:30. ' +
     'Per quando vorresti prenotare?';
 
+// Messaggio iniziale personalizzato (Impostazioni → Agente vocale, chiave
+// app_settings 'voice_first_message'). Il segnaposto {nome} (o {{nome}}) viene
+// sostituito col nome del chiamante quando è noto; quando è sconosciuto viene
+// rimosso e la punteggiatura ripulita ("Ciao {nome}, sono" → "Ciao, sono").
+// Vuoto ⇒ si usano i default hardcoded (VOICE_FIRST_MESSAGE_FALLBACK e il
+// saluto per nome), così l'operatore può gestire il saluto dal CRM senza
+// toccarlo su ElevenLabs.
+function renderVoiceFirstMessage(template: string, firstName: string): string {
+    return template
+        .replace(/\{\{?\s*nome\s*\}?\}/gi, firstName || '')
+        .replace(/\s+([,.;:!?])/g, '$1')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+}
+
 // Conversation Initiation Webhook — called by ElevenLabs BEFORE the first
 // message is spoken. We look up the caller in the rubrica and inject
 // dynamic variables + a personalised `first_message` override so returning
@@ -839,6 +854,14 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
         ? `Buongiorno, sono Sofia del Vecchio Frantoio. Le prenotazioni sono momentaneamente sospese. La invitiamo a richiamare dopo le ${suspensionCallback} per verificare eventuali tavoli disponibili. Grazie e a presto!`
         : '';
 
+    // Messaggio iniziale personalizzato dal CRM (vuoto ⇒ default hardcoded).
+    // `genericGreeting` è la versione senza nome, usata per anonimi/sconosciuti/
+    // errori; i chiamanti noti ottengono la stessa base con {nome} sostituito.
+    const customFirst = (await getVoiceFirstMessage()).trim();
+    const genericGreeting = customFirst
+        ? renderVoiceFirstMessage(customFirst, '')
+        : VOICE_FIRST_MESSAGE_FALLBACK;
+
     const baseDynamicVars = {
         customer_first_name: '',
         customer_full_name: '',
@@ -847,7 +870,7 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
         customer_known: 'false',
         booking_status_message: suspensionMessage,
     };
-    const effectiveFirstMessage = suspended ? suspensionMessage : VOICE_FIRST_MESSAGE_FALLBACK;
+    const effectiveFirstMessage = suspended ? suspensionMessage : genericGreeting;
     const fallbackResponse = {
         type: 'conversation_initiation_client_data',
         dynamic_variables: baseDynamicVars,
@@ -892,7 +915,7 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
                 type: 'conversation_initiation_client_data',
                 dynamic_variables: { ...baseDynamicVars, caller_id_spelled: callerIdSpelled },
                 conversation_config_override: {
-                    agent: { first_message: VOICE_FIRST_MESSAGE_FALLBACK },
+                    agent: { first_message: genericGreeting },
                 },
             });
         }
@@ -903,9 +926,13 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
         // or ask something out of scope). The agent classifies intent from
         // the reply — booking → normal flow, everything else → the AMBITO
         // redirect rule already in the prompt.
-        const personalisedFirstMessage = firstName
-            ? `Ciao ${firstName}, sono Sofia del Vecchio Frantoio, come posso aiutarti?`
-            : VOICE_FIRST_MESSAGE_FALLBACK;
+        // Con un messaggio custom impostato usiamo quello (con {nome} → nome);
+        // altrimenti il saluto per nome hardcoded, o il generico se manca il nome.
+        const personalisedFirstMessage = customFirst
+            ? renderVoiceFirstMessage(customFirst, firstName)
+            : (firstName
+                ? `Ciao ${firstName}, sono Sofia del Vecchio Frantoio, come posso aiutarti?`
+                : VOICE_FIRST_MESSAGE_FALLBACK);
 
         console.log('[ElevenLabs] init-conversation hit', {
             phone: normalized,
@@ -933,7 +960,7 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
             type: 'conversation_initiation_client_data',
             dynamic_variables: { ...baseDynamicVars, caller_id_spelled: callerIdSpelled },
             conversation_config_override: {
-                agent: { first_message: VOICE_FIRST_MESSAGE_FALLBACK },
+                agent: { first_message: genericGreeting },
             },
         });
     }
@@ -14232,6 +14259,25 @@ const VOICE_LARGE_GROUP_KEY = 'voice_large_group_threshold';
 const VOICE_LARGE_GROUP_DEFAULT = 8;
 const VOICE_SUSPENSION_CALLBACK_KEY = 'voice_bookings_suspension_callback_time';
 const VOICE_SUSPENSION_CALLBACK_DEFAULT = '19:00';
+// Messaggio iniziale di Sofia, testo libero. Vuoto ⇒ default hardcoded nel
+// webhook init-conversation (vedi renderVoiceFirstMessage). Cap difensivo per
+// evitare payload assurdi verso ElevenLabs.
+const VOICE_FIRST_MESSAGE_KEY = 'voice_first_message';
+const VOICE_FIRST_MESSAGE_MAX = 500;
+
+async function getVoiceFirstMessage(): Promise<string> {
+    try {
+        const result = await queryWithRetry(
+            'SELECT text_value FROM app_settings WHERE key = $1',
+            [VOICE_FIRST_MESSAGE_KEY]
+        );
+        const raw = result.rows[0]?.text_value;
+        return typeof raw === 'string' ? raw : '';
+    } catch (err) {
+        console.error(`[channel-settings] failed to read ${VOICE_FIRST_MESSAGE_KEY}:`, err);
+        return '';
+    }
+}
 
 async function getVoiceLargeGroupThreshold(): Promise<number> {
     try {
@@ -14430,13 +14476,14 @@ async function computeVoiceSuspensionState(): Promise<{ suspended: boolean; call
 
 app.get('/settings/channels', authenticate, async (_req, res) => {
     try {
-        const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw, voiceDateBlocksRaw, roomCaps] = await Promise.all([
+        const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw, voiceDateBlocksRaw, roomCaps, voiceFirstMessage] = await Promise.all([
             getVoiceLargeGroupThreshold(),
             getVoiceSuspensionCallbackTime(),
             getVoiceSuspensionSchedule(),
             getPublicBookingBlocks(),
             getVoiceDateBlocks(),
             getRoomOccupancyCaps(),
+            getVoiceFirstMessage(),
         ]);
         // Filter past blocks at read time; UI never has to worry about them.
         const publicBlocks = pruneExpiredBlocks(publicBlocksRaw);
@@ -14448,6 +14495,7 @@ app.get('/settings/channels', authenticate, async (_req, res) => {
             public_bookings_blocks: publicBlocks,
             voice_bookings_date_blocks: voiceDateBlocks,
             room_occupancy_caps: roomCaps,
+            voice_first_message: voiceFirstMessage,
         });
     } catch (err) {
         console.error('Error fetching channel settings:', err);
@@ -14479,6 +14527,18 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
             });
         }
         updates.push({ key: VOICE_SUSPENSION_CALLBACK_KEY, column: 'text_value', value: raw });
+    }
+
+    if (body.voice_first_message !== undefined) {
+        // Testo libero; stringa vuota = ripristina il default hardcoded.
+        const raw = String(body.voice_first_message).trim();
+        if (raw.length > VOICE_FIRST_MESSAGE_MAX) {
+            return res.status(400).json({
+                error: 'invalid_value',
+                message: `voice_first_message must be at most ${VOICE_FIRST_MESSAGE_MAX} characters`,
+            });
+        }
+        updates.push({ key: VOICE_FIRST_MESSAGE_KEY, column: 'text_value', value: raw });
     }
 
     if (body.public_bookings_blocks !== undefined) {
@@ -14664,13 +14724,14 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
                            SET ${u.column} = EXCLUDED.${u.column}, updated_at = CURRENT_TIMESTAMP`;
             await queryWithRetry(sql, [u.key, u.value]);
         }
-        const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw, voiceDateBlocksRaw, roomCaps] = await Promise.all([
+        const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw, voiceDateBlocksRaw, roomCaps, voiceFirstMessage] = await Promise.all([
             getVoiceLargeGroupThreshold(),
             getVoiceSuspensionCallbackTime(),
             getVoiceSuspensionSchedule(),
             getPublicBookingBlocks(),
             getVoiceDateBlocks(),
             getRoomOccupancyCaps(),
+            getVoiceFirstMessage(),
         ]);
         const publicBlocks = pruneExpiredBlocks(publicBlocksRaw);
         const voiceDateBlocks = pruneExpiredBlocks(voiceDateBlocksRaw);
@@ -14681,6 +14742,7 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
             public_bookings_blocks: publicBlocks,
             voice_bookings_date_blocks: voiceDateBlocks,
             room_occupancy_caps: roomCaps,
+            voice_first_message: voiceFirstMessage,
         });
     } catch (err) {
         console.error('Error updating channel settings:', err);
