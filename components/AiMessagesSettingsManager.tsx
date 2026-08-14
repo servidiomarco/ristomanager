@@ -103,21 +103,21 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
     }
 
     return (
-        <details className="group bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] overflow-hidden">
-            <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--color-surface-2)] transition-colors">
+        <details className="group bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden">
+            <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
                 <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-md bg-[var(--color-surface-3)] flex items-center justify-center text-violet-600 dark:text-violet-400 flex-shrink-0">
+                    <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-arriving-text)] flex-shrink-0">
                         <Sparkles className="w-5 h-5" />
                     </div>
                     <div className="min-w-0">
-                        <h4 className="font-medium text-[14px] text-[var(--color-fg)]">Messaggi con AI</h4>
-                        <p className="text-[13px] text-[var(--color-fg-muted)] truncate">
+                        <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Messaggi con AI</h4>
+                        <p className="text-[13px] text-[var(--ds-text-muted)] truncate">
                             Risposte suggerite ai clienti, basate sulle regole che scrivi tu.
                         </p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className={`text-[11px] font-medium uppercase tracking-wide ${enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-[var(--color-fg-subtle)]'}`}>
+                    <span className={`text-[12px] font-medium ${enabled ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-text-subtle)]'}`}>
                         {enabled ? 'Attivo' : 'Disattivato'}
                     </span>
                     <button
@@ -125,14 +125,14 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
                         aria-label={`${enabled ? 'Disattiva' : 'Attiva'} messaggi con AI`}
                         onClick={e => { e.preventDefault(); e.stopPropagation(); if (canEdit) toggle(); }}
                         disabled={!canEdit || saving}
-                        className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] focus:ring-offset-2 focus:ring-offset-[var(--color-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
-                            enabled ? 'bg-emerald-500' : 'bg-[var(--color-surface-3)] border border-[var(--color-line)]'
+                        className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+                            enabled ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
                         }`}
                     >
                         <span aria-hidden="true"
                               className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${enabled ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
                     </button>
-                    <ChevronDown className="w-4 h-4 text-[var(--color-fg-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
+                    <ChevronDown className="w-4 h-4 text-[var(--ds-text-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
                 </div>
             </summary>
 
