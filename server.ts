@@ -870,7 +870,13 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
         customer_known: 'false',
         booking_status_message: suspensionMessage,
     };
-    const effectiveFirstMessage = suspended ? suspensionMessage : genericGreeting;
+    // A prenotazioni sospese, se c'è un messaggio iniziale personalizzato lo
+    // usiamo anche qui: l'operatore vuole annunciare la sospensione con parole
+    // sue (es. "per Ferragosto siamo al completo, prenota sul sito"). I tool di
+    // prenotazione restano comunque disattivati e booking_status_message
+    // continua a segnalare al prompt che è sospeso, così Sofia non prenota per
+    // telefono. Senza messaggio custom si usa il testo automatico di sospensione.
+    const effectiveFirstMessage = suspended && !customFirst ? suspensionMessage : genericGreeting;
     const fallbackResponse = {
         type: 'conversation_initiation_client_data',
         dynamic_variables: baseDynamicVars,
