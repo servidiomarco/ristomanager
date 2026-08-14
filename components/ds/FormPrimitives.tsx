@@ -1,4 +1,5 @@
 import React from 'react';
+import { ChevronDown } from 'lucide-react';
 
 /**
  * Form building blocks shared across modals. Deliberately unopinionated about
@@ -14,22 +15,51 @@ export const FormCard: React.FC<{
   /** Rendered opposite the title — a count, a hint, a small action. */
   aside?: React.ReactNode;
   className?: string;
+  /** Rende la card collassabile: l'header diventa un toggle (native <details>). */
+  collapsible?: boolean;
+  /** Solo con `collapsible`: stato iniziale. Default aperto. */
+  defaultOpen?: boolean;
   children: React.ReactNode;
-}> = ({ title, aside, className = '', children }) => (
-  <section className={`rounded-[20px] bg-[var(--ds-surface)] p-5 sm:p-6 ${className}`}>
-    {(title || aside) && (
-      <div className="mb-5 flex items-center justify-between gap-3">
-        {title && (
-          <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
-            {title}
-          </h3>
-        )}
-        {aside && <div className="flex-shrink-0">{aside}</div>}
-      </div>
-    )}
-    {children}
-  </section>
-);
+}> = ({ title, aside, className = '', collapsible = false, defaultOpen = true, children }) => {
+  // Variante collassabile: <details> nativo, così apre/chiude senza stato React
+  // né JS, resta accessibile da tastiera e ricorda l'apertura nella sessione. Il
+  // padding inferiore della summary fa da separatore dal contenuto (≈ il mb-5
+  // dell'header non collassabile), quindi il contenuto ha solo padding laterale
+  // e inferiore.
+  if (collapsible) {
+    return (
+      <details open={defaultOpen} className={`group rounded-[20px] bg-[var(--ds-surface)] ${className}`}>
+        <summary className="flex cursor-pointer list-none select-none items-center justify-between gap-3 p-5 sm:p-6 [&::-webkit-details-marker]:hidden">
+          <div className="flex min-w-0 items-center gap-2">
+            <ChevronDown className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)] transition-transform group-open:rotate-180" aria-hidden />
+            {title && (
+              <h3 className="truncate text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
+                {title}
+              </h3>
+            )}
+          </div>
+          {aside && <div className="flex-shrink-0">{aside}</div>}
+        </summary>
+        <div className="px-5 pb-5 sm:px-6 sm:pb-6">{children}</div>
+      </details>
+    );
+  }
+  return (
+    <section className={`rounded-[20px] bg-[var(--ds-surface)] p-5 sm:p-6 ${className}`}>
+      {(title || aside) && (
+        <div className="mb-5 flex items-center justify-between gap-3">
+          {title && (
+            <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
+              {title}
+            </h3>
+          )}
+          {aside && <div className="flex-shrink-0">{aside}</div>}
+        </div>
+      )}
+      {children}
+    </section>
+  );
+};
 
 /* ── Field ────────────────────────────────────────────────────────────────
    Label + control + optional hint. `required` renders the asterisk in the

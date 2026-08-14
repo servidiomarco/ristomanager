@@ -529,9 +529,49 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
             )}
           </FormCard>
 
+          {/* Trascrizione sopra i messaggi e aperta di default: dopo una
+              chiamata è la cosa che si guarda per prima. Entrambe collassabili
+              per accorciare la colonna quando servono i messaggi. */}
+          <FormCard
+            title="Trascrizione"
+            aside={<span className="text-[13px] text-[var(--ds-text-muted)]">Agente vocale</span>}
+            collapsible
+            defaultOpen
+          >
+            {detail.summary && (
+              <div className="mb-4 rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+                <div className="mb-1 text-[13px] font-medium text-[var(--ds-text-secondary)]">Riassunto</div>
+                <p className="text-[15px] leading-relaxed text-[var(--ds-text-primary)]">{detail.summary}</p>
+              </div>
+            )}
+            {turns.length === 0 ? (
+              <p className="text-[14px] text-[var(--ds-text-muted)]">Trascrizione non disponibile.</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {turns.map((turn, idx) => (
+                  <div key={idx} className={`flex ${turn.who === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div
+                      className={`max-w-[85%] rounded-[18px] px-3.5 py-2 text-[14px] leading-relaxed ${
+                        turn.who === 'user'
+                          ? 'rounded-br-[6px] bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)]'
+                          : turn.who === 'agent'
+                          ? 'rounded-bl-[6px] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
+                          : 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
+                      }`}
+                    >
+                      {turn.text}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </FormCard>
+
           <FormCard
             title="Messaggi inviati"
             aside={messages.length > 0 ? <CountBadge count={messages.length} /> : undefined}
+            collapsible
+            defaultOpen={false}
           >
             {messagesLoading ? (
               <div className="flex items-center gap-2 text-[14px] text-[var(--ds-text-muted)]">
@@ -566,36 +606,6 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
                     </div>
                   );
                 })}
-              </div>
-            )}
-          </FormCard>
-
-          <FormCard title="Trascrizione" aside={<span className="text-[13px] text-[var(--ds-text-muted)]">Agente vocale</span>}>
-            {detail.summary && (
-              <div className="mb-4 rounded-[16px] bg-[var(--ds-surface-row)] p-3">
-                <div className="mb-1 text-[13px] font-medium text-[var(--ds-text-secondary)]">Riassunto</div>
-                <p className="text-[15px] leading-relaxed text-[var(--ds-text-primary)]">{detail.summary}</p>
-              </div>
-            )}
-            {turns.length === 0 ? (
-              <p className="text-[14px] text-[var(--ds-text-muted)]">Trascrizione non disponibile.</p>
-            ) : (
-              <div className="flex flex-col gap-2">
-                {turns.map((turn, idx) => (
-                  <div key={idx} className={`flex ${turn.who === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div
-                      className={`max-w-[85%] rounded-[18px] px-3.5 py-2 text-[14px] leading-relaxed ${
-                        turn.who === 'user'
-                          ? 'rounded-br-[6px] bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)]'
-                          : turn.who === 'agent'
-                          ? 'rounded-bl-[6px] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
-                          : 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
-                      }`}
-                    >
-                      {turn.text}
-                    </div>
-                  </div>
-                ))}
               </div>
             )}
           </FormCard>
