@@ -746,30 +746,49 @@
         roomsContainer.innerHTML = '<div class="grid grid-cols-1 gap-2"></div>';
         const grid = roomsContainer.firstElementChild;
 
-        const makeChip = (label, isActive, onClick) => {
+        // Etichetta sotto il nome sala: "Prenotazione" (si conferma da sola) o
+        // "Richiesta di Prenotazione" (sala oltre il ~70%: la conferma lo staff).
+        // Il flag `over_threshold` arriva da GET /public/rooms ed è lo stesso
+        // che decide l'esito reale del submit, così il cliente sa cosa aspettarsi.
+        const makeChip = (label, isActive, onClick, overThreshold) => {
             const b = document.createElement('button');
             b.type = 'button';
-            b.className = `w-full text-left px-4 py-3 rounded-xl text-sm font-semibold border-2 transition ${
+            b.className = `w-full text-left px-4 py-3 rounded-xl border-2 transition ${
                 isActive
                     ? 'border-amber-800 bg-amber-50 text-amber-900'
                     : 'border-stone-200 bg-white text-stone-700 active:bg-stone-50 hover:bg-stone-50'
             }`;
-            b.textContent = label;
+            const tag = overThreshold ? 'Richiesta di Prenotazione' : 'Prenotazione';
+            const tagClass = overThreshold ? 'text-amber-700' : 'text-emerald-700';
+            const name = document.createElement('div');
+            name.className = 'text-sm font-semibold';
+            name.textContent = label;
+            const sub = document.createElement('div');
+            sub.className = `text-xs font-medium mt-0.5 ${tagClass}`;
+            sub.textContent = tag;
+            b.appendChild(name);
+            b.appendChild(sub);
             b.addEventListener('click', onClick);
             return b;
         };
 
+        // "Nessuna preferenza": lo staff sceglie una sala libera. Si conferma da
+        // sola se almeno una sala è sotto soglia; se sono tutte oltre, diventa
+        // comunque una richiesta.
+        const anyUnderThreshold = state.rooms.some(r => !r.over_threshold);
         grid.appendChild(makeChip(
             'Nessuna preferenza',
             state.roomId === null,
-            () => { state.roomId = null; renderRooms(); }
+            () => { state.roomId = null; renderRooms(); },
+            !anyUnderThreshold
         ));
 
         state.rooms.forEach(room => {
             grid.appendChild(makeChip(
                 room.name,
                 state.roomId === room.id,
-                () => { state.roomId = room.id; renderRooms(); }
+                () => { state.roomId = room.id; renderRooms(); },
+                !!room.over_threshold
             ));
         });
     }

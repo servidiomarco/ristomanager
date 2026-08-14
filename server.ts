@@ -117,6 +117,7 @@ import {
     computeRoomOccupancy,
     pickSelfServiceTable,
     listBookableRooms,
+    getCappedRoomIds,
 } from './services/roomOccupancyService.js';
 import { toTitleCase } from './utils/text.js';
 import {
@@ -16156,7 +16157,14 @@ app.get('/public/rooms', async (req, res) => {
         // Stessa definizione di "tavolo assegnabile" usata dall'assegnazione
         // automatica: una sala compare solo se ha davvero qualcosa da dare.
         const rooms = await listBookableRooms(date, shift as Shift, guests);
-        res.json({ rooms });
+        // `over_threshold` = la sala è oltre il proprio limite di occupazione
+        // (default 70%): la prenotazione lì NON si auto-conferma ma diventa una
+        // richiesta che approva lo staff. È esattamente lo stesso insieme usato
+        // da pickSelfServiceTable per decidere confermato vs richiesta, quindi
+        // l'etichetta sul form combacia sempre con l'esito reale del submit.
+        const cappedIds = new Set(await getCappedRoomIds(date, shift as Shift));
+        const roomsWithFlag = rooms.map(r => ({ ...r, over_threshold: cappedIds.has(r.id) }));
+        res.json({ rooms: roomsWithFlag });
     } catch (err: any) {
         console.error('GET /public/rooms error:', err);
         res.status(500).json({ error: 'Failed to load rooms' });
