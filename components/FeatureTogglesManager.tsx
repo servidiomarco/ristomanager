@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Globe, Phone, Loader2, ChevronDown, Users, PauseCircle, Clock, CalendarClock, Plus, Trash2, Percent } from 'lucide-react';
+import { Globe, Phone, Loader2, ChevronDown, Users, PauseCircle, Clock, CalendarClock, Plus, Trash2, Percent, MessageSquare } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
 import {
     getFeatureFlags,
@@ -98,6 +98,11 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
     const [suspensionCallbackDraft, setSuspensionCallbackDraft] = useState<string>('');
     const [savingSuspensionCallback, setSavingSuspensionCallback] = useState(false);
 
+    // Messaggio iniziale di Sofia. Testo libero, salvato in ChannelSettings;
+    // vuoto = default di sistema. Draft separato per digitazione fluida.
+    const [voiceFirstMessageDraft, setVoiceFirstMessageDraft] = useState<string>('');
+    const [savingVoiceFirstMessage, setSavingVoiceFirstMessage] = useState(false);
+
     // Scheduled suspensions — one row per {date, start, end}. Draft is edited
     // in place; on Save we ship the whole array to the backend (simpler than
     // per-row PATCH and the list stays small).
@@ -143,6 +148,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                 setChannels(channelsData);
                 setVoiceThresholdDraft(String(channelsData.voice_large_group_threshold));
                 setSuspensionCallbackDraft(channelsData.voice_bookings_suspension_callback_time);
+                setVoiceFirstMessageDraft(channelsData.voice_first_message ?? '');
                 setScheduleDraft(channelsData.voice_bookings_suspension_schedule ?? []);
                 setBlocksDraft(channelsData.public_bookings_blocks ?? []);
                 setVoiceBlocksDraft(channelsData.voice_bookings_date_blocks ?? []);
@@ -216,6 +222,26 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
             showToast(err?.message || 'Errore aggiornamento soglia', 'error');
         } finally {
             setSavingVoiceThreshold(false);
+        }
+    };
+
+    const saveVoiceFirstMessage = async () => {
+        if (!channels || !canEdit || savingVoiceFirstMessage) return;
+        const raw = voiceFirstMessageDraft.trim();
+        if (raw.length > 500) {
+            showToast('Il messaggio può essere al massimo 500 caratteri', 'error');
+            return;
+        }
+        setSavingVoiceFirstMessage(true);
+        try {
+            const updated = await updateChannelSettings({ voice_first_message: raw });
+            setChannels(updated);
+            setVoiceFirstMessageDraft(updated.voice_first_message ?? '');
+            showToast(raw ? 'Messaggio iniziale aggiornato' : 'Messaggio iniziale ripristinato al default', 'success');
+        } catch (err: any) {
+            showToast(err?.message || 'Errore aggiornamento messaggio', 'error');
+        } finally {
+            setSavingVoiceFirstMessage(false);
         }
     };
 
@@ -443,6 +469,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
 
     const voiceThresholdDirty = String(channels.voice_large_group_threshold) !== voiceThresholdDraft.trim();
     const suspensionCallbackDirty = channels.voice_bookings_suspension_callback_time !== suspensionCallbackDraft.trim();
+    const voiceFirstMessageDirty = (channels.voice_first_message ?? '') !== voiceFirstMessageDraft.trim();
     const suspended = flags.voice_bookings_suspended;
     const suspensionSaving = savingKey === 'voice_bookings_suspended';
     const scheduleDirty = JSON.stringify(channels.voice_bookings_suspension_schedule ?? []) !== JSON.stringify(scheduleDraft);
@@ -507,6 +534,37 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
 
                             {isVoice && (
                                 <>
+                                    <div className="rounded-md bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
+                                        <label className="flex items-start gap-2 text-[13px] text-[var(--ds-text-primary)] font-medium">
+                                            <MessageSquare className="h-4 w-4 mt-0.5 text-[var(--ds-text-muted)] flex-shrink-0" />
+                                            <span>Messaggio iniziale di Sofia</span>
+                                        </label>
+                                        <p className="text-[12px] text-[var(--ds-text-muted)] mt-1 mb-2 leading-relaxed">
+                                            La prima frase che Sofia pronuncia alla risposta. Modificalo qui invece che su ElevenLabs. Usa <code className="px-1 rounded bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]">{'{nome}'}</code> per inserire il nome del cliente quando il numero è riconosciuto (viene tolto per i chiamanti sconosciuti). Lascia vuoto per usare il messaggio predefinito.
+                                        </p>
+                                        <textarea
+                                            rows={3}
+                                            maxLength={500}
+                                            value={voiceFirstMessageDraft}
+                                            onChange={(e) => setVoiceFirstMessageDraft(e.target.value)}
+                                            disabled={!canEdit || savingVoiceFirstMessage}
+                                            placeholder="Es. Ciao {nome}, sono Sofia del Vecchio Frantoio, come posso aiutarti?"
+                                            className="w-full px-2.5 py-2 rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[13px] text-[var(--ds-text-primary)] leading-relaxed resize-y focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
+                                        />
+                                        <div className="flex items-center gap-2 mt-2">
+                                            <span className="text-[12px] text-[var(--ds-text-muted)] tabular">{voiceFirstMessageDraft.trim().length}/500</span>
+                                            <button
+                                                type="button"
+                                                onClick={saveVoiceFirstMessage}
+                                                disabled={!canEdit || savingVoiceFirstMessage || !voiceFirstMessageDirty}
+                                                className="ml-auto inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[13px] font-medium bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                                            >
+                                                {savingVoiceFirstMessage && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                                                Salva
+                                            </button>
+                                        </div>
+                                    </div>
+
                                     <div className="rounded-md bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
                                         <label className="flex items-start gap-2 text-[13px] text-[var(--ds-text-primary)] font-medium">
                                             <Users className="h-4 w-4 mt-0.5 text-[var(--ds-text-muted)] flex-shrink-0" />
