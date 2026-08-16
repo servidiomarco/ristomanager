@@ -2372,7 +2372,7 @@ const App: React.FC = () => {
 
         {view === ViewState.CUCINA && (
           <CardErrorBoundary label="Cucina">
-            <KitchenDisplay />
+            <KitchenDisplay globalDate={globalDate} globalShiftFilter={globalShiftFilter} />
           </CardErrorBoundary>
         )}
 

@@ -7,6 +7,7 @@ import {
   type KdsItem, type KdsCourseState, type MenuCatalogue,
 } from '../services/ordersApiService';
 import { getKitchenServiceSummary, type KitchenServiceSummary } from '../services/apiService';
+import { getRomeDatePart } from '../utils/reservationTime';
 import { ModalShell, EmptyState, StatusPill, dsButton } from './ds';
 
 // ---------------------------------------------------------------------------
@@ -66,7 +67,18 @@ interface Column {
   waitingOthers: boolean;
 }
 
-export const KitchenDisplay: React.FC = () => {
+interface KitchenDisplayProps {
+  globalDate?: Date;
+  globalShiftFilter?: 'ALL' | 'LUNCH' | 'DINNER';
+}
+
+// Turno "corrente" quando l'utente non ne ha scelto uno esplicito: prima delle
+// 17 è pranzo, dopo è cena. Stessa soglia usata dal server per il default.
+const DINNER_START_HOUR = 17;
+const inferShift = (d: Date): 'LUNCH' | 'DINNER' =>
+  d.getHours() < DINNER_START_HOUR ? 'LUNCH' : 'DINNER';
+
+export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, globalShiftFilter }) => {
   const now = useNow(15_000);
   const [stationId, setStationId] = useState<number | null>(() => {
     const saved = localStorage.getItem(STATION_KEY);
@@ -88,17 +100,27 @@ export const KitchenDisplay: React.FC = () => {
 
   useEffect(() => { getMenuCatalogue().then(setCatalogue).catch(() => {}); }, []);
 
+  // Il banner segue la data/turno globale dell'header: se il cuoco naviga a
+  // "Mar 18 Cena" vuole vedere il riepilogo di quel servizio, non di oggi.
+  // Con turno "ALL" ripieghiamo sull'inferenza oraria del giorno selezionato.
+  const summaryDate = globalDate ? getRomeDatePart(globalDate) : '';
+  const summaryShift: 'LUNCH' | 'DINNER' =
+    globalShiftFilter === 'LUNCH' || globalShiftFilter === 'DINNER'
+      ? globalShiftFilter
+      : inferShift(globalDate ?? new Date());
+
   useEffect(() => {
     let cancelled = false;
     const load = () => {
-      getKitchenServiceSummary()
+      const params = summaryDate ? { date: summaryDate, shift: summaryShift } : undefined;
+      getKitchenServiceSummary(params)
         .then(s => { if (!cancelled) setSummary(s); })
         .catch(() => { /* niente banner: solo dettaglio in meno */ });
     };
     load();
     const poll = setInterval(load, 60_000);
     return () => { cancelled = true; clearInterval(poll); };
-  }, []);
+  }, [summaryDate, summaryShift]);
 
   const reload = useCallback(async () => {
     try {
