@@ -9,7 +9,7 @@ import { BillSheet } from './pagamenti/BillSheet';
 import { BillFigures, billStateLabel } from './prenotazione/BillFigures';
 import { PaymentRequestRow } from './prenotazione/PaymentRequestRow';
 import { MessaggiPanel } from './prenotazione/MessaggiPanel';
-import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, RoomClosedOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill } from '../types';
+import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, RoomClosedOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill, NoteSelection } from '../types';
 import { Banknote, Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, ListFilter, Map as MapIcon, List, MessageCircle, Mail, Armchair, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap } from '../services/apiService';
@@ -707,8 +707,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Fetched from /settings/reservation-notes on mount so admins can edit the
   // chip list from Impostazioni. Each preset carries an optional lucide icon
   // key that we render both as a chip and next to the customer's name in the
-  // reservation card. Starts empty and gets replaced by the API payload.
-  const [quickNotes, setQuickNotes] = useState<Array<{ label: string; icon: string | null }>>([]);
+  // reservation card. `has_quantity`/`variants` opt-in a small picker (e.g.
+  // Stinco → 2 × maiale) that populates the structured `note_selections`
+  // mirror on the reservation; chips without them keep the old toggle
+  // behaviour and only feed `selectedQuickNotes` (free-text join).
+  const [quickNotes, setQuickNotes] = useState<Array<{
+    id: number;
+    label: string;
+    icon: string | null;
+    has_quantity: boolean;
+    variants: string[];
+  }>>([]);
+  // Structured picks made through the quantity/variant picker. Kept in sync
+  // with the mirrored chips in the form and serialized to Reservation.note_selections.
+  const [noteSelections, setNoteSelections] = useState<NoteSelection[]>([]);
+  // Which chip's popover is open. Null = closed. Value = quickNotes.id.
+  const [notePickerFor, setNotePickerFor] = useState<number | null>(null);
   // Fetched from /settings/reservation-allergens on mount, same rationale as
   // quickNotes: admins edit the list in Impostazioni → Opzioni prenotazioni.
   const [allergenPresets, setAllergenPresets] = useState<string[]>([]);
@@ -851,7 +865,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     (async () => {
       try {
         const rows = await getReservationNotePresets();
-        if (!cancelled) setQuickNotes(rows.map(r => ({ label: r.label, icon: r.icon || null })));
+        if (!cancelled) setQuickNotes(rows.map(r => ({
+          id: r.id,
+          label: r.label,
+          icon: r.icon || null,
+          has_quantity: !!r.has_quantity,
+          variants: (r.variants || []).map(v => v.label),
+        })));
       } catch {
         // Silent: an empty chip list is a clear "not configured yet" signal.
       }
@@ -1856,8 +1876,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setSelectedAllergens(dietary.intolerances);
       const existingAllergens = [...dietary.allergies, ...dietary.intolerances];
 
-      // Extract quick notes
+      // Structured picks are the authoritative source for chips with
+      // has_quantity/varianti — take them straight from the reservation and
+      // skip the free-text scan for those, so we don't double-count.
+      const existingStructured = Array.isArray(res.note_selections) ? res.note_selections : [];
+      setNoteSelections(existingStructured);
+      const structuredIds = new Set(existingStructured.map(s => s.preset_id));
+      // Extract quick notes (chips senza struttura): riconosciute per etichetta
+      // nel testo libero, come nel vecchio flusso.
       const existingQuickNotes = quickNotes
+        .filter(n => !structuredIds.has(n.id) && !n.has_quantity && n.variants.length === 0)
         .filter(n => res.notes?.toLowerCase().includes(n.label.toLowerCase()))
         .map(n => n.label);
       setSelectedQuickNotes(existingQuickNotes);
@@ -1946,6 +1974,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setSelectedAllergies([]);
       setDietaryTab('allergie');
       setSelectedQuickNotes([]);
+      setNoteSelections([]);
+      setNotePickerFor(null);
       setShowAllergensSection(false);
       setShowNotesSection(false);
       setModalRoomFilter('ALL');
@@ -2375,6 +2405,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         selectedAllergens: string[];
         selectedAllergies?: string[];
         selectedQuickNotes: string[];
+        noteSelections?: NoteSelection[];
       }>(DRAFT_KEYS.RESERVATION_NEW);
       if (!existing) {
         setDraftBanner(null);
@@ -2384,9 +2415,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setSelectedAllergens(existing.data.selectedAllergens || []);
       setSelectedAllergies(existing.data.selectedAllergies || []);
       setSelectedQuickNotes(existing.data.selectedQuickNotes || []);
+      setNoteSelections(existing.data.noteSelections || []);
       setShowAllergensSection((existing.data.selectedAllergens || []).length > 0 || (existing.data.selectedAllergies || []).length > 0);
       setShowNotesSection(
         (existing.data.selectedQuickNotes || []).length > 0 ||
+        (existing.data.noteSelections || []).length > 0 ||
         !!existing.data.formData?.notes
       );
       setDraftBanner(null);
@@ -2412,7 +2445,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       (formData.notes && formData.notes.trim() !== '') ||
       selectedAllergens.length > 0 ||
       selectedAllergies.length > 0 ||
-      selectedQuickNotes.length > 0;
+      selectedQuickNotes.length > 0 ||
+      noteSelections.length > 0;
     if (!hasContent) return;
 
     const timer = setTimeout(() => {
@@ -2421,10 +2455,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         selectedAllergens,
         selectedAllergies,
         selectedQuickNotes,
+        noteSelections,
       });
     }, 400);
     return () => clearTimeout(timer);
-  }, [isFormOpen, isEditing, openedAsWalkIn, formData, selectedAllergens, selectedAllergies, selectedQuickNotes]);
+  }, [isFormOpen, isEditing, openedAsWalkIn, formData, selectedAllergens, selectedAllergies, selectedQuickNotes, noteSelections]);
 
   // The allergy/health-data consent is only relevant when the booking actually
   // records an allergen (special-category data, art. 9 GDPR). Auto-tick it the
@@ -2827,17 +2862,25 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       }
       if (isSavingReservation) return;
 
-      // Combine dietary flags, quick notes, and additional notes
+      // Combine dietary flags, quick notes, and additional notes.
+      // Le scelte strutturate finiscono ANCHE in `notes` in forma leggibile
+      // ("2× Stinco (maiale)"), così restano visibili nelle vecchie viste che
+      // non conoscono ancora note_selections; l'aggregazione cucina usa solo
+      // il campo strutturato, quindi niente rischio di doppio conteggio.
       const allergensText = buildDietaryNote(selectedAllergies, selectedAllergens);
+      const structuredText = noteSelections.length > 0
+          ? noteSelections.map(s => `${s.quantity}× ${s.label}${s.variant ? ` (${s.variant})` : ''}`).join(', ')
+          : '';
       const quickNotesText = selectedQuickNotes.length > 0
           ? selectedQuickNotes.join(', ')
           : '';
       const additionalNotes = formData.notes || '';
-      const combinedNotes = [allergensText, quickNotesText, additionalNotes].filter(Boolean).join(' | ');
+      const combinedNotes = [allergensText, structuredText, quickNotesText, additionalNotes].filter(Boolean).join(' | ');
 
       const dataToSave = {
           ...formData,
-          notes: combinedNotes || undefined
+          notes: combinedNotes || undefined,
+          note_selections: noteSelections,
       };
 
       // Skip preflight checks when editing — duplicates/future dates only matter
@@ -5157,11 +5200,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         }`}
                                     >
                                         <div className="flex items-center gap-3">
-                                            <StickyNote className={`h-4 w-4 ${(selectedQuickNotes.length > 0 || formData.notes) ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-secondary)]'}`} />
+                                            <StickyNote className={`h-4 w-4 ${(selectedQuickNotes.length > 0 || noteSelections.length > 0 || formData.notes) ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-secondary)]'}`} />
                                             <div className="text-left">
                                                 <span className="text-sm font-medium text-[var(--ds-text-primary)]">Note</span>
-                                                {selectedQuickNotes.length > 0 && (
-                                                    <p className="text-xs text-[var(--ds-text-secondary)]">{selectedQuickNotes.join(', ')}</p>
+                                                {(selectedQuickNotes.length > 0 || noteSelections.length > 0) && (
+                                                    <p className="text-xs text-[var(--ds-text-secondary)]">
+                                                        {[
+                                                          ...noteSelections.map(s => `${s.quantity}× ${s.label}${s.variant ? ` (${s.variant})` : ''}`),
+                                                          ...selectedQuickNotes,
+                                                        ].join(', ')}
+                                                    </p>
                                                 )}
                                             </div>
                                         </div>
@@ -5170,36 +5218,68 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
                                     {showNotesSection && (
                                         <div className="p-3 pt-0 space-y-4 border-t border-[var(--ds-border)] bg-[var(--ds-surface)]">
-                                            {/* Quick Notes */}
+                                            {/* Quick Notes. Chip senza has_quantity/varianti = toggle
+                                                (dietro le quinte alimenta selectedQuickNotes → notes libere).
+                                                Chip con struttura = apre un popover che chiede quantità e,
+                                                se presente, la variante; il risultato entra in noteSelections. */}
                                             <div className="grid grid-cols-2 gap-2 pt-3">
                                                 {quickNotes.map(note => {
-                                                    const isSelected = selectedQuickNotes.includes(note.label);
                                                     const NoteIcon = getReservationNoteIcon(note.icon);
+                                                    const structured = note.has_quantity || note.variants.length > 0;
+                                                    const structuredPicks = structured
+                                                      ? noteSelections.filter(s => s.preset_id === note.id)
+                                                      : [];
+                                                    const structuredTotalQty = structuredPicks.reduce((sum, s) => sum + s.quantity, 0);
+                                                    const isSelected = structured
+                                                      ? structuredPicks.length > 0
+                                                      : selectedQuickNotes.includes(note.label);
                                                     return (
-                                                        <button
-                                                            key={note.label}
-                                                            type="button"
-                                                            onClick={() => {
-                                                                setSelectedQuickNotes(prev =>
+                                                        <div key={`chip-${note.id}`} className="relative">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    if (structured) {
+                                                                        setNotePickerFor(prev => prev === note.id ? null : note.id);
+                                                                    } else {
+                                                                        setSelectedQuickNotes(prev =>
+                                                                            isSelected
+                                                                                ? prev.filter(n => n !== note.label)
+                                                                                : [...prev, note.label]
+                                                                        );
+                                                                    }
+                                                                }}
+                                                                className={`w-full flex items-center gap-2 px-3.5 h-9 rounded-full transition-colors text-left ${
                                                                     isSelected
-                                                                        ? prev.filter(n => n !== note.label)
-                                                                        : [...prev, note.label]
-                                                                );
-                                                            }}
-                                                            className={`flex items-center gap-2 px-3.5 h-9 rounded-full transition-colors text-left ${
-                                                                isSelected
-                                                                    ? 'border-[var(--ds-text-primary)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
-                                                                    : 'border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)]'
-                                                            }`}
-                                                        >
-                                                            <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${
-                                                                isSelected ? 'bg-[var(--ds-text-primary)] border-[var(--ds-text-primary)]' : 'border-[var(--ds-border)] bg-[var(--ds-surface)]'
-                                                            }`}>
-                                                                {isSelected && <Check className="text-[var(--ds-action-fg)] w-2.5 h-2.5" />}
-                                                            </div>
-                                                            {NoteIcon && <NoteIcon className="w-4 h-4 flex-shrink-0" />}
-                                                            <span className="text-sm font-medium truncate">{note.label}</span>
-                                                        </button>
+                                                                        ? 'border-[var(--ds-text-primary)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
+                                                                        : 'border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)]'
+                                                                }`}
+                                                            >
+                                                                <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${
+                                                                    isSelected ? 'bg-[var(--ds-text-primary)] border-[var(--ds-text-primary)]' : 'border-[var(--ds-border)] bg-[var(--ds-surface)]'
+                                                                }`}>
+                                                                    {isSelected && !structured && <Check className="text-[var(--ds-action-fg)] w-2.5 h-2.5" />}
+                                                                    {isSelected && structured && (
+                                                                        <span className="text-[10px] font-bold text-[var(--ds-action-fg)] tabular-nums">{structuredTotalQty}</span>
+                                                                    )}
+                                                                </div>
+                                                                {NoteIcon && <NoteIcon className="w-4 h-4 flex-shrink-0" />}
+                                                                <span className="text-sm font-medium truncate">{note.label}</span>
+                                                            </button>
+                                                            {structured && notePickerFor === note.id && (
+                                                                <NotePickerPopover
+                                                                    preset={note}
+                                                                    picks={structuredPicks}
+                                                                    onCommit={(nextPicks) => {
+                                                                        setNoteSelections(prev => {
+                                                                            const others = prev.filter(s => s.preset_id !== note.id);
+                                                                            return [...others, ...nextPicks];
+                                                                        });
+                                                                        setNotePickerFor(null);
+                                                                    }}
+                                                                    onCancel={() => setNotePickerFor(null)}
+                                                                />
+                                                            )}
+                                                        </div>
                                                     );
                                                 })}
                                             </div>
@@ -7100,3 +7180,154 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     </div>
   );
 };
+
+// Popover ancorato al chip della nota (es. Stinco). Il modello è:
+//  - `quantity` sempre presente (default 1, min 1);
+//  - `variant` opzionale — se il preset ha varianti, l'operatore sceglie una
+//    tipologia per volta e può aggiungere ulteriori righe per l'altra
+//    variante ("2 stinchi maiale + 1 stinco vitello");
+//  - `preset_id` mantiene il collegamento anche se l'etichetta viene rinominata
+//    in Impostazioni; l'aggregazione lato cucina raggruppa comunque per label
+//    (le rinominazioni non fanno drift storico).
+type QuickNotePreset = {
+    id: number;
+    label: string;
+    icon: string | null;
+    has_quantity: boolean;
+    variants: string[];
+};
+
+interface NotePickerPopoverProps {
+    preset: QuickNotePreset;
+    picks: NoteSelection[];
+    onCommit: (next: NoteSelection[]) => void;
+    onCancel: () => void;
+}
+
+const NotePickerPopover: React.FC<NotePickerPopoverProps> = ({ preset, picks, onCommit, onCancel }) => {
+    // Se il preset ha varianti trattiamo il popover come editor di più righe
+    // (una per variante scelta). Altrimenti è una singola quantità.
+    const hasVariants = preset.variants.length > 0;
+    const initial: Record<string, number> = {};
+    for (const p of picks) initial[p.variant ?? ''] = p.quantity;
+    const [qtyByVariant, setQtyByVariant] = useState<Record<string, number>>(() => {
+        if (hasVariants) return initial;
+        return { '': picks[0]?.quantity ?? 1 };
+    });
+
+    const bump = (variant: string, delta: number) => {
+        setQtyByVariant(prev => {
+            const cur = prev[variant] ?? 0;
+            const next = Math.max(0, Math.min(99, cur + delta));
+            return { ...prev, [variant]: next };
+        });
+    };
+    const setQty = (variant: string, value: number) => {
+        setQtyByVariant(prev => ({ ...prev, [variant]: Math.max(0, Math.min(99, Math.floor(value) || 0)) }));
+    };
+
+    const commit = () => {
+        const rows: NoteSelection[] = [];
+        if (hasVariants) {
+            for (const v of preset.variants) {
+                const q = qtyByVariant[v] ?? 0;
+                if (q > 0) rows.push({ preset_id: preset.id, label: preset.label, variant: v, quantity: q });
+            }
+        } else {
+            const q = qtyByVariant[''] ?? 0;
+            if (q > 0) rows.push({ preset_id: preset.id, label: preset.label, variant: null, quantity: q });
+        }
+        onCommit(rows);
+    };
+
+    const clear = () => onCommit([]);
+
+    return (
+        <>
+            <div className="fixed inset-0 z-[80]" onClick={onCancel} />
+            <div
+                className="absolute left-0 top-full mt-1 z-[81] w-72 rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-overlay)]"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <div className="flex items-center justify-between pb-2 mb-2 border-b border-[var(--ds-border)]">
+                    <span className="text-[13px] font-semibold text-[var(--ds-text-primary)]">{preset.label}</span>
+                    <button type="button" onClick={onCancel} className="p-1 rounded hover:bg-[var(--ds-surface-row)]" aria-label="Chiudi">
+                        <X className="w-3.5 h-3.5 text-[var(--ds-text-muted)]" />
+                    </button>
+                </div>
+                {hasVariants ? (
+                    <ul className="space-y-2">
+                        {preset.variants.map(v => (
+                            <li key={v} className="flex items-center gap-2">
+                                <span className="flex-1 text-[13px] text-[var(--ds-text-primary)] truncate">{v}</span>
+                                <QuantityStepper
+                                    value={qtyByVariant[v] ?? 0}
+                                    onIncrement={() => bump(v, 1)}
+                                    onDecrement={() => bump(v, -1)}
+                                    onChange={(n) => setQty(v, n)}
+                                />
+                            </li>
+                        ))}
+                    </ul>
+                ) : (
+                    <div className="flex items-center justify-between gap-2 py-1">
+                        <span className="text-[13px] text-[var(--ds-text-secondary)]">Quantità</span>
+                        <QuantityStepper
+                            value={qtyByVariant[''] ?? 0}
+                            onIncrement={() => bump('', 1)}
+                            onDecrement={() => bump('', -1)}
+                            onChange={(n) => setQty('', n)}
+                        />
+                    </div>
+                )}
+                <div className="mt-3 pt-2 border-t border-[var(--ds-border)] flex items-center justify-between gap-2">
+                    <button
+                        type="button"
+                        onClick={clear}
+                        className="text-[12px] text-rose-500 hover:text-rose-600"
+                    >
+                        Rimuovi
+                    </button>
+                    <button
+                        type="button"
+                        onClick={commit}
+                        className="px-3 py-1.5 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[12px] font-semibold hover:bg-[var(--ds-action-bg-hover)]"
+                    >
+                        Conferma
+                    </button>
+                </div>
+            </div>
+        </>
+    );
+};
+
+const QuantityStepper: React.FC<{
+    value: number;
+    onIncrement: () => void;
+    onDecrement: () => void;
+    onChange: (n: number) => void;
+}> = ({ value, onIncrement, onDecrement, onChange }) => (
+    <div className="inline-flex items-center rounded-full border border-[var(--ds-border)] bg-[var(--ds-surface)]">
+        <button
+            type="button"
+            onClick={onDecrement}
+            disabled={value <= 0}
+            className="w-8 h-8 flex items-center justify-center text-[var(--ds-text-primary)] disabled:opacity-30"
+            aria-label="Diminuisci"
+        >−</button>
+        <input
+            type="number"
+            min={0}
+            max={99}
+            value={value}
+            onChange={(e) => onChange(Number(e.target.value))}
+            className="w-10 h-8 text-center text-[13px] font-semibold tabular-nums bg-transparent focus:outline-none appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+        />
+        <button
+            type="button"
+            onClick={onIncrement}
+            className="w-8 h-8 flex items-center justify-center text-[var(--ds-text-primary)]"
+            aria-label="Aumenta"
+        >+</button>
+    </div>
+);
