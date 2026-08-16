@@ -19181,7 +19181,7 @@ app.post('/orders/:id/transfer', authenticate, requirePermission('orders:take'),
 // quelle con varianti si aggregano per coppia (label, variant). Le allergie
 // restano nelle dietary_notes del cliente (testo libero) e le restituiamo
 // per prenotazione, così l'UI può elencarle senza aprire la scheda cliente.
-app.get('/kitchen/service-summary', authenticate, requirePermission('reservations:view'), async (req, res) => {
+app.get('/kitchen/service-summary', authenticate, requirePermission('orders:kds'), async (req, res) => {
     try {
         const service = serviceFromQuery(req.query);
 
