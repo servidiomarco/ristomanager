@@ -2969,7 +2969,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           : hasMultipleReservations
               ? `Doppio turno · ${allReservations.map(r => {
                     const t = getRomeTimePart(r.reservation_time);
-                    return `${toTitleCase(r.customer_name)}${t ? ` (${t})` : ''}`;
+                    const covers = `${r.guests}${r.children && r.children > 0 ? ` (${r.children}b)` : ''} coperti`;
+                    return `${toTitleCase(r.customer_name)}${t ? ` (${t})` : ''} · ${covers}`;
                 }).join(' · ')}`
               : reservation
                   ? `Occupato da: ${toTitleCase(reservation.customer_name)} · ${reservation.guests}${reservation.children && reservation.children > 0 ? ` (${reservation.children}b)` : ''} coperti${reservationTime ? ` · ${reservationTime}` : ''}`
@@ -3095,14 +3096,24 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 {allReservations.map((r, i) => {
                                     const t = getRomeTimePart(r.reservation_time);
                                     return (
-                                        <span key={r.id} className="text-[11px]">
+                                        <span key={r.id} className="text-[11px] inline-flex items-center">
                                             <span className="opacity-70 tabular mr-1">{i + 1}°</span>
                                             {toTitleCase(r.customer_name)}
                                             {t && <span className="opacity-70 ml-1 tabular">· {t}</span>}
+                                            <span className="opacity-90 ml-1.5 inline-flex items-center gap-0.5 tabular">
+                                                <Armchair size={11} className="flex-shrink-0" />{r.guests}{r.children && r.children > 0 ? ` (${r.children}b)` : ''}
+                                            </span>
                                         </span>
                                     );
                                 })}
                             </div>
+                        ) : reservation ? (
+                            <span className="inline-flex items-center">
+                                {toTitleCase(reservation.customer_name)}
+                                <span className="opacity-90 ml-1.5 inline-flex items-center gap-0.5 tabular">
+                                    <Armchair size={11} className="flex-shrink-0" />{reservation.guests}{reservation.children && reservation.children > 0 ? ` (${reservation.children}b)` : ''}
+                                </span>
+                            </span>
                         ) : (
                             hoverPillNames[0]
                         )}
