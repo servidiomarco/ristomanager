@@ -261,7 +261,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
         </div>
       </div>
 
-      {summary && (summary.dietary.length > 0 || summary.dietary_lines.length > 0) && (
+      {summary && (
         <ServiceSummaryBanner
           summary={summary}
           open={summaryOpen}
