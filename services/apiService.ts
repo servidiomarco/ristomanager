@@ -1230,10 +1230,22 @@ export const getMarketingAudience = async (): Promise<MarketingAudience> => {
   });
 };
 
+export interface ReservationNotePresetVariant {
+  // id is present when the variant already exists in the DB. New variants
+  // added in the editor are sent to PUT without an id and get one back.
+  id?: number;
+  label: string;
+}
+
 export interface ReservationNotePreset {
   id: number;
   label: string;
   icon?: string | null;
+  // When true the chip opens a picker for quantity (and variant, if any)
+  // instead of appending plain text to the note. Structured selections
+  // land in Reservation.note_selections and feed the kitchen aggregation.
+  has_quantity?: boolean;
+  variants?: ReservationNotePresetVariant[];
 }
 
 export const getReservationNotePresets = async (): Promise<ReservationNotePreset[]> => {
@@ -1243,7 +1255,12 @@ export const getReservationNotePresets = async (): Promise<ReservationNotePreset
 };
 
 export const updateReservationNotePresets = async (
-  items: Array<{ label: string; icon?: string | null }>,
+  items: Array<{
+    label: string;
+    icon?: string | null;
+    has_quantity?: boolean;
+    variants?: Array<{ label: string }>;
+  }>,
 ): Promise<ReservationNotePreset[]> => {
   return apiRequest<ReservationNotePreset[]>(`${API_URL}/settings/reservation-notes`, {
     method: 'PUT',
@@ -1271,4 +1288,25 @@ export const updateReservationAllergenPresets = async (
     headers: getHeaders(),
     body: JSON.stringify({ labels }),
   });
+};
+
+export interface KitchenServiceSummary {
+  service_date: string;
+  shift: 'LUNCH' | 'DINNER';
+  reservations: number;
+  dietary: Array<{ label: string; variant: string | null; quantity: number }>;
+  dietary_lines: Array<{ reservation_id: number; customer_name: string; text: string }>;
+}
+
+export const getKitchenServiceSummary = async (
+  params?: { date?: string; shift?: 'LUNCH' | 'DINNER' },
+): Promise<KitchenServiceSummary> => {
+  const qs = new URLSearchParams();
+  if (params?.date) qs.set('date', params.date);
+  if (params?.shift) qs.set('shift', params.shift);
+  const query = qs.toString();
+  return apiRequest<KitchenServiceSummary>(
+    `${API_URL}/kitchen/service-summary${query ? `?${query}` : ''}`,
+    { headers: getHeaders(false) },
+  );
 };

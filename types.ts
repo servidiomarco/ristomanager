@@ -166,6 +166,17 @@ export enum ReservationStatus {
   CANCELLED = 'CANCELLED'   // Cancelled by customer (e.g. via voice agent)
 }
 
+// Structured picks made through the note-preset picker (e.g. clicking
+// "Stinco" and choosing quantity=2, variant="maiale"). Sits alongside the
+// free-text `notes` field so the kitchen dashboard can aggregate reliably
+// across a whole service, without regex-parsing operator prose.
+export interface NoteSelection {
+  preset_id: number;
+  label: string;
+  quantity: number;
+  variant?: string | null;
+}
+
 export interface Reservation {
   id: number;
   customer_name: string;
@@ -182,6 +193,9 @@ export interface Reservation {
   duration_minutes?: number;
   table_id?: number;
   notes?: string;
+  // Structured mirror of `notes` for note presets that use has_quantity
+  // (e.g. "Stinco maiale ×2"). Plain-text quick-notes stay in `notes` only.
+  note_selections?: NoteSelection[];
   email?: string;
   phone?: string;
   payment_status: PaymentStatus;

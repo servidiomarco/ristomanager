@@ -758,6 +758,13 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS consent_data_health BOOLEAN;`);
         await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS consent_updated_at TIMESTAMPTZ;`);
 
+        // Structured mirror of the free-text note. Each entry is
+        //   { preset_id, label, quantity, variant }
+        // and comes from the note-preset picker in the reservation form
+        // (has_quantity chips only — plain preset clicks stay text-only).
+        // Powers the kitchen dashboard's service-wide aggregation.
+        await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS note_selections JSONB NOT NULL DEFAULT '[]'::jsonb;`);
+
         // ============================================
         // ROLE PERMISSIONS TABLE
         // ============================================
@@ -1939,6 +1946,11 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // as a plain text pill. Client keeps a whitelist so unknown values
         // gracefully fall back to no icon.
         await client.query(`ALTER TABLE reservation_note_presets ADD COLUMN IF NOT EXISTS icon VARCHAR(40);`);
+        // Turns the chip into a structured selection: clicking it opens a
+        // mini-picker for quantity (and variant, if any). Powers the kitchen
+        // dashboard aggregation ("stinchi maiale: 8"). Default false keeps
+        // legacy chips as plain-text tags.
+        await client.query(`ALTER TABLE reservation_note_presets ADD COLUMN IF NOT EXISTS has_quantity BOOLEAN NOT NULL DEFAULT FALSE;`);
         const existingPresetCount = await client.query(`SELECT COUNT(*)::int AS n FROM reservation_note_presets;`);
         if (existingPresetCount.rows[0]?.n === 0) {
             await client.query(`
@@ -1951,6 +1963,20 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                     ('Vista',            60, 'mountain');
             `);
         }
+
+        // Variants attached to a note preset (e.g. stinco → maiale/vitello).
+        // A preset without rows here still counts as "variant-less" — the
+        // picker in that case only asks for quantity if has_quantity is true.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS reservation_note_preset_variants (
+                id         SERIAL PRIMARY KEY,
+                preset_id  INTEGER NOT NULL REFERENCES reservation_note_presets(id) ON DELETE CASCADE,
+                label      VARCHAR(80) NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_note_variants_preset ON reservation_note_preset_variants(preset_id);`);
 
         // ============================================
         // RESERVATION ALLERGEN PRESETS

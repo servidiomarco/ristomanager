@@ -2189,6 +2189,35 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
 // PROTECTED ENDPOINTS
 // ============================================
 
+// Sanitize the structured note_selections payload from the client. Returns
+// a JSON string ready to bind as $::jsonb — always an array, silently drops
+// malformed rows so a bad client payload can never poison the aggregation.
+function sanitizeNoteSelections(raw: unknown): string {
+    if (!Array.isArray(raw)) return '[]';
+    const out: Array<{ preset_id: number; label: string; quantity: number; variant: string | null }> = [];
+    for (const item of raw) {
+        if (!item || typeof item !== 'object') continue;
+        const anyItem = item as any;
+        const presetId = Number(anyItem.preset_id);
+        const label = typeof anyItem.label === 'string' ? anyItem.label.trim() : '';
+        const quantity = Math.floor(Number(anyItem.quantity));
+        if (!Number.isFinite(presetId) || presetId <= 0) continue;
+        if (!label) continue;
+        if (!Number.isFinite(quantity) || quantity < 1) continue;
+        const variant = typeof anyItem.variant === 'string' && anyItem.variant.trim()
+            ? anyItem.variant.trim().slice(0, 80)
+            : null;
+        out.push({
+            preset_id: presetId,
+            label: label.slice(0, 80),
+            quantity: Math.min(quantity, 999),
+            variant,
+        });
+        if (out.length >= 50) break;
+    }
+    return JSON.stringify(out);
+}
+
 // Returns true if the table belongs to a closed room.
 async function isTableInClosedRoom(tableId: number | null | undefined): Promise<boolean> {
     if (tableId == null) return false;
@@ -2426,8 +2455,9 @@ app.get('/reservations', authenticate, async (req, res) => {
 
 app.post('/reservations', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
-        const { customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, consent_marketing, consent_data_health } = req.body;
+        const { customer_name, reservation_time, shift, guests, children, table_id, notes, note_selections, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, consent_marketing, consent_data_health } = req.body;
         const childrenCount = Math.max(0, Math.min(Number(children) || 0, Number(guests) || 0));
+        const noteSelectionsJson = sanitizeNoteSelections(note_selections);
         // GDPR consents (optional). Stamp consent_updated_at whenever the client
         // sent an explicit boolean for either consent — that's the moment of proof.
         const consentMarketing = typeof consent_marketing === 'boolean' ? consent_marketing : null;
@@ -2493,8 +2523,8 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         }
         const result = await queryWithRetry(
             `WITH ins AS (
-                INSERT INTO reservations (customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, created_by_user_id, consent_marketing, consent_data_health, consent_updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+                INSERT INTO reservations (customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, created_by_user_id, consent_marketing, consent_data_health, consent_updated_at, note_selections)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb)
                 RETURNING *
             )
             SELECT ins.*, u.full_name AS created_by_user_name,
@@ -2533,6 +2563,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
                 consentMarketing,
                 consentDataHealth,
                 consentUpdatedAt,
+                noteSelectionsJson,
             ]
         );
         const newReservation = result.rows[0];
@@ -2597,12 +2628,18 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
 app.put('/reservations/:id', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, consent_marketing, consent_data_health } = req.body;
+        const { customer_name, reservation_time, shift, guests, children, table_id, notes, note_selections, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, consent_marketing, consent_data_health } = req.body;
         // Consents are non-destructive: only touched when the client sends an
         // explicit boolean. Missing → keep the stored value (COALESCE).
         const consentMarketing = typeof consent_marketing === 'boolean' ? consent_marketing : null;
         const consentDataHealth = typeof consent_data_health === 'boolean' ? consent_data_health : null;
         const childrenCount = Math.max(0, Math.min(Number(children) || 0, Number(guests) || 0));
+        // Structured mirror of the note chips. If the client omits the field
+        // we leave the stored value alone (COALESCE below), so a partial PUT
+        // that only tweaks e.g. table_id doesn't clear the selections.
+        const noteSelectionsJson: string | null = note_selections === undefined
+            ? null
+            : sanitizeNoteSelections(note_selections);
         const rawDuration = duration_minutes == null || duration_minutes === '' ? null : Number(duration_minutes);
         const durationValue: number | null = Number.isFinite(rawDuration) && rawDuration! > 0 ? Math.min(600, Math.max(15, Math.round(rawDuration!))) : null;
         const effectiveDurationForCheck = durationValue ?? (shift === 'LUNCH' ? 90 : 120);
@@ -2639,7 +2676,8 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, children = $5, table_id = $6, notes = $7, email = $8, phone = $9, payment_status = $10, arrival_status = $11, reservation_status = $12, duration_minutes = $13,
                     consent_marketing = COALESCE($15, consent_marketing),
                     consent_data_health = COALESCE($16, consent_data_health),
-                    consent_updated_at = CASE WHEN ($15 IS NOT NULL OR $16 IS NOT NULL) THEN CURRENT_TIMESTAMP ELSE consent_updated_at END
+                    consent_updated_at = CASE WHEN ($15 IS NOT NULL OR $16 IS NOT NULL) THEN CURRENT_TIMESTAMP ELSE consent_updated_at END,
+                    note_selections = COALESCE($17::jsonb, note_selections)
                 WHERE id = $14
                 RETURNING *
             )
@@ -2679,6 +2717,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 id,
                 consentMarketing,
                 consentDataHealth,
+                noteSelectionsJson,
             ]
         );
         const updatedReservation = result.rows[0];
@@ -15943,10 +15982,30 @@ app.delete('/settings/ai-knowledge/:id', authenticate, requirePermission('settin
 // track per-item CRUD/ordering.
 app.get('/settings/reservation-notes', authenticate, async (_req, res) => {
     try {
+        // LEFT JOIN + json_agg pulls variants (ordered) alongside the preset
+        // in a single round-trip. FILTER excludes the phantom NULL variant
+        // for presets that have none, so we get `[]` not `[null]`.
         const result = await queryWithRetry(
-            `SELECT id, label, icon FROM reservation_note_presets ORDER BY sort_order ASC, id ASC`
+            `SELECT p.id, p.label, p.icon, p.has_quantity,
+                    COALESCE(
+                        json_agg(
+                            json_build_object('id', v.id, 'label', v.label)
+                            ORDER BY v.sort_order ASC, v.id ASC
+                        ) FILTER (WHERE v.id IS NOT NULL),
+                        '[]'::json
+                    ) AS variants
+             FROM reservation_note_presets p
+             LEFT JOIN reservation_note_preset_variants v ON v.preset_id = p.id
+             GROUP BY p.id
+             ORDER BY p.sort_order ASC, p.id ASC`
         );
-        res.json(result.rows.map((r: any) => ({ id: r.id, label: r.label, icon: r.icon || null })));
+        res.json(result.rows.map((r: any) => ({
+            id: r.id,
+            label: r.label,
+            icon: r.icon || null,
+            has_quantity: !!r.has_quantity,
+            variants: Array.isArray(r.variants) ? r.variants : [],
+        })));
     } catch (err) {
         console.error('Error fetching reservation note presets:', err);
         res.status(500).json({ error: 'Failed to fetch reservation note presets' });
@@ -16020,9 +16079,9 @@ app.put('/settings/reservation-allergens', authenticate, requirePermission('sett
 app.put('/settings/reservation-notes', authenticate, requirePermission('settings:full'), async (req, res) => {
     const body = req.body ?? {};
     // Accept either the legacy shape { labels: string[] } or the richer
-    // { items: { label, icon? }[] }. The legacy branch keeps older clients
-    // working while frontends roll out the icon picker.
-    const rawItems: Array<{ label: any; icon?: any }> | null = Array.isArray(body.items)
+    // { items: { label, icon?, has_quantity?, variants? }[] }. The legacy
+    // branch keeps older clients working while frontends roll out variants.
+    const rawItems: Array<{ label: any; icon?: any; has_quantity?: any; variants?: any }> | null = Array.isArray(body.items)
         ? body.items
         : Array.isArray(body.labels)
             ? body.labels.map((l: any) => ({ label: l }))
@@ -16030,7 +16089,8 @@ app.put('/settings/reservation-notes', authenticate, requirePermission('settings
     if (!rawItems) {
         return res.status(400).json({ error: 'invalid_body', message: 'items or labels required' });
     }
-    const cleaned: Array<{ label: string; icon: string | null }> = [];
+    type Cleaned = { label: string; icon: string | null; has_quantity: boolean; variants: string[] };
+    const cleaned: Cleaned[] = [];
     const seen = new Set<string>();
     for (const raw of rawItems) {
         if (!raw || typeof raw.label !== 'string') continue;
@@ -16052,7 +16112,27 @@ app.put('/settings/reservation-notes', authenticate, requirePermission('settings
             }
             icon = t;
         }
-        cleaned.push({ label: trimmed, icon });
+        const has_quantity = raw.has_quantity === true;
+        const variantSeen = new Set<string>();
+        const variants: string[] = [];
+        if (Array.isArray(raw.variants)) {
+            for (const v of raw.variants) {
+                const vLabel = typeof v === 'string' ? v : (v && typeof v.label === 'string' ? v.label : '');
+                const vTrim = vLabel.trim();
+                if (!vTrim) continue;
+                if (vTrim.length > 80) {
+                    return res.status(400).json({ error: 'variant_too_long', message: `Variante "${vTrim.slice(0, 20)}…" supera 80 caratteri` });
+                }
+                const vKey = vTrim.toLowerCase();
+                if (variantSeen.has(vKey)) continue;
+                variantSeen.add(vKey);
+                variants.push(vTrim);
+            }
+        }
+        if (variants.length > 20) {
+            return res.status(400).json({ error: 'too_many_variants', message: `"${trimmed}" ha più di 20 varianti.` });
+        }
+        cleaned.push({ label: trimmed, icon, has_quantity, variants });
     }
     if (cleaned.length > 30) {
         return res.status(400).json({ error: 'too_many_labels', message: 'Massimo 30 note.' });
@@ -16060,18 +16140,46 @@ app.put('/settings/reservation-notes', authenticate, requirePermission('settings
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
+        // Wiping presets cascades to variants via ON DELETE CASCADE.
         await client.query('DELETE FROM reservation_note_presets');
         for (let i = 0; i < cleaned.length; i++) {
-            await client.query(
-                `INSERT INTO reservation_note_presets (label, sort_order, icon) VALUES ($1, $2, $3)`,
-                [cleaned[i].label, (i + 1) * 10, cleaned[i].icon]
+            const c = cleaned[i];
+            const ins = await client.query(
+                `INSERT INTO reservation_note_presets (label, sort_order, icon, has_quantity)
+                 VALUES ($1, $2, $3, $4) RETURNING id`,
+                [c.label, (i + 1) * 10, c.icon, c.has_quantity]
             );
+            const presetId = ins.rows[0].id;
+            for (let j = 0; j < c.variants.length; j++) {
+                await client.query(
+                    `INSERT INTO reservation_note_preset_variants (preset_id, label, sort_order)
+                     VALUES ($1, $2, $3)`,
+                    [presetId, c.variants[j], (j + 1) * 10]
+                );
+            }
         }
         await client.query('COMMIT');
         const result = await queryWithRetry(
-            `SELECT id, label, icon FROM reservation_note_presets ORDER BY sort_order ASC, id ASC`
+            `SELECT p.id, p.label, p.icon, p.has_quantity,
+                    COALESCE(
+                        json_agg(
+                            json_build_object('id', v.id, 'label', v.label)
+                            ORDER BY v.sort_order ASC, v.id ASC
+                        ) FILTER (WHERE v.id IS NOT NULL),
+                        '[]'::json
+                    ) AS variants
+             FROM reservation_note_presets p
+             LEFT JOIN reservation_note_preset_variants v ON v.preset_id = p.id
+             GROUP BY p.id
+             ORDER BY p.sort_order ASC, p.id ASC`
         );
-        res.json(result.rows.map((r: any) => ({ id: r.id, label: r.label, icon: r.icon || null })));
+        res.json(result.rows.map((r: any) => ({
+            id: r.id,
+            label: r.label,
+            icon: r.icon || null,
+            has_quantity: !!r.has_quantity,
+            variants: Array.isArray(r.variants) ? r.variants : [],
+        })));
     } catch (err) {
         await client.query('ROLLBACK').catch(() => {});
         console.error('Error updating reservation note presets:', err);
@@ -19062,6 +19170,91 @@ app.post('/orders/:id/transfer', authenticate, requirePermission('orders:take'),
         await client.query('ROLLBACK').catch(() => {});
         client.release();
         console.error('POST /orders/:id/transfer error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// --- Riepilogo di servizio per la cucina (banner in cima al KDS) ------------
+// Aggrega le scelte strutturate (note_selections) e le note dietetiche del
+// turno per dare alla cucina un colpo d'occhio "stasera 8 stinchi di maiale,
+// 3 di vitello". Le note dei preset senza varianti si contano per etichetta;
+// quelle con varianti si aggregano per coppia (label, variant). Le allergie
+// restano nelle dietary_notes del cliente (testo libero) e le restituiamo
+// per prenotazione, così l'UI può elencarle senza aprire la scheda cliente.
+app.get('/kitchen/service-summary', authenticate, requirePermission('reservations:view'), async (req, res) => {
+    try {
+        const service = serviceFromQuery(req.query);
+
+        const rows = await queryWithRetry(
+            `SELECT r.id,
+                    r.customer_name,
+                    r.reservation_time,
+                    r.guests,
+                    r.note_selections,
+                    c.dietary_notes AS customer_dietary_notes
+             FROM reservations r
+             LEFT JOIN LATERAL (
+                 SELECT cc.dietary_notes
+                 FROM customers cc
+                 WHERE r.phone IS NOT NULL
+                   AND cc.phone IS NOT NULL
+                   AND regexp_replace(r.phone, '\\D', '', 'g') = regexp_replace(cc.phone, '\\D', '', 'g')
+                 ORDER BY cc.is_vip DESC NULLS LAST, cc.id ASC
+                 LIMIT 1
+             ) c ON true
+             WHERE DATE(r.reservation_time) = $1::date
+               AND r.shift = $2
+               AND COALESCE(r.reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')
+             ORDER BY r.reservation_time ASC, r.id ASC`,
+            [service.service_date, service.shift]
+        );
+
+        // Aggregazione per (label, variant): raggruppiamo lato Node per non
+        // stressare il planner con array_agg + jsonb_each dentro la stessa query.
+        // Il volume è al massimo qualche decina di prenotazioni per turno.
+        const byLabel = new Map<string, { label: string; variant: string | null; quantity: number }>();
+        const dietary_lines: { reservation_id: number; customer_name: string; text: string }[] = [];
+
+        for (const row of rows.rows) {
+            const selections = Array.isArray(row.note_selections) ? row.note_selections : [];
+            for (const sel of selections) {
+                if (!sel || typeof sel.label !== 'string') continue;
+                const label = sel.label.trim();
+                if (!label) continue;
+                const variant = typeof sel.variant === 'string' && sel.variant.trim() ? sel.variant.trim() : null;
+                const qty = Number(sel.quantity);
+                if (!Number.isFinite(qty) || qty <= 0) continue;
+                const key = `${label} ${variant ?? ''}`;
+                const cur = byLabel.get(key);
+                if (cur) cur.quantity += qty;
+                else byLabel.set(key, { label, variant, quantity: qty });
+            }
+            const diet = typeof row.customer_dietary_notes === 'string'
+                ? row.customer_dietary_notes.trim() : '';
+            if (diet) {
+                dietary_lines.push({
+                    reservation_id: Number(row.id),
+                    customer_name: row.customer_name ?? '',
+                    text: diet,
+                });
+            }
+        }
+
+        const dietary = [...byLabel.values()].sort((a, b) =>
+            b.quantity - a.quantity
+            || a.label.localeCompare(b.label)
+            || (a.variant ?? '').localeCompare(b.variant ?? '')
+        );
+
+        res.json({
+            service_date: service.service_date,
+            shift: service.shift,
+            reservations: rows.rows.length,
+            dietary,
+            dietary_lines,
+        });
+    } catch (err: any) {
+        console.error('GET /kitchen/service-summary error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });
