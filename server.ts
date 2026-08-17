@@ -14,6 +14,8 @@ import rateLimit from 'express-rate-limit';
 import QRCode from 'qrcode';
 import pool, { createSchema, queryWithRetry } from './db.js';
 import { SocketService } from './services/socketService.js';
+import * as bookingTools from './services/bookingTools.js';
+import { VOICE_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
 import {
     generateSuggestedReply,
     isAiConfigured,
@@ -1051,922 +1053,72 @@ app.post('/webhook/elevenlabs/lookup-customer', async (req, res) => {
 // Tool 1 — check_availability
 // Body shape (per ElevenLabs tools spec): { parameters: { date, shift, guests }, conversation_id?, agent_id? }
 // We also accept flat top-level fields as a fallback.
-app.post('/webhook/elevenlabs/check-availability', async (req, res) => {
-    if (!authorizeElevenLabs(req, res)) return;
+// I quattro tool sono in services/bookingTools.ts, indipendenti dal canale:
+// qui restano solo le cose davvero di ElevenLabs — firma, forma del body
+// `{parameters:{...}}`, e gli interruttori del canale telefonico. Il canale
+// WhatsApp riuserà gli stessi tool con un adattatore come questo.
+
+/** Parametri del tool: ElevenLabs li annida in `parameters`, ma alcune
+ *  versioni dell'agente li mandano al primo livello. */
+const elevenLabsParams = (req: express.Request): Record<string, any> => {
+    const body: any = req.body || {};
+    const p = (body.parameters && typeof body.parameters === 'object') ? body.parameters : body;
+    return { ...p, conversation_id: body.conversation_id || p.conversation_id };
+};
+
+/** Interruttori del canale telefonico. Restituisce true se si può procedere. */
+const voiceChannelOpen = async (res: express.Response, checkSuspension: boolean): Promise<boolean> => {
     if (!(await getFeatureFlag('voice_agent_enabled', true))) {
-        return res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
+        res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
+        return false;
     }
-    {
+    if (checkSuspension) {
         const state = await computeVoiceSuspensionState();
         if (state.suspended) {
-            return res.status(503).json({ error: 'voice_bookings_suspended', message: buildVoiceSuspensionMessage(state.callbackTime) });
+            res.status(503).json({ error: 'voice_bookings_suspended', message: buildVoiceSuspensionMessage(state.callbackTime) });
+            return false;
         }
     }
+    return true;
+};
 
-    const p = (req.body?.parameters && typeof req.body.parameters === 'object')
-        ? req.body.parameters
-        : req.body || {};
-    const rawShift = String(p.shift ?? '').trim().toUpperCase();
-    const guests = Number(p.guests);
-    const rawLocation = String(p.location_preference ?? '').trim().toUpperCase();
-    const locationPreference = rawLocation === 'INDOOR' || rawLocation === 'OUTDOOR'
-        ? (rawLocation as 'INDOOR' | 'OUTDOOR')
-        : undefined;
+const sendToolOutcome = (res: express.Response, outcome: ToolOutcome) =>
+    res.status(outcome.serverError ? 500 : 200).json(outcome.body);
 
-    // NOTE: user-actionable validation errors (bad date/time/shift/guests) are
-    // returned as HTTP 200 with `available:false` and a human-readable
-    // `message`. ElevenLabs does not surface HTTP 4xx response bodies to the
-    // LLM as tool output, so returning 400 makes the agent fall back to a
-    // generic "errore tecnico" reply instead of reading the message back to
-    // the customer. Only true server errors stay as 5xx.
-    const normalizedDate = parseFlexibleDate(p.date);
-    if (!normalizedDate) {
-        console.warn('[ElevenLabs] check-availability rejected: unparseable date', { received: p.date });
-        return res.json({
-            available: false,
-            free_tables_count: 0,
-            error: 'invalid_date',
-            message: 'Formato data non riconosciuto. Esempi accettati: 2026-05-14, 14/05/2026, "14 maggio 2026".'
-        });
-    }
-    if (rawShift !== Shift.LUNCH && rawShift !== Shift.DINNER) {
-        return res.json({
-            available: false,
-            free_tables_count: 0,
-            error: 'invalid_shift',
-            message: 'Il turno non è valido. Può indicare se si tratta di pranzo o cena?'
-        });
-    }
-    if (!Number.isFinite(guests) || guests < 1 || guests > 50) {
-        return res.json({
-            available: false,
-            free_tables_count: 0,
-            error: 'invalid_guests',
-            message: 'Il numero di ospiti non è valido. Può ripetermi per quante persone vuole prenotare?'
-        });
-    }
-    // Operator-blocked target date (fixed-menu holidays etc.): Sofia must not
-    // book it — she reads back the callback invitation instead. Checked before
-    // availability so the caller never hears table counts for a blocked day.
-    {
-        const voiceShift = rawShift as 'LUNCH' | 'DINNER';
-        const dateBlock = findVoiceDateBlock(normalizedDate, voiceShift, await getVoiceDateBlocks());
-        if (dateBlock) {
-            console.log('[ElevenLabs] check-availability blocked date', { date: normalizedDate, shift: rawShift, block: dateBlock });
-            return res.json({
-                available: false,
-                free_tables_count: 0,
-                error: 'date_blocked',
-                date_readback: formatItalianDateReadback(normalizedDate),
-                message: buildVoiceDateBlockMessage(normalizedDate, voiceShift, dateBlock),
-            });
-        }
-    }
-    // Large-group handoff. Case in point: on 2026-07-17 the agent told a
-    // caller that no tables were free for 11 people at lunch on 2026-07-24,
-    // when in fact every room was empty — findAvailability filters by
-    // `tables.seats >= guests`, so groups larger than the biggest single
-    // table always come back empty even when total capacity is fine. Rather
-    // than teach the agent to reason about merging tables, we cap the
-    // self-serve flow at a configurable threshold (default 8) and hand
-    // anything larger to a human. Editable from Settings → Canali.
-    const voiceThreshold = await getVoiceLargeGroupThreshold();
-    if (guests > voiceThreshold) {
-        console.log('[ElevenLabs] check-availability handoff (large group)', { date: normalizedDate, shift: rawShift, guests, threshold: voiceThreshold });
-        return res.json({
-            available: false,
-            free_tables_count: 0,
-            error: 'large_group',
-            message: `Per gruppi da ${voiceThreshold + 1} persone in su preferiamo gestire la prenotazione al telefono. Lascio un promemoria e la richiamiamo il prima possibile.`
-        });
-    }
-
-    try {
-        const result = await findAvailability({
-            date: normalizedDate,
-            shift: rawShift as Shift,
-            guests: Math.trunc(guests),
-            location_preference: locationPreference,
-        });
-        console.log('[ElevenLabs] check-availability', { date: normalizedDate, raw_date: p.date, shift: rawShift, guests, location_preference: locationPreference, result });
-        // date_readback is the Italian "venerdì 10 luglio" string the agent
-        // MUST use verbatim when confirming the date to the caller — LLMs
-        // routinely mismatch weekday and day-of-month otherwise.
-        res.json({ ...result, date_readback: formatItalianDateReadback(normalizedDate) });
-    } catch (err) {
-        console.error('[ElevenLabs] check-availability error', err);
-        res.status(500).json({
-            available: false,
-            free_tables_count: 0,
-            message: 'Si è verificato un errore tecnico, posso richiamarla?'
-        });
-    }
+app.post('/webhook/elevenlabs/check-availability', async (req, res) => {
+    if (!authorizeElevenLabs(req, res)) return;
+    if (!(await voiceChannelOpen(res, true))) return;
+    sendToolOutcome(res, await bookingTools.checkAvailability(elevenLabsParams(req), VOICE_CHANNEL));
 });
 
 // Tool 2 — create_reservation
-// Body shape: { parameters: { customer_name, phone, date (YYYY-MM-DD), time (HH:MM),
-//                              shift (LUNCH|DINNER), guests, notes? }, conversation_id?, agent_id? }
-// Writes a reservation with source=VOICE and requires_review=true so staff can sanity-check
-// before the booking is treated as confirmed. Returns the Italian confirmation phrase the
-// agent reads aloud at the end of the call.
+// Scrive una prenotazione con source=VOICE e requires_review=true, così lo
+// staff la ricontrolla prima di considerarla confermata. Restituisce la frase
+// italiana che l'agente legge in chiusura di chiamata.
 app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
     if (!authorizeElevenLabs(req, res)) return;
-    if (!(await getFeatureFlag('voice_agent_enabled', true))) {
-        return res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
-    }
-    {
-        const state = await computeVoiceSuspensionState();
-        if (state.suspended) {
-            return res.status(503).json({ error: 'voice_bookings_suspended', message: buildVoiceSuspensionMessage(state.callbackTime) });
-        }
-    }
-
-    const p = (req.body?.parameters && typeof req.body.parameters === 'object')
-        ? req.body.parameters
-        : req.body || {};
-    const conversationId: string | undefined = req.body?.conversation_id || p.conversation_id;
-
-    const customerName = normalizeCustomerName(String(p.customer_name ?? '').trim());
-    // Phone: prefer `phone` (what the customer dictates or confirms), fall back
-    // to `caller_id` (auto-captured from the SIP From: header by ElevenLabs).
-    // The agent's system prompt pre-fills phone with {{system__caller_id}} and
-    // reads it back for confirmation; if the customer corrects it, `phone`
-    // wins. This branch is the safety net for when the agent forgets to
-    // interpolate the variable or the caller ID is empty/anonymous.
-    const callerIdRaw = String(p.caller_id ?? '').trim();
-    const phoneRaw = String(p.phone ?? '').trim() || callerIdRaw;
-    const phoneSource: 'customer' | 'caller_id' | 'none' = String(p.phone ?? '').trim()
-        ? 'customer'
-        : callerIdRaw ? 'caller_id' : 'none';
-    const rawShift = String(p.shift ?? '').trim().toUpperCase();
-    const guests = Number(p.guests);
-    const childrenRaw = p.children;
-    const notes = typeof p.notes === 'string' ? p.notes.trim() : undefined;
-    const rawLocation = String(p.location_preference ?? '').trim().toUpperCase();
-    const locationPreference = rawLocation === 'INDOOR' || rawLocation === 'OUTDOOR'
-        ? (rawLocation as 'INDOOR' | 'OUTDOOR')
-        : undefined;
-
-    // See note in check-availability: user-actionable validation errors are
-    // returned as HTTP 200 with `success:false` so ElevenLabs surfaces the
-    // Italian `message` to the LLM (it drops 4xx bodies).
-    if (!customerName) {
-        return res.json({
-            success: false,
-            error: 'invalid_customer_name',
-            message: 'Non ho colto il nome per la prenotazione. Può ripetermi il nome del cliente?'
-        });
-    }
-    // Placeholder guard: when the LLM skips the name-collection step it fills
-    // the required param with a generic filler ("Cliente") instead of a real
-    // name. Reject it so the agent is forced to actually ask the caller —
-    // the Italian message is read back to the LLM and drives the retry.
-    const NAME_PLACEHOLDERS = new Set(['cliente', 'customer', 'ospite', 'guest', 'anonimo', 'sconosciuto', 'signore', 'signora', 'sig', 'n/a', 'na', 'test', 'nome', 'nome cognome']);
-    if (NAME_PLACEHOLDERS.has(customerName.toLowerCase().trim())) {
-        console.warn('[ElevenLabs] create-reservation rejected: placeholder name', { received: customerName });
-        return res.json({
-            success: false,
-            error: 'invalid_customer_name',
-            message: 'Serve il nome reale del cliente per registrare la prenotazione. Chieda nome e cognome al cliente e riprovi.'
-        });
-    }
-    if (!phoneRaw) {
-        return res.json({
-            success: false,
-            error: 'invalid_phone',
-            message: 'Non ho un numero di telefono per la prenotazione. Può dettarmelo?'
-        });
-    }
-    const normalizedDate = parseFlexibleDate(p.date);
-    if (!normalizedDate) {
-        console.warn('[ElevenLabs] create-reservation rejected: unparseable date', { received: p.date });
-        return res.json({
-            success: false,
-            error: 'invalid_date',
-            message: 'Formato data non riconosciuto. Esempi accettati: 2026-05-14, 14/05/2026, "14 maggio 2026".'
-        });
-    }
-    const normalizedTime = parseFlexibleTime(p.time);
-    if (!normalizedTime) {
-        console.warn('[ElevenLabs] create-reservation rejected: unparseable time', { received: p.time });
-        return res.json({
-            success: false,
-            error: 'invalid_time',
-            message: 'Formato orario non riconosciuto. Esempi accettati: 20:30, "20 e 30", "20 e mezza".'
-        });
-    }
-    if (rawShift !== Shift.LUNCH && rawShift !== Shift.DINNER) {
-        return res.json({
-            success: false,
-            error: 'invalid_shift',
-            message: 'Il turno non è valido. Può indicare se si tratta di pranzo o cena?'
-        });
-    }
-    // Defense-in-depth mirror of the date-block guard in check-availability:
-    // an LLM that skips the availability step must still not be able to book
-    // a date the operator reserved for manual handling.
-    {
-        const voiceShift = rawShift as 'LUNCH' | 'DINNER';
-        const dateBlock = findVoiceDateBlock(normalizedDate, voiceShift, await getVoiceDateBlocks());
-        if (dateBlock) {
-            console.log('[ElevenLabs] create-reservation blocked date', { date: normalizedDate, shift: rawShift, block: dateBlock, conversation_id: conversationId });
-            return res.json({
-                success: false,
-                error: 'date_blocked',
-                message: buildVoiceDateBlockMessage(normalizedDate, voiceShift, dateBlock),
-            });
-        }
-    }
-    // Constrain the booking time to the restaurant's slot grid so voice
-    // bookings round-trip through the manual edit form without falling back
-    // to a different time option. The grid is derived from the
-    // opening_hours + special_closures tables (see utils/slots.ts), so it
-    // changes per weekday and can be temporarily closed for holidays.
-    const validSlots = await getAvailableSlots(normalizedDate, rawShift as Shift);
-    if (!validSlots.includes(normalizedTime)) {
-        const shiftLabel = (rawShift as Shift) === Shift.LUNCH ? 'il pranzo' : 'la cena';
-        console.warn('[ElevenLabs] create-reservation rejected: invalid_slot', {
-            received_time: p.time, normalized_time: normalizedTime, shift: rawShift,
-            available_slots: validSlots,
-        });
-        const message = validSlots.length === 0
-            ? `Mi dispiace, ${shiftLabel} di quel giorno non è disponibile. Possiamo provare un altro giorno?`
-            : `Per ${shiftLabel} possiamo prenotare solo alle ${formatSlotListItalian(validSlots)}. Quale orario preferisce?`;
-        return res.json({
-            success: false,
-            error: 'invalid_slot',
-            available_slots: validSlots,
-            message,
-        });
-    }
-    if (!Number.isFinite(guests) || guests < 1 || guests > 50) {
-        return res.json({
-            success: false,
-            error: 'invalid_guests',
-            message: 'Il numero di ospiti non è valido. Può ripetermi per quante persone vuole prenotare?'
-        });
-    }
-    // Defense-in-depth for the self-serve cap enforced in check-availability
-    // (see comment there for the underlying reason). Prevents an LLM
-    // hallucination from bypassing the handoff by calling create-reservation
-    // directly without a prior availability check. Threshold is dynamic —
-    // editable from Settings → Canali.
-    const voiceThresholdCreate = await getVoiceLargeGroupThreshold();
-    if (guests > voiceThresholdCreate) {
-        console.log('[ElevenLabs] create-reservation blocked (large group)', { guests, threshold: voiceThresholdCreate, conversation_id: conversationId });
-        return res.json({
-            success: false,
-            error: 'large_group',
-            message: `Per gruppi da ${voiceThresholdCreate + 1} persone in su preferiamo gestire la prenotazione al telefono. Lascio un promemoria e la richiamiamo il prima possibile.`
-        });
-    }
-    const childrenNum = Number(childrenRaw);
-    const children = Number.isFinite(childrenNum) && childrenNum > 0
-        ? Math.max(0, Math.min(Math.trunc(childrenNum), Math.trunc(guests)))
-        : 0;
-
-    // Build an ISO datetime; the DB column is TIMESTAMPTZ so we let Postgres
-    // interpret as the server's configured timezone (Europe/Rome in prod).
-    const reservationTime = `${normalizedDate}T${normalizedTime}:00`;
-
-    // Caparra automatica: stessa policy del canale web (€10 a persona sopra
-    // la soglia ospiti). La prenotazione nasce PENDING senza tavolo e il link
-    // di pagamento parte su WhatsApp con fallback SMS; la conferma arriva
-    // dal webhook di pagamento come per il web.
-    const voiceDepositRequired = await isAutoDepositRequired(Math.trunc(guests));
-
-    try {
-        console.log('[ElevenLabs] create-reservation start', {
-            customer_name: customerName, raw_date: p.date, raw_time: p.time,
-            normalized_date: normalizedDate, normalized_time: normalizedTime,
-            shift: rawShift, guests, children, conversation_id: conversationId,
-            location_preference: locationPreference, phone_source: phoneSource,
-            deposit_required: voiceDepositRequired,
-        });
-        const created = await createVoiceReservation({
-            customer_name: customerName,
-            phone: phoneRaw,
-            reservation_time: reservationTime,
-            shift: rawShift as Shift,
-            guests: Math.trunc(guests),
-            children,
-            notes,
-            conversation_id: conversationId,
-            location_preference: locationPreference,
-            deposit_required: voiceDepositRequired,
-        });
-
-        // Deposit link: order + payment_requests row + WhatsApp/SMS send.
-        // On any gateway failure we degrade to the plain requires-review flow
-        // (staff completes the caparra by hand from the booking card).
-        let depositCheckoutUrl: string | null = null;
-        let depositAmountCents = 0;
-        const voiceDepositPolicy = voiceDepositRequired ? await getAutoDepositPolicy() : null;
-        if (voiceDepositRequired) {
-            depositAmountCents = Math.trunc(guests) * (voiceDepositPolicy?.perPersonCents ?? DEPOSIT_DEFAULTS.perPersonCents);
-            const [yyyy, mm, dd] = normalizedDate.split('-');
-            const depositDateLabel = `${dd}/${mm}/${yyyy}`;
-            const depositGuestsLabel = `${Math.trunc(guests)} ${Math.trunc(guests) === 1 ? 'persona' : 'persone'}`;
-            const orderDescription = `Caparra prenotazione #${created.id} - ${depositGuestsLabel} ${depositDateLabel} ${normalizedTime}`;
-            try {
-                const order = await createPaymentOrder({
-                    amount: depositAmountCents,
-                    currency: 'EUR',
-                    description: orderDescription,
-                    reference: `reservation:${created.id}`,
-                    flow: 'deposit',
-                });
-                const insertedPayment = await queryWithRetry(
-                    `INSERT INTO payment_requests
-                        (reservation_id, amount_cents, currency, description, status, provider,
-                         provider_order_id, checkout_url, metadata)
-                     VALUES ($1, $2, 'EUR', $3, $4, $5, $6, $7, $8)
-                     RETURNING *`,
-                    [
-                        created.id,
-                        depositAmountCents,
-                        orderDescription,
-                        order.status,
-                        order.provider,
-                        order.id,
-                        order.checkoutUrl,
-                        JSON.stringify({ ...order.metadata, source: 'voice_auto_deposit' }),
-                    ]
-                );
-                depositCheckoutUrl = order.checkoutUrl;
-                try { socketService?.broadcastToAll('paymentRequest:created', insertedPayment.rows[0]); }
-                catch (err) { console.warn('[ElevenLabs] payment socket broadcast failed:', err); }
-
-                const smsText = buildDepositRequestMessage(
-                    toTitleCase(created.customer_name),
-                    depositGuestsLabel,
-                    depositDateLabel,
-                    normalizedTime,
-                    depositAmountCents,
-                    order.checkoutUrl,
-                    voiceDepositPolicy?.perPersonCents
-                );
-                const whatsappTemplate = buildBookingDepositRequestTemplate(
-                    toTitleCase(created.customer_name),
-                    depositGuestsLabel,
-                    depositDateLabel,
-                    normalizedTime,
-                    depositAmountCents,
-                    order.checkoutUrl
-                );
-                sendBookingConfirmation(created.phone, smsText, created.id, { whatsappTemplate }).catch(err =>
-                    console.error('[ElevenLabs] deposit link send failed:', err?.message || err)
-                );
-            } catch (err: any) {
-                console.error('[ElevenLabs] deposit link creation failed:', err?.message || err);
-                depositAmountCents = 0;
-            }
-        }
-
-        // Link the (eventual) call audit row to this reservation. Fire-and-forget
-        // so a missing voice_calls table (pre-migration) doesn't break booking.
-        if (conversationId) {
-            recordVoiceCall({
-                conversation_id: conversationId,
-                phone: normalizeItalianPhone(phoneRaw),
-                reservation_id: created.id,
-            }).catch(err => console.warn('[ElevenLabs] recordVoiceCall (create) failed:', err?.message || err));
-        }
-
-        // Auto-save the caller into the rubrica. Voice bookings are the most
-        // common way a brand-new customer first appears in our system, so the
-        // upsert here is what keeps the rubrica in sync with reality.
-        await upsertCustomerFromReservation(customerName, phoneRaw, null, null);
-
-        // Activity log: no authenticated user, attribute to the voice agent.
-        LogService.logActivity(
-            null,
-            'voice-agent@elevenlabs',
-            'Agent vocale',
-            ActivityAction.CREATE,
-            ResourceType.RESERVATION,
-            created.id,
-            created.customer_name,
-            {
-                source: 'VOICE',
-                conversation_id: conversationId,
-                requires_review: created.requires_review,
-                guests: created.guests,
-                children: created.children,
-                reservation_time: created.reservation_time,
-                shift: created.shift,
-            }
-        );
-
-        // Broadcast to live dashboards so the new booking pops up without refresh.
-        if (socketService) {
-            try {
-                socketService.broadcastReservationCreated(created as any);
-            } catch (err) {
-                console.warn('[ElevenLabs] broadcastReservationCreated failed:', err);
-            }
-            // Se la caparra vocale è stata creata, il row grezzo appena
-            // trasmesso non ha i campi latest_payment_*: rimanda la versione
-            // arricchita così l'icona acconto compare subito in dashboard.
-            if (depositCheckoutUrl) broadcastReservationsUpdatedByIds([created.id]).catch(() => {});
-        }
-
-        const reservationLabel = reservationPushLabel(asUtcInstant(created.reservation_time));
-        pushSendToRoles(
-            ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
-            {
-                category: 'reservation',
-                title: 'Nuova prenotazione vocale',
-                body: `${toTitleCase(created.customer_name)} · ${created.guests} ospiti · ${reservationLabel}`,
-                url: `/?view=RESERVATIONS&reservationId=${created.id}`,
-                tag: `reservation-${created.id}`,
-            },
-            { excludeUserId: null }
-        ).catch(err => console.error('Push (voice reservation) failed:', err));
-
-        // Deposit branch swaps the closing phrase: the caller must know the
-        // table is guaranteed only after paying the link we just sent.
-        const firstName = toTitleCase(created.customer_name).split(' ')[0];
-        const confirmationPhrase = depositCheckoutUrl
-            ? `Registrato ${firstName}: per i gruppi numerosi chiediamo una caparra di ${formatEuroMinor(depositAmountCents)}. Le ho appena inviato il link di pagamento su WhatsApp, o via SMS. Il tavolo sarà confermato appena riceviamo il pagamento. Grazie!`
-            : voiceDepositRequired
-                ? `Registrato ${firstName}: per i gruppi numerosi è prevista una caparra. La ricontatteremo a breve per completare la prenotazione. Grazie!`
-                : formatItalianConfirmation(created);
-        console.log('[ElevenLabs] create-reservation OK', {
-            id: created.id, conversation_id: conversationId, customer: created.customer_name,
-            table_id: created.table_id, table_name: created.table_name,
-            room: created.room_name, location: created.room_location,
-            deposit_required: voiceDepositRequired, deposit_link_sent: !!depositCheckoutUrl,
-        });
-        res.json({
-            success: true,
-            reservation_id: created.id,
-            requires_review: created.requires_review,
-            confirmation_phrase: confirmationPhrase,
-            // date_readback is the Italian "venerdì 10 luglio" string the
-            // agent MUST use verbatim to name the day in its final readback.
-            date_readback: formatItalianDateReadback(normalizedDate),
-            table_id: created.table_id,
-            table_name: created.table_name,
-            room_name: created.room_name,
-            room_location: created.room_location,
-            deposit_required: voiceDepositRequired,
-            deposit_amount: voiceDepositRequired ? formatEuroMinor(depositAmountCents) : undefined,
-            deposit_link_sent: voiceDepositRequired ? !!depositCheckoutUrl : undefined,
-        });
-    } catch (err: any) {
-        console.error('[ElevenLabs] create-reservation error', err);
-        res.status(500).json({
-            success: false,
-            message: 'Si è verificato un errore tecnico nel salvare la prenotazione, posso richiamarla?'
-        });
-    }
+    if (!(await voiceChannelOpen(res, true))) return;
+    sendToolOutcome(res, await bookingTools.createReservation(elevenLabsParams(req), VOICE_CHANNEL));
 });
 
-// Cancel a reservation made by the caller. The agent should ask the caller
-// for date (and optionally time) and confirm by repeating the customer name
-// before invoking this tool. Soft cancel — sets reservation_status=CANCELLED
-// so the row remains for audit and can be linked to the conversation.
+// Cancellazione. L'agente chiede data (e all'occorrenza orario) e ripete il
+// nome del cliente prima di invocare il tool. È una cancellazione morbida:
+// reservation_status=CANCELLED, la riga resta per l'audit.
 app.post('/webhook/elevenlabs/cancel-reservation', async (req, res) => {
     if (!authorizeElevenLabs(req, res)) return;
-    if (!(await getFeatureFlag('voice_agent_enabled', true))) {
-        return res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
-    }
-
-    const p = (req.body?.parameters && typeof req.body.parameters === 'object')
-        ? req.body.parameters
-        : req.body || {};
-    const conversationId: string | undefined = req.body?.conversation_id || p.conversation_id;
-
-    // Same phone/caller_id fallback as create-reservation.
-    const callerIdRaw = String(p.caller_id ?? '').trim();
-    const phoneRaw = String(p.phone ?? '').trim() || callerIdRaw;
-    const phoneSource: 'customer' | 'caller_id' | 'none' = String(p.phone ?? '').trim()
-        ? 'customer'
-        : callerIdRaw ? 'caller_id' : 'none';
-    // See note in check-availability: user-actionable validation errors are
-    // returned as HTTP 200 with `success:false` so ElevenLabs surfaces the
-    // Italian `message` to the LLM (it drops 4xx bodies).
-    if (!phoneRaw) {
-        return res.json({
-            success: false,
-            error: 'invalid_phone',
-            message: 'Non ho un numero di telefono a cui associare la prenotazione. Può dettarmelo?'
-        });
-    }
-    const normalizedDate = parseFlexibleDate(p.date);
-    if (!normalizedDate) {
-        console.warn('[ElevenLabs] cancel-reservation rejected: unparseable date', { received: p.date });
-        return res.json({
-            success: false,
-            error: 'invalid_date',
-            message: 'Formato data non riconosciuto. Esempi accettati: 2026-05-14, 14/05/2026, "14 maggio 2026".'
-        });
-    }
-    // Time is optional — only used to disambiguate when the caller has more
-    // than one booking on the same day.
-    let normalizedTime: string | undefined;
-    if (p.time !== undefined && p.time !== null && String(p.time).trim() !== '') {
-        const t = parseFlexibleTime(p.time);
-        if (!t) {
-            console.warn('[ElevenLabs] cancel-reservation rejected: unparseable time', { received: p.time });
-            return res.json({
-                success: false,
-                error: 'invalid_time',
-                message: 'Formato orario non riconosciuto. Esempi accettati: 20:30, "20 e 30", "20 e mezza".'
-            });
-        }
-        normalizedTime = t;
-    }
-
-    try {
-        console.log('[ElevenLabs] cancel-reservation start', {
-            phone_raw: phoneRaw, phone_source: phoneSource,
-            normalized_date: normalizedDate,
-            normalized_time: normalizedTime, conversation_id: conversationId,
-        });
-        const outcome = await cancelVoiceReservation({
-            phone: phoneRaw,
-            date: normalizedDate,
-            time: normalizedTime,
-            conversation_id: conversationId,
-        });
-
-        if (outcome.status === 'not_found') {
-            console.log('[ElevenLabs] cancel-reservation: no match', {
-                phone: normalizeItalianPhone(phoneRaw), date: normalizedDate, time: normalizedTime,
-            });
-            return res.json({
-                success: false,
-                status: 'not_found',
-                message: 'Non trovo una prenotazione a questo numero per la data indicata. Può confermarmi la data esatta?'
-            });
-        }
-
-        if (outcome.status === 'already_cancelled') {
-            const { timeLabel } = formatBookingDateTime(asUtcInstant(outcome.reservation.reservation_time));
-            console.log('[ElevenLabs] cancel-reservation: already cancelled', {
-                id: outcome.reservation.id, conversation_id: conversationId,
-            });
-            return res.json({
-                success: false,
-                status: 'already_cancelled',
-                reservation_id: outcome.reservation.id,
-                message: `La prenotazione di ${outcome.reservation.customer_name} delle ${timeLabel} risulta già annullata. C'è altro che posso fare?`
-            });
-        }
-
-        if (outcome.status === 'ambiguous') {
-            const list = outcome.candidates.map(c => {
-                const { timeLabel } = formatBookingDateTime(asUtcInstant(c.reservation_time));
-                return `${timeLabel} per ${c.guests}`;
-            }).join(', ');
-            console.log('[ElevenLabs] cancel-reservation: ambiguous', {
-                count: outcome.candidates.length, candidates: outcome.candidates.map(c => c.id),
-            });
-            return res.json({
-                success: false,
-                status: 'ambiguous',
-                candidates: outcome.candidates,
-                message: `Ho trovato più prenotazioni per quel giorno (${list}). Mi conferma l'orario di quella da annullare?`
-            });
-        }
-
-        const cancelled = outcome.reservation;
-
-        // Link the audit row so the cancellation conversation is traceable.
-        if (conversationId) {
-            recordVoiceCall({
-                conversation_id: conversationId,
-                phone: normalizeItalianPhone(phoneRaw),
-                reservation_id: cancelled.id,
-            }).catch(err => console.warn('[ElevenLabs] recordVoiceCall (cancel) failed:', err?.message || err));
-        }
-
-        LogService.logActivity(
-            null,
-            'voice-agent@elevenlabs',
-            'Agent vocale',
-            ActivityAction.DELETE,
-            ResourceType.RESERVATION,
-            cancelled.id,
-            cancelled.customer_name,
-            {
-                source: 'VOICE',
-                conversation_id: conversationId,
-                cancelled_via: 'voice_agent',
-                reservation_time: cancelled.reservation_time,
-                shift: cancelled.shift,
-                guests: cancelled.guests,
-            }
-        );
-
-        if (socketService) {
-            try {
-                socketService.broadcastReservationUpdated({
-                    ...cancelled,
-                    reservation_status: 'CANCELLED',
-                } as any);
-            } catch (err) {
-                console.warn('[ElevenLabs] broadcastReservationUpdated failed:', err);
-            }
-        }
-
-        const reservationLabel = reservationPushLabel(asUtcInstant(cancelled.reservation_time));
-        pushSendToRoles(
-            ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
-            {
-                category: 'reservation',
-                title: 'Prenotazione cancellata (voce)',
-                body: `${toTitleCase(cancelled.customer_name)} · ${cancelled.guests} ospiti · ${reservationLabel}`,
-                url: `/?view=RESERVATIONS&reservationId=${cancelled.id}`,
-                tag: `reservation-${cancelled.id}`,
-            },
-            { excludeUserId: null }
-        ).catch(err => console.error('Push (voice cancellation) failed:', err));
-
-        const confirmationPhrase = formatItalianCancellation(cancelled);
-        console.log('[ElevenLabs] cancel-reservation OK', {
-            id: cancelled.id, conversation_id: conversationId, customer: cancelled.customer_name,
-        });
-        return res.json({
-            success: true,
-            status: 'cancelled',
-            reservation_id: cancelled.id,
-            confirmation_phrase: confirmationPhrase,
-        });
-    } catch (err: any) {
-        console.error('[ElevenLabs] cancel-reservation error', err);
-        return res.status(500).json({
-            success: false,
-            message: 'Si è verificato un errore tecnico, posso richiamarla per cancellare la prenotazione?'
-        });
-    }
+    // Nessun controllo di sospensione: annullare deve restare possibile anche
+    // quando le prenotazioni telefoniche sono sospese (com'era prima).
+    if (!(await voiceChannelOpen(res, false))) return;
+    sendToolOutcome(res, await bookingTools.cancelReservation(elevenLabsParams(req), VOICE_CHANNEL));
 });
 
-// Modify an existing reservation (change date/time/shift/guests/location/notes).
-// Same identify-by-phone-and-date pattern as cancel-reservation. Only the
-// `new_*` fields that are actually being changed need to be present in the
-// request body; anything omitted keeps its current value.
+// Modifica di una prenotazione esistente (data/orario/turno/coperti/zona/note).
+// Stesso schema di identificazione per telefono e data della cancellazione:
+// servono solo i campi `new_*` che cambiano davvero.
 app.post('/webhook/elevenlabs/modify-reservation', async (req, res) => {
     if (!authorizeElevenLabs(req, res)) return;
-    if (!(await getFeatureFlag('voice_agent_enabled', true))) {
-        return res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
-    }
-
-    const p = (req.body?.parameters && typeof req.body.parameters === 'object')
-        ? req.body.parameters
-        : req.body || {};
-    const conversationId: string | undefined = req.body?.conversation_id || p.conversation_id;
-
-    const callerIdRaw = String(p.caller_id ?? '').trim();
-    const phoneRaw = String(p.phone ?? '').trim() || callerIdRaw;
-    if (!phoneRaw) {
-        return res.json({
-            success: false,
-            error: 'invalid_phone',
-            message: 'Non ho un numero di telefono a cui associare la prenotazione. Può dettarmelo?'
-        });
-    }
-    const normalizedDate = parseFlexibleDate(p.date);
-    if (!normalizedDate) {
-        return res.json({
-            success: false,
-            error: 'invalid_date',
-            message: 'Formato data della prenotazione da modificare non riconosciuto. Esempi: 2026-05-14, 14/05/2026, "14 maggio 2026".'
-        });
-    }
-    let normalizedTime: string | undefined;
-    if (p.time !== undefined && p.time !== null && String(p.time).trim() !== '') {
-        const t = parseFlexibleTime(p.time);
-        if (!t) {
-            return res.json({
-                success: false,
-                error: 'invalid_time',
-                message: 'Formato orario della prenotazione non riconosciuto. Esempi: 20:30, "20 e 30", "20 e mezza".'
-            });
-        }
-        normalizedTime = t;
-    }
-
-    // Parse the "new_*" overrides — each field is optional.
-    let newDate: string | undefined;
-    if (p.new_date !== undefined && p.new_date !== null && String(p.new_date).trim() !== '') {
-        newDate = parseFlexibleDate(p.new_date) || undefined;
-        if (!newDate) {
-            return res.json({
-                success: false,
-                error: 'invalid_new_date',
-                message: 'Formato nuova data non riconosciuto. Esempi: 2026-05-14, 14/05/2026, "14 maggio 2026".'
-            });
-        }
-    }
-    let newTime: string | undefined;
-    if (p.new_time !== undefined && p.new_time !== null && String(p.new_time).trim() !== '') {
-        newTime = parseFlexibleTime(p.new_time) || undefined;
-        if (!newTime) {
-            return res.json({
-                success: false,
-                error: 'invalid_new_time',
-                message: 'Formato nuovo orario non riconosciuto. Esempi: 20:30, "20 e 30", "20 e mezza".'
-            });
-        }
-    }
-    let newShift: Shift | undefined;
-    if (p.new_shift !== undefined && p.new_shift !== null && String(p.new_shift).trim() !== '') {
-        const s = String(p.new_shift).trim().toUpperCase();
-        if (s !== Shift.LUNCH && s !== Shift.DINNER) {
-            return res.json({
-                success: false,
-                error: 'invalid_new_shift',
-                message: 'Il nuovo turno non è valido. Può indicare se si tratta di pranzo o cena?'
-            });
-        }
-        newShift = s as Shift;
-    }
-    let newGuests: number | undefined;
-    if (p.new_guests !== undefined && p.new_guests !== null && String(p.new_guests).trim() !== '') {
-        const g = Number(p.new_guests);
-        if (!Number.isFinite(g) || g < 1 || g > 50) {
-            return res.json({
-                success: false,
-                error: 'invalid_new_guests',
-                message: 'Il nuovo numero di ospiti non è valido. Può ripetermi per quante persone?'
-            });
-        }
-        newGuests = Math.trunc(g);
-    }
-    let newLocation: 'INDOOR' | 'OUTDOOR' | undefined;
-    if (p.new_location_preference !== undefined && p.new_location_preference !== null) {
-        const l = String(p.new_location_preference).trim().toUpperCase();
-        if (l === 'INDOOR' || l === 'OUTDOOR') newLocation = l as 'INDOOR' | 'OUTDOOR';
-    }
-    const newNotes = typeof p.new_notes === 'string' && p.new_notes.trim() !== ''
-        ? p.new_notes.trim()
-        : undefined;
-
-    if (!newDate && !newTime && !newShift && newGuests === undefined && !newLocation && !newNotes) {
-        return res.json({
-            success: false,
-            error: 'no_changes_provided',
-            message: 'Cosa vuole modificare della prenotazione? Data, orario, numero di persone, zona (interno o esterno) o note?'
-        });
-    }
-
-    // If the new time crosses shift boundaries and the shift wasn't specified,
-    // derive it so the agent doesn't have to worry about it.
-    if (newTime && !newShift) {
-        const hh = parseInt(newTime.split(':')[0], 10);
-        if (Number.isFinite(hh)) {
-            newShift = (hh >= 11 && hh < 17) ? Shift.LUNCH : Shift.DINNER;
-        }
-    }
-
-    try {
-        console.log('[ElevenLabs] modify-reservation start', {
-            phone_raw: phoneRaw, normalized_date: normalizedDate, normalized_time: normalizedTime,
-            new_date: newDate, new_time: newTime, new_shift: newShift, new_guests: newGuests,
-            new_location: newLocation, has_new_notes: !!newNotes, conversation_id: conversationId,
-        });
-        const outcome = await modifyVoiceReservation({
-            phone: phoneRaw,
-            date: normalizedDate,
-            time: normalizedTime,
-            conversation_id: conversationId,
-            new_date: newDate,
-            new_time: newTime,
-            new_shift: newShift,
-            new_guests: newGuests,
-            new_location_preference: newLocation,
-            new_notes: newNotes,
-        });
-
-        if (outcome.status === 'not_found') {
-            return res.json({
-                success: false,
-                status: 'not_found',
-                message: 'Non trovo una prenotazione a questo numero per la data indicata. Può confermarmi la data esatta?'
-            });
-        }
-        if (outcome.status === 'already_cancelled') {
-            return res.json({
-                success: false,
-                status: 'already_cancelled',
-                reservation_id: outcome.reservation.id,
-                message: `La prenotazione di ${outcome.reservation.customer_name} risulta annullata: non posso modificarla. Vuole fare una nuova prenotazione?`
-            });
-        }
-        if (outcome.status === 'ambiguous') {
-            const list = outcome.candidates.map(c => {
-                const { timeLabel } = formatBookingDateTime(asUtcInstant(c.reservation_time));
-                return `${timeLabel} per ${c.guests}`;
-            }).join(', ');
-            return res.json({
-                success: false,
-                status: 'ambiguous',
-                candidates: outcome.candidates,
-                message: `Ho trovato più prenotazioni per quel giorno (${list}). Mi conferma l'orario di quella da modificare?`
-            });
-        }
-        if (outcome.status === 'no_change') {
-            return res.json({
-                success: false,
-                status: 'no_change',
-                message: 'I dati che mi ha indicato coincidono con quelli già registrati. Non c\'è nulla da modificare.'
-            });
-        }
-        if (outcome.status === 'unavailable') {
-            return res.json({
-                success: false,
-                status: 'unavailable',
-                message: 'Mi dispiace, non abbiamo disponibilità per la nuova configurazione richiesta. Vuole provare un altro orario o un\'altra data?'
-            });
-        }
-
-        // outcome.status === 'modified'
-        const { before, after } = outcome;
-
-        // Link the audit row so the modification is traceable.
-        if (conversationId) {
-            recordVoiceCall({
-                conversation_id: conversationId,
-                phone: normalizeItalianPhone(phoneRaw),
-                reservation_id: after.id,
-            }).catch(err => console.warn('[ElevenLabs] recordVoiceCall (modify) failed:', err?.message || err));
-        }
-
-        LogService.logActivity(
-            null,
-            'voice-agent@elevenlabs',
-            'Agent vocale',
-            ActivityAction.UPDATE,
-            ResourceType.RESERVATION,
-            after.id,
-            after.customer_name,
-            {
-                source: 'VOICE',
-                conversation_id: conversationId,
-                modified_via: 'voice_agent',
-                before: {
-                    reservation_time: before.reservation_time,
-                    shift: before.shift,
-                    guests: before.guests,
-                    // Senza il tavolo di partenza l'audit non mostrava che la
-                    // modifica lo aveva cambiato (indagine tavolo 56, 04/08).
-                    table_id: before.table_id ?? null,
-                },
-                after: {
-                    reservation_time: after.reservation_time,
-                    shift: after.shift,
-                    guests: after.guests,
-                    table_id: after.table_id,
-                },
-            }
-        );
-
-        if (socketService) {
-            try {
-                socketService.broadcastReservationUpdated(after as any);
-            } catch (err) {
-                console.warn('[ElevenLabs] broadcastReservationUpdated (modify) failed:', err);
-            }
-        }
-
-        const reservationLabel = reservationPushLabel(asUtcInstant(after.reservation_time));
-        pushSendToRoles(
-            ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
-            {
-                category: 'reservation',
-                title: 'Prenotazione modificata (voce)',
-                body: `${toTitleCase(after.customer_name)} · ${after.guests} ospiti · ${reservationLabel}`,
-                url: `/?view=RESERVATIONS&reservationId=${after.id}`,
-                tag: `reservation-${after.id}`,
-            },
-            { excludeUserId: null }
-        ).catch(err => console.error('Push (voice modification) failed:', err));
-
-        const confirmationPhrase = formatItalianModification(after);
-        console.log('[ElevenLabs] modify-reservation OK', {
-            id: after.id, conversation_id: conversationId, customer: after.customer_name,
-        });
-        // after.reservation_time is a Date object; String(Date) gives
-        // "Fri Jan 15 2027 ..." which is not ISO. Use toISOString().
-        const rt: any = after.reservation_time;
-        const afterIso: string = rt instanceof Date ? rt.toISOString() : String(rt);
-        return res.json({
-            success: true,
-            status: 'modified',
-            reservation_id: after.id,
-            confirmation_phrase: confirmationPhrase,
-            date_readback: formatItalianDateReadback(afterIso.slice(0, 10)),
-        });
-    } catch (err: any) {
-        console.error('[ElevenLabs] modify-reservation error', err);
-        return res.status(500).json({
-            success: false,
-            message: 'Si è verificato un errore tecnico nel modificare la prenotazione, posso richiamarla?'
-        });
-    }
+    if (!(await voiceChannelOpen(res, false))) return;
+    sendToolOutcome(res, await bookingTools.modifyReservation(elevenLabsParams(req), VOICE_CHANNEL));
 });
 
 // Post-call webhook — fires when the conversation ends.
@@ -20139,6 +19291,66 @@ app.delete('/sala/profiles/:id', authenticate, requirePermission('settings:full'
         res.status(500).json({ error: 'Internal server error' });
     }
 });
+
+// Aggancio degli strumenti di prenotazione alle funzioni che vivono qui.
+// Iniezione invece di import perché il modulo non può importare server.ts
+// (ciclo) e perché così i tool restano testabili con dipendenze finte.
+bookingTools.configureBookingTools({
+    parseFlexibleDate,
+    parseFlexibleTime,
+    normalizeItalianPhone,
+    normalizeCustomerName,
+    formatItalianDateReadback,
+    formatItalianConfirmation,
+    formatItalianCancellation,
+    formatItalianModification,
+    formatSlotListItalian,
+    formatBookingDateTime,
+    formatEuroMinor,
+    asUtcInstant,
+    toTitleCase,
+    reservationPushLabel,
+
+    findAvailability,
+    getAvailableSlots,
+    createVoiceReservation,
+    cancelVoiceReservation,
+    modifyVoiceReservation,
+    recordVoiceCall,
+    upsertCustomerFromReservation,
+
+    getVoiceDateBlocks,
+    findVoiceDateBlock,
+    buildVoiceDateBlockMessage,
+    getLargeGroupThreshold: getVoiceLargeGroupThreshold,
+
+    isAutoDepositRequired,
+    getAutoDepositPolicy,
+    depositDefaultPerPersonCents: DEPOSIT_DEFAULTS.perPersonCents,
+    createPaymentOrder,
+    queryWithRetry,
+    buildDepositRequestMessage,
+    buildBookingDepositRequestTemplate,
+    sendBookingConfirmation,
+
+    logActivity: LogService.logActivity.bind(LogService),
+    activityAction: ActivityAction,
+    resourceType: ResourceType,
+    pushSendToRoles,
+    // socketService è inizializzato dopo il listen: le lambda lo leggono al
+    // momento della chiamata, non alla configurazione.
+    broadcastReservationCreated: (r: any) => socketService?.broadcastReservationCreated(r),
+    broadcastReservationUpdated: (r: any) => socketService?.broadcastReservationUpdated(r),
+    broadcastPaymentRequestCreated: (r: any) => socketService?.broadcastToAll('paymentRequest:created', r),
+    broadcastReservationsUpdatedByIds,
+});
+
+// La voce aggancia ogni azione alla riga di voice_calls per l'audit della
+// telefonata; gli altri canali avranno il proprio aggancio.
+VOICE_CHANNEL.linkConversation = ({ conversationId, phone, reservationId }) => {
+    recordVoiceCall({ conversation_id: conversationId, phone, reservation_id: reservationId })
+        .catch(err => console.warn('[ElevenLabs] recordVoiceCall failed:', err?.message || err));
+};
 
 const startServer = async () => {
     try {
