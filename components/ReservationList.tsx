@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom';
 import {
   ModalShell, FormCard, Field, Stepper, StepNav, SegmentedControl, dsInput, dsSelect, dsTextarea, dsButton, dsStepArrow,
-  SearchField, SectionHeader, StatusPill, StatStrip, EmptyState, Callout, dsIconButton, CountBadge,
+  SearchField, SectionHeader, StatusPill, StatStrip, EmptyState, Callout, dsIconButton, CountBadge, useMediaQuery,
 } from './ds';
 import type { SectionTone, Stat } from './ds';
 import { BillSheet } from './pagamenti/BillSheet';
@@ -7214,6 +7214,10 @@ const NotePickerPopover: React.FC<NotePickerPopoverProps> = ({ preset, picks, on
         if (hasVariants) return initial;
         return { '': picks[0]?.quantity ?? 1 };
     });
+    // Su schermi stretti il popover ancorato al chip finisce fuori viewport e
+    // viene tagliato: renderizziamo come bottom-sheet full-width, con touch
+    // target 44px come da design system.
+    const isWide = useMediaQuery('(min-width: 768px)');
 
     const bump = (variant: string, delta: number) => {
         setQtyByVariant(prev => {
@@ -7242,62 +7246,105 @@ const NotePickerPopover: React.FC<NotePickerPopoverProps> = ({ preset, picks, on
 
     const clear = () => onCommit([]);
 
-    return (
+    const body = (
         <>
-            <div className="fixed inset-0 z-[80]" onClick={onCancel} />
-            <div
-                className="absolute left-0 top-full mt-1 z-[81] w-72 rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-overlay)]"
-                onClick={(e) => e.stopPropagation()}
-            >
-                <div className="flex items-center justify-between pb-2 mb-2 border-b border-[var(--ds-border)]">
-                    <span className="text-[13px] font-semibold text-[var(--ds-text-primary)]">{preset.label}</span>
-                    <button type="button" onClick={onCancel} className="p-1 rounded hover:bg-[var(--ds-surface-row)]" aria-label="Chiudi">
-                        <X className="w-3.5 h-3.5 text-[var(--ds-text-muted)]" />
-                    </button>
+            <div className={`flex items-center justify-between pb-2 mb-2 border-b border-[var(--ds-border)] ${isWide ? '' : 'px-1'}`}>
+                <span className={`font-semibold text-[var(--ds-text-primary)] ${isWide ? 'text-[13px]' : 'text-[16px]'}`}>
+                    {preset.label}
+                </span>
+                <button
+                    type="button"
+                    onClick={onCancel}
+                    className={`rounded-full flex items-center justify-center hover:bg-[var(--ds-surface-row)] ${isWide ? 'w-7 h-7' : 'w-11 h-11'}`}
+                    aria-label="Chiudi"
+                >
+                    <X className={`text-[var(--ds-text-muted)] ${isWide ? 'w-3.5 h-3.5' : 'w-5 h-5'}`} />
+                </button>
+            </div>
+            {hasVariants ? (
+                <ul className={isWide ? 'space-y-2' : 'space-y-1'}>
+                    {preset.variants.map(v => (
+                        <li key={v} className={`flex items-center gap-3 ${isWide ? '' : 'py-1'}`}>
+                            <span className={`flex-1 text-[var(--ds-text-primary)] truncate ${isWide ? 'text-[13px]' : 'text-[15px]'}`}>{v}</span>
+                            <QuantityStepper
+                                large={!isWide}
+                                value={qtyByVariant[v] ?? 0}
+                                onIncrement={() => bump(v, 1)}
+                                onDecrement={() => bump(v, -1)}
+                                onChange={(n) => setQty(v, n)}
+                            />
+                        </li>
+                    ))}
+                </ul>
+            ) : (
+                <div className="flex items-center justify-between gap-3 py-1">
+                    <span className={`text-[var(--ds-text-secondary)] ${isWide ? 'text-[13px]' : 'text-[15px]'}`}>Quantità</span>
+                    <QuantityStepper
+                        large={!isWide}
+                        value={qtyByVariant[''] ?? 0}
+                        onIncrement={() => bump('', 1)}
+                        onDecrement={() => bump('', -1)}
+                        onChange={(n) => setQty('', n)}
+                    />
                 </div>
-                {hasVariants ? (
-                    <ul className="space-y-2">
-                        {preset.variants.map(v => (
-                            <li key={v} className="flex items-center gap-2">
-                                <span className="flex-1 text-[13px] text-[var(--ds-text-primary)] truncate">{v}</span>
-                                <QuantityStepper
-                                    value={qtyByVariant[v] ?? 0}
-                                    onIncrement={() => bump(v, 1)}
-                                    onDecrement={() => bump(v, -1)}
-                                    onChange={(n) => setQty(v, n)}
-                                />
-                            </li>
-                        ))}
-                    </ul>
-                ) : (
-                    <div className="flex items-center justify-between gap-2 py-1">
-                        <span className="text-[13px] text-[var(--ds-text-secondary)]">Quantità</span>
-                        <QuantityStepper
-                            value={qtyByVariant[''] ?? 0}
-                            onIncrement={() => bump('', 1)}
-                            onDecrement={() => bump('', -1)}
-                            onChange={(n) => setQty('', n)}
-                        />
-                    </div>
-                )}
-                <div className="mt-3 pt-2 border-t border-[var(--ds-border)] flex items-center justify-between gap-2">
-                    <button
-                        type="button"
-                        onClick={clear}
-                        className="text-[12px] text-rose-500 hover:text-rose-600"
-                    >
-                        Rimuovi
-                    </button>
-                    <button
-                        type="button"
-                        onClick={commit}
-                        className="px-3 py-1.5 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[12px] font-semibold hover:bg-[var(--ds-action-bg-hover)]"
-                    >
-                        Conferma
-                    </button>
-                </div>
+            )}
+            <div className={`mt-3 pt-2 border-t border-[var(--ds-border)] flex items-center justify-between gap-2 ${isWide ? '' : 'px-1'}`}>
+                <button
+                    type="button"
+                    onClick={clear}
+                    className={`text-rose-500 hover:text-rose-600 font-medium ${isWide ? 'text-[12px]' : 'text-[15px] min-h-11 px-2'}`}
+                >
+                    Rimuovi
+                </button>
+                <button
+                    type="button"
+                    onClick={commit}
+                    className={`rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] font-semibold hover:bg-[var(--ds-action-bg-hover)] ${
+                        isWide ? 'px-3 py-1.5 text-[12px]' : 'px-5 min-h-11 text-[15px]'
+                    }`}
+                >
+                    Conferma
+                </button>
             </div>
         </>
+    );
+
+    if (isWide) {
+        return (
+            <>
+                <div className="fixed inset-0 z-[80]" onClick={onCancel} />
+                <div
+                    className="absolute left-0 top-full mt-1 z-[81] w-72 rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-overlay)]"
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    {body}
+                </div>
+            </>
+        );
+    }
+
+    // Mobile: bottom sheet portalato al body — l'ancoraggio absolute veniva
+    // tagliato dal contenitore della card e la funzionalità restava bloccata.
+    return createPortal(
+        <div
+            className="fixed inset-0 z-[80] flex items-end"
+            onClick={onCancel}
+            role="dialog"
+            aria-modal="true"
+            aria-label={preset.label}
+        >
+            <div className="absolute inset-0 bg-black/40" />
+            <div
+                className="relative w-full bg-[var(--ds-surface)] rounded-t-2xl shadow-[var(--ds-shadow-overlay)] px-4 pt-3 pb-[max(env(safe-area-inset-bottom),1rem)] animate-in slide-in-from-bottom duration-200"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <div className="flex justify-center pb-2">
+                    <div className="w-10 h-1 rounded-full bg-[var(--ds-border-strong)]" />
+                </div>
+                {body}
+            </div>
+        </div>,
+        document.body,
     );
 };
 
@@ -7306,28 +7353,33 @@ const QuantityStepper: React.FC<{
     onIncrement: () => void;
     onDecrement: () => void;
     onChange: (n: number) => void;
-}> = ({ value, onIncrement, onDecrement, onChange }) => (
-    <div className="inline-flex items-center rounded-full border border-[var(--ds-border)] bg-[var(--ds-surface)]">
-        <button
-            type="button"
-            onClick={onDecrement}
-            disabled={value <= 0}
-            className="w-8 h-8 flex items-center justify-center text-[var(--ds-text-primary)] disabled:opacity-30"
-            aria-label="Diminuisci"
-        >−</button>
-        <input
-            type="number"
-            min={0}
-            max={99}
-            value={value}
-            onChange={(e) => onChange(Number(e.target.value))}
-            className="w-10 h-8 text-center text-[13px] font-semibold tabular-nums bg-transparent focus:outline-none appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-        />
-        <button
-            type="button"
-            onClick={onIncrement}
-            className="w-8 h-8 flex items-center justify-center text-[var(--ds-text-primary)]"
-            aria-label="Aumenta"
-        >+</button>
-    </div>
-);
+    large?: boolean;
+}> = ({ value, onIncrement, onDecrement, onChange, large = false }) => {
+    const btn = large ? 'w-11 h-11 text-[18px]' : 'w-8 h-8';
+    const input = large ? 'w-12 h-11 text-[16px]' : 'w-10 h-8 text-[13px]';
+    return (
+        <div className="inline-flex items-center rounded-full border border-[var(--ds-border)] bg-[var(--ds-surface)]">
+            <button
+                type="button"
+                onClick={onDecrement}
+                disabled={value <= 0}
+                className={`${btn} flex items-center justify-center text-[var(--ds-text-primary)] disabled:opacity-30`}
+                aria-label="Diminuisci"
+            >−</button>
+            <input
+                type="number"
+                min={0}
+                max={99}
+                value={value}
+                onChange={(e) => onChange(Number(e.target.value))}
+                className={`${input} text-center font-semibold tabular-nums bg-transparent focus:outline-none appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+            />
+            <button
+                type="button"
+                onClick={onIncrement}
+                className={`${btn} flex items-center justify-center text-[var(--ds-text-primary)]`}
+                aria-label="Aumenta"
+            >+</button>
+        </div>
+    );
+};
