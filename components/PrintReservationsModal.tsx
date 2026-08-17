@@ -44,6 +44,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
   const [printShift, setPrintShift] = useState<Shift | 'ALL'>(initialShift);
   const [printRoomId, setPrintRoomId] = useState<number | 'ALL'>('ALL');
   const [printArrival, setPrintArrival] = useState<ArrivalStatus | 'ALL'>('ALL');
+  const [printSort, setPrintSort] = useState<'TIME' | 'TABLE'>('TIME');
   const [includeBanquets, setIncludeBanquets] = useState(true);
 
   useEffect(() => {
@@ -52,6 +53,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
       setPrintShift(initialShift);
       setPrintRoomId('ALL');
       setPrintArrival('ALL');
+      setPrintSort('TIME');
       setIncludeBanquets(true);
     }
   }, [isOpen, initialDate, initialShift]);
@@ -63,7 +65,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
   }, [tables]);
 
   const filteredReservations = useMemo(() => {
-    return reservations
+    const rows = reservations
       .filter(r => getRomeDatePart(r.reservation_time) === printDate)
       .filter(r => printShift === 'ALL' || r.shift === printShift)
       .filter(r => {
@@ -78,9 +80,24 @@ export const PrintReservationsModal: React.FC<Props> = ({
         if (printArrival === 'ALL') return true;
         if (printArrival === ArrivalStatus.ARRIVED) return isSeated(r);
         return (r.arrival_status || ArrivalStatus.WAITING) === printArrival;
-      })
-      .sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
-  }, [reservations, printDate, printShift, printRoomId, printArrival, tableById]);
+      });
+
+    if (printSort === 'TABLE') {
+      // Ordinamento naturale sul nome tavolo ("1","2","10" invece di "1","10","2").
+      // Chi non ha tavolo assegnato scivola in fondo: in stampa serve per capire
+      // subito chi ancora deve essere accomodato.
+      return rows.slice().sort((a, b) => {
+        const ta = a.table_id ? tableById.get(a.table_id)?.name ?? '' : '';
+        const tb = b.table_id ? tableById.get(b.table_id)?.name ?? '' : '';
+        if (!ta && tb) return 1;
+        if (ta && !tb) return -1;
+        const byTable = ta.localeCompare(tb, 'it', { numeric: true, sensitivity: 'base' });
+        if (byTable !== 0) return byTable;
+        return a.reservation_time.localeCompare(b.reservation_time);
+      });
+    }
+    return rows.slice().sort((a, b) => a.reservation_time.localeCompare(b.reservation_time));
+  }, [reservations, printDate, printShift, printRoomId, printArrival, printSort, tableById]);
 
   const banquetsForDate = useMemo(() => {
     if (!includeBanquets) return [];
@@ -172,6 +189,23 @@ export const PrintReservationsModal: React.FC<Props> = ({
                   <option value={ArrivalStatus.ARRIVED}>Arrivati</option>
                   <option value={ArrivalStatus.DEPARTED}>Liberati</option>
                 </select>
+              </div>
+              <div>
+                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Ordina per</label>
+                <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full w-full">
+                  {(['TIME', 'TABLE'] as const).map(s => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setPrintSort(s)}
+                      className={`flex-1 px-3 py-1.5 rounded-full text-sm font-medium transition ${
+                        printSort === s ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'
+                      }`}
+                    >
+                      {s === 'TIME' ? 'Orario' : 'Tavolo'}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
