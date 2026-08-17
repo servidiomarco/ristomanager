@@ -5234,52 +5234,35 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                       ? structuredPicks.length > 0
                                                       : selectedQuickNotes.includes(note.label);
                                                     return (
-                                                        <div key={`chip-${note.id}`} className="relative">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    if (structured) {
-                                                                        setNotePickerFor(prev => prev === note.id ? null : note.id);
-                                                                    } else {
-                                                                        setSelectedQuickNotes(prev =>
-                                                                            isSelected
-                                                                                ? prev.filter(n => n !== note.label)
-                                                                                : [...prev, note.label]
-                                                                        );
-                                                                    }
-                                                                }}
-                                                                className={`w-full flex items-center gap-2 px-3.5 h-9 rounded-full transition-colors text-left ${
-                                                                    isSelected
-                                                                        ? 'border-[var(--ds-text-primary)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
-                                                                        : 'border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)]'
-                                                                }`}
-                                                            >
-                                                                <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${
-                                                                    isSelected ? 'bg-[var(--ds-text-primary)] border-[var(--ds-text-primary)]' : 'border-[var(--ds-border)] bg-[var(--ds-surface)]'
-                                                                }`}>
-                                                                    {isSelected && !structured && <Check className="text-[var(--ds-action-fg)] w-2.5 h-2.5" />}
-                                                                    {isSelected && structured && (
-                                                                        <span className="text-[10px] font-bold text-[var(--ds-action-fg)] tabular-nums">{structuredTotalQty}</span>
-                                                                    )}
-                                                                </div>
-                                                                {NoteIcon && <NoteIcon className="w-4 h-4 flex-shrink-0" />}
-                                                                <span className="text-sm font-medium truncate">{note.label}</span>
-                                                            </button>
-                                                            {structured && notePickerFor === note.id && (
-                                                                <NotePickerPopover
-                                                                    preset={note}
-                                                                    picks={structuredPicks}
-                                                                    onCommit={(nextPicks) => {
-                                                                        setNoteSelections(prev => {
-                                                                            const others = prev.filter(s => s.preset_id !== note.id);
-                                                                            return [...others, ...nextPicks];
-                                                                        });
-                                                                        setNotePickerFor(null);
-                                                                    }}
-                                                                    onCancel={() => setNotePickerFor(null)}
-                                                                />
-                                                            )}
-                                                        </div>
+                                                        <NoteChip
+                                                            key={`chip-${note.id}`}
+                                                            note={note}
+                                                            NoteIcon={NoteIcon}
+                                                            structured={structured}
+                                                            structuredPicks={structuredPicks}
+                                                            structuredTotalQty={structuredTotalQty}
+                                                            isSelected={isSelected}
+                                                            isOpen={notePickerFor === note.id}
+                                                            onChipClick={() => {
+                                                                if (structured) {
+                                                                    setNotePickerFor(prev => prev === note.id ? null : note.id);
+                                                                } else {
+                                                                    setSelectedQuickNotes(prev =>
+                                                                        isSelected
+                                                                            ? prev.filter(n => n !== note.label)
+                                                                            : [...prev, note.label]
+                                                                    );
+                                                                }
+                                                            }}
+                                                            onCommit={(nextPicks) => {
+                                                                setNoteSelections(prev => {
+                                                                    const others = prev.filter(s => s.preset_id !== note.id);
+                                                                    return [...others, ...nextPicks];
+                                                                });
+                                                                setNotePickerFor(null);
+                                                            }}
+                                                            onCancel={() => setNotePickerFor(null)}
+                                                        />
                                                     );
                                                 })}
                                             </div>
@@ -7197,14 +7180,108 @@ type QuickNotePreset = {
     variants: string[];
 };
 
-interface NotePickerPopoverProps {
-    preset: QuickNotePreset;
-    picks: NoteSelection[];
+interface NoteChipProps {
+    note: QuickNotePreset;
+    NoteIcon: React.ComponentType<{ className?: string }> | null;
+    structured: boolean;
+    structuredPicks: NoteSelection[];
+    structuredTotalQty: number;
+    isSelected: boolean;
+    isOpen: boolean;
+    onChipClick: () => void;
     onCommit: (next: NoteSelection[]) => void;
     onCancel: () => void;
 }
 
-const NotePickerPopover: React.FC<NotePickerPopoverProps> = ({ preset, picks, onCommit, onCancel }) => {
+// Isolato in un componente per catturare il ref del pulsante: il picker viene
+// portalato al body per non essere clippato dal card contenitore e ha bisogno
+// del bounding rect del chip per posizionarsi.
+const NoteChip: React.FC<NoteChipProps> = ({
+    note, NoteIcon, structured, structuredPicks, structuredTotalQty,
+    isSelected, isOpen, onChipClick, onCommit, onCancel,
+}) => {
+    const btnRef = useRef<HTMLButtonElement | null>(null);
+    return (
+        <div className="relative">
+            <button
+                ref={btnRef}
+                type="button"
+                onClick={onChipClick}
+                className={`w-full flex items-center gap-2 px-3.5 h-9 rounded-full transition-colors text-left ${
+                    isSelected
+                        ? 'border-[var(--ds-text-primary)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
+                        : 'border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)]'
+                }`}
+            >
+                <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${
+                    isSelected ? 'bg-[var(--ds-text-primary)] border-[var(--ds-text-primary)]' : 'border-[var(--ds-border)] bg-[var(--ds-surface)]'
+                }`}>
+                    {isSelected && !structured && <Check className="text-[var(--ds-action-fg)] w-2.5 h-2.5" />}
+                    {isSelected && structured && (
+                        <span className="text-[10px] font-bold text-[var(--ds-action-fg)] tabular-nums">{structuredTotalQty}</span>
+                    )}
+                </div>
+                {NoteIcon && <NoteIcon className="w-4 h-4 flex-shrink-0" />}
+                <span className="text-sm font-medium truncate">{note.label}</span>
+            </button>
+            {structured && isOpen && (
+                <NotePickerPopover
+                    preset={note}
+                    picks={structuredPicks}
+                    anchorEl={btnRef.current}
+                    onCommit={onCommit}
+                    onCancel={onCancel}
+                />
+            )}
+        </div>
+    );
+};
+
+interface NotePickerPopoverProps {
+    preset: QuickNotePreset;
+    picks: NoteSelection[];
+    anchorEl: HTMLElement | null;
+    onCommit: (next: NoteSelection[]) => void;
+    onCancel: () => void;
+}
+
+// Posiziona il popover sotto il chip, ma se non c'e' spazio nel viewport si
+// sposta sopra o clampa al bordo. Portalato al body per evitare che i card
+// contenitori con overflow lo taglino (bug visto in Note prenotazione).
+const usePopoverPosition = (
+    anchorEl: HTMLElement | null,
+    enabled: boolean,
+    popoverWidth: number,
+    popoverHeightEstimate: number,
+): { top: number; left: number } => {
+    const [pos, setPos] = useState({ top: 0, left: 0 });
+    useEffect(() => {
+        if (!enabled || !anchorEl) return;
+        const compute = () => {
+            const rect = anchorEl.getBoundingClientRect();
+            const margin = 8;
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            const preferBelow = rect.bottom + popoverHeightEstimate + margin <= vh;
+            const top = preferBelow
+                ? rect.bottom + 6
+                : Math.max(margin, rect.top - popoverHeightEstimate - 6);
+            const rawLeft = rect.left;
+            const left = Math.min(Math.max(margin, rawLeft), vw - popoverWidth - margin);
+            setPos({ top, left });
+        };
+        compute();
+        window.addEventListener('resize', compute);
+        window.addEventListener('scroll', compute, true);
+        return () => {
+            window.removeEventListener('resize', compute);
+            window.removeEventListener('scroll', compute, true);
+        };
+    }, [anchorEl, enabled, popoverWidth, popoverHeightEstimate]);
+    return pos;
+};
+
+const NotePickerPopover: React.FC<NotePickerPopoverProps> = ({ preset, picks, anchorEl, onCommit, onCancel }) => {
     // Se il preset ha varianti trattiamo il popover come editor di più righe
     // (una per variante scelta). Altrimenti è una singola quantità.
     const hasVariants = preset.variants.length > 0;
@@ -7309,17 +7386,24 @@ const NotePickerPopover: React.FC<NotePickerPopoverProps> = ({ preset, picks, on
         </>
     );
 
+    const desktopWidth = 288;
+    const desktopHeightEstimate = Math.max(180, 90 + (hasVariants ? preset.variants.length : 1) * 48);
+    const pos = usePopoverPosition(anchorEl, isWide, desktopWidth, desktopHeightEstimate);
     if (isWide) {
-        return (
+        return createPortal(
             <>
                 <div className="fixed inset-0 z-[80]" onClick={onCancel} />
                 <div
-                    className="absolute left-0 top-full mt-1 z-[81] w-72 rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-overlay)]"
+                    className="fixed z-[81] rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-overlay)]"
+                    style={{ top: pos.top, left: pos.left, width: desktopWidth }}
                     onClick={(e) => e.stopPropagation()}
+                    role="dialog"
+                    aria-label={preset.label}
                 >
                     {body}
                 </div>
-            </>
+            </>,
+            document.body,
         );
     }
 
