@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { queryWithRetry } from '../db.js';
@@ -13,6 +14,11 @@ export interface TokenPayload {
   userId: number;
   email: string;
   role: UserRole;
+  // Fase B2 del piano SaaS: il tenant viaggia nel token. I token emessi
+  // prima del deploy non hanno il claim (TTL 6h): chi li verifica
+  // normalizza col fallback 1 — corretto per tutti gli utenti esistenti.
+  // Il fallback va rimosso prima di accendere il secondo tenant.
+  tenantId: number;
 }
 
 export interface AuthTokens {
@@ -30,6 +36,26 @@ export class AuthService {
   // Verify password against hash
   static async verifyPassword(password: string, hash: string): Promise<boolean> {
     return bcrypt.compare(password, hash);
+  }
+
+  // I refresh token sono JWT da ~250 byte, ma bcrypt considera solo i primi
+  // 72: header e inizio payload sono identici per tutti i token dello stesso
+  // utente, quindi il confronto diretto passava per QUALUNQUE token emesso e
+  // la rotazione non revocava niente. Il digest SHA-256 (44 caratteri in
+  // base64) porta l'intero token dentro la finestra di bcrypt.
+  //
+  // Il cambio di formato invalida gli hash già salvati: al primo refresh
+  // dopo il deploy ogni sessione attiva riceve 401 e rifà il login una volta.
+  private static digestRefreshToken(token: string): string {
+    return createHash('sha256').update(token).digest('base64');
+  }
+
+  private static async hashRefreshToken(token: string): Promise<string> {
+    return this.hashPassword(this.digestRefreshToken(token));
+  }
+
+  private static async verifyRefreshTokenHash(token: string, hash: string): Promise<boolean> {
+    return this.verifyPassword(this.digestRefreshToken(token), hash);
   }
 
   // Generate access and refresh tokens
@@ -58,9 +84,14 @@ export class AuthService {
   }
 
   // Login user
-  static async login(email: string, password: string): Promise<{ user: User; tokens: AuthTokens } | null> {
+  static async login(email: string, password: string): Promise<{ user: User; tokens: AuthTokens } | { tenantSuspended: true } | null> {
     const result = await queryWithRetry(
-      'SELECT id, email, password_hash, full_name, role, is_active, created_at, updated_at, last_login, preferred_landing_view FROM users WHERE email = $1',
+      `SELECT u.id, u.email, u.password_hash, u.full_name, u.role, u.is_active,
+              u.created_at, u.updated_at, u.last_login, u.preferred_landing_view,
+              u.tenant_id, t.status AS tenant_status, t.slug AS tenant_slug, t.name AS tenant_name
+         FROM users u
+         JOIN tenants t ON t.id = u.tenant_id
+        WHERE u.email = $1`,
       [email.toLowerCase()]
     );
 
@@ -74,6 +105,13 @@ export class AuthService {
       return null;
     }
 
+    // Tenant sospeso: l'account è valido ma il ristorante è spento (mancato
+    // pagamento, dismissione). Distinto dalle credenziali errate: la UI deve
+    // poter spiegare, non dire "password sbagliata".
+    if (userRow.tenant_status !== 'active') {
+      return { tenantSuspended: true };
+    }
+
     const isValidPassword = await this.verifyPassword(password, userRow.password_hash);
     if (!isValidPassword) {
       return null;
@@ -85,13 +123,14 @@ export class AuthService {
     const payload: TokenPayload = {
       userId: userRow.id,
       email: userRow.email,
-      role: userRow.role as UserRole
+      role: userRow.role as UserRole,
+      tenantId: Number(userRow.tenant_id)
     };
 
     const tokens = this.generateTokens(payload);
 
     // Store refresh token hash
-    const refreshTokenHash = await this.hashPassword(tokens.refreshToken);
+    const refreshTokenHash = await this.hashRefreshToken(tokens.refreshToken);
     await queryWithRetry('UPDATE users SET refresh_token_hash = $1 WHERE id = $2', [refreshTokenHash, userRow.id]);
 
     const user: User = {
@@ -103,7 +142,12 @@ export class AuthService {
       created_at: userRow.created_at,
       updated_at: userRow.updated_at,
       last_login: userRow.last_login,
-      preferred_landing_view: userRow.preferred_landing_view ?? null
+      preferred_landing_view: userRow.preferred_landing_view ?? null,
+      tenant: {
+        id: Number(userRow.tenant_id),
+        slug: userRow.tenant_slug,
+        name: userRow.tenant_name
+      }
     };
 
     return { user, tokens };
@@ -116,9 +160,14 @@ export class AuthService {
       return null;
     }
 
-    // Verify refresh token is still valid in database
+    // Verify refresh token is still valid in database. Il join sul tenant
+    // fa anche da interruttore: sospendere un tenant taglia i refresh, e
+    // quindi ogni sessione muore entro il TTL dell'access token (6h).
     const result = await queryWithRetry(
-      'SELECT id, email, role, is_active, refresh_token_hash FROM users WHERE id = $1',
+      `SELECT u.id, u.email, u.role, u.is_active, u.refresh_token_hash, u.tenant_id
+         FROM users u
+         JOIN tenants t ON t.id = u.tenant_id AND t.status = 'active'
+        WHERE u.id = $1`,
       [payload.userId]
     );
 
@@ -128,8 +177,14 @@ export class AuthService {
 
     const userRow = result.rows[0];
 
+    // Dopo il logout l'hash è NULL: senza questo guard bcrypt.compare(token,
+    // null) lancia e una revoca legittima risponde 500 invece di 401.
+    if (!userRow.refresh_token_hash) {
+      return null;
+    }
+
     // Verify refresh token hash matches
-    const isValidRefreshToken = await this.verifyPassword(refreshToken, userRow.refresh_token_hash);
+    const isValidRefreshToken = await this.verifyRefreshTokenHash(refreshToken, userRow.refresh_token_hash);
     if (!isValidRefreshToken) {
       return null;
     }
@@ -137,13 +192,14 @@ export class AuthService {
     const newPayload: TokenPayload = {
       userId: userRow.id,
       email: userRow.email,
-      role: userRow.role as UserRole
+      role: userRow.role as UserRole,
+      tenantId: Number(userRow.tenant_id)
     };
 
     const tokens = this.generateTokens(newPayload);
 
     // Update refresh token hash
-    const newRefreshTokenHash = await this.hashPassword(tokens.refreshToken);
+    const newRefreshTokenHash = await this.hashRefreshToken(tokens.refreshToken);
     await queryWithRetry('UPDATE users SET refresh_token_hash = $1 WHERE id = $2', [newRefreshTokenHash, userRow.id]);
 
     return tokens;
@@ -154,10 +210,16 @@ export class AuthService {
     await queryWithRetry('UPDATE users SET refresh_token_hash = NULL WHERE id = $1', [userId]);
   }
 
-  // Get user by ID
+  // Get user by ID (con il tenant di appartenenza: /auth/me lo espone
+  // alla UI, che da lì sa nome e slug del ristorante).
   static async getUserById(userId: number): Promise<User | null> {
     const result = await queryWithRetry(
-      'SELECT id, email, full_name, role, is_active, created_at, updated_at, last_login, preferred_landing_view FROM users WHERE id = $1',
+      `SELECT u.id, u.email, u.full_name, u.role, u.is_active, u.created_at,
+              u.updated_at, u.last_login, u.preferred_landing_view,
+              u.tenant_id, t.slug AS tenant_slug, t.name AS tenant_name
+         FROM users u
+         JOIN tenants t ON t.id = u.tenant_id
+        WHERE u.id = $1`,
       [userId]
     );
 
@@ -175,7 +237,12 @@ export class AuthService {
       created_at: row.created_at,
       updated_at: row.updated_at,
       last_login: row.last_login,
-      preferred_landing_view: row.preferred_landing_view ?? null
+      preferred_landing_view: row.preferred_landing_view ?? null,
+      tenant: {
+        id: Number(row.tenant_id),
+        slug: row.tenant_slug,
+        name: row.tenant_name
+      }
     };
   }
 

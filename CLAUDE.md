@@ -15,11 +15,12 @@ npm run build          # SPA production build
 npm run build:server   # compile server.ts + deps to dist/ via tsconfig.server.json
 npm run start:server   # run server.ts directly (ts-node ESM loader) — local backend on :3000
 npm start              # run the compiled dist/server.js
+npm test               # build the server, then API tests (Vitest+supertest) on a local throwaway Postgres
 ```
 
 Run `npx tsc --noEmit` after any change and `npx vite build` before committing (then `rm -rf dist` — it is gitignored but the server build also writes there).
 
-**There are no tests.** No Jest, RTL, or Vitest is installed and there is no `npm test`. Section 13 of the design-system doc describes a test suite that does not exist yet — treat it as aspirational, not as a description of the repo.
+**Tests: API smoke suite only.** `npm test` compiles the server and runs Vitest + supertest (`tests/api/`) against the real compiled artifact (`dist/server.js`) on a local Postgres. `tests/api/globalSetup.ts` **drops and recreates** the database named in `DATABASE_URL` (default `postgresql://localhost/ristotest_api`) and refuses non-localhost hosts. Readiness is probed by logging in the seeded owner — `/health` returns 200 before the schema exists, never use it as a readiness gate. Test files run sequentially (shared server + DB); a test that toggles a feature flag changes state for the files after it. There are still no frontend/unit tests — section 13 of the design-system doc remains aspirational. CI (`.github/workflows/ci.yml`) runs typecheck, both builds, and the API tests on every PR.
 
 Two shell scripts stand up a full local stack, each seeding its own Postgres database and refusing to run against a non-localhost host:
 
@@ -68,9 +69,11 @@ There is no router. `App.tsx` holds `const [view, setView] = useState<ViewState>
 
 Access + refresh tokens sit in localStorage; `apiService.fetchWithAuth` transparently refreshes once on a 401 and retries.
 
-### Database: no migration tool
+### Database: frozen baseline + node-pg-migrate
 
-`db.ts` exports the `pg` pool and `createSchema()`, which runs at server boot and is written entirely as `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`. To add a column, append an `ALTER` line in `createSchema()` — that is the migration. The pool is tuned around Railway's proxy (IPv4-pinned DNS, 30s idle eviction, statement timeouts); the comments there explain which production failure each setting fixes.
+`db.ts` exports the `pg` pool, `createSchema()` and `runMigrations()`. `createSchema()` is the historical baseline — written entirely as `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, run at every boot — and is **frozen**: do not add new schema changes to it. Every schema change goes in a versioned migration instead: `npm run migrate:create -- nome-migrazione` creates a plain-JS ESM file in `migrations/` (`export const up = (pgm) => { pgm.sql(...) }`). At boot the server runs `createSchema()` first, then `runMigrations()` applies pending migrations (recorded in the `pgmigrations` table). In production migrations run only at boot; `npm run migrate` exists for local use and needs `DATABASE_URL`. `migrations/` is COPY'd into the Dockerfile production stage — a migration file outside that directory will not ship.
+
+The pool is tuned around Railway's proxy (IPv4-pinned DNS, 30s idle eviction, statement timeouts); the comments there explain which production failure each setting fixes. Migrations deliberately run on a dedicated client without those statement timeouts.
 
 The pg `DATE` type parser is overridden to return plain `YYYY-MM-DD` strings, because the default parser shifts dates through the server's local timezone and produces off-by-one-day bugs.
 

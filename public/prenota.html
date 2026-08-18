@@ -42,6 +42,7 @@
     <div class="max-w-md md:max-w-xl mx-auto px-4 sm:px-6 py-6 md:py-10 pb-32">
         <header class="text-center mb-8 md:mb-10">
             <a
+                id="brandLink"
                 href="https://www.vecchiofrantoio.com"
                 target="_blank"
                 rel="noopener"
@@ -49,6 +50,7 @@
                 aria-label="Vai al sito Il Vecchio Frantoio"
             >
                 <img
+                    id="brandLogo"
                     src="/prenota/logo.png?v=2"
                     alt="Il Vecchio Frantoio — Cucina Tradizionale"
                     class="mx-auto h-28 sm:h-36 md:h-44 w-auto select-none"
@@ -333,7 +335,7 @@
 
         <!-- Footer -->
         <footer class="mt-10 text-center text-[11px] uppercase tracking-[0.24em] text-stone-400">
-            Il Vecchio Frantoio · Cucina Tradizionale
+            <span id="brandFooter">Il Vecchio Frantoio · Cucina Tradizionale</span>
             <div class="mt-2 normal-case tracking-normal">
                 <a href="/privacy" target="_blank" rel="noopener" class="text-stone-500 hover:text-amber-800 underline">Informativa sulla privacy</a>
                 <span class="mx-1.5 text-stone-300">·</span>
@@ -354,7 +356,7 @@
                 <p id="confirmRecap" class="text-sm text-stone-500 mt-4"></p>
                 <div class="mt-8 flex items-center justify-center gap-3">
                     <span class="rule"></span>
-                    <span class="text-[11px] uppercase tracking-[0.28em] text-stone-500">Il Vecchio Frantoio</span>
+                    <span id="brandConfirmName" class="text-[11px] uppercase tracking-[0.28em] text-stone-500">Il Vecchio Frantoio</span>
                     <span class="rule"></span>
                 </div>
             </div>
@@ -387,6 +389,27 @@
         const r = await fetch('/public/contact');
         if (r.ok) contact = await r.json();
     } catch { /* network issue → stay on maintenance card (safe default) */ }
+
+    // Branding dal server (Impostazioni → Aspetti legali). Va applicato PRIMA
+    // dell'early-return qui sotto: anche la pagina di manutenzione deve
+    // portare il nome giusto. I testi statici nell'HTML restano il fallback
+    // senza JS / senza rete.
+    const branding = contact?.branding;
+    if (branding?.name) {
+        document.title = `Prenota un tavolo · ${branding.name}`;
+        const brandLine = branding.tagline ? `${branding.name} · ${branding.tagline}` : branding.name;
+        const footerEl = document.getElementById('brandFooter');
+        if (footerEl) footerEl.textContent = brandLine;
+        const confirmEl = document.getElementById('brandConfirmName');
+        if (confirmEl) confirmEl.textContent = branding.name;
+        const logoEl = document.getElementById('brandLogo');
+        if (logoEl) logoEl.alt = branding.tagline ? `${branding.name} — ${branding.tagline}` : branding.name;
+        const linkEl = document.getElementById('brandLink');
+        if (linkEl && branding.website_url) {
+            linkEl.href = branding.website_url;
+            linkEl.setAttribute('aria-label', `Vai al sito ${branding.name}`);
+        }
+    }
 
     if (!contact?.bookingsEnabled) return;
 

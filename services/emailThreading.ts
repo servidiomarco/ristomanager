@@ -41,7 +41,10 @@ export function splitReferences(refs: string | null): string[] {
 
 // Given the Message-IDs from a reply's In-Reply-To / References headers, find
 // the reservation those Message-IDs belong to. Returns null when no match.
-export async function resolveReservationByMessageIds(candidateIds: string[]): Promise<number | null> {
+// tenantId obbligatorio: i canali inbound (Resend, IMAP) lo fissano al tenant
+// pubblico. Senza filtro un Message-ID riusato aggancerebbe la risposta alla
+// prenotazione di un altro ristorante.
+export async function resolveReservationByMessageIds(tenantId: number, candidateIds: string[]): Promise<number | null> {
     const ids = candidateIds.filter(Boolean);
     if (ids.length === 0) return null;
     try {
@@ -49,9 +52,10 @@ export async function resolveReservationByMessageIds(candidateIds: string[]): Pr
             `SELECT reservation_id
              FROM outbound_messages
              WHERE message_id = ANY($1::text[]) AND reservation_id IS NOT NULL
+               AND tenant_id = $2
              ORDER BY sent_at DESC
              LIMIT 1`,
-            [ids]
+            [ids, tenantId]
         );
         return r.rows[0]?.reservation_id ?? null;
     } catch (err: any) {

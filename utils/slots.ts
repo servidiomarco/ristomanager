@@ -50,6 +50,9 @@ function generateSlots(open: string, close: string, stepMinutes: number): string
 
 // Aggregate disabled_slots per (weekday, shift). Doing this in SQL con
 // array_agg + FILTER evita una seconda query per ogni row di opening_hours.
+// Il JOIN sui disabled slots vincola anche il tenant: senza `d.tenant_id =
+// h.tenant_id` gli slot spenti di un ristorante sparirebbero dal calendario
+// di tutti gli altri.
 const OPENING_HOURS_SELECT = `
     SELECT h.weekday,
            to_char(h.lunch_open,  'HH24:MI') AS lunch_open,
@@ -68,20 +71,24 @@ const OPENING_HOURS_SELECT = `
                '{}'
            ) AS disabled_dinner_slots
     FROM opening_hours h
-    LEFT JOIN opening_hours_disabled_slots d ON d.weekday = h.weekday
+    LEFT JOIN opening_hours_disabled_slots d
+           ON d.tenant_id = h.tenant_id AND d.weekday = h.weekday
 `;
 
-export async function getOpeningHours(weekday: number): Promise<OpeningHoursRow | null> {
+// GROUP BY su (tenant_id, weekday): con la PK composita il solo weekday non
+// basta più a Postgres per la dipendenza funzionale delle altre colonne.
+export async function getOpeningHours(tenantId: number, weekday: number): Promise<OpeningHoursRow | null> {
     const result = await queryWithRetry(
-        `${OPENING_HOURS_SELECT} WHERE h.weekday = $1 GROUP BY h.weekday`,
-        [weekday]
+        `${OPENING_HOURS_SELECT} WHERE h.tenant_id = $1 AND h.weekday = $2 GROUP BY h.tenant_id, h.weekday`,
+        [tenantId, weekday]
     );
     return result.rows[0] ?? null;
 }
 
-export async function getAllOpeningHours(): Promise<OpeningHoursRow[]> {
+export async function getAllOpeningHours(tenantId: number): Promise<OpeningHoursRow[]> {
     const result = await queryWithRetry(
-        `${OPENING_HOURS_SELECT} GROUP BY h.weekday ORDER BY h.weekday ASC`
+        `${OPENING_HOURS_SELECT} WHERE h.tenant_id = $1 GROUP BY h.tenant_id, h.weekday ORDER BY h.weekday ASC`,
+        [tenantId]
     );
     return result.rows;
 }
@@ -90,22 +97,23 @@ export async function getAllOpeningHours(): Promise<OpeningHoursRow[]> {
  * Returns true if the date+shift is marked closed in special_closures.
  * A row with shift=NULL closes the entire day for both shifts.
  */
-export async function isShiftClosed(date: string, shift: Shift): Promise<boolean> {
+export async function isShiftClosed(tenantId: number, date: string, shift: Shift): Promise<boolean> {
     const result = await queryWithRetry(
         `SELECT 1 FROM special_closures
-         WHERE date = $1::date AND (shift IS NULL OR shift = $2)
+         WHERE tenant_id = $1 AND date = $2::date AND (shift IS NULL OR shift = $3)
          LIMIT 1`,
-        [date, shift]
+        [tenantId, date, shift]
     );
     return result.rows.length > 0;
 }
 
-export async function listClosures(fromDate?: string): Promise<SpecialClosureRow[]> {
-    const params: any[] = [];
+export async function listClosures(tenantId: number, fromDate?: string): Promise<SpecialClosureRow[]> {
+    const params: any[] = [tenantId];
     let sql = `SELECT id, to_char(date, 'YYYY-MM-DD') AS date, shift, reason
-               FROM special_closures`;
+               FROM special_closures
+               WHERE tenant_id = $1`;
     if (fromDate) {
-        sql += ` WHERE date >= $1::date`;
+        sql += ` AND date >= $2::date`;
         params.push(fromDate);
     }
     sql += ` ORDER BY date ASC, shift NULLS FIRST`;
@@ -118,16 +126,16 @@ export async function listClosures(fromDate?: string): Promise<SpecialClosureRow
  * Returns [] if the weekday has no configured hours for that shift,
  * or if the date is closed (whole-day or shift-specific) via special_closures.
  */
-export async function getAvailableSlots(date: string, shift: Shift): Promise<string[]> {
+export async function getAvailableSlots(tenantId: number, date: string, shift: Shift): Promise<string[]> {
     const weekday = isoDateToWeekday(date);
-    const hours = await getOpeningHours(weekday);
+    const hours = await getOpeningHours(tenantId, weekday);
     if (!hours) return [];
 
     const open  = shift === Shift.LUNCH ? hours.lunch_open  : hours.dinner_open;
     const close = shift === Shift.LUNCH ? hours.lunch_close : hours.dinner_close;
     if (!open || !close) return [];
 
-    if (await isShiftClosed(date, shift)) return [];
+    if (await isShiftClosed(tenantId, date, shift)) return [];
 
     const disabled = new Set(
         shift === Shift.LUNCH ? hours.disabled_lunch_slots : hours.disabled_dinner_slots
@@ -135,8 +143,8 @@ export async function getAvailableSlots(date: string, shift: Shift): Promise<str
     return generateSlots(open, close, hours.slot_minutes).filter(s => !disabled.has(s));
 }
 
-export async function isValidSlotForShift(time: string, date: string, shift: Shift): Promise<boolean> {
-    const slots = await getAvailableSlots(date, shift);
+export async function isValidSlotForShift(tenantId: number, time: string, date: string, shift: Shift): Promise<boolean> {
+    const slots = await getAvailableSlots(tenantId, date, shift);
     return slots.includes(time);
 }
 

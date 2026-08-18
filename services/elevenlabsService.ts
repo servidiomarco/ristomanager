@@ -10,6 +10,12 @@ import { getCappedRoomIds, pickSelfServiceTable, isTableStillAssignable } from '
 // HMAC SIGNATURE VERIFICATION
 // ============================================
 
+// Tenant del canale vocale: le chiamate arrivano da webhook senza JWT, quindi
+// non c'è un req.tenantId da leggere. Finché la Fase C3 non ricava il tenant
+// dal numero chiamato, tutta la voce appartiene al tenant 1 (stesso valore di
+// PUBLIC_TENANT_ID in server.ts — non importabile da qui: ciclo di moduli).
+const VOICE_TENANT_ID = 1;
+
 const SIGNATURE_HEADER = 'elevenlabs-signature';
 const SIGNATURE_TOLERANCE_SECONDS = 300; // 5 minutes
 
@@ -426,8 +432,11 @@ export interface CustomerLookupResult {
  * by upsertCustomerFromReservation, so "+39 333 1234567" and "3331234567"
  * collide. Also fetches the most recent non-cancelled reservation date so the
  * agent can greet returning callers with "bentornato".
+ *
+ * tenantId obbligatorio: i webhook voce lo fissano al tenant pubblico. Senza
+ * filtro Sofia saluterebbe per nome il cliente di un altro ristorante.
  */
-export async function findCustomerByPhone(phone: string): Promise<CustomerLookupResult> {
+export async function findCustomerByPhone(tenantId: number, phone: string): Promise<CustomerLookupResult> {
     if (!phone) return { exists: false };
     const digits = phone.replace(/\D/g, '');
     if (!digits) return { exists: false };
@@ -436,10 +445,11 @@ export async function findCustomerByPhone(phone: string): Promise<CustomerLookup
     const result = await queryWithRetry(
         `SELECT id, name
          FROM customers
-         WHERE right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
+         WHERE tenant_id = $2
+           AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
          ORDER BY id ASC
          LIMIT 1`,
-        [last10]
+        [last10, tenantId]
     );
     if (result.rows.length === 0) return { exists: false };
 
@@ -519,7 +529,7 @@ export interface AvailabilityResult {
 async function isShiftAlreadyOverToday(date: string, shift: Shift): Promise<boolean> {
     if (date !== getRomeDatePart(new Date())) return false;
     const nowTime = getRomeTimePart(new Date()); // HH:MM, 24h Rome
-    const slots = await getAvailableSlots(date, shift);
+    const slots = await getAvailableSlots(VOICE_TENANT_ID, date, shift);
     // Zero-padded 24h strings compare correctly lexicographically. Empty slot
     // list (shift closed that weekday) → nothing left to offer.
     return slots.every(s => s <= nowTime);
@@ -527,35 +537,37 @@ async function isShiftAlreadyOverToday(date: string, shift: Shift): Promise<bool
 
 export async function findAvailability(input: AvailabilityInput): Promise<AvailabilityResult> {
     const { date, shift, guests, location_preference } = input;
-    const cappedRooms = await getCappedRoomIds(date, shift);
+    const cappedRooms = await getCappedRoomIds(VOICE_TENANT_ID, date, shift);
 
     const breakdown = await queryWithRetry(`
         SELECT r.location AS location, COUNT(*)::int AS free
         FROM tables t
-        JOIN rooms r ON t.room_id = r.id
-        WHERE r.is_closed = false
+        JOIN rooms r ON t.room_id = r.id AND r.tenant_id = t.tenant_id
+        WHERE t.tenant_id = $5
+          AND r.is_closed = false
           AND NOT (r.id = ANY($4::int[]))
           AND r.id NOT IN (
-              SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3
+              SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3 AND tenant_id = $5
           )
           AND t.id NOT IN (
-              SELECT table_id FROM table_hidden_overrides WHERE date = $2 AND shift = $3
+              SELECT table_id FROM table_hidden_overrides WHERE date = $2 AND shift = $3 AND tenant_id = $5
           )
           AND t.seats >= $1
           AND NOT EXISTS (
               SELECT 1 FROM reservations res
               WHERE res.table_id = t.id
+                AND res.tenant_id = $5
                 AND DATE(res.reservation_time) = $2
                 AND res.shift = $3
                 AND COALESCE(res.reservation_status, 'CONFIRMED') <> 'CANCELLED'
           )
           AND NOT EXISTS (
               SELECT 1 FROM table_merges tm
-              WHERE tm.date = $2 AND tm.shift = $3
+              WHERE tm.date = $2 AND tm.shift = $3 AND tm.tenant_id = $5
                 AND (tm.primary_id = t.id OR t.id = ANY(tm.merged_ids))
           )
         GROUP BY r.location
-    `, [guests, date, shift, cappedRooms]);
+    `, [guests, date, shift, cappedRooms, VOICE_TENANT_ID]);
 
     let freeIndoor = 0;
     let freeOutdoor = 0;
@@ -594,33 +606,35 @@ export async function findAvailability(input: AvailabilityInput): Promise<Availa
 
     const otherShift = shift === Shift.LUNCH ? Shift.DINNER : Shift.LUNCH;
     // I cap si misurano per turno: l'altro turno ha la sua occupazione.
-    const cappedRoomsAlt = await getCappedRoomIds(date, otherShift);
+    const cappedRoomsAlt = await getCappedRoomIds(VOICE_TENANT_ID, date, otherShift);
     const altResult = await queryWithRetry(`
         SELECT COUNT(*)::int AS free
         FROM tables t
-        JOIN rooms r ON t.room_id = r.id
-        WHERE r.is_closed = false
+        JOIN rooms r ON t.room_id = r.id AND r.tenant_id = t.tenant_id
+        WHERE t.tenant_id = $5
+          AND r.is_closed = false
           AND NOT (r.id = ANY($4::int[]))
           AND r.id NOT IN (
-              SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3
+              SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3 AND tenant_id = $5
           )
           AND t.id NOT IN (
-              SELECT table_id FROM table_hidden_overrides WHERE date = $2 AND shift = $3
+              SELECT table_id FROM table_hidden_overrides WHERE date = $2 AND shift = $3 AND tenant_id = $5
           )
           AND t.seats >= $1
           AND NOT EXISTS (
               SELECT 1 FROM reservations res
               WHERE res.table_id = t.id
+                AND res.tenant_id = $5
                 AND DATE(res.reservation_time) = $2
                 AND res.shift = $3
                 AND COALESCE(res.reservation_status, 'CONFIRMED') <> 'CANCELLED'
           )
           AND NOT EXISTS (
               SELECT 1 FROM table_merges tm
-              WHERE tm.date = $2 AND tm.shift = $3
+              WHERE tm.date = $2 AND tm.shift = $3 AND tm.tenant_id = $5
                 AND (tm.primary_id = t.id OR t.id = ANY(tm.merged_ids))
           )
-    `, [guests, date, otherShift, cappedRoomsAlt]);
+    `, [guests, date, otherShift, cappedRoomsAlt, VOICE_TENANT_ID]);
     const altFree = altResult.rows[0]?.free ?? 0;
 
     // Only offer the other shift if it hasn't already passed today — otherwise
@@ -697,7 +711,7 @@ async function pickAutoAssignTable(
     guests: number,
     locationPreference: RoomLocation | undefined
 ): Promise<{ id: number; name: string; room_name: string; location: RoomLocation | null } | null> {
-    const picked = await pickSelfServiceTable(date, shift, guests, { location: locationPreference });
+    const picked = await pickSelfServiceTable(VOICE_TENANT_ID, date, shift, guests, { location: locationPreference });
     if (!picked) return null;
     return { id: picked.id, name: picked.name, room_name: picked.room_name, location: picked.location };
 }
@@ -1023,7 +1037,7 @@ export async function modifyVoiceReservation(
     if (scheduleChanged) {
         const keepCurrentTable = current.table_id != null
             && !newLocation
-            && await isTableStillAssignable(current.table_id, newDate, newShift, newGuests, current.id);
+            && await isTableStillAssignable(VOICE_TENANT_ID, current.table_id, newDate, newShift, newGuests, current.id);
         if (!keepCurrentTable) {
             assigned = await pickAutoAssignTable(
                 newDate,
@@ -1111,10 +1125,13 @@ export interface VoiceCallRecord {
     reservation_id?: number;
 }
 
-export async function recordVoiceCall(record: VoiceCallRecord): Promise<void> {
+// tenantId obbligatorio sull'INSERT. conversation_id resta unico GLOBALE
+// (è l'id ElevenLabs, univoco per costruzione nel loro workspace), quindi
+// l'ON CONFLICT non cambia: la scopatura per tenant vive nelle query.
+export async function recordVoiceCall(tenantId: number, record: VoiceCallRecord): Promise<void> {
     await queryWithRetry(`
-        INSERT INTO voice_calls (conversation_id, phone, duration_seconds, transcript, summary, reservation_id)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO voice_calls (tenant_id, conversation_id, phone, duration_seconds, transcript, summary, reservation_id)
+        VALUES ($7, $1, $2, $3, $4, $5, $6)
         ON CONFLICT (conversation_id) DO UPDATE SET
             phone = COALESCE(EXCLUDED.phone, voice_calls.phone),
             duration_seconds = COALESCE(EXCLUDED.duration_seconds, voice_calls.duration_seconds),
@@ -1127,7 +1144,8 @@ export async function recordVoiceCall(record: VoiceCallRecord): Promise<void> {
         record.duration_seconds ?? null,
         record.transcript ?? null,
         record.summary ?? null,
-        record.reservation_id ?? null
+        record.reservation_id ?? null,
+        tenantId
     ]);
 }
 

@@ -24,6 +24,11 @@ import {
     resolveReservationByFromEmail,
 } from './emailThreading.js';
 
+// Il poller IMAP gira senza richiesta HTTP: come le altre superfici pubbliche
+// (webhook, voce) resta ancorato al tenant storico finché la Fase C non
+// threada il tenant nella configurazione della mailbox.
+const PUBLIC_TENANT_ID = 1;
+
 export interface ImapConfig {
     host: string;
     port: number;
@@ -308,7 +313,7 @@ async function handleMessage(msg: FetchMessageObject): Promise<void> {
         : splitReferences((parsed.references as string | undefined) ?? null);
 
     const candidateIds = [inReplyTo, ...referenceIds].filter(Boolean) as string[];
-    let reservationId = await resolveReservationByMessageIds(candidateIds);
+    let reservationId = await resolveReservationByMessageIds(PUBLIC_TENANT_ID, candidateIds);
     if (!reservationId) {
         reservationId = await resolveReservationByFromEmail(fromEmail);
     }
@@ -328,9 +333,9 @@ async function handleMessage(msg: FetchMessageObject): Promise<void> {
     try {
         const insert = await queryWithRetry(
             `INSERT INTO outbound_messages
-                (provider, channel, direction, from_email, to_email, subject, body, status,
+                (tenant_id, provider, channel, direction, from_email, to_email, subject, body, status,
                  provider_sid, message_id, in_reply_to, reservation_id, sent_at)
-             VALUES ('imap', 'email', 'inbound', $1, $2, $3, $4, 'received',
+             VALUES ($10, 'imap', 'email', 'inbound', $1, $2, $3, $4, 'received',
                      $5, $6, $7, $8, COALESCE($9::timestamptz, CURRENT_TIMESTAMP))
              RETURNING id, provider, channel, direction, from_email, to_email, subject, body, status,
                        provider_sid, message_id, in_reply_to, reservation_id, sent_at,
@@ -345,6 +350,7 @@ async function handleMessage(msg: FetchMessageObject): Promise<void> {
                 inReplyTo,
                 reservationId,
                 sentAt,
+                PUBLIC_TENANT_ID,
             ]
         );
         insertedRow = insert.rows[0] ?? null;
@@ -365,6 +371,7 @@ async function handleMessage(msg: FetchMessageObject): Promise<void> {
         const preview = String(body || '').replace(/\s+/g, ' ').trim().slice(0, 80);
         const fromDisplay = fromEmail || 'sconosciuto';
         pushSendToRoles(
+            PUBLIC_TENANT_ID,
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
             {
                 category: 'email',

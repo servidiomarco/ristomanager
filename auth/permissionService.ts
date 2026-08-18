@@ -23,74 +23,94 @@ export const ALL_PERMISSIONS: { feature: string; permissions: Permission[] }[] =
   { feature: 'Comande e Cucina', permissions: ['orders:view', 'orders:take', 'orders:kds', 'orders:expedite', 'orders:void'] }
 ];
 
-// Last-known-good permissions cache. We deliberately keep stale entries
-// usable when the DB is unreachable (Railway Postgres on the hobby tier
-// recycles the container every few minutes), so a transient outage does
-// not start denying every authenticated write with a misleading 403.
-let permissionsCache: Record<string, Permission[]> = {};
-let lastSuccessfulRefresh = 0;
-let lastRefreshAttempt = 0;
+// Fase B2 del piano SaaS: la matrice permessi è PER TENANT — ogni
+// ristorante può personalizzare cosa fa un MANAGER senza toccare gli
+// altri. La cache è keyed per tenant, con la stessa semantica
+// last-known-good di prima: le voci stantie restano usabili quando il DB
+// è irraggiungibile (Railway Postgres sul piano hobby ricicla il
+// container ogni pochi minuti), così un'interruzione transitoria non
+// nega ogni scrittura autenticata con un 403 fuorviante.
+type TenantPermissionsCache = {
+  permissions: Record<string, Permission[]>;
+  lastSuccessfulRefresh: number;
+  lastRefreshAttempt: number;
+};
+
+const cacheByTenant = new Map<number, TenantPermissionsCache>();
 const CACHE_TTL = 5 * 60 * 1000;       // 5 min between proactive refreshes
 const REFRESH_BACKOFF_MS = 5_000;      // after a failed refresh, wait 5s before retrying
+
+const emptyRoleMap = (): Record<string, Permission[]> => ({
+  OWNER: [], GENERAL_MANAGER: [], MANAGER: [], RECEPTION: [], WAITER: [], KITCHEN: []
+});
 
 const totalPermissionsIn = (snap: Record<string, Permission[]>): number =>
   Object.values(snap).reduce((n, arr) => n + arr.length, 0);
 
-const refreshPermissionCache = async (): Promise<void> => {
+const tenantCache = (tenantId: number): TenantPermissionsCache => {
+  let entry = cacheByTenant.get(tenantId);
+  if (!entry) {
+    entry = { permissions: emptyRoleMap(), lastSuccessfulRefresh: 0, lastRefreshAttempt: 0 };
+    cacheByTenant.set(tenantId, entry);
+  }
+  return entry;
+};
+
+const refreshPermissionCache = async (tenantId: number): Promise<void> => {
+  const entry = tenantCache(tenantId);
   const now = Date.now();
-  if (now - lastSuccessfulRefresh < CACHE_TTL) return;
-  if (now - lastRefreshAttempt < REFRESH_BACKOFF_MS) return;
-  lastRefreshAttempt = now;
+  if (now - entry.lastSuccessfulRefresh < CACHE_TTL) return;
+  if (now - entry.lastRefreshAttempt < REFRESH_BACKOFF_MS) return;
+  entry.lastRefreshAttempt = now;
 
   let fresh: Record<string, Permission[]>;
   try {
-    fresh = await RolePermissionService.getAllRolePermissions();
+    fresh = await RolePermissionService.getAllRolePermissions(tenantId);
   } catch (err) {
-    if (lastSuccessfulRefresh > 0) {
-      console.warn('[perms] DB read failed; using stale cache from',
-        new Date(lastSuccessfulRefresh).toISOString(), '-', (err as Error)?.message);
+    if (entry.lastSuccessfulRefresh > 0) {
+      console.warn(`[perms] DB read failed (tenant ${tenantId}); using stale cache from`,
+        new Date(entry.lastSuccessfulRefresh).toISOString(), '-', (err as Error)?.message);
       return;
     }
     throw err;
   }
 
   if (totalPermissionsIn(fresh) === 0) {
-    if (lastSuccessfulRefresh > 0) {
-      console.warn('[perms] DB returned empty role_permissions; keeping stale cache');
+    if (entry.lastSuccessfulRefresh > 0) {
+      console.warn(`[perms] DB returned empty role_permissions (tenant ${tenantId}); keeping stale cache`);
       return;
     }
-    throw new Error('role_permissions table is empty');
+    throw new Error(`role_permissions is empty for tenant ${tenantId}`);
   }
 
-  permissionsCache = fresh;
-  lastSuccessfulRefresh = now;
+  entry.permissions = fresh;
+  entry.lastSuccessfulRefresh = now;
+};
+
+const invalidate = (tenantId: number): void => {
+  const entry = tenantCache(tenantId);
+  entry.lastSuccessfulRefresh = 0;
+  entry.lastRefreshAttempt = 0;
 };
 
 export class RolePermissionService {
   // Get all permissions for a role from database
-  static async getPermissionsForRole(role: UserRole): Promise<Permission[]> {
+  static async getPermissionsForRole(tenantId: number, role: UserRole): Promise<Permission[]> {
     const result = await queryWithRetry(
-      'SELECT permission FROM role_permissions WHERE role = $1',
-      [role]
+      'SELECT permission FROM role_permissions WHERE tenant_id = $1 AND role = $2',
+      [tenantId, role]
     );
     return result.rows.map(row => row.permission as Permission);
   }
 
   // Get all role permissions (for admin UI)
-  static async getAllRolePermissions(): Promise<Record<string, Permission[]>> {
+  static async getAllRolePermissions(tenantId: number): Promise<Record<string, Permission[]>> {
     const result = await queryWithRetry(
-      'SELECT role, permission FROM role_permissions ORDER BY role, permission'
+      'SELECT role, permission FROM role_permissions WHERE tenant_id = $1 ORDER BY role, permission',
+      [tenantId]
     );
 
-    const permissions: Record<string, Permission[]> = {
-      OWNER: [],
-      GENERAL_MANAGER: [],
-      MANAGER: [],
-      RECEPTION: [],
-      WAITER: [],
-      KITCHEN: []
-    };
-
+    const permissions = emptyRoleMap();
     for (const row of result.rows) {
       if (permissions[row.role]) {
         permissions[row.role].push(row.permission as Permission);
@@ -101,27 +121,22 @@ export class RolePermissionService {
   }
 
   // Set permissions for a role (replaces existing permissions)
-  static async setPermissionsForRole(role: UserRole, permissions: Permission[]): Promise<void> {
+  static async setPermissionsForRole(tenantId: number, role: UserRole, permissions: Permission[]): Promise<void> {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
-      // Delete existing permissions for this role
-      await client.query('DELETE FROM role_permissions WHERE role = $1', [role]);
+      await client.query('DELETE FROM role_permissions WHERE tenant_id = $1 AND role = $2', [tenantId, role]);
 
-      // Insert new permissions
       for (const permission of permissions) {
         await client.query(
-          'INSERT INTO role_permissions (role, permission) VALUES ($1, $2)',
-          [role, permission]
+          'INSERT INTO role_permissions (tenant_id, role, permission) VALUES ($1, $2, $3)',
+          [tenantId, role, permission]
         );
       }
 
       await client.query('COMMIT');
-
-      // Invalidate cache (next read will refresh)
-      lastSuccessfulRefresh = 0;
-      lastRefreshAttempt = 0;
+      invalidate(tenantId);
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -131,44 +146,44 @@ export class RolePermissionService {
   }
 
   // Add a single permission to a role
-  static async addPermission(role: UserRole, permission: Permission): Promise<void> {
+  static async addPermission(tenantId: number, role: UserRole, permission: Permission): Promise<void> {
     await queryWithRetry(
-      'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-      [role, permission]
+      'INSERT INTO role_permissions (tenant_id, role, permission) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
+      [tenantId, role, permission]
     );
-    lastSuccessfulRefresh = 0;
-    lastRefreshAttempt = 0;
+    invalidate(tenantId);
   }
 
   // Remove a single permission from a role
-  static async removePermission(role: UserRole, permission: Permission): Promise<void> {
+  static async removePermission(tenantId: number, role: UserRole, permission: Permission): Promise<void> {
     await queryWithRetry(
-      'DELETE FROM role_permissions WHERE role = $1 AND permission = $2',
-      [role, permission]
+      'DELETE FROM role_permissions WHERE tenant_id = $1 AND role = $2 AND permission = $3',
+      [tenantId, role, permission]
     );
-    lastSuccessfulRefresh = 0;
-    lastRefreshAttempt = 0;
+    invalidate(tenantId);
   }
 
   // Check if a role has a specific permission. Falls back to a
   // last-known-good cache if the DB is temporarily unavailable.
-  static async hasPermission(role: UserRole, permission: Permission): Promise<boolean> {
-    await refreshPermissionCache();
-    return permissionsCache[role]?.includes(permission) ?? false;
+  static async hasPermission(tenantId: number, role: UserRole, permission: Permission): Promise<boolean> {
+    await refreshPermissionCache(tenantId);
+    return tenantCache(tenantId).permissions[role]?.includes(permission) ?? false;
   }
 
   // Get cached permissions for a role (same fallback semantics)
-  static async getCachedPermissions(role: UserRole): Promise<Permission[]> {
-    await refreshPermissionCache();
-    return permissionsCache[role] || [];
+  static async getCachedPermissions(tenantId: number, role: UserRole): Promise<Permission[]> {
+    await refreshPermissionCache(tenantId);
+    return tenantCache(tenantId).permissions[role] || [];
   }
 
-  // Eager warm-up — call once after DB init so the first user request
-  // doesn't pay the cache-miss latency, and the cache is populated
-  // before Postgres has a chance to bounce.
+  // Eager warm-up — scalda la cache di tutti i tenant attivi dopo l'init
+  // del DB, così la prima richiesta non paga la latenza del cache-miss.
   static async warmUp(): Promise<void> {
     try {
-      await refreshPermissionCache();
+      const tenants = await queryWithRetry(`SELECT id FROM tenants WHERE status = 'active'`);
+      for (const row of tenants.rows) {
+        await refreshPermissionCache(Number(row.id));
+      }
     } catch (err) {
       console.warn('[perms] warm-up failed, will retry on first request:', (err as Error)?.message);
     }

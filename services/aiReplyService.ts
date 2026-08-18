@@ -68,7 +68,7 @@ const fmtDate = (d: Date | string | null | undefined): string => {
 };
 
 function buildSystem(ctx: AiReplyContext): string {
-    const nome = ctx.restaurantName || 'Il Vecchio Frantoio';
+    const nome = ctx.restaurantName || 'il ristorante';
     const regole = ctx.knowledge.length > 0
         ? ctx.knowledge.map(k => `- ${k.title}: ${k.content}`).join('\n')
         : '(nessuna regola inserita)';

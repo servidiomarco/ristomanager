@@ -189,7 +189,7 @@ function buildSystem(ctx: AgentContext): string {
         ].filter(Boolean).join('\n')
         : '(nessuna prenotazione collegata a questo numero)';
 
-    return `Sei l'addetto alle prenotazioni del ristorante "${ctx.restaurantName || 'Il Vecchio Frantoio'}" e scrivi ai clienti su WhatsApp.
+    return `Sei l'addetto alle prenotazioni del ristorante "${ctx.restaurantName || 'il ristorante'}" e scrivi ai clienti su WhatsApp.
 
 Oggi è ${oggi} (${iso}). Il pranzo è LUNCH, la cena è DINNER.
 Il telefono di questo cliente è ${ctx.phone}: usalo come parametro "phone" degli strumenti, non chiederglielo.

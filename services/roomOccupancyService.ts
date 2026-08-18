@@ -38,11 +38,11 @@ export function isValidRoomOccupancyCap(entry: any): entry is RoomOccupancyCap {
     return true;
 }
 
-export async function getRoomOccupancyCaps(): Promise<RoomOccupancyCap[]> {
+export async function getRoomOccupancyCaps(tenantId: number): Promise<RoomOccupancyCap[]> {
     try {
         const result = await queryWithRetry(
-            'SELECT text_value FROM app_settings WHERE key = $1',
-            [ROOM_OCCUPANCY_CAPS_KEY]
+            'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
+            [tenantId, ROOM_OCCUPANCY_CAPS_KEY]
         );
         const raw = result.rows[0]?.text_value;
         if (typeof raw !== 'string' || !raw.trim()) return [];
@@ -83,17 +83,20 @@ export interface RoomOccupancy {
  * tavolo + i suoi ospiti: altrimenti il canale web potrebbe riempire una
  * sala con decine di richieste PENDING senza mai toccare il cap.
  */
-export async function computeRoomOccupancy(date: string, shift: Shift): Promise<RoomOccupancy[]> {
-    const caps = await getRoomOccupancyCaps();
+export async function computeRoomOccupancy(tenantId: number, date: string, shift: Shift): Promise<RoomOccupancy[]> {
+    const caps = await getRoomOccupancyCaps(tenantId);
     const capByRoom = new Map<number, RoomOccupancyCap>(caps.map(c => [c.room_id, c]));
 
+    // $3 = tenant su ogni tabella coinvolta: senza, i tavoli e i banchetti
+    // di un ristorante peserebbero sull'occupazione delle sale dell'altro.
     const result = await queryWithRetry(`
         WITH active AS (
             SELECT t.id, t.room_id, t.seats
             FROM tables t
-            WHERE NOT EXISTS (
+            WHERE t.tenant_id = $3
+              AND NOT EXISTS (
                 SELECT 1 FROM table_hidden_overrides h
-                WHERE h.table_id = t.id AND h.date = $1 AND h.shift = $2
+                WHERE h.table_id = t.id AND h.date = $1 AND h.shift = $2 AND h.tenant_id = $3
             )
         ),
         capacity AS (
@@ -111,24 +114,25 @@ export async function computeRoomOccupancy(date: string, shift: Shift): Promise<
                    -- ospiti, quindi pesa per i posti che tiene fermi.
                    COALESCE(SUM(CASE WHEN EXISTS (
                        SELECT 1 FROM banquet_menus b
-                       WHERE b.event_date = $1 AND b.shift = $2 AND a.id = ANY(b.table_ids)
+                       WHERE b.event_date = $1 AND b.shift = $2 AND b.tenant_id = $3 AND a.id = ANY(b.table_ids)
                    ) THEN a.seats ELSE 0 END), 0)::int AS banquet_seats
             FROM active a
             WHERE EXISTS (
                     SELECT 1 FROM reservations res
                     WHERE res.table_id = a.id
+                      AND res.tenant_id = $3
                       AND DATE(res.reservation_time) = $1
                       AND res.shift = $2
                       AND COALESCE(res.reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')
                   )
                OR EXISTS (
                     SELECT 1 FROM table_merges tm
-                    WHERE tm.date = $1 AND tm.shift = $2
+                    WHERE tm.date = $1 AND tm.shift = $2 AND tm.tenant_id = $3
                       AND (tm.primary_id = a.id OR a.id = ANY(tm.merged_ids))
                   )
                OR EXISTS (
                     SELECT 1 FROM banquet_menus b
-                    WHERE b.event_date = $1 AND b.shift = $2 AND a.id = ANY(b.table_ids)
+                    WHERE b.event_date = $1 AND b.shift = $2 AND b.tenant_id = $3 AND a.id = ANY(b.table_ids)
                   )
             GROUP BY a.room_id
         ),
@@ -137,6 +141,7 @@ export async function computeRoomOccupancy(date: string, shift: Shift): Promise<
             FROM active a
             JOIN reservations res
               ON res.table_id = a.id
+             AND res.tenant_id = $3
              AND DATE(res.reservation_time) = $1
              AND res.shift = $2
              AND COALESCE(res.reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')
@@ -152,10 +157,12 @@ export async function computeRoomOccupancy(date: string, shift: Shift): Promise<
             FROM rooms rm
             JOIN reservations res
               ON res.table_id IS NULL
+             AND res.tenant_id = $3
              AND DATE(res.reservation_time) = $1
              AND res.shift = $2
              AND COALESCE(res.reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')
              AND position('Sala richiesta: ' || rm.name || '.' in COALESCE(res.notes, '')) > 0
+            WHERE rm.tenant_id = $3
             GROUP BY rm.id
         )
         SELECT rm.id                                AS room_id,
@@ -170,15 +177,16 @@ export async function computeRoomOccupancy(date: string, shift: Shift): Promise<
                  + COALESCE(q.seats_requested, 0)   AS used_seats,
                EXISTS (
                    SELECT 1 FROM room_closed_overrides rc
-                   WHERE rc.room_id = rm.id AND rc.date = $1 AND rc.shift = $2
+                   WHERE rc.room_id = rm.id AND rc.date = $1 AND rc.shift = $2 AND rc.tenant_id = $3
                )                                    AS closed_for_shift
         FROM rooms rm
         LEFT JOIN capacity  c ON c.room_id = rm.id
         LEFT JOIN occupied  o ON o.room_id = rm.id
         LEFT JOIN covers    v ON v.room_id = rm.id
         LEFT JOIN requested q ON q.room_id = rm.id
+        WHERE rm.tenant_id = $3
         ORDER BY rm.name ASC
-    `, [date, shift]);
+    `, [date, shift, tenantId]);
 
     return result.rows.map((row: any) => {
         const capacityTables = Number(row.capacity_tables) || 0;
@@ -216,13 +224,13 @@ export async function computeRoomOccupancy(date: string, shift: Shift): Promise<
  * Restituisce sempre un array (mai null) così può essere passato dritto a
  * un `= ANY($n::int[])` senza guardie extra.
  */
-export async function getCappedRoomIds(date: string, shift: Shift): Promise<number[]> {
+export async function getCappedRoomIds(tenantId: number, date: string, shift: Shift): Promise<number[]> {
     try {
-        const caps = await getRoomOccupancyCaps();
+        const caps = await getRoomOccupancyCaps(tenantId);
         // Nessun cap configurato: evita la query di occupazione sul percorso
         // caldo (ogni check-availability dell'agente vocale ci passa).
         if (caps.length === 0) return [];
-        const occupancy = await computeRoomOccupancy(date, shift);
+        const occupancy = await computeRoomOccupancy(tenantId, date, shift);
         return occupancy.filter(o => o.at_cap).map(o => o.room_id);
     } catch (err) {
         // Fail-open: un errore di lettura non deve far sparire la disponibilità.
@@ -248,22 +256,24 @@ export interface SelfServiceTablePick {
  * lista sale ignorava accorpamenti e banchetti e proponeva online sale in
  * realtà piene.
  *
- * `alias` è l'alias del tavolo nella query chiamante; `dateParam`/`shiftParam`
- * sono le posizioni dei placeholder di data e turno.
+ * `alias` è l'alias del tavolo nella query chiamante; `dateParam`/`shiftParam`/
+ * `tenantParam` sono le posizioni dei placeholder di data, turno e tenant.
  */
-function assignableTableSql(alias: string, dateParam: number, shiftParam: number, excludeReservationParam?: number): string {
+function assignableTableSql(alias: string, dateParam: number, shiftParam: number, tenantParam: number, excludeReservationParam?: number): string {
     const d = `$${dateParam}`;
     const s = `$${shiftParam}`;
+    const tn = `$${tenantParam}`;
     // Chi MODIFICA una prenotazione deve poter tenere il proprio tavolo: senza
     // l'esclusione, la prenotazione stessa lo farebbe risultare occupato.
     const excl = excludeReservationParam ? `AND res.id <> $${excludeReservationParam}` : '';
     return `
               ${alias}.id NOT IN (
-                  SELECT table_id FROM table_hidden_overrides WHERE date = ${d} AND shift = ${s}
+                  SELECT table_id FROM table_hidden_overrides WHERE date = ${d} AND shift = ${s} AND tenant_id = ${tn}
               )
               AND NOT EXISTS (
                   SELECT 1 FROM reservations res
                   WHERE res.table_id = ${alias}.id
+                    AND res.tenant_id = ${tn}
                     AND DATE(res.reservation_time) = ${d}
                     AND res.shift = ${s}
                     ${excl}
@@ -271,12 +281,12 @@ function assignableTableSql(alias: string, dateParam: number, shiftParam: number
               )
               AND NOT EXISTS (
                   SELECT 1 FROM table_merges tm
-                  WHERE tm.date = ${d} AND tm.shift = ${s}
+                  WHERE tm.date = ${d} AND tm.shift = ${s} AND tm.tenant_id = ${tn}
                     AND (tm.primary_id = ${alias}.id OR ${alias}.id = ANY(tm.merged_ids))
               )
               AND NOT EXISTS (
                   SELECT 1 FROM banquet_menus b
-                  WHERE b.event_date = ${d} AND b.shift = ${s} AND ${alias}.id = ANY(b.table_ids)
+                  WHERE b.event_date = ${d} AND b.shift = ${s} AND b.tenant_id = ${tn} AND ${alias}.id = ANY(b.table_ids)
               )`;
 }
 
@@ -290,6 +300,7 @@ function assignableTableSql(alias: string, dateParam: number, shiftParam: number
  * non ha niente da dare a nessuno dei due.
  */
 export async function listBookableRooms(
+    tenantId: number,
     date: string,
     shift: Shift,
     guests: number
@@ -297,18 +308,20 @@ export async function listBookableRooms(
     const result = await queryWithRetry(`
         SELECT r.id, r.name
         FROM rooms r
-        WHERE r.is_closed = false
+        WHERE r.tenant_id = $4
+          AND r.is_closed = false
           AND r.id NOT IN (
-              SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3
+              SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3 AND tenant_id = $4
           )
           AND EXISTS (
               SELECT 1 FROM tables t
               WHERE t.room_id = r.id
+                AND t.tenant_id = $4
                 AND t.seats >= $1
-                AND ${assignableTableSql('t', 2, 3)}
+                AND ${assignableTableSql('t', 2, 3, 4)}
           )
         ORDER BY r.name ASC
-    `, [Math.trunc(guests), date, shift]);
+    `, [Math.trunc(guests), date, shift, tenantId]);
     return result.rows;
 }
 
@@ -324,12 +337,13 @@ export async function listBookableRooms(
  * prenotazione senza tavolo e la lascia allo staff.
  */
 export async function pickSelfServiceTable(
+    tenantId: number,
     date: string,
     shift: Shift,
     guests: number,
     opts: { roomId?: number | null; location?: 'INDOOR' | 'OUTDOOR' | null } = {}
 ): Promise<SelfServiceTablePick | null> {
-    const params: any[] = [guests, date, shift];
+    const params: any[] = [guests, date, shift, tenantId];
     let extraFilters = '';
     if (opts.location) {
         params.push(opts.location);
@@ -339,20 +353,21 @@ export async function pickSelfServiceTable(
         params.push(Math.trunc(opts.roomId));
         extraFilters += ` AND r.id = $${params.length}`;
     }
-    params.push(await getCappedRoomIds(date, shift));
+    params.push(await getCappedRoomIds(tenantId, date, shift));
     extraFilters += ` AND NOT (r.id = ANY($${params.length}::int[]))`;
 
     const result = await queryWithRetry(`
         SELECT t.id, t.name, r.id AS room_id, r.name AS room_name, r.location
         FROM tables t
-        JOIN rooms r ON t.room_id = r.id
-        WHERE r.is_closed = false
+        JOIN rooms r ON t.room_id = r.id AND r.tenant_id = t.tenant_id
+        WHERE t.tenant_id = $4
+          AND r.is_closed = false
           ${extraFilters}
           AND r.id NOT IN (
-              SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3
+              SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3 AND tenant_id = $4
           )
           AND t.seats >= $1
-          AND ${assignableTableSql('t', 2, 3)}
+          AND ${assignableTableSql('t', 2, 3, 4)}
         ORDER BY t.seats ASC, t.id ASC
         LIMIT 1
     `, params);
@@ -369,6 +384,7 @@ export async function pickSelfServiceTable(
  * qui NON conta: il tavolo è già suo, tenerlo non aggiunge coperti alla sala.
  */
 export async function isTableStillAssignable(
+    tenantId: number,
     tableId: number,
     date: string,
     shift: Shift,
@@ -378,16 +394,17 @@ export async function isTableStillAssignable(
     const result = await queryWithRetry(`
         SELECT 1
         FROM tables t
-        JOIN rooms r ON t.room_id = r.id
+        JOIN rooms r ON t.room_id = r.id AND r.tenant_id = t.tenant_id
         WHERE t.id = $4
+          AND t.tenant_id = $6
           AND r.is_closed = false
           AND r.id NOT IN (
-              SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3
+              SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3 AND tenant_id = $6
           )
           AND t.seats >= $1
-          AND ${assignableTableSql('t', 2, 3, 5)}
+          AND ${assignableTableSql('t', 2, 3, 6, 5)}
         LIMIT 1
-    `, [Math.trunc(guests), date, shift, Math.trunc(tableId), Math.trunc(excludeReservationId)]);
+    `, [Math.trunc(guests), date, shift, Math.trunc(tableId), Math.trunc(excludeReservationId), tenantId]);
     return (result.rowCount ?? 0) > 0;
 }
 

@@ -1,0 +1,54 @@
+# CI del repo: typecheck + build di entrambi i lati, poi i test API contro
+# un Postgres di servizio. Gira su ogni PR e su main.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  typecheck-build:
+    name: Typecheck e build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck frontend
+        run: npx tsc --noEmit
+      - name: Build frontend
+        run: npm run build
+      - name: Build server
+        run: npm run build:server
+
+  api-tests:
+    name: Test API
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Il globalSetup droppa e ricrea questo database a ogni run.
+      DATABASE_URL: postgresql://postgres:ci@localhost:5432/ristotest_api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Test API (build server + vitest)
+        run: npm test

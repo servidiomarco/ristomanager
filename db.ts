@@ -3,7 +3,9 @@ dotenv.config();
 
 import dns from 'dns';
 import net from 'net';
-import { Pool, types } from 'pg';
+import path from 'path';
+import { Client, Pool, types } from 'pg';
+import { runner as runMigrationRunner } from 'node-pg-migrate';
 import bcrypt from 'bcryptjs';
 
 // Railway's internal DNS returns both AAAA (IPv6) and A (IPv4) for the
@@ -120,6 +122,83 @@ export const queryWithRetry = async (text: string, params?: any[]): Promise<{ ro
     throw lastErr;
 };
 
+// ============================================
+// MIGRATIONS — node-pg-migrate
+// ============================================
+// createSchema() qui sotto è CONGELATO: è la baseline storica dello schema
+// e non va più esteso. Ogni modifica di schema da qui in avanti è una
+// migration versionata in migrations/ (`npm run migrate:create -- nome`).
+// Al boot il server esegue prima createSchema (idempotente sui database
+// esistenti) e poi le migration non ancora applicate, registrate nella
+// tabella pgmigrations.
+export const runMigrations = async (): Promise<void> => {
+    // Client dedicato, non il pool: il runner apre una transazione per
+    // migration e un lock advisory per l'intera run — non deve contendersi
+    // la connessione con le query dell'app né subire gli statement_timeout
+    // del pool (un backfill legittimo può superare i 15s).
+    const client = new Client({
+        connectionString: process.env.DATABASE_URL,
+        ssl: process.env.DATABASE_URL?.includes('sslmode=require') ? {
+            rejectUnauthorized: false,
+        } : false,
+    });
+    await client.connect();
+    try {
+        // Stessa sessione Europe/Rome del pool (vedi pool.on('connect')):
+        // una migration deve vedere il database come lo vedono le route.
+        await client.query("SET TIME ZONE 'Europe/Rome'");
+        const applied = await runMigrationRunner({
+            dbClient: client,
+            dir: path.resolve(process.cwd(), 'migrations'),
+            direction: 'up',
+            migrationsTable: 'pgmigrations',
+        });
+        if (applied.length > 0) {
+            console.log(`Migrations applicate (${applied.length}): ${applied.map(m => m.name).join(', ')}`);
+        }
+    } finally {
+        await client.end();
+    }
+};
+
+// ============================================
+// CONTESTO TENANT (Fase B2)
+// ============================================
+// Esegue `fn` dentro una transazione con `app.tenant_id` impostato come
+// variabile di sessione locale. Oggi è solo un contratto; quando la Fase B4
+// accende la Row-Level Security, le policy leggeranno
+// current_setting('app.tenant_id') e una query non scopata dentro
+// withTenant ritornerà zero righe invece dei dati di un altro ristorante.
+// I PR di dominio della Fase B3 migrano le route su questo helper.
+export const withTenant = async <T>(
+    tenantId: number,
+    fn: (client: import('pg').PoolClient) => Promise<T>
+): Promise<T> => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        // set_config con is_local=true: la variabile muore col COMMIT/ROLLBACK,
+        // il client torna al pool pulito.
+        await client.query(`SELECT set_config('app.tenant_id', $1, true)`, [String(tenantId)]);
+        const result = await fn(client);
+        await client.query('COMMIT');
+        return result;
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
+};
+
+// Variante a query singola, per i call site che oggi usano queryWithRetry.
+export const tenantQuery = (
+    tenantId: number,
+    text: string,
+    params?: any[]
+): Promise<{ rows: any[]; rowCount: number | null }> =>
+    withTenant(tenantId, client => client.query(text, params));
+
 // Retry logic for schema creation
 const MAX_RETRIES = 5;
 const RETRY_DELAY_MS = 3000;
@@ -196,16 +275,10 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
 
         await client.query(`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_closed BOOLEAN DEFAULT false;`);
         await client.query(`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS location VARCHAR(20);`);
-        // One-shot seed for the initial room set. Idempotent: only assigns
-        // location when still NULL, so later edits via UI/SQL win.
-        await client.query(`
-            UPDATE rooms SET location = 'INDOOR'
-            WHERE location IS NULL AND name IN ('Veranda', 'Tettoia', 'Macine');
-        `);
-        await client.query(`
-            UPDATE rooms SET location = 'OUTDOOR'
-            WHERE location IS NULL AND name IN ('Fiume', 'Fuori', 'Porticato');
-        `);
+        // Il seed one-shot delle location per le sale del Vecchio Frantoio
+        // (Veranda/Tettoia/Macine → INDOOR, Fiume/Fuori/Porticato → OUTDOOR)
+        // è stato rimosso col de-branding (Fase A3): in produzione è già
+        // applicato, e un'installazione nuova ha sale sue.
 
         await client.query(`
             CREATE TABLE IF NOT EXISTS tables (
@@ -778,9 +851,12 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             );
         `);
 
-        // Seed default owner account if no users exist
+        // Seed default owner account if no users exist. Email e password
+        // sono sovrascrivibili da env: il default esiste solo perché senza
+        // un OWNER non si entra mai (il provisioning vero arriva in Fase D).
         const userCount = await client.query('SELECT COUNT(*) FROM users');
         if (parseInt(userCount.rows[0].count) === 0) {
+            const defaultEmail = (process.env.DEFAULT_OWNER_EMAIL || 'admin@ristomanager.com').toLowerCase();
             const defaultPassword = process.env.DEFAULT_OWNER_PASSWORD || 'admin123';
             const salt = await bcrypt.genSalt(12);
             const passwordHash = await bcrypt.hash(defaultPassword, salt);
@@ -788,9 +864,9 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             await client.query(
                 `INSERT INTO users (email, password_hash, full_name, role)
                  VALUES ($1, $2, $3, $4)`,
-                ['admin@ristomanager.com', passwordHash, 'Admin Owner', 'OWNER']
+                [defaultEmail, passwordHash, 'Admin Owner', 'OWNER']
             );
-            console.log('Default owner account created: admin@ristomanager.com');
+            console.log(`Default owner account created: ${defaultEmail}`);
         }
 
         // Seed default role permissions if none exist
@@ -1225,27 +1301,40 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // existing duplicates. Tie-break: keep the lowest id, blank the phone
         // on the rest so they survive (with a marker note) instead of being
         // silently lost. Idempotent: a re-run finds no duplicates to fix.
+        // Partizione ANCHE per tenant (Fase B3.4): l'unicità del telefono è
+        // per ristorante, e senza tenant_id questa dedupe azzererebbe il
+        // numero del cliente omonimo di un ALTRO ristorante a ogni boot.
+        // Il DO block è condizionale perché al PRIMO boot di un database
+        // vuoto questa funzione gira prima della migration che aggiunge
+        // tenant_id: lì la tabella è vuota e la dedupe è comunque un no-op.
         await client.query(`
-            WITH ranked AS (
-                SELECT id,
-                       regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') AS digits,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY regexp_replace(COALESCE(phone, ''), '\\D', '', 'g')
-                           ORDER BY id ASC
-                       ) AS rn
-                FROM customers
-                WHERE phone IS NOT NULL
-                  AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') <> ''
-            )
-            UPDATE customers c
-            SET phone = NULL,
-                notes = COALESCE(c.notes, '') ||
-                        CASE WHEN COALESCE(c.notes, '') = '' THEN '' ELSE E'\\n' END ||
-                        '[telefono rimosso automaticamente: duplicato di un altro contatto]',
-                updated_at = CURRENT_TIMESTAMP
-            FROM ranked r
-            WHERE c.id = r.id
-              AND r.rn > 1;
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'customers' AND column_name = 'tenant_id'
+                ) THEN
+                    WITH ranked AS (
+                        SELECT id,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY tenant_id, regexp_replace(COALESCE(phone, ''), '\\D', '', 'g')
+                                   ORDER BY id ASC
+                               ) AS rn
+                        FROM customers
+                        WHERE phone IS NOT NULL
+                          AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') <> ''
+                    )
+                    UPDATE customers c
+                    SET phone = NULL,
+                        notes = COALESCE(c.notes, '') ||
+                                CASE WHEN COALESCE(c.notes, '') = '' THEN '' ELSE E'\\n' END ||
+                                '[telefono rimosso automaticamente: duplicato di un altro contatto]',
+                        updated_at = CURRENT_TIMESTAMP
+                    FROM ranked r
+                    WHERE c.id = r.id
+                      AND r.rn > 1;
+                END IF;
+            END $$;
         `);
         await client.query(`
             CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_phone_digits_unique
@@ -1298,24 +1387,10 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             );
         }
 
-        // Drop auto-imported customers without a phone number — the rubrica
-        // only stores entries we can call back. Manually-created customers
-        // (auto_imported = FALSE) are left alone.
-        await client.query(`
-            DELETE FROM customers
-             WHERE auto_imported = TRUE
-               AND phone IS NULL;
-        `);
-
-        // Normalise existing names to Title Case. INITCAP treats apostrophes,
-        // hyphens and spaces as word separators — so "MARIO ROSSI",
-        // "mario rossi" and "d'angelo" all land on "Mario Rossi" / "D'Angelo".
-        // Idempotent: only rows that aren't already title-cased get touched.
-        await client.query(`
-            UPDATE customers
-               SET name = INITCAP(name)
-             WHERE name <> INITCAP(name);
-        `);
+        // La pulizia degli auto-importati senza telefono e la normalizzazione
+        // INITCAP dei nomi sono backfill una-tantum: spostati nella migration
+        // 1787052759282_backfill-una-tantum (giravano qui come full-table
+        // scan a ogni boot).
 
         // One-time backfill: seed the rubrica from reservations the first time
         // this migration runs. Restricted to reservations that carry a phone
@@ -1636,7 +1711,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             INSERT INTO opening_hours (weekday, lunch_open, lunch_close, dinner_open, dinner_close, slot_minutes)
             SELECT g.weekday, '13:00'::time, '14:00'::time, '19:30'::time, '23:30'::time, 30
             FROM generate_series(0, 6) AS g(weekday)
-            ON CONFLICT (weekday) DO NOTHING;
+            ON CONFLICT DO NOTHING;
         `);
 
         await client.query(`
@@ -1685,7 +1760,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             INSERT INTO app_settings (key, value) VALUES
                 ('public_bookings_enabled', false),
                 ('voice_agent_enabled',      true)
-            ON CONFLICT (key) DO NOTHING;
+            ON CONFLICT DO NOTHING;
         `);
         // Some settings are numeric (e.g. thresholds), so `value` needs to be
         // nullable and we grow a companion `int_value` column. Rows use one
@@ -1699,7 +1774,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`
             INSERT INTO app_settings (key, int_value) VALUES
                 ('voice_large_group_threshold', 8)
-            ON CONFLICT (key) DO NOTHING;
+            ON CONFLICT DO NOTHING;
         `);
         // Some settings carry text values (HH:MM, labels, …). Same rule as
         // int_value: rows use text_value XOR the others depending on type.
@@ -1711,17 +1786,17 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`
             INSERT INTO app_settings (key, value) VALUES
                 ('voice_bookings_suspended', false)
-            ON CONFLICT (key) DO NOTHING;
+            ON CONFLICT DO NOTHING;
         `);
         await client.query(`
             INSERT INTO app_settings (key, text_value) VALUES
                 ('voice_bookings_suspension_callback_time', '19:00')
-            ON CONFLICT (key) DO NOTHING;
+            ON CONFLICT DO NOTHING;
         `);
         await client.query(`
             INSERT INTO app_settings (key, text_value) VALUES
                 ('voice_bookings_suspension_schedule', '[]')
-            ON CONFLICT (key) DO NOTHING;
+            ON CONFLICT DO NOTHING;
         `);
 
         // ============================================
@@ -1819,7 +1894,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`
             INSERT INTO app_settings (key, text_value) VALUES
                 ('active_payment_provider', 'revolut')
-            ON CONFLICT (key) DO NOTHING;
+            ON CONFLICT DO NOTHING;
         `);
 
         // ============================================
@@ -1921,6 +1996,11 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`
             CREATE TABLE IF NOT EXISTS agent_proposals (
                 id             SERIAL PRIMARY KEY,
+                -- Nasce già scopata: il resto dello schema ci è arrivato per
+                -- migrazione (Fase B3), una tabella nuova non ha motivo di
+                -- ripetere quel giro. Senza, due ristoranti con lo stesso
+                -- cliente in rubrica vedrebbero le proposte l'uno dell'altro.
+                tenant_id      BIGINT NOT NULL DEFAULT 1,
                 phone_digits   VARCHAR(20) NOT NULL,
                 tool           VARCHAR(40) NOT NULL,
                 args           JSONB NOT NULL,
@@ -1935,7 +2015,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 resolved_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
             );
         `);
-        await client.query(`CREATE INDEX IF NOT EXISTS idx_agent_proposals_phone ON agent_proposals(phone_digits, status);`);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_agent_proposals_phone ON agent_proposals(tenant_id, phone_digits, status);`);
 
         // ============================================
         // BASE DI CONOSCENZA PER LE RISPOSTE AI
@@ -2464,13 +2544,13 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`
             INSERT INTO app_settings (key, text_value) VALUES
                 ('course_fire_mode', 'AUTO_ALL')
-            ON CONFLICT (key) DO NOTHING;
+            ON CONFLICT DO NOTHING;
         `);
         // Il modulo comande resta spento finché non c'è una UI che lo usi.
         await client.query(`
             INSERT INTO app_settings (key, value) VALUES
                 ('table_orders_enabled', false)
-            ON CONFLICT (key) DO NOTHING;
+            ON CONFLICT DO NOTHING;
         `);
 
         // ============================================
@@ -2522,22 +2602,8 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS shift VARCHAR(10)
                 CHECK (shift IS NULL OR shift IN ('LUNCH','DINNER'));
         `);
-        // Backfill dalle comande già esistenti, con la stessa regola.
-        await client.query(`
-            UPDATE orders SET
-                service_date = (
-                    CASE WHEN EXTRACT(hour FROM (opened_at AT TIME ZONE 'Europe/Rome')) < 5
-                         THEN ((opened_at AT TIME ZONE 'Europe/Rome') - INTERVAL '1 day')::date
-                         ELSE (opened_at AT TIME ZONE 'Europe/Rome')::date
-                    END
-                ),
-                shift = (
-                    CASE WHEN EXTRACT(hour FROM (opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
-                         THEN 'LUNCH' ELSE 'DINNER'
-                    END
-                )
-            WHERE service_date IS NULL OR shift IS NULL;
-        `);
+        // Il backfill delle comande preesistenti (service_date/shift derivati
+        // da opened_at) vive nella migration 1787052759282_backfill-una-tantum.
         await client.query(`
             CREATE INDEX IF NOT EXISTS idx_orders_service
                 ON orders(service_date, shift, status);
@@ -2584,7 +2650,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             INSERT INTO app_settings (key, int_value) VALUES
                 ('cover_charge_cents', 0),
                 ('service_charge_percent', 0)
-            ON CONFLICT (key) DO NOTHING;
+            ON CONFLICT DO NOTHING;
         `);
 
         // Con la vista passe online (PR 5) il lancio passa da AUTO_ALL ad
@@ -2607,7 +2673,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             `);
             await client.query(`
                 INSERT INTO app_settings (key, value) VALUES ('course_fire_mode_passe_migrated', true)
-                ON CONFLICT (key) DO NOTHING;
+                ON CONFLICT DO NOTHING;
             `);
         }
 
@@ -2676,24 +2742,11 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // Il conto appartiene a un servizio (giorno + turno), come le comande:
         // senza, la chiusura di stasera riusava il conto mai incassato di ieri
         // sullo stesso tavolo e i totali si sommavano attraverso i giorni.
-        // Backfill dal servizio della prima comanda agganciata, altrimenti
-        // derivato da opened_at (stessa regola del servizio corrente: prima
-        // delle 5 è ancora la cena del giorno prima).
         await client.query(`ALTER TABLE table_bills ADD COLUMN IF NOT EXISTS service_date DATE;`);
         await client.query(`ALTER TABLE table_bills ADD COLUMN IF NOT EXISTS shift VARCHAR(10);`);
-        await client.query(`
-            UPDATE table_bills b SET
-                service_date = COALESCE(
-                    (SELECT o.service_date FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
-                    CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) < 5
-                         THEN ((b.opened_at AT TIME ZONE 'Europe/Rome')::date - 1)
-                         ELSE (b.opened_at AT TIME ZONE 'Europe/Rome')::date END),
-                shift = COALESCE(
-                    (SELECT o.shift FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
-                    CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
-                         THEN 'LUNCH' ELSE 'DINNER' END)
-            WHERE b.service_date IS NULL OR b.shift IS NULL;
-        `);
+        // Il backfill dei conti preesistenti (dal servizio della prima comanda
+        // agganciata, altrimenti da opened_at) vive nella migration
+        // 1787052759282_backfill-una-tantum.
         await client.query(`DROP INDEX IF EXISTS idx_table_bills_one_active;`);
         await client.query(`
             CREATE UNIQUE INDEX IF NOT EXISTS idx_table_bills_one_active_service
@@ -2726,26 +2779,11 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
         `);
-        // Il profilo del Vecchio Frantoio, censito ma NON applicato: la
-        // configurazione entra in vigore solo quando qualcuno preme "attiva"
-        // da Impostazioni. Idempotente: se esiste, non si tocca.
-        await client.query(`
-            INSERT INTO sala_profiles (name, payload) VALUES ('Vecchio Frantoio', $1)
-            ON CONFLICT (name) DO NOTHING;
-        `, [JSON.stringify({
-            fire_mode: 'AUTO_FIRST',
-            stations: [
-                { name: 'Antipasti', color: 'emerald', printer: 'antipasti', is_active: true },
-                { name: 'Primi',     color: 'amber',   printer: null,        is_active: true },
-                { name: 'Griglia',   color: 'rose',    printer: null,        is_active: true },
-            ],
-            printers: [
-                { name: 'preconti',  host: '192.168.1.50',  port: 9100, kind: 'THERMAL', is_active: true, notes: 'Ditron PRP-300 al banco' },
-                { name: 'antipasti', host: '192.168.1.30',  port: 9100, kind: 'THERMAL', is_active: true, notes: 'centro Antipasti' },
-                { name: 'bar',       host: '192.168.1.200', port: 9100, kind: 'THERMAL', is_active: true, notes: 'Bar' },
-                { name: 'fiscale',   host: '192.168.1.201', port: 9100, kind: 'FISCAL',  is_active: true, notes: 'Epson TM-T800F — gestita dal Passepartout' },
-            ],
-        })]);
+        // Il seed del profilo "Vecchio Frantoio" (stazioni + IP delle termiche
+        // sulla LAN del ristorante) è stato rimosso col de-branding (Fase A3):
+        // in produzione la riga esiste già, e spedire gli IP di una LAN
+        // altrui a ogni nuova installazione era un errore. I profili si
+        // creano da Impostazioni → Sala & Cucina.
 
         // Permessi del modulo comande sui database esistenti. A runtime la
         // fonte di verità è questa tabella, non ROLE_PERMISSIONS in
