@@ -195,6 +195,12 @@ app.use((err: any, _req: express.Request, res: express.Response, next: express.N
 // valida: un turno inesistente in lettura ritorna un set vuoto, non scrive.
 const KNOWN_SHIFTS = new Set(['LUNCH', 'DINNER']);
 const isKnownShift = (v: unknown): boolean => typeof v === 'string' && KNOWN_SHIFTS.has(v);
+
+// Tenant per le superfici senza JWT (pagina pubblica, webhook, scheduler,
+// print agent): finché le Fasi C2/C3 non instradano il tenant da URL o
+// numero chiamato, tutto il traffico non autenticato appartiene al tenant 1.
+// Ogni uso di questa costante è un punto da rivisitare in Fase C.
+const PUBLIC_TENANT_ID = 1;
 app.use((req, res, next) => {
     if (req.method === 'GET') return next();
     const s = (req.body as any)?.shift;
@@ -882,7 +888,7 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
     // first_message override + the {{booking_status_message}} dynamic
     // variable are the only two knobs available (agent.prompt.prompt is
     // read from Studio, but we still push it so the prompt guard fires).
-    const { suspended, callbackTime: suspensionCallback } = await computeVoiceSuspensionState();
+    const { suspended, callbackTime: suspensionCallback } = await computeVoiceSuspensionState(PUBLIC_TENANT_ID);
     const suspensionMessage = suspended
         ? `Buongiorno, sono Sofia del ${businessIdentity().voiceName}. Le prenotazioni sono momentaneamente sospese. La invitiamo a richiamare dopo le ${suspensionCallback} per verificare eventuali tavoli disponibili. Grazie e a presto!`
         : '';
@@ -890,7 +896,7 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
     // Messaggio iniziale personalizzato dal CRM (vuoto ⇒ default hardcoded).
     // `genericGreeting` è la versione senza nome, usata per anonimi/sconosciuti/
     // errori; i chiamanti noti ottengono la stessa base con {nome} sostituito.
-    const customFirst = (await getVoiceFirstMessage()).trim();
+    const customFirst = (await getVoiceFirstMessage(PUBLIC_TENANT_ID)).trim();
     const genericGreeting = customFirst
         ? renderVoiceFirstMessage(customFirst, '')
         : voiceFirstMessageFallback();
@@ -927,7 +933,7 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
         return res.json(fallbackResponse);
     }
 
-    if (!(await getFeatureFlag('voice_agent_enabled', true))) {
+    if (!(await getFeatureFlag(PUBLIC_TENANT_ID, 'voice_agent_enabled', true))) {
         return res.json(fallbackResponse);
     }
 
@@ -1022,7 +1028,7 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
 // caused the agent to say hello twice (once generic, once by name).
 app.post('/webhook/elevenlabs/lookup-customer', async (req, res) => {
     if (!authorizeElevenLabs(req, res)) return;
-    if (!(await getFeatureFlag('voice_agent_enabled', true))) {
+    if (!(await getFeatureFlag(PUBLIC_TENANT_ID, 'voice_agent_enabled', true))) {
         return res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
     }
 
@@ -1098,12 +1104,12 @@ const elevenLabsParams = (req: express.Request): Record<string, any> => {
 
 /** Interruttori del canale telefonico. Restituisce true se si può procedere. */
 const voiceChannelOpen = async (res: express.Response, checkSuspension: boolean): Promise<boolean> => {
-    if (!(await getFeatureFlag('voice_agent_enabled', true))) {
+    if (!(await getFeatureFlag(PUBLIC_TENANT_ID, 'voice_agent_enabled', true))) {
         res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
         return false;
     }
     if (checkSuspension) {
-        const state = await computeVoiceSuspensionState();
+        const state = await computeVoiceSuspensionState(PUBLIC_TENANT_ID);
         if (state.suspended) {
             res.status(503).json({ error: 'voice_bookings_suspended', message: buildVoiceSuspensionMessage(state.callbackTime) });
             return false;
@@ -2827,7 +2833,7 @@ async function loadBillView(billId: number): Promise<any | null> {
 
 app.post('/reservations/:id/bill', authenticate, requirePermission('payments:full'), async (req, res) => {
     try {
-        if (!(await getFeatureFlag('pay_at_table_enabled', false))) {
+        if (!(await getFeatureFlag(req.tenantId!, 'pay_at_table_enabled', false))) {
             return res.status(403).json({
                 error: 'feature_disabled',
                 message: 'Il conto al tavolo è disattivato. Attivalo da Impostazioni → Conto al tavolo.',
@@ -2941,7 +2947,7 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
 // esplicito con il canale usato.
 app.post('/reservations/:id/bill/notify', authenticate, requirePermission('payments:full'), async (req, res) => {
     try {
-        if (!(await getFeatureFlag('pay_at_table_enabled', false))) {
+        if (!(await getFeatureFlag(req.tenantId!, 'pay_at_table_enabled', false))) {
             return res.status(403).json({
                 error: 'feature_disabled',
                 message: 'Il conto al tavolo è disattivato. Attivalo da Impostazioni → Conto al tavolo.',
@@ -3370,7 +3376,7 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => {
         // When the operator disables the feature mid-service, guests scanning
         // a still-valid QR get a 404 like any expired token — the waiter
         // handles the payment through the normal channel.
-        if (!(await getFeatureFlag('pay_at_table_enabled', false))) {
+        if (!(await getFeatureFlag(PUBLIC_TENANT_ID, 'pay_at_table_enabled', false))) {
             return res.status(404).json({ error: 'Not found' });
         }
 
@@ -3462,7 +3468,7 @@ app.get('/pay/:token/qr.png', publicPayLimiter, async (req, res) => {
         if (!token || token.length < 20 || !/^[A-Za-z0-9_-]+$/.test(token)) {
             return res.status(404).send('Not found');
         }
-        if (!(await getFeatureFlag('pay_at_table_enabled', false))) {
+        if (!(await getFeatureFlag(PUBLIC_TENANT_ID, 'pay_at_table_enabled', false))) {
             return res.status(404).send('Not found');
         }
         const publicUrl = `${payAtTableBaseUrl()}/pay/${token}`;
@@ -3500,7 +3506,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         const token = String(req.params.token || '');
         if (!token || token.length < 20) return res.status(404).json({ error: 'Not found' });
 
-        if (!(await getFeatureFlag('pay_at_table_enabled', false))) {
+        if (!(await getFeatureFlag(PUBLIC_TENANT_ID, 'pay_at_table_enabled', false))) {
             return res.status(404).json({ error: 'Not found' });
         }
 
@@ -3658,10 +3664,10 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         let checkoutUrl: string | null = null;
         let paymentRequestId: number | null = null;
         try {
-            if (!(await isPaymentConfiguredForFlow('bill'))) {
-                throw new Error(`${providerLabel(await getPaymentProviderForFlow('bill'))} not configured`);
+            if (!(await isPaymentConfiguredForFlow(PUBLIC_TENANT_ID, 'bill'))) {
+                throw new Error(`${providerLabel(await getPaymentProviderForFlow(PUBLIC_TENANT_ID, 'bill'))} not configured`);
             }
-            const order = await createPaymentOrder({
+            const order = await createPaymentOrder(PUBLIC_TENANT_ID, {
                 amount,
                 currency: 'EUR',
                 description: `Conto ${billLabel} - quota${claimantLabel ? ' ' + claimantLabel : ''}`,
@@ -3741,7 +3747,7 @@ app.post('/pay/:token/release', publicPayLimiter, async (req, res) => {
         const token = String(req.params.token || '');
         if (!token || token.length < 20) return res.status(404).json({ error: 'Not found' });
 
-        if (!(await getFeatureFlag('pay_at_table_enabled', false))) {
+        if (!(await getFeatureFlag(PUBLIC_TENANT_ID, 'pay_at_table_enabled', false))) {
             return res.status(404).json({ error: 'Not found' });
         }
 
@@ -4258,7 +4264,7 @@ app.get('/public/media/:token', async (req, res) => {
 // (o cestinare). Vedi services/aiReplyService.ts per il perche'.
 app.post('/messages/suggest-reply', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
-        if (!(await getFeatureFlag('ai_messages_enabled', false))) {
+        if (!(await getFeatureFlag(req.tenantId!, 'ai_messages_enabled', false))) {
             return res.status(403).json({
                 error: 'feature_disabled',
                 message: 'Messaggi con AI disattivato. Attivalo da Impostazioni → Messaggi con AI.',
@@ -4505,11 +4511,11 @@ async function getAutoDepositPolicy(): Promise<{ enabled: boolean; minGuests: nu
     }
 }
 
-async function isAutoDepositRequired(guests: number): Promise<boolean> {
+async function isAutoDepositRequired(tenantId: number, guests: number): Promise<boolean> {
     const policy = await getAutoDepositPolicy();
     if (!policy.enabled || guests < policy.minGuests) return false;
     try {
-        return await isPaymentConfiguredForFlow('deposit');
+        return await isPaymentConfiguredForFlow(tenantId, 'deposit');
     } catch (err) {
         console.warn('[auto-deposit] provider check failed:', (err as any)?.message || err);
         return false;
@@ -4822,8 +4828,8 @@ app.get('/payments/requests', authenticate, requirePermission('reservations:view
 // behaviour (WhatsApp template first, SMS fallback) for any caller that omits it.
 app.post('/payments/requests', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
-        if (!(await isPaymentConfiguredForFlow('deposit'))) {
-            const effective = await getPaymentProviderForFlow('deposit');
+        if (!(await isPaymentConfiguredForFlow(req.tenantId!, 'deposit'))) {
+            const effective = await getPaymentProviderForFlow(req.tenantId!, 'deposit');
             return res.status(503).json({ error: `${providerLabel(effective)} non è configurato (credenziali mancanti)` });
         }
 
@@ -4866,7 +4872,7 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
         const orderDescription = (typeof description === 'string' && description.trim())
             ? description.trim()
             : `Prenotazione #${reservation.id} - ${reservation.guests} persone`;
-        const order = await createPaymentOrder({
+        const order = await createPaymentOrder(req.tenantId!, {
             amount: amountCents,
             currency: 'EUR',
             description: orderDescription,
@@ -7195,9 +7201,9 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
 // By construction it returns just the customers who (a) gave marketing consent
 // and (b) have a usable channel, so non-consenting contacts are excluded
 // automatically. Disabled when the legal layer runs in "simple" mode.
-app.get('/customers/marketing-audience', authenticate, requirePermission('customers:view'), async (_req, res) => {
+app.get('/customers/marketing-audience', authenticate, requirePermission('customers:view'), async (req, res) => {
     try {
-        const legal = await getLegalConfig();
+        const legal = await getLegalConfig(req.tenantId!);
         if (legal.legal_mode !== 'advanced') {
             return res.status(409).json({
                 error: 'marketing_disabled',
@@ -10740,31 +10746,43 @@ const IDENTITY_FALLBACK: BusinessIdentity = {
     websiteUrl: 'https://www.vecchiofrantoio.com',
 };
 
-let identityCache: BusinessIdentity = { ...IDENTITY_FALLBACK };
-let identityRefreshedAt = 0;
+// Cache per tenant: ogni ristorante ha la propria identità pubblica.
+const identityCache = new Map<number, { identity: BusinessIdentity; refreshedAt: number }>();
 const IDENTITY_TTL_MS = 60_000;
 
-function businessIdentity(): BusinessIdentity {
-    if (Date.now() - identityRefreshedAt > IDENTITY_TTL_MS) {
-        identityRefreshedAt = Date.now();
-        refreshBusinessIdentity().catch(err =>
+// I template di messaggi/email chiamano businessIdentity() senza argomento e
+// restano quindi sul tenant 1 (PUBLIC_TENANT_ID): il threading del tenant nel
+// dominio messaggistica appartiene al suo PR, non a questo.
+function businessIdentity(tenantId: number = PUBLIC_TENANT_ID): BusinessIdentity {
+    const cached = identityCache.get(tenantId);
+    if (!cached || Date.now() - cached.refreshedAt > IDENTITY_TTL_MS) {
+        // Segnaposto subito in cache: evita una raffica di refresh paralleli
+        // mentre il primo è in volo (stesso schema del TTL precedente).
+        identityCache.set(tenantId, {
+            identity: cached?.identity ?? { ...IDENTITY_FALLBACK },
+            refreshedAt: Date.now(),
+        });
+        refreshBusinessIdentity(tenantId).catch(err =>
             console.warn('[identity] refresh fallito:', (err as any)?.message || err));
     }
-    return identityCache;
+    return identityCache.get(tenantId)!.identity;
 }
 
-async function refreshBusinessIdentity(): Promise<void> {
-    const legal = await getLegalConfig();
+async function refreshBusinessIdentity(tenantId: number): Promise<void> {
+    const legal = await getLegalConfig(tenantId);
     const s = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
-    identityCache = {
-        name: s(legal.business_name) || IDENTITY_FALLBACK.name,
-        voiceName: s(legal.voice_business_name) || s(legal.business_name) || IDENTITY_FALLBACK.voiceName,
-        tagline: s(legal.business_tagline) || IDENTITY_FALLBACK.tagline,
-        phone: s(legal.public_phone) || IDENTITY_FALLBACK.phone,
-        whatsapp: s(legal.public_whatsapp) || IDENTITY_FALLBACK.whatsapp,
-        mapsUrl: s(legal.maps_url) || IDENTITY_FALLBACK.mapsUrl,
-        websiteUrl: s(legal.website_url) || IDENTITY_FALLBACK.websiteUrl,
-    };
+    identityCache.set(tenantId, {
+        identity: {
+            name: s(legal.business_name) || IDENTITY_FALLBACK.name,
+            voiceName: s(legal.voice_business_name) || s(legal.business_name) || IDENTITY_FALLBACK.voiceName,
+            tagline: s(legal.business_tagline) || IDENTITY_FALLBACK.tagline,
+            phone: s(legal.public_phone) || IDENTITY_FALLBACK.phone,
+            whatsapp: s(legal.public_whatsapp) || IDENTITY_FALLBACK.whatsapp,
+            mapsUrl: s(legal.maps_url) || IDENTITY_FALLBACK.mapsUrl,
+            websiteUrl: s(legal.website_url) || IDENTITY_FALLBACK.websiteUrl,
+        },
+        refreshedAt: Date.now(),
+    });
 }
 
 // tel:/wa.me a partire dal numero scritto per umani. Regola: se c'è un "+"
@@ -12188,9 +12206,9 @@ app.delete('/reminders/:id', authenticate, requirePermission('settings:full'), a
     }
 });
 
-app.get('/opening-hours', authenticate, async (_req, res) => {
+app.get('/opening-hours', authenticate, async (req, res) => {
     try {
-        const rows = await getAllOpeningHours();
+        const rows = await getAllOpeningHours(req.tenantId!);
         res.json(rows);
     } catch (error) {
         console.error('Error fetching opening_hours:', error);
@@ -12253,8 +12271,8 @@ app.put('/opening-hours/:weekday', authenticate, requirePermission('settings:ful
              SET lunch_open = $2::time, lunch_close = $3::time,
                  dinner_open = $4::time, dinner_close = $5::time,
                  slot_minutes = $6
-             WHERE weekday = $1`,
-            [weekday, lo, lc, dorn, dc, step]
+             WHERE tenant_id = $7 AND weekday = $1`,
+            [weekday, lo, lc, dorn, dc, step, req.tenantId!]
         );
         if (upd.rowCount === 0) {
             await client.query('ROLLBACK');
@@ -12262,32 +12280,32 @@ app.put('/opening-hours/:weekday', authenticate, requirePermission('settings:ful
         }
         if (disabledLunch !== undefined) {
             await client.query(
-                `DELETE FROM opening_hours_disabled_slots WHERE weekday = $1 AND shift = 'LUNCH'`,
-                [weekday]
+                `DELETE FROM opening_hours_disabled_slots WHERE tenant_id = $2 AND weekday = $1 AND shift = 'LUNCH'`,
+                [weekday, req.tenantId!]
             );
             if (disabledLunch.length > 0) {
                 await client.query(
-                    `INSERT INTO opening_hours_disabled_slots (weekday, shift, slot_time)
-                     SELECT $1, 'LUNCH', unnest($2::text[])::time`,
-                    [weekday, disabledLunch]
+                    `INSERT INTO opening_hours_disabled_slots (tenant_id, weekday, shift, slot_time)
+                     SELECT $3, $1, 'LUNCH', unnest($2::text[])::time`,
+                    [weekday, disabledLunch, req.tenantId!]
                 );
             }
         }
         if (disabledDinner !== undefined) {
             await client.query(
-                `DELETE FROM opening_hours_disabled_slots WHERE weekday = $1 AND shift = 'DINNER'`,
-                [weekday]
+                `DELETE FROM opening_hours_disabled_slots WHERE tenant_id = $2 AND weekday = $1 AND shift = 'DINNER'`,
+                [weekday, req.tenantId!]
             );
             if (disabledDinner.length > 0) {
                 await client.query(
-                    `INSERT INTO opening_hours_disabled_slots (weekday, shift, slot_time)
-                     SELECT $1, 'DINNER', unnest($2::text[])::time`,
-                    [weekday, disabledDinner]
+                    `INSERT INTO opening_hours_disabled_slots (tenant_id, weekday, shift, slot_time)
+                     SELECT $3, $1, 'DINNER', unnest($2::text[])::time`,
+                    [weekday, disabledDinner, req.tenantId!]
                 );
             }
         }
         await client.query('COMMIT');
-        const fresh = await getOpeningHours(weekday);
+        const fresh = await getOpeningHours(req.tenantId!, weekday);
         res.json(fresh);
     } catch (error) {
         try { await client.query('ROLLBACK'); } catch {}
@@ -12301,7 +12319,7 @@ app.put('/opening-hours/:weekday', authenticate, requirePermission('settings:ful
 app.get('/closures', authenticate, async (req, res) => {
     try {
         const from = typeof req.query.from === 'string' ? req.query.from : undefined;
-        const rows = await listClosures(from);
+        const rows = await listClosures(req.tenantId!, from);
         res.json(rows);
     } catch (error) {
         console.error('Error fetching closures:', error);
@@ -12321,11 +12339,11 @@ app.post('/closures', authenticate, requirePermission('settings:full'), async (r
 
     try {
         const result = await queryWithRetry(
-            `INSERT INTO special_closures (date, shift, reason)
-             VALUES ($1::date, $2, $3)
-             ON CONFLICT (date, shift) DO UPDATE SET reason = EXCLUDED.reason
+            `INSERT INTO special_closures (tenant_id, date, shift, reason)
+             VALUES ($4, $1::date, $2, $3)
+             ON CONFLICT (tenant_id, date, shift) DO UPDATE SET reason = EXCLUDED.reason
              RETURNING id, to_char(date, 'YYYY-MM-DD') AS date, shift, reason`,
-            [date, shift ?? null, reasonText]
+            [date, shift ?? null, reasonText, req.tenantId!]
         );
         res.status(201).json(result.rows[0]);
     } catch (error) {
@@ -12340,7 +12358,7 @@ app.delete('/closures/:id', authenticate, requirePermission('settings:full'), as
         return res.status(400).json({ error: 'invalid_id' });
     }
     try {
-        const result = await queryWithRetry('DELETE FROM special_closures WHERE id = $1', [id]);
+        const result = await queryWithRetry('DELETE FROM special_closures WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
         if (result.rowCount === 0) return res.status(404).json({ error: 'not_found' });
         res.status(204).send();
     } catch (error) {
@@ -13524,9 +13542,9 @@ app.post('/voice-calls/sync', authenticate, voiceCallsAuthorize, async (_req, re
 type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled';
 const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled'];
 
-async function getFeatureFlag(key: FeatureFlagKey, fallback: boolean): Promise<boolean> {
+async function getFeatureFlag(tenantId: number, key: FeatureFlagKey, fallback: boolean): Promise<boolean> {
     try {
-        const result = await queryWithRetry('SELECT value FROM app_settings WHERE key = $1', [key]);
+        const result = await queryWithRetry('SELECT value FROM app_settings WHERE tenant_id = $1 AND key = $2', [tenantId, key]);
         if (result.rowCount === 0) return fallback;
         return Boolean(result.rows[0].value);
     } catch (err) {
@@ -13551,11 +13569,11 @@ const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, boolean> = {
     ai_messages_enabled: false,
 };
 
-app.get('/settings/features', authenticate, async (_req, res) => {
+app.get('/settings/features', authenticate, async (req, res) => {
     try {
         const result = await queryWithRetry(
-            'SELECT key, value FROM app_settings WHERE key = ANY($1)',
-            [FEATURE_FLAG_KEYS]
+            'SELECT key, value FROM app_settings WHERE tenant_id = $1 AND key = ANY($2)',
+            [req.tenantId!, FEATURE_FLAG_KEYS]
         );
         const flags: Record<string, boolean> = { ...FEATURE_FLAG_DEFAULTS };
         for (const row of result.rows) {
@@ -13581,11 +13599,11 @@ const VOICE_SUSPENSION_CALLBACK_DEFAULT = '19:00';
 const VOICE_FIRST_MESSAGE_KEY = 'voice_first_message';
 const VOICE_FIRST_MESSAGE_MAX = 500;
 
-async function getVoiceFirstMessage(): Promise<string> {
+async function getVoiceFirstMessage(tenantId: number): Promise<string> {
     try {
         const result = await queryWithRetry(
-            'SELECT text_value FROM app_settings WHERE key = $1',
-            [VOICE_FIRST_MESSAGE_KEY]
+            'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
+            [tenantId, VOICE_FIRST_MESSAGE_KEY]
         );
         const raw = result.rows[0]?.text_value;
         return typeof raw === 'string' ? raw : '';
@@ -13595,11 +13613,11 @@ async function getVoiceFirstMessage(): Promise<string> {
     }
 }
 
-async function getVoiceLargeGroupThreshold(): Promise<number> {
+async function getVoiceLargeGroupThreshold(tenantId: number): Promise<number> {
     try {
         const result = await queryWithRetry(
-            'SELECT int_value FROM app_settings WHERE key = $1',
-            [VOICE_LARGE_GROUP_KEY]
+            'SELECT int_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
+            [tenantId, VOICE_LARGE_GROUP_KEY]
         );
         const raw = result.rows[0]?.int_value;
         const n = Number(raw);
@@ -13611,11 +13629,11 @@ async function getVoiceLargeGroupThreshold(): Promise<number> {
     }
 }
 
-async function getVoiceSuspensionCallbackTime(): Promise<string> {
+async function getVoiceSuspensionCallbackTime(tenantId: number): Promise<string> {
     try {
         const result = await queryWithRetry(
-            'SELECT text_value FROM app_settings WHERE key = $1',
-            [VOICE_SUSPENSION_CALLBACK_KEY]
+            'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
+            [tenantId, VOICE_SUSPENSION_CALLBACK_KEY]
         );
         const raw = result.rows[0]?.text_value;
         if (typeof raw === 'string' && HHMM_RE.test(raw)) return raw;
@@ -13643,11 +13661,11 @@ function isValidPublicBookingBlock(e: any): e is PublicBookingBlock {
     return true;
 }
 
-async function getPublicBookingBlocks(): Promise<PublicBookingBlock[]> {
+async function getPublicBookingBlocks(tenantId: number): Promise<PublicBookingBlock[]> {
     try {
         const result = await queryWithRetry(
-            'SELECT text_value FROM app_settings WHERE key = $1',
-            [PUBLIC_BOOKINGS_BLOCKS_KEY]
+            'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
+            [tenantId, PUBLIC_BOOKINGS_BLOCKS_KEY]
         );
         const raw = result.rows[0]?.text_value;
         if (typeof raw !== 'string' || !raw.trim()) return [];
@@ -13696,11 +13714,11 @@ function isValidVoiceDateBlock(e: any): e is VoiceDateBlock {
     return true;
 }
 
-async function getVoiceDateBlocks(): Promise<VoiceDateBlock[]> {
+async function getVoiceDateBlocks(tenantId: number): Promise<VoiceDateBlock[]> {
     try {
         const result = await queryWithRetry(
-            'SELECT text_value FROM app_settings WHERE key = $1',
-            [VOICE_DATE_BLOCKS_KEY]
+            'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
+            [tenantId, VOICE_DATE_BLOCKS_KEY]
         );
         const raw = result.rows[0]?.text_value;
         if (typeof raw !== 'string' || !raw.trim()) return [];
@@ -13740,11 +13758,11 @@ function isValidScheduleEntry(e: any): e is ScheduledSuspension {
     return true;
 }
 
-async function getVoiceSuspensionSchedule(): Promise<ScheduledSuspension[]> {
+async function getVoiceSuspensionSchedule(tenantId: number): Promise<ScheduledSuspension[]> {
     try {
         const result = await queryWithRetry(
-            'SELECT text_value FROM app_settings WHERE key = $1',
-            [VOICE_SUSPENSION_SCHEDULE_KEY]
+            'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
+            [tenantId, VOICE_SUSPENSION_SCHEDULE_KEY]
         );
         const raw = result.rows[0]?.text_value;
         if (typeof raw !== 'string' || !raw.trim()) return [];
@@ -13779,27 +13797,27 @@ function pickActiveScheduleEntry(entries: ScheduledSuspension[], now: Date = new
 // (uses the default callback) with the scheduled entries (each entry can
 // carry its own callback_time; falls back to end_time when absent). Manual
 // toggle wins if both hit.
-async function computeVoiceSuspensionState(): Promise<{ suspended: boolean; callbackTime: string }> {
-    if (await getFeatureFlag('voice_bookings_suspended', false)) {
-        const callbackTime = await getVoiceSuspensionCallbackTime();
+async function computeVoiceSuspensionState(tenantId: number): Promise<{ suspended: boolean; callbackTime: string }> {
+    if (await getFeatureFlag(tenantId, 'voice_bookings_suspended', false)) {
+        const callbackTime = await getVoiceSuspensionCallbackTime(tenantId);
         return { suspended: true, callbackTime };
     }
-    const schedule = await getVoiceSuspensionSchedule();
+    const schedule = await getVoiceSuspensionSchedule(tenantId);
     const active = pickActiveScheduleEntry(schedule);
     if (active) return { suspended: true, callbackTime: active.callback_time || active.end_time };
     return { suspended: false, callbackTime: '' };
 }
 
-app.get('/settings/channels', authenticate, async (_req, res) => {
+app.get('/settings/channels', authenticate, async (req, res) => {
     try {
         const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw, voiceDateBlocksRaw, roomCaps, voiceFirstMessage] = await Promise.all([
-            getVoiceLargeGroupThreshold(),
-            getVoiceSuspensionCallbackTime(),
-            getVoiceSuspensionSchedule(),
-            getPublicBookingBlocks(),
-            getVoiceDateBlocks(),
-            getRoomOccupancyCaps(),
-            getVoiceFirstMessage(),
+            getVoiceLargeGroupThreshold(req.tenantId!),
+            getVoiceSuspensionCallbackTime(req.tenantId!),
+            getVoiceSuspensionSchedule(req.tenantId!),
+            getPublicBookingBlocks(req.tenantId!),
+            getVoiceDateBlocks(req.tenantId!),
+            getRoomOccupancyCaps(req.tenantId!),
+            getVoiceFirstMessage(req.tenantId!),
         ]);
         // Filter past blocks at read time; UI never has to worry about them.
         const publicBlocks = pruneExpiredBlocks(publicBlocksRaw);
@@ -14034,20 +14052,20 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
 
     try {
         for (const u of updates) {
-            const sql = `INSERT INTO app_settings (key, ${u.column}, updated_at)
-                         VALUES ($1, $2, CURRENT_TIMESTAMP)
-                         ON CONFLICT (key) DO UPDATE
+            const sql = `INSERT INTO app_settings (tenant_id, key, ${u.column}, updated_at)
+                         VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                         ON CONFLICT (tenant_id, key) DO UPDATE
                            SET ${u.column} = EXCLUDED.${u.column}, updated_at = CURRENT_TIMESTAMP`;
-            await queryWithRetry(sql, [u.key, u.value]);
+            await queryWithRetry(sql, [req.tenantId!, u.key, u.value]);
         }
         const [voiceThreshold, suspensionCallback, suspensionSchedule, publicBlocksRaw, voiceDateBlocksRaw, roomCaps, voiceFirstMessage] = await Promise.all([
-            getVoiceLargeGroupThreshold(),
-            getVoiceSuspensionCallbackTime(),
-            getVoiceSuspensionSchedule(),
-            getPublicBookingBlocks(),
-            getVoiceDateBlocks(),
-            getRoomOccupancyCaps(),
-            getVoiceFirstMessage(),
+            getVoiceLargeGroupThreshold(req.tenantId!),
+            getVoiceSuspensionCallbackTime(req.tenantId!),
+            getVoiceSuspensionSchedule(req.tenantId!),
+            getPublicBookingBlocks(req.tenantId!),
+            getVoiceDateBlocks(req.tenantId!),
+            getRoomOccupancyCaps(req.tenantId!),
+            getVoiceFirstMessage(req.tenantId!),
         ]);
         const publicBlocks = pruneExpiredBlocks(publicBlocksRaw);
         const voiceDateBlocks = pruneExpiredBlocks(voiceDateBlocksRaw);
@@ -14076,8 +14094,8 @@ app.get('/settings/rooms-occupancy', authenticate, async (req, res) => {
         : new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit' });
     try {
         const [lunch, dinner] = await Promise.all([
-            computeRoomOccupancy(date, Shift.LUNCH),
-            computeRoomOccupancy(date, Shift.DINNER),
+            computeRoomOccupancy(req.tenantId!, date, Shift.LUNCH),
+            computeRoomOccupancy(req.tenantId!, date, Shift.DINNER),
         ]);
         // One row per room carrying both shifts: the settings card renders a
         // single line per sala, so joining here keeps the UI dumb.
@@ -14177,12 +14195,12 @@ function normalizeLegalMode(v: unknown): LegalMode {
     return (typeof v === 'string' && (LEGAL_MODES as readonly string[]).includes(v)) ? (v as LegalMode) : LEGAL_MODE_DEFAULT;
 }
 
-async function getLegalConfig(): Promise<Record<string, string | boolean>> {
+async function getLegalConfig(tenantId: number): Promise<Record<string, string | boolean>> {
     const base = emptyLegalConfig();
     try {
         const result = await queryWithRetry(
-            'SELECT text_value FROM app_settings WHERE key = $1',
-            [LEGAL_CONFIG_KEY]
+            'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
+            [tenantId, LEGAL_CONFIG_KEY]
         );
         const raw = result.rows[0]?.text_value;
         if (typeof raw === 'string' && raw.trim()) {
@@ -14203,9 +14221,9 @@ async function getLegalConfig(): Promise<Record<string, string | boolean>> {
     return base;
 }
 
-app.get('/settings/legal', authenticate, async (_req, res) => {
+app.get('/settings/legal', authenticate, async (req, res) => {
     try {
-        res.json(await getLegalConfig());
+        res.json(await getLegalConfig(req.tenantId!));
     } catch (err) {
         console.error('GET /settings/legal error:', err);
         res.status(500).json({ error: 'Failed to fetch legal settings' });
@@ -14221,7 +14239,7 @@ app.put('/settings/legal', authenticate, requirePermission('settings:full'), asy
         if (typeof body !== 'object' || Array.isArray(body)) {
             return res.status(400).json({ error: 'invalid_value', message: 'Body must be an object' });
         }
-        const current = await getLegalConfig();
+        const current = await getLegalConfig(req.tenantId!);
         const next: Record<string, string | boolean> = { ...current };
         for (const k of LEGAL_STRING_FIELDS) {
             if (k in body) {
@@ -14243,15 +14261,15 @@ app.put('/settings/legal', authenticate, requirePermission('settings:full'), asy
         // legal_mode must be one of the known modes; anything else falls back safely.
         next.legal_mode = normalizeLegalMode(next.legal_mode);
         await queryWithRetry(
-            `INSERT INTO app_settings (key, text_value, updated_at)
-             VALUES ($1, $2, CURRENT_TIMESTAMP)
-             ON CONFLICT (key) DO UPDATE
+            `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (tenant_id, key) DO UPDATE
                SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
-            [LEGAL_CONFIG_KEY, JSON.stringify(next)]
+            [req.tenantId!, LEGAL_CONFIG_KEY, JSON.stringify(next)]
         );
         // I messaggi leggono l'identità dalla cache: senza refresh il nuovo
         // nome comparirebbe solo alla scadenza del TTL.
-        await refreshBusinessIdentity();
+        await refreshBusinessIdentity(req.tenantId!);
         res.json(next);
     } catch (err: any) {
         console.error('PUT /settings/legal error:', err);
@@ -14276,16 +14294,16 @@ app.put('/settings/features', authenticate, requirePermission('settings:full'), 
     try {
         for (const { key, value } of updates) {
             await queryWithRetry(
-                `INSERT INTO app_settings (key, value, updated_at)
-                 VALUES ($1, $2, CURRENT_TIMESTAMP)
-                 ON CONFLICT (key) DO UPDATE
+                `INSERT INTO app_settings (tenant_id, key, value, updated_at)
+                 VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                 ON CONFLICT (tenant_id, key) DO UPDATE
                    SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP`,
-                [key, value]
+                [req.tenantId!, key, value]
             );
         }
         const result = await queryWithRetry(
-            'SELECT key, value FROM app_settings WHERE key = ANY($1)',
-            [FEATURE_FLAG_KEYS]
+            'SELECT key, value FROM app_settings WHERE tenant_id = $1 AND key = ANY($2)',
+            [req.tenantId!, FEATURE_FLAG_KEYS]
         );
         const flags: Record<string, boolean> = { ...FEATURE_FLAG_DEFAULTS };
         for (const row of result.rows) {
@@ -14437,10 +14455,10 @@ app.put('/settings/integrations/revolut', authenticate, requirePermission('setti
 // uses its own pair), because SumUp serves both from the same host and tells
 // them apart by the key. `environment` picks which pair is live, so an
 // operator can keep sandbox credentials around and flip back to test.
-app.get('/settings/integrations/sumup', authenticate, requirePermission('settings:full'), async (_req, res) => {
+app.get('/settings/integrations/sumup', authenticate, requirePermission('settings:full'), async (req, res) => {
     try {
         const status = await getSumUpConfigStatus();
-        const activeProvider = await getActivePaymentProvider();
+        const activeProvider = await getActivePaymentProvider(req.tenantId!);
 
         // Same defensive read as the Revolut card: on a brand-new deploy the
         // schema-init may not have created the table yet, and the card should
@@ -14575,7 +14593,7 @@ app.put('/settings/integrations/sumup', authenticate, requirePermission('setting
                     error: `${providerLabel(providerChange)} non è configurato: completa le credenziali prima di attivarlo`,
                 });
             }
-            await setActivePaymentProvider(providerChange);
+            await setActivePaymentProvider(req.tenantId!, providerChange);
         }
 
         if (req.user) {
@@ -14594,7 +14612,7 @@ app.put('/settings/integrations/sumup', authenticate, requirePermission('setting
         }
 
         const status = await getSumUpConfigStatus();
-        const activeProvider = await getActivePaymentProvider();
+        const activeProvider = await getActivePaymentProvider(req.tenantId!);
         res.json({
             ...status,
             active_provider: activeProvider,
@@ -14617,9 +14635,9 @@ app.put('/settings/integrations/sumup', authenticate, requirePermission('setting
 // acconto (SumUp)"), and that box is used by staff who can't see Settings.
 // Nothing here is secret — just which gateway is live and whether it's ready.
 // PUT stays admin-only.
-app.get('/settings/payments/provider', authenticate, async (_req, res) => {
+app.get('/settings/payments/provider', authenticate, async (req, res) => {
     try {
-        const active = await getActivePaymentProvider();
+        const active = await getActivePaymentProvider(req.tenantId!);
         const configured: Record<string, boolean> = {};
         for (const provider of PAYMENT_PROVIDERS) {
             configured[provider] = await isProviderConfigured(provider);
@@ -14627,7 +14645,7 @@ app.get('/settings/payments/provider', authenticate, async (_req, res) => {
         // Per-flow overrides (caparre e conti al tavolo): override = scelta
         // esplicita o null (= segue il globale), effective = provider che
         // verrà davvero usato per il prossimo incasso di quel flusso.
-        const overrides = await getPaymentProviderOverrides();
+        const overrides = await getPaymentProviderOverrides(req.tenantId!);
         const flows: Record<string, { override: PaymentProvider | null; effective: PaymentProvider; label: string }> = {};
         for (const flow of PAYMENT_FLOWS) {
             const effective = overrides[flow] ?? active;
@@ -14665,7 +14683,7 @@ app.put('/settings/payments/provider', authenticate, requirePermission('settings
                     error: `${providerLabel(provider)} non è configurato: completa le credenziali prima di attivarlo`,
                 });
             }
-            await setPaymentProviderForFlow(flow, provider);
+            await setPaymentProviderForFlow(req.tenantId!, flow, provider);
             const flowLabel = flow === 'deposit' ? 'caparre' : 'conti al tavolo';
             if (req.user) {
                 LogService.logActivity(
@@ -14691,7 +14709,7 @@ app.put('/settings/payments/provider', authenticate, requirePermission('settings
                 error: `${providerLabel(provider)} non è configurato: completa le credenziali prima di attivarlo`,
             });
         }
-        await setActivePaymentProvider(provider);
+        await setActivePaymentProvider(req.tenantId!, provider);
 
         if (req.user) {
             LogService.logActivity(
@@ -15063,9 +15081,9 @@ app.post('/settings/integrations/imap/test', authenticate, requirePermission('se
 // the original `revolut_configured` key so existing clients keep working.
 // GET is auth-only so any operator can read the current policy; PUT requires
 // settings:full because the setting affects customer-facing charges.
-app.get('/settings/auto-deposit', authenticate, async (_req, res) => {
+app.get('/settings/auto-deposit', authenticate, async (req, res) => {
     try {
-        const activeProvider = await getActivePaymentProvider();
+        const activeProvider = await getActivePaymentProvider(req.tenantId!);
         const paymentConfigured = await isProviderConfigured(activeProvider);
         const policy = await getAutoDepositPolicy();
         res.json({
@@ -15142,7 +15160,7 @@ app.put('/settings/auto-deposit', authenticate, requirePermission('settings:full
             );
         }
 
-        const activeProvider = await getActivePaymentProvider();
+        const activeProvider = await getActivePaymentProvider(req.tenantId!);
         const paymentConfigured = await isProviderConfigured(activeProvider);
         const after = await getAutoDepositPolicy();
         res.json({
@@ -15490,9 +15508,9 @@ app.get('/public/availability', async (req, res) => {
 
     try {
         const [lunchSlotsRaw, dinnerSlotsRaw, blocks] = await Promise.all([
-            getAvailableSlots(date, Shift.LUNCH),
-            getAvailableSlots(date, Shift.DINNER),
-            getPublicBookingBlocks(),
+            getAvailableSlots(PUBLIC_TENANT_ID, date, Shift.LUNCH),
+            getAvailableSlots(PUBLIC_TENANT_ID, date, Shift.DINNER),
+            getPublicBookingBlocks(PUBLIC_TENANT_ID),
         ]);
         // Empty a shift's slot list if the operator has blocked it — the
         // public form treats "no slots" as "not bookable", so nothing else
@@ -15548,7 +15566,7 @@ app.get('/public/rooms', async (req, res) => {
         // richiesta che approva lo staff. È esattamente lo stesso insieme usato
         // da pickSelfServiceTable per decidere confermato vs richiesta, quindi
         // l'etichetta sul form combacia sempre con l'esito reale del submit.
-        const cappedIds = new Set(await getCappedRoomIds(date, shift as Shift));
+        const cappedIds = new Set(await getCappedRoomIds(PUBLIC_TENANT_ID, date, shift as Shift));
         const roomsWithFlag = rooms.map(r => ({ ...r, over_threshold: cappedIds.has(r.id) }));
         res.json({ rooms: roomsWithFlag });
     } catch (err: any) {
@@ -15562,7 +15580,7 @@ app.get('/public/rooms', async (req, res) => {
 // /prenota page. Lets us swap the DID at porting time via VONAGE_VOICE_NUMBER
 // and pause/resume web bookings from Settings, no HTML edit needed.
 app.get('/public/contact', async (_req, res) => {
-    const bookingsEnabled = await getFeatureFlag('public_bookings_enabled', false);
+    const bookingsEnabled = await getFeatureFlag(PUBLIC_TENANT_ID, 'public_bookings_enabled', false);
     const raw = (process.env.VONAGE_VOICE_NUMBER || '').replace(/[^\d+]/g, '');
     let voice: { phone: string; display: string } | null = null;
     if (raw) {
@@ -15583,7 +15601,7 @@ app.get('/public/contact', async (_req, res) => {
     // agent id per il widget vocale del CRM: dati pubblici per costruzione
     // (compaiono comunque nella pagina/bundle), serviti da qui perché la
     // pagina questo endpoint lo chiama già.
-    const identity = businessIdentity();
+    const identity = businessIdentity(PUBLIC_TENANT_ID);
     res.json({
         voice,
         bookingsEnabled,
@@ -15612,7 +15630,7 @@ const buildVoiceSuspensionMessage = (callbackTime: string) =>
     `Le prenotazioni sono momentaneamente sospese. Richiami dopo le ${callbackTime} per verificare eventuali tavoli disponibili.`;
 
 app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
-    if (!(await getFeatureFlag('public_bookings_enabled', false))) {
+    if (!(await getFeatureFlag(PUBLIC_TENANT_ID, 'public_bookings_enabled', false))) {
         return res.status(503).json({ error: 'bookings_disabled', message: PUBLIC_BOOKINGS_DISABLED_MESSAGE });
     }
     try {
@@ -15705,7 +15723,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         // the availability grid so we refuse even if a slot happens to be
         // free. Prevents a race between the /public/availability call and
         // this create when the operator adds the block in between.
-        const blocks = await getPublicBookingBlocks();
+        const blocks = await getPublicBookingBlocks(PUBLIC_TENANT_ID);
         if (isPublicBookingBlocked(date, shift as any, blocks)) {
             const isFullDay = blocks.some(b => b.date === date && b.shift === 'ALL');
             const scope = isFullDay ? 'per questa data' : (shift === Shift.LUNCH ? 'per il pranzo di questa data' : 'per la cena di questa data');
@@ -15716,7 +15734,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         }
 
         // Confirm the requested slot is on the current grid for that date+shift.
-        const validSlots = await getAvailableSlots(date, shift as Shift);
+        const validSlots = await getAvailableSlots(PUBLIC_TENANT_ID, date, shift as Shift);
         if (!validSlots.includes(time)) {
             return res.status(409).json({ error: 'slot_unavailable', message: 'Lo slot scelto non è più disponibile' });
         }
@@ -15771,7 +15789,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         // non è pagata il tavolo non è garantito, quindi in quel caso la
         // richiesta resta PENDING e la conferma arriva col pagamento.
         // Stessa policy condivisa col canale vocale (isAutoDepositRequired).
-        const depositRequired = await isAutoDepositRequired(Math.trunc(guestsNum));
+        const depositRequired = await isAutoDepositRequired(PUBLIC_TENANT_ID, Math.trunc(guestsNum));
 
         // Conferma automatica: se la sala è ancora sotto il proprio limite di
         // occupazione assegniamo il tavolo e confermiamo subito; se il limite
@@ -15782,7 +15800,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         let autoTable: Awaited<ReturnType<typeof pickSelfServiceTable>> = null;
         if (!depositRequired) {
             try {
-                autoTable = await pickSelfServiceTable(date, shift as Shift, Math.trunc(guestsNum), {
+                autoTable = await pickSelfServiceTable(PUBLIC_TENANT_ID, date, shift as Shift, Math.trunc(guestsNum), {
                     roomId: requestedRoomId && Number.isFinite(requestedRoomId) ? Math.trunc(requestedRoomId) : null,
                 });
             } catch (err) {
@@ -15885,7 +15903,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
             depositAmountCents = guestsNum * (depositPolicy?.perPersonCents ?? DEPOSIT_DEFAULTS.perPersonCents);
             const orderDescription = `Caparra prenotazione #${created.id} - ${guestsLabel} ${dateLabel} ${time}`;
             try {
-                const order = await createPaymentOrder({
+                const order = await createPaymentOrder(PUBLIC_TENANT_ID, {
                     amount: depositAmountCents,
                     currency: 'EUR',
                     description: orderDescription,
@@ -16051,7 +16069,7 @@ app.get('/prenota', (_req, res) => {
 // category health data (allergies) — collected by the booking form.
 app.get(['/privacy', '/informativa-privacy'], async (_req, res) => {
     try {
-        const c = await getLegalConfig();
+        const c = await getLegalConfig(PUBLIC_TENANT_ID);
         const esc = (v: unknown): string => String(v ?? '').replace(/[&<>"']/g, ch => (
             { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] as string));
         const ph = (v: unknown, fallback: string): string => {
@@ -16365,9 +16383,9 @@ type CourseFireModeValue = 'AUTO_ALL' | 'AUTO_FIRST' | 'MANUAL';
 // Come vengono lanciate le uscite. Default prudente ad AUTO_ALL: finché la
 // vista passe non esiste (PR 5) nessuno può lanciare a mano, e un default
 // diverso lascerebbe le uscite ferme in QUEUED senza che nessuno se ne accorga.
-async function getCourseFireMode(): Promise<CourseFireModeValue> {
+async function getCourseFireMode(tenantId: number): Promise<CourseFireModeValue> {
     try {
-        const r = await queryWithRetry(`SELECT text_value FROM app_settings WHERE key = 'course_fire_mode'`);
+        const r = await queryWithRetry(`SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = 'course_fire_mode'`, [tenantId]);
         const v = r.rows[0]?.text_value;
         if (v === 'AUTO_FIRST' || v === 'MANUAL' || v === 'AUTO_ALL') return v;
         return 'AUTO_ALL';
@@ -16377,8 +16395,8 @@ async function getCourseFireMode(): Promise<CourseFireModeValue> {
     }
 }
 
-const ordersEnabledGuard = async (res: any): Promise<boolean> => {
-    if (await getFeatureFlag('table_orders_enabled', false)) return true;
+const ordersEnabledGuard = async (req: any, res: any): Promise<boolean> => {
+    if (await getFeatureFlag(req.tenantId!, 'table_orders_enabled', false)) return true;
     res.status(403).json({
         error: 'feature_disabled',
         message: 'Il modulo comande è disattivato. Attivalo da Impostazioni.',
@@ -16548,7 +16566,7 @@ async function enqueueCoursePrintsInTx(client: any, orderId: number, courseNo: n
 // due camerieri sullo stesso tavolo devono scrivere sulla stessa comanda.
 app.post('/orders', authenticate, requirePermission('orders:take'), async (req, res) => {
     try {
-        if (!(await ordersEnabledGuard(res))) return;
+        if (!(await ordersEnabledGuard(req, res))) return;
 
         const idemKey = typeof req.headers['idempotency-key'] === 'string'
             ? (req.headers['idempotency-key'] as string).slice(0, 80)
@@ -16677,7 +16695,7 @@ app.get('/menu/catalogue', authenticate, requirePermission('orders:view'), async
 
 app.get('/orders/:id', authenticate, requirePermission('orders:view'), async (req, res) => {
     try {
-        if (!(await ordersEnabledGuard(res))) return;
+        if (!(await ordersEnabledGuard(req, res))) return;
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
         const view = await loadOrderView(id);
@@ -16697,7 +16715,7 @@ app.get('/orders/:id', authenticate, requirePermission('orders:view'), async (re
 // aprendo il tavolo.
 app.get('/tables/bills-status', authenticate, requirePermission('orders:view'), async (req, res) => {
     try {
-        if (!(await ordersEnabledGuard(res))) return;
+        if (!(await ordersEnabledGuard(req, res))) return;
         const service = serviceFromQuery(req.query);
         const rows = await queryWithRetry(
             `SELECT b.id, b.table_id, b.total_cents, b.covers, b.status,
@@ -16754,7 +16772,7 @@ app.get('/tables/bills-status', authenticate, requirePermission('orders:view'), 
 
 app.get('/tables/:id/order', authenticate, requirePermission('orders:view'), async (req, res) => {
     try {
-        if (!(await ordersEnabledGuard(res))) return;
+        if (!(await ordersEnabledGuard(req, res))) return;
         const tableId = parseInt(req.params.id, 10);
         if (!Number.isFinite(tableId)) return res.status(400).json({ error: 'id non valido' });
         // Solo il servizio in corso: una comanda dimenticata a pranzo non deve
@@ -16783,7 +16801,7 @@ app.get('/tables/:id/order', authenticate, requirePermission('orders:view'), asy
 app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), async (req, res) => {
     const client = await pool.connect();
     try {
-        if (!(await ordersEnabledGuard(res))) { client.release(); return; }
+        if (!(await ordersEnabledGuard(req, res))) { client.release(); return; }
 
         const orderId = parseInt(req.params.id, 10);
         if (!Number.isFinite(orderId)) { client.release(); return res.status(400).json({ error: 'id non valido' }); }
@@ -16916,7 +16934,7 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
         await client.query('COMMIT');
         client.release();
 
-        await syncSystemLines(orderId);
+        await syncSystemLines(req.tenantId!, orderId);
         const view = await loadOrderView(orderId);
         // Se la comanda è già agganciata a un conto, il totale lo segue.
         const sync = await resyncBillForOrder(orderId);
@@ -16934,7 +16952,7 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
 // l'unica strada onesta è lo storno, che lascia traccia.
 app.patch('/orders/items/:id', authenticate, requirePermission('orders:take'), async (req, res) => {
     try {
-        if (!(await ordersEnabledGuard(res))) return;
+        if (!(await ordersEnabledGuard(req, res))) return;
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
 
@@ -16982,7 +17000,7 @@ app.patch('/orders/items/:id', authenticate, requirePermission('orders:take'), a
             vals
         );
 
-        await syncSystemLines(upd.rows[0].order_id);
+        await syncSystemLines(req.tenantId!, upd.rows[0].order_id);
         const view = await loadOrderView(upd.rows[0].order_id);
         const sync = await resyncBillForOrder(upd.rows[0].order_id);
         try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
@@ -16995,7 +17013,7 @@ app.patch('/orders/items/:id', authenticate, requirePermission('orders:take'), a
 
 app.delete('/orders/items/:id', authenticate, requirePermission('orders:take'), async (req, res) => {
     try {
-        if (!(await ordersEnabledGuard(res))) return;
+        if (!(await ordersEnabledGuard(req, res))) return;
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
 
@@ -17009,7 +17027,7 @@ app.delete('/orders/items/:id', authenticate, requirePermission('orders:take'), 
         }
         await queryWithRetry(`DELETE FROM order_items WHERE id = $1`, [id]);
 
-        await syncSystemLines(cur.rows[0].order_id);
+        await syncSystemLines(req.tenantId!, cur.rows[0].order_id);
         const view = await loadOrderView(cur.rows[0].order_id);
         const sync = await resyncBillForOrder(cur.rows[0].order_id);
         try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
@@ -17027,7 +17045,7 @@ app.delete('/orders/items/:id', authenticate, requirePermission('orders:take'), 
 app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), async (req, res) => {
     const client = await pool.connect();
     try {
-        if (!(await ordersEnabledGuard(res))) { client.release(); return; }
+        if (!(await ordersEnabledGuard(req, res))) { client.release(); return; }
 
         const orderId = parseInt(req.params.id, 10);
         if (!Number.isFinite(orderId)) { client.release(); return res.status(400).json({ error: 'id non valido' }); }
@@ -17038,7 +17056,7 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
             return res.status(400).json({ error: 'course_no deve essere > 0' });
         }
 
-        const mode = await getCourseFireMode();
+        const mode = await getCourseFireMode(req.tenantId!);
         await client.query('BEGIN');
 
         const ord = await client.query(`SELECT * FROM orders WHERE id = $1 FOR UPDATE`, [orderId]);
@@ -17118,7 +17136,7 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
 // uno storno e non resta traccia.
 app.post('/orders/:id/courses/:n/recall', authenticate, requirePermission('orders:take'), async (req, res) => {
     try {
-        if (!(await ordersEnabledGuard(res))) return;
+        if (!(await ordersEnabledGuard(req, res))) return;
         const orderId = parseInt(req.params.id, 10);
         const courseNo = parseInt(req.params.n, 10);
         if (!Number.isFinite(orderId) || !Number.isFinite(courseNo)) {
@@ -17159,7 +17177,7 @@ app.post('/orders/:id/courses/:n/recall', authenticate, requirePermission('order
 // (piatti senza partita assegnata), che è il fallback del passe.
 app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req, res) => {
     try {
-        if (!(await ordersEnabledGuard(res))) return;
+        if (!(await ordersEnabledGuard(req, res))) return;
 
         const raw = req.query.station_id;
         const stationId = raw != null && raw !== '' ? Number(raw) : null;
@@ -17245,7 +17263,7 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
 // richiede uno storno esplicito, che ha un percorso suo (PR 7).
 app.post('/kds/items/:id/status', authenticate, requirePermission('orders:kds'), async (req, res) => {
     try {
-        if (!(await ordersEnabledGuard(res))) return;
+        if (!(await ordersEnabledGuard(req, res))) return;
 
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
@@ -17338,11 +17356,11 @@ const PASSE_QUEUED_ALERT_SECONDS = 5 * 60;
 
 // Tutte le uscite vive, con lo stato di ogni partita. Il passe si iscrive a
 // tutte le partite: è l'unico a vedere l'insieme.
-app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), async (_req: any, res) => {
+app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), async (req: any, res) => {
     try {
-        if (!(await ordersEnabledGuard(res))) return;
+        if (!(await ordersEnabledGuard(req, res))) return;
 
-        const service = serviceFromQuery(_req.query);
+        const service = serviceFromQuery(req.query);
         const rows = await queryWithRetry(
             `SELECT oi.id, oi.order_id, oi.course_no, oi.name_snapshot, oi.qty,
                     oi.status, oi.station_id, oi.queued_at, oi.fired_at,
@@ -17453,7 +17471,7 @@ app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), as
 app.post('/orders/:id/courses/:n/fire', authenticate, requirePermission('orders:expedite'), async (req, res) => {
     const client = await pool.connect();
     try {
-        if (!(await ordersEnabledGuard(res))) { client.release(); return; }
+        if (!(await ordersEnabledGuard(req, res))) { client.release(); return; }
 
         const orderId = parseInt(req.params.id, 10);
         const courseNo = parseInt(req.params.n, 10);
@@ -17501,7 +17519,7 @@ app.post('/orders/:id/courses/:n/fire', authenticate, requirePermission('orders:
 app.post('/orders/:id/courses/:n/refire', authenticate, requirePermission('orders:expedite'), async (req, res) => {
     const client = await pool.connect();
     try {
-        if (!(await ordersEnabledGuard(res))) { client.release(); return; }
+        if (!(await ordersEnabledGuard(req, res))) { client.release(); return; }
 
         const orderId = parseInt(req.params.id, 10);
         const courseNo = parseInt(req.params.n, 10);
@@ -17560,7 +17578,7 @@ app.post('/orders/:id/courses/:n/refire', authenticate, requirePermission('order
 // push ai camerieri invece dell'urlo dalla cucina.
 app.post('/orders/:id/courses/:n/call', authenticate, requirePermission('orders:expedite'), async (req, res) => {
     try {
-        if (!(await ordersEnabledGuard(res))) return;
+        if (!(await ordersEnabledGuard(req, res))) return;
         const orderId = parseInt(req.params.id, 10);
         const courseNo = parseInt(req.params.n, 10);
         if (!Number.isFinite(orderId) || !Number.isFinite(courseNo)) {
@@ -17853,7 +17871,7 @@ async function resyncBillForOrder(orderId: number): Promise<{ warning?: string }
 // una stima dai posti del tavolo, e alimenta lo split equo del conto.
 app.patch('/orders/:id', authenticate, requirePermission('orders:take'), async (req, res) => {
     try {
-        if (!(await ordersEnabledGuard(res))) return;
+        if (!(await ordersEnabledGuard(req, res))) return;
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
 
@@ -17880,7 +17898,7 @@ app.patch('/orders/:id', authenticate, requirePermission('orders:take'), async (
 
         // Cambiare i coperti cambia la riga "Coperto".
         if (req.body?.covers != null) {
-            await syncSystemLines(id);
+            await syncSystemLines(req.tenantId!, id);
             await resyncBillForOrder(id);
         }
         // I coperti viaggiano anche sul conto: è il divisore dello split equo.
@@ -17907,7 +17925,7 @@ app.patch('/orders/:id', authenticate, requirePermission('orders:take'), async (
 app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), async (req, res) => {
     const client = await pool.connect();
     try {
-        if (!(await ordersEnabledGuard(res))) { client.release(); return; }
+        if (!(await ordersEnabledGuard(req, res))) { client.release(); return; }
         const orderId = parseInt(req.params.id, 10);
         if (!Number.isFinite(orderId)) { client.release(); return res.status(400).json({ error: 'id non valido' }); }
 
@@ -18084,7 +18102,7 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
 // era già nullable, mancava solo l'ingresso.
 app.post('/tables/:id/bill', authenticate, requirePermission('payments:full'), async (req, res) => {
     try {
-        if (!(await getFeatureFlag('pay_at_table_enabled', false))) {
+        if (!(await getFeatureFlag(req.tenantId!, 'pay_at_table_enabled', false))) {
             return res.status(403).json({
                 error: 'feature_disabled',
                 message: 'Il conto al tavolo è disattivato. Attivalo da Impostazioni → Conto al tavolo.',
@@ -18177,10 +18195,11 @@ app.post('/tables/:id/bill', authenticate, requirePermission('payments:full'), a
 // stesso codice degli altri importi e compaiono nel dettaglio che l'ospite
 // vede dal QR. Ricalcolate a ogni mutazione — il servizio è una percentuale
 // dell'imponibile, quindi si muove con le righe.
-async function syncSystemLinesInTx(client: any, orderId: number): Promise<void> {
+async function syncSystemLinesInTx(client: any, tenantId: number, orderId: number): Promise<void> {
     const cfg = await client.query(
         `SELECT key, int_value FROM app_settings
-         WHERE key IN ('cover_charge_cents','service_charge_percent')`
+         WHERE tenant_id = $1 AND key IN ('cover_charge_cents','service_charge_percent')`,
+        [tenantId]
     );
     const map = Object.fromEntries(cfg.rows.map((r: any) => [r.key, Number(r.int_value ?? 0)]));
     const coverCents = Math.max(0, map.cover_charge_cents ?? 0);
@@ -18233,11 +18252,11 @@ async function syncSystemLinesInTx(client: any, orderId: number): Promise<void> 
     }
 }
 
-async function syncSystemLines(orderId: number): Promise<void> {
+async function syncSystemLines(tenantId: number, orderId: number): Promise<void> {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        await syncSystemLinesInTx(client, orderId);
+        await syncSystemLinesInTx(client, tenantId, orderId);
         await client.query('COMMIT');
     } catch (err) {
         await client.query('ROLLBACK').catch(() => {});
@@ -18251,7 +18270,7 @@ async function syncSystemLines(orderId: number): Promise<void> {
 // con motivazione, e resta a bilancio come scarto.
 app.post('/orders/items/:id/void', authenticate, requirePermission('orders:void'), async (req, res) => {
     try {
-        if (!(await ordersEnabledGuard(res))) return;
+        if (!(await ordersEnabledGuard(req, res))) return;
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
 
@@ -18275,7 +18294,7 @@ app.post('/orders/items/:id/void', authenticate, requirePermission('orders:void'
         }
         const item = upd.rows[0];
 
-        await syncSystemLines(item.order_id);
+        await syncSystemLines(req.tenantId!, item.order_id);
         const view = await loadOrderView(item.order_id);
         const sync = await resyncBillForOrder(item.order_id);
 
@@ -18315,7 +18334,7 @@ app.post('/orders/items/:id/void', authenticate, requirePermission('orders:void'
 // è la stessa cosa che prendere una comanda.
 app.post('/orders/:id/discount', authenticate, requirePermission('orders:void'), async (req, res) => {
     try {
-        if (!(await ordersEnabledGuard(res))) return;
+        if (!(await ordersEnabledGuard(req, res))) return;
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
 
@@ -18377,7 +18396,7 @@ app.post('/orders/:id/discount', authenticate, requirePermission('orders:void'),
 app.post('/orders/:id/transfer', authenticate, requirePermission('orders:take'), async (req, res) => {
     const client = await pool.connect();
     try {
-        if (!(await ordersEnabledGuard(res))) { client.release(); return; }
+        if (!(await ordersEnabledGuard(req, res))) { client.release(); return; }
         const id = parseInt(req.params.id, 10);
         const targetId = Number(req.body?.table_id);
         if (!Number.isFinite(id) || !Number.isFinite(targetId)) {
@@ -18552,7 +18571,7 @@ app.get('/kitchen/service-summary', authenticate, requirePermission('orders:kds'
 // del sabato sera.
 app.get('/reports/kitchen', authenticate, requirePermission('orders:expedite'), async (req, res) => {
     try {
-        if (!(await ordersEnabledGuard(res))) return;
+        if (!(await ordersEnabledGuard(req, res))) return;
 
         const from = typeof req.query.from === 'string' ? req.query.from : null;
         const to = typeof req.query.to === 'string' ? req.query.to : null;
@@ -18660,7 +18679,7 @@ app.get('/reports/kitchen', authenticate, requirePermission('orders:expedite'), 
 // endpoint elenca i conti attivi per tavolo, con o senza prenotazione.
 app.get('/bills/open', authenticate, requirePermission('payments:view'), async (req, res) => {
     try {
-        if (!(await getFeatureFlag('pay_at_table_enabled', false))) {
+        if (!(await getFeatureFlag(req.tenantId!, 'pay_at_table_enabled', false))) {
             return res.json({ bills: [] });
         }
 
@@ -18850,7 +18869,7 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
 
         // Priorità: stampante esplicita nel body → instradamento configurato
         // per la funzionalità → default storico 'preconti'.
-        const routes = await getPrintRoutes();
+        const routes = await getPrintRoutes(req.tenantId!);
         const routed = req.body?.kind === 'QR' ? routes.qr : routes.preconto;
         const printer = /^[a-z0-9_-]{1,30}$/i.test(String(req.body?.printer ?? ''))
             ? String(req.body.printer) : (routed ?? 'preconti');
@@ -18960,23 +18979,23 @@ const PRINT_ROUTE_KEYS = {
 } as const;
 type PrintRouteFn = keyof typeof PRINT_ROUTE_KEYS;
 
-async function getPrintRoutes(): Promise<Record<PrintRouteFn, string | null>> {
+async function getPrintRoutes(tenantId: number): Promise<Record<PrintRouteFn, string | null>> {
     const r = await queryWithRetry(
-        `SELECT key, text_value FROM app_settings WHERE key = ANY($1)`,
-        [Object.values(PRINT_ROUTE_KEYS)]
+        `SELECT key, text_value FROM app_settings WHERE tenant_id = $1 AND key = ANY($2)`,
+        [tenantId, Object.values(PRINT_ROUTE_KEYS)]
     );
     const val = (k: string) => r.rows.find((x: any) => x.key === k)?.text_value ?? null;
     return { preconto: val(PRINT_ROUTE_KEYS.preconto), qr: val(PRINT_ROUTE_KEYS.qr) };
 }
 
-app.get('/sala/config', authenticate, async (_req, res) => {
+app.get('/sala/config', authenticate, async (req, res) => {
     try {
         const [fireMode, stations, printers, jobs, printRoutes, categories, catMap] = await Promise.all([
-            getCourseFireMode(),
+            getCourseFireMode(req.tenantId!),
             queryWithRetry(`SELECT id, name, color, sort_order, is_active, printer FROM stations ORDER BY sort_order, id`),
             queryWithRetry(`SELECT id, name, host, port, kind, is_active, notes FROM printers ORDER BY kind, name`),
             queryWithRetry(`SELECT status, COUNT(*)::int AS n FROM print_jobs WHERE status IN ('PENDING','FAILED') GROUP BY status`),
-            getPrintRoutes(),
+            getPrintRoutes(req.tenantId!),
             queryWithRetry(`SELECT DISTINCT category FROM dishes WHERE category IS NOT NULL AND category <> '' ORDER BY category`),
             queryWithRetry(`SELECT category, station_id FROM category_stations`),
         ]);
@@ -19033,9 +19052,9 @@ app.put('/sala/fire-mode', authenticate, requirePermission('settings:full'), asy
         const mode = String(req.body?.mode ?? '');
         if (!FIRE_MODES.includes(mode)) return res.status(400).json({ error: 'Fire mode non valido' });
         await queryWithRetry(
-            `INSERT INTO app_settings (key, text_value) VALUES ('course_fire_mode', $1)
-             ON CONFLICT (key) DO UPDATE SET text_value = $1, updated_at = CURRENT_TIMESTAMP`,
-            [mode]
+            `INSERT INTO app_settings (tenant_id, key, text_value) VALUES ($1, 'course_fire_mode', $2)
+             ON CONFLICT (tenant_id, key) DO UPDATE SET text_value = $2, updated_at = CURRENT_TIMESTAMP`,
+            [req.tenantId!, mode]
         );
         res.json({ fire_mode: mode });
     } catch (err: any) {
@@ -19067,16 +19086,16 @@ app.put('/sala/print-routes', authenticate, requirePermission('settings:full'), 
         if (updates.length === 0) return res.status(400).json({ error: 'Nessun campo da aggiornare' });
         for (const [key, value] of updates) {
             if (value == null) {
-                await queryWithRetry(`DELETE FROM app_settings WHERE key = $1`, [key]);
+                await queryWithRetry(`DELETE FROM app_settings WHERE tenant_id = $1 AND key = $2`, [req.tenantId!, key]);
             } else {
                 await queryWithRetry(
-                    `INSERT INTO app_settings (key, text_value) VALUES ($1, $2)
-                     ON CONFLICT (key) DO UPDATE SET text_value = $2, updated_at = CURRENT_TIMESTAMP`,
-                    [key, value]
+                    `INSERT INTO app_settings (tenant_id, key, text_value) VALUES ($1, $2, $3)
+                     ON CONFLICT (tenant_id, key) DO UPDATE SET text_value = $3, updated_at = CURRENT_TIMESTAMP`,
+                    [req.tenantId!, key, value]
                 );
             }
         }
-        res.json({ ok: true, print_routes: await getPrintRoutes() });
+        res.json({ ok: true, print_routes: await getPrintRoutes(req.tenantId!) });
     } catch (err: any) {
         console.error('PUT /sala/print-routes error:', err);
         res.status(500).json({ error: 'Internal server error' });
@@ -19196,8 +19215,8 @@ app.delete('/sala/printers/:id', authenticate, requirePermission('settings:full'
         // Una stampante referenziata da una partita non si elimina: la partita
         // resterebbe a puntare un nome fantasma e i job si accoderebbero nel vuoto.
         const usedRoute = await queryWithRetry(
-            `SELECT key FROM app_settings WHERE key = ANY($1) AND text_value = $2 LIMIT 1`,
-            [Object.values(PRINT_ROUTE_KEYS), p.rows[0].name]
+            `SELECT key FROM app_settings WHERE tenant_id = $1 AND key = ANY($2) AND text_value = $3 LIMIT 1`,
+            [req.tenantId!, Object.values(PRINT_ROUTE_KEYS), p.rows[0].name]
         );
         if (usedRoute.rows.length > 0) {
             return res.status(409).json({
@@ -19247,9 +19266,9 @@ app.post('/sala/printers/:id/test', authenticate, requirePermission('settings:fu
 // un profilo è una base da applicare, non una sincronizzazione distruttiva.
 // "Scollega" rimuove solo il marcatore: la configurazione corrente resta.
 
-const salaSnapshot = async (): Promise<any> => {
+const salaSnapshot = async (tenantId: number): Promise<any> => {
     const [fireMode, stations, printers] = await Promise.all([
-        getCourseFireMode(),
+        getCourseFireMode(tenantId),
         queryWithRetry(`SELECT name, color, printer, is_active FROM stations ORDER BY sort_order, id`),
         queryWithRetry(`SELECT name, host, port, kind, is_active, notes FROM printers ORDER BY id`),
     ]);
@@ -19259,21 +19278,21 @@ const salaSnapshot = async (): Promise<any> => {
     );
     return {
         fire_mode: fireMode, stations: stations.rows, printers: printers.rows,
-        print_routes: await getPrintRoutes(),
+        print_routes: await getPrintRoutes(tenantId),
         category_stations: catMap.rows,
     };
 };
 
-const getActiveSalaProfile = async (): Promise<string | null> => {
-    const r = await queryWithRetry(`SELECT text_value FROM app_settings WHERE key = 'sala_active_profile'`);
+const getActiveSalaProfile = async (tenantId: number): Promise<string | null> => {
+    const r = await queryWithRetry(`SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = 'sala_active_profile'`, [tenantId]);
     return r.rows[0]?.text_value ?? null;
 };
 
-app.get('/sala/profiles', authenticate, async (_req, res) => {
+app.get('/sala/profiles', authenticate, async (req, res) => {
     try {
         const [rows, active] = await Promise.all([
             queryWithRetry(`SELECT id, name, updated_at FROM sala_profiles ORDER BY name`),
-            getActiveSalaProfile(),
+            getActiveSalaProfile(req.tenantId!),
         ]);
         res.json({ profiles: rows.rows, active_profile: active });
     } catch (err: any) {
@@ -19288,7 +19307,7 @@ app.post('/sala/profiles', authenticate, requirePermission('settings:full'), asy
         if (!name || name.length > 60) return res.status(400).json({ error: 'Nome non valido' });
         const ins = await queryWithRetry(
             `INSERT INTO sala_profiles (name, payload) VALUES ($1, $2) RETURNING id, name, updated_at`,
-            [name, JSON.stringify(await salaSnapshot())]
+            [name, JSON.stringify(await salaSnapshot(req.tenantId!))]
         );
         res.status(201).json(ins.rows[0]);
     } catch (err: any) {
@@ -19306,7 +19325,7 @@ app.put('/sala/profiles/:id', authenticate, requirePermission('settings:full'), 
         const upd = await queryWithRetry(
             `UPDATE sala_profiles SET payload = $2, updated_at = CURRENT_TIMESTAMP
              WHERE id = $1 RETURNING id, name, updated_at`,
-            [id, JSON.stringify(await salaSnapshot())]
+            [id, JSON.stringify(await salaSnapshot(req.tenantId!))]
         );
         if (upd.rows.length === 0) return res.status(404).json({ error: 'Profilo non trovato' });
         res.json(upd.rows[0]);
@@ -19328,9 +19347,9 @@ app.post('/sala/profiles/:id/activate', authenticate, requirePermission('setting
         await client.query('BEGIN');
         if (payload?.fire_mode && ['AUTO_ALL', 'AUTO_FIRST', 'MANUAL'].includes(payload.fire_mode)) {
             await client.query(
-                `INSERT INTO app_settings (key, text_value) VALUES ('course_fire_mode', $1)
-                 ON CONFLICT (key) DO UPDATE SET text_value = $1, updated_at = CURRENT_TIMESTAMP`,
-                [payload.fire_mode]
+                `INSERT INTO app_settings (tenant_id, key, text_value) VALUES ($1, 'course_fire_mode', $2)
+                 ON CONFLICT (tenant_id, key) DO UPDATE SET text_value = $2, updated_at = CURRENT_TIMESTAMP`,
+                [req.tenantId!, payload.fire_mode]
             );
         }
         for (const pr of Array.isArray(payload?.printers) ? payload.printers : []) {
@@ -19363,12 +19382,12 @@ app.post('/sala/profiles/:id/activate', authenticate, requirePermission('setting
             const v = payload?.print_routes?.[fn];
             if (v === undefined) continue;
             if (v == null || !PRINTER_NAME_RE.test(String(v))) {
-                await client.query(`DELETE FROM app_settings WHERE key = $1`, [PRINT_ROUTE_KEYS[fn]]);
+                await client.query(`DELETE FROM app_settings WHERE tenant_id = $1 AND key = $2`, [req.tenantId!, PRINT_ROUTE_KEYS[fn]]);
             } else {
                 await client.query(
-                    `INSERT INTO app_settings (key, text_value) VALUES ($1, $2)
-                     ON CONFLICT (key) DO UPDATE SET text_value = $2, updated_at = CURRENT_TIMESTAMP`,
-                    [PRINT_ROUTE_KEYS[fn], String(v)]
+                    `INSERT INTO app_settings (tenant_id, key, text_value) VALUES ($1, $2, $3)
+                     ON CONFLICT (tenant_id, key) DO UPDATE SET text_value = $3, updated_at = CURRENT_TIMESTAMP`,
+                    [req.tenantId!, PRINT_ROUTE_KEYS[fn], String(v)]
                 );
             }
         }
@@ -19384,9 +19403,9 @@ app.post('/sala/profiles/:id/activate', authenticate, requirePermission('setting
             );
         }
         await client.query(
-            `INSERT INTO app_settings (key, text_value) VALUES ('sala_active_profile', $1)
-             ON CONFLICT (key) DO UPDATE SET text_value = $1, updated_at = CURRENT_TIMESTAMP`,
-            [name]
+            `INSERT INTO app_settings (tenant_id, key, text_value) VALUES ($1, 'sala_active_profile', $2)
+             ON CONFLICT (tenant_id, key) DO UPDATE SET text_value = $2, updated_at = CURRENT_TIMESTAMP`,
+            [req.tenantId!, name]
         );
         await client.query('COMMIT');
         res.json({ ok: true, active_profile: name });
@@ -19399,9 +19418,9 @@ app.post('/sala/profiles/:id/activate', authenticate, requirePermission('setting
     }
 });
 
-app.post('/sala/profiles/detach', authenticate, requirePermission('settings:full'), async (_req, res) => {
+app.post('/sala/profiles/detach', authenticate, requirePermission('settings:full'), async (req, res) => {
     try {
-        await queryWithRetry(`DELETE FROM app_settings WHERE key = 'sala_active_profile'`);
+        await queryWithRetry(`DELETE FROM app_settings WHERE tenant_id = $1 AND key = 'sala_active_profile'`, [req.tenantId!]);
         res.json({ ok: true });
     } catch (err: any) {
         console.error('POST /sala/profiles/detach error:', err);
@@ -19416,8 +19435,8 @@ app.delete('/sala/profiles/:id', authenticate, requirePermission('settings:full'
         const del = await queryWithRetry(`DELETE FROM sala_profiles WHERE id = $1 RETURNING name`, [id]);
         if (del.rows.length === 0) return res.status(404).json({ error: 'Profilo non trovato' });
         await queryWithRetry(
-            `DELETE FROM app_settings WHERE key = 'sala_active_profile' AND text_value = $1`,
-            [del.rows[0].name]
+            `DELETE FROM app_settings WHERE tenant_id = $1 AND key = 'sala_active_profile' AND text_value = $2`,
+            [req.tenantId!, del.rows[0].name]
         );
         res.json({ ok: true });
     } catch (err: any) {
@@ -19446,22 +19465,26 @@ bookingTools.configureBookingTools({
     reservationPushLabel,
 
     findAvailability,
-    getAvailableSlots,
+    // I tool di prenotazione servono i canali self-service (voce, domani
+    // WhatsApp): niente JWT, quindi il tenant è quello pubblico. Le lambda
+    // fissano il tenant qui perché bookingTools resti ignaro del threading
+    // fino alla Fase C.
+    getAvailableSlots: (date: string, shift: Shift) => getAvailableSlots(PUBLIC_TENANT_ID, date, shift),
     createVoiceReservation,
     cancelVoiceReservation,
     modifyVoiceReservation,
     recordVoiceCall,
     upsertCustomerFromReservation,
 
-    getVoiceDateBlocks,
+    getVoiceDateBlocks: () => getVoiceDateBlocks(PUBLIC_TENANT_ID),
     findVoiceDateBlock,
     buildVoiceDateBlockMessage,
-    getLargeGroupThreshold: getVoiceLargeGroupThreshold,
+    getLargeGroupThreshold: () => getVoiceLargeGroupThreshold(PUBLIC_TENANT_ID),
 
-    isAutoDepositRequired,
+    isAutoDepositRequired: (guests: number) => isAutoDepositRequired(PUBLIC_TENANT_ID, guests),
     getAutoDepositPolicy,
     depositDefaultPerPersonCents: DEPOSIT_DEFAULTS.perPersonCents,
-    createPaymentOrder,
+    createPaymentOrder: (p: any) => createPaymentOrder(PUBLIC_TENANT_ID, p),
     queryWithRetry,
     buildDepositRequestMessage,
     buildBookingDepositRequestTemplate,
@@ -19524,7 +19547,7 @@ const startServer = async () => {
                     }
                     // Warm della cache identità: i primi messaggi dopo il boot
                     // non devono uscire coi fallback se legal_config è compilato.
-                    refreshBusinessIdentity().catch(err =>
+                    refreshBusinessIdentity(PUBLIC_TENANT_ID).catch(err =>
                         console.warn('Identity cache warm-up skipped:', (err as any)?.message || err));
                     try {
                         await RolePermissionService.warmUp();

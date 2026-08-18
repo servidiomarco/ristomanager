@@ -56,36 +56,40 @@ export function publicBaseUrl(): string {
 const ACTIVE_PROVIDER_KEY = 'active_payment_provider';
 const DEFAULT_PROVIDER: PaymentProvider = 'revolut';
 const CACHE_TTL_MS = 30_000;
-let activeCache: { provider: PaymentProvider; loadedAt: number } | null = null;
+// Cache per tenant: una Map e non una singola entry, altrimenti il provider
+// scelto da un ristorante resterebbe "attivo" per tutti gli altri fino alla
+// scadenza del TTL.
+const activeCache = new Map<number, { provider: PaymentProvider; loadedAt: number }>();
 
 export function invalidateActivePaymentProviderCache(): void {
-    activeCache = null;
+    activeCache.clear();
 }
 
-export async function getActivePaymentProvider(): Promise<PaymentProvider> {
+export async function getActivePaymentProvider(tenantId: number): Promise<PaymentProvider> {
     const now = Date.now();
-    if (activeCache && now - activeCache.loadedAt < CACHE_TTL_MS) return activeCache.provider;
+    const cached = activeCache.get(tenantId);
+    if (cached && now - cached.loadedAt < CACHE_TTL_MS) return cached.provider;
     let provider: PaymentProvider = DEFAULT_PROVIDER;
     try {
         const result = await queryWithRetry(
-            'SELECT text_value FROM app_settings WHERE key = $1',
-            [ACTIVE_PROVIDER_KEY]
+            'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
+            [tenantId, ACTIVE_PROVIDER_KEY]
         );
         const raw = result.rows[0]?.text_value;
         if (isPaymentProvider(raw)) provider = raw;
     } catch (err) {
         console.warn('[payments] active provider lookup failed, using', DEFAULT_PROVIDER, ':', (err as any)?.message || err);
     }
-    activeCache = { provider, loadedAt: now };
+    activeCache.set(tenantId, { provider, loadedAt: now });
     return provider;
 }
 
-export async function setActivePaymentProvider(provider: PaymentProvider): Promise<void> {
+export async function setActivePaymentProvider(tenantId: number, provider: PaymentProvider): Promise<void> {
     await queryWithRetry(
-        `INSERT INTO app_settings (key, text_value, updated_at)
-         VALUES ($1, $2, CURRENT_TIMESTAMP)
-         ON CONFLICT (key) DO UPDATE SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
-        [ACTIVE_PROVIDER_KEY, provider]
+        `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+         VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+         ON CONFLICT (tenant_id, key) DO UPDATE SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+        [tenantId, ACTIVE_PROVIDER_KEY, provider]
     );
     invalidateActivePaymentProviderCache();
 }
@@ -114,20 +118,22 @@ const FLOW_KEYS: Record<PaymentFlow, string> = {
     bill: 'bill_payment_provider',
 };
 
-let flowCache: { loadedAt: number; overrides: Partial<Record<PaymentFlow, PaymentProvider>> } | null = null;
+// Stessa regola della cache del provider attivo: per tenant.
+const flowCache = new Map<number, { loadedAt: number; overrides: Partial<Record<PaymentFlow, PaymentProvider>> }>();
 
 export function invalidatePaymentProviderFlowCache(): void {
-    flowCache = null;
+    flowCache.clear();
 }
 
-export async function getPaymentProviderOverrides(): Promise<Partial<Record<PaymentFlow, PaymentProvider>>> {
+export async function getPaymentProviderOverrides(tenantId: number): Promise<Partial<Record<PaymentFlow, PaymentProvider>>> {
     const now = Date.now();
-    if (flowCache && now - flowCache.loadedAt < CACHE_TTL_MS) return flowCache.overrides;
+    const cached = flowCache.get(tenantId);
+    if (cached && now - cached.loadedAt < CACHE_TTL_MS) return cached.overrides;
     const overrides: Partial<Record<PaymentFlow, PaymentProvider>> = {};
     try {
         const result = await queryWithRetry(
-            'SELECT key, text_value FROM app_settings WHERE key = ANY($1::text[])',
-            [PAYMENT_FLOWS.map(f => FLOW_KEYS[f])]
+            'SELECT key, text_value FROM app_settings WHERE tenant_id = $1 AND key = ANY($2::text[])',
+            [tenantId, PAYMENT_FLOWS.map(f => FLOW_KEYS[f])]
         );
         for (const flow of PAYMENT_FLOWS) {
             const raw = result.rows.find((r: any) => r.key === FLOW_KEYS[flow])?.text_value;
@@ -136,25 +142,25 @@ export async function getPaymentProviderOverrides(): Promise<Partial<Record<Paym
     } catch (err) {
         console.warn('[payments] flow provider lookup failed, using global:', (err as any)?.message || err);
     }
-    flowCache = { loadedAt: now, overrides };
+    flowCache.set(tenantId, { loadedAt: now, overrides });
     return overrides;
 }
 
-export async function getPaymentProviderForFlow(flow: PaymentFlow): Promise<PaymentProvider> {
-    const overrides = await getPaymentProviderOverrides();
-    return overrides[flow] ?? getActivePaymentProvider();
+export async function getPaymentProviderForFlow(tenantId: number, flow: PaymentFlow): Promise<PaymentProvider> {
+    const overrides = await getPaymentProviderOverrides(tenantId);
+    return overrides[flow] ?? getActivePaymentProvider(tenantId);
 }
 
 // provider === null rimuove l'override: il flusso torna a seguire il globale.
-export async function setPaymentProviderForFlow(flow: PaymentFlow, provider: PaymentProvider | null): Promise<void> {
+export async function setPaymentProviderForFlow(tenantId: number, flow: PaymentFlow, provider: PaymentProvider | null): Promise<void> {
     if (provider === null) {
-        await queryWithRetry('DELETE FROM app_settings WHERE key = $1', [FLOW_KEYS[flow]]);
+        await queryWithRetry('DELETE FROM app_settings WHERE tenant_id = $1 AND key = $2', [tenantId, FLOW_KEYS[flow]]);
     } else {
         await queryWithRetry(
-            `INSERT INTO app_settings (key, text_value, updated_at)
-             VALUES ($1, $2, CURRENT_TIMESTAMP)
-             ON CONFLICT (key) DO UPDATE SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
-            [FLOW_KEYS[flow], provider]
+            `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (tenant_id, key) DO UPDATE SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+            [tenantId, FLOW_KEYS[flow], provider]
         );
     }
     invalidatePaymentProviderFlowCache();
@@ -162,14 +168,14 @@ export async function setPaymentProviderForFlow(flow: PaymentFlow, provider: Pay
 
 // "Possiamo incassare adesso su QUESTO flusso?" — chiede al provider
 // effettivo del flusso (override o globale).
-export async function isPaymentConfiguredForFlow(flow: PaymentFlow): Promise<boolean> {
-    return isProviderConfigured(await getPaymentProviderForFlow(flow));
+export async function isPaymentConfiguredForFlow(tenantId: number, flow: PaymentFlow): Promise<boolean> {
+    return isProviderConfigured(await getPaymentProviderForFlow(tenantId, flow));
 }
 
 // "Can we take a payment right now?" — asks the ACTIVE provider only, which
 // is what every create-payment guard in server.ts wants.
-export async function isPaymentConfigured(): Promise<boolean> {
-    return isProviderConfigured(await getActivePaymentProvider());
+export async function isPaymentConfigured(tenantId: number): Promise<boolean> {
+    return isProviderConfigured(await getActivePaymentProvider(tenantId));
 }
 
 // Italian label used in the 503 bodies the UI surfaces verbatim.
@@ -266,10 +272,10 @@ async function sumupReturnUrl(): Promise<string | undefined> {
 
 // Create a checkout with the provider effective for the flow (or the ACTIVE
 // provider when no flow is given).
-export async function createPaymentOrder(input: CreatePaymentOrderInput): Promise<NormalisedOrder> {
+export async function createPaymentOrder(tenantId: number, input: CreatePaymentOrderInput): Promise<NormalisedOrder> {
     const provider = input.flow
-        ? await getPaymentProviderForFlow(input.flow)
-        : await getActivePaymentProvider();
+        ? await getPaymentProviderForFlow(tenantId, input.flow)
+        : await getActivePaymentProvider(tenantId);
 
     if (provider === 'sumup') {
         const returnUrl = await sumupReturnUrl();
