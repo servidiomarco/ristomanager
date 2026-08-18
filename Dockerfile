@@ -46,6 +46,11 @@ COPY --from=builder /app/dist ./dist
 # Static assets served by the API (public booking page lives here)
 COPY public ./public
 
+# Migration files: plain JS eseguito a runtime da node-pg-migrate al boot
+# (runMigrations in db.ts). Senza questa COPY il server parte ma lo schema
+# resta fermo alla baseline di createSchema.
+COPY migrations ./migrations
+
 # Expose port 8080 (Railway's default)
 EXPOSE 8080
 

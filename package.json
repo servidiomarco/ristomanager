@@ -10,7 +10,10 @@
     "build:server": "tsc -p tsconfig.server.json",
     "start:server": "node --loader ts-node/esm server.ts",
     "start": "node dist/server.js",
-    "start:prod": "node dist/server.js"
+    "start:prod": "node dist/server.js",
+    "migrate": "node-pg-migrate up",
+    "migrate:down": "node-pg-migrate down",
+    "migrate:create": "node-pg-migrate create -j js"
   },
   "dependencies": {
     "@google/genai": "^1.30.0",
@@ -30,6 +33,7 @@
     "jwt-decode": "^4.0.0",
     "lucide-react": "^0.554.0",
     "mailparser": "^3.9.14",
+    "node-pg-migrate": "^9.0.0",
     "nodemailer": "^9.0.3",
     "pg": "^8.16.3",
     "qrcode": "^1.5.4",
