@@ -128,6 +128,12 @@ export class AuthService {
 
     const userRow = result.rows[0];
 
+    // Dopo il logout l'hash è NULL: senza questo guard bcrypt.compare(token,
+    // null) lancia e una revoca legittima risponde 500 invece di 401.
+    if (!userRow.refresh_token_hash) {
+      return null;
+    }
+
     // Verify refresh token hash matches
     const isValidRefreshToken = await this.verifyPassword(refreshToken, userRow.refresh_token_hash);
     if (!isValidRefreshToken) {

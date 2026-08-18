@@ -15,11 +15,12 @@ npm run build          # SPA production build
 npm run build:server   # compile server.ts + deps to dist/ via tsconfig.server.json
 npm run start:server   # run server.ts directly (ts-node ESM loader) — local backend on :3000
 npm start              # run the compiled dist/server.js
+npm test               # build the server, then API tests (Vitest+supertest) on a local throwaway Postgres
 ```
 
 Run `npx tsc --noEmit` after any change and `npx vite build` before committing (then `rm -rf dist` — it is gitignored but the server build also writes there).
 
-**There are no tests.** No Jest, RTL, or Vitest is installed and there is no `npm test`. Section 13 of the design-system doc describes a test suite that does not exist yet — treat it as aspirational, not as a description of the repo.
+**Tests: API smoke suite only.** `npm test` compiles the server and runs Vitest + supertest (`tests/api/`) against the real compiled artifact (`dist/server.js`) on a local Postgres. `tests/api/globalSetup.ts` **drops and recreates** the database named in `DATABASE_URL` (default `postgresql://localhost/ristotest_api`) and refuses non-localhost hosts. Readiness is probed by logging in the seeded owner — `/health` returns 200 before the schema exists, never use it as a readiness gate. Test files run sequentially (shared server + DB); a test that toggles a feature flag changes state for the files after it. There are still no frontend/unit tests — section 13 of the design-system doc remains aspirational. CI (`.github/workflows/ci.yml`) runs typecheck, both builds, and the API tests on every PR.
 
 Two shell scripts stand up a full local stack, each seeding its own Postgres database and refusing to run against a non-localhost host:
 
