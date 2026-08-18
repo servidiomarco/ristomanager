@@ -38,6 +38,18 @@ describe('reservations', () => {
         expect(res.status).toBe(401);
     });
 
+    it('rifiuta un turno sconosciuto con 400 (non più 500 dal constraint)', async () => {
+        const res = await api().post('/reservations').set(bearer(token)).send({
+            customer_name: 'Turno Strano',
+            reservation_time: ORARIO_CENA,
+            shift: 'BRUNCH',
+            guests: 2,
+            table_id: tableId,
+        });
+        expect(res.status).toBe(400);
+        expect(res.body.error).toBe('invalid_shift');
+    });
+
     it('crea, lista, aggiorna e cancella una prenotazione', async () => {
         const created = await api().post('/reservations').set(bearer(token)).send({
             customer_name: 'Prova Collaudo',
