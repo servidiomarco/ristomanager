@@ -1313,8 +1313,8 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
                     rm.name AS room_name
              FROM voice_calls vc
              JOIN reservations r ON r.id = vc.reservation_id
-             LEFT JOIN tables t ON t.id = r.table_id
-             LEFT JOIN rooms rm ON rm.id = t.room_id
+             LEFT JOIN tables t ON t.id = r.table_id AND t.tenant_id = r.tenant_id
+             LEFT JOIN rooms rm ON rm.id = t.room_id AND rm.tenant_id = t.tenant_id
              WHERE vc.conversation_id = $1`,
             [conversationId]
         );
@@ -1409,11 +1409,13 @@ function sanitizeNoteSelections(raw: unknown): string {
 }
 
 // Returns true if the table belongs to a closed room.
-async function isTableInClosedRoom(tableId: number | null | undefined): Promise<boolean> {
+// tenantId obbligatorio: senza filtro il check leggerebbe lo stato della
+// sala di un altro ristorante per un table_id altrui.
+async function isTableInClosedRoom(tenantId: number, tableId: number | null | undefined): Promise<boolean> {
     if (tableId == null) return false;
     const result = await queryWithRetry(
-        'SELECT r.is_closed FROM tables t JOIN rooms r ON t.room_id = r.id WHERE t.id = $1',
-        [tableId]
+        'SELECT r.is_closed FROM tables t JOIN rooms r ON t.room_id = r.id WHERE t.id = $1 AND t.tenant_id = $2 AND r.tenant_id = $2',
+        [tableId, tenantId]
     );
     return result.rows[0]?.is_closed === true;
 }
@@ -1454,7 +1456,7 @@ async function broadcastReservationsUpdatedByIds(ids: number[]): Promise<void> {
                 ORDER BY cc.is_vip DESC NULLS LAST, (cc.preferred_table_id IS NULL), cc.id ASC
                 LIMIT 1
             ) c ON true
-            LEFT JOIN tables pt ON pt.id = c.preferred_table_id
+            LEFT JOIN tables pt ON pt.id = c.preferred_table_id AND pt.tenant_id = r.tenant_id
             LEFT JOIN LATERAL (
                 SELECT pr.id, pr.status, pr.amount_cents, pr.currency, pr.provider,
                        pr.delivery_channel, pr.created_at, pr.completed_at
@@ -1488,7 +1490,11 @@ interface TableConflict {
 // duration_minutes. Kept in sync with defaultDurationForShift() on the client.
 const SHIFT_DEFAULT_DURATION_SQL = `CASE WHEN r.shift = 'LUNCH' THEN 90 ELSE 120 END`;
 
+// tenantId obbligatorio: req.tenantId! dalle route autenticate,
+// PUBLIC_TENANT_ID dal flusso di prenotazione pubblica. Senza filtro un
+// banchetto di un altro ristorante bloccherebbe (o non bloccherebbe) i tavoli.
 async function findTableConflicts(
+    tenantId: number,
     eventDate: string,
     shift: string | null | undefined,
     tableIds: number[],
@@ -1512,8 +1518,9 @@ async function findTableConflicts(
     const conflicts: TableConflict[] = [];
 
     const useWindow = options?.reservationStart != null && options?.reservationDurationMin != null;
-    const resParams: any[] = [tableIds, eventDate];
+    const resParams: any[] = [tableIds, eventDate, tenantId];
     let resWhere = `r.table_id = ANY($1::int[])
+                    AND r.tenant_id = $3
                     AND DATE(r.reservation_time) = $2::date
                     AND COALESCE(r.arrival_status, 'WAITING') <> 'DEPARTED'
                     AND COALESCE(r.reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')`;
@@ -1550,8 +1557,8 @@ async function findTableConflicts(
         });
     }
 
-    const banParams: any[] = [eventDate, shift, tableIds];
-    let banWhere = `b.event_date = $1::date AND b.shift = $2 AND b.table_ids && $3::int[]`;
+    const banParams: any[] = [eventDate, shift, tableIds, tenantId];
+    let banWhere = `b.event_date = $1::date AND b.shift = $2 AND b.table_ids && $3::int[] AND b.tenant_id = $4`;
     if (options?.excludeBanquetId) {
         banParams.push(options.excludeBanquetId);
         banWhere += ` AND b.id <> $${banParams.length}`;
@@ -1564,8 +1571,8 @@ async function findTableConflicts(
         const overlap: number[] = (row.table_ids || []).filter((tid: number) => tableIds.includes(tid));
         if (overlap.length === 0) continue;
         const tableNames = await queryWithRetry(
-            'SELECT id, name FROM tables WHERE id = ANY($1::int[])',
-            [overlap]
+            'SELECT id, name FROM tables WHERE id = ANY($1::int[]) AND tenant_id = $2',
+            [overlap, tenantId]
         );
         for (const t of tableNames.rows) {
             conflicts.push({
@@ -1625,7 +1632,7 @@ app.get('/reservations', authenticate, async (req, res) => {
                 ORDER BY cc.is_vip DESC NULLS LAST, (cc.preferred_table_id IS NULL), cc.id ASC
                 LIMIT 1
             ) c ON true
-            LEFT JOIN tables pt ON pt.id = c.preferred_table_id
+            LEFT JOIN tables pt ON pt.id = c.preferred_table_id AND pt.tenant_id = r.tenant_id
             LEFT JOIN LATERAL (
                 SELECT pr.id, pr.status, pr.amount_cents, pr.currency, pr.provider,
                        pr.delivery_channel, pr.created_at, pr.completed_at
@@ -1669,21 +1676,23 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
             const phoneDigits = String(phone).replace(/\D/g, '');
             if (phoneDigits) {
                 const customerRow = await queryWithRetry(
-                    `SELECT c.preferred_table_id, t.seats, t.max_seats
+                    `SELECT c.preferred_table_id, t.id AS pt_id, t.seats, t.max_seats
                      FROM customers c
-                     LEFT JOIN tables t ON t.id = c.preferred_table_id
+                     LEFT JOIN tables t ON t.id = c.preferred_table_id AND t.tenant_id = $2
                      WHERE c.phone IS NOT NULL
                        AND regexp_replace(c.phone, '\\D', '', 'g') = $1
                      LIMIT 1`,
-                    [phoneDigits]
+                    [phoneDigits, req.tenantId!]
                 );
                 const row = customerRow.rows[0];
-                if (row && row.preferred_table_id) {
+                // pt_id nullo = tavolo preferito fuori tenant: si ignora la
+                // preferenza invece di assegnare un tavolo altrui.
+                if (row && row.preferred_table_id && row.pt_id != null) {
                     const capacity = Number(row.max_seats || row.seats || 0);
                     const fitsGuests = !guests || !capacity || Number(guests) <= capacity;
-                    if (fitsGuests && !(await isTableInClosedRoom(row.preferred_table_id))) {
+                    if (fitsGuests && !(await isTableInClosedRoom(req.tenantId!, row.preferred_table_id))) {
                         const eventDate = new Date(reservation_time).toISOString().substring(0, 10);
-                        const conflicts = await findTableConflicts(eventDate, shift, [Number(row.preferred_table_id)], {
+                        const conflicts = await findTableConflicts(req.tenantId!, eventDate, shift, [Number(row.preferred_table_id)], {
                             reservationStart: reservation_time,
                             reservationDurationMin: effectiveDurationForCheck,
                         });
@@ -1695,12 +1704,12 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
             }
         }
 
-        if (await isTableInClosedRoom(effectiveTableId)) {
+        if (await isTableInClosedRoom(req.tenantId!, effectiveTableId)) {
             return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
         }
         if (effectiveTableId != null && reservation_time && shift) {
             const eventDate = new Date(reservation_time).toISOString().substring(0, 10);
-            const conflicts = await findTableConflicts(eventDate, shift, [effectiveTableId], {
+            const conflicts = await findTableConflicts(req.tenantId!, eventDate, shift, [effectiveTableId], {
                 reservationStart: reservation_time,
                 reservationDurationMin: effectiveDurationForCheck,
             });
@@ -1734,7 +1743,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
                 ORDER BY cc.is_vip DESC NULLS LAST, (cc.preferred_table_id IS NULL), cc.id ASC
                 LIMIT 1
             ) c ON true
-            LEFT JOIN tables pt ON pt.id = c.preferred_table_id`,
+            LEFT JOIN tables pt ON pt.id = c.preferred_table_id AND pt.tenant_id = ins.tenant_id`,
             [
                 customer_name,
                 reservation_time,
@@ -1834,7 +1843,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         const rawDuration = duration_minutes == null || duration_minutes === '' ? null : Number(duration_minutes);
         const durationValue: number | null = Number.isFinite(rawDuration) && rawDuration! > 0 ? Math.min(600, Math.max(15, Math.round(rawDuration!))) : null;
         const effectiveDurationForCheck = durationValue ?? (shift === 'LUNCH' ? 90 : 120);
-        if (await isTableInClosedRoom(table_id)) {
+        if (await isTableInClosedRoom(req.tenantId!, table_id)) {
             return res.status(400).json({ error: 'La sala selezionata è chiusa. Scegli un tavolo in una sala aperta.' });
         }
         // Both CANCELLED and DECLINED free the assigned table so it can be
@@ -1843,7 +1852,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         const effectiveTableId = releasesTable ? null : (table_id ?? null);
         if (!releasesTable && table_id != null && reservation_time && shift) {
             const eventDate = new Date(reservation_time).toISOString().substring(0, 10);
-            const conflicts = await findTableConflicts(eventDate, shift, [Number(table_id)], {
+            const conflicts = await findTableConflicts(req.tenantId!, eventDate, shift, [Number(table_id)], {
                 excludeReservationId: Number(id),
                 reservationStart: reservation_time,
                 reservationDurationMin: effectiveDurationForCheck,
@@ -1890,7 +1899,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 ORDER BY cc.is_vip DESC NULLS LAST, (cc.preferred_table_id IS NULL), cc.id ASC
                 LIMIT 1
             ) c ON true
-            LEFT JOIN tables pt ON pt.id = c.preferred_table_id`,
+            LEFT JOIN tables pt ON pt.id = c.preferred_table_id AND pt.tenant_id = upd.tenant_id`,
             [
                 customer_name,
                 reservation_time,
@@ -2181,7 +2190,7 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
                    ORDER BY cc.is_vip DESC NULLS LAST, (cc.preferred_table_id IS NULL), cc.id ASC
                    LIMIT 1
                ) c ON true
-               LEFT JOIN tables pt ON pt.id = c.preferred_table_id
+               LEFT JOIN tables pt ON pt.id = c.preferred_table_id AND pt.tenant_id = r.tenant_id
               WHERE r.id = ANY($1::int[])`,
             [[aId, bId]]
         );
@@ -3530,7 +3539,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
             `SELECT b.id, b.total_cents, b.covers, b.status, b.reservation_id, b.items,
                     t.name AS table_name
              FROM table_bills b
-             LEFT JOIN tables t ON t.id = b.table_id
+             LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
              WHERE b.share_token = $1
                AND b.status IN ('OPEN','LOCKED')
              FOR UPDATE OF b`,
@@ -4303,8 +4312,8 @@ app.post('/messages/suggest-reply', authenticate, requirePermission('reservation
             `SELECT r.customer_name, r.reservation_time, r.guests, r.notes, r.reservation_status AS status,
                     ro.name AS room_name
                FROM reservations r
-               LEFT JOIN tables t ON t.id = r.table_id
-               LEFT JOIN rooms ro ON ro.id = t.room_id
+               LEFT JOIN tables t ON t.id = r.table_id AND t.tenant_id = r.tenant_id
+               LEFT JOIN rooms ro ON ro.id = t.room_id AND ro.tenant_id = t.tenant_id
               WHERE r.phone IS NOT NULL AND r.phone <> ''
                 AND ${PHONE_MATCH_KEY_SQL('r.phone')} = ${PHONE_MATCH_KEY_SQL('$1')}
               ORDER BY abs(extract(epoch FROM (r.reservation_time - CURRENT_TIMESTAMP))) ASC
@@ -4670,7 +4679,7 @@ app.get('/payments', authenticate, requirePermission('payments:view'), async (re
              LEFT JOIN reservations r ON r.id = pr.reservation_id
              LEFT JOIN table_bill_splits tbs ON tbs.id = pr.table_bill_split_id
              LEFT JOIN table_bills tb ON tb.id = tbs.table_bill_id
-             LEFT JOIN tables t ON t.id = tb.table_id
+             LEFT JOIN tables t ON t.id = tb.table_id AND t.tenant_id = tb.tenant_id
              ${whereSql}
              ORDER BY pr.created_at DESC
              LIMIT $${params.length - 1} OFFSET $${params.length}`,
@@ -5655,7 +5664,7 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
 // Tables - require authentication
 app.get('/tables', authenticate, async (req, res) => {
     try {
-        const result = await queryWithRetry('SELECT * FROM tables ORDER BY name');
+        const result = await queryWithRetry('SELECT * FROM tables WHERE tenant_id = $1 ORDER BY name', [req.tenantId!]);
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -5666,9 +5675,15 @@ app.get('/tables', authenticate, async (req, res) => {
 app.post('/tables', authenticate, requirePermission('floorplan:full'), async (req, res) => {
     try {
         const { name, shape, seats, x, y, room_id, status, rotation } = req.body;
+        // La sala dev'essere del tenant: senza questo check un room_id altrui
+        // aggancerebbe il tavolo alla pianta di un altro ristorante.
+        if (room_id != null) {
+            const room = await queryWithRetry('SELECT id FROM rooms WHERE id = $1 AND tenant_id = $2', [room_id, req.tenantId!]);
+            if (room.rowCount === 0) return res.status(404).json({ error: 'Room not found' });
+        }
         const result = await queryWithRetry(
-            'INSERT INTO tables (name, shape, seats, x, y, room_id, status, rotation) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
-            [name, shape, seats, x, y, room_id, status, rotation || 0]
+            'INSERT INTO tables (tenant_id, name, shape, seats, x, y, room_id, status, rotation) VALUES ($9, $1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
+            [name, shape, seats, x, y, room_id, status, rotation || 0, req.tenantId!]
         );
         const newTable = result.rows[0];
 
@@ -5731,14 +5746,25 @@ app.put('/tables/:id', authenticate, requirePermission('floorplan:update_status'
             return res.status(400).json({ error: 'No fields to update' });
         }
 
+        // room_id arriva dal body: senza il check per tenant un id altrui
+        // sposterebbe il tavolo nella pianta di un altro ristorante.
+        if (req.body.room_id != null) {
+            const room = await queryWithRetry('SELECT id FROM rooms WHERE id = $1 AND tenant_id = $2', [req.body.room_id, req.tenantId!]);
+            if (room.rowCount === 0) return res.status(404).json({ error: 'Room not found' });
+        }
+
         values.push(id);
-        const query = `UPDATE tables SET ${fields.join(', ')} WHERE id = $${paramIndex} RETURNING *`;
+        values.push(req.tenantId!);
+        const query = `UPDATE tables SET ${fields.join(', ')} WHERE id = $${paramIndex} AND tenant_id = $${paramIndex + 1} RETURNING *`;
 
         console.log('SQL Query:', query);
         console.log('Values:', values);
 
         const result = await queryWithRetry(query, values);
         const updatedTable = result.rows[0];
+        if (!updatedTable) {
+            return res.status(404).json({ error: 'Table not found' });
+        }
 
         console.log('Updated table merged_with:', updatedTable.merged_with);
 
@@ -5772,10 +5798,10 @@ app.delete('/tables/:id', authenticate, requirePermission('floorplan:full'), asy
         const { id } = req.params;
 
         // Get table name before deleting
-        const existing = await queryWithRetry('SELECT name FROM tables WHERE id = $1', [id]);
+        const existing = await queryWithRetry('SELECT name FROM tables WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
         const resourceName = existing.rows[0]?.name;
 
-        await queryWithRetry('DELETE FROM tables WHERE id = $1', [id]);
+        await queryWithRetry('DELETE FROM tables WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
 
         // Log activity
         if (req.user) {
@@ -5816,8 +5842,8 @@ app.get('/table-merges', authenticate, async (req, res) => {
             return res.status(400).json({ error: 'shift must be LUNCH or DINNER' });
         }
         const result = await queryWithRetry(
-            'SELECT id, date, shift, primary_id, merged_ids FROM table_merges WHERE date = $1 AND shift = $2',
-            [date, shift]
+            'SELECT id, date, shift, primary_id, merged_ids FROM table_merges WHERE date = $1 AND shift = $2 AND tenant_id = $3',
+            [date, shift, req.tenantId!]
         );
         res.json(result.rows);
     } catch (err) {
@@ -5837,13 +5863,24 @@ app.post('/table-merges', authenticate, requirePermission('floorplan:full'), asy
         if (shift !== 'LUNCH' && shift !== 'DINNER') {
             return res.status(400).json({ error: 'shift must be LUNCH or DINNER' });
         }
+        // Tutti i tavoli coinvolti devono essere del tenant PRIMA dell'upsert:
+        // il vincolo resta (date, shift, primary_id), quindi un primary_id
+        // altrui farebbe DO UPDATE sull'unione di un altro ristorante.
+        const allIds = [primary_id, ...merged_ids];
+        const owned = await queryWithRetry(
+            'SELECT id FROM tables WHERE id = ANY($1::int[]) AND tenant_id = $2',
+            [allIds, req.tenantId!]
+        );
+        if ((owned.rowCount ?? 0) !== new Set(allIds).size) {
+            return res.status(404).json({ error: 'Table not found' });
+        }
         const result = await queryWithRetry(
-            `INSERT INTO table_merges (date, shift, primary_id, merged_ids)
-             VALUES ($1, $2, $3, $4)
+            `INSERT INTO table_merges (tenant_id, date, shift, primary_id, merged_ids)
+             VALUES ($5, $1, $2, $3, $4)
              ON CONFLICT (date, shift, primary_id)
              DO UPDATE SET merged_ids = EXCLUDED.merged_ids
              RETURNING id, date, shift, primary_id, merged_ids`,
-            [date, shift, primary_id, merged_ids]
+            [date, shift, primary_id, merged_ids, req.tenantId!]
         );
         const merge = result.rows[0];
 
@@ -5881,9 +5918,9 @@ app.delete('/table-merges', authenticate, requirePermission('floorplan:full'), a
         }
         const result = await queryWithRetry(
             `DELETE FROM table_merges
-             WHERE date = $1 AND shift = $2 AND primary_id = $3
+             WHERE date = $1 AND shift = $2 AND primary_id = $3 AND tenant_id = $4
              RETURNING id, date, shift, primary_id, merged_ids`,
-            [date, shift, primary_id]
+            [date, shift, primary_id, req.tenantId!]
         );
         if (result.rowCount === 0) {
             return res.status(404).json({ error: 'Merge not found' });
@@ -5931,15 +5968,16 @@ app.get('/table-hidden', authenticate, async (req, res) => {
                 return res.status(400).json({ error: 'shift must be LUNCH or DINNER' });
             }
             const result = await queryWithRetry(
-                'SELECT id, date, shift, table_id FROM table_hidden_overrides WHERE date = $1 AND shift = $2',
-                [date, shift]
+                'SELECT id, date, shift, table_id FROM table_hidden_overrides WHERE date = $1 AND shift = $2 AND tenant_id = $3',
+                [date, shift, req.tenantId!]
             );
             return res.json(result.rows);
         }
-        const whereClause = scope === 'all' ? '' : 'WHERE date >= CURRENT_DATE';
+        const whereClause = scope === 'all' ? 'WHERE tenant_id = $1' : 'WHERE tenant_id = $1 AND date >= CURRENT_DATE';
         const result = await queryWithRetry(
             `SELECT id, date, shift, table_id FROM table_hidden_overrides ${whereClause}
-             ORDER BY date ASC, shift ASC`
+             ORDER BY date ASC, shift ASC`,
+            [req.tenantId!]
         );
         res.json(result.rows);
     } catch (err) {
@@ -5961,6 +5999,12 @@ app.post('/table-hidden', authenticate, requirePermission('floorplan:full'), asy
             return res.status(400).json({ error: 'shift must be LUNCH or DINNER' });
         }
 
+        // Il tavolo dev'essere del tenant PRIMA dell'upsert: il vincolo resta
+        // (date, shift, table_id), quindi un table_id altrui farebbe
+        // DO UPDATE sull'override di un altro ristorante.
+        const tbl = await queryWithRetry('SELECT id FROM tables WHERE id = $1 AND tenant_id = $2', [table_id, req.tenantId!]);
+        if (tbl.rowCount === 0) return res.status(404).json({ error: 'Table not found' });
+
         // Block if a reservation is on this table for the given date+shift.
         const reservationCheck = await queryWithRetry(
             `SELECT id, customer_name FROM reservations
@@ -5981,8 +6025,8 @@ app.post('/table-hidden', authenticate, requirePermission('floorplan:full'), asy
         // either as primary or inside merged_ids.
         const mergeCheck = await queryWithRetry(
             `SELECT id, primary_id, merged_ids FROM table_merges
-             WHERE date = $1 AND shift = $2 AND ($3 = primary_id OR $3 = ANY(merged_ids))`,
-            [date, shift, table_id]
+             WHERE date = $1 AND shift = $2 AND tenant_id = $4 AND ($3 = primary_id OR $3 = ANY(merged_ids))`,
+            [date, shift, table_id, req.tenantId!]
         );
         if (mergeCheck.rowCount && mergeCheck.rowCount > 0) {
             return res.status(409).json({
@@ -5992,11 +6036,11 @@ app.post('/table-hidden', authenticate, requirePermission('floorplan:full'), asy
         }
 
         const result = await queryWithRetry(
-            `INSERT INTO table_hidden_overrides (date, shift, table_id)
-             VALUES ($1, $2, $3)
+            `INSERT INTO table_hidden_overrides (tenant_id, date, shift, table_id)
+             VALUES ($4, $1, $2, $3)
              ON CONFLICT (date, shift, table_id) DO UPDATE SET date = EXCLUDED.date
              RETURNING id, date, shift, table_id`,
-            [date, shift, table_id]
+            [date, shift, table_id, req.tenantId!]
         );
         const hidden = result.rows[0];
 
@@ -6031,9 +6075,9 @@ app.delete('/table-hidden', authenticate, requirePermission('floorplan:full'), a
         }
         const result = await queryWithRetry(
             `DELETE FROM table_hidden_overrides
-             WHERE date = $1 AND shift = $2 AND table_id = $3
+             WHERE date = $1 AND shift = $2 AND table_id = $3 AND tenant_id = $4
              RETURNING id, date, shift, table_id`,
-            [date, shift, table_id]
+            [date, shift, table_id, req.tenantId!]
         );
         if (result.rowCount === 0) {
             return res.status(404).json({ error: 'Hidden override not found' });
@@ -6082,17 +6126,18 @@ app.get('/room-closed', authenticate, async (req, res) => {
                 return res.status(400).json({ error: 'shift must be LUNCH or DINNER' });
             }
             const result = await queryWithRetry(
-                'SELECT id, date, shift, room_id FROM room_closed_overrides WHERE date = $1 AND shift = $2',
-                [date, shift]
+                'SELECT id, date, shift, room_id FROM room_closed_overrides WHERE date = $1 AND shift = $2 AND tenant_id = $3',
+                [date, shift, req.tenantId!]
             );
             return res.json(result.rows);
         }
         // Aggregate list. scope=all returns everything, otherwise only future
         // (date >= today) rows so the panel defaults to what's actionable.
-        const whereClause = scope === 'all' ? '' : 'WHERE date >= CURRENT_DATE';
+        const whereClause = scope === 'all' ? 'WHERE tenant_id = $1' : 'WHERE tenant_id = $1 AND date >= CURRENT_DATE';
         const result = await queryWithRetry(
             `SELECT id, date, shift, room_id FROM room_closed_overrides ${whereClause}
-             ORDER BY date ASC, shift ASC`
+             ORDER BY date ASC, shift ASC`,
+            [req.tenantId!]
         );
         res.json(result.rows);
     } catch (err) {
@@ -6113,6 +6158,12 @@ app.post('/room-closed', authenticate, requirePermission('floorplan:full'), asyn
         if (shift !== 'LUNCH' && shift !== 'DINNER') {
             return res.status(400).json({ error: 'shift must be LUNCH or DINNER' });
         }
+
+        // La sala dev'essere del tenant PRIMA dell'upsert: il vincolo resta
+        // (date, shift, room_id), quindi un room_id altrui farebbe
+        // DO UPDATE sull'override di un altro ristorante.
+        const room = await queryWithRetry('SELECT id FROM rooms WHERE id = $1 AND tenant_id = $2', [room_id, req.tenantId!]);
+        if (room.rowCount === 0) return res.status(404).json({ error: 'Room not found' });
 
         // Block if any active reservation is on a table of this room for the
         // given date+shift. Uses the same "active" semantics as public/rooms:
@@ -6136,11 +6187,11 @@ app.post('/room-closed', authenticate, requirePermission('floorplan:full'), asyn
         }
 
         const result = await queryWithRetry(
-            `INSERT INTO room_closed_overrides (date, shift, room_id)
-             VALUES ($1, $2, $3)
+            `INSERT INTO room_closed_overrides (tenant_id, date, shift, room_id)
+             VALUES ($4, $1, $2, $3)
              ON CONFLICT (date, shift, room_id) DO UPDATE SET date = EXCLUDED.date
              RETURNING id, date, shift, room_id`,
-            [date, shift, room_id]
+            [date, shift, room_id, req.tenantId!]
         );
         const closed = result.rows[0];
 
@@ -6175,9 +6226,9 @@ app.delete('/room-closed', authenticate, requirePermission('floorplan:full'), as
         }
         const result = await queryWithRetry(
             `DELETE FROM room_closed_overrides
-             WHERE date = $1 AND shift = $2 AND room_id = $3
+             WHERE date = $1 AND shift = $2 AND room_id = $3 AND tenant_id = $4
              RETURNING id, date, shift, room_id`,
-            [date, shift, room_id]
+            [date, shift, room_id, req.tenantId!]
         );
         if (result.rowCount === 0) {
             return res.status(404).json({ error: 'Room closed override not found' });
@@ -6214,6 +6265,7 @@ app.get('/rooms', authenticate, async (req, res) => {
         // Names not in the list fall to the end, alphabetically.
         const result = await queryWithRetry(`
             SELECT * FROM rooms
+            WHERE tenant_id = $1
             ORDER BY
                 CASE LOWER(TRIM(name))
                     WHEN 'veranda'   THEN 1
@@ -6225,7 +6277,7 @@ app.get('/rooms', authenticate, async (req, res) => {
                     ELSE 99
                 END,
                 name
-        `);
+        `, [req.tenantId!]);
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -6237,8 +6289,8 @@ app.post('/rooms', authenticate, requirePermission('floorplan:full'), async (req
     try {
         const { name, width, height } = req.body;
         const result = await queryWithRetry(
-            'INSERT INTO rooms (name, width, height) VALUES ($1, $2, $3) RETURNING *',
-            [name, width, height]
+            'INSERT INTO rooms (tenant_id, name, width, height) VALUES ($4, $1, $2, $3) RETURNING *',
+            [name, width, height, req.tenantId!]
         );
         const newRoom = result.rows[0];
 
@@ -6274,8 +6326,8 @@ app.patch('/rooms/:id', authenticate, requirePermission('floorplan:full'), async
             return res.status(400).json({ error: 'is_closed must be boolean' });
         }
         const result = await queryWithRetry(
-            'UPDATE rooms SET is_closed = $1 WHERE id = $2 RETURNING *',
-            [is_closed, id]
+            'UPDATE rooms SET is_closed = $1 WHERE id = $2 AND tenant_id = $3 RETURNING *',
+            [is_closed, id, req.tenantId!]
         );
         const updatedRoom = result.rows[0];
         if (!updatedRoom) {
@@ -6309,10 +6361,10 @@ app.delete('/rooms/:id', authenticate, requirePermission('floorplan:full'), asyn
         const { id } = req.params;
 
         // Get room name before deleting
-        const existing = await queryWithRetry('SELECT name FROM rooms WHERE id = $1', [id]);
+        const existing = await queryWithRetry('SELECT name FROM rooms WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
         const resourceName = existing.rows[0]?.name;
 
-        await queryWithRetry('DELETE FROM rooms WHERE id = $1', [id]);
+        await queryWithRetry('DELETE FROM rooms WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
 
         // Log activity
         if (req.user) {
@@ -6341,7 +6393,7 @@ app.delete('/rooms/:id', authenticate, requirePermission('floorplan:full'), asyn
 // Dishes - require authentication
 app.get('/dishes', authenticate, async (req, res) => {
     try {
-        const result = await queryWithRetry('SELECT * FROM dishes ORDER BY category, name');
+        const result = await queryWithRetry('SELECT * FROM dishes WHERE tenant_id = $1 ORDER BY category, name', [req.tenantId!]);
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -6353,8 +6405,8 @@ app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, re
     try {
         const { name, description, price, category, allergens, photo_url } = req.body;
         const result = await queryWithRetry(
-            'INSERT INTO dishes (name, description, price, category, allergens, photo_url) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-            [name, description, price, category, allergens, photo_url || null]
+            'INSERT INTO dishes (tenant_id, name, description, price, category, allergens, photo_url) VALUES ($7, $1, $2, $3, $4, $5, $6) RETURNING *',
+            [name, description, price, category, allergens, photo_url || null, req.tenantId!]
         );
         const newDish = result.rows[0];
 
@@ -6387,10 +6439,13 @@ app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req,
         const { id } = req.params;
         const { name, description, price, category, allergens, photo_url } = req.body;
         const result = await queryWithRetry(
-            'UPDATE dishes SET name = $1, description = $2, price = $3, category = $4, allergens = $5, photo_url = $6 WHERE id = $7 RETURNING *',
-            [name, description, price, category, allergens, photo_url || null, id]
+            'UPDATE dishes SET name = $1, description = $2, price = $3, category = $4, allergens = $5, photo_url = $6 WHERE id = $7 AND tenant_id = $8 RETURNING *',
+            [name, description, price, category, allergens, photo_url || null, id, req.tenantId!]
         );
         const updatedDish = result.rows[0];
+        if (!updatedDish) {
+            return res.status(404).json({ error: 'Dish not found' });
+        }
 
         // Log activity
         if (req.user) {
@@ -6421,10 +6476,10 @@ app.delete('/dishes/:id', authenticate, requirePermission('menu:full'), async (r
         const { id } = req.params;
 
         // Get dish name before deleting
-        const existing = await queryWithRetry('SELECT name FROM dishes WHERE id = $1', [id]);
+        const existing = await queryWithRetry('SELECT name FROM dishes WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
         const resourceName = existing.rows[0]?.name;
 
-        await queryWithRetry('DELETE FROM dishes WHERE id = $1', [id]);
+        await queryWithRetry('DELETE FROM dishes WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
 
         // Log activity
         if (req.user) {
@@ -7581,8 +7636,8 @@ app.post('/customers/:sourceId/merge-into/:targetId', authenticate, requirePermi
         // Re-parent banquet menus (real FK, ON DELETE SET NULL — we want to
         // preserve the association).
         await client.query(
-            `UPDATE banquet_menus SET customer_id = $1 WHERE customer_id = $2`,
-            [targetId, sourceId]
+            `UPDATE banquet_menus SET customer_id = $1 WHERE customer_id = $2 AND tenant_id = $3`,
+            [targetId, sourceId, req.tenantId!]
         );
 
         // Backfill target fields that are empty from the source. Notes are
@@ -8285,6 +8340,29 @@ app.post('/inventory/movements', authenticate, requirePermission('inventory:full
     }
 });
 
+// dish_ids e table_ids dei banchetti sono array senza FK a livello DB:
+// il tenant va verificato a mano, o un id altrui finirebbe nel menù.
+// Ritorna il messaggio d'errore (→ 404) o null se tutto è del tenant.
+async function banquetFkGuard(tenantId: number, dishIds: number[], tableIds: number[]): Promise<string | null> {
+    const uniqueDishes = [...new Set(dishIds)];
+    if (uniqueDishes.length > 0) {
+        const owned = await queryWithRetry(
+            'SELECT id FROM dishes WHERE id = ANY($1::int[]) AND tenant_id = $2',
+            [uniqueDishes, tenantId]
+        );
+        if ((owned.rowCount ?? 0) !== uniqueDishes.length) return 'Dish not found';
+    }
+    const uniqueTables = [...new Set(tableIds)];
+    if (uniqueTables.length > 0) {
+        const owned = await queryWithRetry(
+            'SELECT id FROM tables WHERE id = ANY($1::int[]) AND tenant_id = $2',
+            [uniqueTables, tenantId]
+        );
+        if ((owned.rowCount ?? 0) !== uniqueTables.length) return 'Table not found';
+    }
+    return null;
+}
+
 // Banquet Menus - require authentication
 app.get('/banquet-menus', authenticate, async (req, res) => {
     try {
@@ -8296,7 +8374,9 @@ app.get('/banquet-menus', authenticate, async (req, res) => {
                     b.discount_type, b.discount_value,
                     COALESCE((SELECT SUM(amount) FROM banquet_payments WHERE banquet_id = b.id), 0)::float AS total_paid
              FROM banquet_menus b
-             ORDER BY b.event_date NULLS LAST, b.name`
+             WHERE b.tenant_id = $1
+             ORDER BY b.event_date NULLS LAST, b.name`,
+            [req.tenantId!]
         );
         res.json(result.rows);
     } catch (err) {
@@ -8326,8 +8406,12 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
         const tableIdsArr: number[] = Array.isArray(table_ids)
             ? table_ids.map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n))
             : [];
+        // Piatti e tavoli arrivano dal body: devono essere del tenant, o il
+        // banchetto punterebbe a record di un altro ristorante.
+        const fkError = await banquetFkGuard(req.tenantId!, flatDishIds, tableIdsArr);
+        if (fkError) return res.status(404).json({ error: fkError });
         if (tableIdsArr.length > 0 && shift) {
-            const conflicts = await findTableConflicts(event_date, shift, tableIdsArr);
+            const conflicts = await findTableConflicts(req.tenantId!, event_date, shift, tableIdsArr);
             if (conflicts.length > 0) {
                 return res.status(409).json({
                     error: buildConflictMessage(conflicts),
@@ -8336,8 +8420,8 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
             }
         }
         const result = await queryWithRetry(
-            "INSERT INTO banquet_menus (name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids, discount_type, discount_value) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids, discount_type, discount_value",
-            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, childrenCount, childrenPrice, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, customer_id ?? null, tableIdsArr.length > 0 ? tableIdsArr : null, normalizedDiscountType, normalizedDiscountValue]
+            "INSERT INTO banquet_menus (tenant_id, name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids, discount_type, discount_value) VALUES ($19, $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids, discount_type, discount_value",
+            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, childrenCount, childrenPrice, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, customer_id ?? null, tableIdsArr.length > 0 ? tableIdsArr : null, normalizedDiscountType, normalizedDiscountValue, req.tenantId!]
         );
         const newMenu = result.rows[0];
 
@@ -8391,8 +8475,10 @@ app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), asyn
         const tableIdsArr: number[] = Array.isArray(table_ids)
             ? table_ids.map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n))
             : [];
+        const fkError = await banquetFkGuard(req.tenantId!, flatDishIds, tableIdsArr);
+        if (fkError) return res.status(404).json({ error: fkError });
         if (tableIdsArr.length > 0 && shift) {
-            const conflicts = await findTableConflicts(event_date, shift, tableIdsArr, { excludeBanquetId: Number(id) });
+            const conflicts = await findTableConflicts(req.tenantId!, event_date, shift, tableIdsArr, { excludeBanquetId: Number(id) });
             if (conflicts.length > 0) {
                 return res.status(409).json({
                     error: buildConflictMessage(conflicts),
@@ -8401,10 +8487,13 @@ app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), asyn
             }
         }
         const result = await queryWithRetry(
-            "UPDATE banquet_menus SET name = $1, description = $2, price_per_person = $3, dish_ids = $4, courses = $5::jsonb, event_date = $6, shift = $7, deposit_amount = $8, guests = $9, children = $10, children_price = $11, notes_courses = $12, notes_service = $13, notes_mise_en_place = $14, customer_id = $15, table_ids = $16, discount_type = $17, discount_value = $18 WHERE id = $19 RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids, discount_type, discount_value",
-            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, childrenCount, childrenPrice, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, customer_id ?? null, tableIdsArr.length > 0 ? tableIdsArr : null, normalizedDiscountType, normalizedDiscountValue, id]
+            "UPDATE banquet_menus SET name = $1, description = $2, price_per_person = $3, dish_ids = $4, courses = $5::jsonb, event_date = $6, shift = $7, deposit_amount = $8, guests = $9, children = $10, children_price = $11, notes_courses = $12, notes_service = $13, notes_mise_en_place = $14, customer_id = $15, table_ids = $16, discount_type = $17, discount_value = $18 WHERE id = $19 AND tenant_id = $20 RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids, discount_type, discount_value",
+            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, childrenCount, childrenPrice, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, customer_id ?? null, tableIdsArr.length > 0 ? tableIdsArr : null, normalizedDiscountType, normalizedDiscountValue, id, req.tenantId!]
         );
         const updatedMenu = result.rows[0];
+        if (!updatedMenu) {
+            return res.status(404).json({ error: 'Banquet not found' });
+        }
 
         // Log activity
         if (req.user) {
@@ -8440,10 +8529,10 @@ app.delete('/banquet-menus/:id', authenticate, requirePermission('menu:full'), a
         const { id } = req.params;
 
         // Get menu name before deleting
-        const existing = await queryWithRetry('SELECT name FROM banquet_menus WHERE id = $1', [id]);
+        const existing = await queryWithRetry('SELECT name FROM banquet_menus WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
         const resourceName = existing.rows[0]?.name;
 
-        await queryWithRetry('DELETE FROM banquet_menus WHERE id = $1', [id]);
+        await queryWithRetry('DELETE FROM banquet_menus WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
 
         // Log activity
         if (req.user) {
@@ -8484,10 +8573,11 @@ app.get('/banquet-menus/:id/payments', authenticate, requirePermission('banquet:
                     p.payment_type, p.payment_method, p.notes, p.created_by_user_id, p.created_at,
                     u.full_name AS created_by_user_name
              FROM banquet_payments p
+             JOIN banquet_menus b ON b.id = p.banquet_id AND b.tenant_id = $2
              LEFT JOIN users u ON p.created_by_user_id = u.id
              WHERE p.banquet_id = $1
              ORDER BY p.payment_date DESC, p.id DESC`,
-            [id]
+            [id, req.tenantId!]
         );
         res.json(result.rows);
     } catch (err) {
@@ -8515,18 +8605,18 @@ app.post('/banquet-menus/:id/payments', authenticate, requirePermission('banquet
             return res.status(400).json({ error: 'invalid payment_method' });
         }
 
-        const banquetCheck = await queryWithRetry('SELECT id, name FROM banquet_menus WHERE id = $1', [id]);
+        const banquetCheck = await queryWithRetry('SELECT id, name FROM banquet_menus WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
         if (banquetCheck.rows.length === 0) {
             return res.status(404).json({ error: 'Banquet not found' });
         }
         const banquetName = banquetCheck.rows[0].name;
 
         const result = await queryWithRetry(
-            `INSERT INTO banquet_payments (banquet_id, amount, payment_date, payment_type, payment_method, notes, created_by_user_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
+            `INSERT INTO banquet_payments (tenant_id, banquet_id, amount, payment_date, payment_type, payment_method, notes, created_by_user_id)
+             VALUES ($8, $1, $2, $3, $4, $5, $6, $7)
              RETURNING id, banquet_id, amount, TO_CHAR(payment_date, 'YYYY-MM-DD') AS payment_date,
                        payment_type, payment_method, notes, created_by_user_id, created_at`,
-            [id, amount, payment_date, payment_type, payment_method, notes ?? null, req.user?.userId ?? null]
+            [id, amount, payment_date, payment_type, payment_method, notes ?? null, req.user?.userId ?? null, req.tenantId!]
         );
         const newPayment = result.rows[0];
 
@@ -8551,8 +8641,8 @@ app.post('/banquet-menus/:id/payments', authenticate, requirePermission('banquet
                     b.notes_mise_en_place, b.customer_id, b.table_ids,
                     b.discount_type, b.discount_value,
                     COALESCE((SELECT SUM(amount) FROM banquet_payments WHERE banquet_id = b.id), 0)::float AS total_paid
-             FROM banquet_menus b WHERE b.id = $1`,
-            [id]
+             FROM banquet_menus b WHERE b.id = $1 AND b.tenant_id = $2`,
+            [id, req.tenantId!]
         );
         if (socketService && refreshed.rows[0]) socketService.broadcastBanquetUpdated(refreshed.rows[0]);
 
@@ -8570,15 +8660,15 @@ app.delete('/banquet-menus/:id/payments/:paymentId', authenticate, requirePermis
             `SELECT p.amount, p.payment_type, b.name AS banquet_name
              FROM banquet_payments p
              JOIN banquet_menus b ON p.banquet_id = b.id
-             WHERE p.id = $1 AND p.banquet_id = $2`,
-            [paymentId, id]
+             WHERE p.id = $1 AND p.banquet_id = $2 AND b.tenant_id = $3`,
+            [paymentId, id, req.tenantId!]
         );
         if (existing.rows.length === 0) {
             return res.status(404).json({ error: 'Payment not found' });
         }
         const { amount, payment_type, banquet_name } = existing.rows[0];
 
-        await queryWithRetry('DELETE FROM banquet_payments WHERE id = $1 AND banquet_id = $2', [paymentId, id]);
+        await queryWithRetry('DELETE FROM banquet_payments WHERE id = $1 AND banquet_id = $2 AND tenant_id = $3', [paymentId, id, req.tenantId!]);
 
         if (req.user) {
             LogService.logActivity(
@@ -8600,8 +8690,8 @@ app.delete('/banquet-menus/:id/payments/:paymentId', authenticate, requirePermis
                     b.notes_mise_en_place, b.customer_id, b.table_ids,
                     b.discount_type, b.discount_value,
                     COALESCE((SELECT SUM(amount) FROM banquet_payments WHERE banquet_id = b.id), 0)::float AS total_paid
-             FROM banquet_menus b WHERE b.id = $1`,
-            [id]
+             FROM banquet_menus b WHERE b.id = $1 AND b.tenant_id = $2`,
+            [id, req.tenantId!]
         );
         if (socketService && refreshed.rows[0]) socketService.broadcastBanquetUpdated(refreshed.rows[0]);
 
@@ -10919,7 +11009,7 @@ async function resolveReservationRoomName(reservation: { table_id?: number | nul
     if (reservation.table_id) {
         try {
             const r = await queryWithRetry(
-                `SELECT rm.name FROM tables t JOIN rooms rm ON rm.id = t.room_id WHERE t.id = $1`,
+                `SELECT rm.name FROM tables t JOIN rooms rm ON rm.id = t.room_id AND rm.tenant_id = t.tenant_id WHERE t.id = $1`,
                 [reservation.table_id]
             );
             const name = r.rows[0]?.name;
@@ -14089,7 +14179,7 @@ app.put('/settings/channels', authenticate, requirePermission('settings:full'), 
         // would silently never apply and the operator would think it does.
         if (normalizedCaps.length > 0) {
             try {
-                const known = await queryWithRetry('SELECT id FROM rooms WHERE id = ANY($1::int[])', [normalizedCaps.map(c => c.room_id)]);
+                const known = await queryWithRetry('SELECT id FROM rooms WHERE id = ANY($1::int[]) AND tenant_id = $2', [normalizedCaps.map(c => c.room_id), req.tenantId!]);
                 const knownIds = new Set<number>(known.rows.map((r: any) => Number(r.id)));
                 const unknown = normalizedCaps.filter(c => !knownIds.has(c.room_id)).map(c => c.room_id);
                 if (unknown.length > 0) {
@@ -15657,7 +15747,7 @@ app.get('/public/rooms', async (req, res) => {
     try {
         // Stessa definizione di "tavolo assegnabile" usata dall'assegnazione
         // automatica: una sala compare solo se ha davvero qualcosa da dare.
-        const rooms = await listBookableRooms(date, shift as Shift, guests);
+        const rooms = await listBookableRooms(PUBLIC_TENANT_ID, date, shift as Shift, guests);
         // `over_threshold` = la sala è oltre il proprio limite di occupazione
         // (default 70%): la prenotazione lì NON si auto-conferma ma diventa una
         // richiesta che approva lo staff. È esattamente lo stesso insieme usato
@@ -15791,8 +15881,8 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         const dup = await queryWithRetry(
             `SELECT r.id, r.reservation_status, ro.name AS room_name
              FROM reservations r
-             LEFT JOIN tables t ON t.id = r.table_id
-             LEFT JOIN rooms ro ON ro.id = t.room_id
+             LEFT JOIN tables t ON t.id = r.table_id AND t.tenant_id = r.tenant_id
+             LEFT JOIN rooms ro ON ro.id = t.room_id AND ro.tenant_id = t.tenant_id
              WHERE r.reservation_time = $1
                AND r.reservation_status <> 'CANCELLED'
                AND r.created_at > NOW() - INTERVAL '30 minutes'
@@ -15844,11 +15934,12 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
             const roomRes = await queryWithRetry(
                 `SELECT name FROM rooms
                  WHERE id = $1
+                   AND tenant_id = $4
                    AND is_closed = false
                    AND id NOT IN (
-                       SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3
+                       SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3 AND tenant_id = $4
                    )`,
-                [requestedRoomId, date, shift]
+                [requestedRoomId, date, shift, PUBLIC_TENANT_ID]
             );
             if (roomRes.rows[0]) {
                 requestedRoomName = roomRes.rows[0].name;
@@ -15930,7 +16021,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         // Se succede molliamo il tavolo e torniamo al flusso manuale: meglio
         // una conferma in meno che due clienti sullo stesso tavolo.
         if (autoConfirmed && autoTable) {
-            const clash = await findTableConflicts(date, shift as string, [autoTable.id], {
+            const clash = await findTableConflicts(PUBLIC_TENANT_ID, date, shift as string, [autoTable.id], {
                 excludeReservationId: created.id,
             });
             if (clash.length > 0) {
@@ -16587,7 +16678,7 @@ async function fireCourseInTx(client: any, orderId: number, courseNo: number): P
         `WITH prep AS (
              SELECT oi.id, COALESCE(d.prep_minutes, 0) AS p
              FROM order_items oi
-             LEFT JOIN dishes d ON d.id = oi.dish_id
+             LEFT JOIN dishes d ON d.id = oi.dish_id AND d.tenant_id = oi.tenant_id
              WHERE oi.order_id = $1 AND oi.course_no = $2 AND oi.status = 'QUEUED'
          ), mx AS (
              SELECT COALESCE(MAX(p), 0) AS m FROM prep
@@ -16616,19 +16707,22 @@ async function fireCourseInTx(client: any, orderId: number, courseNo: number): P
 // lanciata di cui la cucina non sa niente è il caso peggiore.
 async function enqueueCoursePrintsInTx(client: any, orderId: number, courseNo: number, firedRows: any[]): Promise<void> {
     const ctx = await client.query(
-        `SELECT o.covers, t.name AS table_name
-         FROM orders o LEFT JOIN tables t ON t.id = o.table_id
+        `SELECT o.covers, o.tenant_id, t.name AS table_name
+         FROM orders o LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
          WHERE o.id = $1`,
         [orderId]
     );
     const tableName = ctx.rows[0]?.table_name ?? null;
     const covers = ctx.rows[0]?.covers ?? null;
+    // Il tenant della comanda pilota il lookup dei centri: senza filtro una
+    // station_id altrui manderebbe la comanda sulla termica di un altro locale.
+    const orderTenantId = ctx.rows[0]?.tenant_id ?? PUBLIC_TENANT_ID;
 
     const stationIds = [...new Set(firedRows.map(r => r.station_id).filter((s: any) => s != null))];
     if (stationIds.length === 0) return;
     const st = await client.query(
-        `SELECT id, name, printer FROM stations WHERE id = ANY($1::int[]) AND printer IS NOT NULL`,
-        [stationIds]
+        `SELECT id, name, printer FROM stations WHERE id = ANY($1::int[]) AND tenant_id = $2 AND printer IS NOT NULL`,
+        [stationIds, orderTenantId]
     );
 
     for (const station of st.rows) {
@@ -16701,9 +16795,21 @@ app.post('/orders', authenticate, requirePermission('orders:take'), async (req, 
         }
         if (!Number.isFinite(covers) || covers <= 0) covers = 1;
 
+        // Il tavolo (dal body o ereditato) dev'essere del tenant: la FK da
+        // sola non lo garantisce, gli id sono globali.
+        if (tableId != null) {
+            const tbl = await queryWithRetry(`SELECT id FROM tables WHERE id = $1 AND tenant_id = $2`, [tableId, req.tenantId!]);
+            if (tbl.rows.length === 0) return res.status(404).json({ error: 'Tavolo non trovato' });
+        }
+
         let priceListId = req.body?.price_list_id != null ? Number(req.body.price_list_id) : null;
-        if (priceListId == null) {
-            const pl = await queryWithRetry(`SELECT id FROM menu_price_lists WHERE is_default LIMIT 1`);
+        if (priceListId != null) {
+            // Il listino arriva dal body: dev'essere del tenant, o la comanda
+            // prezzerebbe col listino di un altro ristorante.
+            const pl = await queryWithRetry(`SELECT id FROM menu_price_lists WHERE id = $1 AND tenant_id = $2`, [priceListId, req.tenantId!]);
+            if (pl.rows.length === 0) return res.status(404).json({ error: 'Listino non trovato' });
+        } else {
+            const pl = await queryWithRetry(`SELECT id FROM menu_price_lists WHERE tenant_id = $1 AND is_default LIMIT 1`, [req.tenantId!]);
             priceListId = pl.rows[0]?.id ?? null;
         }
 
@@ -16767,14 +16873,14 @@ app.post('/orders', authenticate, requirePermission('orders:take'), async (req, 
 // piatto — in sala la latenza si nota.
 //
 // Sta sotto /menu e non sotto /orders per non collidere con /orders/:id.
-app.get('/menu/catalogue', authenticate, requirePermission('orders:view'), async (_req, res) => {
+app.get('/menu/catalogue', authenticate, requirePermission('orders:view'), async (req, res) => {
     try {
         const [lists, stations, groups, mods, links] = await Promise.all([
-            queryWithRetry(`SELECT id, name, is_default, is_active, sort_order FROM menu_price_lists WHERE is_active ORDER BY sort_order, id`),
-            queryWithRetry(`SELECT id, name, color, sort_order, is_active FROM stations WHERE is_active ORDER BY sort_order, id`),
-            queryWithRetry(`SELECT id, name, min_select, max_select, sort_order FROM modifier_groups ORDER BY sort_order, id`),
-            queryWithRetry(`SELECT id, group_id, name, price_delta_cents, is_active, sort_order FROM modifiers WHERE is_active ORDER BY sort_order, id`),
-            queryWithRetry(`SELECT dish_id, group_id FROM dish_modifier_groups`),
+            queryWithRetry(`SELECT id, name, is_default, is_active, sort_order FROM menu_price_lists WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
+            queryWithRetry(`SELECT id, name, color, sort_order, is_active FROM stations WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
+            queryWithRetry(`SELECT id, name, min_select, max_select, sort_order FROM modifier_groups WHERE tenant_id = $1 ORDER BY sort_order, id`, [req.tenantId!]),
+            queryWithRetry(`SELECT id, group_id, name, price_delta_cents, is_active, sort_order FROM modifiers WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
+            queryWithRetry(`SELECT dish_id, group_id FROM dish_modifier_groups WHERE tenant_id = $1`, [req.tenantId!]),
         ]);
         res.json({
             price_lists: lists.rows,
@@ -16829,7 +16935,7 @@ app.get('/tables/bills-status', authenticate, requirePermission('orders:view'), 
                     (SELECT COUNT(*)::int FROM orders o
                      WHERE o.table_bill_id = b.id AND o.status = 'OPEN') AS open_orders
              FROM table_bills b
-             LEFT JOIN tables t ON t.id = b.table_id
+             LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
              WHERE b.table_id IS NOT NULL
                AND b.status IN ('OPEN','LOCKED')
                AND b.service_date = $1 AND b.shift = $2`,
@@ -16958,8 +17064,8 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
                 `SELECT d.id, d.name, d.price,
                         COALESCE(d.station_id, cs.station_id) AS station_id
                  FROM dishes d
-                 LEFT JOIN category_stations cs ON cs.category = d.category
-                 WHERE d.id = $1`, [dishId]
+                 LEFT JOIN category_stations cs ON cs.category = d.category AND cs.tenant_id = d.tenant_id
+                 WHERE d.id = $1 AND d.tenant_id = $2`, [dishId, req.tenantId!]
             );
             if (dish.rows.length === 0) {
                 await client.query('ROLLBACK'); client.release();
@@ -16972,8 +17078,8 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
             let unitPrice: number | null = null;
             if (priceListId != null) {
                 const p = await client.query(
-                    `SELECT price_cents FROM dish_prices WHERE dish_id = $1 AND price_list_id = $2`,
-                    [dishId, priceListId]
+                    `SELECT price_cents FROM dish_prices WHERE dish_id = $1 AND price_list_id = $2 AND tenant_id = $3`,
+                    [dishId, priceListId, req.tenantId!]
                 );
                 if (p.rows.length > 0) unitPrice = Number(p.rows[0].price_cents);
             }
@@ -16989,9 +17095,9 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
                 const mres = await client.query(
                     `SELECT m.id, m.name, m.price_delta_cents
                      FROM modifiers m
-                     JOIN dish_modifier_groups dmg ON dmg.group_id = m.group_id
-                     WHERE m.id = ANY($1::int[]) AND dmg.dish_id = $2 AND m.is_active`,
-                    [modifierIds, dishId]
+                     JOIN dish_modifier_groups dmg ON dmg.group_id = m.group_id AND dmg.tenant_id = m.tenant_id
+                     WHERE m.id = ANY($1::int[]) AND dmg.dish_id = $2 AND m.tenant_id = $3 AND m.is_active`,
+                    [modifierIds, dishId, req.tenantId!]
                 );
                 if (mres.rows.length !== modifierIds.length) {
                     await client.query('ROLLBACK'); client.release();
@@ -17009,7 +17115,18 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
             // La partita viene copiata sulla riga, non risolta via join a
             // runtime: riassegnare un piatto a un'altra partita non deve
             // spostare ciò che è già in preparazione.
-            const stationId = raw?.station_id != null ? Number(raw.station_id) : dish.rows[0].station_id;
+            let stationId = raw?.station_id != null ? Number(raw.station_id) : dish.rows[0].station_id;
+            // station_id dal body: dev'essere del tenant, o la riga finirebbe
+            // sul monitor (e sulla termica) di un altro ristorante.
+            if (raw?.station_id != null && Number.isFinite(stationId)) {
+                const stCheck = await client.query(
+                    `SELECT id FROM stations WHERE id = $1 AND tenant_id = $2`, [stationId, req.tenantId!]
+                );
+                if (stCheck.rows.length === 0) {
+                    await client.query('ROLLBACK'); client.release();
+                    return res.status(400).json({ error: `items[${i}].station_id non valido` });
+                }
+            }
 
             const itemKey = typeof raw?.idempotency_key === 'string'
                 ? raw.idempotency_key.slice(0, 80)
@@ -17296,7 +17413,7 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
                     c.dietary_notes AS customer_dietary_notes
              FROM order_items oi
              JOIN orders o ON o.id = oi.order_id
-             LEFT JOIN tables t ON t.id = o.table_id
+             LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
              LEFT JOIN reservations r ON r.id = o.reservation_id
              -- Gli allergeni stanno in anagrafica cliente, agganciata per
              -- telefono normalizzato: stessa lateral join delle prenotazioni.
@@ -17466,7 +17583,7 @@ app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), as
                     o.table_id, t.name AS table_name, r.customer_name
              FROM order_items oi
              JOIN orders o ON o.id = oi.order_id
-             LEFT JOIN tables t ON t.id = o.table_id
+             LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
              LEFT JOIN reservations r ON r.id = o.reservation_id
              WHERE o.status = 'OPEN'
                AND o.service_date = $1 AND o.shift = $2
@@ -17542,7 +17659,8 @@ app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), as
         });
 
         const stations = await queryWithRetry(
-            `SELECT id, name, color, sort_order FROM stations WHERE is_active ORDER BY sort_order, id`
+            `SELECT id, name, color, sort_order FROM stations WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`,
+            [req.tenantId!]
         );
 
         res.json({
@@ -17633,7 +17751,7 @@ app.post('/orders/:id/courses/:n/refire', authenticate, requirePermission('order
             `WITH prep AS (
                  SELECT oi.id, COALESCE(d.prep_minutes, 0) AS p
                  FROM order_items oi
-                 LEFT JOIN dishes d ON d.id = oi.dish_id
+                 LEFT JOIN dishes d ON d.id = oi.dish_id AND d.tenant_id = oi.tenant_id
                  WHERE oi.order_id = $1 AND oi.course_no = $2 AND oi.status = 'SENT'
              ), mx AS (
                  SELECT COALESCE(MAX(p), 0) AS m FROM prep
@@ -17685,7 +17803,7 @@ app.post('/orders/:id/courses/:n/call', authenticate, requirePermission('orders:
 
         const info = await queryWithRetry(
             `SELECT t.name AS table_name
-             FROM orders o LEFT JOIN tables t ON t.id = o.table_id
+             FROM orders o LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
              WHERE o.id = $1`,
             [orderId]
         );
@@ -17738,7 +17856,7 @@ async function billItemsSnapshot(client: any, billId: number): Promise<any[]> {
                 oi.course_no, d.category
          FROM order_items oi
          JOIN orders o ON o.id = oi.order_id
-         LEFT JOIN dishes d ON d.id = oi.dish_id
+         LEFT JOIN dishes d ON d.id = oi.dish_id AND d.tenant_id = oi.tenant_id
          WHERE o.table_bill_id = $1 AND oi.status <> 'VOIDED'
          ORDER BY oi.course_no, oi.id`,
         [billId]
@@ -18210,7 +18328,7 @@ app.post('/tables/:id/bill', authenticate, requirePermission('payments:full'), a
         const tableId = parseInt(req.params.id, 10);
         if (!Number.isFinite(tableId)) return res.status(400).json({ error: 'id non valido' });
 
-        const tbl = await queryWithRetry(`SELECT id, seats, name FROM tables WHERE id = $1`, [tableId]);
+        const tbl = await queryWithRetry(`SELECT id, seats, name FROM tables WHERE id = $1 AND tenant_id = $2`, [tableId, req.tenantId!]);
         if (tbl.rows.length === 0) return res.status(404).json({ error: 'Tavolo non trovato' });
 
         // Sorgente Passepartout: righe e totale dalla comanda del gestionale.
@@ -18519,7 +18637,7 @@ app.post('/orders/:id/transfer', authenticate, requirePermission('orders:take'),
             return res.status(409).json({ error: 'La comanda è già su questo tavolo' });
         }
 
-        const tbl = await client.query(`SELECT id, name FROM tables WHERE id = $1`, [targetId]);
+        const tbl = await client.query(`SELECT id, name FROM tables WHERE id = $1 AND tenant_id = $2`, [targetId, req.tenantId!]);
         if (tbl.rows.length === 0) {
             await client.query('ROLLBACK'); client.release();
             return res.status(404).json({ error: 'Tavolo di destinazione non trovato' });
@@ -18688,7 +18806,7 @@ app.get('/reports/kitchen', authenticate, requirePermission('orders:expedite'), 
                     ))::numeric/60.0, 1) AS mediana_min,
                     COUNT(*) FILTER (WHERE oi.status = 'VOIDED')::int AS stornate
              FROM order_items oi
-             LEFT JOIN stations s ON s.id = oi.station_id
+             LEFT JOIN stations s ON s.id = oi.station_id AND s.tenant_id = oi.tenant_id
              WHERE oi.ready_at IS NOT NULL AND oi.line_kind = 'DISH'
                AND ($1::date IS NULL OR oi.fired_at >= $1::date)
                AND ($2::date IS NULL OR oi.fired_at < ($2::date + INTERVAL '1 day'))
@@ -18828,7 +18946,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                     COUNT(s.id) FILTER (WHERE s.status = 'PAID')::int AS paid_splits,
                     (SELECT COUNT(*) FROM orders o WHERE o.table_bill_id = b.id AND o.status = 'OPEN')::int AS open_orders
              FROM table_bills b
-             LEFT JOIN tables t ON t.id = b.table_id
+             LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
              LEFT JOIN reservations r ON r.id = b.reservation_id
              LEFT JOIN table_bill_splits s ON s.table_bill_id = b.id
              WHERE b.status = ANY($3::varchar[])
@@ -18864,7 +18982,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                         ), 0)) * oi.qty
                     ) FILTER (WHERE oi.status <> 'VOIDED'), 0)::int AS total_cents
              FROM orders o
-             LEFT JOIN tables t ON t.id = o.table_id
+             LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
              LEFT JOIN order_items oi ON oi.order_id = o.id
              WHERE o.status = 'OPEN'
                AND (o.service_date <> $1::date
@@ -18931,7 +19049,7 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
 
         const b = await queryWithRetry(
             `SELECT b.*, t.name AS table_name FROM table_bills b
-             LEFT JOIN tables t ON t.id = b.table_id
+             LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
              WHERE b.id = $1`,
             [billId]
         );
@@ -19008,9 +19126,12 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
 // effettivo in un paio di secondi, senza toccare l'agente.
 app.get('/print-agent/config', printAgentAuth, async (_req, res) => {
     try {
+        // L'agente si autentica col token d'installazione, non col JWT:
+        // il tenant è quello pubblico finché il token non porterà il suo.
         const rows = await queryWithRetry(
             `SELECT name, host, port FROM printers
-             WHERE kind = 'THERMAL' AND is_active ORDER BY name`
+             WHERE tenant_id = $1 AND kind = 'THERMAL' AND is_active ORDER BY name`,
+            [PUBLIC_TENANT_ID]
         );
         res.json({ printers: rows.rows });
     } catch (err: any) {
@@ -19091,12 +19212,12 @@ app.get('/sala/config', authenticate, async (req, res) => {
     try {
         const [fireMode, stations, printers, jobs, printRoutes, categories, catMap] = await Promise.all([
             getCourseFireMode(req.tenantId!),
-            queryWithRetry(`SELECT id, name, color, sort_order, is_active, printer FROM stations ORDER BY sort_order, id`),
-            queryWithRetry(`SELECT id, name, host, port, kind, is_active, notes FROM printers ORDER BY kind, name`),
+            queryWithRetry(`SELECT id, name, color, sort_order, is_active, printer FROM stations WHERE tenant_id = $1 ORDER BY sort_order, id`, [req.tenantId!]),
+            queryWithRetry(`SELECT id, name, host, port, kind, is_active, notes FROM printers WHERE tenant_id = $1 ORDER BY kind, name`, [req.tenantId!]),
             queryWithRetry(`SELECT status, COUNT(*)::int AS n FROM print_jobs WHERE status IN ('PENDING','FAILED') GROUP BY status`),
             getPrintRoutes(req.tenantId!),
-            queryWithRetry(`SELECT DISTINCT category FROM dishes WHERE category IS NOT NULL AND category <> '' ORDER BY category`),
-            queryWithRetry(`SELECT category, station_id FROM category_stations`),
+            queryWithRetry(`SELECT DISTINCT category FROM dishes WHERE tenant_id = $1 AND category IS NOT NULL AND category <> '' ORDER BY category`, [req.tenantId!]),
+            queryWithRetry(`SELECT category, station_id FROM category_stations WHERE tenant_id = $1`, [req.tenantId!]),
         ]);
         const jobCount = (s: string) => jobs.rows.find((r: any) => r.status === s)?.n ?? 0;
         res.json({
@@ -19128,16 +19249,19 @@ app.put('/sala/category-stations', authenticate, requirePermission('settings:ful
         if (!category || category.length > 100) return res.status(400).json({ error: 'Categoria non valida' });
         const stationId = req.body?.station_id != null ? Number(req.body.station_id) : null;
         if (stationId === null) {
-            await queryWithRetry(`DELETE FROM category_stations WHERE category = $1`, [category]);
+            await queryWithRetry(`DELETE FROM category_stations WHERE category = $1 AND tenant_id = $2`, [category, req.tenantId!]);
             return res.json({ category, station_id: null });
         }
         if (!Number.isFinite(stationId)) return res.status(400).json({ error: 'station_id non valido' });
-        const st = await queryWithRetry(`SELECT id FROM stations WHERE id = $1`, [stationId]);
+        // La partita dev'essere del tenant PRIMA dell'upsert: la PK ora è
+        // (tenant_id, category), ma una station_id altrui instraderebbe le
+        // comande sul monitor di un altro ristorante.
+        const st = await queryWithRetry(`SELECT id FROM stations WHERE id = $1 AND tenant_id = $2`, [stationId, req.tenantId!]);
         if (st.rows.length === 0) return res.status(404).json({ error: 'Partita non trovata' });
         await queryWithRetry(
-            `INSERT INTO category_stations (category, station_id) VALUES ($1, $2)
-             ON CONFLICT (category) DO UPDATE SET station_id = $2`,
-            [category, stationId]
+            `INSERT INTO category_stations (tenant_id, category, station_id) VALUES ($3, $1, $2)
+             ON CONFLICT (tenant_id, category) DO UPDATE SET station_id = $2`,
+            [category, stationId, req.tenantId!]
         );
         res.json({ category, station_id: stationId });
     } catch (err: any) {
@@ -19176,7 +19300,7 @@ app.put('/sala/print-routes', authenticate, requirePermission('settings:full'), 
             const name = String(raw).toLowerCase();
             if (!PRINTER_NAME_RE.test(name)) return res.status(400).json({ error: `Nome stampante non valido per ${fn}` });
             const pr = await queryWithRetry(
-                `SELECT 1 FROM printers WHERE name = $1 AND kind = 'THERMAL' AND is_active = true`, [name]);
+                `SELECT 1 FROM printers WHERE name = $1 AND tenant_id = $2 AND kind = 'THERMAL' AND is_active = true`, [name, req.tenantId!]);
             if (pr.rows.length === 0) {
                 return res.status(400).json({ error: `Stampante '${name}' inesistente o non attiva` });
             }
@@ -19208,10 +19332,10 @@ app.post('/sala/stations', authenticate, requirePermission('settings:full'), asy
         const printer = req.body?.printer != null ? String(req.body.printer) : null;
         if (printer !== null && !PRINTER_NAME_RE.test(printer)) return res.status(400).json({ error: 'Stampante non valida' });
         const ins = await queryWithRetry(
-            `INSERT INTO stations (name, color, sort_order, printer)
-             VALUES ($1, $2, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM stations), $3)
+            `INSERT INTO stations (tenant_id, name, color, sort_order, printer)
+             VALUES ($4, $1, $2, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM stations WHERE tenant_id = $4), $3)
              RETURNING id, name, color, sort_order, is_active, printer`,
-            [name, req.body?.color ?? null, printer]
+            [name, req.body?.color ?? null, printer, req.tenantId!]
         );
         res.status(201).json(ins.rows[0]);
     } catch (err: any) {
@@ -19239,11 +19363,11 @@ app.put('/sala/stations/:id', authenticate, requirePermission('settings:full'), 
                 color = COALESCE($3, color),
                 is_active = COALESCE($4, is_active),
                 printer = CASE WHEN $5 THEN $6 ELSE printer END
-             WHERE id = $1
+             WHERE id = $1 AND tenant_id = $7
              RETURNING id, name, color, sort_order, is_active, printer`,
             [id, name, req.body?.color ?? null,
              typeof req.body?.is_active === 'boolean' ? req.body.is_active : null,
-             touchPrinter, printer]
+             touchPrinter, printer, req.tenantId!]
         );
         if (upd.rows.length === 0) return res.status(404).json({ error: 'Partita non trovata' });
         res.json(upd.rows[0]);
@@ -19264,10 +19388,10 @@ app.post('/sala/printers', authenticate, requirePermission('settings:full'), asy
         if (!/^[a-z0-9.\-]+$/i.test(host)) return res.status(400).json({ error: 'Indirizzo non valido' });
         if (!Number.isInteger(port) || port < 1 || port > 65535) return res.status(400).json({ error: 'Porta non valida' });
         const ins = await queryWithRetry(
-            `INSERT INTO printers (name, host, port, kind, notes)
-             VALUES ($1, $2, $3, $4, $5)
+            `INSERT INTO printers (tenant_id, name, host, port, kind, notes)
+             VALUES ($6, $1, $2, $3, $4, $5)
              RETURNING id, name, host, port, kind, is_active, notes`,
-            [name, host, port, kind, req.body?.notes ? String(req.body.notes).slice(0, 300) : null]
+            [name, host, port, kind, req.body?.notes ? String(req.body.notes).slice(0, 300) : null, req.tenantId!]
         );
         res.status(201).json(ins.rows[0]);
     } catch (err: any) {
@@ -19291,11 +19415,12 @@ app.put('/sala/printers/:id', authenticate, requirePermission('settings:full'), 
                 port = COALESCE($3, port),
                 is_active = COALESCE($4, is_active),
                 notes = COALESCE($5, notes)
-             WHERE id = $1
+             WHERE id = $1 AND tenant_id = $6
              RETURNING id, name, host, port, kind, is_active, notes`,
             [id, host, port,
              typeof req.body?.is_active === 'boolean' ? req.body.is_active : null,
-             req.body?.notes != null ? String(req.body.notes).slice(0, 300) : null]
+             req.body?.notes != null ? String(req.body.notes).slice(0, 300) : null,
+             req.tenantId!]
         );
         if (upd.rows.length === 0) return res.status(404).json({ error: 'Stampante non trovata' });
         res.json(upd.rows[0]);
@@ -19309,7 +19434,7 @@ app.delete('/sala/printers/:id', authenticate, requirePermission('settings:full'
     try {
         const id = Number(req.params.id);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
-        const p = await queryWithRetry(`SELECT name FROM printers WHERE id = $1`, [id]);
+        const p = await queryWithRetry(`SELECT name FROM printers WHERE id = $1 AND tenant_id = $2`, [id, req.tenantId!]);
         if (p.rows.length === 0) return res.status(404).json({ error: 'Stampante non trovata' });
         // Una stampante referenziata da una partita non si elimina: la partita
         // resterebbe a puntare un nome fantasma e i job si accoderebbero nel vuoto.
@@ -19322,13 +19447,13 @@ app.delete('/sala/printers/:id', authenticate, requirePermission('settings:full'
                 error: `Stampante usata dall'instradamento stampe (${usedRoute.rows[0].key === 'print_route_qr' ? 'foglietto QR' : 'preconto'}): cambia prima la destinazione`,
             });
         }
-        const used = await queryWithRetry(`SELECT name FROM stations WHERE printer = $1 LIMIT 1`, [p.rows[0].name]);
+        const used = await queryWithRetry(`SELECT name FROM stations WHERE printer = $1 AND tenant_id = $2 LIMIT 1`, [p.rows[0].name, req.tenantId!]);
         if (used.rows.length > 0) {
             return res.status(409).json({
                 error: `Usata dalla partita "${used.rows[0].name}": togli prima l'assegnazione.`,
             });
         }
-        await queryWithRetry(`DELETE FROM printers WHERE id = $1`, [id]);
+        await queryWithRetry(`DELETE FROM printers WHERE id = $1 AND tenant_id = $2`, [id, req.tenantId!]);
         res.json({ ok: true });
     } catch (err: any) {
         console.error('DELETE /sala/printers/:id error:', err);
@@ -19342,7 +19467,7 @@ app.post('/sala/printers/:id/test', authenticate, requirePermission('settings:fu
     try {
         const id = Number(req.params.id);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
-        const p = await queryWithRetry(`SELECT name, host, port, kind, is_active FROM printers WHERE id = $1`, [id]);
+        const p = await queryWithRetry(`SELECT name, host, port, kind, is_active FROM printers WHERE id = $1 AND tenant_id = $2`, [id, req.tenantId!]);
         if (p.rows.length === 0) return res.status(404).json({ error: 'Stampante non trovata' });
         if (p.rows[0].kind !== 'THERMAL') return res.status(400).json({ error: 'La stampante fiscale non accetta stampe di prova (Fase 2)' });
         if (!p.rows[0].is_active) return res.status(400).json({ error: 'Stampante disattivata' });
@@ -19368,12 +19493,14 @@ app.post('/sala/printers/:id/test', authenticate, requirePermission('settings:fu
 const salaSnapshot = async (tenantId: number): Promise<any> => {
     const [fireMode, stations, printers] = await Promise.all([
         getCourseFireMode(tenantId),
-        queryWithRetry(`SELECT name, color, printer, is_active FROM stations ORDER BY sort_order, id`),
-        queryWithRetry(`SELECT name, host, port, kind, is_active, notes FROM printers ORDER BY id`),
+        queryWithRetry(`SELECT name, color, printer, is_active FROM stations WHERE tenant_id = $1 ORDER BY sort_order, id`, [tenantId]),
+        queryWithRetry(`SELECT name, host, port, kind, is_active, notes FROM printers WHERE tenant_id = $1 ORDER BY id`, [tenantId]),
     ]);
     const catMap = await queryWithRetry(
         `SELECT cs.category, s.name AS station_name
-         FROM category_stations cs JOIN stations s ON s.id = cs.station_id`
+         FROM category_stations cs JOIN stations s ON s.id = cs.station_id AND s.tenant_id = cs.tenant_id
+         WHERE cs.tenant_id = $1`,
+        [tenantId]
     );
     return {
         fire_mode: fireMode, stations: stations.rows, printers: printers.rows,
@@ -19390,7 +19517,7 @@ const getActiveSalaProfile = async (tenantId: number): Promise<string | null> =>
 app.get('/sala/profiles', authenticate, async (req, res) => {
     try {
         const [rows, active] = await Promise.all([
-            queryWithRetry(`SELECT id, name, updated_at FROM sala_profiles ORDER BY name`),
+            queryWithRetry(`SELECT id, name, updated_at FROM sala_profiles WHERE tenant_id = $1 ORDER BY name`, [req.tenantId!]),
             getActiveSalaProfile(req.tenantId!),
         ]);
         res.json({ profiles: rows.rows, active_profile: active });
@@ -19405,8 +19532,8 @@ app.post('/sala/profiles', authenticate, requirePermission('settings:full'), asy
         const name = String(req.body?.name ?? '').trim();
         if (!name || name.length > 60) return res.status(400).json({ error: 'Nome non valido' });
         const ins = await queryWithRetry(
-            `INSERT INTO sala_profiles (name, payload) VALUES ($1, $2) RETURNING id, name, updated_at`,
-            [name, JSON.stringify(await salaSnapshot(req.tenantId!))]
+            `INSERT INTO sala_profiles (tenant_id, name, payload) VALUES ($3, $1, $2) RETURNING id, name, updated_at`,
+            [name, JSON.stringify(await salaSnapshot(req.tenantId!)), req.tenantId!]
         );
         res.status(201).json(ins.rows[0]);
     } catch (err: any) {
@@ -19423,8 +19550,8 @@ app.put('/sala/profiles/:id', authenticate, requirePermission('settings:full'), 
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
         const upd = await queryWithRetry(
             `UPDATE sala_profiles SET payload = $2, updated_at = CURRENT_TIMESTAMP
-             WHERE id = $1 RETURNING id, name, updated_at`,
-            [id, JSON.stringify(await salaSnapshot(req.tenantId!))]
+             WHERE id = $1 AND tenant_id = $3 RETURNING id, name, updated_at`,
+            [id, JSON.stringify(await salaSnapshot(req.tenantId!)), req.tenantId!]
         );
         if (upd.rows.length === 0) return res.status(404).json({ error: 'Profilo non trovato' });
         res.json(upd.rows[0]);
@@ -19439,7 +19566,7 @@ app.post('/sala/profiles/:id/activate', authenticate, requirePermission('setting
     try {
         const id = Number(req.params.id);
         if (!Number.isFinite(id)) { client.release(); return res.status(400).json({ error: 'id non valido' }); }
-        const p = await queryWithRetry(`SELECT name, payload FROM sala_profiles WHERE id = $1`, [id]);
+        const p = await queryWithRetry(`SELECT name, payload FROM sala_profiles WHERE id = $1 AND tenant_id = $2`, [id, req.tenantId!]);
         if (p.rows.length === 0) { client.release(); return res.status(404).json({ error: 'Profilo non trovato' }); }
         const { name, payload } = p.rows[0];
 
@@ -19454,27 +19581,27 @@ app.post('/sala/profiles/:id/activate', authenticate, requirePermission('setting
         for (const pr of Array.isArray(payload?.printers) ? payload.printers : []) {
             if (!PRINTER_NAME_RE.test(String(pr?.name ?? ''))) continue;
             await client.query(
-                `INSERT INTO printers (name, host, port, kind, is_active, notes)
-                 VALUES ($1, $2, $3, $4, $5, $6)
-                 ON CONFLICT (name) DO UPDATE SET
+                `INSERT INTO printers (tenant_id, name, host, port, kind, is_active, notes)
+                 VALUES ($7, $1, $2, $3, $4, $5, $6)
+                 ON CONFLICT (tenant_id, name) DO UPDATE SET
                     host = EXCLUDED.host, port = EXCLUDED.port, kind = EXCLUDED.kind,
                     is_active = EXCLUDED.is_active, notes = EXCLUDED.notes`,
                 [pr.name, String(pr.host ?? ''), Number(pr.port) || 9100,
                  pr.kind === 'FISCAL' ? 'FISCAL' : 'THERMAL', pr.is_active !== false,
-                 pr.notes ?? null]
+                 pr.notes ?? null, req.tenantId!]
             );
         }
         for (const st of Array.isArray(payload?.stations) ? payload.stations : []) {
             const stName = String(st?.name ?? '').trim();
             if (!stName) continue;
             await client.query(
-                `INSERT INTO stations (name, color, sort_order, printer, is_active)
-                 VALUES ($1, $2, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM stations), $3, $4)
-                 ON CONFLICT (lower(name)) DO UPDATE SET
+                `INSERT INTO stations (tenant_id, name, color, sort_order, printer, is_active)
+                 VALUES ($5, $1, $2, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM stations WHERE tenant_id = $5), $3, $4)
+                 ON CONFLICT (tenant_id, lower(name)) DO UPDATE SET
                     color = EXCLUDED.color, printer = EXCLUDED.printer, is_active = EXCLUDED.is_active`,
                 [stName, st.color ?? null,
                  st.printer != null && PRINTER_NAME_RE.test(String(st.printer)) ? st.printer : null,
-                 st.is_active !== false]
+                 st.is_active !== false, req.tenantId!]
             );
         }
         for (const fn of Object.keys(PRINT_ROUTE_KEYS) as PrintRouteFn[]) {
@@ -19495,10 +19622,10 @@ app.post('/sala/profiles/:id/activate', authenticate, requirePermission('setting
             const stName = String(cm?.station_name ?? '').trim();
             if (!cat || !stName) continue;
             await client.query(
-                `INSERT INTO category_stations (category, station_id)
-                 SELECT $1, id FROM stations WHERE lower(name) = lower($2)
-                 ON CONFLICT (category) DO UPDATE SET station_id = EXCLUDED.station_id`,
-                [cat, stName]
+                `INSERT INTO category_stations (tenant_id, category, station_id)
+                 SELECT $3, $1, id FROM stations WHERE lower(name) = lower($2) AND tenant_id = $3
+                 ON CONFLICT (tenant_id, category) DO UPDATE SET station_id = EXCLUDED.station_id`,
+                [cat, stName, req.tenantId!]
             );
         }
         await client.query(
@@ -19531,7 +19658,7 @@ app.delete('/sala/profiles/:id', authenticate, requirePermission('settings:full'
     try {
         const id = Number(req.params.id);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
-        const del = await queryWithRetry(`DELETE FROM sala_profiles WHERE id = $1 RETURNING name`, [id]);
+        const del = await queryWithRetry(`DELETE FROM sala_profiles WHERE id = $1 AND tenant_id = $2 RETURNING name`, [id, req.tenantId!]);
         if (del.rows.length === 0) return res.status(404).json({ error: 'Profilo non trovato' });
         await queryWithRetry(
             `DELETE FROM app_settings WHERE tenant_id = $1 AND key = 'sala_active_profile' AND text_value = $2`,
