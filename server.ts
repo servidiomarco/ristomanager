@@ -12,7 +12,7 @@ import path from 'path';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import QRCode from 'qrcode';
-import pool, { createSchema, queryWithRetry } from './db.js';
+import pool, { createSchema, queryWithRetry, runMigrations } from './db.js';
 import { SocketService } from './services/socketService.js';
 import {
     generateSuggestedReply,
@@ -20165,6 +20165,17 @@ const startServer = async () => {
             createSchema()
                 .then(async () => {
                     console.log('✅ Database schema initialized');
+                    // Le migration girano DOPO createSchema: la baseline
+                    // congelata crea le tabelle, le migration le evolvono.
+                    // Un errore qui non ferma il server (stessa filosofia di
+                    // createSchema), ma va in log come errore: uno schema
+                    // rimasto indietro è un incidente da vedere subito.
+                    try {
+                        await runMigrations();
+                        console.log('✅ Database migrations up to date');
+                    } catch (migErr) {
+                        console.error('❌ Database migrations failed:', migErr);
+                    }
                     try {
                         await RolePermissionService.warmUp();
                         console.log('✅ Role permission cache warmed up');

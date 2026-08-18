@@ -68,9 +68,11 @@ There is no router. `App.tsx` holds `const [view, setView] = useState<ViewState>
 
 Access + refresh tokens sit in localStorage; `apiService.fetchWithAuth` transparently refreshes once on a 401 and retries.
 
-### Database: no migration tool
+### Database: frozen baseline + node-pg-migrate
 
-`db.ts` exports the `pg` pool and `createSchema()`, which runs at server boot and is written entirely as `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`. To add a column, append an `ALTER` line in `createSchema()` — that is the migration. The pool is tuned around Railway's proxy (IPv4-pinned DNS, 30s idle eviction, statement timeouts); the comments there explain which production failure each setting fixes.
+`db.ts` exports the `pg` pool, `createSchema()` and `runMigrations()`. `createSchema()` is the historical baseline — written entirely as `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, run at every boot — and is **frozen**: do not add new schema changes to it. Every schema change goes in a versioned migration instead: `npm run migrate:create -- nome-migrazione` creates a plain-JS ESM file in `migrations/` (`export const up = (pgm) => { pgm.sql(...) }`). At boot the server runs `createSchema()` first, then `runMigrations()` applies pending migrations (recorded in the `pgmigrations` table). In production migrations run only at boot; `npm run migrate` exists for local use and needs `DATABASE_URL`. `migrations/` is COPY'd into the Dockerfile production stage — a migration file outside that directory will not ship.
+
+The pool is tuned around Railway's proxy (IPv4-pinned DNS, 30s idle eviction, statement timeouts); the comments there explain which production failure each setting fixes. Migrations deliberately run on a dedicated client without those statement timeouts.
 
 The pg `DATE` type parser is overridden to return plain `YYYY-MM-DD` strings, because the default parser shifts dates through the server's local timezone and produces off-by-one-day bugs.
 

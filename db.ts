@@ -3,7 +3,9 @@ dotenv.config();
 
 import dns from 'dns';
 import net from 'net';
-import { Pool, types } from 'pg';
+import path from 'path';
+import { Client, Pool, types } from 'pg';
+import { runner as runMigrationRunner } from 'node-pg-migrate';
 import bcrypt from 'bcryptjs';
 
 // Railway's internal DNS returns both AAAA (IPv6) and A (IPv4) for the
@@ -118,6 +120,45 @@ export const queryWithRetry = async (text: string, params?: any[]): Promise<{ ro
         }
     }
     throw lastErr;
+};
+
+// ============================================
+// MIGRATIONS — node-pg-migrate
+// ============================================
+// createSchema() qui sotto è CONGELATO: è la baseline storica dello schema
+// e non va più esteso. Ogni modifica di schema da qui in avanti è una
+// migration versionata in migrations/ (`npm run migrate:create -- nome`).
+// Al boot il server esegue prima createSchema (idempotente sui database
+// esistenti) e poi le migration non ancora applicate, registrate nella
+// tabella pgmigrations.
+export const runMigrations = async (): Promise<void> => {
+    // Client dedicato, non il pool: il runner apre una transazione per
+    // migration e un lock advisory per l'intera run — non deve contendersi
+    // la connessione con le query dell'app né subire gli statement_timeout
+    // del pool (un backfill legittimo può superare i 15s).
+    const client = new Client({
+        connectionString: process.env.DATABASE_URL,
+        ssl: process.env.DATABASE_URL?.includes('sslmode=require') ? {
+            rejectUnauthorized: false,
+        } : false,
+    });
+    await client.connect();
+    try {
+        // Stessa sessione Europe/Rome del pool (vedi pool.on('connect')):
+        // una migration deve vedere il database come lo vedono le route.
+        await client.query("SET TIME ZONE 'Europe/Rome'");
+        const applied = await runMigrationRunner({
+            dbClient: client,
+            dir: path.resolve(process.cwd(), 'migrations'),
+            direction: 'up',
+            migrationsTable: 'pgmigrations',
+        });
+        if (applied.length > 0) {
+            console.log(`Migrations applicate (${applied.length}): ${applied.map(m => m.name).join(', ')}`);
+        }
+    } finally {
+        await client.end();
+    }
 };
 
 // Retry logic for schema creation
@@ -1298,24 +1339,10 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             );
         }
 
-        // Drop auto-imported customers without a phone number — the rubrica
-        // only stores entries we can call back. Manually-created customers
-        // (auto_imported = FALSE) are left alone.
-        await client.query(`
-            DELETE FROM customers
-             WHERE auto_imported = TRUE
-               AND phone IS NULL;
-        `);
-
-        // Normalise existing names to Title Case. INITCAP treats apostrophes,
-        // hyphens and spaces as word separators — so "MARIO ROSSI",
-        // "mario rossi" and "d'angelo" all land on "Mario Rossi" / "D'Angelo".
-        // Idempotent: only rows that aren't already title-cased get touched.
-        await client.query(`
-            UPDATE customers
-               SET name = INITCAP(name)
-             WHERE name <> INITCAP(name);
-        `);
+        // La pulizia degli auto-importati senza telefono e la normalizzazione
+        // INITCAP dei nomi sono backfill una-tantum: spostati nella migration
+        // 1787052759282_backfill-una-tantum (giravano qui come full-table
+        // scan a ogni boot).
 
         // One-time backfill: seed the rubrica from reservations the first time
         // this migration runs. Restricted to reservations that carry a phone
@@ -2492,22 +2519,8 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             ALTER TABLE orders ADD COLUMN IF NOT EXISTS shift VARCHAR(10)
                 CHECK (shift IS NULL OR shift IN ('LUNCH','DINNER'));
         `);
-        // Backfill dalle comande già esistenti, con la stessa regola.
-        await client.query(`
-            UPDATE orders SET
-                service_date = (
-                    CASE WHEN EXTRACT(hour FROM (opened_at AT TIME ZONE 'Europe/Rome')) < 5
-                         THEN ((opened_at AT TIME ZONE 'Europe/Rome') - INTERVAL '1 day')::date
-                         ELSE (opened_at AT TIME ZONE 'Europe/Rome')::date
-                    END
-                ),
-                shift = (
-                    CASE WHEN EXTRACT(hour FROM (opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
-                         THEN 'LUNCH' ELSE 'DINNER'
-                    END
-                )
-            WHERE service_date IS NULL OR shift IS NULL;
-        `);
+        // Il backfill delle comande preesistenti (service_date/shift derivati
+        // da opened_at) vive nella migration 1787052759282_backfill-una-tantum.
         await client.query(`
             CREATE INDEX IF NOT EXISTS idx_orders_service
                 ON orders(service_date, shift, status);
@@ -2646,24 +2659,11 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // Il conto appartiene a un servizio (giorno + turno), come le comande:
         // senza, la chiusura di stasera riusava il conto mai incassato di ieri
         // sullo stesso tavolo e i totali si sommavano attraverso i giorni.
-        // Backfill dal servizio della prima comanda agganciata, altrimenti
-        // derivato da opened_at (stessa regola del servizio corrente: prima
-        // delle 5 è ancora la cena del giorno prima).
         await client.query(`ALTER TABLE table_bills ADD COLUMN IF NOT EXISTS service_date DATE;`);
         await client.query(`ALTER TABLE table_bills ADD COLUMN IF NOT EXISTS shift VARCHAR(10);`);
-        await client.query(`
-            UPDATE table_bills b SET
-                service_date = COALESCE(
-                    (SELECT o.service_date FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
-                    CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) < 5
-                         THEN ((b.opened_at AT TIME ZONE 'Europe/Rome')::date - 1)
-                         ELSE (b.opened_at AT TIME ZONE 'Europe/Rome')::date END),
-                shift = COALESCE(
-                    (SELECT o.shift FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
-                    CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
-                         THEN 'LUNCH' ELSE 'DINNER' END)
-            WHERE b.service_date IS NULL OR b.shift IS NULL;
-        `);
+        // Il backfill dei conti preesistenti (dal servizio della prima comanda
+        // agganciata, altrimenti da opened_at) vive nella migration
+        // 1787052759282_backfill-una-tantum.
         await client.query(`DROP INDEX IF EXISTS idx_table_bills_one_active;`);
         await client.query(`
             CREATE UNIQUE INDEX IF NOT EXISTS idx_table_bills_one_active_service
