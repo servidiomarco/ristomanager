@@ -440,8 +440,9 @@ app.post('/webhook/twilio-whatsapp-status', twilioUrlEncoded, async (req, res) =
                  END,
                  confirmation_error = $2
              WHERE confirmation_provider_sid = $3
+               AND tenant_id = $4
              RETURNING *`,
-            [status, errText, MessageSid]
+            [status, errText, MessageSid, PUBLIC_TENANT_ID]
         );
         if (updated.rows[0] && socketService) {
             try { socketService.broadcastReservationUpdated(updated.rows[0]); }
@@ -546,8 +547,9 @@ async function maybeFallbackWhatsAppToSms(originalSid: string, errCode: string):
     if (already.rowCount && already.rowCount > 0) return;
 
     const resr = await queryWithRetry(
-        `SELECT phone FROM reservations WHERE id = $1`,
-        [row.reservation_id]
+        // Il tenant è quello della riga WA fallita, come per l'SMS di ripiego.
+        `SELECT phone FROM reservations WHERE id = $1 AND tenant_id = $2`,
+        [row.reservation_id, row.tenant_id]
     );
     const phone = resr.rows[0]?.phone;
     if (!phone || !String(phone).trim()) return;
@@ -559,7 +561,7 @@ async function maybeFallbackWhatsAppToSms(originalSid: string, errCode: string):
         const smsResult = await sendTwilioSms(Number(row.tenant_id), String(phone), String(row.body), row.reservation_id);
         // Rewire the reservation's confirmation tracking to the new SMS sid
         // so the delivery icon updates as the SMS gets delivered.
-        await recordConfirmationSent(row.reservation_id, smsResult).catch(err =>
+        await recordConfirmationSent(Number(row.tenant_id), row.reservation_id, smsResult).catch(err =>
             console.warn('[Twilio] recordConfirmationSent (fallback) failed:', err?.message || err)
         );
     } catch (err: any) {
@@ -700,7 +702,7 @@ app.post('/webhook/resend-inbound', async (req, res) => {
         const candidateIds = [inReplyTo, ...referenceIds].filter(Boolean) as string[];
         let reservationId = await resolveReservationByMessageIds(PUBLIC_TENANT_ID, candidateIds);
         if (!reservationId) {
-            reservationId = await resolveReservationByFromEmail(fromEmail);
+            reservationId = await resolveReservationByFromEmail(PUBLIC_TENANT_ID, fromEmail);
         }
         if (!reservationId) {
             console.warn('[Resend-inbound] unmatched reply from', fromEmail, 'subject:', full.subject);
@@ -1324,7 +1326,7 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
             `SELECT r.id, r.customer_name, r.phone, r.reservation_time, r.guests,
                     rm.name AS room_name
              FROM voice_calls vc
-             JOIN reservations r ON r.id = vc.reservation_id
+             JOIN reservations r ON r.id = vc.reservation_id AND r.tenant_id = vc.tenant_id
              LEFT JOIN tables t ON t.id = r.table_id AND t.tenant_id = r.tenant_id
              LEFT JOIN rooms rm ON rm.id = t.room_id AND rm.tenant_id = t.tenant_id
              WHERE vc.conversation_id = $1
@@ -1480,6 +1482,7 @@ async function broadcastReservationsUpdatedByIds(ids: number[]): Promise<void> {
                        pr.delivery_channel, pr.created_at, pr.completed_at
                 FROM payment_requests pr
                 WHERE pr.reservation_id = r.id
+                  AND pr.tenant_id = r.tenant_id
                 ORDER BY pr.created_at DESC
                 LIMIT 1
             ) lp ON true
@@ -1659,11 +1662,13 @@ app.get('/reservations', authenticate, async (req, res) => {
                        pr.delivery_channel, pr.created_at, pr.completed_at
                 FROM payment_requests pr
                 WHERE pr.reservation_id = r.id
+                  AND pr.tenant_id = r.tenant_id
                 ORDER BY pr.created_at DESC
                 LIMIT 1
             ) lp ON true
+            WHERE r.tenant_id = $1
             ORDER BY r.reservation_time DESC
-        `);
+        `, [req.tenantId!]);
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -1744,8 +1749,8 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         }
         const result = await queryWithRetry(
             `WITH ins AS (
-                INSERT INTO reservations (customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, created_by_user_id, consent_marketing, consent_data_health, consent_updated_at, note_selections)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb)
+                INSERT INTO reservations (customer_name, reservation_time, shift, guests, children, table_id, notes, email, phone, payment_status, arrival_status, reservation_status, duration_minutes, created_by_user_id, consent_marketing, consent_data_health, consent_updated_at, note_selections, tenant_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18::jsonb, $19)
                 RETURNING *
             )
             SELECT ins.*, u.full_name AS created_by_user_name,
@@ -1786,6 +1791,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
                 consentDataHealth,
                 consentUpdatedAt,
                 noteSelectionsJson,
+                req.tenantId!,
             ]
         );
         const newReservation = result.rows[0];
@@ -1894,7 +1900,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         const result = await queryWithRetry(
             `WITH old AS (
                 SELECT reservation_status AS prev_status, table_id AS prev_table_id
-                FROM reservations WHERE id = $14
+                FROM reservations WHERE id = $14 AND tenant_id = $18
             ), upd AS (
                 UPDATE reservations
                 SET customer_name = $1, reservation_time = $2, shift = $3, guests = $4, children = $5, table_id = $6, notes = $7, email = $8, phone = $9, payment_status = $10, arrival_status = $11, reservation_status = $12, duration_minutes = $13,
@@ -1902,7 +1908,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                     consent_data_health = COALESCE($16, consent_data_health),
                     consent_updated_at = CASE WHEN ($15 IS NOT NULL OR $16 IS NOT NULL) THEN CURRENT_TIMESTAMP ELSE consent_updated_at END,
                     note_selections = COALESCE($17::jsonb, note_selections)
-                WHERE id = $14
+                WHERE id = $14 AND tenant_id = $18
                 RETURNING *
             )
             SELECT upd.*, u.full_name AS created_by_user_name, (SELECT prev_status FROM old) AS prev_status,
@@ -1943,6 +1949,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 consentMarketing,
                 consentDataHealth,
                 noteSelectionsJson,
+                req.tenantId!,
             ]
         );
         const updatedReservation = result.rows[0];
@@ -2134,10 +2141,10 @@ app.delete('/reservations/:id', authenticate, requirePermission('reservations:fu
         const { id } = req.params;
 
         // Get reservation name before deleting
-        const existing = await queryWithRetry('SELECT customer_name FROM reservations WHERE id = $1', [id]);
+        const existing = await queryWithRetry('SELECT customer_name FROM reservations WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
         const resourceName = existing.rows[0]?.customer_name;
 
-        await queryWithRetry('DELETE FROM reservations WHERE id = $1', [id]);
+        await queryWithRetry('DELETE FROM reservations WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
 
         // Log activity
         if (req.user) {
@@ -2180,8 +2187,8 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
         await client.query('BEGIN');
 
         const rows = await client.query(
-            `SELECT id, table_id, customer_name FROM reservations WHERE id = ANY($1::int[]) FOR UPDATE`,
-            [[aId, bId]]
+            `SELECT id, table_id, customer_name FROM reservations WHERE id = ANY($1::int[]) AND tenant_id = $2 FOR UPDATE`,
+            [[aId, bId], req.tenantId!]
         );
         if (rows.rows.length !== 2) {
             await client.query('ROLLBACK');
@@ -2197,8 +2204,8 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
         await client.query(
             `UPDATE reservations
                 SET table_id = CASE id WHEN $1 THEN $4::int WHEN $2 THEN $3::int END
-              WHERE id IN ($1, $2)`,
-            [aId, bId, a.table_id, b.table_id]
+              WHERE id IN ($1, $2) AND tenant_id = $5`,
+            [aId, bId, a.table_id, b.table_id, req.tenantId!]
         );
 
         const enriched = await client.query(
@@ -2221,8 +2228,8 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
                    LIMIT 1
                ) c ON true
                LEFT JOIN tables pt ON pt.id = c.preferred_table_id AND pt.tenant_id = r.tenant_id
-              WHERE r.id = ANY($1::int[])`,
-            [[aId, bId]]
+              WHERE r.id = ANY($1::int[]) AND r.tenant_id = $2`,
+            [[aId, bId], req.tenantId!]
         );
 
         await client.query('COMMIT');
@@ -2274,15 +2281,17 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
 // still fired for other clients but isn't the sole source of truth for the
 // caller anymore (mobile Safari on shaky wifi was dropping the event
 // occasionally, leaving the card stuck on "Da confermare").
-async function promoteReservationIfPending(reservationId: number): Promise<any | null> {
+// tenantId obbligatorio: il flip arriva sempre da route autenticate, ma senza
+// filtro un id indovinato confermerebbe la prenotazione di un altro ristorante.
+async function promoteReservationIfPending(tenantId: number, reservationId: number): Promise<any | null> {
     try {
         const upd = await queryWithRetry(
             `UPDATE reservations
              SET reservation_status = 'CONFIRMED',
                  updated_at = CURRENT_TIMESTAMP
-             WHERE id = $1 AND reservation_status = 'PENDING'
+             WHERE id = $1 AND tenant_id = $2 AND reservation_status = 'PENDING'
              RETURNING *`,
-            [reservationId]
+            [reservationId, tenantId]
         );
         if (upd.rows.length === 0) return null;
         // Live views listen on this event to update badges/status pills.
@@ -2310,8 +2319,8 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('
             'auto';
 
         const result = await queryWithRetry(
-            'SELECT id, customer_name, reservation_time, guests, phone, table_id, notes FROM reservations WHERE id = $1',
-            [id]
+            'SELECT id, customer_name, reservation_time, guests, phone, table_id, notes FROM reservations WHERE id = $1 AND tenant_id = $2',
+            [id, req.tenantId!]
         );
 
         if (result.rows.length === 0) {
@@ -2338,7 +2347,7 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('
                 return res.status(400).json({ error: 'SMS non configurato' });
             }
             outcome = await sendTwilioSms(req.tenantId!, reservation.phone, message, reservation.id);
-            recordConfirmationSent(reservation.id, outcome).catch(err =>
+            recordConfirmationSent(req.tenantId!, reservation.id, outcome).catch(err =>
                 console.warn('[confirmation] recordConfirmationSent failed:', err?.message || err)
             );
         } else if (channelChoice === 'whatsapp') {
@@ -2357,7 +2366,7 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('
                 reservation.guests
             );
             outcome = await sendWhatsAppText(req.tenantId!, reservation.phone, message, reservation.id, whatsappTemplate);
-            recordConfirmationSent(reservation.id, outcome).catch(err =>
+            recordConfirmationSent(req.tenantId!, reservation.id, outcome).catch(err =>
                 console.warn('[confirmation] recordConfirmationSent failed:', err?.message || err)
             );
         } else {
@@ -2375,7 +2384,7 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('
         // Flip PENDING → CONFIRMED now that the "your booking is confirmed"
         // message is actually out — the CRM status is only allowed to lag
         // reality, never precede it.
-        const promoted = await promoteReservationIfPending(reservation.id);
+        const promoted = await promoteReservationIfPending(req.tenantId!, reservation.id);
         res.json({
             success: true,
             message: `Confirmation sent via ${label}`,
@@ -2396,8 +2405,8 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
     try {
         const { id } = req.params;
         const result = await queryWithRetry(
-            'SELECT id, customer_name, reservation_time, guests, phone, email, table_id, notes FROM reservations WHERE id = $1',
-            [id]
+            'SELECT id, customer_name, reservation_time, guests, phone, email, table_id, notes FROM reservations WHERE id = $1 AND tenant_id = $2',
+            [id, req.tenantId!]
         );
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Reservation not found' });
@@ -2460,8 +2469,9 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
                  confirmation_delivered_at = NULL,
                  confirmation_error = NULL
              WHERE id = $2
+               AND tenant_id = $3
              RETURNING *`,
-            [sent.messageId || null, reservation.id]
+            [sent.messageId || null, reservation.id, req.tenantId!]
         );
         if (updated.rows[0] && socketService) {
             try { socketService.broadcastReservationUpdated(updated.rows[0]); }
@@ -2472,7 +2482,7 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
         // Same PENDING → CONFIRMED promotion as the SMS/WhatsApp branch: the
         // customer just received a "you're booked" email, so the CRM must
         // stop showing "Da confermare".
-        const promoted = await promoteReservationIfPending(reservation.id);
+        const promoted = await promoteReservationIfPending(req.tenantId!, reservation.id);
         res.json({
             success: true,
             message: 'Confirmation sent via Email',
@@ -2505,8 +2515,8 @@ app.post('/reservations/:id/send-custom-email', authenticate, requirePermission(
         }
 
         const result = await queryWithRetry(
-            'SELECT id, customer_name, email FROM reservations WHERE id = $1',
-            [id]
+            'SELECT id, customer_name, email FROM reservations WHERE id = $1 AND tenant_id = $2',
+            [id, req.tenantId!]
         );
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Reservation not found' });
@@ -2577,8 +2587,8 @@ app.get('/reservations/:id/messages', authenticate, requirePermission('reservati
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
 
         const resRow = await queryWithRetry(
-            'SELECT phone, email FROM reservations WHERE id = $1',
-            [id]
+            'SELECT phone, email FROM reservations WHERE id = $1 AND tenant_id = $2',
+            [id, req.tenantId!]
         );
         if (resRow.rows.length === 0) return res.status(404).json({ error: 'Not found' });
         const phone: string | null = resRow.rows[0].phone;
@@ -2637,12 +2647,17 @@ app.get('/reservations/:id/bill', authenticate, requirePermission('payments:view
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
 
         const billIdRs = await queryWithRetry(
-            `SELECT id FROM table_bills
-             WHERE reservation_id = $1
-               AND status IN ('OPEN', 'LOCKED', 'SETTLED', 'SETTLED_PARTIAL')
-             ORDER BY opened_at DESC
+            // Il JOIN sulla prenotazione del tenant fa da guardia FK: un id di
+            // un altro ristorante cade nel 404 come un id inesistente. La
+            // scopatura piena di table_bills arriva col dominio pagamenti.
+            `SELECT tb.id FROM table_bills tb
+             JOIN reservations r ON r.id = tb.reservation_id AND r.tenant_id = tb.tenant_id
+             WHERE tb.reservation_id = $1
+               AND r.tenant_id = $2
+               AND tb.status IN ('OPEN', 'LOCKED', 'SETTLED', 'SETTLED_PARTIAL')
+             ORDER BY tb.opened_at DESC
              LIMIT 1`,
-            [id]
+            [id, req.tenantId!]
         );
         if (billIdRs.rows.length === 0) {
             return res.status(404).json({ error: 'No active bill for this reservation' });
@@ -2918,8 +2933,10 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
         const totalRounded = Math.round(totalCents);
 
         const resRow = await queryWithRetry(
-            'SELECT id, guests, table_id FROM reservations WHERE id = $1',
-            [id]
+            // Scopata sul tenant: un reservation_id altrui cade qui nel 404
+            // prima di poter aprire un conto sul tavolo di un altro ristorante.
+            'SELECT id, guests, table_id FROM reservations WHERE id = $1 AND tenant_id = $2',
+            [id, req.tenantId!]
         );
         if (resRow.rows.length === 0) return res.status(404).json({ error: 'Reservation not found' });
 
@@ -3009,8 +3026,8 @@ app.post('/reservations/:id/bill/notify', authenticate, requirePermission('payme
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid reservation id' });
 
         const resvRow = await queryWithRetry(
-            'SELECT id, customer_name, phone FROM reservations WHERE id = $1',
-            [id]
+            'SELECT id, customer_name, phone FROM reservations WHERE id = $1 AND tenant_id = $2',
+            [id, req.tenantId!]
         );
         if (resvRow.rowCount === 0) return res.status(404).json({ error: 'Reservation not found' });
         const reservation = resvRow.rows[0];
@@ -3892,7 +3909,8 @@ app.get('/messages/conversations', authenticate, requirePermission('reservations
             LEFT JOIN counts c ON c.phone_key = l.phone_key
             LEFT JOIN LATERAL (
                 SELECT customer_name FROM reservations
-                WHERE right(regexp_replace(COALESCE(phone,''), '\D', '', 'g'), 10) = l.phone_key
+                WHERE tenant_id = $1
+                  AND right(regexp_replace(COALESCE(phone,''), '\D', '', 'g'), 10) = l.phone_key
                 ORDER BY reservation_time DESC
                 LIMIT 1
             ) r ON true
@@ -4097,7 +4115,8 @@ app.get('/email/threads', authenticate, requirePermission('reservations:view'), 
             LEFT JOIN counts c ON c.email_key = l.email_key
             LEFT JOIN LATERAL (
                 SELECT customer_name FROM reservations
-                WHERE lower(email) = l.email_key
+                WHERE tenant_id = $1
+                  AND lower(email) = l.email_key
                 ORDER BY reservation_time DESC
                 LIMIT 1
             ) r ON true
@@ -4210,7 +4229,9 @@ app.post('/email/send', authenticate, requirePermission('reservations:full'), as
         let customerName: string | null = null;
         if (reservationId != null) {
             const r = await queryWithRetry(
-                'SELECT customer_name FROM reservations WHERE id = $1', [reservationId]
+                // Un id di un altro tenant equivale a inesistente: l'email
+                // parte comunque, ma senza aggancio alla prenotazione altrui.
+                'SELECT customer_name FROM reservations WHERE id = $1 AND tenant_id = $2', [reservationId, req.tenantId!]
             );
             if (r.rows.length === 0) {
                 reservationId = null;
@@ -4366,11 +4387,12 @@ app.post('/messages/suggest-reply', authenticate, requirePermission('reservation
                FROM reservations r
                LEFT JOIN tables t ON t.id = r.table_id AND t.tenant_id = r.tenant_id
                LEFT JOIN rooms ro ON ro.id = t.room_id AND ro.tenant_id = t.tenant_id
-              WHERE r.phone IS NOT NULL AND r.phone <> ''
+              WHERE r.tenant_id = $2
+                AND r.phone IS NOT NULL AND r.phone <> ''
                 AND ${PHONE_MATCH_KEY_SQL('r.phone')} = ${PHONE_MATCH_KEY_SQL('$1')}
               ORDER BY abs(extract(epoch FROM (r.reservation_time - CURRENT_TIMESTAMP))) ASC
               LIMIT 1`,
-            [key]
+            [key, req.tenantId!]
         );
 
         const suggestion = await generateSuggestedReply({
@@ -4729,7 +4751,7 @@ app.get('/payments', authenticate, requirePermission('payments:view'), async (re
                     tb.status AS bill_status,
                     t.name AS table_name
              FROM payment_requests pr
-             LEFT JOIN reservations r ON r.id = pr.reservation_id
+             LEFT JOIN reservations r ON r.id = pr.reservation_id AND r.tenant_id = pr.tenant_id
              LEFT JOIN table_bill_splits tbs ON tbs.id = pr.table_bill_split_id
              LEFT JOIN table_bills tb ON tb.id = tbs.table_bill_id
              LEFT JOIN tables t ON t.id = tb.table_id AND t.tenant_id = tb.tenant_id
@@ -4742,7 +4764,7 @@ app.get('/payments', authenticate, requirePermission('payments:view'), async (re
         const countResult = await queryWithRetry(
             `SELECT COUNT(*)::int AS total
              FROM payment_requests pr
-             LEFT JOIN reservations r ON r.id = pr.reservation_id
+             LEFT JOIN reservations r ON r.id = pr.reservation_id AND r.tenant_id = pr.tenant_id
              ${whereSql}`,
             params.slice(0, params.length - 2)
         );
@@ -4809,7 +4831,7 @@ app.get('/payments/:id/messages', authenticate, requirePermission('payments:view
         const payRow = await queryWithRetry(
             `SELECT pr.reservation_id, pr.checkout_url, r.phone, r.email
              FROM payment_requests pr
-             LEFT JOIN reservations r ON r.id = pr.reservation_id
+             LEFT JOIN reservations r ON r.id = pr.reservation_id AND r.tenant_id = pr.tenant_id
              WHERE pr.id = $1`,
             [id]
         );
@@ -4917,8 +4939,10 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
         // Fetch the reservation so we can pre-fill the message and check that the
         // chosen channel has somewhere to land (email address or phone number).
         const resvResult = await queryWithRetry(
-            'SELECT id, customer_name, phone, email, reservation_time, guests FROM reservations WHERE id = $1',
-            [reservationId]
+            // Guardia FK: un reservation_id di un altro tenant cade nel 404
+            // prima di creare una richiesta di pagamento agganciata altrove.
+            'SELECT id, customer_name, phone, email, reservation_time, guests FROM reservations WHERE id = $1 AND tenant_id = $2',
+            [reservationId, req.tenantId!]
         );
         if (resvResult.rowCount === 0) return res.status(404).json({ error: 'Prenotazione non trovata' });
         const reservation = resvResult.rows[0];
@@ -5303,11 +5327,13 @@ async function applyPaymentOrderTransition(
     if (isFirstCompletion && row.reservation_id && !billSplitId) {
         (async () => {
             try {
+                // Niente JWT qui (webhook/riconciliatore): la prenotazione è
+                // quella del tenant della payment_request, mai di un altro.
                 const resvRes = await queryWithRetry(
                     `SELECT id, customer_name, phone, reservation_time, guests,
                             reservation_status, table_id, notes
-                     FROM reservations WHERE id = $1`,
-                    [row.reservation_id]
+                     FROM reservations WHERE id = $1 AND tenant_id = $2`,
+                    [row.reservation_id, row.tenant_id]
                 );
                 if (resvRes.rowCount === 0) return;
                 const reservation = resvRes.rows[0];
@@ -5317,9 +5343,9 @@ async function applyPaymentOrderTransition(
                         `UPDATE reservations
                          SET reservation_status = 'CONFIRMED',
                              updated_at = CURRENT_TIMESTAMP
-                         WHERE id = $1
+                         WHERE id = $1 AND tenant_id = $2
                          RETURNING *`,
-                        [reservation.id]
+                        [reservation.id, row.tenant_id]
                     );
                     if (upd.rows[0] && socketService) {
                         try { socketService.broadcastReservationUpdated(upd.rows[0]); }
@@ -5689,8 +5715,8 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
             (async () => {
                 try {
                     const resv = await queryWithRetry(
-                        'SELECT customer_name, phone, reservation_time FROM reservations WHERE id = $1',
-                        [payment.reservation_id]
+                        'SELECT customer_name, phone, reservation_time FROM reservations WHERE id = $1 AND tenant_id = $2',
+                        [payment.reservation_id, req.tenantId!]
                     );
                     const reservation = resv.rows[0];
                     if (!reservation?.phone) return;
@@ -6065,10 +6091,11 @@ app.post('/table-hidden', authenticate, requirePermission('floorplan:full'), asy
         // Block if a reservation is on this table for the given date+shift.
         const reservationCheck = await queryWithRetry(
             `SELECT id, customer_name FROM reservations
-             WHERE table_id = $1
+             WHERE tenant_id = $4
+               AND table_id = $1
                AND shift = $2
                AND DATE(reservation_time AT TIME ZONE 'Europe/Rome') = $3`,
-            [table_id, shift, date]
+            [table_id, shift, date, req.tenantId!]
         );
         if (reservationCheck.rowCount && reservationCheck.rowCount > 0) {
             return res.status(409).json({
@@ -6228,12 +6255,13 @@ app.post('/room-closed', authenticate, requirePermission('floorplan:full'), asyn
         const reservationCheck = await queryWithRetry(
             `SELECT res.id, res.customer_name
              FROM reservations res
-             JOIN tables t ON t.id = res.table_id
-             WHERE t.room_id = $1
+             JOIN tables t ON t.id = res.table_id AND t.tenant_id = res.tenant_id
+             WHERE res.tenant_id = $4
+               AND t.room_id = $1
                AND res.shift = $2
                AND DATE(res.reservation_time AT TIME ZONE 'Europe/Rome') = $3
                AND COALESCE(res.reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')`,
-            [room_id, shift, date]
+            [room_id, shift, date, req.tenantId!]
         );
         if (reservationCheck.rowCount && reservationCheck.rowCount > 0) {
             return res.status(409).json({
@@ -10891,7 +10919,9 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
         // confermare") — staff reviews them in the list and the confirmation
         // message is fired automatically when they flip the status to CONFIRMED.
         const result = await queryWithRetry(
-            'INSERT INTO reservations (customer_name, reservation_time, shift, guests, phone, payment_status, arrival_status, reservation_status) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *',
+            // Canale WhatsApp inbound: niente JWT, la prenotazione nasce sul
+            // tenant pubblico come il resto del flusso webhook.
+            'INSERT INTO reservations (customer_name, reservation_time, shift, guests, phone, payment_status, arrival_status, reservation_status, tenant_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *',
             [
                 name,
                 `${date}T${time}`,
@@ -10900,7 +10930,8 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
                 phoneNumber,
                 PaymentStatus.PENDING,
                 'WAITING',
-                'PENDING'
+                'PENDING',
+                PUBLIC_TENANT_ID
             ]
         );
 
@@ -11841,8 +11872,13 @@ const PHONE_MATCH_KEY_SQL = (col: string) => `
  * stasera, non di quella di marzo. Le annullate restano candidabili (spesso
  * il messaggio E' la disdetta), ma perdono contro una prenotazione viva a
  * parita' di distanza.
+ *
+ * tenantId obbligatorio (quello del messaggio: PUBLIC_TENANT_ID dai webhook,
+ * req.tenantId! dalle route autenticate): senza filtro lo stesso numero in
+ * due ristoranti aggancerebbe la prenotazione dell'altro.
  */
 async function resolveReservationByPhone(
+    tenantId: number,
     phone: string,
     when: Date = new Date()
 ): Promise<number | null> {
@@ -11852,12 +11888,13 @@ async function resolveReservationByPhone(
         const r = await queryWithRetry(
             `SELECT id
                FROM reservations
-              WHERE phone IS NOT NULL AND phone <> ''
+              WHERE tenant_id = $3
+                AND phone IS NOT NULL AND phone <> ''
                 AND ${PHONE_MATCH_KEY_SQL('phone')} = $1
               ORDER BY (reservation_status = 'CANCELLED') ASC,
                        abs(extract(epoch FROM (reservation_time - $2::timestamptz))) ASC
               LIMIT 1`,
-            [key, when.toISOString()]
+            [key, when.toISOString(), tenantId]
         );
         return r.rows[0]?.id ?? null;
     } catch (err: any) {
@@ -11883,7 +11920,7 @@ async function logInboundMessage(params: {
         // solo in Inbox e non compare sulla scheda dove il cameriere guarda.
         // Se non c'e' nessuna prenotazione (cliente nuovo) resta NULL e il
         // messaggio vive comunque in Inbox — mai un filtro, solo un'aggiunta.
-        const reservationId = await resolveReservationByPhone(params.from);
+        const reservationId = await resolveReservationByPhone(params.tenantId, params.from);
         const result = await queryWithRetry(
             `INSERT INTO outbound_messages
              (tenant_id, provider, channel, direction, from_phone, from_phone_digits,
@@ -12221,7 +12258,7 @@ async function sendBookingConfirmation(
         }
     }
     if (reservationId != null) {
-        recordConfirmationSent(reservationId, result).catch(err =>
+        recordConfirmationSent(tenantId, reservationId, result).catch(err =>
             console.warn('[confirmation] recordConfirmationSent failed:', err?.message || err)
         );
     }
@@ -12232,7 +12269,10 @@ async function sendBookingConfirmation(
 // update so the delivery icon shows up on live dashboards. Called after a
 // successful Twilio/WhatsApp send. Silently no-ops for providers that don't
 // return a SID (Vonage) — without a SID we can't correlate the status callback.
+// tenantId obbligatorio: arriva dal chiamante (route autenticata o tenant
+// della riga WA fallita nel fallback) — mai dedotto dal solo reservationId.
 async function recordConfirmationSent(
+    tenantId: number,
     reservationId: number,
     result: OutboundConfirmationResult
 ): Promise<void> {
@@ -12246,8 +12286,9 @@ async function recordConfirmationSent(
              confirmation_delivered_at = NULL,
              confirmation_error = NULL
          WHERE id = $4
+           AND tenant_id = $5
          RETURNING *`,
-        [initialStatus, result.channel, result.sid ?? null, reservationId]
+        [initialStatus, result.channel, result.sid ?? null, reservationId, tenantId]
     );
     if (updated.rows[0] && socketService) {
         try { socketService.broadcastReservationUpdated(updated.rows[0]); }
@@ -13392,7 +13433,7 @@ app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
                     cust.customer_id,
                     cust.customer_name
              FROM voice_calls vc
-             LEFT JOIN reservations r ON r.id = vc.reservation_id
+             LEFT JOIN reservations r ON r.id = vc.reservation_id AND r.tenant_id = vc.tenant_id
              LEFT JOIN users u ON u.id = vc.follow_up_updated_by
              LEFT JOIN LATERAL (
                  SELECT c.id AS customer_id, c.name AS customer_name
@@ -13414,7 +13455,7 @@ app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
         const countResult = await queryWithRetry(
             `SELECT COUNT(*)::int AS total
              FROM voice_calls vc
-             LEFT JOIN reservations r ON r.id = vc.reservation_id
+             LEFT JOIN reservations r ON r.id = vc.reservation_id AND r.tenant_id = vc.tenant_id
              ${whereSql}`,
             params.slice(0, params.length - 2)
         );
@@ -13625,7 +13666,7 @@ app.get('/voice-calls/:id', authenticate, voiceCallsAuthorize, async (req, res) 
                     cust.customer_id,
                     cust.customer_name
              FROM voice_calls vc
-             LEFT JOIN reservations r ON r.id = vc.reservation_id
+             LEFT JOIN reservations r ON r.id = vc.reservation_id AND r.tenant_id = vc.tenant_id
              LEFT JOIN users u ON u.id = vc.follow_up_updated_by
              LEFT JOIN LATERAL (
                  SELECT c.id AS customer_id, c.name AS customer_name
@@ -16005,7 +16046,8 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
              FROM reservations r
              LEFT JOIN tables t ON t.id = r.table_id AND t.tenant_id = r.tenant_id
              LEFT JOIN rooms ro ON ro.id = t.room_id AND ro.tenant_id = t.tenant_id
-             WHERE r.reservation_time = $1
+             WHERE r.tenant_id = $4
+               AND r.reservation_time = $1
                AND r.reservation_status <> 'CANCELLED'
                AND r.created_at > NOW() - INTERVAL '30 minutes'
                AND (
@@ -16014,7 +16056,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                  OR ($3::text IS NOT NULL AND lower(r.email) = $3::text)
                )
              ORDER BY r.id DESC LIMIT 1`,
-            [`${date}T${time}:00`, dupPhoneDigits, dupEmailLower]
+            [`${date}T${time}:00`, dupPhoneDigits, dupEmailLower, PUBLIC_TENANT_ID]
         );
         if (dup.rows.length > 0) {
             const existing = dup.rows[0];
@@ -16126,15 +16168,16 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                 customer_name, reservation_time, shift, guests, children,
                 table_id, notes, email, phone, payment_status, arrival_status,
                 reservation_status, source, requires_review,
-                consent_data_health, consent_updated_at
+                consent_data_health, consent_updated_at, tenant_id
             )
-            VALUES ($1, $2, $3, $4, 0, $10, $5, $6, $7, 'PENDING', 'WAITING', $11, 'GOOGLE', $12, $8, $9)
+            VALUES ($1, $2, $3, $4, 0, $10, $5, $6, $7, 'PENDING', 'WAITING', $11, 'GOOGLE', $12, $8, $9, $13)
             RETURNING *`,
             [customer_name, reservation_time, shift, Math.trunc(guestsNum), notes, emailNormalized, phoneE164,
              consentHealth, consentUpdatedAt,
              autoTable?.id ?? null,
              autoConfirmed ? 'CONFIRMED' : 'PENDING',
-             !autoConfirmed]
+             !autoConfirmed,
+             PUBLIC_TENANT_ID]
         );
         const created = result.rows[0];
 
@@ -16153,8 +16196,8 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                 const reverted = await queryWithRetry(
                     `UPDATE reservations
                      SET table_id = NULL, reservation_status = 'PENDING', requires_review = true
-                     WHERE id = $1 RETURNING *`,
-                    [created.id]
+                     WHERE id = $1 AND tenant_id = $2 RETURNING *`,
+                    [created.id, PUBLIC_TENANT_ID]
                 );
                 Object.assign(created, reverted.rows[0]);
                 autoTable = null;
@@ -16911,7 +16954,9 @@ app.post('/orders', authenticate, requirePermission('orders:take'), async (req, 
         let covers = req.body?.covers != null ? Number(req.body.covers) : NaN;
         if (reservationId != null) {
             const r = await queryWithRetry(
-                `SELECT id, table_id, guests FROM reservations WHERE id = $1`, [reservationId]
+                // Come il tavolo qui sotto: una prenotazione altrui fa 404,
+                // mai una comanda agganciata a un altro ristorante.
+                `SELECT id, table_id, guests FROM reservations WHERE id = $1 AND tenant_id = $2`, [reservationId, req.tenantId!]
             );
             if (r.rows.length === 0) return res.status(404).json({ error: 'Prenotazione non trovata' });
             if (tableId == null) tableId = r.rows[0].table_id ?? null;
@@ -17538,7 +17583,7 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
              FROM order_items oi
              JOIN orders o ON o.id = oi.order_id
              LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
-             LEFT JOIN reservations r ON r.id = o.reservation_id
+             LEFT JOIN reservations r ON r.id = o.reservation_id AND r.tenant_id = o.tenant_id
              -- Gli allergeni stanno in anagrafica cliente, agganciata per
              -- telefono normalizzato: stessa lateral join delle prenotazioni.
              LEFT JOIN LATERAL (
@@ -17709,7 +17754,7 @@ app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), as
              FROM order_items oi
              JOIN orders o ON o.id = oi.order_id
              LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
-             LEFT JOIN reservations r ON r.id = o.reservation_id
+             LEFT JOIN reservations r ON r.id = o.reservation_id AND r.tenant_id = o.tenant_id
              WHERE o.status = 'OPEN'
                AND o.service_date = $1 AND o.shift = $2
                AND oi.status IN ('QUEUED','SENT','PREPARING','READY')
@@ -18850,11 +18895,12 @@ app.get('/kitchen/service-summary', authenticate, requirePermission('orders:kds'
                  ORDER BY cc.is_vip DESC NULLS LAST, cc.id ASC
                  LIMIT 1
              ) c ON true
-             WHERE DATE(r.reservation_time) = $1::date
+             WHERE r.tenant_id = $3
+               AND DATE(r.reservation_time) = $1::date
                AND r.shift = $2
                AND COALESCE(r.reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')
              ORDER BY r.reservation_time ASC, r.id ASC`,
-            [service.service_date, service.shift]
+            [service.service_date, service.shift, req.tenantId!]
         );
 
         // Aggregazione per (label, variant): raggruppiamo lato Node per non
@@ -19073,7 +19119,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                     (SELECT COUNT(*) FROM orders o WHERE o.table_bill_id = b.id AND o.status = 'OPEN')::int AS open_orders
              FROM table_bills b
              LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
-             LEFT JOIN reservations r ON r.id = b.reservation_id
+             LEFT JOIN reservations r ON r.id = b.reservation_id AND r.tenant_id = b.tenant_id
              LEFT JOIN table_bill_splits s ON s.table_bill_id = b.id
              WHERE b.status = ANY($3::varchar[])
                AND ($1::date IS NULL OR COALESCE(

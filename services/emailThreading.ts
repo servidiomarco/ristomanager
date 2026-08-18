@@ -65,16 +65,19 @@ export async function resolveReservationByMessageIds(tenantId: number, candidate
 }
 
 // Fallback resolver: match sender's email against a recent reservation.
-export async function resolveReservationByFromEmail(fromEmail: string | null): Promise<number | null> {
+// tenantId obbligatorio come per resolveReservationByMessageIds: la stessa
+// email in due ristoranti aggancerebbe la prenotazione dell'altro.
+export async function resolveReservationByFromEmail(tenantId: number, fromEmail: string | null): Promise<number | null> {
     if (!fromEmail) return null;
     try {
         const r = await queryWithRetry(
             `SELECT id
              FROM reservations
-             WHERE lower(email) = lower($1)
+             WHERE tenant_id = $2
+               AND lower(email) = lower($1)
              ORDER BY reservation_time DESC
              LIMIT 1`,
-            [fromEmail]
+            [fromEmail, tenantId]
         );
         return r.rows[0]?.id ?? null;
     } catch (err: any) {
