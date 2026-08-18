@@ -1264,6 +1264,7 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
                 const row = phantomRow.rows[0];
                 const displayPhone = row.phone || phoneRaw || 'numero sconosciuto';
                 pushSendToRoles(
+                    PUBLIC_TENANT_ID,
                     ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
                     {
                         category: 'voice',
@@ -1357,6 +1358,7 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
             const label = row.customer_name || row.phone || 'Numero sconosciuto';
             const bodyLine = row.customer_name && row.phone ? `${row.customer_name} · ${row.phone}` : label;
             pushSendToRoles(
+                PUBLIC_TENANT_ID,
                 ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
                 {
                     category: 'voice',
@@ -1789,6 +1791,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         // no asUtcInstant, the naive branch reads it verbatim (see fix #85).
         const reservationLabel = reservationPushLabel(reservation_time);
         pushSendToRoles(
+            req.tenantId!,
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
             {
                 category: 'reservation',
@@ -1961,6 +1964,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         if (previousStatus !== 'CANCELLED' && reservation_status === 'CANCELLED' && updatedReservation) {
             const reservationLabel = reservationPushLabel(asUtcInstant(updatedReservation.reservation_time));
             pushSendToRoles(
+                req.tenantId!,
                 ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
                 {
                     category: 'reservation',
@@ -5049,7 +5053,7 @@ async function applyBillSplitTransition(
                 // the staff must refund it by hand (until the dedicated
                 // refund endpoint lands).
                 console.error('[bill-split] OVERPAYMENT: split', splitId, 'paid after abandon, bill', billId, 'has no capacity left:', resErr?.message);
-                pushSendToRoles(['OWNER', 'GENERAL_MANAGER', 'MANAGER'], {
+                pushSendToRoles(PUBLIC_TENANT_ID, ['OWNER', 'GENERAL_MANAGER', 'MANAGER'], {
                     category: 'payment',
                     title: 'Pagamento in eccesso da rimborsare',
                     body: `${formatEuroMinor(amount)} pagati su un conto già saldato (conto #${billId}). Serve un rimborso manuale da Revolut.`,
@@ -5221,7 +5225,7 @@ async function applyPaymentOrderTransition(
     // want a "grazie, la tua prenotazione è confermata" WhatsApp.
     if (isFirstCompletion && !billSplitId) {
         const bodyLine = `${formatEuroMinor(row.amount_cents)} da prenotazione #${row.reservation_id ?? '?'}`;
-        pushSendToRoles(['OWNER', 'GENERAL_MANAGER', 'MANAGER'], {
+        pushSendToRoles(PUBLIC_TENANT_ID, ['OWNER', 'GENERAL_MANAGER', 'MANAGER'], {
             category: 'payment',
             title: 'Pagamento ricevuto',
             body: bodyLine,
@@ -6497,19 +6501,23 @@ const reminderPriority = (hoursBefore: number): 'LOW' | 'MEDIUM' | 'HIGH' => {
     return 'LOW';
 };
 
-async function addBanquetToReminders(banquetId: number, eventDate: string): Promise<void> {
+// tenantId arriva dal chiamante: req.tenantId! nelle route dei banchetti,
+// la tenant_id della riga banquet_menus nel backfill di boot. Senza questo
+// il reminder cucina di un ristorante aggregherebbe i banchetti dell'altro.
+async function addBanquetToReminders(tenantId: number, banquetId: number, eventDate: string): Promise<void> {
     for (const hours of BANQUET_REMINDER_WINDOWS) {
         const dueDate = computeReminderDueDate(eventDate, hours);
 
         const existing = await queryWithRetry(`
             SELECT ${TODO_FULL_SELECT}
             FROM todos
-            WHERE banquet_reminder_hours = $1
+            WHERE tenant_id = $3
+              AND banquet_reminder_hours = $1
               AND due_date = $2
               AND assigned_to_team = 'KITCHEN'
               AND completed = false
             LIMIT 1
-        `, [hours, dueDate]);
+        `, [hours, dueDate, tenantId]);
 
         if (existing.rows.length > 0) {
             const todo = existing.rows[0];
@@ -6519,16 +6527,16 @@ async function addBanquetToReminders(banquetId: number, eventDate: string): Prom
             const updated = await queryWithRetry(`
                 UPDATE todos
                 SET linked_banquet_ids = $1, title = $2, description = $3
-                WHERE id = $4
+                WHERE id = $4 AND tenant_id = $5
                 RETURNING ${TODO_FULL_SELECT}
-            `, [newIds, buildReminderTitle(eventDate, hours), buildReminderDescription(eventDate), todo.id]);
+            `, [newIds, buildReminderTitle(eventDate, hours), buildReminderDescription(eventDate), todo.id, tenantId]);
             if (socketService && updated.rows[0]) socketService.broadcastToAll('todo:updated', updated.rows[0]);
         } else {
             const created = await queryWithRetry(`
                 INSERT INTO todos (
-                    title, description, priority, category, due_date,
+                    tenant_id, title, description, priority, category, due_date,
                     assigned_to_team, linked_banquet_ids, banquet_reminder_hours
-                ) VALUES ($1, $2, $3, $4, $5, 'KITCHEN', $6, $7)
+                ) VALUES ($8, $1, $2, $3, $4, $5, 'KITCHEN', $6, $7)
                 RETURNING ${TODO_FULL_SELECT}
             `, [
                 buildReminderTitle(eventDate, hours),
@@ -6538,10 +6546,12 @@ async function addBanquetToReminders(banquetId: number, eventDate: string): Prom
                 dueDate,
                 [banquetId],
                 hours,
+                tenantId,
             ]);
             if (socketService && created.rows[0]) socketService.broadcastToAll('todo:created', created.rows[0]);
             if (created.rows[0]) {
                 pushSendToRoles(
+                    tenantId,
                     ['KITCHEN'],
                     {
                         category: 'system',
@@ -6556,36 +6566,37 @@ async function addBanquetToReminders(banquetId: number, eventDate: string): Prom
     }
 }
 
-async function removeBanquetFromReminders(banquetId: number): Promise<void> {
+async function removeBanquetFromReminders(tenantId: number, banquetId: number): Promise<void> {
     const todos = await queryWithRetry(`
         SELECT ${TODO_FULL_SELECT}
         FROM todos
-        WHERE banquet_reminder_hours IS NOT NULL
+        WHERE tenant_id = $2
+          AND banquet_reminder_hours IS NOT NULL
           AND $1 = ANY(linked_banquet_ids)
-    `, [banquetId]);
+    `, [banquetId, tenantId]);
 
     for (const todo of todos.rows) {
         const ids: number[] = Array.isArray(todo.linkedBanquetIds) ? todo.linkedBanquetIds : [];
         const newIds = ids.filter((id: number) => id !== banquetId);
 
         if (newIds.length === 0) {
-            await queryWithRetry('DELETE FROM todos WHERE id = $1', [todo.id]);
+            await queryWithRetry('DELETE FROM todos WHERE id = $1 AND tenant_id = $2', [todo.id, tenantId]);
             if (socketService) socketService.broadcastToAll('todo:deleted', { id: todo.id });
         } else {
             const updated = await queryWithRetry(`
                 UPDATE todos
                 SET linked_banquet_ids = $1
-                WHERE id = $2
+                WHERE id = $2 AND tenant_id = $3
                 RETURNING ${TODO_FULL_SELECT}
-            `, [newIds, todo.id]);
+            `, [newIds, todo.id, tenantId]);
             if (socketService && updated.rows[0]) socketService.broadcastToAll('todo:updated', updated.rows[0]);
         }
     }
 }
 
-async function syncBanquetReminders(banquetId: number, newEventDate: string): Promise<void> {
-    await removeBanquetFromReminders(banquetId);
-    await addBanquetToReminders(banquetId, newEventDate);
+async function syncBanquetReminders(tenantId: number, banquetId: number, newEventDate: string): Promise<void> {
+    await removeBanquetFromReminders(tenantId, banquetId);
+    await addBanquetToReminders(tenantId, banquetId, newEventDate);
 }
 
 // ============================================
@@ -6617,7 +6628,10 @@ const addDaysIso = (iso: string, days: number): string => {
     return d.toISOString().substring(0, 10);
 };
 
-async function runDailyBreadReminder(targetRoles: string[] = ['OWNER']): Promise<void> {
+// tenantId arriva dalla riga di reminders che ha fatto scattare il tick: il
+// conteggio coperti e il todo devono restare del ristorante del reminder,
+// altrimenti il pane di un locale conterebbe i tavoli dell'altro.
+async function runDailyBreadReminder(tenantId: number, targetRoles: string[] = ['OWNER']): Promise<void> {
     const todayIso = getItalianTodayIso();
     const tomorrowIso = addDaysIso(todayIso, 1);
 
@@ -6629,15 +6643,17 @@ async function runDailyBreadReminder(targetRoles: string[] = ['OWNER']): Promise
         `SELECT (
             COALESCE((
                 SELECT SUM(guests) FROM reservations
-                WHERE DATE(reservation_time) = $1
+                WHERE tenant_id = $2
+                  AND DATE(reservation_time) = $1
                   AND COALESCE(reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')
             ), 0)
             + COALESCE((
                 SELECT SUM(guests) FROM banquet_menus
-                WHERE event_date = $1
+                WHERE tenant_id = $2
+                  AND event_date = $1
             ), 0)
          )::int AS total`,
-        [tomorrowIso]
+        [tomorrowIso, tenantId]
     );
     const totalGuests: number = result.rows[0]?.total ?? 0;
     const kg = Math.max(1, Math.ceil(totalGuests / 10));
@@ -6654,11 +6670,12 @@ async function runDailyBreadReminder(targetRoles: string[] = ['OWNER']): Promise
     const existing = await queryWithRetry(`
         SELECT ${TODO_FULL_SELECT}
         FROM todos
-        WHERE auto_kind = $1
+        WHERE tenant_id = $3
+          AND auto_kind = $1
           AND due_date = $2
           AND assigned_to_team = 'OWNER'
         LIMIT 1
-    `, [BREAD_AUTO_KIND, tomorrowIso]);
+    `, [BREAD_AUTO_KIND, tomorrowIso, tenantId]);
 
     // Upsert the todo record. Skip only if the todo already exists AND has
     // been completed by the owner — in that case they've already acted on
@@ -6672,19 +6689,19 @@ async function runDailyBreadReminder(targetRoles: string[] = ['OWNER']): Promise
             const updated = await queryWithRetry(`
                 UPDATE todos
                 SET title = $1, description = $2
-                WHERE id = $3
+                WHERE id = $3 AND tenant_id = $4
                 RETURNING ${TODO_FULL_SELECT}
-            `, [title, description, todo.id]);
+            `, [title, description, todo.id, tenantId]);
             if (socketService && updated.rows[0]) socketService.broadcastToAll('todo:updated', updated.rows[0]);
         }
     } else {
         const created = await queryWithRetry(`
             INSERT INTO todos (
-                title, description, priority, category, due_date,
+                tenant_id, title, description, priority, category, due_date,
                 assigned_to_team, auto_kind
-            ) VALUES ($1, $2, 'HIGH', 'INVENTORY', $3, 'OWNER', $4)
+            ) VALUES ($5, $1, $2, 'HIGH', 'INVENTORY', $3, 'OWNER', $4)
             RETURNING ${TODO_FULL_SELECT}
-        `, [title, description, tomorrowIso, BREAD_AUTO_KIND]);
+        `, [title, description, tomorrowIso, BREAD_AUTO_KIND, tenantId]);
         if (socketService && created.rows[0]) socketService.broadcastToAll('todo:created', created.rows[0]);
     }
 
@@ -6697,6 +6714,7 @@ async function runDailyBreadReminder(targetRoles: string[] = ['OWNER']): Promise
     if (!todoAlreadyDone) {
         const roles = (targetRoles && targetRoles.length > 0) ? targetRoles : ['OWNER'];
         pushSendToRoles(
+            tenantId,
             roles,
             {
                 category: 'system',
@@ -6884,11 +6902,14 @@ type ReminderHandler = (reminder: ReminderRow) => Promise<void>;
 const SYSTEM_REMINDER_HANDLERS: Record<string, ReminderHandler> = {
     // Forward the reminder's target_roles so the operator's Impostazioni
     // choice ("Chi riceve?") is honoured by the system handler as well.
-    BREAD_DAILY: async (r) => { await runDailyBreadReminder(r.target_roles); },
+    BREAD_DAILY: async (r) => { await runDailyBreadReminder(r.tenant_id, r.target_roles); },
 };
 
 interface ReminderRow {
     id: number;
+    // Lo scheduler gira senza richiesta: il tenant viaggia con la riga e
+    // decide chi riceve la push e su quali dati calcolare i contenuti.
+    tenant_id: number;
     title: string;
     description: string | null;
     kind: 'ONE_OFF' | 'RECURRING';
@@ -6953,7 +6974,7 @@ async function fireReminder(r: ReminderRow): Promise<void> {
         // chosen target roles. Body falls back to title if description is
         // empty so the push isn't rendered blank.
         const roles = (r.target_roles && r.target_roles.length > 0) ? r.target_roles : ['OWNER'];
-        await pushSendToRoles(roles, {
+        await pushSendToRoles(r.tenant_id, roles, {
             category: 'system',
             title: r.title,
             body: r.description || r.title,
@@ -6966,8 +6987,11 @@ async function fireReminder(r: ReminderRow): Promise<void> {
 const startRemindersScheduler = () => {
     const tick = async () => {
         try {
+            // Nessun filtro tenant qui, di proposito: il tick è l'unico punto
+            // che serve TUTTI i ristoranti; ogni riga porta il proprio
+            // tenant_id a valle (push, contenuti dinamici).
             const result = await queryWithRetry(
-                `SELECT id, title, description, kind, frequency, schedule_time,
+                `SELECT id, tenant_id, title, description, kind, frequency, schedule_time,
                         to_char(schedule_date, 'YYYY-MM-DD') AS schedule_date,
                         weekdays, month_day, target_roles, active, system_key, last_run_at
                  FROM reminders
@@ -6983,8 +7007,8 @@ const startRemindersScheduler = () => {
                          SET last_run_at = CURRENT_TIMESTAMP,
                              active = CASE WHEN kind = 'ONE_OFF' THEN FALSE ELSE active END,
                              updated_at = CURRENT_TIMESTAMP
-                         WHERE id = $1`,
-                        [row.id]
+                         WHERE id = $1 AND tenant_id = $2`,
+                        [row.id, row.tenant_id]
                     );
                     console.log(`⏰ Reminder fired: #${row.id} "${row.title}" (kind=${row.kind}, system_key=${row.system_key ?? '-'})`);
                 } catch (err) {
@@ -7669,14 +7693,14 @@ const LOW_STOCK_ALERT_ROLES = ['OWNER', 'GENERAL_MANAGER', 'KITCHEN'];
 app.get('/inventory/locations', authenticate, requirePermission('inventory:view'), async (req, res) => {
     try {
         const { area } = req.query as { area?: string };
-        const params: any[] = [];
-        let where = '';
+        const params: any[] = [req.tenantId!];
+        let where = 'WHERE tenant_id = $1';
         if (area) {
             if (!ALLOWED_INVENTORY_AREAS.has(area)) {
                 return res.status(400).json({ error: 'Invalid area' });
             }
             params.push(area);
-            where = 'WHERE area = $1';
+            where += ' AND area = $2';
         }
         const result = await queryWithRetry(
             `SELECT id, area, name, sort_order, created_at
@@ -7702,10 +7726,10 @@ app.post('/inventory/locations', authenticate, requirePermission('inventory:full
             return res.status(400).json({ error: 'name is required' });
         }
         const result = await queryWithRetry(
-            `INSERT INTO inventory_locations (area, name, sort_order)
-             VALUES ($1, $2, $3)
+            `INSERT INTO inventory_locations (tenant_id, area, name, sort_order)
+             VALUES ($4, $1, $2, $3)
              RETURNING id, area, name, sort_order, created_at`,
-            [area, String(name).trim(), Number.isFinite(Number(sort_order)) ? Number(sort_order) : 0]
+            [area, String(name).trim(), Number.isFinite(Number(sort_order)) ? Number(sort_order) : 0, req.tenantId!]
         );
         const created = result.rows[0];
         if (req.user) {
@@ -7735,9 +7759,9 @@ app.put('/inventory/locations/:id', authenticate, requirePermission('inventory:f
         const result = await queryWithRetry(
             `UPDATE inventory_locations
              SET name = $1, sort_order = $2
-             WHERE id = $3
+             WHERE id = $3 AND tenant_id = $4
              RETURNING id, area, name, sort_order, created_at`,
-            [String(name).trim(), Number.isFinite(Number(sort_order)) ? Number(sort_order) : 0, id]
+            [String(name).trim(), Number.isFinite(Number(sort_order)) ? Number(sort_order) : 0, id, req.tenantId!]
         );
         if (result.rowCount === 0) {
             return res.status(404).json({ error: 'Location not found' });
@@ -7763,13 +7787,13 @@ app.put('/inventory/locations/:id', authenticate, requirePermission('inventory:f
 app.delete('/inventory/locations/:id', authenticate, requirePermission('inventory:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const existing = await queryWithRetry('SELECT area, name FROM inventory_locations WHERE id = $1', [id]);
+        const existing = await queryWithRetry('SELECT area, name FROM inventory_locations WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
         if (existing.rowCount === 0) {
             return res.status(404).json({ error: 'Location not found' });
         }
         // ON DELETE CASCADE on inventory_stock + inventory_movements drops the
         // related rows. Stock is destroyed — confirm on the client side.
-        await queryWithRetry('DELETE FROM inventory_locations WHERE id = $1', [id]);
+        await queryWithRetry('DELETE FROM inventory_locations WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
         if (req.user) {
             LogService.logActivity(
                 req.user.userId, req.user.email, req.user.email,
@@ -7788,14 +7812,14 @@ app.delete('/inventory/locations/:id', authenticate, requirePermission('inventor
 app.get('/inventory/categories', authenticate, requirePermission('inventory:view'), async (req, res) => {
     try {
         const { area } = req.query as { area?: string };
-        const params: any[] = [];
-        let where = '';
+        const params: any[] = [req.tenantId!];
+        let where = 'WHERE tenant_id = $1';
         if (area) {
             if (!ALLOWED_INVENTORY_AREAS.has(area)) {
                 return res.status(400).json({ error: 'Invalid area' });
             }
             params.push(area);
-            where = 'WHERE area = $1';
+            where += ' AND area = $2';
         }
         const result = await queryWithRetry(
             `SELECT id, area, name, sort_order, created_at
@@ -7821,10 +7845,10 @@ app.post('/inventory/categories', authenticate, requirePermission('inventory:ful
             return res.status(400).json({ error: 'name is required' });
         }
         const result = await queryWithRetry(
-            `INSERT INTO inventory_categories (area, name, sort_order)
-             VALUES ($1, $2, $3)
+            `INSERT INTO inventory_categories (tenant_id, area, name, sort_order)
+             VALUES ($4, $1, $2, $3)
              RETURNING id, area, name, sort_order, created_at`,
-            [area, String(name).trim(), Number.isFinite(Number(sort_order)) ? Number(sort_order) : 0]
+            [area, String(name).trim(), Number.isFinite(Number(sort_order)) ? Number(sort_order) : 0, req.tenantId!]
         );
         const created = result.rows[0];
         if (req.user) {
@@ -7854,9 +7878,9 @@ app.put('/inventory/categories/:id', authenticate, requirePermission('inventory:
         const result = await queryWithRetry(
             `UPDATE inventory_categories
              SET name = $1, sort_order = $2
-             WHERE id = $3
+             WHERE id = $3 AND tenant_id = $4
              RETURNING id, area, name, sort_order, created_at`,
-            [String(name).trim(), Number.isFinite(Number(sort_order)) ? Number(sort_order) : 0, id]
+            [String(name).trim(), Number.isFinite(Number(sort_order)) ? Number(sort_order) : 0, id, req.tenantId!]
         );
         if (result.rowCount === 0) {
             return res.status(404).json({ error: 'Category not found' });
@@ -7882,13 +7906,13 @@ app.put('/inventory/categories/:id', authenticate, requirePermission('inventory:
 app.delete('/inventory/categories/:id', authenticate, requirePermission('inventory:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const existing = await queryWithRetry('SELECT area, name FROM inventory_categories WHERE id = $1', [id]);
+        const existing = await queryWithRetry('SELECT area, name FROM inventory_categories WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
         if (existing.rowCount === 0) {
             return res.status(404).json({ error: 'Category not found' });
         }
         // ON DELETE SET NULL on inventory_products.category_id keeps products
         // alive but unassigned.
-        await queryWithRetry('DELETE FROM inventory_categories WHERE id = $1', [id]);
+        await queryWithRetry('DELETE FROM inventory_categories WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
         if (req.user) {
             LogService.logActivity(
                 req.user.userId, req.user.email, req.user.email,
@@ -7907,19 +7931,19 @@ app.delete('/inventory/categories/:id', authenticate, requirePermission('invento
 app.get('/inventory/products', authenticate, requirePermission('inventory:view'), async (req, res) => {
     try {
         const { area } = req.query as { area?: string };
-        const params: any[] = [];
-        let where = '';
+        const params: any[] = [req.tenantId!];
+        let where = 'WHERE p.tenant_id = $1';
         if (area) {
             if (!ALLOWED_INVENTORY_AREAS.has(area)) {
                 return res.status(400).json({ error: 'Invalid area' });
             }
             params.push(area);
-            where = 'WHERE p.area = $1';
+            where += ' AND p.area = $2';
         }
         const result = await queryWithRetry(
             `SELECT p.id, p.area, p.name, p.unit, p.notes, p.category_id, c.name AS category_name, p.created_at
              FROM inventory_products p
-             LEFT JOIN inventory_categories c ON c.id = p.category_id
+             LEFT JOIN inventory_categories c ON c.id = p.category_id AND c.tenant_id = p.tenant_id
              ${where}
              ORDER BY p.area, p.name`,
             params
@@ -7944,8 +7968,8 @@ app.post('/inventory/products', authenticate, requirePermission('inventory:full'
         let validCategoryId: number | null = null;
         if (category_id != null && category_id !== '') {
             const catCheck = await queryWithRetry(
-                'SELECT area FROM inventory_categories WHERE id = $1',
-                [category_id]
+                'SELECT area FROM inventory_categories WHERE id = $1 AND tenant_id = $2',
+                [category_id, req.tenantId!]
             );
             if (catCheck.rowCount === 0) {
                 return res.status(400).json({ error: 'Invalid category' });
@@ -7957,8 +7981,8 @@ app.post('/inventory/products', authenticate, requirePermission('inventory:full'
         }
         const result = await queryWithRetry(
             `WITH inserted AS (
-               INSERT INTO inventory_products (area, name, unit, notes, category_id)
-               VALUES ($1, $2, $3, $4, $5)
+               INSERT INTO inventory_products (tenant_id, area, name, unit, notes, category_id)
+               VALUES ($6, $1, $2, $3, $4, $5)
                RETURNING id, area, name, unit, notes, category_id, created_at
              )
              SELECT i.*, c.name AS category_name
@@ -7970,6 +7994,7 @@ app.post('/inventory/products', authenticate, requirePermission('inventory:full'
                 unit ? String(unit).trim() : null,
                 notes ? String(notes).trim() : null,
                 validCategoryId,
+                req.tenantId!,
             ]
         );
         const created = result.rows[0];
@@ -7998,15 +8023,15 @@ app.put('/inventory/products/:id', authenticate, requirePermission('inventory:fu
             return res.status(400).json({ error: 'name is required' });
         }
         // Look up product area to validate category_id stays in the same area.
-        const prod = await queryWithRetry('SELECT area FROM inventory_products WHERE id = $1', [id]);
+        const prod = await queryWithRetry('SELECT area FROM inventory_products WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
         if (prod.rowCount === 0) {
             return res.status(404).json({ error: 'Product not found' });
         }
         let validCategoryId: number | null = null;
         if (category_id != null && category_id !== '') {
             const catCheck = await queryWithRetry(
-                'SELECT area FROM inventory_categories WHERE id = $1',
-                [category_id]
+                'SELECT area FROM inventory_categories WHERE id = $1 AND tenant_id = $2',
+                [category_id, req.tenantId!]
             );
             if (catCheck.rowCount === 0) {
                 return res.status(400).json({ error: 'Invalid category' });
@@ -8020,7 +8045,7 @@ app.put('/inventory/products/:id', authenticate, requirePermission('inventory:fu
             `WITH updated AS (
                UPDATE inventory_products
                SET name = $1, unit = $2, notes = $3, category_id = $4
-               WHERE id = $5
+               WHERE id = $5 AND tenant_id = $6
                RETURNING id, area, name, unit, notes, category_id, created_at
              )
              SELECT u.*, c.name AS category_name
@@ -8032,6 +8057,7 @@ app.put('/inventory/products/:id', authenticate, requirePermission('inventory:fu
                 notes ? String(notes).trim() : null,
                 validCategoryId,
                 id,
+                req.tenantId!,
             ]
         );
         const updated = result.rows[0];
@@ -8055,11 +8081,11 @@ app.put('/inventory/products/:id', authenticate, requirePermission('inventory:fu
 app.delete('/inventory/products/:id', authenticate, requirePermission('inventory:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const existing = await queryWithRetry('SELECT area, name FROM inventory_products WHERE id = $1', [id]);
+        const existing = await queryWithRetry('SELECT area, name FROM inventory_products WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
         if (existing.rowCount === 0) {
             return res.status(404).json({ error: 'Product not found' });
         }
-        await queryWithRetry('DELETE FROM inventory_products WHERE id = $1', [id]);
+        await queryWithRetry('DELETE FROM inventory_products WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
         if (req.user) {
             LogService.logActivity(
                 req.user.userId, req.user.email, req.user.email,
@@ -8079,14 +8105,16 @@ app.delete('/inventory/products/:id', authenticate, requirePermission('inventory
 app.get('/inventory/stock', authenticate, requirePermission('inventory:view'), async (req, res) => {
     try {
         const { area } = req.query as { area?: string };
-        const params: any[] = [];
-        let where = '';
+        // La PK di inventory_stock resta (product_id, location_id): il filtro
+        // tenant passa dal prodotto, che è la fonte autorevole dell'area.
+        const params: any[] = [req.tenantId!];
+        let where = 'WHERE p.tenant_id = $1';
         if (area) {
             if (!ALLOWED_INVENTORY_AREAS.has(area)) {
                 return res.status(400).json({ error: 'Invalid area' });
             }
             params.push(area);
-            where = 'WHERE p.area = $1';
+            where += ' AND p.area = $2';
         }
         const result = await queryWithRetry(
             `SELECT s.product_id, s.location_id, s.quantity::float AS quantity
@@ -8108,21 +8136,21 @@ app.get('/inventory/stock', authenticate, requirePermission('inventory:view'), a
 app.get('/inventory/low-stock', authenticate, requirePermission('inventory:view'), async (req, res) => {
     try {
         const { area } = req.query as { area?: string };
-        const params: any[] = [LOW_STOCK_THRESHOLD];
-        let where = '';
+        const params: any[] = [LOW_STOCK_THRESHOLD, req.tenantId!];
+        let where = 'WHERE p.tenant_id = $2';
         if (area) {
             if (!ALLOWED_INVENTORY_AREAS.has(area)) {
                 return res.status(400).json({ error: 'Invalid area' });
             }
             params.push(area);
-            where = 'WHERE p.area = $2';
+            where += ' AND p.area = $3';
         }
         const result = await queryWithRetry(
             `SELECT p.id, p.area, p.name, p.unit, p.category_id,
                     c.name AS category_name,
                     COALESCE(SUM(s.quantity), 0)::float AS total_quantity
              FROM inventory_products p
-             LEFT JOIN inventory_categories c ON c.id = p.category_id
+             LEFT JOIN inventory_categories c ON c.id = p.category_id AND c.tenant_id = p.tenant_id
              LEFT JOIN inventory_stock s     ON s.product_id = p.id
              ${where}
              GROUP BY p.id, c.name
@@ -8160,11 +8188,13 @@ app.post('/inventory/movements', authenticate, requirePermission('inventory:full
         await client.query('BEGIN');
 
         // Make sure product and location exist and belong to the same area.
+        // Il tenant è parte dell'esistenza: prodotto o location di un altro
+        // ristorante rispondono 404, non 400.
         const validation = await client.query(
             `SELECT p.area AS p_area, l.area AS l_area, p.name AS p_name, l.name AS l_name, p.unit AS p_unit
              FROM inventory_products p, inventory_locations l
-             WHERE p.id = $1 AND l.id = $2`,
-            [productId, locationId]
+             WHERE p.id = $1 AND l.id = $2 AND p.tenant_id = $3 AND l.tenant_id = $3`,
+            [productId, locationId, req.tenantId!]
         );
         if (validation.rowCount === 0) {
             await client.query('ROLLBACK');
@@ -8180,26 +8210,26 @@ app.post('/inventory/movements', authenticate, requirePermission('inventory:full
         // threshold-crossing once the delta lands.
         const totalBeforeRes = await client.query(
             `SELECT COALESCE(SUM(quantity), 0)::float AS total
-             FROM inventory_stock WHERE product_id = $1`,
-            [productId]
+             FROM inventory_stock WHERE product_id = $1 AND tenant_id = $2`,
+            [productId, req.tenantId!]
         );
         const totalBefore: number = totalBeforeRes.rows[0]?.total ?? 0;
 
         // Upsert the stock row. Negative results are allowed so carico/scarico
         // never silently fails — the UI surfaces a warning when total < 0.
         const upsert = await client.query(
-            `INSERT INTO inventory_stock (product_id, location_id, quantity, updated_at)
-             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+            `INSERT INTO inventory_stock (tenant_id, product_id, location_id, quantity, updated_at)
+             VALUES ($4, $1, $2, $3, CURRENT_TIMESTAMP)
              ON CONFLICT (product_id, location_id)
              DO UPDATE SET quantity = inventory_stock.quantity + EXCLUDED.quantity,
                            updated_at = CURRENT_TIMESTAMP
              RETURNING quantity::float AS quantity`,
-            [productId, locationId, deltaNum]
+            [productId, locationId, deltaNum, req.tenantId!]
         );
 
         const movement = await client.query(
-            `INSERT INTO inventory_movements (product_id, location_id, delta, reason, notes, user_id, user_name)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
+            `INSERT INTO inventory_movements (tenant_id, product_id, location_id, delta, reason, notes, user_id, user_name)
+             VALUES ($8, $1, $2, $3, $4, $5, $6, $7)
              RETURNING id, product_id, location_id, delta::float AS delta, reason, notes, user_id, user_name, created_at`,
             [
                 productId,
@@ -8209,6 +8239,7 @@ app.post('/inventory/movements', authenticate, requirePermission('inventory:full
                 notes ? String(notes).trim() : null,
                 req.user?.userId ?? null,
                 req.user?.email ?? null,
+                req.tenantId!,
             ]
         );
 
@@ -8229,6 +8260,7 @@ app.post('/inventory/movements', authenticate, requirePermission('inventory:full
             const unit = v.p_unit ? ` ${v.p_unit}` : '';
             const qtyText = Number.isInteger(totalAfter) ? String(totalAfter) : totalAfter.toFixed(1);
             pushSendToRoles(
+                req.tenantId!,
                 LOW_STOCK_ALERT_ROLES,
                 {
                     category: 'system',
@@ -8327,7 +8359,7 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
         if (socketService) socketService.broadcastBanquetCreated(newMenu);
 
         // Generate kitchen reminder todos (72h/48h/24h before event_date)
-        addBanquetToReminders(newMenu.id, newMenu.event_date).catch(err => {
+        addBanquetToReminders(req.tenantId!, newMenu.id, newMenu.event_date).catch(err => {
             console.error('Failed to create banquet reminder todos:', err);
         });
 
@@ -8392,7 +8424,7 @@ app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), asyn
         if (socketService) socketService.broadcastBanquetUpdated(updatedMenu);
 
         // Re-sync kitchen reminder todos (handles event_date changes)
-        syncBanquetReminders(parseInt(id, 10), updatedMenu.event_date).catch(err => {
+        syncBanquetReminders(req.tenantId!, parseInt(id, 10), updatedMenu.event_date).catch(err => {
             console.error('Failed to sync banquet reminder todos:', err);
         });
 
@@ -8430,7 +8462,7 @@ app.delete('/banquet-menus/:id', authenticate, requirePermission('menu:full'), a
         if (socketService) socketService.broadcastBanquetDeleted(Number(id));
 
         // Remove banquet from kitchen reminder todos
-        removeBanquetFromReminders(Number(id)).catch(err => {
+        removeBanquetFromReminders(req.tenantId!, Number(id)).catch(err => {
             console.error('Failed to remove banquet from reminder todos:', err);
         });
 
@@ -8607,11 +8639,12 @@ app.get('/todos', authenticate, async (req, res) => {
                 created_by_user_id as "createdByUserId",
                 created_by_user_name as "createdByUserName"
             FROM todos
+            WHERE tenant_id = $1
         `;
-        const params: string[] = [];
+        const params: any[] = [req.tenantId!];
 
         if (date) {
-            query += ' WHERE due_date = $1';
+            query += ' AND due_date = $2';
             params.push(date as string);
         }
 
@@ -8651,7 +8684,8 @@ app.get('/todos/my', authenticate, async (req, res) => {
                 created_by_user_id as "createdByUserId",
                 created_by_user_name as "createdByUserName"
             FROM todos
-            WHERE (assigned_to_user_id = $1 OR assigned_to_team = $2)
+            WHERE tenant_id = $3
+              AND (assigned_to_user_id = $1 OR assigned_to_team = $2)
               AND completed = false
             ORDER BY
                 CASE priority
@@ -8661,7 +8695,7 @@ app.get('/todos/my', authenticate, async (req, res) => {
                 END,
                 due_date ASC NULLS LAST,
                 created_at DESC
-        `, [userId, userRole]);
+        `, [userId, userRole, req.tenantId!]);
 
         res.json(result.rows);
     } catch (err) {
@@ -8692,9 +8726,11 @@ app.post('/todos', authenticate, async (req, res) => {
                 return res.status(403).json({ error: 'Non puoi assegnare task a questo team' });
             }
             if (assignedToUserId) {
+                // Il filtro tenant impedisce di assegnare un todo allo staff
+                // di un altro ristorante: l'utente fuori tenant "non esiste".
                 const target = await queryWithRetry(
-                    'SELECT role FROM users WHERE id = $1',
-                    [assignedToUserId]
+                    'SELECT role FROM users WHERE id = $1 AND tenant_id = $2',
+                    [assignedToUserId, req.tenantId!]
                 );
                 const targetRole = target.rows[0]?.role as UserRole | undefined;
                 if (!targetRole || !canAssignToRole(actorRole, targetRole)) {
@@ -8705,11 +8741,11 @@ app.post('/todos', authenticate, async (req, res) => {
 
         const result = await queryWithRetry(`
             INSERT INTO todos (
-                title, description, priority, category, due_date,
+                tenant_id, title, description, priority, category, due_date,
                 assigned_to_user_id, assigned_to_user_name, assigned_to_team,
                 linked_reservation_id, linked_banquet_ids, banquet_reminder_hours,
                 created_by_user_id, created_by_user_name
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            ) VALUES ($14, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             RETURNING
                 id,
                 title,
@@ -8742,7 +8778,8 @@ app.post('/todos', authenticate, async (req, res) => {
             Array.isArray(linkedBanquetIds) && linkedBanquetIds.length > 0 ? linkedBanquetIds : null,
             banquetReminderHours ?? null,
             req.user?.userId || null,
-            req.user?.email || null
+            req.user?.email || null,
+            req.tenantId!
         ]);
 
         const newTodo = result.rows[0];
@@ -8795,8 +8832,8 @@ app.put('/todos/:id', authenticate, async (req, res) => {
             }
             if (req.body.hasOwnProperty('assignedToUserId') && assignedToUserId) {
                 const target = await queryWithRetry(
-                    'SELECT role FROM users WHERE id = $1',
-                    [assignedToUserId]
+                    'SELECT role FROM users WHERE id = $1 AND tenant_id = $2',
+                    [assignedToUserId, req.tenantId!]
                 );
                 const targetRole = target.rows[0]?.role as UserRole | undefined;
                 if (!targetRole || !canAssignToRole(actorRole, targetRole)) {
@@ -8853,17 +8890,18 @@ app.put('/todos/:id', authenticate, async (req, res) => {
         let previousAssignee: number | null = null;
         if (req.body.hasOwnProperty('assignedToUserId')) {
             const prev = await queryWithRetry(
-                'SELECT assigned_to_user_id FROM todos WHERE id = $1',
-                [id]
+                'SELECT assigned_to_user_id FROM todos WHERE id = $1 AND tenant_id = $2',
+                [id, req.tenantId!]
             );
             previousAssignee = prev.rows[0]?.assigned_to_user_id ?? null;
         }
 
         values.push(id);
+        values.push(req.tenantId!);
         const query = `
             UPDATE todos
             SET ${fields.join(', ')}
-            WHERE id = $${paramIndex}
+            WHERE id = $${paramIndex} AND tenant_id = $${paramIndex + 1}
             RETURNING
                 id,
                 title,
@@ -8932,7 +8970,7 @@ app.put('/todos/:id/toggle', authenticate, async (req, res) => {
                     WHEN NOT completed THEN CURRENT_TIMESTAMP
                     ELSE NULL
                 END
-            WHERE id = $1
+            WHERE id = $1 AND tenant_id = $2
             RETURNING
                 id,
                 title,
@@ -8952,7 +8990,7 @@ app.put('/todos/:id/toggle', authenticate, async (req, res) => {
                 assigned_to_team as "assignedToTeam",
                 created_by_user_id as "createdByUserId",
                 created_by_user_name as "createdByUserName"
-        `, [id]);
+        `, [id, req.tenantId!]);
 
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Todo not found' });
@@ -8975,7 +9013,7 @@ app.delete('/todos/:id', authenticate, async (req, res) => {
     try {
         const { id } = req.params;
 
-        const result = await queryWithRetry('DELETE FROM todos WHERE id = $1 RETURNING id', [id]);
+        const result = await queryWithRetry('DELETE FROM todos WHERE id = $1 AND tenant_id = $2 RETURNING id', [id, req.tenantId!]);
 
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Todo not found' });
@@ -9167,12 +9205,13 @@ app.get('/shopping', authenticate, async (req, res) => {
                 si.quantity::float8 as quantity,
                 si.unit as unit
             FROM shopping_items si
-            LEFT JOIN suppliers s ON s.id = si.supplier_id
+            LEFT JOIN suppliers s ON s.id = si.supplier_id AND s.tenant_id = si.tenant_id
+            WHERE si.tenant_id = $1
         `;
-        const params: string[] = [];
+        const params: any[] = [req.tenantId!];
 
         if (date) {
-            query += ' WHERE si.date = $1';
+            query += ' AND si.date = $2';
             params.push(date as string);
         }
 
@@ -9233,7 +9272,7 @@ app.post('/shopping', authenticate, async (req, res) => {
 
         // If a supplier is provided, validate it exists and serves the same category
         if (supplierId) {
-            const supRes = await queryWithRetry('SELECT categories FROM suppliers WHERE id = $1', [supplierId]);
+            const supRes = await queryWithRetry('SELECT categories FROM suppliers WHERE id = $1 AND tenant_id = $2', [supplierId, req.tenantId!]);
             if (supRes.rows.length === 0) {
                 return res.status(400).json({ error: 'Supplier not found' });
             }
@@ -9250,10 +9289,10 @@ app.post('/shopping', authenticate, async (req, res) => {
         console.log('🛒 Creator email:', creatorEmail);
 
         const inserted = await queryWithRetry(`
-            INSERT INTO shopping_items (name, category, date, created_by_user_id, created_by_user_name, supplier_id, quantity, unit)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO shopping_items (tenant_id, name, category, date, created_by_user_id, created_by_user_name, supplier_id, quantity, unit)
+            VALUES ($9, $1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING id
-        `, [name, finalCategory, date, req.user?.userId || null, creatorEmail, supplierId || null, qu.quantity, qu.unit]);
+        `, [name, finalCategory, date, req.user?.userId || null, creatorEmail, supplierId || null, qu.quantity, qu.unit, req.tenantId!]);
 
         const newId = inserted.rows[0].id;
 
@@ -9272,9 +9311,9 @@ app.post('/shopping', authenticate, async (req, res) => {
                 si.quantity::float8 as quantity,
                 si.unit as unit
             FROM shopping_items si
-            LEFT JOIN suppliers s ON s.id = si.supplier_id
-            WHERE si.id = $1
-        `, [newId]);
+            LEFT JOIN suppliers s ON s.id = si.supplier_id AND s.tenant_id = si.tenant_id
+            WHERE si.id = $1 AND si.tenant_id = $2
+        `, [newId, req.tenantId!]);
 
         console.log('🛒 Created item:', result.rows[0]);
 
@@ -9322,14 +9361,14 @@ app.put('/shopping/:id', authenticate, async (req, res) => {
 
         // When supplierId is provided (non-null), ensure it serves the (possibly new) category
         if (supplierId) {
-            const supRes = await queryWithRetry('SELECT categories FROM suppliers WHERE id = $1', [supplierId]);
+            const supRes = await queryWithRetry('SELECT categories FROM suppliers WHERE id = $1 AND tenant_id = $2', [supplierId, req.tenantId!]);
             if (supRes.rows.length === 0) {
                 return res.status(400).json({ error: 'Supplier not found' });
             }
             // Resolve effective category: incoming category, or existing one
             let effectiveCategory = category;
             if (!effectiveCategory) {
-                const itemRes = await queryWithRetry('SELECT category FROM shopping_items WHERE id = $1', [id]);
+                const itemRes = await queryWithRetry('SELECT category FROM shopping_items WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
                 if (itemRes.rows.length === 0) {
                     return res.status(404).json({ error: 'Item not found' });
                 }
@@ -9357,9 +9396,10 @@ app.put('/shopping/:id', authenticate, async (req, res) => {
             sets.push(`unit = $${p++}`); params.push(normalizedQU.unit);
         }
         params.push(id);
+        params.push(req.tenantId!);
 
         const updateRes = await queryWithRetry(
-            `UPDATE shopping_items SET ${sets.join(', ')} WHERE id = $${p} RETURNING id`,
+            `UPDATE shopping_items SET ${sets.join(', ')} WHERE id = $${p} AND tenant_id = $${p + 1} RETURNING id`,
             params
         );
 
@@ -9382,9 +9422,9 @@ app.put('/shopping/:id', authenticate, async (req, res) => {
                 si.quantity::float8 as quantity,
                 si.unit as unit
             FROM shopping_items si
-            LEFT JOIN suppliers s ON s.id = si.supplier_id
-            WHERE si.id = $1
-        `, [id]);
+            LEFT JOIN suppliers s ON s.id = si.supplier_id AND s.tenant_id = si.tenant_id
+            WHERE si.id = $1 AND si.tenant_id = $2
+        `, [id, req.tenantId!]);
 
         const updatedItem = result.rows[0];
 
@@ -9405,9 +9445,9 @@ app.put('/shopping/:id/toggle', authenticate, async (req, res) => {
         const toggleRes = await queryWithRetry(`
             UPDATE shopping_items
             SET checked = NOT checked
-            WHERE id = $1
+            WHERE id = $1 AND tenant_id = $2
             RETURNING id
-        `, [id]);
+        `, [id, req.tenantId!]);
 
         if (toggleRes.rows.length === 0) {
             return res.status(404).json({ error: 'Item not found' });
@@ -9428,9 +9468,9 @@ app.put('/shopping/:id/toggle', authenticate, async (req, res) => {
                 si.quantity::float8 as quantity,
                 si.unit as unit
             FROM shopping_items si
-            LEFT JOIN suppliers s ON s.id = si.supplier_id
-            WHERE si.id = $1
-        `, [id]);
+            LEFT JOIN suppliers s ON s.id = si.supplier_id AND s.tenant_id = si.tenant_id
+            WHERE si.id = $1 AND si.tenant_id = $2
+        `, [id, req.tenantId!]);
 
         const updatedItem = result.rows[0];
 
@@ -9452,9 +9492,9 @@ app.delete('/shopping/clear-checked', authenticate, async (req, res) => {
         const { date } = req.query;
 
         if (date) {
-            await queryWithRetry('DELETE FROM shopping_items WHERE date = $1 AND checked = true', [date]);
+            await queryWithRetry('DELETE FROM shopping_items WHERE tenant_id = $2 AND date = $1 AND checked = true', [date, req.tenantId!]);
         } else {
-            await queryWithRetry('DELETE FROM shopping_items WHERE checked = true');
+            await queryWithRetry('DELETE FROM shopping_items WHERE tenant_id = $1 AND checked = true', [req.tenantId!]);
         }
 
         const socketId = req.headers['x-socket-id'] as string;
@@ -9471,7 +9511,7 @@ app.delete('/shopping/:id', authenticate, async (req, res) => {
     try {
         const { id } = req.params;
 
-        const result = await queryWithRetry('DELETE FROM shopping_items WHERE id = $1 RETURNING id, TO_CHAR(date, \'YYYY-MM-DD\') as date', [id]);
+        const result = await queryWithRetry('DELETE FROM shopping_items WHERE id = $1 AND tenant_id = $2 RETURNING id, TO_CHAR(date, \'YYYY-MM-DD\') as date', [id, req.tenantId!]);
 
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Item not found' });
@@ -9515,7 +9555,7 @@ const normalizeCategoriesInput = (input: unknown): { categories?: SupplierCatego
     return { categories: cleaned };
 };
 
-app.get('/suppliers', authenticate, async (_req, res) => {
+app.get('/suppliers', authenticate, async (req, res) => {
     try {
         const result = await queryWithRetry(`
             SELECT
@@ -9526,8 +9566,9 @@ app.get('/suppliers', authenticate, async (_req, res) => {
                 note,
                 created_at as "createdAt"
             FROM suppliers
+            WHERE tenant_id = $1
             ORDER BY LOWER(name) ASC
-        `);
+        `, [req.tenantId!]);
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -9545,10 +9586,10 @@ app.post('/suppliers', authenticate, async (req, res) => {
         if (norm.error) return res.status(400).json({ error: norm.error });
 
         const result = await queryWithRetry(`
-            INSERT INTO suppliers (name, categories, phone, note)
-            VALUES ($1, $2::varchar(20)[], $3, $4)
+            INSERT INTO suppliers (tenant_id, name, categories, phone, note)
+            VALUES ($5, $1, $2::varchar(20)[], $3, $4)
             RETURNING id, name, categories, phone, note, created_at as "createdAt"
-        `, [name.trim(), norm.categories, phone?.trim() || null, note?.trim() || null]);
+        `, [name.trim(), norm.categories, phone?.trim() || null, note?.trim() || null, req.tenantId!]);
 
         const supplier = result.rows[0];
         const socketId = req.headers['x-socket-id'] as string;
@@ -9587,9 +9628,10 @@ app.put('/suppliers/:id', authenticate, async (req, res) => {
         if (phone !== undefined) { sets.push(`phone = $${p++}`); params.push(phone?.trim() || null); }
         if (note !== undefined) { sets.push(`note = $${p++}`); params.push(note?.trim() || null); }
         params.push(id);
+        params.push(req.tenantId!);
 
         const result = await queryWithRetry(
-            `UPDATE suppliers SET ${sets.join(', ')} WHERE id = $${p}
+            `UPDATE suppliers SET ${sets.join(', ')} WHERE id = $${p} AND tenant_id = $${p + 1}
              RETURNING id, name, categories, phone, note, created_at as "createdAt"`,
             params
         );
@@ -9607,8 +9649,8 @@ app.put('/suppliers/:id', authenticate, async (req, res) => {
             await queryWithRetry(
                 `UPDATE shopping_items
                  SET supplier_id = NULL
-                 WHERE supplier_id = $1 AND NOT (category = ANY ($2::varchar(20)[]))`,
-                [id, normalizedCategories]
+                 WHERE tenant_id = $3 AND supplier_id = $1 AND NOT (category = ANY ($2::varchar(20)[]))`,
+                [id, normalizedCategories, req.tenantId!]
             );
         }
 
@@ -9622,7 +9664,7 @@ app.put('/suppliers/:id', authenticate, async (req, res) => {
 app.delete('/suppliers/:id', authenticate, async (req, res) => {
     try {
         const { id } = req.params;
-        const result = await queryWithRetry('DELETE FROM suppliers WHERE id = $1 RETURNING id', [id]);
+        const result = await queryWithRetry('DELETE FROM suppliers WHERE id = $1 AND tenant_id = $2 RETURNING id', [id, req.tenantId!]);
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Supplier not found' });
         }
@@ -9645,11 +9687,11 @@ app.delete('/suppliers/:id', authenticate, async (req, res) => {
 app.get('/staff', authenticate, async (req, res) => {
     try {
         const { category } = req.query;
-        let query = 'SELECT * FROM staff_members';
-        const params: any[] = [];
+        let query = 'SELECT * FROM staff_members WHERE tenant_id = $1';
+        const params: any[] = [req.tenantId!];
 
         if (category) {
-            query += ' WHERE category = $1';
+            query += ' AND category = $2';
             params.push(category);
         }
 
@@ -9692,10 +9734,10 @@ app.post('/staff', authenticate, requirePermission('staff:full'), async (req, re
         }
 
         const result = await queryWithRetry(
-            `INSERT INTO staff_members (name, surname, category, staff_type, phone, email, role, hire_date, contract_end_date, weekly_rest_day, notes)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            `INSERT INTO staff_members (tenant_id, name, surname, category, staff_type, phone, email, role, hire_date, contract_end_date, weekly_rest_day, notes)
+             VALUES ($12, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
              RETURNING *`,
-            [name, surname, category, staffType, phone || null, email || null, role || null, hireDate || null, contractEndDate || null, weeklyRestDay ?? null, notes || null]
+            [name, surname, category, staffType, phone || null, email || null, role || null, hireDate || null, contractEndDate || null, weeklyRestDay ?? null, notes || null, req.tenantId!]
         );
 
         const row = result.rows[0];
@@ -9738,9 +9780,9 @@ app.post('/staff', authenticate, requirePermission('staff:full'), async (req, re
 app.get('/staff/shifts', authenticate, async (req, res) => {
     try {
         const { date, staffId, startDate, endDate } = req.query;
-        let query = 'SELECT * FROM staff_shifts WHERE 1=1';
-        const params: any[] = [];
-        let paramCount = 0;
+        let query = 'SELECT * FROM staff_shifts WHERE tenant_id = $1';
+        const params: any[] = [req.tenantId!];
+        let paramCount = 1;
 
         if (date) {
             paramCount++;
@@ -9784,6 +9826,11 @@ app.get('/staff/shifts', authenticate, async (req, res) => {
     }
 });
 
+// Gli id dello staff sono UUID: si valida il formato prima di passarli a
+// Postgres, o un id malformato diventa un errore di cast (500) invece di
+// un pulito "non trovato".
+const STAFF_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // Create shift
 app.post('/staff/shifts', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
@@ -9793,12 +9840,26 @@ app.post('/staff/shifts', authenticate, requirePermission('staff:full'), async (
             return res.status(400).json({ error: 'staffId, date, and shift are required' });
         }
 
+        // Il vincolo unico resta (staff_id, date, shift): senza questa
+        // verifica un tenant potrebbe fare upsert sul turno di uno staff
+        // di un altro ristorante passando il suo id.
+        if (!STAFF_UUID_RE.test(String(staffId))) {
+            return res.status(404).json({ error: 'Staff member not found' });
+        }
+        const staffCheck = await queryWithRetry(
+            'SELECT id FROM staff_members WHERE id = $1 AND tenant_id = $2',
+            [staffId, req.tenantId!]
+        );
+        if (staffCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Staff member not found' });
+        }
+
         const result = await queryWithRetry(
-            `INSERT INTO staff_shifts (staff_id, date, shift, present, notes)
-             VALUES ($1, $2, $3, $4, $5)
+            `INSERT INTO staff_shifts (tenant_id, staff_id, date, shift, present, notes)
+             VALUES ($6, $1, $2, $3, $4, $5)
              ON CONFLICT (staff_id, date, shift) DO UPDATE SET present = $4, notes = $5
              RETURNING *`,
-            [staffId, date, shift, present !== false, notes || null]
+            [staffId, date, shift, present !== false, notes || null, req.tenantId!]
         );
 
         const row = result.rows[0];
@@ -9838,14 +9899,28 @@ app.post('/staff/shifts/bulk', authenticate, requirePermission('staff:full'), as
             return res.status(400).json({ error: 'invalid_shift', message: `Turno non valido: ${String(invalid?.shift).slice(0, 30)}` });
         }
 
+        // Come per il singolo turno: tutti gli staff_id devono appartenere al
+        // tenant, altrimenti l'upsert toccherebbe righe di un altro ristorante.
+        const staffIds = Array.from(new Set(shifts.map((s: any) => String(s?.staffId ?? ''))));
+        if (staffIds.some((sid: string) => !STAFF_UUID_RE.test(sid))) {
+            return res.status(404).json({ error: 'Staff member not found' });
+        }
+        const owned = await queryWithRetry(
+            'SELECT id FROM staff_members WHERE id = ANY($1::uuid[]) AND tenant_id = $2',
+            [staffIds, req.tenantId!]
+        );
+        if (owned.rows.length !== staffIds.length) {
+            return res.status(404).json({ error: 'Staff member not found' });
+        }
+
         const createdShifts = [];
         for (const shift of shifts) {
             const result = await queryWithRetry(
-                `INSERT INTO staff_shifts (staff_id, date, shift, present, notes)
-                 VALUES ($1, $2, $3, $4, $5)
+                `INSERT INTO staff_shifts (tenant_id, staff_id, date, shift, present, notes)
+                 VALUES ($6, $1, $2, $3, $4, $5)
                  ON CONFLICT (staff_id, date, shift) DO UPDATE SET present = $4, notes = $5
                  RETURNING *`,
-                [shift.staffId, shift.date, shift.shift, shift.present !== false, shift.notes || null]
+                [shift.staffId, shift.date, shift.shift, shift.present !== false, shift.notes || null, req.tenantId!]
             );
             const row = result.rows[0];
             createdShifts.push({
@@ -9876,9 +9951,9 @@ app.put('/staff/shifts/:id', authenticate, requirePermission('staff:full'), asyn
             `UPDATE staff_shifts SET
                 present = COALESCE($1, present),
                 notes = COALESCE($2, notes)
-             WHERE id = $3
+             WHERE id = $3 AND tenant_id = $4
              RETURNING *`,
-            [present, notes, id]
+            [present, notes, id, req.tenantId!]
         );
 
         if (result.rows.length === 0) {
@@ -9911,7 +9986,7 @@ app.put('/staff/shifts/:id', authenticate, requirePermission('staff:full'), asyn
 app.delete('/staff/shifts/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const result = await queryWithRetry('DELETE FROM staff_shifts WHERE id = $1 RETURNING id', [id]);
+        const result = await queryWithRetry('DELETE FROM staff_shifts WHERE id = $1 AND tenant_id = $2 RETURNING id', [id, req.tenantId!]);
 
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Shift not found' });
@@ -9936,9 +10011,9 @@ app.delete('/staff/shifts/:id', authenticate, requirePermission('staff:full'), a
 app.get('/staff/time-off', authenticate, async (req, res) => {
     try {
         const { staffId, startDate, endDate } = req.query;
-        let query = 'SELECT * FROM staff_time_off WHERE 1=1';
-        const params: any[] = [];
-        let paramCount = 0;
+        let query = 'SELECT * FROM staff_time_off WHERE tenant_id = $1';
+        const params: any[] = [req.tenantId!];
+        let paramCount = 1;
 
         if (staffId) {
             paramCount++;
@@ -9991,11 +10066,24 @@ app.post('/staff/time-off', authenticate, requirePermission('staff:full'), async
             return res.status(400).json({ error: 'shift must be LUNCH, DINNER, or null' });
         }
 
+        // Lo staff deve appartenere al tenant: senza il controllo si potrebbe
+        // registrare un'assenza per un dipendente di un altro ristorante.
+        if (!STAFF_UUID_RE.test(String(staffId))) {
+            return res.status(404).json({ error: 'Staff member not found' });
+        }
+        const staffCheck = await queryWithRetry(
+            'SELECT id FROM staff_members WHERE id = $1 AND tenant_id = $2',
+            [staffId, req.tenantId!]
+        );
+        if (staffCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Staff member not found' });
+        }
+
         const result = await queryWithRetry(
-            `INSERT INTO staff_time_off (staff_id, start_date, end_date, type, shift, notes, approved)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
+            `INSERT INTO staff_time_off (tenant_id, staff_id, start_date, end_date, type, shift, notes, approved)
+             VALUES ($8, $1, $2, $3, $4, $5, $6, $7)
              RETURNING *`,
-            [staffId, startDate, endDate, type, shift || null, notes || null, approved !== false]
+            [staffId, startDate, endDate, type, shift || null, notes || null, approved !== false, req.tenantId!]
         );
 
         const row = result.rows[0];
@@ -10044,9 +10132,9 @@ app.put('/staff/time-off/:id', authenticate, requirePermission('staff:full'), as
                 shift = CASE WHEN $4::boolean THEN $5 ELSE shift END,
                 notes = COALESCE($6, notes),
                 approved = COALESCE($7, approved)
-             WHERE id = $8
+             WHERE id = $8 AND tenant_id = $9
              RETURNING *`,
-            [startDate, endDate, type, shiftProvided, shift ?? null, notes, approved, id]
+            [startDate, endDate, type, shiftProvided, shift ?? null, notes, approved, id, req.tenantId!]
         );
 
         if (result.rows.length === 0) {
@@ -10081,7 +10169,7 @@ app.put('/staff/time-off/:id', authenticate, requirePermission('staff:full'), as
 app.delete('/staff/time-off/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const result = await queryWithRetry('DELETE FROM staff_time_off WHERE id = $1 RETURNING id', [id]);
+        const result = await queryWithRetry('DELETE FROM staff_time_off WHERE id = $1 AND tenant_id = $2 RETURNING id', [id, req.tenantId!]);
 
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Time off record not found' });
@@ -10112,9 +10200,9 @@ app.get('/staff/presence', authenticate, async (req, res) => {
         const dateStr = String(date);
 
         const [staffResult, shiftsResult, timeOffResult] = await Promise.all([
-            queryWithRetry('SELECT * FROM staff_members WHERE is_active = true ORDER BY category, surname, name'),
-            queryWithRetry('SELECT staff_id, shift, present FROM staff_shifts WHERE date = $1', [dateStr]),
-            queryWithRetry('SELECT staff_id, shift FROM staff_time_off WHERE start_date <= $1 AND end_date >= $1', [dateStr])
+            queryWithRetry('SELECT * FROM staff_members WHERE tenant_id = $1 AND is_active = true ORDER BY category, surname, name', [req.tenantId!]),
+            queryWithRetry('SELECT staff_id, shift, present FROM staff_shifts WHERE tenant_id = $2 AND date = $1', [dateStr, req.tenantId!]),
+            queryWithRetry('SELECT staff_id, shift FROM staff_time_off WHERE tenant_id = $2 AND start_date <= $1 AND end_date >= $1', [dateStr, req.tenantId!])
         ]);
 
         // A NULL shift in time_off means the whole day is off; otherwise only the
@@ -10195,7 +10283,7 @@ app.get('/staff/presence', authenticate, async (req, res) => {
 app.get('/staff/:id', authenticate, async (req, res) => {
     try {
         const { id } = req.params;
-        const result = await queryWithRetry('SELECT * FROM staff_members WHERE id = $1', [id]);
+        const result = await queryWithRetry('SELECT * FROM staff_members WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
 
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Staff member not found' });
@@ -10247,13 +10335,13 @@ app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req,
                 notes = COALESCE($12, notes),
                 is_active = COALESCE($13, is_active),
                 updated_at = CURRENT_TIMESTAMP
-             WHERE id = $14
+             WHERE id = $14 AND tenant_id = $15
              RETURNING *`,
             [
                 name, surname, category, staffType, phone, email, role, hireDate, contractEndDate,
                 weeklyRestDay === undefined ? 'KEEP' : 'SET',
                 weeklyRestDay === undefined ? null : weeklyRestDay,
-                notes, isActive, id
+                notes, isActive, id, req.tenantId!
             ]
         );
 
@@ -10295,7 +10383,7 @@ app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req,
 app.delete('/staff/:id', authenticate, requirePermission('staff:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const result = await queryWithRetry('DELETE FROM staff_members WHERE id = $1 RETURNING id', [id]);
+        const result = await queryWithRetry('DELETE FROM staff_members WHERE id = $1 AND tenant_id = $2 RETURNING id', [id, req.tenantId!]);
 
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Staff member not found' });
@@ -11646,6 +11734,7 @@ async function logInboundMessage(params: {
                 || mediaLabel;
             const fromDisplay = params.from || 'sconosciuto';
             pushSendToRoles(
+                PUBLIC_TENANT_ID,
                 ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
                 {
                     category: 'message',
@@ -12069,7 +12158,9 @@ const REMINDER_FREQUENCIES = new Set(['DAILY', 'WEEKLY', 'MONTHLY']);
 const REMINDER_WEEKDAY_CODES_SET = new Set(WEEKDAY_CODES);
 const REMINDER_VALID_ROLES = new Set(['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER', 'KITCHEN']);
 
-function normalizeReminderPayload(body: any): { ok: true; data: Omit<ReminderRow, 'id' | 'last_run_at'> } | { ok: false; error: string } {
+// tenant_id escluso dal payload normalizzato: non arriva mai dal client,
+// lo aggiunge la route dal contesto autenticato (req.tenantId).
+function normalizeReminderPayload(body: any): { ok: true; data: Omit<ReminderRow, 'id' | 'last_run_at' | 'tenant_id'> } | { ok: false; error: string } {
     const title = typeof body?.title === 'string' ? body.title.trim() : '';
     if (!title || title.length > 200) return { ok: false, error: 'Titolo richiesto (max 200 caratteri)' };
     const description = typeof body?.description === 'string' ? body.description.trim() : null;
@@ -12121,7 +12212,7 @@ function normalizeReminderPayload(body: any): { ok: true; data: Omit<ReminderRow
     };
 }
 
-app.get('/reminders', authenticate, async (_req, res) => {
+app.get('/reminders', authenticate, async (req, res) => {
     try {
         const r = await queryWithRetry(
             `SELECT id, title, description, kind, frequency, schedule_time,
@@ -12129,7 +12220,9 @@ app.get('/reminders', authenticate, async (_req, res) => {
                     weekdays, month_day, target_roles, active, system_key,
                     last_run_at, created_at, updated_at
              FROM reminders
-             ORDER BY active DESC, created_at DESC`
+             WHERE tenant_id = $1
+             ORDER BY active DESC, created_at DESC`,
+            [req.tenantId!]
         );
         res.json({ reminders: r.rows });
     } catch (err: any) {
@@ -12145,15 +12238,16 @@ app.post('/reminders', authenticate, requirePermission('settings:full'), async (
         const d = parsed.data;
         const inserted = await queryWithRetry(
             `INSERT INTO reminders
-                (title, description, kind, frequency, schedule_time,
+                (tenant_id, title, description, kind, frequency, schedule_time,
                  schedule_date, weekdays, month_day, target_roles, active)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             VALUES ($11, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
              RETURNING id, title, description, kind, frequency, schedule_time,
                        to_char(schedule_date, 'YYYY-MM-DD') AS schedule_date,
                        weekdays, month_day, target_roles, active, system_key,
                        last_run_at, created_at, updated_at`,
             [d.title, d.description, d.kind, d.frequency, d.schedule_time,
-             d.schedule_date, d.weekdays, d.month_day, d.target_roles, d.active]
+             d.schedule_date, d.weekdays, d.month_day, d.target_roles, d.active,
+             req.tenantId!]
         );
         res.status(201).json(inserted.rows[0]);
     } catch (err: any) {
@@ -12177,13 +12271,14 @@ app.put('/reminders/:id', authenticate, requirePermission('settings:full'), asyn
                  schedule_time = $5, schedule_date = $6, weekdays = $7,
                  month_day = $8, target_roles = $9, active = $10,
                  updated_at = CURRENT_TIMESTAMP
-             WHERE id = $11
+             WHERE id = $11 AND tenant_id = $12
              RETURNING id, title, description, kind, frequency, schedule_time,
                        to_char(schedule_date, 'YYYY-MM-DD') AS schedule_date,
                        weekdays, month_day, target_roles, active, system_key,
                        last_run_at, created_at, updated_at`,
             [d.title, d.description, d.kind, d.frequency, d.schedule_time,
-             d.schedule_date, d.weekdays, d.month_day, d.target_roles, d.active, id]
+             d.schedule_date, d.weekdays, d.month_day, d.target_roles, d.active, id,
+             req.tenantId!]
         );
         if (updated.rows.length === 0) return res.status(404).json({ error: 'Reminder not found' });
         res.json(updated.rows[0]);
@@ -12197,7 +12292,7 @@ app.delete('/reminders/:id', authenticate, requirePermission('settings:full'), a
     try {
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
-        const r = await queryWithRetry('DELETE FROM reminders WHERE id = $1 RETURNING id', [id]);
+        const r = await queryWithRetry('DELETE FROM reminders WHERE id = $1 AND tenant_id = $2 RETURNING id', [id, req.tenantId!]);
         if (r.rows.length === 0) return res.status(404).json({ error: 'Reminder not found' });
         res.json({ ok: true });
     } catch (err: any) {
@@ -12403,9 +12498,9 @@ app.get('/haccp/temperatures', authenticate, async (req, res) => {
                    recorded_by_user_name as "recordedByUserName",
                    recorded_at as "recordedAt"
             FROM haccp_temperature_readings
-            WHERE date = $1
+            WHERE tenant_id = $2 AND date = $1
             ORDER BY location ASC
-        `, [date]);
+        `, [date, req.tenantId!]);
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -12428,9 +12523,9 @@ app.post('/haccp/temperatures', authenticate, async (req, res) => {
         const recorderName = req.user?.email || null;
         const result = await queryWithRetry(`
             INSERT INTO haccp_temperature_readings
-                (date, location, temperature, target_max, note, recorded_by_user_id, recorded_by_user_name)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            ON CONFLICT (date, location) DO UPDATE SET
+                (tenant_id, date, location, temperature, target_max, note, recorded_by_user_id, recorded_by_user_name)
+            VALUES ($8, $1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (tenant_id, date, location) DO UPDATE SET
                 temperature = EXCLUDED.temperature,
                 target_max = EXCLUDED.target_max,
                 note = EXCLUDED.note,
@@ -12446,7 +12541,7 @@ app.post('/haccp/temperatures', authenticate, async (req, res) => {
                       recorded_by_user_id as "recordedByUserId",
                       recorded_by_user_name as "recordedByUserName",
                       recorded_at as "recordedAt"
-        `, [date, location.trim(), temp, target, note?.trim() || null, req.user?.userId || null, recorderName]);
+        `, [date, location.trim(), temp, target, note?.trim() || null, req.user?.userId || null, recorderName, req.tenantId!]);
         res.status(201).json(result.rows[0]);
     } catch (err) {
         console.error(err);
@@ -12456,7 +12551,7 @@ app.post('/haccp/temperatures', authenticate, async (req, res) => {
 
 app.delete('/haccp/temperatures/:id', authenticate, async (req, res) => {
     try {
-        const result = await queryWithRetry('DELETE FROM haccp_temperature_readings WHERE id = $1 RETURNING id', [req.params.id]);
+        const result = await queryWithRetry('DELETE FROM haccp_temperature_readings WHERE id = $1 AND tenant_id = $2 RETURNING id', [req.params.id, req.tenantId!]);
         if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
         res.status(204).send();
     } catch (err) {
@@ -12480,9 +12575,9 @@ app.get('/haccp/oil', authenticate, async (req, res) => {
                    recorded_by_user_name as "recordedByUserName",
                    recorded_at as "recordedAt"
             FROM haccp_oil_checks
-            WHERE date = $1
+            WHERE tenant_id = $2 AND date = $1
             ORDER BY fryer_label ASC
-        `, [date]);
+        `, [date, req.tenantId!]);
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -12503,9 +12598,9 @@ app.post('/haccp/oil', authenticate, async (req, res) => {
         const recorderName = req.user?.email || null;
         const result = await queryWithRetry(`
             INSERT INTO haccp_oil_checks
-                (date, fryer_label, action, note, recorded_by_user_id, recorded_by_user_name)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT (date, fryer_label) DO UPDATE SET
+                (tenant_id, date, fryer_label, action, note, recorded_by_user_id, recorded_by_user_name)
+            VALUES ($7, $1, $2, $3, $4, $5, $6)
+            ON CONFLICT (tenant_id, date, fryer_label) DO UPDATE SET
                 action = EXCLUDED.action,
                 note = EXCLUDED.note,
                 recorded_by_user_id = EXCLUDED.recorded_by_user_id,
@@ -12519,7 +12614,7 @@ app.post('/haccp/oil', authenticate, async (req, res) => {
                       recorded_by_user_id as "recordedByUserId",
                       recorded_by_user_name as "recordedByUserName",
                       recorded_at as "recordedAt"
-        `, [date, fryerLabel.trim(), action, note?.trim() || null, req.user?.userId || null, recorderName]);
+        `, [date, fryerLabel.trim(), action, note?.trim() || null, req.user?.userId || null, recorderName, req.tenantId!]);
         res.status(201).json(result.rows[0]);
     } catch (err) {
         console.error(err);
@@ -12529,7 +12624,7 @@ app.post('/haccp/oil', authenticate, async (req, res) => {
 
 app.delete('/haccp/oil/:id', authenticate, async (req, res) => {
     try {
-        const result = await queryWithRetry('DELETE FROM haccp_oil_checks WHERE id = $1 RETURNING id', [req.params.id]);
+        const result = await queryWithRetry('DELETE FROM haccp_oil_checks WHERE id = $1 AND tenant_id = $2 RETURNING id', [req.params.id, req.tenantId!]);
         if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
         res.status(204).send();
     } catch (err) {
@@ -12553,9 +12648,9 @@ app.get('/haccp/cleaning', authenticate, async (req, res) => {
                    recorded_by_user_name as "recordedByUserName",
                    recorded_at as "recordedAt"
             FROM haccp_cleaning_checks
-            WHERE date = $1
+            WHERE tenant_id = $2 AND date = $1
             ORDER BY point ASC
-        `, [date]);
+        `, [date, req.tenantId!]);
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -12573,9 +12668,9 @@ app.post('/haccp/cleaning', authenticate, async (req, res) => {
         const recorderName = req.user?.email || null;
         const result = await queryWithRetry(`
             INSERT INTO haccp_cleaning_checks
-                (date, point, done, note, recorded_by_user_id, recorded_by_user_name)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT (date, point) DO UPDATE SET
+                (tenant_id, date, point, done, note, recorded_by_user_id, recorded_by_user_name)
+            VALUES ($7, $1, $2, $3, $4, $5, $6)
+            ON CONFLICT (tenant_id, date, point) DO UPDATE SET
                 done = EXCLUDED.done,
                 note = EXCLUDED.note,
                 recorded_by_user_id = EXCLUDED.recorded_by_user_id,
@@ -12589,7 +12684,7 @@ app.post('/haccp/cleaning', authenticate, async (req, res) => {
                       recorded_by_user_id as "recordedByUserId",
                       recorded_by_user_name as "recordedByUserName",
                       recorded_at as "recordedAt"
-        `, [date, point.trim(), !!done, note?.trim() || null, req.user?.userId || null, recorderName]);
+        `, [date, point.trim(), !!done, note?.trim() || null, req.user?.userId || null, recorderName, req.tenantId!]);
         res.status(201).json(result.rows[0]);
     } catch (err) {
         console.error(err);
@@ -12599,7 +12694,7 @@ app.post('/haccp/cleaning', authenticate, async (req, res) => {
 
 app.delete('/haccp/cleaning/:id', authenticate, async (req, res) => {
     try {
-        const result = await queryWithRetry('DELETE FROM haccp_cleaning_checks WHERE id = $1 RETURNING id', [req.params.id]);
+        const result = await queryWithRetry('DELETE FROM haccp_cleaning_checks WHERE id = $1 AND tenant_id = $2 RETURNING id', [req.params.id, req.tenantId!]);
         if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
         res.status(204).send();
     } catch (err) {
@@ -12625,9 +12720,9 @@ app.get('/haccp/receipts', authenticate, async (req, res) => {
                    recorded_by_user_name as "recordedByUserName",
                    recorded_at as "recordedAt"
             FROM haccp_goods_receipts
-            WHERE date = $1
+            WHERE tenant_id = $2 AND date = $1
             ORDER BY recorded_at ASC
-        `, [date]);
+        `, [date, req.tenantId!]);
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -12646,8 +12741,8 @@ app.post('/haccp/receipts', authenticate, async (req, res) => {
         const recorderName = req.user?.email || null;
         const result = await queryWithRetry(`
             INSERT INTO haccp_goods_receipts
-                (date, product, lot_number, temperature, accepted, note, recorded_by_user_id, recorded_by_user_name)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                (tenant_id, date, product, lot_number, temperature, accepted, note, recorded_by_user_id, recorded_by_user_name)
+            VALUES ($9, $1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING id,
                       TO_CHAR(date, 'YYYY-MM-DD') as date,
                       product,
@@ -12658,7 +12753,7 @@ app.post('/haccp/receipts', authenticate, async (req, res) => {
                       recorded_by_user_id as "recordedByUserId",
                       recorded_by_user_name as "recordedByUserName",
                       recorded_at as "recordedAt"
-        `, [date, product.trim(), lotNumber?.trim() || null, temp, accepted !== false, note?.trim() || null, req.user?.userId || null, recorderName]);
+        `, [date, product.trim(), lotNumber?.trim() || null, temp, accepted !== false, note?.trim() || null, req.user?.userId || null, recorderName, req.tenantId!]);
         res.status(201).json(result.rows[0]);
     } catch (err) {
         console.error(err);
@@ -12679,8 +12774,9 @@ app.put('/haccp/receipts/:id', authenticate, async (req, res) => {
         if (note !== undefined) { sets.push(`note = $${p++}`); params.push(note?.trim() || null); }
         if (sets.length === 0) return res.status(400).json({ error: 'No updatable fields provided' });
         params.push(req.params.id);
+        params.push(req.tenantId!);
         const result = await queryWithRetry(`
-            UPDATE haccp_goods_receipts SET ${sets.join(', ')} WHERE id = $${p}
+            UPDATE haccp_goods_receipts SET ${sets.join(', ')} WHERE id = $${p} AND tenant_id = $${p + 1}
             RETURNING id,
                       TO_CHAR(date, 'YYYY-MM-DD') as date,
                       product,
@@ -12702,7 +12798,7 @@ app.put('/haccp/receipts/:id', authenticate, async (req, res) => {
 
 app.delete('/haccp/receipts/:id', authenticate, async (req, res) => {
     try {
-        const result = await queryWithRetry('DELETE FROM haccp_goods_receipts WHERE id = $1 RETURNING id', [req.params.id]);
+        const result = await queryWithRetry('DELETE FROM haccp_goods_receipts WHERE id = $1 AND tenant_id = $2 RETURNING id', [req.params.id, req.tenantId!]);
         if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
         res.status(204).send();
     } catch (err) {
@@ -12728,9 +12824,9 @@ app.get('/haccp/production', authenticate, async (req, res) => {
                    recorded_by_user_name as "recordedByUserName",
                    recorded_at as "recordedAt"
             FROM haccp_production_logs
-            WHERE date = $1
+            WHERE tenant_id = $2 AND date = $1
             ORDER BY recorded_at ASC
-        `, [date]);
+        `, [date, req.tenantId!]);
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -12748,8 +12844,8 @@ app.post('/haccp/production', authenticate, async (req, res) => {
         const recorderName = req.user?.email || null;
         const result = await queryWithRetry(`
             INSERT INTO haccp_production_logs
-                (date, product, blast_temp_range, blast_duration, internal_lot, note, recorded_by_user_id, recorded_by_user_name)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                (tenant_id, date, product, blast_temp_range, blast_duration, internal_lot, note, recorded_by_user_id, recorded_by_user_name)
+            VALUES ($9, $1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING id,
                       TO_CHAR(date, 'YYYY-MM-DD') as date,
                       product,
@@ -12760,7 +12856,7 @@ app.post('/haccp/production', authenticate, async (req, res) => {
                       recorded_by_user_id as "recordedByUserId",
                       recorded_by_user_name as "recordedByUserName",
                       recorded_at as "recordedAt"
-        `, [date, product.trim(), blastTempRange?.trim() || null, blastDuration?.trim() || null, internalLot?.trim() || null, note?.trim() || null, req.user?.userId || null, recorderName]);
+        `, [date, product.trim(), blastTempRange?.trim() || null, blastDuration?.trim() || null, internalLot?.trim() || null, note?.trim() || null, req.user?.userId || null, recorderName, req.tenantId!]);
         res.status(201).json(result.rows[0]);
     } catch (err) {
         console.error(err);
@@ -12781,8 +12877,9 @@ app.put('/haccp/production/:id', authenticate, async (req, res) => {
         if (note !== undefined) { sets.push(`note = $${p++}`); params.push(note?.trim() || null); }
         if (sets.length === 0) return res.status(400).json({ error: 'No updatable fields provided' });
         params.push(req.params.id);
+        params.push(req.tenantId!);
         const result = await queryWithRetry(`
-            UPDATE haccp_production_logs SET ${sets.join(', ')} WHERE id = $${p}
+            UPDATE haccp_production_logs SET ${sets.join(', ')} WHERE id = $${p} AND tenant_id = $${p + 1}
             RETURNING id,
                       TO_CHAR(date, 'YYYY-MM-DD') as date,
                       product,
@@ -12804,7 +12901,7 @@ app.put('/haccp/production/:id', authenticate, async (req, res) => {
 
 app.delete('/haccp/production/:id', authenticate, async (req, res) => {
     try {
-        const result = await queryWithRetry('DELETE FROM haccp_production_logs WHERE id = $1 RETURNING id', [req.params.id]);
+        const result = await queryWithRetry('DELETE FROM haccp_production_logs WHERE id = $1 AND tenant_id = $2 RETURNING id', [req.params.id, req.tenantId!]);
         if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
         res.status(204).send();
     } catch (err) {
@@ -15865,6 +15962,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
             catch (err) { console.warn('[public-booking] socket broadcast failed:', err); }
         }
         pushSendToRoles(
+            PUBLIC_TENANT_ID,
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
             {
                 category: 'reservation',
@@ -17602,6 +17700,7 @@ app.post('/orders/:id/courses/:n/call', authenticate, requirePermission('orders:
         // La push è best-effort: se fallisce il monitor mostra comunque
         // l'uscita pronta, non si perde niente.
         pushSendToRoles(
+            req.tenantId!,
             ['WAITER', 'MANAGER', 'GENERAL_MANAGER', 'OWNER'],
             {
                 category: 'service',
@@ -19493,7 +19592,10 @@ bookingTools.configureBookingTools({
     logActivity: LogService.logActivity.bind(LogService),
     activityAction: ActivityAction,
     resourceType: ResourceType,
-    pushSendToRoles,
+    // Canali pubblici (voce/WhatsApp): il tenant è fissato qui, così
+    // bookingTools resta ignaro del threading fino alla Fase C.
+    pushSendToRoles: (roles: string[], payload: any, opts?: any) =>
+        pushSendToRoles(PUBLIC_TENANT_ID, roles, payload, opts),
     // socketService è inizializzato dopo il listen: le lambda lo leggono al
     // momento della chiamata, non alla configurazione.
     broadcastReservationCreated: (r: any) => socketService?.broadcastReservationCreated(r),
@@ -19557,12 +19659,14 @@ const startServer = async () => {
                     }
                     try {
                         const today = new Date().toISOString().substring(0, 10);
+                        // Backfill di boot: nessuna richiesta in mano, il
+                        // tenant si legge dalla riga del banchetto stesso.
                         const upcoming = await queryWithRetry(
-                            "SELECT id, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date FROM banquet_menus WHERE event_date >= $1",
+                            "SELECT id, tenant_id, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date FROM banquet_menus WHERE event_date >= $1",
                             [today]
                         );
                         for (const row of upcoming.rows) {
-                            await addBanquetToReminders(row.id, row.event_date);
+                            await addBanquetToReminders(row.tenant_id, row.id, row.event_date);
                         }
                         if (upcoming.rows.length > 0) {
                             console.log(`✅ Backfilled kitchen reminder todos for ${upcoming.rows.length} upcoming banquet(s)`);

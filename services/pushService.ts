@@ -87,10 +87,13 @@ const fetchSubscriptionsForUser = async (userId: number): Promise<SubscriptionRo
     return result.rows;
 };
 
-const fetchSubscriptionsForRoles = async (roles: string[], excludeUserId?: number | null): Promise<SubscriptionRow[]> => {
+const fetchSubscriptionsForRoles = async (tenantId: number, roles: string[], excludeUserId?: number | null): Promise<SubscriptionRow[]> => {
     if (roles.length === 0) return [];
-    const params: any[] = [roles];
-    let where = 'u.role = ANY($1::text[]) AND u.is_active = TRUE';
+    // Il tenant è obbligatorio: senza filtro una push per ruolo arriverebbe
+    // allo staff di TUTTI i ristoranti (con due tenant l'altro locale vedrebbe
+    // le prenotazioni altrui nel centro notifiche).
+    const params: any[] = [roles, tenantId];
+    let where = 'u.role = ANY($1::text[]) AND u.is_active = TRUE AND u.tenant_id = $2';
     if (excludeUserId) {
         params.push(excludeUserId);
         where += ` AND u.id <> $${params.length}`;
@@ -196,10 +199,10 @@ async function persistForUsers(
     }));
 }
 
-async function fetchUserIdsForRoles(roles: string[], excludeUserId?: number | null): Promise<number[]> {
+async function fetchUserIdsForRoles(tenantId: number, roles: string[], excludeUserId?: number | null): Promise<number[]> {
     if (roles.length === 0) return [];
-    const params: any[] = [roles];
-    let where = 'role = ANY($1::text[]) AND is_active = TRUE';
+    const params: any[] = [roles, tenantId];
+    let where = 'role = ANY($1::text[]) AND is_active = TRUE AND tenant_id = $2';
     if (excludeUserId) {
         params.push(excludeUserId);
         where += ` AND id <> $${params.length}`;
@@ -214,13 +217,16 @@ export const sendToUser = async (userId: number, payload: PushPayload) => {
     return sendToSubscriptions(subs, payload);
 };
 
+// tenantId è il PRIMO parametro, obbligatorio: rende impossibile aggiungere
+// un call site che dimentica il tenant (il compilatore lo rifiuta).
 export const sendToRoles = async (
+    tenantId: number,
     roles: string[],
     payload: PushPayload,
     options?: { excludeUserId?: number | null }
 ) => {
-    const recipients = await fetchUserIdsForRoles(roles, options?.excludeUserId);
+    const recipients = await fetchUserIdsForRoles(tenantId, roles, options?.excludeUserId);
     await persistForUsers(recipients, payload);
-    const subs = await fetchSubscriptionsForRoles(roles, options?.excludeUserId);
+    const subs = await fetchSubscriptionsForRoles(tenantId, roles, options?.excludeUserId);
     return sendToSubscriptions(subs, payload);
 };
