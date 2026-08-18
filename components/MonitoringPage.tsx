@@ -7,7 +7,9 @@ import {
 } from '../services/monitoringApiService';
 
 /* La pagina "Consumi AI" mette in fila i due fornitori che consumano credito a
-   nostro carico: ElevenLabs (l'agente vocale Sofia) e Gemini (report/analisi AI).
+   nostro carico: ElevenLabs (l'agente vocale Sofia) e Claude (messaggi e
+   report AI). I consumi storici di Gemini restano nel conteggio: la tabella
+   tiene il fornitore riga per riga, quindi il passaggio non perde niente.
    Le due sorgenti sono diverse — ElevenLabs si legge live dalla sua API, Gemini
    dalla telemetria che il client scrive a ogni chiamata — ma qui si leggono con
    lo stesso ritmo e lo stesso selettore di finestra temporale. */
@@ -296,7 +298,7 @@ export const MonitoringPage: React.FC = () => {
               {/* ---- GEMINI ---- */}
               <SectionCard
                 icon={<Bot className="h-5 w-5" />}
-                title="Analisi AI (Gemini)"
+                title="Analisi AI (modelli di testo)"
                 subtitle={`Ultimi ${days} giorni · token registrati a ogni generazione (storico dal momento dell'attivazione del tracciamento)`}
               >
                 <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -336,7 +338,7 @@ export const MonitoringPage: React.FC = () => {
                     </ResponsiveContainer>
                   </div>
                 ) : (
-                  <EmptyChart message="Nessun consumo Gemini registrato in questa finestra." />
+                  <EmptyChart message="Nessun consumo AI registrato in questa finestra." />
                 )}
 
                 {/* Ripartizione per feature */}

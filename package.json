@@ -17,6 +17,7 @@
     "migrate:create": "node-pg-migrate create -j js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.117.1",
     "@google/genai": "^1.30.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.5",

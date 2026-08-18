@@ -15,7 +15,8 @@ import QRCode from 'qrcode';
 import pool, { createSchema, queryWithRetry, runMigrations } from './db.js';
 import { SocketService } from './services/socketService.js';
 import * as bookingTools from './services/bookingTools.js';
-import { VOICE_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
+import * as whatsappAgent from './services/whatsappAgent.js';
+import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
 import {
     generateSuggestedReply,
     isAiConfigured,
@@ -4356,7 +4357,7 @@ app.post('/messages/suggest-reply', authenticate, requirePermission('reservation
             });
         }
         if (!isAiConfigured()) {
-            return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY non configurata sul backend' });
+            return res.status(503).json({ error: 'not_configured', message: 'ANTHROPIC_API_KEY non configurata sul backend' });
         }
         const key = String(req.body?.phone_digits ?? '').replace(/\D/g, '').slice(-10);
         if (!key) return res.status(400).json({ error: 'phone_digits mancante' });
@@ -4407,7 +4408,7 @@ app.post('/messages/suggest-reply', authenticate, requirePermission('reservation
             onUsage: (u) => {
                 queryWithRetry(
                     `INSERT INTO ai_token_usage (provider, feature, model, prompt_tokens, output_tokens, total_tokens, user_email)
-                     VALUES ('gemini', 'suggest_reply', $1, $2, $3, $4, $5)`,
+                     VALUES ('anthropic', 'suggest_reply', $1, $2, $3, $4, $5)`,
                     [u.model, u.promptTokens, u.outputTokens, u.totalTokens || (u.promptTokens + u.outputTokens), (req.user?.email || null)]
                 ).catch(err => console.error('ai_token_usage insert (suggest_reply) failed:', err));
             },
@@ -4427,6 +4428,176 @@ app.post('/messages/suggest-reply', authenticate, requirePermission('reservation
             return res.status(status).json({ error: err.kind, message: err.message });
         }
         console.error('POST /messages/suggest-reply error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// --- Agente WhatsApp: propone, non esegue ----------------------------------
+// Gli strumenti di sola lettura girano davvero; quelli che scrivono diventano
+// una proposta che una persona conferma con un tocco. Vedi
+// services/whatsappAgent.ts per il perche' della divisione.
+
+const proposalRow = (r: any) => ({
+    id: r.id,
+    tool: r.tool,
+    args: r.args,
+    summary: r.summary,
+    suggested_reply: r.suggested_reply,
+    status: r.status,
+    expires_at: r.expires_at,
+    reservation_id: r.reservation_id,
+});
+
+app.post('/messages/agent/run', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    try {
+        if (!(await getFeatureFlag(req.tenantId!, 'ai_messages_enabled', false))) {
+            return res.status(403).json({ error: 'feature_disabled', message: 'Messaggi con AI disattivato.' });
+        }
+        if (!whatsappAgent.isAgentConfigured()) {
+            return res.status(503).json({ error: 'not_configured', message: 'ANTHROPIC_API_KEY non configurata sul backend' });
+        }
+        const key = String(req.body?.phone_digits ?? '').replace(/\D/g, '').slice(-10);
+        if (!key) return res.status(400).json({ error: 'phone_digits mancante' });
+
+        const [msgs, kb, soglia] = await Promise.all([
+            queryWithRetry(
+                `SELECT direction, body, from_phone, to_phone
+                   FROM outbound_messages
+                  WHERE channel IN ('sms','whatsapp')
+                    AND (right(to_phone_digits, 10) = $1::text OR right(from_phone_digits, 10) = $1::text)
+                  ORDER BY sent_at DESC LIMIT 15`, [key]),
+            queryWithRetry(`SELECT title, content FROM ai_knowledge_entries WHERE is_active ORDER BY sort_order, id`),
+            getVoiceLargeGroupThreshold(req.tenantId!),
+        ]);
+        const messages = msgs.rows.reverse();
+        if (messages.length === 0) return res.status(404).json({ error: 'Conversazione vuota' });
+
+        const resv = await queryWithRetry(
+            `SELECT r.id, r.customer_name, r.reservation_time, r.guests, r.notes,
+                    r.reservation_status AS status, ro.name AS room_name
+               FROM reservations r
+               LEFT JOIN tables t ON t.id = r.table_id
+               LEFT JOIN rooms ro ON ro.id = t.room_id
+              WHERE r.phone IS NOT NULL AND r.phone <> ''
+                AND ${PHONE_MATCH_KEY_SQL('r.phone')} = ${PHONE_MATCH_KEY_SQL('$1')}
+              ORDER BY abs(extract(epoch FROM (r.reservation_time - CURRENT_TIMESTAMP))) ASC
+              LIMIT 1`, [key]);
+
+        // Numero in formato utile agli strumenti: quello da cui il cliente scrive.
+        const inbound = messages.find((m: any) => m.direction === 'inbound');
+        const phone = inbound?.from_phone || `+${key}`;
+
+        const result = await whatsappAgent.runAgent({
+            phoneDigits: key,
+            messages: messages as any,
+            reservation: resv.rows[0] ?? null,
+            phone,
+            knowledge: kb.rows as any,
+            largeGroupThreshold: soglia,
+            restaurantName: businessIdentity().name,
+        });
+
+        let proposta: any = null;
+        if (result.proposal) {
+            // Una proposta per volta e per conversazione: quelle vecchie
+            // decadono, altrimenti lo staff si trova due schede in contrasto.
+            await queryWithRetry(
+                `UPDATE agent_proposals SET status = 'SUPERSEDED', resolved_at = CURRENT_TIMESTAMP
+                  WHERE tenant_id = $2 AND phone_digits = $1 AND status = 'PENDING'`, [key, req.tenantId!]);
+            const ins = await queryWithRetry(
+                `INSERT INTO agent_proposals (tenant_id, phone_digits, tool, args, summary, suggested_reply, reservation_id)
+                 VALUES ($7, $1, $2, $3::jsonb, $4, $5, $6) RETURNING *`,
+                [key, result.proposal.tool, JSON.stringify(result.proposal.args),
+                 result.proposal.summary, result.reply, resv.rows[0]?.id ?? null, req.tenantId!]);
+            proposta = proposalRow(ins.rows[0]);
+        }
+
+        res.json({
+            reply: result.reply,
+            proposal: proposta,
+            checks: result.checks,
+            reason: result.reason ?? null,
+            knowledge_count: kb.rows.length,
+        });
+    } catch (err: any) {
+        if (err instanceof whatsappAgent.AgentError) {
+            const status = err.kind === 'not_configured' ? 503 : err.kind === 'no_knowledge' ? 400 : 502;
+            return res.status(status).json({ error: err.kind, message: err.message });
+        }
+        console.error('POST /messages/agent/run error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Esegue la proposta: e' QUI che si scrive sulle prenotazioni, e solo dopo un
+// tocco di una persona. Usa gli stessi strumenti di Sofia col canale WhatsApp.
+app.post('/messages/agent/proposals/:id/confirm', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+
+        // Lock di riga: due tocchi ravvicinati non devono eseguire due volte.
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+            const r = await client.query(`SELECT * FROM agent_proposals WHERE id = $1 AND tenant_id = $2 FOR UPDATE`, [id, req.tenantId!]);
+            const prop = r.rows[0];
+            if (!prop) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Proposta non trovata' }); }
+            if (prop.status !== 'PENDING') {
+                await client.query('ROLLBACK');
+                return res.status(409).json({ error: 'already_resolved', status: prop.status });
+            }
+            if (new Date(prop.expires_at).getTime() < Date.now()) {
+                await client.query(`UPDATE agent_proposals SET status='EXPIRED', resolved_at=CURRENT_TIMESTAMP WHERE id=$1`, [id]);
+                await client.query('COMMIT');
+                return res.status(409).json({
+                    error: 'expired',
+                    message: 'Proposta scaduta: la situazione della sala potrebbe essere cambiata. Rilancia il suggerimento.',
+                });
+            }
+            await client.query(`UPDATE agent_proposals SET status='EXECUTING' WHERE id=$1`, [id]);
+            await client.query('COMMIT');
+        } finally {
+            client.release();
+        }
+
+        const prop = (await queryWithRetry(`SELECT * FROM agent_proposals WHERE id=$1 AND tenant_id=$2`, [id, req.tenantId!])).rows[0];
+        const args = prop.args || {};
+        const esegui = prop.tool === 'create_reservation' ? bookingTools.createReservation
+            : prop.tool === 'modify_reservation' ? bookingTools.modifyReservation
+            : prop.tool === 'cancel_reservation' ? bookingTools.cancelReservation
+            : null;
+        if (!esegui) {
+            await queryWithRetry(`UPDATE agent_proposals SET status='FAILED', resolved_at=CURRENT_TIMESTAMP WHERE id=$1`, [id]);
+            return res.status(400).json({ error: 'Strumento non eseguibile', tool: prop.tool });
+        }
+
+        const outcome = await esegui(args, WHATSAPP_CHANNEL);
+        const riuscito = outcome.body?.success === true;
+        await queryWithRetry(
+            `UPDATE agent_proposals
+                SET status = $2, result = $3::jsonb, resolved_at = CURRENT_TIMESTAMP, resolved_by_user_id = $4
+              WHERE id = $1`,
+            [id, riuscito ? 'DONE' : 'FAILED', JSON.stringify(outcome.body), req.user?.userId ?? null]);
+
+        res.status(outcome.serverError ? 500 : 200).json({ ok: riuscito, tool: prop.tool, result: outcome.body });
+    } catch (err: any) {
+        console.error('POST /messages/agent/proposals/:id/confirm error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/messages/agent/proposals/:id/discard', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        const r = await queryWithRetry(
+            `UPDATE agent_proposals SET status='DISCARDED', resolved_at=CURRENT_TIMESTAMP, resolved_by_user_id=$2
+              WHERE id=$1 AND tenant_id=$3 AND status='PENDING' RETURNING id`, [id, req.user?.userId ?? null, req.tenantId!]);
+        if (r.rows.length === 0) return res.status(409).json({ error: 'Proposta non più in attesa' });
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('POST /messages/agent/proposals/:id/discard error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -13186,8 +13357,8 @@ app.post('/ai-usage', authenticate, async (req: any, res) => {
         };
         const provider = String(req.body?.provider || '').trim().toLowerCase().slice(0, 20);
         const feature = String(req.body?.feature || '').trim().slice(0, 60);
-        // Per ora accettiamo solo 'gemini': ElevenLabs si legge live, non si logga qui.
-        if (provider !== 'gemini') {
+        // ElevenLabs si legge live dalla sua API, non si logga qui.
+        if (provider !== 'anthropic' && provider !== 'gemini') {
             return res.status(400).json({ error: 'Provider non supportato' });
         }
         if (!feature) {
@@ -13223,7 +13394,7 @@ app.get('/ai-usage/gemini', authenticate, requireDevBoardAdmin, async (req, res)
                     COUNT(*)::int                        AS calls,
                     MAX(created_at)                      AS last_at
              FROM ai_token_usage
-             WHERE provider = 'gemini'
+             WHERE provider <> 'elevenlabs'
                AND created_at >= NOW() - make_interval(days => $1::int)`,
             [days]
         );
@@ -13234,7 +13405,7 @@ app.get('/ai-usage/gemini', authenticate, requireDevBoardAdmin, async (req, res)
                     COALESCE(SUM(total_tokens),0)::int  AS total_tokens,
                     COUNT(*)::int                        AS calls
              FROM ai_token_usage
-             WHERE provider = 'gemini'
+             WHERE provider <> 'elevenlabs'
                AND created_at >= NOW() - make_interval(days => $1::int)
              GROUP BY day
              ORDER BY day`,
@@ -13246,7 +13417,7 @@ app.get('/ai-usage/gemini', authenticate, requireDevBoardAdmin, async (req, res)
                     COALESCE(SUM(total_tokens),0)::int AS total_tokens,
                     COUNT(*)::int AS calls
              FROM ai_token_usage
-             WHERE provider = 'gemini'
+             WHERE provider <> 'elevenlabs'
                AND created_at >= NOW() - make_interval(days => $1::int)
              GROUP BY feature
              ORDER BY total_tokens DESC`,
