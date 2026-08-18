@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { queryWithRetry } from '../db.js';
@@ -30,6 +31,26 @@ export class AuthService {
   // Verify password against hash
   static async verifyPassword(password: string, hash: string): Promise<boolean> {
     return bcrypt.compare(password, hash);
+  }
+
+  // I refresh token sono JWT da ~250 byte, ma bcrypt considera solo i primi
+  // 72: header e inizio payload sono identici per tutti i token dello stesso
+  // utente, quindi il confronto diretto passava per QUALUNQUE token emesso e
+  // la rotazione non revocava niente. Il digest SHA-256 (44 caratteri in
+  // base64) porta l'intero token dentro la finestra di bcrypt.
+  //
+  // Il cambio di formato invalida gli hash già salvati: al primo refresh
+  // dopo il deploy ogni sessione attiva riceve 401 e rifà il login una volta.
+  private static digestRefreshToken(token: string): string {
+    return createHash('sha256').update(token).digest('base64');
+  }
+
+  private static async hashRefreshToken(token: string): Promise<string> {
+    return this.hashPassword(this.digestRefreshToken(token));
+  }
+
+  private static async verifyRefreshTokenHash(token: string, hash: string): Promise<boolean> {
+    return this.verifyPassword(this.digestRefreshToken(token), hash);
   }
 
   // Generate access and refresh tokens
@@ -91,7 +112,7 @@ export class AuthService {
     const tokens = this.generateTokens(payload);
 
     // Store refresh token hash
-    const refreshTokenHash = await this.hashPassword(tokens.refreshToken);
+    const refreshTokenHash = await this.hashRefreshToken(tokens.refreshToken);
     await queryWithRetry('UPDATE users SET refresh_token_hash = $1 WHERE id = $2', [refreshTokenHash, userRow.id]);
 
     const user: User = {
@@ -135,7 +156,7 @@ export class AuthService {
     }
 
     // Verify refresh token hash matches
-    const isValidRefreshToken = await this.verifyPassword(refreshToken, userRow.refresh_token_hash);
+    const isValidRefreshToken = await this.verifyRefreshTokenHash(refreshToken, userRow.refresh_token_hash);
     if (!isValidRefreshToken) {
       return null;
     }
@@ -149,7 +170,7 @@ export class AuthService {
     const tokens = this.generateTokens(newPayload);
 
     // Update refresh token hash
-    const newRefreshTokenHash = await this.hashPassword(tokens.refreshToken);
+    const newRefreshTokenHash = await this.hashRefreshToken(tokens.refreshToken);
     await queryWithRetry('UPDATE users SET refresh_token_hash = $1 WHERE id = $2', [newRefreshTokenHash, userRow.id]);
 
     return tokens;
