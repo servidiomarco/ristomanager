@@ -64,12 +64,13 @@ describe('auth', () => {
         expect(refresh.body.accessToken).toBeTruthy();
         expect(refresh.body.refreshToken).not.toBe(primo);
 
-        // NOTA (debolezza nota, da PR dedicato): la rotazione salva l'hash del
-        // nuovo token ma NON revoca il vecchio — bcrypt tronca a 72 byte e
-        // tutti i refresh JWT dello stesso utente condividono i primi 72 byte
-        // (header + inizio payload), quindi il confronto passa per qualunque
-        // token emesso. Qui si verifica la revoca che oggi funziona davvero:
-        // il logout azzera l'hash e invalida ogni refresh token.
+        // La rotazione revoca il token precedente: il replay deve fallire.
+        // (Il confronto passa dal digest SHA-256 del token: senza, bcrypt
+        // tronca a 72 byte e qualunque refresh JWT dell'utente passerebbe.)
+        const replay = await api().post('/auth/refresh').send({ refreshToken: primo });
+        expect(replay.status).toBe(401);
+
+        // E il logout azzera l'hash: nemmeno l'ultimo token emesso passa più.
         const logout = await api()
             .post('/auth/logout')
             .set(bearer(login.body.accessToken))
