@@ -461,14 +461,17 @@ export async function findCustomerByPhone(tenantId: number, phone: string): Prom
     let lastVisit: string | undefined;
     try {
         const visit = await queryWithRetry(
+            // Stesso tenant della scheda cliente: il "bentornato" non deve
+            // citare la cena fatta in un altro ristorante.
             `SELECT reservation_time
              FROM reservations
-             WHERE right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
+             WHERE tenant_id = $2
+               AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
                AND COALESCE(reservation_status, 'CONFIRMED') <> 'CANCELLED'
                AND reservation_time < CURRENT_TIMESTAMP
              ORDER BY reservation_time DESC
              LIMIT 1`,
-            [last10]
+            [last10, tenantId]
         );
         if (visit.rows.length > 0) {
             const dt = new Date(visit.rows[0].reservation_time);
@@ -749,9 +752,9 @@ export async function createVoiceReservation(
         INSERT INTO reservations (
             customer_name, reservation_time, shift, guests, children, phone,
             notes, payment_status, arrival_status, source, requires_review, table_id,
-            reservation_status
+            reservation_status, tenant_id
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', 'WAITING', $8, true, $9, $10)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', 'WAITING', $8, true, $9, $10, $11)
         RETURNING *
     `, [
         input.customer_name.trim(),
@@ -763,7 +766,8 @@ export async function createVoiceReservation(
         notes,
         ReservationSource.VOICE,
         assigned?.id ?? null,
-        input.deposit_required ? 'PENDING' : 'CONFIRMED'
+        input.deposit_required ? 'PENDING' : 'CONFIRMED',
+        VOICE_TENANT_ID
     ]);
 
     const row = result.rows[0];
@@ -822,16 +826,19 @@ export async function cancelVoiceReservation(
 ): Promise<CancelVoiceReservationOutput> {
     const last10 = lastTenDigits(input.phone);
 
-    const params: any[] = [last10, input.date];
+    // Solo prenotazioni del tenant voce: lo stesso numero potrebbe avere una
+    // cena anche nell'altro ristorante, e Sofia non deve poterla toccare.
+    const params: any[] = [last10, input.date, VOICE_TENANT_ID];
     let sql = `
         SELECT id, customer_name, reservation_time, shift, guests
         FROM reservations
-        WHERE right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
+        WHERE tenant_id = $3
+          AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
           AND DATE(reservation_time) = $2::date
           AND COALESCE(reservation_status, 'CONFIRMED') <> 'CANCELLED'
     `;
     if (input.time) {
-        sql += ` AND to_char(reservation_time, 'HH24:MI') = $3`;
+        sql += ` AND to_char(reservation_time, 'HH24:MI') = $4`;
         params.push(input.time);
     }
     sql += ' ORDER BY reservation_time ASC';
@@ -844,16 +851,17 @@ export async function cancelVoiceReservation(
         // cancel something we already cancelled (common after a dashboard test
         // or a duplicate call). Same filters as above but allowing the
         // CANCELLED status, so we can tell the caller it's already done.
-        const cancelledParams: any[] = [last10, input.date];
+        const cancelledParams: any[] = [last10, input.date, VOICE_TENANT_ID];
         let cancelledSql = `
             SELECT id, customer_name, reservation_time, shift, guests
             FROM reservations
-            WHERE right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
+            WHERE tenant_id = $3
+              AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
               AND DATE(reservation_time) = $2::date
               AND COALESCE(reservation_status, 'CONFIRMED') = 'CANCELLED'
         `;
         if (input.time) {
-            cancelledSql += ` AND to_char(reservation_time, 'HH24:MI') = $3`;
+            cancelledSql += ` AND to_char(reservation_time, 'HH24:MI') = $4`;
             cancelledParams.push(input.time);
         }
         cancelledSql += ' ORDER BY reservation_time DESC LIMIT 1';
@@ -869,9 +877,9 @@ export async function cancelVoiceReservation(
     const updated = await queryWithRetry(`
         UPDATE reservations
         SET reservation_status = 'CANCELLED'
-        WHERE id = $1
+        WHERE id = $1 AND tenant_id = $2
         RETURNING id, customer_name, reservation_time, shift, guests
-    `, [target.id]);
+    `, [target.id, VOICE_TENANT_ID]);
 
     return { status: 'cancelled', reservation: updated.rows[0] };
 }
@@ -964,18 +972,19 @@ export async function modifyVoiceReservation(
 ): Promise<ModifyVoiceReservationOutput> {
     const last10 = lastTenDigits(input.phone);
 
-    // 1) Locate the reservation. Same rules as cancel.
-    const params: any[] = [last10, input.date];
+    // 1) Locate the reservation. Same rules as cancel (tenant voce compreso).
+    const params: any[] = [last10, input.date, VOICE_TENANT_ID];
     let sql = `
         SELECT id, customer_name, reservation_time, shift, guests, table_id, phone,
                COALESCE(reservation_status, 'CONFIRMED') AS reservation_status,
                notes, children
         FROM reservations
-        WHERE right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
+        WHERE tenant_id = $3
+          AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
           AND DATE(reservation_time) = $2::date
     `;
     if (input.time) {
-        sql += ` AND to_char(reservation_time, 'HH24:MI') = $3`;
+        sql += ` AND to_char(reservation_time, 'HH24:MI') = $4`;
         params.push(input.time);
     }
     sql += ' ORDER BY reservation_time ASC';
@@ -1067,17 +1076,17 @@ export async function modifyVoiceReservation(
             `UPDATE reservations
              SET reservation_time = $1, shift = $2, guests = $3, table_id = $4,
                  notes = $5, reservation_status = 'CONFIRMED'
-             WHERE id = $6
+             WHERE id = $6 AND tenant_id = $7
              RETURNING ${returning}`,
             [newReservationTime, newShift, newGuests, assigned?.id ?? current.table_id,
-             notesToStore, current.id]
+             notesToStore, current.id, VOICE_TENANT_ID]
           )
         : await queryWithRetry(
             `UPDATE reservations
              SET notes = $1, reservation_status = 'CONFIRMED'
-             WHERE id = $2
+             WHERE id = $2 AND tenant_id = $3
              RETURNING ${returning}`,
-            [notesToStore, current.id]
+            [notesToStore, current.id, VOICE_TENANT_ID]
           );
 
     const after: ModifiedReservation = {

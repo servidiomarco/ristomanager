@@ -315,7 +315,7 @@ async function handleMessage(msg: FetchMessageObject): Promise<void> {
     const candidateIds = [inReplyTo, ...referenceIds].filter(Boolean) as string[];
     let reservationId = await resolveReservationByMessageIds(PUBLIC_TENANT_ID, candidateIds);
     if (!reservationId) {
-        reservationId = await resolveReservationByFromEmail(fromEmail);
+        reservationId = await resolveReservationByFromEmail(PUBLIC_TENANT_ID, fromEmail);
     }
     if (!reservationId) {
         console.warn('[IMAP] unmatched reply from', fromEmail, 'subject:', subject);
