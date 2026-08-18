@@ -538,30 +538,32 @@ export async function findAvailability(input: AvailabilityInput): Promise<Availa
     const breakdown = await queryWithRetry(`
         SELECT r.location AS location, COUNT(*)::int AS free
         FROM tables t
-        JOIN rooms r ON t.room_id = r.id
-        WHERE r.is_closed = false
+        JOIN rooms r ON t.room_id = r.id AND r.tenant_id = t.tenant_id
+        WHERE t.tenant_id = $5
+          AND r.is_closed = false
           AND NOT (r.id = ANY($4::int[]))
           AND r.id NOT IN (
-              SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3
+              SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3 AND tenant_id = $5
           )
           AND t.id NOT IN (
-              SELECT table_id FROM table_hidden_overrides WHERE date = $2 AND shift = $3
+              SELECT table_id FROM table_hidden_overrides WHERE date = $2 AND shift = $3 AND tenant_id = $5
           )
           AND t.seats >= $1
           AND NOT EXISTS (
               SELECT 1 FROM reservations res
               WHERE res.table_id = t.id
+                AND res.tenant_id = $5
                 AND DATE(res.reservation_time) = $2
                 AND res.shift = $3
                 AND COALESCE(res.reservation_status, 'CONFIRMED') <> 'CANCELLED'
           )
           AND NOT EXISTS (
               SELECT 1 FROM table_merges tm
-              WHERE tm.date = $2 AND tm.shift = $3
+              WHERE tm.date = $2 AND tm.shift = $3 AND tm.tenant_id = $5
                 AND (tm.primary_id = t.id OR t.id = ANY(tm.merged_ids))
           )
         GROUP BY r.location
-    `, [guests, date, shift, cappedRooms]);
+    `, [guests, date, shift, cappedRooms, VOICE_TENANT_ID]);
 
     let freeIndoor = 0;
     let freeOutdoor = 0;
@@ -604,29 +606,31 @@ export async function findAvailability(input: AvailabilityInput): Promise<Availa
     const altResult = await queryWithRetry(`
         SELECT COUNT(*)::int AS free
         FROM tables t
-        JOIN rooms r ON t.room_id = r.id
-        WHERE r.is_closed = false
+        JOIN rooms r ON t.room_id = r.id AND r.tenant_id = t.tenant_id
+        WHERE t.tenant_id = $5
+          AND r.is_closed = false
           AND NOT (r.id = ANY($4::int[]))
           AND r.id NOT IN (
-              SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3
+              SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3 AND tenant_id = $5
           )
           AND t.id NOT IN (
-              SELECT table_id FROM table_hidden_overrides WHERE date = $2 AND shift = $3
+              SELECT table_id FROM table_hidden_overrides WHERE date = $2 AND shift = $3 AND tenant_id = $5
           )
           AND t.seats >= $1
           AND NOT EXISTS (
               SELECT 1 FROM reservations res
               WHERE res.table_id = t.id
+                AND res.tenant_id = $5
                 AND DATE(res.reservation_time) = $2
                 AND res.shift = $3
                 AND COALESCE(res.reservation_status, 'CONFIRMED') <> 'CANCELLED'
           )
           AND NOT EXISTS (
               SELECT 1 FROM table_merges tm
-              WHERE tm.date = $2 AND tm.shift = $3
+              WHERE tm.date = $2 AND tm.shift = $3 AND tm.tenant_id = $5
                 AND (tm.primary_id = t.id OR t.id = ANY(tm.merged_ids))
           )
-    `, [guests, date, otherShift, cappedRoomsAlt]);
+    `, [guests, date, otherShift, cappedRoomsAlt, VOICE_TENANT_ID]);
     const altFree = altResult.rows[0]?.free ?? 0;
 
     // Only offer the other shift if it hasn't already passed today — otherwise
@@ -1029,7 +1033,7 @@ export async function modifyVoiceReservation(
     if (scheduleChanged) {
         const keepCurrentTable = current.table_id != null
             && !newLocation
-            && await isTableStillAssignable(current.table_id, newDate, newShift, newGuests, current.id);
+            && await isTableStillAssignable(VOICE_TENANT_ID, current.table_id, newDate, newShift, newGuests, current.id);
         if (!keepCurrentTable) {
             assigned = await pickAutoAssignTable(
                 newDate,
