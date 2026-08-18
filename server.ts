@@ -177,6 +177,33 @@ app.use((err: any, _req: express.Request, res: express.Response, next: express.N
     return next(err);
 });
 
+// ============================================
+// TURNI DI SERVIZIO — validazione applicativa
+// ============================================
+// I CHECK (shift IN ('LUNCH','DINNER')) sono stati rimossi dalle 8 tabelle
+// con la migration drop-shift-checks (Fase A4 del piano SaaS): un vincolo di
+// dominio inciso in 8 punti dello schema impediva di rappresentare un
+// ristorante con turni diversi. L'invariante "nessun turno sconosciuto viene
+// scritto" resta globale e vive qui: qualunque body con un campo `shift`
+// non riconosciuto viene rifiutato prima della rotta — 400 col nome del
+// turno, invece del 500 anonimo del vecchio constraint. Quando i turni
+// diventeranno configurabili per ristorante, KNOWN_SHIFTS leggerà la
+// configurazione e lo schema non si tocca.
+//
+// Solo il campo top-level: le rotte con forme annidate (es. il bulk dei
+// turni staff) validano le proprie righe. GET con shift in query non si
+// valida: un turno inesistente in lettura ritorna un set vuoto, non scrive.
+const KNOWN_SHIFTS = new Set(['LUNCH', 'DINNER']);
+const isKnownShift = (v: unknown): boolean => typeof v === 'string' && KNOWN_SHIFTS.has(v);
+app.use((req, res, next) => {
+    if (req.method === 'GET') return next();
+    const s = (req.body as any)?.shift;
+    if (s !== undefined && s !== null && !isKnownShift(s)) {
+        return res.status(400).json({ error: 'invalid_shift', message: `Turno non valido: ${String(s).slice(0, 30)}` });
+    }
+    next();
+});
+
 // Request logging middleware
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
@@ -9797,6 +9824,12 @@ app.post('/staff/shifts/bulk', authenticate, requirePermission('staff:full'), as
 
         if (!Array.isArray(shifts) || shifts.length === 0) {
             return res.status(400).json({ error: 'shifts array is required' });
+        }
+        // Forma annidata: il middleware globale vede solo body.shift, le
+        // righe del bulk vanno controllate qui.
+        const invalid = shifts.find((s: any) => !isKnownShift(s?.shift));
+        if (invalid) {
+            return res.status(400).json({ error: 'invalid_shift', message: `Turno non valido: ${String(invalid?.shift).slice(0, 30)}` });
         }
 
         const createdShifts = [];
