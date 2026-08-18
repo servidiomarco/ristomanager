@@ -11,16 +11,22 @@
 // gestore. Nient'altro: nessun dato di altri clienti, nessuno storico di
 // prenotazioni altrui.
 //
-// La chiave sta sul backend (GEMINI_API_KEY su Railway) e non viene mai
+// La chiave sta sul backend (ANTHROPIC_API_KEY su Railway) e non viene mai
 // esposta al browser — a differenza del vecchio report della dashboard, che
 // girava lato client con la chiave iniettata nel bundle.
 
-import { GoogleGenAI } from '@google/genai';
+import Anthropic from '@anthropic-ai/sdk';
 
-// gemini-2.5-flash non e' piu' disponibile per le chiavi API create di
-// recente (404 "no longer available to new users"): verificato con la chiave
-// in produzione il 2026-08-13.
-const MODEL = 'gemini-3.5-flash';
+const MODEL = 'claude-opus-5';
+
+// Sforzo minimo: il compito è breve e ben delimitato (leggere poche righe,
+// scrivere due frasi o dire NON_SO). Il ragionamento resta acceso perché è
+// quello che tiene in piedi il NON_SO: senza, il modello tende a rispondere
+// comunque invece di ammettere che l'informazione non c'è.
+const SFORZO = 'low' as const;
+
+// Il ragionamento attinge allo stesso budget della risposta.
+const MAX_TOKEN = 2048;
 
 export interface AiReplyContext {
     /** Messaggi della conversazione, dal più vecchio al più recente. */
@@ -48,7 +54,7 @@ export class AiReplyError extends Error {
 }
 
 export function isAiConfigured(): boolean {
-    return Boolean((process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim());
+    return Boolean((process.env.ANTHROPIC_API_KEY || '').trim());
 }
 
 const fmtDate = (d: Date | string | null | undefined): string => {
@@ -61,7 +67,7 @@ const fmtDate = (d: Date | string | null | undefined): string => {
     });
 };
 
-function buildPrompt(ctx: AiReplyContext): string {
+function buildSystem(ctx: AiReplyContext): string {
     const nome = ctx.restaurantName || 'Il Vecchio Frantoio';
     const regole = ctx.knowledge.length > 0
         ? ctx.knowledge.map(k => `- ${k.title}: ${k.content}`).join('\n')
@@ -78,12 +84,6 @@ function buildPrompt(ctx: AiReplyContext): string {
         ].filter(Boolean).join('\n')
         : '(nessuna prenotazione collegata a questo numero)';
 
-    const conversazione = ctx.messages
-        .map(m => `${m.direction === 'inbound' ? 'CLIENTE' : 'RISTORANTE'}: ${String(m.body || '').replace(/\s+/g, ' ').trim()}`)
-        .filter(l => l.length > 10)
-        .slice(-15)
-        .join('\n');
-
     // Le istruzioni ripetono due volte il divieto di inventare perché è il
     // fallimento che costa di più: una risposta sicura di sé su un orario o
     // una disponibilità sbagliata manda un cliente davanti a una porta chiusa.
@@ -95,10 +95,7 @@ ${regole}
 PRENOTAZIONE COLLEGATA A QUESTO NUMERO:
 ${pren}
 
-CONVERSAZIONE (dal più vecchio al più recente):
-${conversazione}
-
-COMPITO: scrivi la prossima risposta del RISTORANTE all'ultimo messaggio del cliente.
+COMPITO: ti verrà data la conversazione; scrivi la prossima risposta del RISTORANTE all'ultimo messaggio del cliente.
 
 COME SCRIVERE:
 - In italiano, dando del tu, tono cordiale e diretto come si scrive su WhatsApp.
@@ -115,6 +112,15 @@ SE NON SAI RISPONDERE (l'informazione non è nelle regole, oppure serve una veri
 rispondi esattamente con: NON_SO
 
 Scrivi solo il testo del messaggio da inviare, senza virgolette e senza spiegazioni.`;
+}
+
+/** La conversazione, resa come trascrizione leggibile per il turno utente. */
+function buildConversation(ctx: AiReplyContext): string {
+    return ctx.messages
+        .map(m => `${m.direction === 'inbound' ? 'CLIENTE' : 'RISTORANTE'}: ${String(m.body || '').replace(/\s+/g, ' ').trim()}`)
+        .filter(l => l.length > 10)
+        .slice(-15)
+        .join('\n');
 }
 
 /** Consumo token di una singola generazione, per la telemetria in ai_token_usage. */
@@ -143,9 +149,9 @@ export async function generateSuggestedReply(
     ctx: AiReplyContext,
     opts: GenerateSuggestedReplyOptions = {}
 ): Promise<string | null> {
-    const apiKey = (process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim();
+    const apiKey = (process.env.ANTHROPIC_API_KEY || '').trim();
     if (!apiKey) {
-        throw new AiReplyError('GEMINI_API_KEY non configurata sul backend', 'not_configured');
+        throw new AiReplyError('ANTHROPIC_API_KEY non configurata sul backend', 'not_configured');
     }
     if (ctx.knowledge.length === 0) {
         throw new AiReplyError(
@@ -154,30 +160,43 @@ export async function generateSuggestedReply(
         );
     }
 
+    const conversazione = buildConversation(ctx);
+    if (!conversazione) return null;
+
+    let response: Anthropic.Message;
     try {
-        const ai = new GoogleGenAI({ apiKey });
-        const response = await ai.models.generateContent({
+        const client = new Anthropic({ apiKey });
+        response = await client.messages.create({
             model: MODEL,
-            contents: buildPrompt(ctx),
+            max_tokens: MAX_TOKEN,
+            output_config: { effort: SFORZO },
+            system: buildSystem(ctx),
+            messages: [{ role: 'user', content: `CONVERSAZIONE (dal più vecchio al più recente):\n${conversazione}` }],
         });
-        // Segnala il consumo prima di ogni return: i token del NON_SO si pagano.
-        if (opts.onUsage) {
-            const u = response.usageMetadata;
-            if (u) {
-                opts.onUsage({
-                    model: MODEL,
-                    promptTokens: u.promptTokenCount ?? 0,
-                    outputTokens: u.candidatesTokenCount ?? 0,
-                    totalTokens: u.totalTokenCount ?? 0,
-                });
-            }
-        }
-        const text = String(response.text || '').trim();
-        if (!text || /^NON_SO\b/i.test(text)) return null;
-        // Il modello ogni tanto incornicia la frase fra virgolette nonostante
-        // le istruzioni: toglierle qui evita che finiscano nel messaggio.
-        return text.replace(/^["'«]|["'»]$/g, '').trim() || null;
     } catch (err: any) {
         throw new AiReplyError(err?.message || 'Errore dal modello', 'upstream');
     }
+
+    // Segnala il consumo prima di ogni return: i token del NON_SO si pagano.
+    if (opts.onUsage) {
+        opts.onUsage({
+            model: MODEL,
+            promptTokens: response.usage.input_tokens ?? 0,
+            outputTokens: response.usage.output_tokens ?? 0,
+            totalTokens: (response.usage.input_tokens ?? 0) + (response.usage.output_tokens ?? 0),
+        });
+    }
+
+    // Il rifiuto va guardato prima del contenuto: lì dentro non c'è niente.
+    if (response.stop_reason === 'refusal') return null;
+
+    const text = response.content
+        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+        .map(b => b.text)
+        .join('')
+        .trim();
+    if (!text || /^NON_SO\b/i.test(text)) return null;
+    // Il modello ogni tanto incornicia la frase fra virgolette nonostante
+    // le istruzioni: toglierle qui evita che finiscano nel messaggio.
+    return text.replace(/^["'«]|["'»]$/g, '').trim() || null;
 }

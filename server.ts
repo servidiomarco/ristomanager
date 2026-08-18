@@ -4284,7 +4284,7 @@ app.post('/messages/suggest-reply', authenticate, requirePermission('reservation
             onUsage: (u) => {
                 queryWithRetry(
                     `INSERT INTO ai_token_usage (provider, feature, model, prompt_tokens, output_tokens, total_tokens, user_email)
-                     VALUES ('gemini', 'suggest_reply', $1, $2, $3, $4, $5)`,
+                     VALUES ('anthropic', 'suggest_reply', $1, $2, $3, $4, $5)`,
                     [u.model, u.promptTokens, u.outputTokens, u.totalTokens || (u.promptTokens + u.outputTokens), (req.user?.email || null)]
                 ).catch(err => console.error('ai_token_usage insert (suggest_reply) failed:', err));
             },
@@ -4330,7 +4330,7 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
             return res.status(403).json({ error: 'feature_disabled', message: 'Messaggi con AI disattivato.' });
         }
         if (!whatsappAgent.isAgentConfigured()) {
-            return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY non configurata sul backend' });
+            return res.status(503).json({ error: 'not_configured', message: 'ANTHROPIC_API_KEY non configurata sul backend' });
         }
         const key = String(req.body?.phone_digits ?? '').replace(/\D/g, '').slice(-10);
         if (!key) return res.status(400).json({ error: 'phone_digits mancante' });
@@ -12896,8 +12896,8 @@ app.post('/ai-usage', authenticate, async (req: any, res) => {
         };
         const provider = String(req.body?.provider || '').trim().toLowerCase().slice(0, 20);
         const feature = String(req.body?.feature || '').trim().slice(0, 60);
-        // Per ora accettiamo solo 'gemini': ElevenLabs si legge live, non si logga qui.
-        if (provider !== 'gemini') {
+        // ElevenLabs si legge live dalla sua API, non si logga qui.
+        if (provider !== 'anthropic' && provider !== 'gemini') {
             return res.status(400).json({ error: 'Provider non supportato' });
         }
         if (!feature) {
@@ -12933,7 +12933,7 @@ app.get('/ai-usage/gemini', authenticate, requireDevBoardAdmin, async (req, res)
                     COUNT(*)::int                        AS calls,
                     MAX(created_at)                      AS last_at
              FROM ai_token_usage
-             WHERE provider = 'gemini'
+             WHERE provider <> 'elevenlabs'
                AND created_at >= NOW() - make_interval(days => $1::int)`,
             [days]
         );
@@ -12944,7 +12944,7 @@ app.get('/ai-usage/gemini', authenticate, requireDevBoardAdmin, async (req, res)
                     COALESCE(SUM(total_tokens),0)::int  AS total_tokens,
                     COUNT(*)::int                        AS calls
              FROM ai_token_usage
-             WHERE provider = 'gemini'
+             WHERE provider <> 'elevenlabs'
                AND created_at >= NOW() - make_interval(days => $1::int)
              GROUP BY day
              ORDER BY day`,
@@ -12956,7 +12956,7 @@ app.get('/ai-usage/gemini', authenticate, requireDevBoardAdmin, async (req, res)
                     COALESCE(SUM(total_tokens),0)::int AS total_tokens,
                     COUNT(*)::int AS calls
              FROM ai_token_usage
-             WHERE provider = 'gemini'
+             WHERE provider <> 'elevenlabs'
                AND created_at >= NOW() - make_interval(days => $1::int)
              GROUP BY feature
              ORDER BY total_tokens DESC`,
