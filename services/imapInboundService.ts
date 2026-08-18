@@ -24,6 +24,11 @@ import {
     resolveReservationByFromEmail,
 } from './emailThreading.js';
 
+// Il poller IMAP gira senza richiesta HTTP: come le altre superfici pubbliche
+// (webhook, voce) resta ancorato al tenant storico finché la Fase C non
+// threada il tenant nella configurazione della mailbox.
+const PUBLIC_TENANT_ID = 1;
+
 export interface ImapConfig {
     host: string;
     port: number;
@@ -365,6 +370,7 @@ async function handleMessage(msg: FetchMessageObject): Promise<void> {
         const preview = String(body || '').replace(/\s+/g, ' ').trim().slice(0, 80);
         const fromDisplay = fromEmail || 'sconosciuto';
         pushSendToRoles(
+            PUBLIC_TENANT_ID,
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
             {
                 category: 'email',
