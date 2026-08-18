@@ -14,6 +14,11 @@ export interface TokenPayload {
   userId: number;
   email: string;
   role: UserRole;
+  // Fase B2 del piano SaaS: il tenant viaggia nel token. I token emessi
+  // prima del deploy non hanno il claim (TTL 6h): chi li verifica
+  // normalizza col fallback 1 — corretto per tutti gli utenti esistenti.
+  // Il fallback va rimosso prima di accendere il secondo tenant.
+  tenantId: number;
 }
 
 export interface AuthTokens {
@@ -79,9 +84,14 @@ export class AuthService {
   }
 
   // Login user
-  static async login(email: string, password: string): Promise<{ user: User; tokens: AuthTokens } | null> {
+  static async login(email: string, password: string): Promise<{ user: User; tokens: AuthTokens } | { tenantSuspended: true } | null> {
     const result = await queryWithRetry(
-      'SELECT id, email, password_hash, full_name, role, is_active, created_at, updated_at, last_login, preferred_landing_view FROM users WHERE email = $1',
+      `SELECT u.id, u.email, u.password_hash, u.full_name, u.role, u.is_active,
+              u.created_at, u.updated_at, u.last_login, u.preferred_landing_view,
+              u.tenant_id, t.status AS tenant_status, t.slug AS tenant_slug, t.name AS tenant_name
+         FROM users u
+         JOIN tenants t ON t.id = u.tenant_id
+        WHERE u.email = $1`,
       [email.toLowerCase()]
     );
 
@@ -95,6 +105,13 @@ export class AuthService {
       return null;
     }
 
+    // Tenant sospeso: l'account è valido ma il ristorante è spento (mancato
+    // pagamento, dismissione). Distinto dalle credenziali errate: la UI deve
+    // poter spiegare, non dire "password sbagliata".
+    if (userRow.tenant_status !== 'active') {
+      return { tenantSuspended: true };
+    }
+
     const isValidPassword = await this.verifyPassword(password, userRow.password_hash);
     if (!isValidPassword) {
       return null;
@@ -106,7 +123,8 @@ export class AuthService {
     const payload: TokenPayload = {
       userId: userRow.id,
       email: userRow.email,
-      role: userRow.role as UserRole
+      role: userRow.role as UserRole,
+      tenantId: Number(userRow.tenant_id)
     };
 
     const tokens = this.generateTokens(payload);
@@ -124,7 +142,12 @@ export class AuthService {
       created_at: userRow.created_at,
       updated_at: userRow.updated_at,
       last_login: userRow.last_login,
-      preferred_landing_view: userRow.preferred_landing_view ?? null
+      preferred_landing_view: userRow.preferred_landing_view ?? null,
+      tenant: {
+        id: Number(userRow.tenant_id),
+        slug: userRow.tenant_slug,
+        name: userRow.tenant_name
+      }
     };
 
     return { user, tokens };
@@ -137,9 +160,14 @@ export class AuthService {
       return null;
     }
 
-    // Verify refresh token is still valid in database
+    // Verify refresh token is still valid in database. Il join sul tenant
+    // fa anche da interruttore: sospendere un tenant taglia i refresh, e
+    // quindi ogni sessione muore entro il TTL dell'access token (6h).
     const result = await queryWithRetry(
-      'SELECT id, email, role, is_active, refresh_token_hash FROM users WHERE id = $1',
+      `SELECT u.id, u.email, u.role, u.is_active, u.refresh_token_hash, u.tenant_id
+         FROM users u
+         JOIN tenants t ON t.id = u.tenant_id AND t.status = 'active'
+        WHERE u.id = $1`,
       [payload.userId]
     );
 
@@ -164,7 +192,8 @@ export class AuthService {
     const newPayload: TokenPayload = {
       userId: userRow.id,
       email: userRow.email,
-      role: userRow.role as UserRole
+      role: userRow.role as UserRole,
+      tenantId: Number(userRow.tenant_id)
     };
 
     const tokens = this.generateTokens(newPayload);
@@ -181,10 +210,16 @@ export class AuthService {
     await queryWithRetry('UPDATE users SET refresh_token_hash = NULL WHERE id = $1', [userId]);
   }
 
-  // Get user by ID
+  // Get user by ID (con il tenant di appartenenza: /auth/me lo espone
+  // alla UI, che da lì sa nome e slug del ristorante).
   static async getUserById(userId: number): Promise<User | null> {
     const result = await queryWithRetry(
-      'SELECT id, email, full_name, role, is_active, created_at, updated_at, last_login, preferred_landing_view FROM users WHERE id = $1',
+      `SELECT u.id, u.email, u.full_name, u.role, u.is_active, u.created_at,
+              u.updated_at, u.last_login, u.preferred_landing_view,
+              u.tenant_id, t.slug AS tenant_slug, t.name AS tenant_name
+         FROM users u
+         JOIN tenants t ON t.id = u.tenant_id
+        WHERE u.id = $1`,
       [userId]
     );
 
@@ -202,7 +237,12 @@ export class AuthService {
       created_at: row.created_at,
       updated_at: row.updated_at,
       last_login: row.last_login,
-      preferred_landing_view: row.preferred_landing_view ?? null
+      preferred_landing_view: row.preferred_landing_view ?? null,
+      tenant: {
+        id: Number(row.tenant_id),
+        slug: row.tenant_slug,
+        name: row.tenant_name
+      }
     };
   }
 

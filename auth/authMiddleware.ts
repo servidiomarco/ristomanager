@@ -9,9 +9,19 @@ declare global {
   namespace Express {
     interface Request {
       user?: TokenPayload;
+      // Tenant della richiesta (Fase B2). Impostato da authenticate; è il
+      // valore su cui le route scopano le query man mano che la Fase B3
+      // le converte.
+      tenantId?: number;
     }
   }
 }
+
+// I token emessi prima della Fase B2 non hanno il claim tenantId (TTL 6h):
+// il fallback 1 è corretto per tutti gli utenti esistenti e va rimosso
+// prima di accendere il secondo tenant.
+const normalizeTenantId = (payload: TokenPayload): number =>
+  Number.isInteger(payload.tenantId) && payload.tenantId > 0 ? payload.tenantId : 1;
 
 // Authentication middleware - verifies JWT token
 export const authenticate = (req: Request, res: Response, next: NextFunction) => {
@@ -28,7 +38,8 @@ export const authenticate = (req: Request, res: Response, next: NextFunction) =>
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
 
-  req.user = payload;
+  req.user = { ...payload, tenantId: normalizeTenantId(payload) };
+  req.tenantId = req.user.tenantId;
   next();
 };
 
@@ -57,7 +68,7 @@ export const requirePermission = (permission: Permission) => {
     }
 
     try {
-      const allowed = await RolePermissionService.hasPermission(req.user.role, permission);
+      const allowed = await RolePermissionService.hasPermission(req.user.tenantId, req.user.role, permission);
       if (!allowed) {
         return res.status(403).json({ error: 'Insufficient permissions' });
       }
@@ -77,7 +88,8 @@ export const optionalAuth = (req: Request, res: Response, next: NextFunction) =>
     const token = authHeader.substring(7);
     const payload = AuthService.verifyAccessToken(token);
     if (payload) {
-      req.user = payload;
+      req.user = { ...payload, tenantId: normalizeTenantId(payload) };
+      req.tenantId = req.user.tenantId;
     }
   }
 
