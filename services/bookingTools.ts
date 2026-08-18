@@ -66,6 +66,21 @@ export const VOICE_CHANNEL: ToolChannel = {
     },
 };
 
+// Il canale chat. L'aggancio alla conversazione non serve: i messaggi sono
+// già legati alla prenotazione da resolveReservationByPhone (PR #132).
+export const WHATSAPP_CHANNEL: ToolChannel = {
+    id: 'whatsapp',
+    logPrefix: '[WhatsApp]',
+    actorEmail: 'agente-whatsapp@ristomanager',
+    actorName: 'Agente WhatsApp',
+    sourceTag: 'WHATSAPP',
+    pushTitles: {
+        created: 'Nuova prenotazione da WhatsApp',
+        cancelled: 'Prenotazione cancellata (WhatsApp)',
+        modified: 'Prenotazione modificata (WhatsApp)',
+    },
+};
+
 /** Tutto ciò che gli strumenti prendono da server.ts. */
 export interface BookingToolsDeps {
     parseFlexibleDate: (v: any) => string | null;

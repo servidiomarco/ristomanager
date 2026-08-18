@@ -1908,6 +1908,36 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`CREATE INDEX IF NOT EXISTS idx_outbound_media_token ON outbound_media(token);`);
 
         // ============================================
+        // PROPOSTE DELL'AGENTE WHATSAPP
+        // ============================================
+        // L'agente non scrive mai sulle prenotazioni da solo: quando capisce
+        // che va creata/modificata/annullata una prenotazione deposita qui la
+        // chiamata che FAREBBE, e una persona la esegue con un tocco. Il
+        // modello fa la parte in cui è bravo (capire una frase confusa), la
+        // persona quella che conta (decidere).
+        //
+        // `expires_at` non è burocrazia: una proposta di due ore fa è stata
+        // calcolata su una sala che nel frattempo si è riempita.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS agent_proposals (
+                id             SERIAL PRIMARY KEY,
+                phone_digits   VARCHAR(20) NOT NULL,
+                tool           VARCHAR(40) NOT NULL,
+                args           JSONB NOT NULL,
+                summary        TEXT NOT NULL,
+                suggested_reply TEXT,
+                status         VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+                reservation_id INTEGER REFERENCES reservations(id) ON DELETE SET NULL,
+                result         JSONB,
+                created_at     TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                expires_at     TIMESTAMPTZ NOT NULL DEFAULT (CURRENT_TIMESTAMP + INTERVAL '2 hours'),
+                resolved_at    TIMESTAMPTZ,
+                resolved_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+            );
+        `);
+        await client.query(`CREATE INDEX IF NOT EXISTS idx_agent_proposals_phone ON agent_proposals(phone_digits, status);`);
+
+        // ============================================
         // BASE DI CONOSCENZA PER LE RISPOSTE AI
         // ============================================
         // Le "regole della casa" che il gestore scrive a mano (torte da fuori,

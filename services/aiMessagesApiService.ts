@@ -74,6 +74,40 @@ export const deleteKnowledge = (id: number): Promise<{ ok: true }> =>
     method: 'DELETE', headers: getHeaders(),
   });
 
+export interface AgentProposal {
+  id: number;
+  tool: 'create_reservation' | 'modify_reservation' | 'cancel_reservation' | string;
+  args: Record<string, any>;
+  /** Riga leggibile per lo staff: "Modifica prenotazione del …: persone 5 → 3". */
+  summary: string;
+  suggested_reply: string | null;
+  status: string;
+  expires_at: string;
+  reservation_id: number | null;
+}
+
+export interface AgentRunResult {
+  reply: string | null;
+  /** Azione che l'agente eseguirebbe: nulla parte senza una conferma umana. */
+  proposal: AgentProposal | null;
+  checks: Array<{ tool: string; args: Record<string, any>; result: any }>;
+  reason: string | null;
+  knowledge_count: number;
+}
+
+/** Fa ragionare l'agente sulla conversazione. Non invia e non scrive nulla. */
+export const runAgent = (phoneDigits: string): Promise<AgentRunResult> =>
+  apiRequest(`${API_URL}/messages/agent/run`, {
+    method: 'POST', headers: getHeaders(), body: JSON.stringify({ phone_digits: phoneDigits }),
+  });
+
+/** Esegue davvero la proposta: è l'unico punto in cui l'agente scrive. */
+export const confirmProposal = (id: number): Promise<{ ok: boolean; tool: string; result: any }> =>
+  apiRequest(`${API_URL}/messages/agent/proposals/${id}/confirm`, { method: 'POST', headers: getHeaders() });
+
+export const discardProposal = (id: number): Promise<{ ok: true }> =>
+  apiRequest(`${API_URL}/messages/agent/proposals/${id}/discard`, { method: 'POST', headers: getHeaders() });
+
 export const suggestReply = (phoneDigits: string): Promise<SuggestReplyResult> =>
   apiRequest(`${API_URL}/messages/suggest-reply`, {
     method: 'POST', headers: getHeaders(), body: JSON.stringify({ phone_digits: phoneDigits }),

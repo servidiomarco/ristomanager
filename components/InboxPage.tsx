@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowRight, Check, CalendarPlus, Paperclip, X as XIcon, Sparkles } from 'lucide-react';
+import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowRight, Check, CalendarPlus, Paperclip, X as XIcon, Sparkles, Wand2 } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
 import { SkeletonInboxList } from './SkeletonCards';
 import {
@@ -13,7 +13,7 @@ import {
   type UploadedAttachment,
 } from '../services/messagesApiService';
 import { socketClient } from '../services/socketClient';
-import { suggestReply } from '../services/aiMessagesApiService';
+import { runAgent, confirmProposal, discardProposal, type AgentProposal } from '../services/aiMessagesApiService';
 import { getFeatureFlags } from '../services/apiService';
 import { toTitleCase } from '../utils/text';
 import {
@@ -160,6 +160,8 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
   const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
   const [aiEnabled, setAiEnabled] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
+  const [proposal, setProposal] = useState<AgentProposal | null>(null);
+  const [proposalBusy, setProposalBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [sending, setSending] = useState(false);
@@ -378,16 +380,20 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
 
   // Il suggerimento finisce NEL CAMPO DI SCRITTURA, non in chat: da lì si
   // legge, si corregge e si invia — o si cancella. Non parte niente da solo.
+  // L'agente legge la conversazione, verifica la disponibilità se serve e
+  // propone. Il testo finisce nel campo di scrittura, l'eventuale azione in un
+  // riquadro sopra: nulla parte e nulla viene scritto senza un tocco.
   const handleSuggest = useCallback(async () => {
     if (!selected || suggesting) return;
     setSuggesting(true);
     setSendError(null);
     try {
-      const r = await suggestReply(selected.phone_digits);
-      if (r.suggestion) {
-        setComposerText(r.suggestion);
+      const r = await runAgent(selected.phone_digits);
+      setProposal(r.proposal);
+      if (r.reply) {
+        setComposerText(r.reply);
         composerRef.current?.focus();
-      } else {
+      } else if (!r.proposal) {
         setSendError(r.reason || 'Nessun suggerimento: rispondi tu.');
       }
     } catch (err: any) {
@@ -396,6 +402,34 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
       setSuggesting(false);
     }
   }, [selected, suggesting]);
+
+  // Cambiando conversazione la proposta non deve seguirti addosso.
+  useEffect(() => { setProposal(null); }, [selectedKey]);
+
+  const handleConfirmProposal = useCallback(async () => {
+    if (!proposal || proposalBusy) return;
+    setProposalBusy(true);
+    setSendError(null);
+    try {
+      const r = await confirmProposal(proposal.id);
+      if (r.ok) {
+        setProposal(null);
+        loadConversations();
+      } else {
+        setSendError(r.result?.message || 'Il gestionale ha rifiutato la modifica');
+      }
+    } catch (err: any) {
+      setSendError(err?.data?.message || err?.message || 'Esecuzione non riuscita');
+    } finally {
+      setProposalBusy(false);
+    }
+  }, [proposal, proposalBusy, loadConversations]);
+
+  const handleDiscardProposal = useCallback(async () => {
+    if (!proposal) return;
+    try { await discardProposal(proposal.id); } catch { /* resta comunque scartata a schermo */ }
+    setProposal(null);
+  }, [proposal]);
 
   const handleSend = useCallback(async () => {
     if (!selected || sending) return;
@@ -725,6 +759,45 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
                   </Callout>
                 )}
                 {sendError && <Callout tone="critical" icon={AlertTriangle}>{sendError}</Callout>}
+
+                {/* La proposta dell'agente. Sta sopra il campo di scrittura e
+                    non parte da sola: l'agente ha capito cosa fare, la
+                    decisione resta di chi legge. */}
+                {proposal && (
+                  <div className="rounded-[14px] border border-violet-300 bg-violet-50 px-3.5 py-3 dark:border-violet-800 dark:bg-violet-950/40">
+                    <div className="flex items-start gap-2.5">
+                      <Wand2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-violet-600 dark:text-violet-400" aria-hidden />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[13px] font-semibold text-violet-900 dark:text-violet-200">
+                          L'agente propone un'azione sulla prenotazione
+                        </p>
+                        <p className="mt-0.5 text-[14px] text-[var(--ds-text-primary)]">{proposal.summary}</p>
+                        <p className="mt-1 text-[12px] text-[var(--ds-text-muted)]">
+                          Niente è ancora cambiato: controlla e conferma tu.
+                        </p>
+                        <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleConfirmProposal}
+                            disabled={proposalBusy}
+                            className="inline-flex h-9 items-center gap-1.5 rounded-full bg-violet-600 px-3.5 text-[13px] font-semibold text-white transition-colors hover:bg-violet-700 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                          >
+                            {proposalBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                            Conferma ed esegui
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleDiscardProposal}
+                            disabled={proposalBusy}
+                            className="inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
+                          >
+                            <XIcon className="h-4 w-4" /> Scarta
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Allegati pronti: si vedono prima di premere invia, e si
                     tolgono uno per uno se si sbaglia file. */}
