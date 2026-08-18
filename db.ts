@@ -237,16 +237,10 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
 
         await client.query(`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS is_closed BOOLEAN DEFAULT false;`);
         await client.query(`ALTER TABLE rooms ADD COLUMN IF NOT EXISTS location VARCHAR(20);`);
-        // One-shot seed for the initial room set. Idempotent: only assigns
-        // location when still NULL, so later edits via UI/SQL win.
-        await client.query(`
-            UPDATE rooms SET location = 'INDOOR'
-            WHERE location IS NULL AND name IN ('Veranda', 'Tettoia', 'Macine');
-        `);
-        await client.query(`
-            UPDATE rooms SET location = 'OUTDOOR'
-            WHERE location IS NULL AND name IN ('Fiume', 'Fuori', 'Porticato');
-        `);
+        // Il seed one-shot delle location per le sale del Vecchio Frantoio
+        // (Veranda/Tettoia/Macine → INDOOR, Fiume/Fuori/Porticato → OUTDOOR)
+        // è stato rimosso col de-branding (Fase A3): in produzione è già
+        // applicato, e un'installazione nuova ha sale sue.
 
         await client.query(`
             CREATE TABLE IF NOT EXISTS tables (
@@ -819,9 +813,12 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             );
         `);
 
-        // Seed default owner account if no users exist
+        // Seed default owner account if no users exist. Email e password
+        // sono sovrascrivibili da env: il default esiste solo perché senza
+        // un OWNER non si entra mai (il provisioning vero arriva in Fase D).
         const userCount = await client.query('SELECT COUNT(*) FROM users');
         if (parseInt(userCount.rows[0].count) === 0) {
+            const defaultEmail = (process.env.DEFAULT_OWNER_EMAIL || 'admin@ristomanager.com').toLowerCase();
             const defaultPassword = process.env.DEFAULT_OWNER_PASSWORD || 'admin123';
             const salt = await bcrypt.genSalt(12);
             const passwordHash = await bcrypt.hash(defaultPassword, salt);
@@ -829,9 +826,9 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             await client.query(
                 `INSERT INTO users (email, password_hash, full_name, role)
                  VALUES ($1, $2, $3, $4)`,
-                ['admin@ristomanager.com', passwordHash, 'Admin Owner', 'OWNER']
+                [defaultEmail, passwordHash, 'Admin Owner', 'OWNER']
             );
-            console.log('Default owner account created: admin@ristomanager.com');
+            console.log(`Default owner account created: ${defaultEmail}`);
         }
 
         // Seed default role permissions if none exist
@@ -2696,26 +2693,11 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
         `);
-        // Il profilo del Vecchio Frantoio, censito ma NON applicato: la
-        // configurazione entra in vigore solo quando qualcuno preme "attiva"
-        // da Impostazioni. Idempotente: se esiste, non si tocca.
-        await client.query(`
-            INSERT INTO sala_profiles (name, payload) VALUES ('Vecchio Frantoio', $1)
-            ON CONFLICT (name) DO NOTHING;
-        `, [JSON.stringify({
-            fire_mode: 'AUTO_FIRST',
-            stations: [
-                { name: 'Antipasti', color: 'emerald', printer: 'antipasti', is_active: true },
-                { name: 'Primi',     color: 'amber',   printer: null,        is_active: true },
-                { name: 'Griglia',   color: 'rose',    printer: null,        is_active: true },
-            ],
-            printers: [
-                { name: 'preconti',  host: '192.168.1.50',  port: 9100, kind: 'THERMAL', is_active: true, notes: 'Ditron PRP-300 al banco' },
-                { name: 'antipasti', host: '192.168.1.30',  port: 9100, kind: 'THERMAL', is_active: true, notes: 'centro Antipasti' },
-                { name: 'bar',       host: '192.168.1.200', port: 9100, kind: 'THERMAL', is_active: true, notes: 'Bar' },
-                { name: 'fiscale',   host: '192.168.1.201', port: 9100, kind: 'FISCAL',  is_active: true, notes: 'Epson TM-T800F — gestita dal Passepartout' },
-            ],
-        })]);
+        // Il seed del profilo "Vecchio Frantoio" (stazioni + IP delle termiche
+        // sulla LAN del ristorante) è stato rimosso col de-branding (Fase A3):
+        // in produzione la riga esiste già, e spedire gli IP di una LAN
+        // altrui a ogni nuova installazione era un errore. I profili si
+        // creano da Impostazioni → Sala & Cucina.
 
         // Permessi del modulo comande sui database esistenti. A runtime la
         // fonte di verità è questa tabella, non ROLE_PERMISSIONS in

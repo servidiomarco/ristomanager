@@ -16,6 +16,7 @@ const EMPTY: LegalSettings = {
   company_name: '', company_address: '', vat_number: '', fiscal_code: '',
   privacy_email: '', privacy_phone: '', dpo_name: '', dpo_contact: '',
   website_url: '', app_name: 'RistoManager', voice_business_name: '',
+  business_name: '', business_tagline: '', public_phone: '', public_whatsapp: '', maps_url: '',
   data_processors: '', retention_customer: '', retention_calls: '',
   retention_marketing: '', extra_eu_note: '', governing_law: '', last_updated: '',
   uses_analytics_cookies: false, records_calls: true, ask_health_consent: true,
@@ -360,6 +361,15 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
             {/* ---------- Form fields ---------- */}
             <div className="space-y-6">
               <div>
+                <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">Identità pubblica</h5>
+                <p className="text-[12px] text-[var(--ds-text-subtle)] mb-3">Nome e contatti usati in email, messaggi e pagina di prenotazione. Vuoti = valori attuali del ristorante.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+                  <Field label="Nome pubblico del ristorante" value={data.business_name} onChange={set('business_name')} placeholder="Il Vecchio Frantoio" disabled={!canEdit} />
+                  <Field label="Sottotitolo / tagline" value={data.business_tagline} onChange={set('business_tagline')} placeholder="Cucina Tradizionale" disabled={!canEdit} />
+                  <Field label="Telefono mostrato ai clienti" value={data.public_phone} onChange={set('public_phone')} placeholder="0985 876578" disabled={!canEdit} />
+                  <Field label="WhatsApp mostrato ai clienti" value={data.public_whatsapp} onChange={set('public_whatsapp')} placeholder="+39 389 591 6494" disabled={!canEdit} />
+                  <Field label="Link Google Maps (Come raggiungerci)" value={data.maps_url} onChange={set('maps_url')} placeholder="https://maps.app.goo.gl/…" disabled={!canEdit} wide />
+                </div>
                 <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">Identità del titolare</h5>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <Field label="Ragione sociale" value={data.company_name} onChange={set('company_name')} placeholder="Ristorante Da Mario S.r.l." disabled={!canEdit} />

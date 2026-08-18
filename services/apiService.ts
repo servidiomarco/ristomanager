@@ -1179,6 +1179,11 @@ export interface LegalSettings {
   website_url: string;
   app_name: string;
   voice_business_name: string;
+  business_name: string;
+  business_tagline: string;
+  public_phone: string;
+  public_whatsapp: string;
+  maps_url: string;
   data_processors: string;
   retention_customer: string;
   retention_calls: string;

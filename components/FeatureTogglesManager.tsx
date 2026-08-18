@@ -548,7 +548,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                             value={voiceFirstMessageDraft}
                                             onChange={(e) => setVoiceFirstMessageDraft(e.target.value)}
                                             disabled={!canEdit || savingVoiceFirstMessage}
-                                            placeholder="Es. Ciao {nome}, sono Sofia del Vecchio Frantoio, come posso aiutarti?"
+                                            placeholder="Es. Ciao {nome}, sono Sofia del ristorante, come posso aiutarti?"
                                             className="w-full px-2.5 py-2 rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[13px] text-[var(--ds-text-primary)] leading-relaxed resize-y focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                                         />
                                         <div className="flex items-center gap-2 mt-2">

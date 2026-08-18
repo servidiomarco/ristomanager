@@ -1,8 +1,11 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 
 const WIDGET_SCRIPT_URL = 'https://elevenlabs.io/convai-widget/index.js';
 const WIDGET_SCRIPT_ID = 'elevenlabs-convai-widget';
-const AGENT_ID = 'agent_5401kq7cjqa8evzbvwpbeghefm6w';
+// L'agent id arriva da /public/contact (env ELEVENLABS_AGENT_ID del backend):
+// tenerlo nel bundle legava il frontend a un singolo ristorante. Senza id
+// configurato il widget non si monta.
+const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
 declare module 'react' {
     namespace JSX {
@@ -32,14 +35,30 @@ const POSITION_OVERRIDE_CSS = `
 `;
 
 export const VoiceAgentWidget: React.FC = () => {
+    const [agentId, setAgentId] = useState<string>('');
+
     useEffect(() => {
+        let cancelled = false;
+        fetch(`${API_URL}/public/contact`)
+            .then(r => (r.ok ? r.json() : null))
+            .then(data => {
+                if (!cancelled && typeof data?.voice_agent_id === 'string') {
+                    setAgentId(data.voice_agent_id);
+                }
+            })
+            .catch(() => { /* senza id il widget resta smontato */ });
+        return () => { cancelled = true; };
+    }, []);
+
+    useEffect(() => {
+        if (!agentId) return;
         if (document.getElementById(WIDGET_SCRIPT_ID)) return;
         const s = document.createElement('script');
         s.id = WIDGET_SCRIPT_ID;
         s.src = WIDGET_SCRIPT_URL;
         s.async = true;
         document.body.appendChild(s);
-    }, []);
+    }, [agentId]);
 
     useEffect(() => {
         const inject = (): boolean => {
@@ -64,9 +83,10 @@ export const VoiceAgentWidget: React.FC = () => {
     // `variant="compact"` collapses the trigger to a small floating button.
     // `expandable="never"` keeps it from auto-expanding into the larger
     // pre-call panel, so the call is started straight from the compact pill.
+    if (!agentId) return null;
     return (
         <elevenlabs-convai
-            agent-id={AGENT_ID}
+            agent-id={agentId}
             variant="compact"
             expandable="never"
         />

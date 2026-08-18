@@ -310,7 +310,7 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             type="text"
                             value={userInput}
                             onChange={(e) => setUserInput(e.target.value)}
-                            placeholder="prenotazioni@vecchiofrantoio.com"
+                            placeholder="prenotazioni@ristorante.it"
                             disabled={!canEdit || saving}
                             autoComplete="off"
                             spellCheck={false}

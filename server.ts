@@ -806,8 +806,11 @@ export function detectLargeGroupHandoff(transcript: string): boolean {
 // webhook when the caller is anonymous, unknown, or lookup fails. Keeping
 // the two literally identical means "webhook down" is indistinguishable
 // from "no personalisation possible" for the caller.
-const VOICE_FIRST_MESSAGE_FALLBACK =
-    'Ciao, sono Sofia del Vecchio Frantoio. Posso aiutarti a prenotare un tavolo. ' +
+// Il nome viene da businessIdentity().voiceName; la frase resta "Sofia del
+// ${voiceName}", quindi per un tenant il cui nome non regge il "del" il campo
+// va valorizzato di conseguenza (es. "ristorante Da Mario").
+const voiceFirstMessageFallback = (): string =>
+    `Ciao, sono Sofia del ${businessIdentity().voiceName}. Posso aiutarti a prenotare un tavolo. ` +
     'Per altre richieste chiama dalle 10:30 alle 14:30 o dalle 18:45 alle 23:30. ' +
     'Per quando vorresti prenotare?';
 
@@ -815,7 +818,7 @@ const VOICE_FIRST_MESSAGE_FALLBACK =
 // app_settings 'voice_first_message'). Il segnaposto {nome} (o {{nome}}) viene
 // sostituito col nome del chiamante quando è noto; quando è sconosciuto viene
 // rimosso e la punteggiatura ripulita ("Ciao {nome}, sono" → "Ciao, sono").
-// Vuoto ⇒ si usano i default hardcoded (VOICE_FIRST_MESSAGE_FALLBACK e il
+// Vuoto ⇒ si usano i default (voiceFirstMessageFallback e il
 // saluto per nome), così l'operatore può gestire il saluto dal CRM senza
 // toccarlo su ElevenLabs.
 function renderVoiceFirstMessage(template: string, firstName: string): string {
@@ -854,7 +857,7 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
     // read from Studio, but we still push it so the prompt guard fires).
     const { suspended, callbackTime: suspensionCallback } = await computeVoiceSuspensionState();
     const suspensionMessage = suspended
-        ? `Buongiorno, sono Sofia del Vecchio Frantoio. Le prenotazioni sono momentaneamente sospese. La invitiamo a richiamare dopo le ${suspensionCallback} per verificare eventuali tavoli disponibili. Grazie e a presto!`
+        ? `Buongiorno, sono Sofia del ${businessIdentity().voiceName}. Le prenotazioni sono momentaneamente sospese. La invitiamo a richiamare dopo le ${suspensionCallback} per verificare eventuali tavoli disponibili. Grazie e a presto!`
         : '';
 
     // Messaggio iniziale personalizzato dal CRM (vuoto ⇒ default hardcoded).
@@ -863,7 +866,7 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
     const customFirst = (await getVoiceFirstMessage()).trim();
     const genericGreeting = customFirst
         ? renderVoiceFirstMessage(customFirst, '')
-        : VOICE_FIRST_MESSAGE_FALLBACK;
+        : voiceFirstMessageFallback();
 
     // A prenotazioni sospese l'operatore può annunciare con parole sue (es. "per
     // Ferragosto siamo al completo, prenota sul sito"): se c'è un messaggio
@@ -943,8 +946,8 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
         const personalisedFirstMessage = customFirst
             ? renderVoiceFirstMessage(customFirst, firstName)
             : (firstName
-                ? `Ciao ${firstName}, sono Sofia del Vecchio Frantoio, come posso aiutarti?`
-                : VOICE_FIRST_MESSAGE_FALLBACK);
+                ? `Ciao ${firstName}, sono Sofia del ${businessIdentity().voiceName}, come posso aiutarti?`
+                : voiceFirstMessageFallback());
 
         console.log('[ElevenLabs] init-conversation hit', {
             phone: normalized,
@@ -4276,6 +4279,7 @@ app.post('/messages/suggest-reply', authenticate, requirePermission('reservation
             messages: messages as any,
             reservation: resv.rows[0] ?? null,
             knowledge: kb.rows as any,
+            restaurantName: businessIdentity().name,
         }, {
             // Telemetria consumi Gemini dei "messaggi AI": la stessa tabella
             // che alimenta la pagina Consumi AI (feature 'suggest_reply').
@@ -4441,7 +4445,7 @@ function buildTableBillLinkMessage(customerName: string, amountCents: number, co
 function buildPaymentMessage(customerName: string, amountCents: number, url: string, description?: string | null): string {
     const amount = formatEuroMinor(amountCents);
     const desc = (description || '').trim();
-    const intro = `Ciao ${toTitleCase(customerName)}, per completare la prenotazione al Vecchio Frantoio serve un anticipo di ${amount}.`;
+    const intro = `Ciao ${toTitleCase(customerName)}, per completare la prenotazione presso ${businessIdentity().name} serve un anticipo di ${amount}.`;
     const line = desc ? `${intro}\n${desc}` : intro;
     return `${line}\nPuoi pagare in sicurezza qui: ${url}\n\nGrazie!`;
 }
@@ -10665,11 +10669,82 @@ function parseBookingMessage(text: string): { date: string | null, time: string 
 // Il tavolo assegnato non entra MAI in questo messaggio: è un dato operativo
 // che lo staff sposta fino all'ultimo, e comunicarlo crea solo aspettative da
 // smentire all'arrivo. Al cliente basta la sala.
-// Link breve del profilo Google Business del ristorante (scheda "Vecchio
-// Frantoio", Buonvicino CS — entità /g/1tf45dt8). Lo stesso URL è nel bottone
-// del template WhatsApp booking_confirmed_v3: cambiarlo qui NON aggiorna il
+// ============================================
+// IDENTITÀ PUBBLICA DEL RISTORANTE
+// ============================================
+// Nome, contatti e tagline usati da messaggi, email, voce e pagina pubblica.
+// La fonte è legal_config (Impostazioni → Aspetti legali); i fallback sono i
+// letterali storici del Vecchio Frantoio, così un legal_config vuoto non
+// cambia di un byte ciò che va in produzione oggi. Piano SaaS, Fase A3.
+//
+// I template di messaggi/email sono funzioni sincrone chiamate in decine di
+// punti: l'identità passa da una cache con TTL breve invece che da un await
+// per call site. Il refresh parte al boot e a ogni salvataggio delle
+// impostazioni legali; nel peggiore dei casi i primi messaggi dopo un boot
+// usano i fallback.
+//
+// mapsUrl: link breve del profilo Google Business (scheda "Vecchio Frantoio",
+// Buonvicino CS — entità /g/1tf45dt8). Lo stesso URL è nel bottone del
+// template WhatsApp booking_confirmed_v3: cambiarlo qui NON aggiorna il
 // template, che richiede un nuovo template e una nuova approvazione Meta.
-const MAPS_DIRECTIONS_URL = 'https://maps.app.goo.gl/pf1DjUYzkhi1sStP8';
+type BusinessIdentity = {
+    name: string;       // nome pubblico, con articolo se serve ("Il Vecchio Frantoio")
+    voiceName: string;  // come Sofia si presenta: "sono Sofia del ${voiceName}"
+    tagline: string;    // footer delle email
+    phone: string;      // telefono come lo legge un umano
+    whatsapp: string;   // numero WhatsApp come lo legge un umano
+    mapsUrl: string;
+    websiteUrl: string;
+};
+
+const IDENTITY_FALLBACK: BusinessIdentity = {
+    name: 'Il Vecchio Frantoio',
+    voiceName: 'Vecchio Frantoio',
+    tagline: 'Cucina Tradizionale',
+    phone: '0985 876578',
+    whatsapp: '+39 389 591 6494',
+    mapsUrl: 'https://maps.app.goo.gl/pf1DjUYzkhi1sStP8',
+    websiteUrl: 'https://www.vecchiofrantoio.com',
+};
+
+let identityCache: BusinessIdentity = { ...IDENTITY_FALLBACK };
+let identityRefreshedAt = 0;
+const IDENTITY_TTL_MS = 60_000;
+
+function businessIdentity(): BusinessIdentity {
+    if (Date.now() - identityRefreshedAt > IDENTITY_TTL_MS) {
+        identityRefreshedAt = Date.now();
+        refreshBusinessIdentity().catch(err =>
+            console.warn('[identity] refresh fallito:', (err as any)?.message || err));
+    }
+    return identityCache;
+}
+
+async function refreshBusinessIdentity(): Promise<void> {
+    const legal = await getLegalConfig();
+    const s = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+    identityCache = {
+        name: s(legal.business_name) || IDENTITY_FALLBACK.name,
+        voiceName: s(legal.voice_business_name) || s(legal.business_name) || IDENTITY_FALLBACK.voiceName,
+        tagline: s(legal.business_tagline) || IDENTITY_FALLBACK.tagline,
+        phone: s(legal.public_phone) || IDENTITY_FALLBACK.phone,
+        whatsapp: s(legal.public_whatsapp) || IDENTITY_FALLBACK.whatsapp,
+        mapsUrl: s(legal.maps_url) || IDENTITY_FALLBACK.mapsUrl,
+        websiteUrl: s(legal.website_url) || IDENTITY_FALLBACK.websiteUrl,
+    };
+}
+
+// tel:/wa.me a partire dal numero scritto per umani. Regola: se c'è un "+"
+// il prefisso internazionale è già nel numero, altrimenti si assume Italia —
+// coerente col resto del codebase (normalizeItalianPhone).
+function phoneHref(display: string): string {
+    const digits = display.replace(/\D/g, '');
+    return `tel:+${display.includes('+') ? digits : `39${digits}`}`;
+}
+function whatsappHref(display: string): string {
+    const digits = display.replace(/\D/g, '');
+    return `https://wa.me/${display.includes('+') ? digits : `39${digits}`}`;
+}
 
 function buildConfirmationMessage(
     customerName: string | null | undefined,
@@ -10733,7 +10808,7 @@ function buildDeclineMessage(
     const greeting = fullName ? `Ciao ${fullName}, purtroppo` : 'Purtroppo';
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
     const persone = guestsNum === 1 ? 'persona' : 'persone';
-    return `${greeting} non ci e' stato possibile confermare la tua richiesta di prenotazione per ${guestsNum} ${persone} il ${dateLabel} alle ${timeLabel}. Chiamaci allo 0985 876578 per verificare un'altra data/orario. Grazie e a presto!`;
+    return `${greeting} non ci e' stato possibile confermare la tua richiesta di prenotazione per ${guestsNum} ${persone} il ${dateLabel} alle ${timeLabel}. Chiamaci al numero ${businessIdentity().phone} per verificare un'altra data/orario. Grazie e a presto!`;
 }
 
 // Template builders for the approved Twilio WA content templates. Each returns
@@ -10952,11 +11027,13 @@ function publicAppBaseUrl(): string | null {
 // on their default light chrome.
 function wrapEmailHtml(preheader: string, bodyBlocks: string): string {
     const base = publicAppBaseUrl();
+    const identity = businessIdentity();
+    const brandName = escapeHtml(identity.name);
     const logoLight = base
-        ? `<img class="logo-light" src="${base}/prenota/logo.png" alt="Il Vecchio Frantoio" width="160" style="display:block;margin:0 auto;max-width:160px;height:auto;">`
+        ? `<img class="logo-light" src="${base}/prenota/logo.png" alt="${brandName}" width="160" style="display:block;margin:0 auto;max-width:160px;height:auto;">`
         : '';
     const logoDark = base
-        ? `<img class="logo-dark" src="${base}/prenota/logo-dark.png" alt="Il Vecchio Frantoio" width="160" style="display:none;margin:0 auto;max-width:160px;height:auto;">`
+        ? `<img class="logo-dark" src="${base}/prenota/logo-dark.png" alt="${brandName}" width="160" style="display:none;margin:0 auto;max-width:160px;height:auto;">`
         : '';
     const preheaderText = escapeHtml(preheader);
     // Mail clients can't resolve relative paths, so the privacy link needs the
@@ -10965,7 +11042,7 @@ function wrapEmailHtml(preheader: string, bodyBlocks: string): string {
     const privacyLink = base
         ? ` · <a href="${base}/privacy" style="color:#a8a29e;text-decoration:underline;">Informativa privacy</a>`
         : '';
-    return `<!DOCTYPE html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Il Vecchio Frantoio</title>
+    return `<!DOCTYPE html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${brandName}</title>
 <meta name="color-scheme" content="light dark">
 <meta name="supported-color-schemes" content="light dark">
 <style>
@@ -10993,7 +11070,7 @@ function wrapEmailHtml(preheader: string, bodyBlocks: string): string {
         ${logoDark}
       </td></tr>
       <tr><td style="padding:8px 32px 32px;">${bodyBlocks}</td></tr>
-      <tr><td class="footer muted" style="padding:16px 32px 28px;border-top:1px solid #f5f5f4;text-align:center;font-size:11px;color:#a8a29e;letter-spacing:0.24em;text-transform:uppercase;">Cucina Tradizionale${privacyLink}</td></tr>
+      <tr><td class="footer muted" style="padding:16px 32px 28px;border-top:1px solid #f5f5f4;text-align:center;font-size:11px;color:#a8a29e;letter-spacing:0.24em;text-transform:uppercase;">${escapeHtml(identity.tagline)}${privacyLink}</td></tr>
     </table>
   </td></tr>
 </table>
@@ -11014,16 +11091,17 @@ function escapeHtml(s: string): string {
 // uses wa.me (works in Gmail, iOS Mail, most clients); the phone link uses
 // tel: so a tap on mobile opens the dialer.
 function contactBlockHtml(): string {
+    const identity = businessIdentity();
     return `
       <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 16px;">
         <tr>
           <td style="font-size:13px;line-height:1.6;color:#57534e;padding:8px 12px;border:1px solid #e7e5e4;border-radius:10px;background:#fbf9f4;">
             <strong style="color:#292524;">Contattaci direttamente:</strong><br>
-            📞 <a href="tel:+390985876578" style="color:#065f46;text-decoration:none;">0985 876578</a>
+            📞 <a href="${phoneHref(identity.phone)}" style="color:#065f46;text-decoration:none;">${escapeHtml(identity.phone)}</a>
             &nbsp;·&nbsp;
-            💬 <a href="https://wa.me/393895916494" style="color:#065f46;text-decoration:none;">WhatsApp +39 389 591 6494</a>
+            💬 <a href="${whatsappHref(identity.whatsapp)}" style="color:#065f46;text-decoration:none;">WhatsApp ${escapeHtml(identity.whatsapp)}</a>
             &nbsp;·&nbsp;
-            📍 <a href="${MAPS_DIRECTIONS_URL}" style="color:#065f46;text-decoration:none;">Come raggiungerci</a>
+            📍 <a href="${identity.mapsUrl}" style="color:#065f46;text-decoration:none;">Come raggiungerci</a>
           </td>
         </tr>
       </table>
@@ -11116,6 +11194,7 @@ function buildBookingRequestEmail(params: {
     roomName?: string | null;
     notes?: string | null;
 }): { subject: string; text: string; html: string } {
+    const identity = businessIdentity();
     const { dateLabel, timeLabel } = formatBookingDateTime(params.reservationTime);
     const name = toTitleCase(params.customerName);
     const guestsNum = Math.max(1, Math.trunc(Number(params.guests) || 1));
@@ -11135,11 +11214,11 @@ abbiamo ricevuto la tua richiesta di prenotazione:
 Ti ricontatteremo a breve per confermarla via email, telefono o WhatsApp.
 
 Per qualsiasi cambio puoi contattarci:
-• Telefono: 0985 876578
-• WhatsApp: +39 389 591 6494
+• Telefono: ${identity.phone}
+• WhatsApp: ${identity.whatsapp}
 
 Grazie e a presto!
-Il Vecchio Frantoio`;
+${identity.name}`;
 
     const detailsHtml = `
       <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${greetingText}<br>abbiamo ricevuto la tua richiesta di prenotazione.</p>
@@ -11150,7 +11229,7 @@ Il Vecchio Frantoio`;
       </table>
       <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Ti ricontatteremo a breve per confermarla via email, telefono o WhatsApp.</p>
       ${contactBlockHtml()}
-      <p style="margin:16px 0 0;font-size:14px;">Grazie e a presto!<br><em>Il Vecchio Frantoio</em></p>
+      <p style="margin:16px 0 0;font-size:14px;">Grazie e a presto!<br><em>${escapeHtml(identity.name)}</em></p>
     `;
     const html = wrapEmailHtml(`Richiesta prenotazione ricevuta per il ${dateLabel} alle ${timeLabel}`, detailsHtml);
     return { subject, text, html };
@@ -11167,6 +11246,7 @@ function buildBookingConfirmationEmail(params: {
 }): { subject: string; text: string; html: string } {
     // DB-sourced confirmation time → read a bare naive string as UTC (see
     // asUtcInstant). The request email above keeps the raw web-form input (#85).
+    const identity = businessIdentity();
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(params.reservationTime));
     const guestsNum = Math.max(1, Math.trunc(Number(params.guests) || 1));
     const persone = guestsNum === 1 ? 'persona' : 'persone';
@@ -11175,7 +11255,7 @@ function buildBookingConfirmationEmail(params: {
     const name = toTitleCase(params.customerName);
     const subject = `Conferma prenotazione — ${dateLabel} ${timeLabel}`;
     const shortConfirm = buildConfirmationMessage(params.customerName, params.reservationTime, params.guests, params.roomName ?? null);
-    const text = `${shortConfirm}\n\nSe hai bisogno di modificare o annullare puoi rispondere a questa email oppure contattarci:\n• Telefono: 0985 876578\n• WhatsApp: +39 389 591 6494\n• Come raggiungerci: ${MAPS_DIRECTIONS_URL}`;
+    const text = `${shortConfirm}\n\nSe hai bisogno di modificare o annullare puoi rispondere a questa email oppure contattarci:\n• Telefono: ${identity.phone}\n• WhatsApp: ${identity.whatsapp}\n• Come raggiungerci: ${identity.mapsUrl}`;
 
     const detailsHtml = `
       <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Ciao ${escapeHtml(name)},` : 'Ciao,'}<br>la tua prenotazione è <strong>confermata</strong>.</p>
@@ -11186,7 +11266,7 @@ function buildBookingConfirmationEmail(params: {
       </table>
       <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Ti aspettiamo a tavola. Se hai bisogno di modificare o annullare, rispondi a questa email o contattaci direttamente.</p>
       ${contactBlockHtml()}
-      <p style="margin:16px 0 0;font-size:14px;">A presto!<br><em>Il Vecchio Frantoio</em></p>
+      <p style="margin:16px 0 0;font-size:14px;">A presto!<br><em>${escapeHtml(identity.name)}</em></p>
     `;
     const html = wrapEmailHtml(`Prenotazione confermata per il ${dateLabel} alle ${timeLabel}`, detailsHtml);
     return { subject, text, html };
@@ -11202,6 +11282,7 @@ function buildDepositRequestEmail(params: {
     checkoutUrl: string;
     description?: string | null;
 }): { subject: string; text: string; html: string } {
+    const identity = businessIdentity();
     const amount = formatEuroMinor(params.amountCents);
     const name = toTitleCase(params.customerName);
     const desc = (params.description || '').trim();
@@ -11209,7 +11290,7 @@ function buildDepositRequestEmail(params: {
     const text = buildPaymentMessage(params.customerName, params.amountCents, params.checkoutUrl, desc || null);
 
     const detailsHtml = `
-      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Ciao ${escapeHtml(name)},` : 'Ciao,'}<br>per completare la prenotazione al Vecchio Frantoio serve un anticipo di <strong>${escapeHtml(amount)}</strong>.</p>
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Ciao ${escapeHtml(name)},` : 'Ciao,'}<br>per completare la prenotazione presso ${escapeHtml(identity.name)} serve un anticipo di <strong>${escapeHtml(amount)}</strong>.</p>
       ${desc ? `<p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#57534e;">${escapeHtml(desc)}</p>` : ''}
       <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 16px;"><tr><td align="center">
         <a href="${escapeHtml(params.checkoutUrl)}" style="display:inline-block;background:#065f46;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 28px;border-radius:10px;">Paga l'acconto — ${escapeHtml(amount)}</a>
@@ -11217,7 +11298,7 @@ function buildDepositRequestEmail(params: {
       <p class="muted" style="margin:0 0 16px;font-size:13px;line-height:1.6;color:#57534e;">Se il pulsante non funziona, copia e incolla questo link nel browser:<br><a href="${escapeHtml(params.checkoutUrl)}" style="color:#065f46;word-break:break-all;">${escapeHtml(params.checkoutUrl)}</a></p>
       <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">Appena riceviamo il pagamento la prenotazione è confermata. La caparra viene scalata dal conto della serata: <a href="${escapeHtml(DEPOSIT_TERMS_URL)}" style="color:#065f46;">come funziona la caparra e come annullare</a> — con rimborso completo se annulli almeno 24 ore prima.</p>
       ${contactBlockHtml()}
-      <p style="margin:16px 0 0;font-size:14px;">A presto!<br><em>Il Vecchio Frantoio</em></p>
+      <p style="margin:16px 0 0;font-size:14px;">A presto!<br><em>${escapeHtml(identity.name)}</em></p>
     `;
     const html = wrapEmailHtml(`Acconto di ${amount} per la tua prenotazione`, detailsHtml);
     return { subject, text, html };
@@ -11233,11 +11314,12 @@ function buildCustomEmail(params: {
     subject: string;
     body: string;
 }): { subject: string; text: string; html: string } {
+    const identity = businessIdentity();
     const name = toTitleCase(params.customerName);
     const subject = params.subject.trim();
     const rawBody = params.body.trim();
     const greeting = name ? `Ciao ${name},` : 'Ciao,';
-    const text = `${greeting}\n\n${rawBody}\n\nGrazie e a presto!\nIl Vecchio Frantoio`;
+    const text = `${greeting}\n\n${rawBody}\n\nGrazie e a presto!\n${identity.name}`;
 
     // Preserve author-intended line breaks. Consecutive newlines become
     // paragraph splits (blank <p>), single newlines become <br>. Every chunk
@@ -11250,7 +11332,7 @@ function buildCustomEmail(params: {
     const detailsHtml = `
       <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${escapeHtml(greeting)}</p>
       ${paragraphs}
-      <p style="margin:16px 0 0;font-size:14px;">Grazie e a presto!<br><em>Il Vecchio Frantoio</em></p>
+      <p style="margin:16px 0 0;font-size:14px;">Grazie e a presto!<br><em>${escapeHtml(identity.name)}</em></p>
     `;
     const html = wrapEmailHtml(subject, detailsHtml);
     return { subject, text, html };
@@ -14027,6 +14109,11 @@ const LEGAL_STRING_FIELDS = [
     'website_url',         // Sito / canale di prenotazione online
     'app_name',            // Nome applicazione mostrato (default RistoManager)
     'voice_business_name', // Nome pronunciato nell'avviso vocale
+    'business_name',       // Nome pubblico del ristorante (firme, email, pagina prenota)
+    'business_tagline',    // Sottotitolo nel footer delle email e della pagina prenota
+    'public_phone',        // Telefono mostrato ai clienti (messaggi ed email)
+    'public_whatsapp',     // Numero WhatsApp mostrato ai clienti
+    'maps_url',            // Link "Come raggiungerci" (Google Maps)
     'data_processors',     // Elenco responsabili/fornitori (testo multiriga)
     'retention_customer',  // Conservazione dati cliente (es. "24 mesi")
     'retention_calls',     // Conservazione registrazioni chiamate (es. "6 mesi")
@@ -14129,6 +14216,9 @@ app.put('/settings/legal', authenticate, requirePermission('settings:full'), asy
                SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
             [LEGAL_CONFIG_KEY, JSON.stringify(next)]
         );
+        // I messaggi leggono l'identità dalla cache: senza refresh il nuovo
+        // nome comparirebbe solo alla scadenza del TTL.
+        await refreshBusinessIdentity();
         res.json(next);
     } catch (err: any) {
         console.error('PUT /settings/legal error:', err);
@@ -15456,6 +15546,11 @@ app.get('/public/contact', async (_req, res) => {
     // La politica caparra serve alla pagina per scrivere importo e soglia
     // nella sezione condizioni: un solo posto da cambiare in Impostazioni.
     const depositPolicy = await getAutoDepositPolicy();
+    // Identità per titolo, footer e link del sito sulla pagina prenota, e
+    // agent id per il widget vocale del CRM: dati pubblici per costruzione
+    // (compaiono comunque nella pagina/bundle), serviti da qui perché la
+    // pagina questo endpoint lo chiama già.
+    const identity = businessIdentity();
     res.json({
         voice,
         bookingsEnabled,
@@ -15464,6 +15559,12 @@ app.get('/public/contact', async (_req, res) => {
             minGuests: depositPolicy.minGuests,
             perPersonCents: depositPolicy.perPersonCents,
         },
+        branding: {
+            name: identity.name,
+            tagline: identity.tagline,
+            website_url: identity.websiteUrl,
+        },
+        voice_agent_id: (process.env.ELEVENLABS_AGENT_ID || '').trim(),
     });
 });
 
@@ -19388,6 +19489,10 @@ const startServer = async () => {
                     } catch (migErr) {
                         console.error('❌ Database migrations failed:', migErr);
                     }
+                    // Warm della cache identità: i primi messaggi dopo il boot
+                    // non devono uscire coi fallback se legal_config è compilato.
+                    refreshBusinessIdentity().catch(err =>
+                        console.warn('Identity cache warm-up skipped:', (err as any)?.message || err));
                     try {
                         await RolePermissionService.warmUp();
                         console.log('✅ Role permission cache warmed up');

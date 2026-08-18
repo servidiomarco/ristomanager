@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { AlertCircle, Loader2, Eye, EyeOff, Check, ChefHat } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { PLATFORM_NAME } from '../platform';
 
 const SAVED_CREDENTIALS_KEY = 'ristocrm_saved_credentials';
 
@@ -60,7 +61,7 @@ export const LoginPage: React.FC = () => {
               <ChefHat className="h-6 w-6 text-[var(--color-fg-on-brand)]" />
             </div>
             <span className="text-[20px] leading-[28px] font-semibold tracking-tight text-[var(--color-fg)]">
-              Risto CRM
+              {PLATFORM_NAME}
             </span>
           </div>
         </div>
@@ -187,7 +188,7 @@ export const LoginPage: React.FC = () => {
         {/* Footer */}
         <div className="px-6 py-6 text-center">
           <p className="text-[12px] leading-[16px] text-[var(--color-fg-subtle)]">
-            Risto Manager · Italia
+            {PLATFORM_NAME} · Italia
           </p>
         </div>
       </div>
