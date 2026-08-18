@@ -43,27 +43,32 @@ export interface PushPayload {
 // il calcolo lato client in App.tsx (useAppBadge). Una singola query con
 // tre subquery per evitare roundtrip multipli. Errori restituiscono null così
 // il payload push omette il campo badge (SW non tocca il valore corrente).
-async function computeAttentionBadge(): Promise<number | null> {
+// tenantId obbligatorio: il badge conta le cose da attenzionare del SOLO
+// ristorante del destinatario, non dell'intera piattaforma.
+async function computeAttentionBadge(tenantId: number): Promise<number | null> {
     try {
         const result = await queryWithRetry(`
             SELECT (
-                (SELECT COUNT(*) FROM reservations WHERE reservation_status = 'PENDING')
+                (SELECT COUNT(*) FROM reservations WHERE reservation_status = 'PENDING' AND tenant_id = $1)
                 + (SELECT COUNT(*) FROM voice_calls
-                   WHERE reservation_id IS NULL
+                   WHERE tenant_id = $1
+                     AND reservation_id IS NULL
                      AND (follow_up_status IS NULL OR follow_up_status = 'PENDING')
                      AND created_at >= NOW() - INTERVAL '7 days')
                 + (SELECT COUNT(*) FROM outbound_messages
-                   WHERE direction = 'inbound'
+                   WHERE tenant_id = $1
+                     AND direction = 'inbound'
                      AND channel IN ('sms','whatsapp')
                      AND read_at IS NULL
                      AND from_phone_digits IS NOT NULL
                      AND length(from_phone_digits) >= 8)
                 + (SELECT COUNT(*) FROM outbound_messages
-                   WHERE direction = 'inbound'
+                   WHERE tenant_id = $1
+                     AND direction = 'inbound'
                      AND channel = 'email'
                      AND read_at IS NULL)
             )::int AS badge
-        `);
+        `, [tenantId]);
         const n = Number(result.rows[0]?.badge ?? 0);
         return Number.isFinite(n) && n >= 0 ? n : 0;
     } catch (err) {
@@ -116,13 +121,13 @@ const deleteSubscriptionById = async (id: number) => {
     }
 };
 
-const sendToSubscriptions = async (subs: SubscriptionRow[], payload: PushPayload) => {
+const sendToSubscriptions = async (tenantId: number, subs: SubscriptionRow[], payload: PushPayload) => {
     if (!configured || subs.length === 0) return { sent: 0, removed: 0 };
     // Auto-attach the badge count so the PWA icon stays in sync even quando
     // l'app è chiusa. Skipped se il caller ha già passato un valore esplicito.
     let effectivePayload = payload;
     if (payload.badge === undefined) {
-        const badge = await computeAttentionBadge();
+        const badge = await computeAttentionBadge(tenantId);
         if (badge !== null) effectivePayload = { ...payload, badge };
     }
     const body = JSON.stringify(effectivePayload);
@@ -214,7 +219,16 @@ async function fetchUserIdsForRoles(tenantId: number, roles: string[], excludeUs
 export const sendToUser = async (userId: number, payload: PushPayload) => {
     await persistForUsers([userId], payload);
     const subs = await fetchSubscriptionsForUser(userId);
-    return sendToSubscriptions(subs, payload);
+    // Il tenant del badge è quello del destinatario: si legge dalla sua riga
+    // utente, così le rotte chiamanti non devono threadare nulla.
+    let tenantId = 1;
+    try {
+        const t = await queryWithRetry('SELECT tenant_id FROM users WHERE id = $1', [userId]);
+        if (t.rows[0]?.tenant_id != null) tenantId = Number(t.rows[0].tenant_id);
+    } catch (err) {
+        console.warn('[push] tenant lookup failed for user', userId, (err as any)?.message || err);
+    }
+    return sendToSubscriptions(tenantId, subs, payload);
 };
 
 // tenantId è il PRIMO parametro, obbligatorio: rende impossibile aggiungere
@@ -228,5 +242,5 @@ export const sendToRoles = async (
     const recipients = await fetchUserIdsForRoles(tenantId, roles, options?.excludeUserId);
     await persistForUsers(recipients, payload);
     const subs = await fetchSubscriptionsForRoles(tenantId, roles, options?.excludeUserId);
-    return sendToSubscriptions(subs, payload);
+    return sendToSubscriptions(tenantId, subs, payload);
 };

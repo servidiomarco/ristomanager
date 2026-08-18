@@ -1301,27 +1301,40 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // existing duplicates. Tie-break: keep the lowest id, blank the phone
         // on the rest so they survive (with a marker note) instead of being
         // silently lost. Idempotent: a re-run finds no duplicates to fix.
+        // Partizione ANCHE per tenant (Fase B3.4): l'unicità del telefono è
+        // per ristorante, e senza tenant_id questa dedupe azzererebbe il
+        // numero del cliente omonimo di un ALTRO ristorante a ogni boot.
+        // Il DO block è condizionale perché al PRIMO boot di un database
+        // vuoto questa funzione gira prima della migration che aggiunge
+        // tenant_id: lì la tabella è vuota e la dedupe è comunque un no-op.
         await client.query(`
-            WITH ranked AS (
-                SELECT id,
-                       regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') AS digits,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY regexp_replace(COALESCE(phone, ''), '\\D', '', 'g')
-                           ORDER BY id ASC
-                       ) AS rn
-                FROM customers
-                WHERE phone IS NOT NULL
-                  AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') <> ''
-            )
-            UPDATE customers c
-            SET phone = NULL,
-                notes = COALESCE(c.notes, '') ||
-                        CASE WHEN COALESCE(c.notes, '') = '' THEN '' ELSE E'\\n' END ||
-                        '[telefono rimosso automaticamente: duplicato di un altro contatto]',
-                updated_at = CURRENT_TIMESTAMP
-            FROM ranked r
-            WHERE c.id = r.id
-              AND r.rn > 1;
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'customers' AND column_name = 'tenant_id'
+                ) THEN
+                    WITH ranked AS (
+                        SELECT id,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY tenant_id, regexp_replace(COALESCE(phone, ''), '\\D', '', 'g')
+                                   ORDER BY id ASC
+                               ) AS rn
+                        FROM customers
+                        WHERE phone IS NOT NULL
+                          AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') <> ''
+                    )
+                    UPDATE customers c
+                    SET phone = NULL,
+                        notes = COALESCE(c.notes, '') ||
+                                CASE WHEN COALESCE(c.notes, '') = '' THEN '' ELSE E'\\n' END ||
+                                '[telefono rimosso automaticamente: duplicato di un altro contatto]',
+                        updated_at = CURRENT_TIMESTAMP
+                    FROM ranked r
+                    WHERE c.id = r.id
+                      AND r.rn > 1;
+                END IF;
+            END $$;
         `);
         await client.query(`
             CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_phone_digits_unique
