@@ -316,7 +316,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                     type="text"
                                     value={userInput}
                                     onChange={(e) => setUserInput(e.target.value)}
-                                    placeholder="noreply@vecchiofrantoio.it"
+                                    placeholder="noreply@ristorante.it"
                                     disabled={!canEdit || saving}
                                     autoComplete="off"
                                     spellCheck={false}
@@ -391,7 +391,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                 type="email"
                                 value={fromEmailInput}
                                 onChange={(e) => setFromEmailInput(e.target.value)}
-                                placeholder="prenotazioni@vecchiofrantoio.it"
+                                placeholder="prenotazioni@ristorante.it"
                                 disabled={!canEdit || saving}
                                 autoComplete="off"
                                 spellCheck={false}
@@ -404,7 +404,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                 type="text"
                                 value={fromNameInput}
                                 onChange={(e) => setFromNameInput(e.target.value)}
-                                placeholder="Vecchio Frantoio"
+                                placeholder="Nome del ristorante"
                                 disabled={!canEdit || saving}
                                 className="w-full px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                             />
@@ -417,7 +417,7 @@ export const SmtpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             type="email"
                             value={replyToInput}
                             onChange={(e) => setReplyToInput(e.target.value)}
-                            placeholder="prenotazioni@vecchiofrantoio.com"
+                            placeholder="prenotazioni@ristorante.it"
                             disabled={!canEdit || saving}
                             autoComplete="off"
                             spellCheck={false}

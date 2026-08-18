@@ -125,7 +125,6 @@ export const HACCP_PRODUCTION_PRODUCT_HINTS: string[] = [
   'Salsa zingara',
   'Salsa silana',
   'Broccoli',
-  'Salsa Vecchio Frantoio',
 ];
 
 // ----- HTTP plumbing (mirrors shoppingApiService) ---------------------------

@@ -47,6 +47,7 @@ import { ImapIntegrationCard } from './components/ImapIntegrationCard';
 import { CardErrorBoundary } from './components/CardErrorBoundary';
 import { LegalSettingsCard } from './components/LegalSettingsCard';
 import { VoiceAgentWidget } from './components/VoiceAgentWidget';
+import { PLATFORM_NAME } from './platform';
 import { DateNavigator } from './components/DateNavigator';
 import { CommandPalette } from './components/CommandPalette';
 import { AppVersionBanner } from './components/AppVersionBanner';
@@ -1732,7 +1733,7 @@ const App: React.FC = () => {
             <div className="bg-[var(--ds-action-bg)] h-10 w-10 rounded-[14px] inline-flex items-center justify-center flex-shrink-0">
                <ChefHat className="text-[var(--ds-action-fg)] h-5 w-5" />
             </div>
-            {!sidebarCollapsed && <span className="ml-3 font-semibold text-[19px] text-[var(--ds-text-primary)] tracking-[-0.015em]">RistoCRM</span>}
+            {!sidebarCollapsed && <span className="ml-3 font-semibold text-[19px] text-[var(--ds-text-primary)] tracking-[-0.015em]">{PLATFORM_NAME}</span>}
           </div>
           <button
             type="button"
@@ -1903,7 +1904,7 @@ const App: React.FC = () => {
               <div className="bg-[var(--ds-action-bg)] h-9 w-9 rounded-[12px] inline-flex items-center justify-center">
                 <ChefHat className="text-[var(--ds-action-fg)] h-[18px] w-[18px]" />
               </div>
-              <span className="font-semibold text-[17px] tracking-[-0.015em] text-[var(--ds-text-primary)]">RistoCRM</span>
+              <span className="font-semibold text-[17px] tracking-[-0.015em] text-[var(--ds-text-primary)]">{PLATFORM_NAME}</span>
            </div>
 
            {/* Desktop date/time/shift control group. Uses flex-1 (not a fixed
