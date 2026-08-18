@@ -38,11 +38,11 @@ export function isValidRoomOccupancyCap(entry: any): entry is RoomOccupancyCap {
     return true;
 }
 
-export async function getRoomOccupancyCaps(): Promise<RoomOccupancyCap[]> {
+export async function getRoomOccupancyCaps(tenantId: number): Promise<RoomOccupancyCap[]> {
     try {
         const result = await queryWithRetry(
-            'SELECT text_value FROM app_settings WHERE key = $1',
-            [ROOM_OCCUPANCY_CAPS_KEY]
+            'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
+            [tenantId, ROOM_OCCUPANCY_CAPS_KEY]
         );
         const raw = result.rows[0]?.text_value;
         if (typeof raw !== 'string' || !raw.trim()) return [];
@@ -83,8 +83,8 @@ export interface RoomOccupancy {
  * tavolo + i suoi ospiti: altrimenti il canale web potrebbe riempire una
  * sala con decine di richieste PENDING senza mai toccare il cap.
  */
-export async function computeRoomOccupancy(date: string, shift: Shift): Promise<RoomOccupancy[]> {
-    const caps = await getRoomOccupancyCaps();
+export async function computeRoomOccupancy(tenantId: number, date: string, shift: Shift): Promise<RoomOccupancy[]> {
+    const caps = await getRoomOccupancyCaps(tenantId);
     const capByRoom = new Map<number, RoomOccupancyCap>(caps.map(c => [c.room_id, c]));
 
     const result = await queryWithRetry(`
@@ -216,13 +216,13 @@ export async function computeRoomOccupancy(date: string, shift: Shift): Promise<
  * Restituisce sempre un array (mai null) così può essere passato dritto a
  * un `= ANY($n::int[])` senza guardie extra.
  */
-export async function getCappedRoomIds(date: string, shift: Shift): Promise<number[]> {
+export async function getCappedRoomIds(tenantId: number, date: string, shift: Shift): Promise<number[]> {
     try {
-        const caps = await getRoomOccupancyCaps();
+        const caps = await getRoomOccupancyCaps(tenantId);
         // Nessun cap configurato: evita la query di occupazione sul percorso
         // caldo (ogni check-availability dell'agente vocale ci passa).
         if (caps.length === 0) return [];
-        const occupancy = await computeRoomOccupancy(date, shift);
+        const occupancy = await computeRoomOccupancy(tenantId, date, shift);
         return occupancy.filter(o => o.at_cap).map(o => o.room_id);
     } catch (err) {
         // Fail-open: un errore di lettura non deve far sparire la disponibilità.
@@ -324,6 +324,7 @@ export async function listBookableRooms(
  * prenotazione senza tavolo e la lascia allo staff.
  */
 export async function pickSelfServiceTable(
+    tenantId: number,
     date: string,
     shift: Shift,
     guests: number,
@@ -339,7 +340,7 @@ export async function pickSelfServiceTable(
         params.push(Math.trunc(opts.roomId));
         extraFilters += ` AND r.id = $${params.length}`;
     }
-    params.push(await getCappedRoomIds(date, shift));
+    params.push(await getCappedRoomIds(tenantId, date, shift));
     extraFilters += ` AND NOT (r.id = ANY($${params.length}::int[]))`;
 
     const result = await queryWithRetry(`

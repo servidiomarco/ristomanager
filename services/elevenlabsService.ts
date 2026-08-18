@@ -10,6 +10,12 @@ import { getCappedRoomIds, pickSelfServiceTable, isTableStillAssignable } from '
 // HMAC SIGNATURE VERIFICATION
 // ============================================
 
+// Tenant del canale vocale: le chiamate arrivano da webhook senza JWT, quindi
+// non c'è un req.tenantId da leggere. Finché la Fase C3 non ricava il tenant
+// dal numero chiamato, tutta la voce appartiene al tenant 1 (stesso valore di
+// PUBLIC_TENANT_ID in server.ts — non importabile da qui: ciclo di moduli).
+const VOICE_TENANT_ID = 1;
+
 const SIGNATURE_HEADER = 'elevenlabs-signature';
 const SIGNATURE_TOLERANCE_SECONDS = 300; // 5 minutes
 
@@ -519,7 +525,7 @@ export interface AvailabilityResult {
 async function isShiftAlreadyOverToday(date: string, shift: Shift): Promise<boolean> {
     if (date !== getRomeDatePart(new Date())) return false;
     const nowTime = getRomeTimePart(new Date()); // HH:MM, 24h Rome
-    const slots = await getAvailableSlots(date, shift);
+    const slots = await getAvailableSlots(VOICE_TENANT_ID, date, shift);
     // Zero-padded 24h strings compare correctly lexicographically. Empty slot
     // list (shift closed that weekday) → nothing left to offer.
     return slots.every(s => s <= nowTime);
@@ -527,7 +533,7 @@ async function isShiftAlreadyOverToday(date: string, shift: Shift): Promise<bool
 
 export async function findAvailability(input: AvailabilityInput): Promise<AvailabilityResult> {
     const { date, shift, guests, location_preference } = input;
-    const cappedRooms = await getCappedRoomIds(date, shift);
+    const cappedRooms = await getCappedRoomIds(VOICE_TENANT_ID, date, shift);
 
     const breakdown = await queryWithRetry(`
         SELECT r.location AS location, COUNT(*)::int AS free
@@ -594,7 +600,7 @@ export async function findAvailability(input: AvailabilityInput): Promise<Availa
 
     const otherShift = shift === Shift.LUNCH ? Shift.DINNER : Shift.LUNCH;
     // I cap si misurano per turno: l'altro turno ha la sua occupazione.
-    const cappedRoomsAlt = await getCappedRoomIds(date, otherShift);
+    const cappedRoomsAlt = await getCappedRoomIds(VOICE_TENANT_ID, date, otherShift);
     const altResult = await queryWithRetry(`
         SELECT COUNT(*)::int AS free
         FROM tables t
@@ -697,7 +703,7 @@ async function pickAutoAssignTable(
     guests: number,
     locationPreference: RoomLocation | undefined
 ): Promise<{ id: number; name: string; room_name: string; location: RoomLocation | null } | null> {
-    const picked = await pickSelfServiceTable(date, shift, guests, { location: locationPreference });
+    const picked = await pickSelfServiceTable(VOICE_TENANT_ID, date, shift, guests, { location: locationPreference });
     if (!picked) return null;
     return { id: picked.id, name: picked.name, room_name: picked.room_name, location: picked.location };
 }

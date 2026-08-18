@@ -1698,7 +1698,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             INSERT INTO opening_hours (weekday, lunch_open, lunch_close, dinner_open, dinner_close, slot_minutes)
             SELECT g.weekday, '13:00'::time, '14:00'::time, '19:30'::time, '23:30'::time, 30
             FROM generate_series(0, 6) AS g(weekday)
-            ON CONFLICT (weekday) DO NOTHING;
+            ON CONFLICT DO NOTHING;
         `);
 
         await client.query(`
@@ -1747,7 +1747,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             INSERT INTO app_settings (key, value) VALUES
                 ('public_bookings_enabled', false),
                 ('voice_agent_enabled',      true)
-            ON CONFLICT (key) DO NOTHING;
+            ON CONFLICT DO NOTHING;
         `);
         // Some settings are numeric (e.g. thresholds), so `value` needs to be
         // nullable and we grow a companion `int_value` column. Rows use one
@@ -1761,7 +1761,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`
             INSERT INTO app_settings (key, int_value) VALUES
                 ('voice_large_group_threshold', 8)
-            ON CONFLICT (key) DO NOTHING;
+            ON CONFLICT DO NOTHING;
         `);
         // Some settings carry text values (HH:MM, labels, …). Same rule as
         // int_value: rows use text_value XOR the others depending on type.
@@ -1773,17 +1773,17 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`
             INSERT INTO app_settings (key, value) VALUES
                 ('voice_bookings_suspended', false)
-            ON CONFLICT (key) DO NOTHING;
+            ON CONFLICT DO NOTHING;
         `);
         await client.query(`
             INSERT INTO app_settings (key, text_value) VALUES
                 ('voice_bookings_suspension_callback_time', '19:00')
-            ON CONFLICT (key) DO NOTHING;
+            ON CONFLICT DO NOTHING;
         `);
         await client.query(`
             INSERT INTO app_settings (key, text_value) VALUES
                 ('voice_bookings_suspension_schedule', '[]')
-            ON CONFLICT (key) DO NOTHING;
+            ON CONFLICT DO NOTHING;
         `);
 
         // ============================================
@@ -1881,7 +1881,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`
             INSERT INTO app_settings (key, text_value) VALUES
                 ('active_payment_provider', 'revolut')
-            ON CONFLICT (key) DO NOTHING;
+            ON CONFLICT DO NOTHING;
         `);
 
         // ============================================
@@ -2496,13 +2496,13 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`
             INSERT INTO app_settings (key, text_value) VALUES
                 ('course_fire_mode', 'AUTO_ALL')
-            ON CONFLICT (key) DO NOTHING;
+            ON CONFLICT DO NOTHING;
         `);
         // Il modulo comande resta spento finché non c'è una UI che lo usi.
         await client.query(`
             INSERT INTO app_settings (key, value) VALUES
                 ('table_orders_enabled', false)
-            ON CONFLICT (key) DO NOTHING;
+            ON CONFLICT DO NOTHING;
         `);
 
         // ============================================
@@ -2602,7 +2602,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             INSERT INTO app_settings (key, int_value) VALUES
                 ('cover_charge_cents', 0),
                 ('service_charge_percent', 0)
-            ON CONFLICT (key) DO NOTHING;
+            ON CONFLICT DO NOTHING;
         `);
 
         // Con la vista passe online (PR 5) il lancio passa da AUTO_ALL ad
@@ -2625,7 +2625,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             `);
             await client.query(`
                 INSERT INTO app_settings (key, value) VALUES ('course_fire_mode_passe_migrated', true)
-                ON CONFLICT (key) DO NOTHING;
+                ON CONFLICT DO NOTHING;
             `);
         }
 
