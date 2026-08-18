@@ -43,10 +43,10 @@ Prerequisiti non negoziabili prima di toccare 260 route: oggi non c'è né un mi
 
 ### PR B1 — Tabella `tenants` + colonna ovunque
 - `tenants`: `id`, `slug UNIQUE`, `name`, `status` (active/suspended), `plan`, `logo`/branding, `timezone` (default `Europe/Rome`), `created_at`.
-- `tenant_id BIGINT REFERENCES tenants` su **tutte le 57 tabelle** (nullable → backfill a tenant 1 = Vecchio Frantoio → `NOT NULL`), indice su ogni tabella.
-- Riscrittura dei vincoli unici globali in compositi — i bloccanti censiti nell'audit:
+- `tenant_id BIGINT NOT NULL DEFAULT 1 REFERENCES tenants` su **tutte le tabelle** (il DEFAULT tiene in piedi le INSERT non ancora scopate; cade a fine Fase B con la RLS), indice su ogni tabella. Aggiunta dinamica su `pg_tables`, non un elenco a mano.
+- ~~Riscrittura dei vincoli unici globali in compositi~~ **Spostata nei PR di dominio della B3**: molti vincoli sono bersaglio di `ON CONFLICT` nel codice, e cambiarli senza aggiornare le query nello stesso deploy rompe le scritture. Ogni PR B3 riscrive i vincoli del suo dominio insieme alle sue query. I bloccanti censiti nell'audit:
   - `customers` telefono unico → unico per `(tenant_id, digits)` (`db.ts:1243`)
-  - `users.email` → `(tenant_id, email)` (`db.ts:159`)
+  - `users.email` → **resta unico globale** (deviazione dal piano originale): il login è per sola email, senza discriminatore tenant — con email unica per tenant due utenti omonimi sarebbero indistinguibili al login. Un'email = un account = un ristorante; si rivede solo se servirà il multi-ristorante per persona.
   - `role_permissions` → `(tenant_id, role, permission)` (`db.ts:770`)
   - `app_settings` PK → `(tenant_id, key)`; `integration_settings` PK → `(tenant_id, provider)`
   - `opening_hours` PK → `(tenant_id, weekday)`; `special_closures`, `disabled_slots` idem
