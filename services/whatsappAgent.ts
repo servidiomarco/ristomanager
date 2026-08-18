@@ -13,17 +13,29 @@
 // Il modello fa la parte in cui è bravo (capire "siamo 3 invece di 5" e
 // tradurlo in parametri), la persona fa quella che conta (decidere).
 //
-// La prova tecnica del 2026-08-18 su 12 messaggi veri ha dato 11 scelte
-// corrette su 12; soprattutto, il modello si ferma da solo dove deve —
-// gruppi grandi, allergeni, richieste fuori tema, dati mancanti. Le stesse
-// regole sono ripetute qui nel prompt perché è lì che vengono applicate.
+// Il modello è Claude. La prova tecnica del 2026-08-18 era stata fatta su
+// Gemini (11 scelte corrette su 12) ma quel piano si esaurisce dopo una
+// manciata di richieste al giorno, e un agente che si ferma al quinto cliente
+// della serata non è un agente. Le regole della casa sono ripetute nel prompt
+// qui sotto perché è lì che vengono applicate, non negli strumenti.
 
-import { GoogleGenAI, type FunctionDeclaration } from '@google/genai';
+import Anthropic from '@anthropic-ai/sdk';
 import * as bookingTools from './bookingTools.js';
 import { WHATSAPP_CHANNEL } from './bookingTools.js';
 
-const MODEL = 'gemini-3.5-flash';
+const MODEL = 'claude-opus-5';
 const MAX_GIRI = 4;
+
+// Il ragionamento resta ACCESO. Non è un vezzo: con il ragionamento spento il
+// modello può scrivere la chiamata a uno strumento dentro il testo visibile
+// invece di emetterla davvero — il turno riesce, la chiamata non parte, e
+// nessuno se ne accorge. Per contenere costo e attesa si abbassa lo sforzo,
+// non si spegne il ragionamento.
+const SFORZO = 'low' as const;
+
+// Il ragionamento consuma dallo stesso budget della risposta: stretto qui
+// significa risposte troncate a metà.
+const MAX_TOKEN = 4096;
 
 /** Strumenti che scrivono: non si eseguono, si propongono. */
 const STRUMENTI_DI_SCRITTURA = new Set(['create_reservation', 'modify_reservation', 'cancel_reservation']);
@@ -77,17 +89,17 @@ export class AgentError extends Error {
 // Dichiarazione degli strumenti — gli stessi quattro di Sofia
 // ---------------------------------------------------------------------------
 
-const declarations = (threshold: number): FunctionDeclaration[] => ([
+const declarations = (threshold: number): Anthropic.Tool[] => ([
     {
         name: 'check_availability',
         description: `Verifica se ci sono tavoli liberi. Usalo SEMPRE prima di dire al cliente che c'è posto: non confermare mai una disponibilità che non hai verificato con questo strumento.`,
-        parameters: {
-            type: 'object' as any,
+        input_schema: {
+            type: 'object',
             properties: {
-                date: { type: 'string' as any, description: 'Data in formato YYYY-MM-DD' },
-                shift: { type: 'string' as any, enum: ['LUNCH', 'DINNER'], description: 'LUNCH per pranzo, DINNER per cena' },
-                guests: { type: 'integer' as any, description: 'Numero di persone' },
-                location_preference: { type: 'string' as any, enum: ['INDOOR', 'OUTDOOR'], description: 'Solo se il cliente esprime una preferenza' },
+                date: { type: 'string', description: 'Data in formato YYYY-MM-DD' },
+                shift: { type: 'string', enum: ['LUNCH', 'DINNER'], description: 'LUNCH per pranzo, DINNER per cena' },
+                guests: { type: 'integer', description: 'Numero di persone' },
+                location_preference: { type: 'string', enum: ['INDOOR', 'OUTDOOR'], description: 'Solo se il cliente esprime una preferenza' },
             },
             required: ['date', 'shift', 'guests'],
         },
@@ -95,18 +107,18 @@ const declarations = (threshold: number): FunctionDeclaration[] => ([
     {
         name: 'create_reservation',
         description: `Crea una nuova prenotazione. Servono tutti: nome e cognome reali, telefono, data, ora, turno, numero di persone. Se ne manca anche uno solo NON usare questo strumento: chiedi al cliente il dato mancante.`,
-        parameters: {
-            type: 'object' as any,
+        input_schema: {
+            type: 'object',
             properties: {
-                customer_name: { type: 'string' as any, description: 'Nome e cognome reali, mai segnaposto come "Cliente"' },
-                phone: { type: 'string' as any },
-                date: { type: 'string' as any, description: 'YYYY-MM-DD' },
-                time: { type: 'string' as any, description: 'HH:MM' },
-                shift: { type: 'string' as any, enum: ['LUNCH', 'DINNER'] },
-                guests: { type: 'integer' as any },
-                children: { type: 'integer' as any, description: 'Quanti dei coperti sono bambini' },
-                location_preference: { type: 'string' as any, enum: ['INDOOR', 'OUTDOOR'] },
-                notes: { type: 'string' as any, description: 'Richieste particolari del cliente' },
+                customer_name: { type: 'string', description: 'Nome e cognome reali, mai segnaposto come "Cliente"' },
+                phone: { type: 'string' },
+                date: { type: 'string', description: 'YYYY-MM-DD' },
+                time: { type: 'string', description: 'HH:MM' },
+                shift: { type: 'string', enum: ['LUNCH', 'DINNER'] },
+                guests: { type: 'integer' },
+                children: { type: 'integer', description: 'Quanti dei coperti sono bambini' },
+                location_preference: { type: 'string', enum: ['INDOOR', 'OUTDOOR'] },
+                notes: { type: 'string', description: 'Richieste particolari del cliente' },
             },
             required: ['customer_name', 'phone', 'date', 'time', 'shift', 'guests'],
         },
@@ -114,17 +126,17 @@ const declarations = (threshold: number): FunctionDeclaration[] => ([
     {
         name: 'modify_reservation',
         description: `Modifica la prenotazione esistente. Passa SOLO i campi new_* che cambiano davvero; il resto resta com'è.`,
-        parameters: {
-            type: 'object' as any,
+        input_schema: {
+            type: 'object',
             properties: {
-                phone: { type: 'string' as any },
-                date: { type: 'string' as any, description: 'Data della prenotazione ATTUALE, YYYY-MM-DD' },
-                time: { type: 'string' as any, description: 'Ora attuale, solo per distinguere fra più prenotazioni nello stesso giorno' },
-                new_date: { type: 'string' as any },
-                new_time: { type: 'string' as any },
-                new_guests: { type: 'integer' as any },
-                new_location_preference: { type: 'string' as any, enum: ['INDOOR', 'OUTDOOR'] },
-                new_notes: { type: 'string' as any },
+                phone: { type: 'string' },
+                date: { type: 'string', description: 'Data della prenotazione ATTUALE, YYYY-MM-DD' },
+                time: { type: 'string', description: 'Ora attuale, solo per distinguere fra più prenotazioni nello stesso giorno' },
+                new_date: { type: 'string' },
+                new_time: { type: 'string' },
+                new_guests: { type: 'integer' },
+                new_location_preference: { type: 'string', enum: ['INDOOR', 'OUTDOOR'] },
+                new_notes: { type: 'string' },
             },
             required: ['phone', 'date'],
         },
@@ -132,12 +144,12 @@ const declarations = (threshold: number): FunctionDeclaration[] => ([
     {
         name: 'cancel_reservation',
         description: 'Annulla la prenotazione esistente.',
-        parameters: {
-            type: 'object' as any,
+        input_schema: {
+            type: 'object',
             properties: {
-                phone: { type: 'string' as any },
-                date: { type: 'string' as any, description: 'YYYY-MM-DD' },
-                time: { type: 'string' as any, description: 'Solo per distinguere fra più prenotazioni nello stesso giorno' },
+                phone: { type: 'string' },
+                date: { type: 'string', description: 'YYYY-MM-DD' },
+                time: { type: 'string', description: 'Solo per distinguere fra più prenotazioni nello stesso giorno' },
             },
             required: ['phone', 'date'],
         },
@@ -224,82 +236,83 @@ function riassumi(tool: string, args: Record<string, any>, ctx: AgentContext): s
 // Ciclo
 // ---------------------------------------------------------------------------
 
-/**
- * Chiamata al modello con ritentativi sul 429.
- *
- * Non è prudenza generica: il piano gratuito di Gemini esaurisce la quota
- * dopo una richiesta e l'agente ne fa due o tre per messaggio. Senza attesa e
- * ritentativo, l'agente sembra "non avere niente da dire" mentre in realtà è
- * stato respinto — il modo peggiore di fallire, perché non lo si capisce.
- */
-async function generaConRitentativi(ai: GoogleGenAI, richiesta: any): Promise<any> {
-    let ultimo: any;
-    for (let tentativo = 0; tentativo < 3; tentativo++) {
-        try {
-            return await ai.models.generateContent(richiesta);
-        } catch (err: any) {
-            ultimo = err;
-            const msg = String(err?.message || '');
-            if (!msg.includes('429') && !/RESOURCE_EXHAUSTED/i.test(msg)) throw err;
-            if (tentativo < 2) await new Promise(r => setTimeout(r, 4000 * (tentativo + 1)));
-        }
-    }
-    throw new AgentError(
-        'Quota del modello esaurita: riprova fra qualche secondo, o attiva la fatturazione su Google AI Studio.',
-        'upstream'
-    );
+export function isAgentConfigured(): boolean {
+    return Boolean((process.env.ANTHROPIC_API_KEY || '').trim());
 }
 
-export function isAgentConfigured(): boolean {
-    return Boolean((process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim());
+/** Il testo visibile della risposta, ignorando i blocchi di ragionamento. */
+function testoDi(message: Anthropic.Message): string {
+    return message.content
+        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+        .map(b => b.text)
+        .join('')
+        .trim()
+        .replace(/^["'«]|["'»]$/g, '');
+}
+
+/** La prima chiamata a strumento, se c'è. */
+function chiamataDi(message: Anthropic.Message): Anthropic.ToolUseBlock | null {
+    return message.content.find((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use') ?? null;
 }
 
 export async function runAgent(ctx: AgentContext): Promise<AgentResult> {
-    const apiKey = (process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim();
-    if (!apiKey) throw new AgentError('GEMINI_API_KEY non configurata sul backend', 'not_configured');
+    const apiKey = (process.env.ANTHROPIC_API_KEY || '').trim();
+    if (!apiKey) throw new AgentError('ANTHROPIC_API_KEY non configurata sul backend', 'not_configured');
     if (ctx.knowledge.length === 0) {
         throw new AgentError('Nessuna regola inserita: aggiungine almeno una in Impostazioni → Messaggi con AI', 'no_knowledge');
     }
 
-    const ai = new GoogleGenAI({ apiKey });
-    const tools = [{ functionDeclarations: declarations(ctx.largeGroupThreshold) }];
+    const client = new Anthropic({ apiKey });
+    const tools = declarations(ctx.largeGroupThreshold);
     const system = buildSystem(ctx);
     const checks: AgentResult['checks'] = [];
 
     // La conversazione come storia di turni: il modello deve vedere chi ha
     // detto cosa, non un blocco di testo indistinto.
-    const contents: any[] = ctx.messages
+    const messages: Anthropic.MessageParam[] = ctx.messages
         .filter(m => (m.body || '').trim())
         .slice(-15)
         .map(m => ({
-            role: m.direction === 'inbound' ? 'user' : 'model',
-            parts: [{ text: m.body.trim() }],
+            role: (m.direction === 'inbound' ? 'user' : 'assistant') as 'user' | 'assistant',
+            content: m.body.trim(),
         }));
-    // Gemini vuole che la storia inizi con l'utente.
-    while (contents.length && contents[0].role !== 'user') contents.shift();
-    if (contents.length === 0) return { reply: null, proposal: null, checks, reason: 'Nessun messaggio del cliente da interpretare' };
+    // La storia deve iniziare da un messaggio del cliente.
+    while (messages.length && messages[0].role !== 'user') messages.shift();
+    if (messages.length === 0) return { reply: null, proposal: null, checks, reason: 'Nessun messaggio del cliente da interpretare' };
+
+    const chiedi = (extra: Partial<Anthropic.MessageCreateParams> = {}) =>
+        client.messages.create({
+            model: MODEL,
+            max_tokens: MAX_TOKEN,
+            output_config: { effort: SFORZO },
+            system,
+            messages,
+            tools,
+            ...extra,
+        } as Anthropic.MessageCreateParamsNonStreaming);
 
     for (let giro = 0; giro < MAX_GIRI; giro++) {
-        let response: any;
+        let response: Anthropic.Message;
         try {
-            response = await generaConRitentativi(ai, {
-                model: MODEL,
-                contents,
-                config: { tools, systemInstruction: system, temperature: 0 },
-            });
+            response = await chiedi();
         } catch (err: any) {
-            if (err instanceof AgentError) throw err;
             throw new AgentError(err?.message || 'Errore dal modello', 'upstream');
         }
 
-        const call = response.functionCalls?.[0];
+        // I classificatori possono rifiutare: va guardato PRIMA di leggere il
+        // contenuto, che in quel caso è vuoto o troncato.
+        if (response.stop_reason === 'refusal') {
+            return { reply: null, proposal: null, checks, reason: 'Il modello ha rifiutato di rispondere a questo messaggio' };
+        }
+
+        const call = chiamataDi(response);
         if (!call) {
-            const testo = String(response.text || '').trim().replace(/^["'«]|["'»]$/g, '');
+            const testo = testoDi(response);
             return { reply: testo || null, proposal: null, checks, reason: testo ? undefined : 'Il modello non ha prodotto una risposta' };
         }
 
-        const nome = String(call.name);
-        const args = (call.args || {}) as Record<string, any>;
+        const nome = call.name;
+        const args = (call.input || {}) as Record<string, any>;
 
         // --- strumento che scrive: si ferma qui e propone -------------------
         if (STRUMENTI_DI_SCRITTURA.has(nome)) {
@@ -313,16 +326,19 @@ export async function runAgent(ctx: AgentContext): Promise<AgentResult> {
             let reply: string | null = null;
             let replyError: string | undefined;
             try {
-                const r2 = await generaConRitentativi(ai, {
+                // Senza strumenti: qui vogliamo solo la frase, non un'altra chiamata.
+                const r2 = await client.messages.create({
                     model: MODEL,
-                    contents: [
-                        ...contents,
-                        { role: 'model', parts: [{ text: `[richiesta compresa: ${proposal.summary}]` }] },
-                        { role: 'user', parts: [{ text: 'Scrivi solo il messaggio da inviare al cliente: digli che stai verificando e che confermi a breve. Una o due frasi, senza dare per fatta la modifica.' }] },
+                    max_tokens: MAX_TOKEN,
+                    output_config: { effort: SFORZO },
+                    system,
+                    messages: [
+                        ...messages,
+                        { role: 'assistant', content: `[richiesta compresa: ${proposal.summary}]` },
+                        { role: 'user', content: 'Scrivi solo il messaggio da inviare al cliente: digli che stai verificando e che confermi a breve. Una o due frasi, senza dare per fatta la modifica.' },
                     ],
-                    config: { systemInstruction: system, temperature: 0 },
                 });
-                reply = String(r2.text || '').trim().replace(/^["'«]|["'»]$/g, '') || null;
+                reply = r2.stop_reason === 'refusal' ? null : (testoDi(r2) || null);
             } catch (err: any) {
                 // La proposta resta valida anche senza frase pronta: lo staff
                 // scrive di suo. Ma il motivo va detto, non nascosto.
@@ -335,8 +351,15 @@ export async function runAgent(ctx: AgentContext): Promise<AgentResult> {
         if (nome === 'check_availability') {
             const outcome = await bookingTools.checkAvailability(args, WHATSAPP_CHANNEL);
             checks.push({ tool: nome, args, result: outcome.body });
-            contents.push({ role: 'model', parts: [{ functionCall: { name: nome, args } }] });
-            contents.push({ role: 'user', parts: [{ functionResponse: { name: nome, response: outcome.body } }] });
+            messages.push({ role: 'assistant', content: response.content });
+            messages.push({
+                role: 'user',
+                content: [{
+                    type: 'tool_result',
+                    tool_use_id: call.id,
+                    content: JSON.stringify(outcome.body),
+                }],
+            });
             continue;
         }
 

@@ -4236,7 +4236,7 @@ app.post('/messages/suggest-reply', authenticate, requirePermission('reservation
             });
         }
         if (!isAiConfigured()) {
-            return res.status(503).json({ error: 'not_configured', message: 'GEMINI_API_KEY non configurata sul backend' });
+            return res.status(503).json({ error: 'not_configured', message: 'ANTHROPIC_API_KEY non configurata sul backend' });
         }
         const key = String(req.body?.phone_digits ?? '').replace(/\D/g, '').slice(-10);
         if (!key) return res.status(400).json({ error: 'phone_digits mancante' });
