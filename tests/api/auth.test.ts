@@ -47,6 +47,28 @@ describe('auth', () => {
         expect(Array.isArray(me.body.permissions)).toBe(true);
     });
 
+    it('il token e /auth/me portano il tenant (Fase B2)', async () => {
+        const login = await api().post('/auth/login').send({
+            email: OWNER_EMAIL,
+            password: OWNER_PASSWORD,
+        });
+        expect(login.status).toBe(200);
+        expect(login.body.user.tenant).toEqual({
+            id: 1,
+            slug: 'vecchio-frantoio',
+            name: 'Il Vecchio Frantoio',
+        });
+
+        // Il claim tenantId sta nel payload del JWT (segmento centrale).
+        const payload = JSON.parse(
+            Buffer.from(login.body.accessToken.split('.')[1], 'base64url').toString()
+        );
+        expect(payload.tenantId).toBe(1);
+
+        const me = await api().get('/auth/me').set(bearer(login.body.accessToken));
+        expect(me.body.tenant.slug).toBe('vecchio-frantoio');
+    });
+
     it('rinnova i token col refresh e li revoca al logout', async () => {
         const login = await api().post('/auth/login').send({
             email: OWNER_EMAIL,

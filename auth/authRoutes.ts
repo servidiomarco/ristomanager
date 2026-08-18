@@ -22,8 +22,14 @@ router.post('/login', async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    // Credenziali giuste, ristorante spento: non è colpa dell'utente e la
+    // UI deve poterlo dire (un 401 generico manderebbe a "password errata").
+    if ('tenantSuspended' in result) {
+      return res.status(403).json({ error: 'tenant_suspended', message: 'Il servizio per questo ristorante è sospeso.' });
+    }
+
     // Get user's permissions from database
-    const permissions = await RolePermissionService.getPermissionsForRole(result.user.role);
+    const permissions = await RolePermissionService.getPermissionsForRole(result.user.tenant!.id, result.user.role);
 
     // Log login activity
     LogService.logActivity(
@@ -111,7 +117,7 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
     }
 
     // Get user's permissions from database
-    const permissions = await RolePermissionService.getPermissionsForRole(user.role);
+    const permissions = await RolePermissionService.getPermissionsForRole(req.user.tenantId, user.role);
 
     res.json({ ...user, permissions });
   } catch (error) {
@@ -148,7 +154,7 @@ router.put('/me/preferences', authenticate, async (req: Request, res: Response) 
       return res.status(404).json({ error: 'User not found' });
     }
 
-    const permissions = await RolePermissionService.getPermissionsForRole(updated.role);
+    const permissions = await RolePermissionService.getPermissionsForRole(req.user.tenantId, updated.role);
     res.json({ ...updated, permissions });
   } catch (error) {
     console.error('Update preferences error:', error);
@@ -336,7 +342,7 @@ router.get('/permissions', authenticate, authorize(UserRole.OWNER), async (req: 
 // GET /auth/permissions/roles - Get all role permissions
 router.get('/permissions/roles', authenticate, authorize(UserRole.OWNER), async (req: Request, res: Response) => {
   try {
-    const permissions = await RolePermissionService.getAllRolePermissions();
+    const permissions = await RolePermissionService.getAllRolePermissions(req.user!.tenantId);
     res.json(permissions);
   } catch (error) {
     console.error('Get role permissions error:', error);
@@ -353,7 +359,7 @@ router.get('/permissions/roles/:role', authenticate, authorize(UserRole.OWNER), 
       return res.status(400).json({ error: 'Invalid role' });
     }
 
-    const permissions = await RolePermissionService.getPermissionsForRole(role);
+    const permissions = await RolePermissionService.getPermissionsForRole(req.user!.tenantId, role);
     res.json({ role, permissions });
   } catch (error) {
     console.error('Get role permissions error:', error);
@@ -387,9 +393,9 @@ router.put('/permissions/roles/:role', authenticate, authorize(UserRole.OWNER), 
       }
     }
 
-    await RolePermissionService.setPermissionsForRole(role, permissions as Permission[]);
+    await RolePermissionService.setPermissionsForRole(req.user!.tenantId, role, permissions as Permission[]);
 
-    const updatedPermissions = await RolePermissionService.getPermissionsForRole(role);
+    const updatedPermissions = await RolePermissionService.getPermissionsForRole(req.user!.tenantId, role);
     res.json({ role, permissions: updatedPermissions });
   } catch (error) {
     console.error('Update role permissions error:', error);

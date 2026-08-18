@@ -59,8 +59,12 @@ export class SocketService {
         return next(new Error('Invalid or expired token'));
       }
 
-      // Attach user data to socket
-      socket.user = payload;
+      // Attach user data to socket. Il tenant serve alla Fase B5 (room
+      // per tenant); i token pre-B2 non hanno il claim → fallback 1.
+      socket.user = {
+        ...payload,
+        tenantId: Number.isInteger(payload.tenantId) && payload.tenantId > 0 ? payload.tenantId : 1,
+      };
       next();
     });
   }

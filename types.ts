@@ -580,6 +580,9 @@ export interface User {
   updated_at?: string;
   last_login?: string;
   preferred_landing_view?: string | null;
+  // Ristorante di appartenenza (Fase B2). Opzionale: gli elenchi utenti
+  // non lo caricano, login e /auth/me sì.
+  tenant?: { id: number; slug: string; name: string };
 }
 
 export interface AuthUser extends User {

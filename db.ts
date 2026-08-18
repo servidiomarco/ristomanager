@@ -161,6 +161,44 @@ export const runMigrations = async (): Promise<void> => {
     }
 };
 
+// ============================================
+// CONTESTO TENANT (Fase B2)
+// ============================================
+// Esegue `fn` dentro una transazione con `app.tenant_id` impostato come
+// variabile di sessione locale. Oggi è solo un contratto; quando la Fase B4
+// accende la Row-Level Security, le policy leggeranno
+// current_setting('app.tenant_id') e una query non scopata dentro
+// withTenant ritornerà zero righe invece dei dati di un altro ristorante.
+// I PR di dominio della Fase B3 migrano le route su questo helper.
+export const withTenant = async <T>(
+    tenantId: number,
+    fn: (client: import('pg').PoolClient) => Promise<T>
+): Promise<T> => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        // set_config con is_local=true: la variabile muore col COMMIT/ROLLBACK,
+        // il client torna al pool pulito.
+        await client.query(`SELECT set_config('app.tenant_id', $1, true)`, [String(tenantId)]);
+        const result = await fn(client);
+        await client.query('COMMIT');
+        return result;
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
+};
+
+// Variante a query singola, per i call site che oggi usano queryWithRetry.
+export const tenantQuery = (
+    tenantId: number,
+    text: string,
+    params?: any[]
+): Promise<{ rows: any[]; rowCount: number | null }> =>
+    withTenant(tenantId, client => client.query(text, params));
+
 // Retry logic for schema creation
 const MAX_RETRIES = 5;
 const RETRY_DELAY_MS = 3000;
