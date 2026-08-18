@@ -432,8 +432,11 @@ export interface CustomerLookupResult {
  * by upsertCustomerFromReservation, so "+39 333 1234567" and "3331234567"
  * collide. Also fetches the most recent non-cancelled reservation date so the
  * agent can greet returning callers with "bentornato".
+ *
+ * tenantId obbligatorio: i webhook voce lo fissano al tenant pubblico. Senza
+ * filtro Sofia saluterebbe per nome il cliente di un altro ristorante.
  */
-export async function findCustomerByPhone(phone: string): Promise<CustomerLookupResult> {
+export async function findCustomerByPhone(tenantId: number, phone: string): Promise<CustomerLookupResult> {
     if (!phone) return { exists: false };
     const digits = phone.replace(/\D/g, '');
     if (!digits) return { exists: false };
@@ -442,10 +445,11 @@ export async function findCustomerByPhone(phone: string): Promise<CustomerLookup
     const result = await queryWithRetry(
         `SELECT id, name
          FROM customers
-         WHERE right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
+         WHERE tenant_id = $2
+           AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
          ORDER BY id ASC
          LIMIT 1`,
-        [last10]
+        [last10, tenantId]
     );
     if (result.rows.length === 0) return { exists: false };
 
@@ -1121,10 +1125,13 @@ export interface VoiceCallRecord {
     reservation_id?: number;
 }
 
-export async function recordVoiceCall(record: VoiceCallRecord): Promise<void> {
+// tenantId obbligatorio sull'INSERT. conversation_id resta unico GLOBALE
+// (è l'id ElevenLabs, univoco per costruzione nel loro workspace), quindi
+// l'ON CONFLICT non cambia: la scopatura per tenant vive nelle query.
+export async function recordVoiceCall(tenantId: number, record: VoiceCallRecord): Promise<void> {
     await queryWithRetry(`
-        INSERT INTO voice_calls (conversation_id, phone, duration_seconds, transcript, summary, reservation_id)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO voice_calls (tenant_id, conversation_id, phone, duration_seconds, transcript, summary, reservation_id)
+        VALUES ($7, $1, $2, $3, $4, $5, $6)
         ON CONFLICT (conversation_id) DO UPDATE SET
             phone = COALESCE(EXCLUDED.phone, voice_calls.phone),
             duration_seconds = COALESCE(EXCLUDED.duration_seconds, voice_calls.duration_seconds),
@@ -1137,7 +1144,8 @@ export async function recordVoiceCall(record: VoiceCallRecord): Promise<void> {
         record.duration_seconds ?? null,
         record.transcript ?? null,
         record.summary ?? null,
-        record.reservation_id ?? null
+        record.reservation_id ?? null,
+        tenantId
     ]);
 }
 

@@ -299,6 +299,7 @@ app.post('/webhook/vonage-inbound', async (req, res) => {
             // Vonage sandbox is deprecated but any inbound still lands here.
             // Persist for the inbox — no auto-reply (see Twilio webhook note).
             const row = await logInboundMessage({
+                tenantId: PUBLIC_TENANT_ID,
                 provider: 'vonage', channel: 'whatsapp',
                 from: String(from), to: '', body: String(messageText),
             });
@@ -394,6 +395,7 @@ app.post('/webhook/twilio-whatsapp', twilioUrlEncoded, async (req, res) => {
             return;
         }
         const row = await logInboundMessage({
+            tenantId: PUBLIC_TENANT_ID,
             provider: 'twilio', channel, from, to, body, sid, media,
         });
         if (row && socketService) {
@@ -465,8 +467,9 @@ app.post('/webhook/twilio-whatsapp-status', twilioUrlEncoded, async (req, res) =
                      error_code = $2,
                      error_message = $3
                  WHERE provider_sid = $4
+                   AND tenant_id = $5
                  RETURNING *`,
-                [status, ErrorCode || null, errText, MessageSid]
+                [status, ErrorCode || null, errText, MessageSid, PUBLIC_TENANT_ID]
             );
             // L'esito arriva dopo l'invio: senza questo evento la bolla resta
             // con l'orologio anche quando il messaggio e' fallito, e chi l'ha
@@ -511,12 +514,15 @@ const WA_FALLBACK_ERROR_CODES = new Set(['63003', '63005', '63007', '63016', '63
 async function maybeFallbackWhatsAppToSms(originalSid: string, errCode: string): Promise<void> {
     // Look up the failed WA send in our log — we need the plain-text body,
     // reservation link, and the moment it was sent (idempotency anchor).
+    // Webhook senza JWT: il tenant è quello pubblico (vedi PUBLIC_TENANT_ID),
+    // ma la riga porta il proprio tenant_id e i passi successivi lo riusano.
     const orig = await queryWithRetry(
-        `SELECT id, body, to_phone, reservation_id, sent_at, channel, direction
+        `SELECT id, body, to_phone, reservation_id, sent_at, channel, direction, tenant_id
          FROM outbound_messages
          WHERE provider_sid = $1
+           AND tenant_id = $2
          LIMIT 1`,
-        [originalSid]
+        [originalSid, PUBLIC_TENANT_ID]
     );
     const row = orig.rows[0];
     if (!row || row.direction !== 'outbound' || row.channel !== 'whatsapp') return;
@@ -533,8 +539,9 @@ async function maybeFallbackWhatsAppToSms(originalSid: string, errCode: string):
            AND channel = 'sms'
            AND direction = 'outbound'
            AND sent_at > $2
+           AND tenant_id = $3
          LIMIT 1`,
-        [row.reservation_id, row.sent_at]
+        [row.reservation_id, row.sent_at, row.tenant_id]
     );
     if (already.rowCount && already.rowCount > 0) return;
 
@@ -547,7 +554,9 @@ async function maybeFallbackWhatsAppToSms(originalSid: string, errCode: string):
 
     console.log(`[Twilio] Auto-fallback SMS after WA ${originalSid} → ${errCode} (reservation ${row.reservation_id})`);
     try {
-        const smsResult = await sendTwilioSms(String(phone), String(row.body), row.reservation_id);
+        // Il tenant dell'SMS di ripiego è quello della riga WA fallita, non
+        // una costante: così il log resta nella conversazione giusta.
+        const smsResult = await sendTwilioSms(Number(row.tenant_id), String(phone), String(row.body), row.reservation_id);
         // Rewire the reservation's confirmation tracking to the new SMS sid
         // so the delivery icon updates as the SMS gets delivered.
         await recordConfirmationSent(row.reservation_id, smsResult).catch(err =>
@@ -689,7 +698,7 @@ app.post('/webhook/resend-inbound', async (req, res) => {
         // Try In-Reply-To first (most reliable), then walk References (older
         // clients quote the entire thread), then fall back to sender lookup.
         const candidateIds = [inReplyTo, ...referenceIds].filter(Boolean) as string[];
-        let reservationId = await resolveReservationByMessageIds(candidateIds);
+        let reservationId = await resolveReservationByMessageIds(PUBLIC_TENANT_ID, candidateIds);
         if (!reservationId) {
             reservationId = await resolveReservationByFromEmail(fromEmail);
         }
@@ -709,9 +718,9 @@ app.post('/webhook/resend-inbound', async (req, res) => {
         try {
             const insert = await queryWithRetry(
                 `INSERT INTO outbound_messages
-                    (provider, channel, direction, from_email, to_email, subject, body, status,
+                    (tenant_id, provider, channel, direction, from_email, to_email, subject, body, status,
                      provider_sid, message_id, in_reply_to, reservation_id, sent_at)
-                 VALUES ('resend', 'email', 'inbound', $1, $2, $3, $4, 'received',
+                 VALUES ($10, 'resend', 'email', 'inbound', $1, $2, $3, $4, 'received',
                          $5, $6, $7, $8, COALESCE($9::timestamptz, CURRENT_TIMESTAMP))
                  RETURNING id, provider, channel, direction, from_email, to_email, subject, body, status,
                            provider_sid, message_id, in_reply_to, reservation_id, sent_at,
@@ -726,6 +735,7 @@ app.post('/webhook/resend-inbound', async (req, res) => {
                     inReplyTo,
                     reservationId,
                     full.created_at,
+                    PUBLIC_TENANT_ID,
                 ]
             );
             insertedRow = insert.rows[0] ?? null;
@@ -956,7 +966,7 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
     const callerIdSpelled = spellItalianPhoneDigits(normalized);
 
     try {
-        const lookup = await findCustomerByPhone(normalized);
+        const lookup = await findCustomerByPhone(PUBLIC_TENANT_ID, normalized);
         if (!lookup.exists) {
             console.log('[ElevenLabs] init-conversation miss', { phone: normalized });
             return res.json({
@@ -1054,7 +1064,7 @@ app.post('/webhook/elevenlabs/lookup-customer', async (req, res) => {
     const callerIdSpelled = spellItalianPhoneDigits(normalized);
 
     try {
-        const lookup = await findCustomerByPhone(normalized);
+        const lookup = await findCustomerByPhone(PUBLIC_TENANT_ID, normalized);
         if (!lookup.exists) {
             console.log('[ElevenLabs] lookup-customer miss', { phone: normalized });
             return res.json({
@@ -1231,7 +1241,7 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
     });
 
     try {
-        await recordVoiceCall({
+        await recordVoiceCall(PUBLIC_TENANT_ID, {
             conversation_id: conversationId,
             phone: phoneRaw ? normalizeItalianPhone(phoneRaw) : undefined,
             duration_seconds: Number.isFinite(duration) ? Math.trunc(duration) : undefined,
@@ -1255,10 +1265,11 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
                 `UPDATE voice_calls
                  SET phantom_confirmation = TRUE
                  WHERE conversation_id = $1
+                   AND tenant_id = $2
                    AND reservation_id IS NULL
                    AND phantom_confirmation = FALSE
                  RETURNING id, phone`,
-                [conversationId]
+                [conversationId, PUBLIC_TENANT_ID]
             );
             if (phantomRow.rowCount && phantomRow.rowCount > 0) {
                 const row = phantomRow.rows[0];
@@ -1294,8 +1305,9 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
                 `UPDATE voice_calls
                  SET large_group_handoff = TRUE
                  WHERE conversation_id = $1
+                   AND tenant_id = $2
                    AND large_group_handoff = FALSE`,
-                [conversationId]
+                [conversationId, PUBLIC_TENANT_ID]
             );
             console.log('[ElevenLabs] large-group handoff detected on', conversationId);
         }
@@ -1315,14 +1327,15 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
              JOIN reservations r ON r.id = vc.reservation_id
              LEFT JOIN tables t ON t.id = r.table_id AND t.tenant_id = r.tenant_id
              LEFT JOIN rooms rm ON rm.id = t.room_id AND rm.tenant_id = t.tenant_id
-             WHERE vc.conversation_id = $1`,
-            [conversationId]
+             WHERE vc.conversation_id = $1
+               AND vc.tenant_id = $2`,
+            [conversationId, PUBLIC_TENANT_ID]
         );
         const row = linked.rows[0];
         if (row && row.phone) {
             const message = buildConfirmationMessage(row.customer_name, row.reservation_time, row.guests, row.room_name);
             const whatsappTemplate = buildBookingConfirmedTemplate(row.customer_name, row.reservation_time, row.guests);
-            sendBookingConfirmation(row.phone, message, row.id, { whatsappTemplate }).catch(err =>
+            sendBookingConfirmation(PUBLIC_TENANT_ID, row.phone, message, row.id, { whatsappTemplate }).catch(err =>
                 console.warn('[ElevenLabs] post-call confirmation send failed:', err?.message || err)
             );
         }
@@ -1343,15 +1356,17 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
                  FROM customers c
                  WHERE vc.phone IS NOT NULL
                    AND c.phone IS NOT NULL
+                   AND c.tenant_id = vc.tenant_id
                    AND length(regexp_replace(c.phone, '\\D', '', 'g')) >= 8
                    AND right(regexp_replace(c.phone, '\\D', '', 'g'), 10)
                      = right(regexp_replace(vc.phone, '\\D', '', 'g'), 10)
                  LIMIT 1
              ) cust ON true
              WHERE vc.conversation_id = $1
+               AND vc.tenant_id = $2
                AND vc.reservation_id IS NULL
                AND (vc.follow_up_status IS NULL OR vc.follow_up_status = 'PENDING')`,
-            [conversationId]
+            [conversationId, PUBLIC_TENANT_ID]
         );
         const row = pending.rows[0];
         if (row) {
@@ -1452,6 +1467,9 @@ async function broadcastReservationsUpdatedByIds(ids: number[]): Promise<void> {
                 FROM customers cc
                 WHERE r.phone IS NOT NULL
                   AND cc.phone IS NOT NULL
+                  -- Rubrica agganciata per telefono: senza il pin sul tenant
+                  -- un numero uguale in due ristoranti mischierebbe le schede.
+                  AND cc.tenant_id = r.tenant_id
                   AND regexp_replace(r.phone, '\\D', '', 'g') = regexp_replace(cc.phone, '\\D', '', 'g')
                 ORDER BY cc.is_vip DESC NULLS LAST, (cc.preferred_table_id IS NULL), cc.id ASC
                 LIMIT 1
@@ -1628,6 +1646,9 @@ app.get('/reservations', authenticate, async (req, res) => {
                 FROM customers cc
                 WHERE r.phone IS NOT NULL
                   AND cc.phone IS NOT NULL
+                  -- Rubrica agganciata per telefono: senza il pin sul tenant
+                  -- un numero uguale in due ristoranti mischierebbe le schede.
+                  AND cc.tenant_id = r.tenant_id
                   AND regexp_replace(r.phone, '\\D', '', 'g') = regexp_replace(cc.phone, '\\D', '', 'g')
                 ORDER BY cc.is_vip DESC NULLS LAST, (cc.preferred_table_id IS NULL), cc.id ASC
                 LIMIT 1
@@ -1679,7 +1700,8 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
                     `SELECT c.preferred_table_id, t.id AS pt_id, t.seats, t.max_seats
                      FROM customers c
                      LEFT JOIN tables t ON t.id = c.preferred_table_id AND t.tenant_id = $2
-                     WHERE c.phone IS NOT NULL
+                     WHERE c.tenant_id = $2
+                       AND c.phone IS NOT NULL
                        AND regexp_replace(c.phone, '\\D', '', 'g') = $1
                      LIMIT 1`,
                     [phoneDigits, req.tenantId!]
@@ -1739,6 +1761,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
                 FROM customers cc
                 WHERE ins.phone IS NOT NULL
                   AND cc.phone IS NOT NULL
+                  AND cc.tenant_id = ins.tenant_id
                   AND regexp_replace(ins.phone, '\\D', '', 'g') = regexp_replace(cc.phone, '\\D', '', 'g')
                 ORDER BY cc.is_vip DESC NULLS LAST, (cc.preferred_table_id IS NULL), cc.id ASC
                 LIMIT 1
@@ -1784,13 +1807,14 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         // Auto-save contact to the customer rubrica if a phone was provided
         // and no matching customer exists. Side-effect — never fails the route.
         await upsertCustomerFromReservation(
+            req.tenantId!,
             customer_name,
             phone,
             email,
             req.user ? { userId: req.user.userId, email: req.user.email } : null
         );
         // Propagate marketing consent to the (now-existing) customer record.
-        await setCustomerMarketingConsent(phone, consentMarketing);
+        await setCustomerMarketingConsent(req.tenantId!, phone, consentMarketing);
 
         // Broadcast to all connected clients except the one who created it
         const socketId = req.headers['x-socket-id'] as string;
@@ -1895,6 +1919,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 FROM customers cc
                 WHERE upd.phone IS NOT NULL
                   AND cc.phone IS NOT NULL
+                  AND cc.tenant_id = upd.tenant_id
                   AND regexp_replace(upd.phone, '\\D', '', 'g') = regexp_replace(cc.phone, '\\D', '', 'g')
                 ORDER BY cc.is_vip DESC NULLS LAST, (cc.preferred_table_id IS NULL), cc.id ASC
                 LIMIT 1
@@ -1958,10 +1983,10 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         // email) so the rubrica reflects edits made on the reservation. Both
         // are side-effects — never fail the route.
         const actor = req.user ? { userId: req.user.userId, email: req.user.email } : null;
-        await upsertCustomerFromReservation(customer_name, phone, email, actor);
-        await syncCustomerFromReservation(customer_name, phone, email, actor);
+        await upsertCustomerFromReservation(req.tenantId!, customer_name, phone, email, actor);
+        await syncCustomerFromReservation(req.tenantId!, customer_name, phone, email, actor);
         // Propagate marketing consent to the customer record (only when provided).
-        await setCustomerMarketingConsent(phone, consentMarketing);
+        await setCustomerMarketingConsent(req.tenantId!, phone, consentMarketing);
 
         // Broadcast to all connected clients except the one who updated it
         const socketId = req.headers['x-socket-id'] as string;
@@ -2000,6 +2025,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             const roomName = await resolveReservationRoomName(updatedReservation);
             if (updatedReservation.phone) {
                 sendBookingConfirmation(
+                    req.tenantId!,
                     updatedReservation.phone,
                     buildConfirmationMessage(
                         updatedReservation.customer_name,
@@ -2035,6 +2061,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                         try {
                             const sent = await sendMail({ to: String(updatedReservation.email), subject, text, html });
                             await logOutboundEmail({
+                                tenantId: req.tenantId!,
                                 provider: emailProvider,
                                 to: String(updatedReservation.email),
                                 subject,
@@ -2044,6 +2071,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                             });
                         } catch (sendErr: any) {
                             await logOutboundEmail({
+                                tenantId: req.tenantId!,
                                 provider: emailProvider,
                                 to: String(updatedReservation.email),
                                 subject,
@@ -2070,6 +2098,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             updatedReservation?.phone
         ) {
             sendBookingConfirmation(
+                req.tenantId!,
                 updatedReservation.phone,
                 buildDeclineMessage(
                     updatedReservation.customer_name,
@@ -2186,6 +2215,7 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
                    FROM customers cc
                    WHERE r.phone IS NOT NULL
                      AND cc.phone IS NOT NULL
+                     AND cc.tenant_id = r.tenant_id
                      AND regexp_replace(r.phone, '\\D', '', 'g') = regexp_replace(cc.phone, '\\D', '', 'g')
                    ORDER BY cc.is_vip DESC NULLS LAST, (cc.preferred_table_id IS NULL), cc.id ASC
                    LIMIT 1
@@ -2307,7 +2337,7 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('
             if (!isTwilioSmsConfigured()) {
                 return res.status(400).json({ error: 'SMS non configurato' });
             }
-            outcome = await sendTwilioSms(reservation.phone, message, reservation.id);
+            outcome = await sendTwilioSms(req.tenantId!, reservation.phone, message, reservation.id);
             recordConfirmationSent(reservation.id, outcome).catch(err =>
                 console.warn('[confirmation] recordConfirmationSent failed:', err?.message || err)
             );
@@ -2326,12 +2356,12 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('
                 reservation.reservation_time,
                 reservation.guests
             );
-            outcome = await sendWhatsAppText(reservation.phone, message, reservation.id, whatsappTemplate);
+            outcome = await sendWhatsAppText(req.tenantId!, reservation.phone, message, reservation.id, whatsappTemplate);
             recordConfirmationSent(reservation.id, outcome).catch(err =>
                 console.warn('[confirmation] recordConfirmationSent failed:', err?.message || err)
             );
         } else {
-            outcome = await sendBookingConfirmation(reservation.phone, message, reservation.id, {
+            outcome = await sendBookingConfirmation(req.tenantId!, reservation.phone, message, reservation.id, {
                 whatsappTemplate: buildBookingConfirmedTemplate(
                     reservation.customer_name,
                     reservation.reservation_time,
@@ -2400,6 +2430,7 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
             });
         } catch (sendErr: any) {
             await logOutboundEmail({
+                tenantId: req.tenantId!,
                 provider: emailProvider,
                 to: String(reservation.email),
                 subject,
@@ -2411,6 +2442,7 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
         }
 
         await logOutboundEmail({
+            tenantId: req.tenantId!,
             provider: emailProvider,
             to: String(reservation.email),
             subject,
@@ -2506,6 +2538,7 @@ app.post('/reservations/:id/send-custom-email', authenticate, requirePermission(
             });
         } catch (sendErr: any) {
             await logOutboundEmail({
+                tenantId: req.tenantId!,
                 provider: emailProvider,
                 to: String(reservation.email),
                 subject: finalSubject,
@@ -2517,6 +2550,7 @@ app.post('/reservations/:id/send-custom-email', authenticate, requirePermission(
         }
 
         await logOutboundEmail({
+            tenantId: req.tenantId!,
             provider: emailProvider,
             to: String(reservation.email),
             subject: finalSubject,
@@ -2568,13 +2602,17 @@ app.get('/reservations/:id/messages', authenticate, requirePermission('reservati
             conditions.push(`lower(to_email) = lower($${params.length})`);
         }
 
+        // Il tenant abbraccia l'OR: senza parentesi il match per telefono
+        // pescherebbe i messaggi di un altro ristorante.
+        params.push(req.tenantId!);
         const result = await queryWithRetry(
             `SELECT id, provider, channel, direction, to_phone, from_phone, to_email, from_email,
                     subject, body, status, provider_sid, message_id, in_reply_to,
                     reservation_id, sent_at, delivered_at, failed_at,
                     error_code, error_message, media
              FROM outbound_messages
-             WHERE ${conditions.join(' OR ')}
+             WHERE tenant_id = $${params.length}
+               AND (${conditions.join(' OR ')})
              ORDER BY sent_at DESC
              LIMIT 50`,
             params
@@ -3006,7 +3044,7 @@ app.post('/reservations/:id/bill/notify', authenticate, requirePermission('payme
         );
 
         try {
-            const delivery = await sendBookingConfirmation(reservation.phone, message, reservation.id, {
+            const delivery = await sendBookingConfirmation(req.tenantId!, reservation.phone, message, reservation.id, {
                 whatsappTemplate: buildTableBillLinkTemplate(
                     reservation.customer_name,
                     Number(bill.covers) || 1,
@@ -3809,7 +3847,7 @@ app.post('/pay/:token/release', publicPayLimiter, async (req, res) => {
 // recent message per group, and left-join reservations to surface the most
 // recent customer_name for that number.
 
-app.get('/messages/conversations', authenticate, requirePermission('reservations:view'), async (_req, res) => {
+app.get('/messages/conversations', authenticate, requirePermission('reservations:view'), async (req, res) => {
     try {
         const result = await queryWithRetry(`
             WITH pairs AS (
@@ -3818,7 +3856,8 @@ app.get('/messages/conversations', authenticate, requirePermission('reservations
                        COALESCE(from_phone_digits, to_phone_digits) AS digits,
                        COALESCE(from_phone, to_phone) AS phone
                 FROM outbound_messages
-                WHERE channel IN ('sms','whatsapp')
+                WHERE tenant_id = $1
+                  AND channel IN ('sms','whatsapp')
                   AND COALESCE(from_phone_digits, to_phone_digits) IS NOT NULL
             ),
             keyed AS (
@@ -3859,7 +3898,7 @@ app.get('/messages/conversations', authenticate, requirePermission('reservations
             ) r ON true
             ORDER BY l.sent_at DESC
             LIMIT 200
-        `);
+        `, [req.tenantId!]);
         res.json({ conversations: result.rows });
     } catch (err) {
         console.error('GET /messages/conversations error:', err);
@@ -3869,17 +3908,18 @@ app.get('/messages/conversations', authenticate, requirePermission('reservations
 
 // Total unread inbound messages. Same number the InboxPage's header shows
 // (sum of unread_count across all conversations) so both badges agree.
-app.get('/messages/unread-count', authenticate, requirePermission('reservations:view'), async (_req, res) => {
+app.get('/messages/unread-count', authenticate, requirePermission('reservations:view'), async (req, res) => {
     try {
         const result = await queryWithRetry(`
             SELECT COUNT(*)::int AS count
             FROM outbound_messages
-            WHERE direction = 'inbound'
+            WHERE tenant_id = $1
+              AND direction = 'inbound'
               AND channel IN ('sms','whatsapp')
               AND read_at IS NULL
               AND from_phone_digits IS NOT NULL
               AND length(from_phone_digits) >= 8
-        `);
+        `, [req.tenantId!]);
         res.json({ count: result.rows[0]?.count ?? 0 });
     } catch (err) {
         console.error('GET /messages/unread-count error:', err);
@@ -3896,12 +3936,13 @@ app.get('/messages/conversations/:phoneDigits', authenticate, requirePermission(
                     status, provider_sid, reservation_id, sent_at, delivered_at,
                     failed_at, read_at, error_code, error_message, media
              FROM outbound_messages
-             WHERE channel IN ('sms','whatsapp')
+             WHERE tenant_id = $2
+               AND channel IN ('sms','whatsapp')
                AND (right(to_phone_digits, 10) = $1::text
                     OR right(from_phone_digits, 10) = $1::text)
              ORDER BY sent_at ASC
              LIMIT 500`,
-            [key]
+            [key, req.tenantId!]
         );
         res.json({ messages: result.rows });
     } catch (err) {
@@ -3922,7 +3963,10 @@ app.get('/messages/:id/media/:index', authenticate, requirePermission('reservati
         if (!Number.isFinite(id) || !Number.isFinite(index) || index < 0) {
             return res.status(400).json({ error: 'Parametri non validi' });
         }
-        const row = await queryWithRetry(`SELECT media FROM outbound_messages WHERE id = $1`, [id]);
+        const row = await queryWithRetry(
+            `SELECT media FROM outbound_messages WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]
+        );
         const media = Array.isArray(row.rows[0]?.media) ? row.rows[0].media : [];
         const item = media[index];
         if (!item?.url) return res.status(404).json({ error: 'Allegato non trovato' });
@@ -3933,8 +3977,8 @@ app.get('/messages/:id/media/:index', authenticate, requirePermission('reservati
         // inviato.
         if (item.token) {
             const own = await queryWithRetry(
-                `SELECT content_type, bytes, size_bytes FROM outbound_media WHERE token = $1`,
-                [String(item.token)]
+                `SELECT content_type, bytes, size_bytes FROM outbound_media WHERE token = $1 AND tenant_id = $2`,
+                [String(item.token), req.tenantId!]
             );
             const file = own.rows[0];
             if (!file) return res.status(404).json({ error: 'Allegato non trovato' });
@@ -3982,12 +4026,13 @@ app.post('/messages/conversations/:phoneDigits/read', authenticate, requirePermi
         const updated = await queryWithRetry(
             `UPDATE outbound_messages
              SET read_at = CURRENT_TIMESTAMP
-             WHERE direction = 'inbound'
+             WHERE tenant_id = $2
+               AND direction = 'inbound'
                AND read_at IS NULL
                AND channel IN ('sms','whatsapp')
                AND right(from_phone_digits, 10) = $1::text
              RETURNING id`,
-            [key]
+            [key, req.tenantId!]
         );
         // Broadcast so every open CRM tab (this operator and any other) can
         // decrement its nav badge without a re-fetch.
@@ -4012,7 +4057,7 @@ app.post('/messages/conversations/:phoneDigits/read', authenticate, requirePermi
 // EmailPage can reuse the InboxPage layout with minimal changes.
 // ============================================
 
-app.get('/email/threads', authenticate, requirePermission('reservations:view'), async (_req, res) => {
+app.get('/email/threads', authenticate, requirePermission('reservations:view'), async (req, res) => {
     try {
         const result = await queryWithRetry(`
             WITH pairs AS (
@@ -4021,7 +4066,8 @@ app.get('/email/threads', authenticate, requirePermission('reservations:view'), 
                        lower(COALESCE(from_email, to_email)) AS email_key,
                        COALESCE(from_email, to_email) AS email
                 FROM outbound_messages
-                WHERE channel = 'email'
+                WHERE tenant_id = $1
+                  AND channel = 'email'
                   AND COALESCE(from_email, to_email) IS NOT NULL
             ),
             latest AS (
@@ -4057,7 +4103,7 @@ app.get('/email/threads', authenticate, requirePermission('reservations:view'), 
             ) r ON true
             ORDER BY l.sent_at DESC
             LIMIT 200
-        `);
+        `, [req.tenantId!]);
         res.json({ threads: result.rows });
     } catch (err) {
         console.error('GET /email/threads error:', err);
@@ -4065,16 +4111,17 @@ app.get('/email/threads', authenticate, requirePermission('reservations:view'), 
     }
 });
 
-app.get('/email/unread-count', authenticate, requirePermission('reservations:view'), async (_req, res) => {
+app.get('/email/unread-count', authenticate, requirePermission('reservations:view'), async (req, res) => {
     try {
         const result = await queryWithRetry(`
             SELECT COUNT(*)::int AS count
             FROM outbound_messages
-            WHERE direction = 'inbound'
+            WHERE tenant_id = $1
+              AND direction = 'inbound'
               AND channel = 'email'
               AND read_at IS NULL
               AND from_email IS NOT NULL
-        `);
+        `, [req.tenantId!]);
         res.json({ count: result.rows[0]?.count ?? 0 });
     } catch (err) {
         console.error('GET /email/unread-count error:', err);
@@ -4091,11 +4138,12 @@ app.get('/email/threads/:emailKey', authenticate, requirePermission('reservation
                     status, provider_sid, message_id, in_reply_to, reservation_id,
                     sent_at, delivered_at, failed_at, read_at, error_code, error_message
              FROM outbound_messages
-             WHERE channel = 'email'
+             WHERE tenant_id = $2
+               AND channel = 'email'
                AND (lower(to_email) = $1 OR lower(from_email) = $1)
              ORDER BY sent_at ASC
              LIMIT 500`,
-            [key]
+            [key, req.tenantId!]
         );
         res.json({ messages: result.rows });
     } catch (err) {
@@ -4111,12 +4159,13 @@ app.post('/email/threads/:emailKey/read', authenticate, requirePermission('reser
         const updated = await queryWithRetry(
             `UPDATE outbound_messages
              SET read_at = CURRENT_TIMESTAMP
-             WHERE direction = 'inbound'
+             WHERE tenant_id = $2
+               AND direction = 'inbound'
                AND read_at IS NULL
                AND channel = 'email'
                AND lower(from_email) = $1
              RETURNING id`,
-            [key]
+            [key, req.tenantId!]
         );
         if (updated.rows.length > 0 && socketService) {
             socketService.broadcastToAll('email:read', {
@@ -4188,14 +4237,14 @@ app.post('/email/send', authenticate, requirePermission('reservations:full'), as
         // threading data.
         const inserted = await queryWithRetry(
             `INSERT INTO outbound_messages
-                (provider, channel, direction, to_email, subject, body, status,
+                (tenant_id, provider, channel, direction, to_email, subject, body, status,
                  message_id, in_reply_to, reservation_id, sent_at)
-             VALUES ('smtp', 'email', 'outbound', $1, $2, $3, 'sent',
+             VALUES ($7, 'smtp', 'email', 'outbound', $1, $2, $3, 'sent',
                      $4, $5, $6, CURRENT_TIMESTAMP)
              RETURNING id, provider, channel, direction, from_email, to_email,
                        subject, body, status, provider_sid, message_id, in_reply_to,
                        reservation_id, sent_at`,
-            [toEmail, subj, bod, sendResult.messageId || null, inReplyTo, reservationId]
+            [toEmail, subj, bod, sendResult.messageId || null, inReplyTo, reservationId, req.tenantId!]
         );
         const message = inserted.rows[0];
 
@@ -4239,9 +4288,9 @@ app.post('/messages/attachments', authenticate, requirePermission('reservations:
         }
         const token = crypto.randomBytes(32).toString('base64url');
         const ins = await queryWithRetry(
-            `INSERT INTO outbound_media (token, content_type, filename, bytes, size_bytes, created_by_user_id)
-             VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, token, content_type, filename, size_bytes`,
-            [token, contentType, filename, buf, buf.length, req.user?.userId ?? null]
+            `INSERT INTO outbound_media (tenant_id, token, content_type, filename, bytes, size_bytes, created_by_user_id)
+             VALUES ($7, $1, $2, $3, $4, $5, $6) RETURNING id, token, content_type, filename, size_bytes`,
+            [token, contentType, filename, buf, buf.length, req.user?.userId ?? null, req.tenantId!]
         );
         res.status(201).json(ins.rows[0]);
     } catch (err: any) {
@@ -4251,7 +4300,9 @@ app.post('/messages/attachments', authenticate, requirePermission('reservations:
 });
 
 // Pubblico per forza: e' Twilio a scaricare il file, e non ha le nostre
-// credenziali. La protezione e' il token da 32 byte nel path.
+// credenziali. La protezione e' il token da 32 byte nel path — e' anche il
+// motivo per cui qui NON c'e' filtro tenant: il token e' unico globale e
+// non indovinabile, il tenant e' implicito nella riga trovata.
 app.get('/public/media/:token', async (req, res) => {
     try {
         const token = String(req.params.token || '');
@@ -4293,11 +4344,12 @@ app.post('/messages/suggest-reply', authenticate, requirePermission('reservation
             queryWithRetry(
                 `SELECT direction, body, sent_at
                    FROM outbound_messages
-                  WHERE channel IN ('sms','whatsapp')
+                  WHERE tenant_id = $2
+                    AND channel IN ('sms','whatsapp')
                     AND (right(to_phone_digits, 10) = $1::text OR right(from_phone_digits, 10) = $1::text)
                   ORDER BY sent_at DESC
                   LIMIT 15`,
-                [key]
+                [key, req.tenantId!]
             ),
             queryWithRetry(
                 `SELECT title, content FROM ai_knowledge_entries WHERE is_active ORDER BY sort_order, id`
@@ -4377,9 +4429,10 @@ app.post('/messages/send', authenticate, requirePermission('reservations:full'),
             const win = await queryWithRetry(
                 `SELECT MAX(sent_at) AS last_inbound_at
                  FROM outbound_messages
-                 WHERE direction = 'inbound' AND channel = 'whatsapp'
+                 WHERE tenant_id = $2
+                   AND direction = 'inbound' AND channel = 'whatsapp'
                    AND right(from_phone_digits, 10) = $1::text`,
-                [key]
+                [key, req.tenantId!]
             );
             const lastInbound = win.rows[0]?.last_inbound_at as Date | null;
             const withinWindow = !!lastInbound
@@ -4398,8 +4451,8 @@ app.post('/messages/send', authenticate, requirePermission('reservations:full'),
                 return res.status(400).json({ error: 'Gli allegati si inviano solo via WhatsApp' });
             }
             const found = await queryWithRetry(
-                `SELECT token FROM outbound_media WHERE token = ANY($1)`,
-                [attachmentTokens]
+                `SELECT token FROM outbound_media WHERE token = ANY($1) AND tenant_id = $2`,
+                [attachmentTokens, req.tenantId!]
             );
             const known = new Set(found.rows.map((r: any) => r.token));
             const missing = attachmentTokens.filter(t => !known.has(t));
@@ -4421,14 +4474,14 @@ app.post('/messages/send', authenticate, requirePermission('reservations:full'),
 
         const body = hasText ? text.trim() : '';
         const result = desiredChannel === 'whatsapp'
-            ? await sendWhatsAppText(phone, body, null, undefined, mediaUrls)
-            : await sendTwilioSms(phone, body);
+            ? await sendWhatsAppText(req.tenantId!, phone, body, null, undefined, mediaUrls)
+            : await sendTwilioSms(req.tenantId!, phone, body);
 
         let row: any = null;
         if (result.sid) {
             const r = await queryWithRetry(
-                `SELECT * FROM outbound_messages WHERE provider_sid = $1 LIMIT 1`,
-                [result.sid]
+                `SELECT * FROM outbound_messages WHERE provider_sid = $1 AND tenant_id = $2 LIMIT 1`,
+                [result.sid, req.tenantId!]
             );
             row = r.rows[0] ?? null;
         }
@@ -4437,13 +4490,13 @@ app.post('/messages/send', authenticate, requirePermission('reservations:full'),
         if (row && mediaUrls.length > 0) {
             const media = attachmentTokens.map((t, i) => ({ url: mediaUrls[i], token: t }));
             const enriched = await queryWithRetry(
-                `UPDATE outbound_messages SET media = $2::jsonb WHERE id = $1 RETURNING *`,
-                [row.id, JSON.stringify(media)]
+                `UPDATE outbound_messages SET media = $2::jsonb WHERE id = $1 AND tenant_id = $3 RETURNING *`,
+                [row.id, JSON.stringify(media), req.tenantId!]
             );
             row = enriched.rows[0] ?? row;
             await queryWithRetry(
-                `UPDATE outbound_media SET message_id = $1 WHERE token = ANY($2)`,
-                [row.id, attachmentTokens]
+                `UPDATE outbound_media SET message_id = $1 WHERE token = ANY($2) AND tenant_id = $3`,
+                [row.id, attachmentTokens, req.tenantId!]
             ).catch(() => {});
         }
         if (row && socketService) {
@@ -4786,12 +4839,14 @@ app.get('/payments/:id/messages', authenticate, requirePermission('payments:view
         }
         if (conditions.length === 0) return res.json({ items: [], checkout_url: checkoutUrl });
 
+        params.push(req.tenantId!);
         const result = await queryWithRetry(
             `SELECT id, provider, channel, to_phone, to_email, subject, body, status, provider_sid,
                     reservation_id, sent_at, delivered_at, failed_at,
                     error_code, error_message
              FROM outbound_messages
-             WHERE ${conditions.join(' OR ')}
+             WHERE tenant_id = $${params.length}
+               AND (${conditions.join(' OR ')})
              ORDER BY sent_at DESC
              LIMIT 100`,
             params
@@ -4946,18 +5001,18 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
                 const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
                 try {
                     const sent = await sendMail({ to: String(reservation.email), subject, text, html });
-                    await logOutboundEmail({ provider: emailProvider, to: String(reservation.email), subject, body: text, messageId: sent.messageId || null, reservationId: reservation.id });
+                    await logOutboundEmail({ tenantId: req.tenantId!, provider: emailProvider, to: String(reservation.email), subject, body: text, messageId: sent.messageId || null, reservationId: reservation.id });
                     return { channel: 'email', sid: sent.messageId || null };
                 } catch (sendErr: any) {
-                    await logOutboundEmail({ provider: emailProvider, to: String(reservation.email), subject, body: text, reservationId: reservation.id, errorMessage: sendErr?.message || String(sendErr) });
+                    await logOutboundEmail({ tenantId: req.tenantId!, provider: emailProvider, to: String(reservation.email), subject, body: text, reservationId: reservation.id, errorMessage: sendErr?.message || String(sendErr) });
                     throw sendErr;
                 }
             }
             if (channel === 'sms') {
-                const r = await sendTwilioSms(reservation.phone, message, reservation.id);
+                const r = await sendTwilioSms(req.tenantId!, reservation.phone, message, reservation.id);
                 return { channel: r.channel, sid: r.sid ?? null };
             }
-            const r = await sendBookingConfirmation(reservation.phone, message, reservation.id, { whatsappTemplate });
+            const r = await sendBookingConfirmation(req.tenantId!, reservation.phone, message, reservation.id, { whatsappTemplate });
             return { channel: r.channel, sid: r.sid ?? null };
         };
 
@@ -5283,7 +5338,9 @@ async function applyPaymentOrderTransition(
                         row.amount_cents,
                         roomName
                     );
-                    await sendBookingConfirmation(reservation.phone, message, reservation.id, {
+                    // Transizione invocata sia da webhook sia da riconciliatore:
+                    // niente JWT in mano, il tenant è quello della payment_request.
+                    await sendBookingConfirmation(Number(row.tenant_id) || PUBLIC_TENANT_ID, reservation.phone, message, reservation.id, {
                         whatsappTemplate: buildBookingDepositConfirmedTemplate(
                             reservation.customer_name,
                             reservation.reservation_time,
@@ -5645,7 +5702,7 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
                     // No Meta-approved template exists for refunds, so this
                     // goes out as SMS (sendBookingConfirmation only attempts
                     // WhatsApp when given a template).
-                    const delivery = await sendBookingConfirmation(reservation.phone, message, payment.reservation_id);
+                    const delivery = await sendBookingConfirmation(req.tenantId!, reservation.phone, message, payment.reservation_id);
                     console.log(`[payments] refund notice sent for payment ${payment.id} via ${delivery.channel}`);
                 } catch (err: any) {
                     console.error('[payments] refund notice failed for payment', payment.id, err?.message || err);
@@ -7094,7 +7151,12 @@ const normalizeCustomerName = (raw: string): string => {
 // Auto-add the reservation contact to the rubrica when a phone is provided and
 // no customer with the same digits-only phone already exists. Failures are
 // swallowed: the reservation save must succeed even if this side-effect fails.
+// tenantId obbligatorio: req.tenantId! dalle rotte autenticate,
+// PUBLIC_TENANT_ID dai canali pubblici (booking web, WhatsApp, voce). Senza
+// filtro, il "cerca per telefono" aggancerebbe la scheda di un altro
+// ristorante e il cliente non verrebbe mai creato in rubrica.
 const upsertCustomerFromReservation = async (
+    tenantId: number,
     customerName: string | null | undefined,
     phone: string | null | undefined,
     email: string | null | undefined,
@@ -7109,20 +7171,22 @@ const upsertCustomerFromReservation = async (
 
         const existing = await queryWithRetry(
             `SELECT id FROM customers
-             WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1
+             WHERE tenant_id = $2
+               AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1
              LIMIT 1`,
-            [phoneDigits]
+            [phoneDigits, tenantId]
         );
         if (existing.rows.length > 0) return;
 
         const inserted = await queryWithRetry(
-            `INSERT INTO customers (name, phone, email)
-             VALUES ($1, $2, $3)
+            `INSERT INTO customers (tenant_id, name, phone, email)
+             VALUES ($4, $1, $2, $3)
              RETURNING id, name`,
             [
                 normalizeCustomerName(String(customerName).trim()),
                 trimmedPhone,
                 email && String(email).trim() ? String(email).trim() : null,
+                tenantId,
             ]
         );
         const newCustomer = inserted.rows[0];
@@ -7148,6 +7212,7 @@ const upsertCustomerFromReservation = async (
 // (matched by phone-digits) so it can be used to filter marketing sends. Only
 // runs when an explicit boolean was provided. Side-effect — never throws.
 const setCustomerMarketingConsent = async (
+    tenantId: number,
     phone: string | null | undefined,
     consent: boolean | null | undefined
 ): Promise<void> => {
@@ -7159,8 +7224,9 @@ const setCustomerMarketingConsent = async (
         await queryWithRetry(
             `UPDATE customers
              SET consent_marketing = $2, consent_marketing_updated_at = CURRENT_TIMESTAMP
-             WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1`,
-            [phoneDigits, consent]
+             WHERE tenant_id = $3
+               AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1`,
+            [phoneDigits, consent, tenantId]
         );
     } catch (err) {
         console.error('setCustomerMarketingConsent failed:', err);
@@ -7171,6 +7237,7 @@ const setCustomerMarketingConsent = async (
 // customer by phone-digits match and updates the name (and email if newly
 // provided) when they differ. Failures are swallowed.
 const syncCustomerFromReservation = async (
+    tenantId: number,
     customerName: string | null | undefined,
     phone: string | null | undefined,
     email: string | null | undefined,
@@ -7184,9 +7251,10 @@ const syncCustomerFromReservation = async (
 
         const existing = await queryWithRetry(
             `SELECT id, name, email FROM customers
-             WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1
+             WHERE tenant_id = $2
+               AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1
              LIMIT 1`,
-            [phoneDigits]
+            [phoneDigits, tenantId]
         );
         if (existing.rows.length === 0) return;
 
@@ -7204,8 +7272,8 @@ const syncCustomerFromReservation = async (
                 name = $1,
                 email = COALESCE($2, email),
                 updated_at = CURRENT_TIMESTAMP
-             WHERE id = $3`,
-            [normalizedName, newEmail, current.id]
+             WHERE id = $3 AND tenant_id = $4`,
+            [normalizedName, newEmail, current.id, tenantId]
         );
 
         if (actor) {
@@ -7239,6 +7307,7 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
             SELECT COUNT(*)::int
             FROM reservations r
             WHERE r.reservation_status = 'NO_SHOW'
+              AND r.tenant_id = c.tenant_id
               AND r.phone IS NOT NULL
               AND REGEXP_REPLACE(r.phone, '\\D', '', 'g') = REGEXP_REPLACE(c.phone, '\\D', '', 'g')
         ) AS no_show_count`;
@@ -7250,11 +7319,12 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
                         consent_marketing, consent_marketing_updated_at,
                         ${noShowSubquery}
                  FROM customers c
-                 WHERE phone IS NOT NULL AND TRIM(phone) <> ''
+                 WHERE c.tenant_id = $3
+                   AND phone IS NOT NULL AND TRIM(phone) <> ''
                    AND (LOWER(name) LIKE $1 OR LOWER(phone) LIKE $1 OR LOWER(COALESCE(email, '')) LIKE $1)
                  ORDER BY name
                  LIMIT $2`,
-                [term, cap]
+                [term, cap, req.tenantId!]
             );
             return res.json(result.rows);
         }
@@ -7264,10 +7334,11 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
                     consent_marketing, consent_marketing_updated_at,
                     ${noShowSubquery}
              FROM customers c
-             WHERE phone IS NOT NULL AND TRIM(phone) <> ''
+             WHERE c.tenant_id = $2
+               AND phone IS NOT NULL AND TRIM(phone) <> ''
              ORDER BY name
              LIMIT $1`,
-            [cap]
+            [cap, req.tenantId!]
         );
         res.json(result.rows);
     } catch (err) {
@@ -7292,9 +7363,11 @@ app.get('/customers/marketing-audience', authenticate, requirePermission('custom
         const result = await queryWithRetry(
             `SELECT id, name, phone, email, consent_marketing_updated_at
              FROM customers
-             WHERE consent_marketing = TRUE
+             WHERE tenant_id = $1
+               AND consent_marketing = TRUE
                AND ((phone IS NOT NULL AND TRIM(phone) <> '') OR (email IS NOT NULL AND TRIM(email) <> ''))
-             ORDER BY name`
+             ORDER BY name`,
+            [req.tenantId!]
         );
         res.json({ mode: legal.legal_mode, count: result.rows.length, recipients: result.rows });
     } catch (err) {
@@ -7328,9 +7401,10 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
                 `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
                         preferred_table_id, preferences_notes, dietary_notes, is_vip
                  FROM customers
-                 WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1
+                 WHERE tenant_id = $2
+                   AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1
                  LIMIT 1`,
-                [phoneDigits]
+                [phoneDigits, req.tenantId!]
             );
             if (existing.rows.length > 0) {
                 return res.status(200).json(existing.rows[0]);
@@ -7338,8 +7412,8 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
         }
 
         const result = await queryWithRetry(
-            `INSERT INTO customers (name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            `INSERT INTO customers (tenant_id, name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip)
+             VALUES ($12, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
              RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
                        preferred_table_id, preferences_notes, dietary_notes, is_vip`,
             [
@@ -7354,6 +7428,7 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
                 preferences_notes ?? null,
                 dietary_notes ?? null,
                 normalizedIsVip,
+                req.tenantId!,
             ]
         );
         const newCustomer = result.rows[0];
@@ -7400,10 +7475,11 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
         if (phoneDigits) {
             const conflict = await queryWithRetry(
                 `SELECT id, name FROM customers
-                 WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1
+                 WHERE tenant_id = $3
+                   AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1
                    AND id <> $2
                  LIMIT 1`,
-                [phoneDigits, id]
+                [phoneDigits, id, req.tenantId!]
             );
             if (conflict.rows.length > 0) {
                 const other = conflict.rows[0];
@@ -7426,8 +7502,8 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
         try {
             await client.query('BEGIN');
             const prev = await client.query(
-                'SELECT name, phone, is_vip, preferred_table_id, dietary_notes, preferences_notes FROM customers WHERE id = $1 FOR UPDATE',
-                [id]
+                'SELECT name, phone, is_vip, preferred_table_id, dietary_notes, preferences_notes FROM customers WHERE id = $1 AND tenant_id = $2 FOR UPDATE',
+                [id, req.tenantId!]
             );
             if (prev.rowCount === 0) {
                 await client.query('ROLLBACK');
@@ -7453,7 +7529,7 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
                     dietary_notes = $10,
                     is_vip = $11,
                     updated_at = CURRENT_TIMESTAMP
-                 WHERE id = $12
+                 WHERE id = $12 AND tenant_id = $13
                  RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
                            preferred_table_id, preferences_notes, dietary_notes, is_vip`,
                 [
@@ -7469,6 +7545,7 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
                     dietary_notes ?? null,
                     normalizedIsVip,
                     id,
+                    req.tenantId!,
                 ]
             );
             updated = result.rows[0];
@@ -7482,12 +7559,15 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
             const phoneChanged = (newPhone || '') !== oldPhone;
             if (oldPhoneDigits.length >= 6 && (nameChanged || phoneChanged)) {
                 const cascade = await client.query(
+                    // La cascata resta nel tenant: il match per sole cifre
+                    // rinominerebbe le prenotazioni di un altro ristorante.
                     `UPDATE reservations
                      SET customer_name = $1,
                          phone = $2
-                     WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $3
+                     WHERE tenant_id = $4
+                       AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $3
                      RETURNING id`,
-                    [newName, newPhone, oldPhoneDigits]
+                    [newName, newPhone, oldPhoneDigits, req.tenantId!]
                 );
                 cascadedReservationIds = cascade.rows.map(r => Number(r.id));
                 if (cascade.rowCount && cascade.rowCount > 0) {
@@ -7509,8 +7589,9 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
             if (cascadedReservationIds.length === 0 && joinedFieldsChanged && oldPhoneDigits.length >= 6) {
                 const match = await client.query(
                     `SELECT id FROM reservations
-                     WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1`,
-                    [oldPhoneDigits]
+                     WHERE tenant_id = $2
+                       AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1`,
+                    [oldPhoneDigits, req.tenantId!]
                 );
                 cascadedReservationIds = match.rows.map(r => Number(r.id));
             }
@@ -7551,14 +7632,15 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
 // by the rubrica "Duplicati" panel to surface pairs that slipped past the
 // per-row unique index (e.g. different country-code prefixes on the same
 // underlying number).
-app.get('/customers/duplicates', authenticate, requirePermission('customers:view'), async (_req, res) => {
+app.get('/customers/duplicates', authenticate, requirePermission('customers:view'), async (req, res) => {
     try {
         const result = await queryWithRetry(
             `WITH digits AS (
                  SELECT id,
                         regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') AS d
                  FROM customers
-                 WHERE phone IS NOT NULL
+                 WHERE tenant_id = $1
+                   AND phone IS NOT NULL
                    AND length(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g')) >= 8
              ),
              groups AS (
@@ -7582,9 +7664,10 @@ app.get('/customers/duplicates', authenticate, requirePermission('customers:view
                         ORDER BY c.id
                     ) AS customers
              FROM groups g
-             JOIN customers c ON c.id = ANY(g.ids)
+             JOIN customers c ON c.id = ANY(g.ids) AND c.tenant_id = $1
              GROUP BY g.key
-             ORDER BY g.key`
+             ORDER BY g.key`,
+            [req.tenantId!]
         );
         res.json({ groups: result.rows });
     } catch (err: any) {
@@ -7609,8 +7692,10 @@ app.post('/customers/:sourceId/merge-into/:targetId', authenticate, requirePermi
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        const src = await client.query('SELECT * FROM customers WHERE id = $1 FOR UPDATE', [sourceId]);
-        const tgt = await client.query('SELECT * FROM customers WHERE id = $1 FOR UPDATE', [targetId]);
+        // Entrambe le schede devono appartenere al tenant: un id altrui fa
+        // 404, mai una fusione fra rubriche di ristoranti diversi.
+        const src = await client.query('SELECT * FROM customers WHERE id = $1 AND tenant_id = $2 FOR UPDATE', [sourceId, req.tenantId!]);
+        const tgt = await client.query('SELECT * FROM customers WHERE id = $1 AND tenant_id = $2 FOR UPDATE', [targetId, req.tenantId!]);
         if (src.rowCount === 0 || tgt.rowCount === 0) {
             await client.query('ROLLBACK');
             return res.status(404).json({ error: 'Customer not found' });
@@ -7627,8 +7712,9 @@ app.post('/customers/:sourceId/merge-into/:targetId', authenticate, requirePermi
                  SET phone = $1,
                      customer_name = $2
                  WHERE phone = $3
+                   AND tenant_id = $4
                  RETURNING id`,
-                [target.phone || source.phone, target.name, source.phone]
+                [target.phone || source.phone, target.name, source.phone, req.tenantId!]
             );
             cascadedReservationIds = cascade.rows.map(r => Number(r.id));
         }
@@ -7659,7 +7745,7 @@ app.post('/customers/:sourceId/merge-into/:targetId', authenticate, requirePermi
                  dietary_notes = COALESCE(NULLIF(dietary_notes, ''), $9),
                  is_vip = is_vip OR $10,
                  updated_at = CURRENT_TIMESTAMP
-             WHERE id = $1
+             WHERE id = $1 AND tenant_id = $11
              RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
                        preferred_table_id, preferences_notes, dietary_notes, is_vip`,
             [
@@ -7673,10 +7759,11 @@ app.post('/customers/:sourceId/merge-into/:targetId', authenticate, requirePermi
                 source.preferences_notes || null,
                 source.dietary_notes || null,
                 source.is_vip === true,
+                req.tenantId!,
             ]
         );
 
-        await client.query('DELETE FROM customers WHERE id = $1', [sourceId]);
+        await client.query('DELETE FROM customers WHERE id = $1 AND tenant_id = $2', [sourceId, req.tenantId!]);
         await client.query('COMMIT');
 
         // Push the re-tagged reservations to every client so booking cards
@@ -7708,13 +7795,13 @@ app.post('/customers/:sourceId/merge-into/:targetId', authenticate, requirePermi
 app.delete('/customers/:id', authenticate, requirePermission('customers:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const existing = await queryWithRetry('SELECT name FROM customers WHERE id = $1', [id]);
+        const existing = await queryWithRetry('SELECT name FROM customers WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
         if (existing.rowCount === 0) {
             return res.status(404).json({ error: 'Customer not found' });
         }
         const resourceName = existing.rows[0].name;
 
-        await queryWithRetry('DELETE FROM customers WHERE id = $1', [id]);
+        await queryWithRetry('DELETE FROM customers WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
 
         if (req.user) {
             LogService.logActivity(
@@ -10760,7 +10847,7 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
     // because Twilio/Vonage rate-limited us or the network blipped — we save
     // first and reply on a best-effort basis.
     const replyAsync = (text: string) => {
-        sendWhatsAppText(phoneNumber, text).catch(err =>
+        sendWhatsAppText(PUBLIC_TENANT_ID, phoneNumber, text).catch(err =>
             console.error('[WhatsApp] reply send failed:', err)
         );
     };
@@ -10825,7 +10912,7 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
         }
 
         // Auto-save WhatsApp contact to the rubrica.
-        await upsertCustomerFromReservation(name, phoneNumber, null, null);
+        await upsertCustomerFromReservation(PUBLIC_TENANT_ID, name, phoneNumber, null, null);
 
         console.log(`[WhatsApp] ✅ Reservation created successfully for ${name}. Waiting for manual confirmation.`);
 
@@ -11660,7 +11747,11 @@ interface WhatsAppTemplateOpts {
 // Persist a row in outbound_messages so the operator can see the full
 // SMS/WhatsApp history per customer without opening the Twilio console.
 // Never lets a logging error break the actual send — errors are just warned.
+// tenantId obbligatorio e threadato lungo tutta la catena di invio
+// (sendBookingConfirmation → sendWhatsAppText/sendTwilioSms → qui): la riga
+// deve finire nella conversazione del ristorante che ha inviato.
 async function logOutboundMessage(params: {
+    tenantId: number;
     provider: 'twilio' | 'vonage' | 'meta';
     channel: 'sms' | 'whatsapp';
     to: string;
@@ -11676,8 +11767,8 @@ async function logOutboundMessage(params: {
             ?? (params.errorMessage ? 'failed' : (params.sid ? 'queued' : 'sent'));
         await queryWithRetry(
             `INSERT INTO outbound_messages
-             (provider, channel, to_phone, to_phone_digits, body, status, provider_sid, reservation_id, error_message, failed_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+             (tenant_id, provider, channel, to_phone, to_phone_digits, body, status, provider_sid, reservation_id, error_message, failed_at)
+             VALUES ($11, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
             [
                 params.provider,
                 params.channel,
@@ -11689,6 +11780,7 @@ async function logOutboundMessage(params: {
                 params.reservationId ?? null,
                 params.errorMessage ?? null,
                 params.errorMessage ? new Date() : null,
+                params.tenantId,
             ]
         );
     } catch (err: any) {
@@ -11775,6 +11867,7 @@ async function resolveReservationByPhone(
 }
 
 async function logInboundMessage(params: {
+    tenantId: number;
     provider: 'twilio' | 'vonage' | 'meta';
     channel: 'sms' | 'whatsapp';
     from: string;
@@ -11793,9 +11886,9 @@ async function logInboundMessage(params: {
         const reservationId = await resolveReservationByPhone(params.from);
         const result = await queryWithRetry(
             `INSERT INTO outbound_messages
-             (provider, channel, direction, from_phone, from_phone_digits,
+             (tenant_id, provider, channel, direction, from_phone, from_phone_digits,
               to_phone, to_phone_digits, body, status, provider_sid, reservation_id, media)
-             VALUES ($1, $2, 'inbound', $3, $4, $5, $6, $7, 'received', $8, $9, $10::jsonb)
+             VALUES ($11, $1, $2, 'inbound', $3, $4, $5, $6, $7, 'received', $8, $9, $10::jsonb)
              RETURNING *`,
             [
                 params.provider,
@@ -11808,6 +11901,7 @@ async function logInboundMessage(params: {
                 params.sid ?? null,
                 reservationId,
                 params.media && params.media.length > 0 ? JSON.stringify(params.media) : null,
+                params.tenantId,
             ]
         );
         const row = result.rows[0] ?? null;
@@ -11824,7 +11918,7 @@ async function logInboundMessage(params: {
                 || mediaLabel;
             const fromDisplay = params.from || 'sconosciuto';
             pushSendToRoles(
-                PUBLIC_TENANT_ID,
+                params.tenantId,
                 ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
                 {
                     category: 'message',
@@ -11848,6 +11942,7 @@ async function logInboundMessage(params: {
 // timeline surfaces SMS/WhatsApp/Email in one chronological list. to_phone*
 // columns are left NULL for email rows; to_email carries the recipient.
 async function logOutboundEmail(params: {
+    tenantId: number;
     provider: 'smtp' | 'resend';
     to: string;
     subject: string;
@@ -11860,8 +11955,8 @@ async function logOutboundEmail(params: {
         const status = params.errorMessage ? 'failed' : 'sent';
         await queryWithRetry(
             `INSERT INTO outbound_messages
-             (provider, channel, to_email, subject, body, status, provider_sid, message_id, direction, reservation_id, error_message, failed_at)
-             VALUES ($1, 'email', $2, $3, $4, $5, $6, $7, 'outbound', $8, $9, $10)`,
+             (tenant_id, provider, channel, to_email, subject, body, status, provider_sid, message_id, direction, reservation_id, error_message, failed_at)
+             VALUES ($11, $1, 'email', $2, $3, $4, $5, $6, $7, 'outbound', $8, $9, $10)`,
             [
                 params.provider,
                 params.to,
@@ -11873,6 +11968,7 @@ async function logOutboundEmail(params: {
                 params.reservationId ?? null,
                 params.errorMessage ?? null,
                 params.errorMessage ? new Date() : null,
+                params.tenantId,
             ]
         );
     } catch (err: any) {
@@ -11898,6 +11994,7 @@ function twilioStatusCallbackUrl(): string | null {
 }
 
 async function sendTwilioWhatsApp(
+    tenantId: number,
     to: string,
     text: string,
     reservationId?: number | null,
@@ -11954,21 +12051,21 @@ async function sendTwilioWhatsApp(
         if (!response.ok) {
             console.error('[Twilio] ❌ Error sending message:', result);
             await logOutboundMessage({
-                provider: 'twilio', channel: 'whatsapp', to, body: text,
+                tenantId, provider: 'twilio', channel: 'whatsapp', to, body: text,
                 reservationId, errorMessage: `Twilio API error: ${response.status} - ${JSON.stringify(result)}`,
             });
             throw new Error(`Twilio API error: ${response.status} - ${JSON.stringify(result)}`);
         }
         console.log(`[Twilio] ✅ Message sent to ${to} (sid=${result.sid})`);
         await logOutboundMessage({
-            provider: 'twilio', channel: 'whatsapp', to, body: text,
+            tenantId, provider: 'twilio', channel: 'whatsapp', to, body: text,
             sid: result.sid, reservationId,
         });
         return { sid: result.sid, channel: 'whatsapp' };
     } catch (err: any) {
         if (err?.message && !err.message.startsWith('Twilio API error')) {
             await logOutboundMessage({
-                provider: 'twilio', channel: 'whatsapp', to, body: text,
+                tenantId, provider: 'twilio', channel: 'whatsapp', to, body: text,
                 reservationId, errorMessage: err.message,
             });
         }
@@ -11982,6 +12079,7 @@ async function sendTwilioWhatsApp(
 // (required for business-initiated messages outside the 24h window); Vonage
 // doesn't support templates so it's skipped in that case.
 async function sendWhatsAppText(
+    tenantId: number,
     to: string,
     text: string,
     reservationId?: number | null,
@@ -11989,17 +12087,17 @@ async function sendWhatsAppText(
     mediaUrls?: string[]
 ): Promise<OutboundConfirmationResult> {
     if (isTwilioWhatsAppConfigured()) {
-        return sendTwilioWhatsApp(to, text, reservationId, template, mediaUrls);
+        return sendTwilioWhatsApp(tenantId, to, text, reservationId, template, mediaUrls);
     }
     if (template) throw new Error('WhatsApp template requires Twilio (Vonage unsupported)');
     if (mediaUrls?.length) throw new Error('Gli allegati richiedono Twilio (Vonage non supportato)');
     try {
         await sendVonageWhatsApp(to, text);
-        await logOutboundMessage({ provider: 'vonage', channel: 'whatsapp', to, body: text, reservationId });
+        await logOutboundMessage({ tenantId, provider: 'vonage', channel: 'whatsapp', to, body: text, reservationId });
         return { channel: 'whatsapp' };
     } catch (err: any) {
         await logOutboundMessage({
-            provider: 'vonage', channel: 'whatsapp', to, body: text, reservationId,
+            tenantId, provider: 'vonage', channel: 'whatsapp', to, body: text, reservationId,
             errorMessage: err?.message || String(err),
         });
         throw err;
@@ -12019,7 +12117,7 @@ function isTwilioSmsConfigured(): boolean {
         && (process.env.TWILIO_MESSAGING_SERVICE_SID || process.env.TWILIO_SMS_FROM));
 }
 
-async function sendTwilioSms(to: string, text: string, reservationId?: number | null): Promise<OutboundConfirmationResult> {
+async function sendTwilioSms(tenantId: number, to: string, text: string, reservationId?: number | null): Promise<OutboundConfirmationResult> {
     const ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
     const AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
     const MESSAGING_SERVICE_SID = process.env.TWILIO_MESSAGING_SERVICE_SID;
@@ -12070,21 +12168,21 @@ async function sendTwilioSms(to: string, text: string, reservationId?: number | 
         if (!response.ok) {
             console.error('[Twilio SMS] ❌ Error sending message:', result);
             await logOutboundMessage({
-                provider: 'twilio', channel: 'sms', to, body: text,
+                tenantId, provider: 'twilio', channel: 'sms', to, body: text,
                 reservationId, errorMessage: `Twilio SMS API error: ${response.status} - ${JSON.stringify(result)}`,
             });
             throw new Error(`Twilio SMS API error: ${response.status} - ${JSON.stringify(result)}`);
         }
         console.log(`[Twilio SMS] ✅ Message sent to ${to} (sid=${result.sid})`);
         await logOutboundMessage({
-            provider: 'twilio', channel: 'sms', to, body: text,
+            tenantId, provider: 'twilio', channel: 'sms', to, body: text,
             sid: result.sid, reservationId,
         });
         return { sid: result.sid, channel: 'sms' };
     } catch (err: any) {
         if (err?.message && !err.message.startsWith('Twilio SMS API error')) {
             await logOutboundMessage({
-                provider: 'twilio', channel: 'sms', to, body: text,
+                tenantId, provider: 'twilio', channel: 'sms', to, body: text,
                 reservationId, errorMessage: err.message,
             });
         }
@@ -12101,6 +12199,7 @@ async function sendTwilioSms(to: string, text: string, reservationId?: number | 
 // sends are still handled by the StatusCallback path. When `reservationId`
 // is passed we persist the Twilio SID so the StatusCallback can update it.
 async function sendBookingConfirmation(
+    tenantId: number,
     to: string,
     text: string,
     reservationId?: number | null,
@@ -12111,12 +12210,12 @@ async function sendBookingConfirmation(
     let result: OutboundConfirmationResult;
     try {
         result = tryWhatsApp
-            ? await sendWhatsAppText(to, text, reservationId, template)
-            : await sendTwilioSms(to, text, reservationId);
+            ? await sendWhatsAppText(tenantId, to, text, reservationId, template)
+            : await sendTwilioSms(tenantId, to, text, reservationId);
     } catch (err: any) {
         if (tryWhatsApp && isTwilioSmsConfigured()) {
             console.warn('[confirmation] WA send failed, falling back to SMS:', err?.message || err);
-            result = await sendTwilioSms(to, text, reservationId);
+            result = await sendTwilioSms(tenantId, to, text, reservationId);
         } else {
             throw err;
         }
@@ -13166,23 +13265,27 @@ app.get('/ai-usage/elevenlabs', authenticate, requireDevBoardAdmin, async (req, 
                     COALESCE(SUM(duration_seconds),0)::int AS seconds,
                     MAX(created_at) AS last_at
              FROM voice_calls
-             WHERE created_at >= NOW() - make_interval(days => $1::int)`,
-            [days]
+             WHERE tenant_id = $2
+               AND created_at >= NOW() - make_interval(days => $1::int)`,
+            [days, req.tenantId!]
         );
         const callDailyQ = queryWithRetry(
             `SELECT to_char(created_at AT TIME ZONE 'Europe/Rome', 'YYYY-MM-DD') AS day,
                     COUNT(*)::int AS calls,
                     COALESCE(SUM(duration_seconds),0)::int AS seconds
              FROM voice_calls
-             WHERE created_at >= NOW() - make_interval(days => $1::int)
+             WHERE tenant_id = $2
+               AND created_at >= NOW() - make_interval(days => $1::int)
              GROUP BY day
              ORDER BY day`,
-            [days]
+            [days, req.tenantId!]
         );
         const callAllTimeQ = queryWithRetry(
             `SELECT COUNT(*)::int AS calls,
                     COALESCE(SUM(duration_seconds),0)::int AS seconds
-             FROM voice_calls`
+             FROM voice_calls
+             WHERE tenant_id = $1`,
+            [req.tenantId!]
         );
 
         const [callTotals, callDaily, callAllTime] = await Promise.all([callTotalsQ, callDailyQ, callAllTimeQ]);
@@ -13209,8 +13312,10 @@ app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
         const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '50'), 10) || 50, 1), 200);
         const offset = Math.max(parseInt(String(req.query.offset ?? '0'), 10) || 0, 0);
 
-        const where: string[] = [];
-        const params: any[] = [];
+        // Primo filtro sempre presente: il tenant. Entra in params prima di
+        // limit/offset, così whereSql vale anche per la COUNT più sotto.
+        const where: string[] = ['vc.tenant_id = $1'];
+        const params: any[] = [req.tenantId!];
 
         if (from && /^\d{4}-\d{2}-\d{2}$/.test(from)) {
             params.push(from);
@@ -13235,7 +13340,8 @@ app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
                   OR r.customer_name ILIKE $${idx}
                   OR EXISTS (
                       SELECT 1 FROM customers c2
-                      WHERE c2.phone IS NOT NULL
+                      WHERE c2.tenant_id = vc.tenant_id
+                        AND c2.phone IS NOT NULL
                         AND vc.phone IS NOT NULL
                         AND length(regexp_replace(c2.phone, '\\D', '', 'g')) >= 8
                         AND right(regexp_replace(c2.phone, '\\D', '', 'g'), 10)
@@ -13293,6 +13399,7 @@ app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
                  FROM customers c
                  WHERE vc.phone IS NOT NULL
                    AND c.phone IS NOT NULL
+                   AND c.tenant_id = vc.tenant_id
                    AND length(regexp_replace(c.phone, '\\D', '', 'g')) >= 8
                    AND right(regexp_replace(c.phone, '\\D', '', 'g'), 10)
                      = right(regexp_replace(vc.phone, '\\D', '', 'g'), 10)
@@ -13331,14 +13438,16 @@ app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
 // Distinct on the last 10 phone digits so the badge matches the Chiamate
 // list, which collapses repeated attempts from the same number into one
 // card; calls without a phone still count one each.
-app.get('/voice-calls/pending-count', authenticate, voiceCallsAuthorize, async (_req, res) => {
+app.get('/voice-calls/pending-count', authenticate, voiceCallsAuthorize, async (req, res) => {
     try {
         const result = await queryWithRetry(
             `SELECT COUNT(DISTINCT COALESCE(NULLIF(right(regexp_replace(phone, '\\D', '', 'g'), 10), ''), 'call-' || id))::int AS count
              FROM voice_calls
-             WHERE reservation_id IS NULL
+             WHERE tenant_id = $1
+               AND reservation_id IS NULL
                AND (follow_up_status IS NULL OR follow_up_status = 'PENDING')
-               AND created_at >= NOW() - INTERVAL '7 days'`
+               AND created_at >= NOW() - INTERVAL '7 days'`,
+            [req.tenantId!]
         );
         res.json({ count: result.rows[0]?.count ?? 0 });
     } catch (err) {
@@ -13358,10 +13467,11 @@ app.post('/voice-calls/mark-all-contacted', authenticate, voiceCallsAuthorize, a
              SET follow_up_status = 'CONTACTED',
                  follow_up_updated_by = $1,
                  follow_up_updated_at = NOW()
-             WHERE reservation_id IS NULL
+             WHERE tenant_id = $2
+               AND reservation_id IS NULL
                AND (follow_up_status IS NULL OR follow_up_status = 'PENDING')
              RETURNING id`,
-            [req.user?.userId ?? null]
+            [req.user?.userId ?? null, req.tenantId!]
         );
         res.json({ updated: result.rows.length });
     } catch (err) {
@@ -13403,8 +13513,10 @@ app.patch('/voice-calls/:id/follow-up', authenticate, voiceCallsAuthorize, async
         sets.push(`follow_up_updated_at = NOW()`);
 
         params.push(id);
+        params.push(req.tenantId!);
         const result = await queryWithRetry(
-            `UPDATE voice_calls SET ${sets.join(', ')} WHERE id = $${params.length}
+            `UPDATE voice_calls SET ${sets.join(', ')}
+             WHERE id = $${params.length - 1} AND tenant_id = $${params.length}
              RETURNING id, follow_up_status, notes, follow_up_updated_at`,
             params
         );
@@ -13430,6 +13542,14 @@ app.patch('/voice-calls/:id/link', authenticate, voiceCallsAuthorize, async (req
             : parseInt(reservationIdRaw, 10);
         if (!Number.isFinite(reservationId)) return res.status(400).json({ error: 'Invalid reservation_id' });
 
+        // Guardia FK cross-tenant (pattern B3): una prenotazione altrui non
+        // si aggancia — 404, come se non esistesse.
+        const resvOk = await queryWithRetry(
+            'SELECT 1 FROM reservations WHERE id = $1 AND tenant_id = $2',
+            [reservationId, req.tenantId!]
+        );
+        if (resvOk.rowCount === 0) return res.status(404).json({ error: 'Reservation not found' });
+
         // Also clears the phantom-recovery banner: if this call was flagged
         // as a phantom confirmation, linking a real reservation is exactly
         // the recovery we were asking staff to perform.
@@ -13440,9 +13560,9 @@ app.patch('/voice-calls/:id/link', authenticate, voiceCallsAuthorize, async (req
                  follow_up_updated_at = NOW(),
                  follow_up_updated_by = $2,
                  phantom_recovered = CASE WHEN phantom_confirmation THEN TRUE ELSE phantom_recovered END
-             WHERE id = $3
+             WHERE id = $3 AND tenant_id = $4
              RETURNING id, reservation_id, follow_up_status, follow_up_updated_at, phantom_recovered`,
-            [reservationId, req.user?.userId ?? null, id]
+            [reservationId, req.user?.userId ?? null, id, req.tenantId!]
         );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
         res.json(result.rows[0]);
@@ -13464,9 +13584,9 @@ app.patch('/voice-calls/:id/recover', authenticate, voiceCallsAuthorize, async (
         const result = await queryWithRetry(
             `UPDATE voice_calls
              SET phantom_recovered = TRUE
-             WHERE id = $1
+             WHERE id = $1 AND tenant_id = $2
              RETURNING id, phantom_confirmation, phantom_recovered`,
-            [id]
+            [id, req.tenantId!]
         );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
         res.json(result.rows[0]);
@@ -13512,13 +13632,14 @@ app.get('/voice-calls/:id', authenticate, voiceCallsAuthorize, async (req, res) 
                  FROM customers c
                  WHERE vc.phone IS NOT NULL
                    AND c.phone IS NOT NULL
+                   AND c.tenant_id = vc.tenant_id
                    AND length(regexp_replace(c.phone, '\\D', '', 'g')) >= 8
                    AND right(regexp_replace(c.phone, '\\D', '', 'g'), 10)
                      = right(regexp_replace(vc.phone, '\\D', '', 'g'), 10)
                  LIMIT 1
              ) cust ON true
-             WHERE vc.id = $1`,
-            [id]
+             WHERE vc.id = $1 AND vc.tenant_id = $2`,
+            [id, req.tenantId!]
         );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Not found' });
         res.json(result.rows[0]);
@@ -13541,8 +13662,8 @@ app.get('/voice-calls/:id/audio', authenticate, voiceCallsAuthorize, async (req,
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
 
         const row = await queryWithRetry(
-            'SELECT conversation_id FROM voice_calls WHERE id = $1',
-            [id]
+            'SELECT conversation_id FROM voice_calls WHERE id = $1 AND tenant_id = $2',
+            [id, req.tenantId!]
         );
         if (row.rows.length === 0) return res.status(404).json({ error: 'Not found' });
         const conversationId = row.rows[0].conversation_id;
@@ -13583,8 +13704,8 @@ app.get('/voice-calls/:id/messages', authenticate, voiceCallsAuthorize, async (r
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
 
         const callRow = await queryWithRetry(
-            'SELECT phone FROM voice_calls WHERE id = $1',
-            [id]
+            'SELECT phone FROM voice_calls WHERE id = $1 AND tenant_id = $2',
+            [id, req.tenantId!]
         );
         if (callRow.rows.length === 0) return res.status(404).json({ error: 'Not found' });
         const phone: string | null = callRow.rows[0].phone;
@@ -13599,10 +13720,11 @@ app.get('/voice-calls/:id/messages', authenticate, voiceCallsAuthorize, async (r
                     reservation_id, sent_at, delivered_at, failed_at,
                     error_code, error_message
              FROM outbound_messages
-             WHERE right(to_phone_digits, 10) = $1
+             WHERE tenant_id = $2
+               AND right(to_phone_digits, 10) = $1
              ORDER BY sent_at DESC
              LIMIT 50`,
-            [suffix]
+            [suffix, req.tenantId!]
         );
         res.json({ items: result.rows });
     } catch (err) {
@@ -13616,7 +13738,7 @@ app.get('/voice-calls/:id/messages', authenticate, voiceCallsAuthorize, async (r
 // redeploys lose calls otherwise). For each new conversation we fetch the
 // detail to get transcript + summary + phone + duration; existing rows are
 // left untouched so manual edits aren't clobbered.
-app.post('/voice-calls/sync', authenticate, voiceCallsAuthorize, async (_req, res) => {
+app.post('/voice-calls/sync', authenticate, voiceCallsAuthorize, async (req, res) => {
     try {
         if (!ELEVENLABS_API_KEY) return res.status(503).json({ error: 'ELEVENLABS_API_KEY not configured' });
         if (!ELEVENLABS_AGENT_ID) return res.status(503).json({ error: 'ELEVENLABS_AGENT_ID not configured' });
@@ -13632,8 +13754,8 @@ app.post('/voice-calls/sync', authenticate, voiceCallsAuthorize, async (_req, re
         const conversations: any[] = Array.isArray(listJson?.conversations) ? listJson.conversations : [];
 
         const existing = await queryWithRetry(
-            `SELECT conversation_id, phone FROM voice_calls WHERE conversation_id = ANY($1::text[])`,
-            [conversations.map(c => c.conversation_id).filter(Boolean)]
+            `SELECT conversation_id, phone FROM voice_calls WHERE conversation_id = ANY($1::text[]) AND tenant_id = $2`,
+            [conversations.map(c => c.conversation_id).filter(Boolean), req.tenantId!]
         );
         const savedWithPhone = new Set<string>(existing.rows.filter(r => r.phone).map(r => r.conversation_id));
         const savedWithoutPhone = new Set<string>(existing.rows.filter(r => !r.phone).map(r => r.conversation_id));
@@ -13690,13 +13812,13 @@ app.post('/voice-calls/sync', authenticate, voiceCallsAuthorize, async (_req, re
                     // untouched to preserve any staff edits or fields already set
                     // by the post-call webhook.
                     if (!phoneRaw) { skipped++; continue; }
-                    await recordVoiceCall({
+                    await recordVoiceCall(req.tenantId!, {
                         conversation_id: conversationId,
                         phone: normalizeItalianPhone(phoneRaw),
                     });
                     backfilled++;
                 } else {
-                    await recordVoiceCall({
+                    await recordVoiceCall(req.tenantId!, {
                         conversation_id: conversationId,
                         phone: phoneRaw ? normalizeItalianPhone(phoneRaw) : undefined,
                         duration_seconds: Number.isFinite(duration) ? Math.trunc(duration) : undefined,
@@ -16045,7 +16167,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         // staff never edit this booking from the internal app. Skipped for
         // email-only bookings — upsertCustomerFromReservation early-returns
         // without a phone.
-        await upsertCustomerFromReservation(customer_name, phoneE164, emailNormalized, null);
+        await upsertCustomerFromReservation(PUBLIC_TENANT_ID, customer_name, phoneE164, emailNormalized, null);
 
         // Notify staff dashboards in real time.
         if (socketService) {
@@ -16175,7 +16297,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
 
         // SMS/WhatsApp ack — only if the guest gave us a phone number.
         if (phoneE164) {
-            sendBookingConfirmation(phoneE164, ackText, created.id, { whatsappTemplate: waTemplate }).catch(err =>
+            sendBookingConfirmation(PUBLIC_TENANT_ID, phoneE164, ackText, created.id, { whatsappTemplate: waTemplate }).catch(err =>
                 console.error('[public-booking] confirmation send failed:', err?.message || err)
             );
         }
@@ -16207,6 +16329,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                     try {
                         const sent = await sendMail({ to: emailNormalized, subject, text, html });
                         await logOutboundEmail({
+                            tenantId: PUBLIC_TENANT_ID,
                             provider: emailProvider,
                             to: emailNormalized,
                             subject,
@@ -16216,6 +16339,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                         });
                     } catch (sendErr: any) {
                         await logOutboundEmail({
+                            tenantId: PUBLIC_TENANT_ID,
                             provider: emailProvider,
                             to: emailNormalized,
                             subject,
@@ -17421,6 +17545,7 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
                  SELECT cc.dietary_notes
                  FROM customers cc
                  WHERE r.phone IS NOT NULL AND cc.phone IS NOT NULL
+                   AND cc.tenant_id = r.tenant_id
                    AND regexp_replace(r.phone, '\\D', '', 'g') = regexp_replace(cc.phone, '\\D', '', 'g')
                  ORDER BY cc.id ASC
                  LIMIT 1
@@ -18720,6 +18845,7 @@ app.get('/kitchen/service-summary', authenticate, requirePermission('orders:kds'
                  FROM customers cc
                  WHERE r.phone IS NOT NULL
                    AND cc.phone IS NOT NULL
+                   AND cc.tenant_id = r.tenant_id
                    AND regexp_replace(r.phone, '\\D', '', 'g') = regexp_replace(cc.phone, '\\D', '', 'g')
                  ORDER BY cc.is_vip DESC NULLS LAST, cc.id ASC
                  LIMIT 1
@@ -19699,8 +19825,9 @@ bookingTools.configureBookingTools({
     createVoiceReservation,
     cancelVoiceReservation,
     modifyVoiceReservation,
-    recordVoiceCall,
-    upsertCustomerFromReservation,
+    recordVoiceCall: (p: any) => recordVoiceCall(PUBLIC_TENANT_ID, p),
+    upsertCustomerFromReservation: (name: string, phone: string, a: any, b: any) =>
+        upsertCustomerFromReservation(PUBLIC_TENANT_ID, name, phone, a, b),
 
     getVoiceDateBlocks: () => getVoiceDateBlocks(PUBLIC_TENANT_ID),
     findVoiceDateBlock,
@@ -19714,7 +19841,8 @@ bookingTools.configureBookingTools({
     queryWithRetry,
     buildDepositRequestMessage,
     buildBookingDepositRequestTemplate,
-    sendBookingConfirmation,
+    sendBookingConfirmation: (phone: string, text: string, resId: number, opts?: any) =>
+        sendBookingConfirmation(PUBLIC_TENANT_ID, phone, text, resId, opts),
 
     logActivity: LogService.logActivity.bind(LogService),
     activityAction: ActivityAction,
@@ -19734,7 +19862,7 @@ bookingTools.configureBookingTools({
 // La voce aggancia ogni azione alla riga di voice_calls per l'audit della
 // telefonata; gli altri canali avranno il proprio aggancio.
 VOICE_CHANNEL.linkConversation = ({ conversationId, phone, reservationId }) => {
-    recordVoiceCall({ conversation_id: conversationId, phone, reservation_id: reservationId })
+    recordVoiceCall(PUBLIC_TENANT_ID, { conversation_id: conversationId, phone, reservation_id: reservationId })
         .catch(err => console.warn('[ElevenLabs] recordVoiceCall failed:', err?.message || err));
 };
 
