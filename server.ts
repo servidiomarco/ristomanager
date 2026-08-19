@@ -17,6 +17,7 @@ import { SocketService } from './services/socketService.js';
 import * as bookingTools from './services/bookingTools.js';
 import * as whatsappAgent from './services/whatsappAgent.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
+import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
 import {
     generateSuggestedReply,
     isAiConfigured,
@@ -202,6 +203,24 @@ const isKnownShift = (v: unknown): boolean => typeof v === 'string' && KNOWN_SHI
 // numero chiamato, tutto il traffico non autenticato appartiene al tenant 1.
 // Ogni uso di questa costante è un punto da rivisitare in Fase C.
 const PUBLIC_TENANT_ID = 1;
+
+// ============================================
+// ENTITLEMENTS COMMERCIALI (tenant_features, Fase C1)
+// ============================================
+// Livello commerciale SOPRA i flag operativi di app_settings: il flag dice
+// se il ristoratore ha acceso il canale, l'entitlement se il canale gli è
+// stato venduto. requireFeature va montato DOPO authenticate (legge
+// req.tenantId); le superfici senza JWT (webhook, pagina pubblica) usano
+// direttamente isFeatureEnabledForTenant. Cache 60s in services/entitlements.
+const requireFeature = (feature: TenantFeature) =>
+    async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+        try {
+            if (await isFeatureEnabledForTenant(req.tenantId ?? PUBLIC_TENANT_ID, feature)) return next();
+        } catch (err) {
+            console.error(`[entitlements] requireFeature(${feature}) fallito:`, (err as any)?.message || err);
+        }
+        res.status(403).json({ error: 'feature_not_enabled', feature });
+    };
 app.use((req, res, next) => {
     if (req.method === 'GET') return next();
     const s = (req.body as any)?.shift;
@@ -279,6 +298,14 @@ app.post('/webhook/vonage-inbound', async (req, res) => {
     try {
         // Acknowledge immediately to Vonage
         res.status(200).send();
+
+        // Entitlement WhatsApp spento: si risponde comunque 200 (un 4xx/5xx
+        // farebbe solo accumulare retry al provider verso un canale non
+        // venduto) ma il messaggio non viene processato né salvato.
+        if (!(await isFeatureEnabledForTenant(PUBLIC_TENANT_ID, 'whatsapp'))) {
+            console.warn('[Vonage] inbound ignorato: entitlement whatsapp disattivo');
+            return;
+        }
 
         // Vonage sends two different formats:
         // Format 1 (actual): { from, message_type: "text", text: "..." }
@@ -370,6 +397,15 @@ app.post('/webhook/twilio-whatsapp', twilioUrlEncoded, async (req, res) => {
     console.log('[Twilio] Incoming message:', req.body);
     // Acknowledge with empty TwiML so Twilio doesn't auto-reply on our behalf.
     res.set('Content-Type', 'text/xml').status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+
+    // Entitlement WhatsApp spento: ack 200 già inviato (Twilio ritenta sui
+    // 4xx/5xx e disattiverebbe il webhook dopo troppi errori), ma il
+    // messaggio non entra nell'inbox. Copre anche gli SMS inbound: il numero
+    // Twilio è unico e fa parte dello stesso add-on messaggistica.
+    if (!(await isFeatureEnabledForTenant(PUBLIC_TENANT_ID, 'whatsapp'))) {
+        console.warn('[Twilio] inbound ignorato: entitlement whatsapp disattivo');
+        return;
+    }
 
     try {
         const fromRaw = String(req.body?.From || '');
@@ -948,6 +984,12 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
         return res.json(fallbackResponse);
     }
 
+    // Entitlement voice (C1) sopra il flag operativo: canale non venduto =
+    // stessa risposta del canale spento — saluto generico, nessun lookup.
+    if (!(await isFeatureEnabledForTenant(PUBLIC_TENANT_ID, 'voice'))) {
+        return res.json(fallbackResponse);
+    }
+
     if (!(await getFeatureFlag(PUBLIC_TENANT_ID, 'voice_agent_enabled', true))) {
         return res.json(fallbackResponse);
     }
@@ -1043,6 +1085,11 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
 // caused the agent to say hello twice (once generic, once by name).
 app.post('/webhook/elevenlabs/lookup-customer', async (req, res) => {
     if (!authorizeElevenLabs(req, res)) return;
+    // Entitlement voice (C1): canale non venduto risponde come quello spento,
+    // così l'agente legge lo stesso messaggio di cortesia in entrambi i casi.
+    if (!(await isFeatureEnabledForTenant(PUBLIC_TENANT_ID, 'voice'))) {
+        return res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
+    }
     if (!(await getFeatureFlag(PUBLIC_TENANT_ID, 'voice_agent_enabled', true))) {
         return res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
     }
@@ -1119,6 +1166,12 @@ const elevenLabsParams = (req: express.Request): Record<string, any> => {
 
 /** Interruttori del canale telefonico. Restituisce true se si può procedere. */
 const voiceChannelOpen = async (res: express.Response, checkSuspension: boolean): Promise<boolean> => {
+    // Entitlement voice (C1) prima del flag operativo: canale non venduto
+    // risponde come quello spento — l'agente legge lo stesso messaggio.
+    if (!(await isFeatureEnabledForTenant(PUBLIC_TENANT_ID, 'voice'))) {
+        res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
+        return false;
+    }
     if (!(await getFeatureFlag(PUBLIC_TENANT_ID, 'voice_agent_enabled', true))) {
         res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
         return false;
@@ -1182,6 +1235,13 @@ app.post('/webhook/elevenlabs/modify-reservation', async (req, res) => {
 // wherever they live.
 app.post('/webhook/elevenlabs/post-call', async (req, res) => {
     if (!authorizeElevenLabs(req, res)) return;
+
+    // Entitlement voice (C1): ack 200 senza processare — ElevenLabs ritenta
+    // all'infinito sui 4xx/5xx e non c'è nulla da registrare per un canale
+    // non venduto.
+    if (!(await isFeatureEnabledForTenant(PUBLIC_TENANT_ID, 'voice'))) {
+        return res.status(200).json({ ok: true, note: 'voice feature not enabled' });
+    }
 
     const body = req.body || {};
     const data = (body.data && typeof body.data === 'object') ? body.data : body;
@@ -2313,7 +2373,9 @@ async function promoteReservationIfPending(tenantId: number, reservationId: numb
     }
 }
 
-app.post('/reservations/:id/confirm-whatsapp', authenticate, requirePermission('reservations:full'), async (req, res) => {
+// requireFeature('whatsapp'): l'invio conferme (WhatsApp o fallback SMS via
+// Twilio) fa parte dell'add-on messaggistica — entitlement C1.
+app.post('/reservations/:id/confirm-whatsapp', authenticate, requireFeature('whatsapp'), requirePermission('reservations:full'), async (req, res) => {
     try {
         const { id } = req.params;
         // Optional `channel` query/body param: 'sms' forces Twilio SMS, 'whatsapp'
@@ -4636,7 +4698,7 @@ app.post('/messages/agent/proposals/:id/discard', authenticate, requirePermissio
     }
 });
 
-app.post('/messages/send', authenticate, requirePermission('reservations:full'), async (req, res) => {
+app.post('/messages/send', authenticate, requireFeature('whatsapp'), requirePermission('reservations:full'), async (req, res) => {
     try {
         const { phone, text, channel } = req.body || {};
         // Gli allegati sono referenziati per token: il file e' gia' a DB
@@ -13662,7 +13724,7 @@ app.get('/ai-usage/elevenlabs', authenticate, requireDevBoardAdmin, async (req, 
 });
 
 // List with optional filters. Default newest-first, capped to 200 rows.
-app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
+app.get('/voice-calls', authenticate, requireFeature('voice'), voiceCallsAuthorize, async (req, res) => {
     try {
         const { from, to, q, linked, follow_up, phantom } = req.query as Record<string, string | undefined>;
         const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '50'), 10) || 50, 1), 200);
@@ -13794,7 +13856,7 @@ app.get('/voice-calls', authenticate, voiceCallsAuthorize, async (req, res) => {
 // Distinct on the last 10 phone digits so the badge matches the Chiamate
 // list, which collapses repeated attempts from the same number into one
 // card; calls without a phone still count one each.
-app.get('/voice-calls/pending-count', authenticate, voiceCallsAuthorize, async (req, res) => {
+app.get('/voice-calls/pending-count', authenticate, requireFeature('voice'), voiceCallsAuthorize, async (req, res) => {
     try {
         const result = await queryWithRetry(
             `SELECT COUNT(DISTINCT COALESCE(NULLIF(right(regexp_replace(phone, '\\D', '', 'g'), 10), ''), 'call-' || id))::int AS count
@@ -13816,7 +13878,7 @@ app.get('/voice-calls/pending-count', authenticate, voiceCallsAuthorize, async (
 // status NULL/PENDING) to CONTACTED in one shot. Powers the "segna tutte
 // come ricontattate" button in Conversazioni — returns how many rows
 // changed so the UI can report it. Declared before the `:id` routes.
-app.post('/voice-calls/mark-all-contacted', authenticate, voiceCallsAuthorize, async (req, res) => {
+app.post('/voice-calls/mark-all-contacted', authenticate, requireFeature('voice'), voiceCallsAuthorize, async (req, res) => {
     try {
         const result = await queryWithRetry(
             `UPDATE voice_calls
@@ -13839,7 +13901,7 @@ app.post('/voice-calls/mark-all-contacted', authenticate, voiceCallsAuthorize, a
 // Update follow-up state for a call: mark as contacted / pending, and store
 // free-text notes for whoever picks it up next. Fields are patched
 // individually — omitted fields stay as-is.
-app.patch('/voice-calls/:id/follow-up', authenticate, voiceCallsAuthorize, async (req, res) => {
+app.patch('/voice-calls/:id/follow-up', authenticate, requireFeature('voice'), voiceCallsAuthorize, async (req, res) => {
     try {
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
@@ -13887,7 +13949,7 @@ app.patch('/voice-calls/:id/follow-up', authenticate, voiceCallsAuthorize, async
 // Link a voice call to a reservation created from it (e.g. after a manual
 // call-back). Also flips the follow-up state to CONTACTED so the call drops
 // out of the pending queue.
-app.patch('/voice-calls/:id/link', authenticate, voiceCallsAuthorize, async (req, res) => {
+app.patch('/voice-calls/:id/link', authenticate, requireFeature('voice'), voiceCallsAuthorize, async (req, res) => {
     try {
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
@@ -13932,7 +13994,7 @@ app.patch('/voice-calls/:id/link', authenticate, voiceCallsAuthorize, async (req
 // the customer, decided to leave it as cancelled, etc.) without necessarily
 // linking a new reservation. Just flips phantom_recovered so the banner
 // disappears from the detail modal.
-app.patch('/voice-calls/:id/recover', authenticate, voiceCallsAuthorize, async (req, res) => {
+app.patch('/voice-calls/:id/recover', authenticate, requireFeature('voice'), voiceCallsAuthorize, async (req, res) => {
     try {
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
@@ -13953,7 +14015,7 @@ app.patch('/voice-calls/:id/recover', authenticate, voiceCallsAuthorize, async (
 });
 
 // Detail with full transcript.
-app.get('/voice-calls/:id', authenticate, voiceCallsAuthorize, async (req, res) => {
+app.get('/voice-calls/:id', authenticate, requireFeature('voice'), voiceCallsAuthorize, async (req, res) => {
     try {
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
@@ -14008,7 +14070,7 @@ app.get('/voice-calls/:id', authenticate, voiceCallsAuthorize, async (req, res) 
 // Stream the call recording from ElevenLabs. The browser hits this endpoint
 // so the API key stays on the server. Audio is gated by the same RBAC as the
 // transcript so a leaked URL can't be hot-linked from outside the app.
-app.get('/voice-calls/:id/audio', authenticate, voiceCallsAuthorize, async (req, res) => {
+app.get('/voice-calls/:id/audio', authenticate, requireFeature('voice'), voiceCallsAuthorize, async (req, res) => {
     try {
         if (!ELEVENLABS_API_KEY) {
             return res.status(503).json({ error: 'ELEVENLABS_API_KEY not configured' });
@@ -14054,7 +14116,7 @@ app.get('/voice-calls/:id/audio', authenticate, voiceCallsAuthorize, async (req,
 // Outbound SMS/WhatsApp history for a given call. We match on the last 10
 // digits of the recipient phone against the call's phone so operator can see
 // every message ever sent to that customer regardless of reservation linkage.
-app.get('/voice-calls/:id/messages', authenticate, voiceCallsAuthorize, async (req, res) => {
+app.get('/voice-calls/:id/messages', authenticate, requireFeature('voice'), voiceCallsAuthorize, async (req, res) => {
     try {
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
@@ -14094,7 +14156,7 @@ app.get('/voice-calls/:id/messages', authenticate, voiceCallsAuthorize, async (r
 // redeploys lose calls otherwise). For each new conversation we fetch the
 // detail to get transcript + summary + phone + duration; existing rows are
 // left untouched so manual edits aren't clobbered.
-app.post('/voice-calls/sync', authenticate, voiceCallsAuthorize, async (req, res) => {
+app.post('/voice-calls/sync', authenticate, requireFeature('voice'), voiceCallsAuthorize, async (req, res) => {
     try {
         if (!ELEVENLABS_API_KEY) return res.status(503).json({ error: 'ELEVENLABS_API_KEY not configured' });
         if (!ELEVENLABS_AGENT_ID) return res.status(503).json({ error: 'ELEVENLABS_AGENT_ID not configured' });
@@ -14982,6 +15044,56 @@ app.put('/settings/features', authenticate, requirePermission('settings:full'), 
     } catch (err) {
         console.error('Error updating feature flags:', err);
         res.status(500).json({ error: 'Failed to update feature flags' });
+    }
+});
+
+// ============================================
+// ENTITLEMENTS (tenant_features, Fase C1)
+// ============================================
+// Livello commerciale sopra i flag operativi qui sopra: /settings/features
+// dice cosa il ristoratore ha acceso, /settings/entitlements cosa gli è
+// stato venduto. Oggi il PUT è self-service (settings:full); passerà al
+// pannello piattaforma con la Fase D2, insieme al billing (D3).
+app.get('/settings/entitlements', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        res.json(await getTenantFeatures(req.tenantId!));
+    } catch (err) {
+        console.error('GET /settings/entitlements error:', err);
+        res.status(500).json({ error: 'Failed to fetch entitlements' });
+    }
+});
+
+app.put('/settings/entitlements', authenticate, requirePermission('settings:full'), async (req, res) => {
+    const body = req.body ?? {};
+    const updates: Array<{ feature: TenantFeature; enabled: boolean }> = [];
+    for (const feature of TENANT_FEATURES) {
+        if (feature in body) {
+            if (typeof body[feature] !== 'boolean') {
+                return res.status(400).json({ error: 'invalid_value', message: `${feature} must be boolean` });
+            }
+            updates.push({ feature, enabled: body[feature] });
+        }
+    }
+    if (updates.length === 0) {
+        return res.status(400).json({ error: 'no_updates', message: 'No entitlement updates supplied' });
+    }
+    try {
+        for (const { feature, enabled } of updates) {
+            await queryWithRetry(
+                `INSERT INTO tenant_features (tenant_id, feature, enabled, updated_at)
+                 VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                 ON CONFLICT (tenant_id, feature) DO UPDATE
+                   SET enabled = EXCLUDED.enabled, updated_at = CURRENT_TIMESTAMP`,
+                [req.tenantId!, feature, enabled]
+            );
+        }
+        // Il toggle deve valere subito, non allo scadere del TTL: chi spegne
+        // un add-on si aspetta che il canale chiuda alla richiesta successiva.
+        invalidateTenantFeaturesCache(req.tenantId!);
+        res.json(await getTenantFeatures(req.tenantId!));
+    } catch (err) {
+        console.error('PUT /settings/entitlements error:', err);
+        res.status(500).json({ error: 'Failed to update entitlements' });
     }
 });
 
@@ -16185,6 +16297,11 @@ const publicBookingLimiter = rateLimit({
 });
 
 app.get('/public/availability', async (req, res) => {
+    // Entitlement web_booking (C1): stessa forma 503/bookings_disabled del
+    // flag operativo, che la pagina /prenota gestisce già.
+    if (!(await isFeatureEnabledForTenant(PUBLIC_TENANT_ID, 'web_booking'))) {
+        return res.status(503).json({ error: 'bookings_disabled', message: PUBLIC_BOOKINGS_DISABLED_MESSAGE });
+    }
     const date = typeof req.query.date === 'string' ? req.query.date : '';
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
         return res.status(400).json({ error: 'invalid_date', message: 'date deve essere YYYY-MM-DD' });
@@ -16264,7 +16381,10 @@ app.get('/public/rooms', async (req, res) => {
 // /prenota page. Lets us swap the DID at porting time via VONAGE_VOICE_NUMBER
 // and pause/resume web bookings from Settings, no HTML edit needed.
 app.get('/public/contact', async (_req, res) => {
-    const bookingsEnabled = await getFeatureFlag(PUBLIC_TENANT_ID, 'public_bookings_enabled', false);
+    // bookingsEnabled = entitlement C1 (canale venduto) AND flag operativo
+    // (canale acceso): la pagina già rende il form disattivato quando è false.
+    const bookingsEnabled = (await isFeatureEnabledForTenant(PUBLIC_TENANT_ID, 'web_booking'))
+        && (await getFeatureFlag(PUBLIC_TENANT_ID, 'public_bookings_enabled', false));
     const raw = (process.env.VONAGE_VOICE_NUMBER || '').replace(/[^\d+]/g, '');
     let voice: { phone: string; display: string } | null = null;
     if (raw) {
@@ -16314,6 +16434,11 @@ const buildVoiceSuspensionMessage = (callbackTime: string) =>
     `Le prenotazioni sono momentaneamente sospese. Richiami dopo le ${callbackTime} per verificare eventuali tavoli disponibili.`;
 
 app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
+    // Entitlement web_booking (C1) prima del flag operativo: stessa risposta
+    // in entrambi i casi, per la pagina non cambia nulla.
+    if (!(await isFeatureEnabledForTenant(PUBLIC_TENANT_ID, 'web_booking'))) {
+        return res.status(503).json({ error: 'bookings_disabled', message: PUBLIC_BOOKINGS_DISABLED_MESSAGE });
+    }
     if (!(await getFeatureFlag(PUBLIC_TENANT_ID, 'public_bookings_enabled', false))) {
         return res.status(503).json({ error: 'bookings_disabled', message: PUBLIC_BOOKINGS_DISABLED_MESSAGE });
     }
@@ -16868,7 +16993,7 @@ app.get('/prenota/logo-dark.png', (_req, res) => {
 // returns the raw response so we can see exactly what's happening.
 // "auto" prefers Twilio → Meta → Vonage (same priority as the dispatcher).
 // Owner-only.
-app.post('/debug/whatsapp-test', authenticate, requirePermission('settings:full'), async (req, res) => {
+app.post('/debug/whatsapp-test', authenticate, requireFeature('whatsapp'), requirePermission('settings:full'), async (req, res) => {
     const to = typeof req.body?.to === 'string' ? req.body.to.trim() : '';
     const text = typeof req.body?.text === 'string' && req.body.text.trim()
         ? req.body.text.trim()

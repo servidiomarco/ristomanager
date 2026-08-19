@@ -581,8 +581,15 @@ export interface User {
   last_login?: string;
   preferred_landing_view?: string | null;
   // Ristorante di appartenenza (Fase B2). Opzionale: gli elenchi utenti
-  // non lo caricano, login e /auth/me sì.
-  tenant?: { id: number; slug: string; name: string };
+  // non lo caricano, login e /auth/me sì. `features` sono gli entitlements
+  // commerciali (Fase C1): quali add-on il ristorante ha comprato. Il
+  // gating della UI su questi flag arriva con la Fase D (wizard D1).
+  tenant?: {
+    id: number;
+    slug: string;
+    name: string;
+    features?: { voice: boolean; whatsapp: boolean; web_booking: boolean };
+  };
 }
 
 export interface AuthUser extends User {
