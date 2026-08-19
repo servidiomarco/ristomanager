@@ -202,7 +202,73 @@ const isKnownShift = (v: unknown): boolean => typeof v === 'string' && KNOWN_SHI
 // print agent): finché le Fasi C2/C3 non instradano il tenant da URL o
 // numero chiamato, tutto il traffico non autenticato appartiene al tenant 1.
 // Ogni uso di questa costante è un punto da rivisitare in Fase C.
+// Dalla C2 i webhook hanno i path gemelli /webhook/t/:tenantToken/<nome> che
+// risolvono il tenant dal token: i path storici restano alias del tenant 1
+// finché i provider non sono riconfigurati.
 const PUBLIC_TENANT_ID = 1;
+
+// ============================================
+// RISOLUZIONE TENANT DA TOKEN (webhook e print agent, Fase C2)
+// ============================================
+// I token vivono su tenants (webhook_token nel path, print_agent_token in
+// header) e si leggono a ogni richiesta dei canali: cache breve con TTL,
+// stesso schema di entitlements. Si cachano solo i match: un token ignoto
+// costa una query, ma non può gonfiare la mappa a colpi di token inventati.
+// La rotazione di un token fatta da un altro processo diventa visibile al
+// massimo dopo TTL — accettabile, i token cambiano quasi mai.
+const tenantTokenCache = new Map<string, { tenantId: number; refreshedAt: number }>();
+const TENANT_TOKEN_TTL_MS = 60_000;
+
+async function resolveTenantByTokenColumn(
+    column: 'webhook_token' | 'print_agent_token',
+    token: string
+): Promise<number | null> {
+    // Forma dei token generati (hex di gen_random_bytes): tutto il resto si
+    // scarta prima di toccare il DB, così un path malformato non costa nulla.
+    if (!token || !/^[A-Za-z0-9_-]{16,64}$/.test(token)) return null;
+    const cacheKey = `${column}:${token}`;
+    const cached = tenantTokenCache.get(cacheKey);
+    if (cached && Date.now() - cached.refreshedAt <= TENANT_TOKEN_TTL_MS) {
+        return cached.tenantId;
+    }
+    try {
+        // La colonna è una delle due literal del tipo, mai input utente:
+        // l'interpolazione è sicura (il token resta parametro bind).
+        const result = await queryWithRetry(
+            `SELECT id FROM tenants WHERE ${column} = $1 LIMIT 1`,
+            [token]
+        );
+        const id = result.rows[0]?.id != null ? Number(result.rows[0].id) : null;
+        if (id != null && Number.isFinite(id)) {
+            tenantTokenCache.set(cacheKey, { tenantId: id, refreshedAt: Date.now() });
+            return id;
+        }
+        return null;
+    } catch (err) {
+        // Stale-if-error come per gli entitlement: un blip del DB non deve
+        // buttare giù i webhook del ristorante in servizio.
+        console.error(`[webhook-token] lookup ${column} fallito:`, (err as any)?.message || err);
+        return cached ? cached.tenantId : null;
+    }
+}
+
+const resolveTenantByWebhookToken = (token: string): Promise<number | null> =>
+    resolveTenantByTokenColumn('webhook_token', token);
+
+// Estrae e risolve :tenantToken dai path gemelli /webhook/t/:tenantToken/…
+// Risponde 404 (e ritorna null) per un token ignoto: un webhook mal
+// configurato non deve MAI cadere in silenzio sul tenant 1.
+const resolveWebhookTenantOr404 = async (
+    req: express.Request,
+    res: express.Response
+): Promise<number | null> => {
+    const tenantId = await resolveTenantByWebhookToken(String(req.params.tenantToken ?? ''));
+    if (tenantId == null) {
+        res.status(404).json({ error: 'unknown_webhook_token' });
+        return null;
+    }
+    return tenantId;
+};
 
 // ============================================
 // ENTITLEMENTS COMMERCIALI (tenant_features, Fase C1)
@@ -291,8 +357,10 @@ app.use('/activity-logs', logRoutes);
 // WHATSAPP WEBHOOK ENDPOINTS (Vonage)
 // ============================================
 
-// Vonage WhatsApp inbound messages webhook
-app.post('/webhook/vonage-inbound', async (req, res) => {
+// Vonage WhatsApp inbound messages webhook.
+// Corpo condiviso fra il path storico (alias del tenant 1) e il gemello
+// /webhook/t/:tenantToken/vonage-inbound che risolve il tenant dal token.
+async function handleVonageInbound(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
     console.log('[Vonage] Incoming message:', JSON.stringify(req.body, null, 2));
 
     try {
@@ -302,7 +370,7 @@ app.post('/webhook/vonage-inbound', async (req, res) => {
         // Entitlement WhatsApp spento: si risponde comunque 200 (un 4xx/5xx
         // farebbe solo accumulare retry al provider verso un canale non
         // venduto) ma il messaggio non viene processato né salvato.
-        if (!(await isFeatureEnabledForTenant(PUBLIC_TENANT_ID, 'whatsapp'))) {
+        if (!(await isFeatureEnabledForTenant(tenantId, 'whatsapp'))) {
             console.warn('[Vonage] inbound ignorato: entitlement whatsapp disattivo');
             return;
         }
@@ -327,12 +395,12 @@ app.post('/webhook/vonage-inbound', async (req, res) => {
             // Vonage sandbox is deprecated but any inbound still lands here.
             // Persist for the inbox — no auto-reply (see Twilio webhook note).
             const row = await logInboundMessage({
-                tenantId: PUBLIC_TENANT_ID,
+                tenantId,
                 provider: 'vonage', channel: 'whatsapp',
                 from: String(from), to: '', body: String(messageText),
             });
             if (row && socketService) {
-                socketService.broadcastToAll(PUBLIC_TENANT_ID, 'message:inbound', row);
+                socketService.broadcastToAll(tenantId, 'message:inbound', row);
             }
         } else {
             console.log('[Vonage] Non-text message received, ignoring');
@@ -343,12 +411,30 @@ app.post('/webhook/vonage-inbound', async (req, res) => {
         // Still respond 200 to Vonage to avoid retries
         res.status(200).send();
     }
+}
+
+// Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
+app.post('/webhook/vonage-inbound', (req, res) => { void handleVonageInbound(PUBLIC_TENANT_ID, req, res); });
+app.post('/webhook/t/:tenantToken/vonage-inbound', async (req, res) => {
+    const tenantId = await resolveWebhookTenantOr404(req, res);
+    if (tenantId == null) return;
+    await handleVonageInbound(tenantId, req, res);
 });
 
-// Vonage WhatsApp status updates webhook
-app.post('/webhook/vonage-status', (req, res) => {
+// Vonage WhatsApp status updates webhook. Solo log: il tenant serve appena
+// il giorno in cui lo stato verrà persistito, ma il gemello col token nasce
+// ora così Vonage si configura una volta sola.
+function handleVonageStatus(_tenantId: number, req: express.Request, res: express.Response): void {
     console.log('[Vonage] Message status:', JSON.stringify(req.body, null, 2));
     res.status(200).send();
+}
+
+// Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
+app.post('/webhook/vonage-status', (req, res) => handleVonageStatus(PUBLIC_TENANT_ID, req, res));
+app.post('/webhook/t/:tenantToken/vonage-status', async (req, res) => {
+    const tenantId = await resolveWebhookTenantOr404(req, res);
+    if (tenantId == null) return;
+    handleVonageStatus(tenantId, req, res);
 });
 
 // ============================================
@@ -389,10 +475,14 @@ function validateTwilioSignature(req: express.Request): boolean {
 // operator inbox can show it in real time. Deliberately NO auto-reply: the
 // old bot that tried to parse "DATA ORA OSPITI NOME" was misleading for
 // customers replying to a confirmation ("Ok perfetto") and has been retired.
-app.post('/webhook/twilio-whatsapp', twilioUrlEncoded, async (req, res) => {
+// Corpo condiviso fra path storico (alias tenant 1) e gemello col token. La
+// firma Twilio copre l'URL completo (req.originalUrl), quindi vale anche sul
+// path tokenizzato: Twilio firma l'URL che ha configurato, token compreso.
+async function handleTwilioWhatsAppInbound(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
     if (!validateTwilioSignature(req)) {
         console.warn('[Twilio] Inbound: invalid signature, rejecting');
-        return res.status(403).send();
+        res.status(403).send();
+        return;
     }
     console.log('[Twilio] Incoming message:', req.body);
     // Acknowledge with empty TwiML so Twilio doesn't auto-reply on our behalf.
@@ -402,7 +492,7 @@ app.post('/webhook/twilio-whatsapp', twilioUrlEncoded, async (req, res) => {
     // 4xx/5xx e disattiverebbe il webhook dopo troppi errori), ma il
     // messaggio non entra nell'inbox. Copre anche gli SMS inbound: il numero
     // Twilio è unico e fa parte dello stesso add-on messaggistica.
-    if (!(await isFeatureEnabledForTenant(PUBLIC_TENANT_ID, 'whatsapp'))) {
+    if (!(await isFeatureEnabledForTenant(tenantId, 'whatsapp'))) {
         console.warn('[Twilio] inbound ignorato: entitlement whatsapp disattivo');
         return;
     }
@@ -432,25 +522,34 @@ app.post('/webhook/twilio-whatsapp', twilioUrlEncoded, async (req, res) => {
             return;
         }
         const row = await logInboundMessage({
-            tenantId: PUBLIC_TENANT_ID,
+            tenantId,
             provider: 'twilio', channel, from, to, body, sid, media,
         });
         if (row && socketService) {
-            socketService.broadcastToAll(PUBLIC_TENANT_ID, 'message:inbound', row);
+            socketService.broadcastToAll(tenantId, 'message:inbound', row);
         }
     } catch (error) {
         console.error('[Twilio] Error processing inbound:', error);
     }
+}
+
+// Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
+app.post('/webhook/twilio-whatsapp', twilioUrlEncoded, (req, res) => { void handleTwilioWhatsAppInbound(PUBLIC_TENANT_ID, req, res); });
+app.post('/webhook/t/:tenantToken/twilio-whatsapp', twilioUrlEncoded, async (req, res) => {
+    const tenantId = await resolveWebhookTenantOr404(req, res);
+    if (tenantId == null) return;
+    await handleTwilioWhatsAppInbound(tenantId, req, res);
 });
 
 // Twilio delivery status callbacks (sent/delivered/read/failed). Applies to
 // both SMS and WhatsApp outbound sends — Twilio uses the same payload shape
 // for both channels. When the SID matches a reservation we persist the status
 // and broadcast so the delivery icon updates live on the card.
-app.post('/webhook/twilio-whatsapp-status', twilioUrlEncoded, async (req, res) => {
+async function handleTwilioWhatsAppStatus(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
     if (!validateTwilioSignature(req)) {
         console.warn('[Twilio] Status: invalid signature, rejecting');
-        return res.status(403).send();
+        res.status(403).send();
+        return;
     }
     const { MessageSid, MessageStatus, To, ErrorCode, ErrorMessage } = req.body || {};
     const errSuffix = ErrorCode ? ` errCode=${ErrorCode}${ErrorMessage ? ` (${ErrorMessage})` : ''}` : '';
@@ -479,10 +578,10 @@ app.post('/webhook/twilio-whatsapp-status', twilioUrlEncoded, async (req, res) =
              WHERE confirmation_provider_sid = $3
                AND tenant_id = $4
              RETURNING *`,
-            [status, errText, MessageSid, PUBLIC_TENANT_ID]
+            [status, errText, MessageSid, tenantId]
         );
         if (updated.rows[0] && socketService) {
-            try { socketService.broadcastReservationUpdated(PUBLIC_TENANT_ID, updated.rows[0]); }
+            try { socketService.broadcastReservationUpdated(tenantId, updated.rows[0]); }
             catch (err) { console.warn('[Twilio] status broadcast failed:', err); }
         }
 
@@ -507,13 +606,13 @@ app.post('/webhook/twilio-whatsapp-status', twilioUrlEncoded, async (req, res) =
                  WHERE provider_sid = $4
                    AND tenant_id = $5
                  RETURNING *`,
-                [status, ErrorCode || null, errText, MessageSid, PUBLIC_TENANT_ID]
+                [status, ErrorCode || null, errText, MessageSid, tenantId]
             );
             // L'esito arriva dopo l'invio: senza questo evento la bolla resta
             // con l'orologio anche quando il messaggio e' fallito, e chi l'ha
             // mandato crede sia partito finche' non ricarica la pagina.
             if (updatedMsg.rows[0] && socketService) {
-                socketService.broadcastToAll(PUBLIC_TENANT_ID, 'message:status', updatedMsg.rows[0]);
+                socketService.broadcastToAll(tenantId, 'message:status', updatedMsg.rows[0]);
             }
         } catch (err: any) {
             console.warn('[Twilio] outbound_messages update failed:', err?.message || err);
@@ -528,12 +627,20 @@ app.post('/webhook/twilio-whatsapp-status', twilioUrlEncoded, async (req, res) =
         // logged any outbound SMS for the same reservation after the failed
         // WA send (covers both auto-retries and manual staff SMS sends).
         if (ErrorCode && WA_FALLBACK_ERROR_CODES.has(String(ErrorCode))) {
-            maybeFallbackWhatsAppToSms(String(MessageSid), String(ErrorCode))
+            maybeFallbackWhatsAppToSms(tenantId, String(MessageSid), String(ErrorCode))
                 .catch(err => console.warn('[Twilio] WA→SMS fallback failed:', err?.message || err));
         }
     } catch (err: any) {
         console.warn('[Twilio] status persist failed:', err?.message || err);
     }
+}
+
+// Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
+app.post('/webhook/twilio-whatsapp-status', twilioUrlEncoded, (req, res) => { void handleTwilioWhatsAppStatus(PUBLIC_TENANT_ID, req, res); });
+app.post('/webhook/t/:tenantToken/twilio-whatsapp-status', twilioUrlEncoded, async (req, res) => {
+    const tenantId = await resolveWebhookTenantOr404(req, res);
+    if (tenantId == null) return;
+    await handleTwilioWhatsAppStatus(tenantId, req, res);
 });
 
 // Twilio WhatsApp error codes that mean "this specific recipient can't be
@@ -549,18 +656,19 @@ app.post('/webhook/twilio-whatsapp-status', twilioUrlEncoded, async (req, res) =
 //           handset unregistered, or a transient Meta-side reason)
 const WA_FALLBACK_ERROR_CODES = new Set(['63003', '63005', '63007', '63016', '63018', '63024']);
 
-async function maybeFallbackWhatsAppToSms(originalSid: string, errCode: string): Promise<void> {
+async function maybeFallbackWhatsAppToSms(tenantId: number, originalSid: string, errCode: string): Promise<void> {
     // Look up the failed WA send in our log — we need the plain-text body,
     // reservation link, and the moment it was sent (idempotency anchor).
-    // Webhook senza JWT: il tenant è quello pubblico (vedi PUBLIC_TENANT_ID),
-    // ma la riga porta il proprio tenant_id e i passi successivi lo riusano.
+    // Il tenant arriva dal webhook di stato (token URL, o alias tenant 1);
+    // la riga porta comunque il proprio tenant_id e i passi successivi
+    // riusano quello.
     const orig = await queryWithRetry(
         `SELECT id, body, to_phone, reservation_id, sent_at, channel, direction, tenant_id
          FROM outbound_messages
          WHERE provider_sid = $1
            AND tenant_id = $2
          LIMIT 1`,
-        [originalSid, PUBLIC_TENANT_ID]
+        [originalSid, tenantId]
     );
     const row = orig.rows[0];
     if (!row || row.direction !== 'outbound' || row.channel !== 'whatsapp') return;
@@ -694,24 +802,27 @@ async function fetchResendReceivedEmail(id: string, apiKey: string): Promise<Res
     }
 }
 
-app.post('/webhook/resend-inbound', async (req, res) => {
-    // Webhook senza JWT: la casella inbound resta quella del tenant
-    // storico finché la Fase C2 non threada il tenant nel routing email.
-    const context = await getResendInboundContext(PUBLIC_TENANT_ID);
+// Corpo condiviso fra path storico (alias tenant 1) e gemello col token:
+// chiavi e segreto Svix arrivano da integration_settings del tenant risolto.
+async function handleResendInbound(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
+    const context = await getResendInboundContext(tenantId);
     if (!context) {
         console.warn('[Resend-inbound] not configured (missing api key or webhook secret)');
-        return res.status(503).json({ error: 'inbound_not_configured' });
+        res.status(503).json({ error: 'inbound_not_configured' });
+        return;
     }
 
     const rawBody = (req as any).rawBody as Buffer | undefined;
     if (!rawBody) {
         console.warn('[Resend-inbound] missing raw body');
-        return res.status(400).json({ error: 'missing_body' });
+        res.status(400).json({ error: 'missing_body' });
+        return;
     }
 
     if (!verifySvixSignature(rawBody, req.headers as any, context.signingSecret)) {
         console.warn('[Resend-inbound] invalid signature, rejecting');
-        return res.status(401).json({ error: 'invalid_signature' });
+        res.status(401).json({ error: 'invalid_signature' });
+        return;
     }
 
     // Ack fast so Resend does not retry the webhook while we're still working.
@@ -739,9 +850,9 @@ app.post('/webhook/resend-inbound', async (req, res) => {
         // Try In-Reply-To first (most reliable), then walk References (older
         // clients quote the entire thread), then fall back to sender lookup.
         const candidateIds = [inReplyTo, ...referenceIds].filter(Boolean) as string[];
-        let reservationId = await resolveReservationByMessageIds(PUBLIC_TENANT_ID, candidateIds);
+        let reservationId = await resolveReservationByMessageIds(tenantId, candidateIds);
         if (!reservationId) {
-            reservationId = await resolveReservationByFromEmail(PUBLIC_TENANT_ID, fromEmail);
+            reservationId = await resolveReservationByFromEmail(tenantId, fromEmail);
         }
         if (!reservationId) {
             console.warn('[Resend-inbound] unmatched reply from', fromEmail, 'subject:', full.subject);
@@ -776,7 +887,7 @@ app.post('/webhook/resend-inbound', async (req, res) => {
                     inReplyTo,
                     reservationId,
                     full.created_at,
-                    PUBLIC_TENANT_ID,
+                    tenantId,
                 ]
             );
             insertedRow = insert.rows[0] ?? null;
@@ -786,12 +897,20 @@ app.post('/webhook/resend-inbound', async (req, res) => {
         }
 
         if (insertedRow && socketService) {
-            try { socketService.broadcastToAll(PUBLIC_TENANT_ID, 'inboundEmail:received', insertedRow); }
+            try { socketService.broadcastToAll(tenantId, 'inboundEmail:received', insertedRow); }
             catch (err) { console.warn('[Resend-inbound] broadcast failed:', err); }
         }
     } catch (err: any) {
         console.error('[Resend-inbound] handler error:', err?.message || err);
     }
+}
+
+// Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
+app.post('/webhook/resend-inbound', (req, res) => { void handleResendInbound(PUBLIC_TENANT_ID, req, res); });
+app.post('/webhook/t/:tenantToken/resend-inbound', async (req, res) => {
+    const tenantId = await resolveWebhookTenantOr404(req, res);
+    if (tenantId == null) return;
+    await handleResendInbound(tenantId, req, res);
 });
 
 // ============================================
@@ -893,8 +1012,8 @@ export function detectLargeGroupHandoff(transcript: string): boolean {
 // Il nome viene da businessIdentity().voiceName; la frase resta "Sofia del
 // ${voiceName}", quindi per un tenant il cui nome non regge il "del" il campo
 // va valorizzato di conseguenza (es. "ristorante Da Mario").
-const voiceFirstMessageFallback = (): string =>
-    `Ciao, sono Sofia del ${businessIdentity().voiceName}. Posso aiutarti a prenotare un tavolo. ` +
+const voiceFirstMessageFallback = (tenantId: number): string =>
+    `Ciao, sono Sofia del ${businessIdentity(tenantId).voiceName}. Posso aiutarti a prenotare un tavolo. ` +
     'Per altre richieste chiama dalle 10:30 alle 14:30 o dalle 18:45 alle 23:30. ' +
     'Per quando vorresti prenotare?';
 
@@ -928,7 +1047,9 @@ function renderVoiceFirstMessage(template: string, firstName: string): string {
 // first_message on the agent — so failure mode is "generic greeting",
 // never a broken call. That's why we return 200 with the fallback message
 // on errors instead of 5xx.
-app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
+// Corpo condiviso fra path storico (alias tenant 1) e gemello col token:
+// sospensione, saluto custom, entitlement e rubrica sono del tenant risolto.
+async function handleElevenLabsInitConversation(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
     if (!authorizeElevenLabs(req, res)) return;
 
     // "Prenotazioni sospese" mode: Sofia is still on the phone but she
@@ -939,18 +1060,18 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
     // first_message override + the {{booking_status_message}} dynamic
     // variable are the only two knobs available (agent.prompt.prompt is
     // read from Studio, but we still push it so the prompt guard fires).
-    const { suspended, callbackTime: suspensionCallback } = await computeVoiceSuspensionState(PUBLIC_TENANT_ID);
+    const { suspended, callbackTime: suspensionCallback } = await computeVoiceSuspensionState(tenantId);
     const suspensionMessage = suspended
-        ? `Buongiorno, sono Sofia del ${businessIdentity().voiceName}. Le prenotazioni sono momentaneamente sospese. La invitiamo a richiamare dopo le ${suspensionCallback} per verificare eventuali tavoli disponibili. Grazie e a presto!`
+        ? `Buongiorno, sono Sofia del ${businessIdentity(tenantId).voiceName}. Le prenotazioni sono momentaneamente sospese. La invitiamo a richiamare dopo le ${suspensionCallback} per verificare eventuali tavoli disponibili. Grazie e a presto!`
         : '';
 
     // Messaggio iniziale personalizzato dal CRM (vuoto ⇒ default hardcoded).
     // `genericGreeting` è la versione senza nome, usata per anonimi/sconosciuti/
     // errori; i chiamanti noti ottengono la stessa base con {nome} sostituito.
-    const customFirst = (await getVoiceFirstMessage(PUBLIC_TENANT_ID)).trim();
+    const customFirst = (await getVoiceFirstMessage(tenantId)).trim();
     const genericGreeting = customFirst
         ? renderVoiceFirstMessage(customFirst, '')
-        : voiceFirstMessageFallback();
+        : voiceFirstMessageFallback(tenantId);
 
     // A prenotazioni sospese l'operatore può annunciare con parole sue (es. "per
     // Ferragosto siamo al completo, prenota sul sito"): se c'è un messaggio
@@ -981,17 +1102,20 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
     // When suspended we short-circuit even for known callers: no personalised
     // greeting, no customer lookup. The suspension message is what matters.
     if (suspended) {
-        return res.json(fallbackResponse);
+        res.json(fallbackResponse);
+        return;
     }
 
     // Entitlement voice (C1) sopra il flag operativo: canale non venduto =
     // stessa risposta del canale spento — saluto generico, nessun lookup.
-    if (!(await isFeatureEnabledForTenant(PUBLIC_TENANT_ID, 'voice'))) {
-        return res.json(fallbackResponse);
+    if (!(await isFeatureEnabledForTenant(tenantId, 'voice'))) {
+        res.json(fallbackResponse);
+        return;
     }
 
-    if (!(await getFeatureFlag(PUBLIC_TENANT_ID, 'voice_agent_enabled', true))) {
-        return res.json(fallbackResponse);
+    if (!(await getFeatureFlag(tenantId, 'voice_agent_enabled', true))) {
+        res.json(fallbackResponse);
+        return;
     }
 
     // ElevenLabs sends caller_id at the top level for SIP calls; guard
@@ -1006,23 +1130,25 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
 
     if (!callerIdRaw) {
         console.log('[ElevenLabs] init-conversation anonymous caller');
-        return res.json(fallbackResponse);
+        res.json(fallbackResponse);
+        return;
     }
 
     const normalized = normalizeItalianPhone(callerIdRaw);
     const callerIdSpelled = spellItalianPhoneDigits(normalized);
 
     try {
-        const lookup = await findCustomerByPhone(PUBLIC_TENANT_ID, normalized);
+        const lookup = await findCustomerByPhone(tenantId, normalized);
         if (!lookup.exists) {
             console.log('[ElevenLabs] init-conversation miss', { phone: normalized });
-            return res.json({
+            res.json({
                 type: 'conversation_initiation_client_data',
                 dynamic_variables: { ...baseDynamicVars, caller_id_spelled: callerIdSpelled },
                 conversation_config_override: {
                     agent: { first_message: genericGreeting },
                 },
             });
+            return;
         }
 
         const firstName = (lookup.first_name || '').trim();
@@ -1036,15 +1162,15 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
         const personalisedFirstMessage = customFirst
             ? renderVoiceFirstMessage(customFirst, firstName)
             : (firstName
-                ? `Ciao ${firstName}, sono Sofia del ${businessIdentity().voiceName}, come posso aiutarti?`
-                : voiceFirstMessageFallback());
+                ? `Ciao ${firstName}, sono Sofia del ${businessIdentity(tenantId).voiceName}, come posso aiutarti?`
+                : voiceFirstMessageFallback(tenantId));
 
         console.log('[ElevenLabs] init-conversation hit', {
             phone: normalized,
             customer_id: lookup.customer_id,
             first_name: firstName,
         });
-        return res.json({
+        res.json({
             type: 'conversation_initiation_client_data',
             dynamic_variables: {
                 customer_first_name: firstName,
@@ -1061,7 +1187,7 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
     } catch (err) {
         console.error('[ElevenLabs] init-conversation error', err);
         // Always 200 — see comment at top of handler.
-        return res.json({
+        res.json({
             type: 'conversation_initiation_client_data',
             dynamic_variables: { ...baseDynamicVars, caller_id_spelled: callerIdSpelled },
             conversation_config_override: {
@@ -1069,6 +1195,14 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
             },
         });
     }
+}
+
+// Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
+app.post('/webhook/elevenlabs/init-conversation', (req, res) => { void handleElevenLabsInitConversation(PUBLIC_TENANT_ID, req, res); });
+app.post('/webhook/t/:tenantToken/elevenlabs/init-conversation', async (req, res) => {
+    const tenantId = await resolveWebhookTenantOr404(req, res);
+    if (tenantId == null) return;
+    await handleElevenLabsInitConversation(tenantId, req, res);
 });
 
 // Tool 0 — lookup_customer  (defensive no-op fallback)
@@ -1083,15 +1217,17 @@ app.post('/webhook/elevenlabs/init-conversation', async (req, res) => {
 // NB: no `greeting_phrase` field on purpose — the static `first_message`
 // already greets the caller, and adding a second server-provided greeting
 // caused the agent to say hello twice (once generic, once by name).
-app.post('/webhook/elevenlabs/lookup-customer', async (req, res) => {
+async function handleElevenLabsLookupCustomer(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
     if (!authorizeElevenLabs(req, res)) return;
     // Entitlement voice (C1): canale non venduto risponde come quello spento,
     // così l'agente legge lo stesso messaggio di cortesia in entrambi i casi.
-    if (!(await isFeatureEnabledForTenant(PUBLIC_TENANT_ID, 'voice'))) {
-        return res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
+    if (!(await isFeatureEnabledForTenant(tenantId, 'voice'))) {
+        res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
+        return;
     }
-    if (!(await getFeatureFlag(PUBLIC_TENANT_ID, 'voice_agent_enabled', true))) {
-        return res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
+    if (!(await getFeatureFlag(tenantId, 'voice_agent_enabled', true))) {
+        res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
+        return;
     }
 
     const p = (req.body?.parameters && typeof req.body.parameters === 'object')
@@ -1102,10 +1238,11 @@ app.post('/webhook/elevenlabs/lookup-customer', async (req, res) => {
 
     if (!phoneRaw) {
         console.log('[ElevenLabs] lookup-customer no phone provided');
-        return res.json({
+        res.json({
             exists: false,
             caller_id_spelled: '',
         });
+        return;
     }
 
     // Pre-render the digit-by-digit Italian spelling so the agent can read
@@ -1116,13 +1253,14 @@ app.post('/webhook/elevenlabs/lookup-customer', async (req, res) => {
     const callerIdSpelled = spellItalianPhoneDigits(normalized);
 
     try {
-        const lookup = await findCustomerByPhone(PUBLIC_TENANT_ID, normalized);
+        const lookup = await findCustomerByPhone(tenantId, normalized);
         if (!lookup.exists) {
             console.log('[ElevenLabs] lookup-customer miss', { phone: normalized });
-            return res.json({
+            res.json({
                 exists: false,
                 caller_id_spelled: callerIdSpelled,
             });
+            return;
         }
 
         console.log('[ElevenLabs] lookup-customer hit', {
@@ -1146,6 +1284,14 @@ app.post('/webhook/elevenlabs/lookup-customer', async (req, res) => {
             caller_id_spelled: callerIdSpelled,
         });
     }
+}
+
+// Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
+app.post('/webhook/elevenlabs/lookup-customer', (req, res) => { void handleElevenLabsLookupCustomer(PUBLIC_TENANT_ID, req, res); });
+app.post('/webhook/t/:tenantToken/elevenlabs/lookup-customer', async (req, res) => {
+    const tenantId = await resolveWebhookTenantOr404(req, res);
+    if (tenantId == null) return;
+    await handleElevenLabsLookupCustomer(tenantId, req, res);
 });
 
 // Tool 1 — check_availability
@@ -1165,19 +1311,19 @@ const elevenLabsParams = (req: express.Request): Record<string, any> => {
 };
 
 /** Interruttori del canale telefonico. Restituisce true se si può procedere. */
-const voiceChannelOpen = async (res: express.Response, checkSuspension: boolean): Promise<boolean> => {
+const voiceChannelOpen = async (tenantId: number, res: express.Response, checkSuspension: boolean): Promise<boolean> => {
     // Entitlement voice (C1) prima del flag operativo: canale non venduto
     // risponde come quello spento — l'agente legge lo stesso messaggio.
-    if (!(await isFeatureEnabledForTenant(PUBLIC_TENANT_ID, 'voice'))) {
+    if (!(await isFeatureEnabledForTenant(tenantId, 'voice'))) {
         res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
         return false;
     }
-    if (!(await getFeatureFlag(PUBLIC_TENANT_ID, 'voice_agent_enabled', true))) {
+    if (!(await getFeatureFlag(tenantId, 'voice_agent_enabled', true))) {
         res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
         return false;
     }
     if (checkSuspension) {
-        const state = await computeVoiceSuspensionState(PUBLIC_TENANT_ID);
+        const state = await computeVoiceSuspensionState(tenantId);
         if (state.suspended) {
             res.status(503).json({ error: 'voice_bookings_suspended', message: buildVoiceSuspensionMessage(state.callbackTime) });
             return false;
@@ -1189,40 +1335,72 @@ const voiceChannelOpen = async (res: express.Response, checkSuspension: boolean)
 const sendToolOutcome = (res: express.Response, outcome: ToolOutcome) =>
     res.status(outcome.serverError ? 500 : 200).json(outcome.body);
 
-app.post('/webhook/elevenlabs/check-availability', async (req, res) => {
+async function handleElevenLabsCheckAvailability(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
     if (!authorizeElevenLabs(req, res)) return;
-    if (!(await voiceChannelOpen(res, true))) return;
-    sendToolOutcome(res, await bookingTools.checkAvailability(elevenLabsParams(req), VOICE_CHANNEL));
+    if (!(await voiceChannelOpen(tenantId, res, true))) return;
+    sendToolOutcome(res, await bookingTools.checkAvailability(tenantId, elevenLabsParams(req), VOICE_CHANNEL));
+}
+
+// Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
+app.post('/webhook/elevenlabs/check-availability', (req, res) => { void handleElevenLabsCheckAvailability(PUBLIC_TENANT_ID, req, res); });
+app.post('/webhook/t/:tenantToken/elevenlabs/check-availability', async (req, res) => {
+    const tenantId = await resolveWebhookTenantOr404(req, res);
+    if (tenantId == null) return;
+    await handleElevenLabsCheckAvailability(tenantId, req, res);
 });
 
 // Tool 2 — create_reservation
 // Scrive una prenotazione con source=VOICE e requires_review=true, così lo
 // staff la ricontrolla prima di considerarla confermata. Restituisce la frase
 // italiana che l'agente legge in chiusura di chiamata.
-app.post('/webhook/elevenlabs/create-reservation', async (req, res) => {
+async function handleElevenLabsCreateReservation(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
     if (!authorizeElevenLabs(req, res)) return;
-    if (!(await voiceChannelOpen(res, true))) return;
-    sendToolOutcome(res, await bookingTools.createReservation(elevenLabsParams(req), VOICE_CHANNEL));
+    if (!(await voiceChannelOpen(tenantId, res, true))) return;
+    sendToolOutcome(res, await bookingTools.createReservation(tenantId, elevenLabsParams(req), VOICE_CHANNEL));
+}
+
+// Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
+app.post('/webhook/elevenlabs/create-reservation', (req, res) => { void handleElevenLabsCreateReservation(PUBLIC_TENANT_ID, req, res); });
+app.post('/webhook/t/:tenantToken/elevenlabs/create-reservation', async (req, res) => {
+    const tenantId = await resolveWebhookTenantOr404(req, res);
+    if (tenantId == null) return;
+    await handleElevenLabsCreateReservation(tenantId, req, res);
 });
 
 // Cancellazione. L'agente chiede data (e all'occorrenza orario) e ripete il
 // nome del cliente prima di invocare il tool. È una cancellazione morbida:
 // reservation_status=CANCELLED, la riga resta per l'audit.
-app.post('/webhook/elevenlabs/cancel-reservation', async (req, res) => {
+async function handleElevenLabsCancelReservation(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
     if (!authorizeElevenLabs(req, res)) return;
     // Nessun controllo di sospensione: annullare deve restare possibile anche
     // quando le prenotazioni telefoniche sono sospese (com'era prima).
-    if (!(await voiceChannelOpen(res, false))) return;
-    sendToolOutcome(res, await bookingTools.cancelReservation(elevenLabsParams(req), VOICE_CHANNEL));
+    if (!(await voiceChannelOpen(tenantId, res, false))) return;
+    sendToolOutcome(res, await bookingTools.cancelReservation(tenantId, elevenLabsParams(req), VOICE_CHANNEL));
+}
+
+// Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
+app.post('/webhook/elevenlabs/cancel-reservation', (req, res) => { void handleElevenLabsCancelReservation(PUBLIC_TENANT_ID, req, res); });
+app.post('/webhook/t/:tenantToken/elevenlabs/cancel-reservation', async (req, res) => {
+    const tenantId = await resolveWebhookTenantOr404(req, res);
+    if (tenantId == null) return;
+    await handleElevenLabsCancelReservation(tenantId, req, res);
 });
 
 // Modifica di una prenotazione esistente (data/orario/turno/coperti/zona/note).
 // Stesso schema di identificazione per telefono e data della cancellazione:
 // servono solo i campi `new_*` che cambiano davvero.
-app.post('/webhook/elevenlabs/modify-reservation', async (req, res) => {
+async function handleElevenLabsModifyReservation(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
     if (!authorizeElevenLabs(req, res)) return;
-    if (!(await voiceChannelOpen(res, false))) return;
-    sendToolOutcome(res, await bookingTools.modifyReservation(elevenLabsParams(req), VOICE_CHANNEL));
+    if (!(await voiceChannelOpen(tenantId, res, false))) return;
+    sendToolOutcome(res, await bookingTools.modifyReservation(tenantId, elevenLabsParams(req), VOICE_CHANNEL));
+}
+
+// Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
+app.post('/webhook/elevenlabs/modify-reservation', (req, res) => { void handleElevenLabsModifyReservation(PUBLIC_TENANT_ID, req, res); });
+app.post('/webhook/t/:tenantToken/elevenlabs/modify-reservation', async (req, res) => {
+    const tenantId = await resolveWebhookTenantOr404(req, res);
+    if (tenantId == null) return;
+    await handleElevenLabsModifyReservation(tenantId, req, res);
 });
 
 // Post-call webhook — fires when the conversation ends.
@@ -1233,14 +1411,15 @@ app.post('/webhook/elevenlabs/modify-reservation', async (req, res) => {
 //   { event: "post_call_transcript", data: { conversation_id, transcript: [...] } }
 // and extract conversation_id / transcript / summary / phone / duration from
 // wherever they live.
-app.post('/webhook/elevenlabs/post-call', async (req, res) => {
+async function handleElevenLabsPostCall(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
     if (!authorizeElevenLabs(req, res)) return;
 
     // Entitlement voice (C1): ack 200 senza processare — ElevenLabs ritenta
     // all'infinito sui 4xx/5xx e non c'è nulla da registrare per un canale
     // non venduto.
-    if (!(await isFeatureEnabledForTenant(PUBLIC_TENANT_ID, 'voice'))) {
-        return res.status(200).json({ ok: true, note: 'voice feature not enabled' });
+    if (!(await isFeatureEnabledForTenant(tenantId, 'voice'))) {
+        res.status(200).json({ ok: true, note: 'voice feature not enabled' });
+        return;
     }
 
     const body = req.body || {};
@@ -1257,7 +1436,8 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
         // Log the whole payload (truncated) once so we can adjust extraction.
         const raw = JSON.stringify(body).slice(0, 2000);
         console.warn('[ElevenLabs] post-call: conversation_id missing — body shape:', raw);
-        return res.status(200).json({ ok: true, note: 'conversation_id not extracted; payload logged' });
+        res.status(200).json({ ok: true, note: 'conversation_id not extracted; payload logged' });
+        return;
     }
 
     // Transcript may be a string (rare) or an array of turns. Coerce to string.
@@ -1306,7 +1486,7 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
     });
 
     try {
-        await recordVoiceCall(PUBLIC_TENANT_ID, {
+        await recordVoiceCall(tenantId, {
             conversation_id: conversationId,
             phone: phoneRaw ? normalizeItalianPhone(phoneRaw) : undefined,
             duration_seconds: Number.isFinite(duration) ? Math.trunc(duration) : undefined,
@@ -1334,13 +1514,13 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
                    AND reservation_id IS NULL
                    AND phantom_confirmation = FALSE
                  RETURNING id, phone`,
-                [conversationId, PUBLIC_TENANT_ID]
+                [conversationId, tenantId]
             );
             if (phantomRow.rowCount && phantomRow.rowCount > 0) {
                 const row = phantomRow.rows[0];
                 const displayPhone = row.phone || phoneRaw || 'numero sconosciuto';
                 pushSendToRoles(
-                    PUBLIC_TENANT_ID,
+                    tenantId,
                     ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
                     {
                         category: 'voice',
@@ -1372,7 +1552,7 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
                  WHERE conversation_id = $1
                    AND tenant_id = $2
                    AND large_group_handoff = FALSE`,
-                [conversationId, PUBLIC_TENANT_ID]
+                [conversationId, tenantId]
             );
             console.log('[ElevenLabs] large-group handoff detected on', conversationId);
         }
@@ -1394,13 +1574,13 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
              LEFT JOIN rooms rm ON rm.id = t.room_id AND rm.tenant_id = t.tenant_id
              WHERE vc.conversation_id = $1
                AND vc.tenant_id = $2`,
-            [conversationId, PUBLIC_TENANT_ID]
+            [conversationId, tenantId]
         );
         const row = linked.rows[0];
         if (row && row.phone) {
             const message = buildConfirmationMessage(row.customer_name, row.reservation_time, row.guests, row.room_name);
             const whatsappTemplate = buildBookingConfirmedTemplate(row.customer_name, row.reservation_time, row.guests);
-            sendBookingConfirmation(PUBLIC_TENANT_ID, row.phone, message, row.id, { whatsappTemplate }).catch(err =>
+            sendBookingConfirmation(tenantId, row.phone, message, row.id, { whatsappTemplate }).catch(err =>
                 console.warn('[ElevenLabs] post-call confirmation send failed:', err?.message || err)
             );
         }
@@ -1431,14 +1611,14 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
                AND vc.tenant_id = $2
                AND vc.reservation_id IS NULL
                AND (vc.follow_up_status IS NULL OR vc.follow_up_status = 'PENDING')`,
-            [conversationId, PUBLIC_TENANT_ID]
+            [conversationId, tenantId]
         );
         const row = pending.rows[0];
         if (row) {
             const label = row.customer_name || row.phone || 'Numero sconosciuto';
             const bodyLine = row.customer_name && row.phone ? `${row.customer_name} · ${row.phone}` : label;
             pushSendToRoles(
-                PUBLIC_TENANT_ID,
+                tenantId,
                 ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
                 {
                     category: 'voice',
@@ -1453,6 +1633,14 @@ app.post('/webhook/elevenlabs/post-call', async (req, res) => {
     } catch (err: any) {
         console.warn('[ElevenLabs] post-call follow-up push failed:', err?.message || err);
     }
+}
+
+// Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
+app.post('/webhook/elevenlabs/post-call', (req, res) => { void handleElevenLabsPostCall(PUBLIC_TENANT_ID, req, res); });
+app.post('/webhook/t/:tenantToken/elevenlabs/post-call', async (req, res) => {
+    const tenantId = await resolveWebhookTenantOr404(req, res);
+    if (tenantId == null) return;
+    await handleElevenLabsPostCall(tenantId, req, res);
 });
 
 // ============================================
@@ -4584,6 +4772,7 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
         const phone = inbound?.from_phone || `+${key}`;
 
         const result = await whatsappAgent.runAgent({
+            tenantId: req.tenantId!,
             phoneDigits: key,
             messages: messages as any,
             reservation: resv.rows[0] ?? null,
@@ -4668,7 +4857,7 @@ app.post('/messages/agent/proposals/:id/confirm', authenticate, requirePermissio
             return res.status(400).json({ error: 'Strumento non eseguibile', tool: prop.tool });
         }
 
-        const outcome = await esegui(args, WHATSAPP_CHANNEL);
+        const outcome = await esegui(req.tenantId!, args, WHATSAPP_CHANNEL);
         const riuscito = outcome.body?.success === true;
         await queryWithRetry(
             `UPDATE agent_proposals
@@ -15097,6 +15286,43 @@ app.put('/settings/entitlements', authenticate, requirePermission('settings:full
     }
 });
 
+// Token di instradamento del tenant (Fase C2): il webhook_token va incollato
+// negli URL dei provider (ElevenLabs, Twilio, Vonage, Resend), il
+// print_agent_token nella config dell'agente di stampa. Endpoint separato da
+// /settings/entitlements, che risponde i soli tre boolean e ha chi ci fa
+// asserzioni sopra. settings:full: i token equivalgono a credenziali.
+app.get('/settings/webhook-info', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const r = await queryWithRetry(
+            'SELECT webhook_token, print_agent_token FROM tenants WHERE id = $1',
+            [req.tenantId!]
+        );
+        const webhookToken: string | null = r.rows[0]?.webhook_token ?? null;
+        const printAgentToken: string | null = r.rows[0]?.print_agent_token ?? null;
+        // Base pubblica dei webhook: in produzione i provider chiamano il
+        // dominio del backend, quindi l'host della richiesta (dietro proxy,
+        // trust-proxy è già attivo) è quello giusto anche in locale.
+        const base = `${req.protocol}://${req.get('host')}`;
+        const webhookBase = webhookToken ? `${base}/webhook/t/${webhookToken}` : null;
+        res.json({
+            webhook_token: webhookToken,
+            print_agent_token: printAgentToken,
+            webhook_base_url: webhookBase,
+            examples: webhookBase ? {
+                elevenlabs_init_conversation: `${webhookBase}/elevenlabs/init-conversation`,
+                elevenlabs_post_call: `${webhookBase}/elevenlabs/post-call`,
+                twilio_whatsapp: `${webhookBase}/twilio-whatsapp`,
+                twilio_whatsapp_status: `${webhookBase}/twilio-whatsapp-status`,
+                vonage_inbound: `${webhookBase}/vonage-inbound`,
+                resend_inbound: `${webhookBase}/resend-inbound`,
+            } : null,
+        });
+    } catch (err) {
+        console.error('GET /settings/webhook-info error:', err);
+        res.status(500).json({ error: 'Failed to fetch webhook info' });
+    }
+});
+
 // ============================================
 // INTEGRATION SETTINGS (Revolut)
 // ============================================
@@ -19695,14 +19921,29 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
 // Raspberry spento si scopre PRIMA del servizio, non alla prima comanda persa.
 let printAgentLastSeen: number | null = null;
 
-const printAgentAuth = (req: any, res: any, next: any) => {
-    const expected = process.env.PRINT_AGENT_TOKEN;
-    if (!expected) {
-        return res.status(503).json({ error: 'print_agent_not_configured' });
-    }
-    if (req.headers['x-print-agent-token'] !== expected) {
+// Autenticazione dell'agente di stampa (Fase C2, token per tenant): vale
+// il token per-tenant a DB (tenants.print_agent_token → quel tenant) oppure,
+// finché gli agent installati non sono riconfigurati, il legacy globale
+// PRINT_AGENT_TOKEN da env → alias del tenant 1. Prima del token per tenant
+// qualunque agente col token globale poteva drenare la coda di chiunque; ora
+// pull e ack sono scopati sul tenant risolto (req.printAgentTenantId).
+const printAgentAuth = async (req: any, res: any, next: any) => {
+    const provided = String(req.headers['x-print-agent-token'] ?? '');
+    if (!provided) {
         return res.status(401).json({ error: 'Unauthorized' });
     }
+    const legacy = process.env.PRINT_AGENT_TOKEN;
+    if (legacy && timingSafeStringEqual(provided, legacy)) {
+        // Alias tenant 1 finché gli agent non sono riconfigurati col token a DB.
+        req.printAgentTenantId = PUBLIC_TENANT_ID;
+        printAgentLastSeen = Date.now();
+        return next();
+    }
+    const tenantId = await resolveTenantByTokenColumn('print_agent_token', provided);
+    if (tenantId == null) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+    req.printAgentTenantId = tenantId;
     printAgentLastSeen = Date.now();
     next();
 };
@@ -19789,14 +20030,14 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
 // La mappa nome→indirizzo per l'agente, dal registro a DB. L'agente la
 // scarica a ogni poll: aggiungere una termica da Impostazioni diventa
 // effettivo in un paio di secondi, senza toccare l'agente.
-app.get('/print-agent/config', printAgentAuth, async (_req, res) => {
+app.get('/print-agent/config', printAgentAuth, async (req: any, res) => {
     try {
         // L'agente si autentica col token d'installazione, non col JWT:
-        // il tenant è quello pubblico finché il token non porterà il suo.
+        // il tenant è quello risolto dal token (printAgentAuth).
         const rows = await queryWithRetry(
             `SELECT name, host, port FROM printers
              WHERE tenant_id = $1 AND kind = 'THERMAL' AND is_active ORDER BY name`,
-            [PUBLIC_TENANT_ID]
+            [req.printAgentTenantId]
         );
         res.json({ printers: rows.rows });
     } catch (err: any) {
@@ -19805,15 +20046,14 @@ app.get('/print-agent/config', printAgentAuth, async (_req, res) => {
     }
 });
 
-app.get('/print-agent/jobs', printAgentAuth, async (_req, res) => {
+app.get('/print-agent/jobs', printAgentAuth, async (req: any, res) => {
     try {
-        // L'agente si autentica col token d'installazione, non col JWT: la
-        // coda resta quella del tenant storico finché il token non porterà il
-        // suo (Fase C2, agente per tenant).
+        // Coda scopata sul tenant del token: un agente vede e ritira solo i
+        // preconti del proprio ristorante.
         const rows = await queryWithRetry(
             `SELECT id, kind, payload, printer, attempts FROM print_jobs
              WHERE status = 'PENDING' AND tenant_id = $1 ORDER BY id LIMIT 10`,
-            [PUBLIC_TENANT_ID]
+            [req.printAgentTenantId]
         );
         res.json({ jobs: rows.rows });
     } catch (err: any) {
@@ -19822,7 +20062,7 @@ app.get('/print-agent/jobs', printAgentAuth, async (_req, res) => {
     }
 });
 
-app.post('/print-agent/jobs/:id/ack', printAgentAuth, async (req, res) => {
+app.post('/print-agent/jobs/:id/ack', printAgentAuth, async (req: any, res) => {
     try {
         const id = Number(req.params.id);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
@@ -19830,7 +20070,7 @@ app.post('/print-agent/jobs/:id/ack', printAgentAuth, async (req, res) => {
             // Stesso perimetro del poll: solo i job del tenant dell'agente.
             await queryWithRetry(
                 `UPDATE print_jobs SET status = 'PRINTED', printed_at = CURRENT_TIMESTAMP, error = NULL
-                 WHERE id = $1 AND tenant_id = $2`, [id, PUBLIC_TENANT_ID]
+                 WHERE id = $1 AND tenant_id = $2`, [id, req.printAgentTenantId]
             );
         } else {
             // Dopo troppi tentativi il job si arena come FAILED invece di
@@ -19841,7 +20081,7 @@ app.post('/print-agent/jobs/:id/ack', printAgentAuth, async (req, res) => {
                      error = $2,
                      status = CASE WHEN attempts + 1 >= 20 THEN 'FAILED' ELSE 'PENDING' END
                  WHERE id = $1 AND tenant_id = $3`,
-                [id, String(req.body?.error ?? 'errore sconosciuto').slice(0, 500), PUBLIC_TENANT_ID]
+                [id, String(req.body?.error ?? 'errore sconosciuto').slice(0, 500), req.printAgentTenantId]
             );
         }
         res.json({ ok: true });
@@ -20360,42 +20600,37 @@ bookingTools.configureBookingTools({
     toTitleCase,
     reservationPushLabel,
 
+    // Dalla C2 il tenant attraversa bookingTools come primo parametro di ogni
+    // tool: qui non si fissa più nulla, le dipendenze tenant-scoped si passano
+    // dirette e ricevono il tenant risolto dall'adattatore del canale (token
+    // webhook per la voce, req.tenantId per le proposte WhatsApp).
     findAvailability,
-    // I tool di prenotazione servono i canali self-service (voce, domani
-    // WhatsApp): niente JWT, quindi il tenant è quello pubblico. Le lambda
-    // fissano il tenant qui perché bookingTools resti ignaro del threading
-    // fino alla Fase C.
-    getAvailableSlots: (date: string, shift: Shift) => getAvailableSlots(PUBLIC_TENANT_ID, date, shift),
+    getAvailableSlots,
     createVoiceReservation,
     cancelVoiceReservation,
     modifyVoiceReservation,
-    recordVoiceCall: (p: any) => recordVoiceCall(PUBLIC_TENANT_ID, p),
-    upsertCustomerFromReservation: (name: string, phone: string, a: any, b: any) =>
-        upsertCustomerFromReservation(PUBLIC_TENANT_ID, name, phone, a, b),
+    recordVoiceCall,
+    upsertCustomerFromReservation,
 
-    getVoiceDateBlocks: () => getVoiceDateBlocks(PUBLIC_TENANT_ID),
+    getVoiceDateBlocks,
     findVoiceDateBlock,
     buildVoiceDateBlockMessage,
-    getLargeGroupThreshold: () => getVoiceLargeGroupThreshold(PUBLIC_TENANT_ID),
+    getLargeGroupThreshold: getVoiceLargeGroupThreshold,
 
-    isAutoDepositRequired: (guests: number) => isAutoDepositRequired(PUBLIC_TENANT_ID, guests),
-    getAutoDepositPolicy: () => getAutoDepositPolicy(PUBLIC_TENANT_ID),
+    isAutoDepositRequired,
+    getAutoDepositPolicy,
     depositDefaultPerPersonCents: DEPOSIT_DEFAULTS.perPersonCents,
-    createPaymentOrder: (p: any) => createPaymentOrder(PUBLIC_TENANT_ID, p),
+    createPaymentOrder,
     queryWithRetry,
     buildDepositRequestMessage,
     buildBookingDepositRequestTemplate,
-    sendBookingConfirmation: (phone: string, text: string, resId: number, opts?: any) =>
-        sendBookingConfirmation(PUBLIC_TENANT_ID, phone, text, resId, opts),
+    sendBookingConfirmation,
 
-    // Canali pubblici (voce/WhatsApp): il tenant è fissato qui, così
-    // bookingTools resta ignaro del threading fino alla Fase C. Vale anche
-    // per l'audit: logActivity ora esige il tenant come primo parametro.
-    logActivity: (...a: any[]) => (LogService.logActivity as any)(PUBLIC_TENANT_ID, ...a),
+    // logActivity esige il tenant come primo parametro: bookingTools lo passa.
+    logActivity: (tenantId: number, ...a: any[]) => (LogService.logActivity as any)(tenantId, ...a),
     activityAction: ActivityAction,
     resourceType: ResourceType,
-    pushSendToRoles: (roles: string[], payload: any, opts?: any) =>
-        pushSendToRoles(PUBLIC_TENANT_ID, roles, payload, opts),
+    pushSendToRoles,
     // socketService è inizializzato dopo il listen: le lambda lo leggono al
     // momento della chiamata, non alla configurazione.
     broadcastReservationCreated: (r: any) => socketService?.broadcastReservationCreated(Number(r.tenant_id) || PUBLIC_TENANT_ID, r),
@@ -20406,8 +20641,8 @@ bookingTools.configureBookingTools({
 
 // La voce aggancia ogni azione alla riga di voice_calls per l'audit della
 // telefonata; gli altri canali avranno il proprio aggancio.
-VOICE_CHANNEL.linkConversation = ({ conversationId, phone, reservationId }) => {
-    recordVoiceCall(PUBLIC_TENANT_ID, { conversation_id: conversationId, phone, reservation_id: reservationId })
+VOICE_CHANNEL.linkConversation = ({ tenantId, conversationId, phone, reservationId }) => {
+    recordVoiceCall(tenantId, { conversation_id: conversationId, phone, reservation_id: reservationId })
         .catch(err => console.warn('[ElevenLabs] recordVoiceCall failed:', err?.message || err));
 };
 

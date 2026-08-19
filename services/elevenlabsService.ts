@@ -10,11 +10,10 @@ import { getCappedRoomIds, pickSelfServiceTable, isTableStillAssignable } from '
 // HMAC SIGNATURE VERIFICATION
 // ============================================
 
-// Tenant del canale vocale: le chiamate arrivano da webhook senza JWT, quindi
-// non c'è un req.tenantId da leggere. Finché la Fase C3 non ricava il tenant
-// dal numero chiamato, tutta la voce appartiene al tenant 1 (stesso valore di
-// PUBLIC_TENANT_ID in server.ts — non importabile da qui: ciclo di moduli).
-const VOICE_TENANT_ID = 1;
+// Il tenant arriva sempre come parametro: dalla Fase C2 i webhook voce lo
+// risolvono dal token nell'URL (/webhook/t/:tenantToken/...), quindi qui non
+// esiste più un tenant hardcodato — ogni funzione lavora per il ristorante
+// del chiamante e solo per quello.
 
 const SIGNATURE_HEADER = 'elevenlabs-signature';
 const SIGNATURE_TOLERANCE_SECONDS = 300; // 5 minutes
@@ -529,18 +528,18 @@ export interface AvailabilityResult {
 // the alternative-shift suggestion so a caller at 18:00 whose dinner is full
 // isn't offered lunch "of the same day" — lunch has long ended. Only ever
 // true for today; future dates are never "over".
-async function isShiftAlreadyOverToday(date: string, shift: Shift): Promise<boolean> {
+async function isShiftAlreadyOverToday(tenantId: number, date: string, shift: Shift): Promise<boolean> {
     if (date !== getRomeDatePart(new Date())) return false;
     const nowTime = getRomeTimePart(new Date()); // HH:MM, 24h Rome
-    const slots = await getAvailableSlots(VOICE_TENANT_ID, date, shift);
+    const slots = await getAvailableSlots(tenantId, date, shift);
     // Zero-padded 24h strings compare correctly lexicographically. Empty slot
     // list (shift closed that weekday) → nothing left to offer.
     return slots.every(s => s <= nowTime);
 }
 
-export async function findAvailability(input: AvailabilityInput): Promise<AvailabilityResult> {
+export async function findAvailability(tenantId: number, input: AvailabilityInput): Promise<AvailabilityResult> {
     const { date, shift, guests, location_preference } = input;
-    const cappedRooms = await getCappedRoomIds(VOICE_TENANT_ID, date, shift);
+    const cappedRooms = await getCappedRoomIds(tenantId, date, shift);
 
     const breakdown = await queryWithRetry(`
         SELECT r.location AS location, COUNT(*)::int AS free
@@ -570,7 +569,7 @@ export async function findAvailability(input: AvailabilityInput): Promise<Availa
                 AND (tm.primary_id = t.id OR t.id = ANY(tm.merged_ids))
           )
         GROUP BY r.location
-    `, [guests, date, shift, cappedRooms, VOICE_TENANT_ID]);
+    `, [guests, date, shift, cappedRooms, tenantId]);
 
     let freeIndoor = 0;
     let freeOutdoor = 0;
@@ -609,7 +608,7 @@ export async function findAvailability(input: AvailabilityInput): Promise<Availa
 
     const otherShift = shift === Shift.LUNCH ? Shift.DINNER : Shift.LUNCH;
     // I cap si misurano per turno: l'altro turno ha la sua occupazione.
-    const cappedRoomsAlt = await getCappedRoomIds(VOICE_TENANT_ID, date, otherShift);
+    const cappedRoomsAlt = await getCappedRoomIds(tenantId, date, otherShift);
     const altResult = await queryWithRetry(`
         SELECT COUNT(*)::int AS free
         FROM tables t
@@ -637,13 +636,13 @@ export async function findAvailability(input: AvailabilityInput): Promise<Availa
               WHERE tm.date = $2 AND tm.shift = $3 AND tm.tenant_id = $5
                 AND (tm.primary_id = t.id OR t.id = ANY(tm.merged_ids))
           )
-    `, [guests, date, otherShift, cappedRoomsAlt, VOICE_TENANT_ID]);
+    `, [guests, date, otherShift, cappedRoomsAlt, tenantId]);
     const altFree = altResult.rows[0]?.free ?? 0;
 
     // Only offer the other shift if it hasn't already passed today — otherwise
     // a 18:00 caller with a full dinner would be told "posso proporle a pranzo
     // dello stesso giorno?", which is nonsensical.
-    if (altFree > 0 && !(await isShiftAlreadyOverToday(date, otherShift))) {
+    if (altFree > 0 && !(await isShiftAlreadyOverToday(tenantId, date, otherShift))) {
         const altLabel = otherShift === Shift.LUNCH ? 'a pranzo' : 'a cena';
         return {
             available: false,
@@ -709,12 +708,13 @@ export interface VoiceReservationOutput {
  * it manually.
  */
 async function pickAutoAssignTable(
+    tenantId: number,
     date: string,
     shift: Shift,
     guests: number,
     locationPreference: RoomLocation | undefined
 ): Promise<{ id: number; name: string; room_name: string; location: RoomLocation | null } | null> {
-    const picked = await pickSelfServiceTable(VOICE_TENANT_ID, date, shift, guests, { location: locationPreference });
+    const picked = await pickSelfServiceTable(tenantId, date, shift, guests, { location: locationPreference });
     if (!picked) return null;
     return { id: picked.id, name: picked.name, room_name: picked.room_name, location: picked.location };
 }
@@ -730,6 +730,7 @@ async function pickAutoAssignTable(
  * booking is still recorded for manual placement.
  */
 export async function createVoiceReservation(
+    tenantId: number,
     input: VoiceReservationInput
 ): Promise<VoiceReservationOutput> {
     const phone = normalizeItalianPhone(input.phone);
@@ -742,6 +743,7 @@ export async function createVoiceReservation(
     // No table while a deposit is pending: assigning one would guarantee the
     // very thing the deposit exists to secure.
     const assigned = input.deposit_required ? null : await pickAutoAssignTable(
+        tenantId,
         reservationDate,
         input.shift,
         input.guests,
@@ -767,7 +769,7 @@ export async function createVoiceReservation(
         ReservationSource.VOICE,
         assigned?.id ?? null,
         input.deposit_required ? 'PENDING' : 'CONFIRMED',
-        VOICE_TENANT_ID
+        tenantId
     ]);
 
     const row = result.rows[0];
@@ -822,13 +824,14 @@ export type CancelVoiceReservationOutput =
  *     one booking that day and no time was provided.
  */
 export async function cancelVoiceReservation(
+    tenantId: number,
     input: CancelVoiceReservationInput
 ): Promise<CancelVoiceReservationOutput> {
     const last10 = lastTenDigits(input.phone);
 
-    // Solo prenotazioni del tenant voce: lo stesso numero potrebbe avere una
-    // cena anche nell'altro ristorante, e Sofia non deve poterla toccare.
-    const params: any[] = [last10, input.date, VOICE_TENANT_ID];
+    // Solo prenotazioni del tenant del canale: lo stesso numero potrebbe avere
+    // una cena anche in un altro ristorante, e Sofia non deve poterla toccare.
+    const params: any[] = [last10, input.date, tenantId];
     let sql = `
         SELECT id, customer_name, reservation_time, shift, guests
         FROM reservations
@@ -851,7 +854,7 @@ export async function cancelVoiceReservation(
         // cancel something we already cancelled (common after a dashboard test
         // or a duplicate call). Same filters as above but allowing the
         // CANCELLED status, so we can tell the caller it's already done.
-        const cancelledParams: any[] = [last10, input.date, VOICE_TENANT_ID];
+        const cancelledParams: any[] = [last10, input.date, tenantId];
         let cancelledSql = `
             SELECT id, customer_name, reservation_time, shift, guests
             FROM reservations
@@ -879,7 +882,7 @@ export async function cancelVoiceReservation(
         SET reservation_status = 'CANCELLED'
         WHERE id = $1 AND tenant_id = $2
         RETURNING id, customer_name, reservation_time, shift, guests
-    `, [target.id, VOICE_TENANT_ID]);
+    `, [target.id, tenantId]);
 
     return { status: 'cancelled', reservation: updated.rows[0] };
 }
@@ -968,12 +971,13 @@ export type ModifyVoiceReservationOutput =
  * returns 'no_change' instead of a spurious success.
  */
 export async function modifyVoiceReservation(
+    tenantId: number,
     input: ModifyVoiceReservationInput
 ): Promise<ModifyVoiceReservationOutput> {
     const last10 = lastTenDigits(input.phone);
 
-    // 1) Locate the reservation. Same rules as cancel (tenant voce compreso).
-    const params: any[] = [last10, input.date, VOICE_TENANT_ID];
+    // 1) Locate the reservation. Same rules as cancel (tenant compreso).
+    const params: any[] = [last10, input.date, tenantId];
     let sql = `
         SELECT id, customer_name, reservation_time, shift, guests, table_id, phone,
                COALESCE(reservation_status, 'CONFIRMED') AS reservation_status,
@@ -1046,9 +1050,10 @@ export async function modifyVoiceReservation(
     if (scheduleChanged) {
         const keepCurrentTable = current.table_id != null
             && !newLocation
-            && await isTableStillAssignable(VOICE_TENANT_ID, current.table_id, newDate, newShift, newGuests, current.id);
+            && await isTableStillAssignable(tenantId, current.table_id, newDate, newShift, newGuests, current.id);
         if (!keepCurrentTable) {
             assigned = await pickAutoAssignTable(
+                tenantId,
                 newDate,
                 newShift,
                 newGuests,
@@ -1079,14 +1084,14 @@ export async function modifyVoiceReservation(
              WHERE id = $6 AND tenant_id = $7
              RETURNING ${returning}`,
             [newReservationTime, newShift, newGuests, assigned?.id ?? current.table_id,
-             notesToStore, current.id, VOICE_TENANT_ID]
+             notesToStore, current.id, tenantId]
           )
         : await queryWithRetry(
             `UPDATE reservations
              SET notes = $1, reservation_status = 'CONFIRMED'
              WHERE id = $2 AND tenant_id = $3
              RETURNING ${returning}`,
-            [notesToStore, current.id, VOICE_TENANT_ID]
+            [notesToStore, current.id, tenantId]
           );
 
     const after: ModifiedReservation = {
