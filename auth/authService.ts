@@ -65,6 +65,22 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
+  // Impersonation (Fase D2): un access token NORMALE — stesso secret, stessa
+  // forma di payload, quindi `authenticate` lo accetta senza saperne niente —
+  // ma corto (15 min) e con il claim impersonated_by per l'audit. Nessun
+  // refresh token, di proposito: la sessione impersonata muore da sola e non
+  // può rinnovarsi, perché il refresh richiede un refresh token firmato col
+  // secret di refresh e qui non ne viene emesso nessuno.
+  static readonly IMPERSONATION_TTL_SECONDS = 15 * 60;
+
+  static generateImpersonationToken(payload: TokenPayload, impersonatedBy: string): string {
+    return jwt.sign(
+      { ...payload, impersonated_by: impersonatedBy },
+      JWT_SECRET,
+      { expiresIn: AuthService.IMPERSONATION_TTL_SECONDS }
+    );
+  }
+
   // Verify access token
   static verifyAccessToken(token: string): TokenPayload | null {
     try {

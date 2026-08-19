@@ -1595,6 +1595,10 @@ const App: React.FC = () => {
   // Get role display name
   const getRoleDisplayName = (role: UserRole): string => {
     const roleNames: Record<UserRole, string> = {
+      // Ruolo di piattaforma: nella UI di un tenant compare solo se un
+      // platform admin sta impersonando — l'etichetta serve a non mostrare
+      // la costante grezza.
+      [UserRole.PLATFORM_ADMIN]: 'Admin piattaforma',
       [UserRole.OWNER]: 'Proprietario',
       [UserRole.GENERAL_MANAGER]: 'General Manager',
       [UserRole.MANAGER]: 'Manager',

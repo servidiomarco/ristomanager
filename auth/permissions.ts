@@ -43,6 +43,46 @@ export type Permission =
 
 // Role-permission mapping
 const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
+  // Il platform admin opera i tenant (lista, sospensione, impersonation),
+  // non ha una matrice per-tenant propria: la lista rispecchia quella di
+  // OWNER solo perché il Record è esaustivo per costruzione. Dentro un
+  // tenant si entra impersonando l'OWNER, non con questo ruolo.
+  [UserRole.PLATFORM_ADMIN]: [
+    'dashboard:view',
+    'dashboard:full',
+    'floorplan:view',
+    'floorplan:update_status',
+    'floorplan:full',
+    'menu:view',
+    'menu:full',
+    'reservations:view',
+    'reservations:full',
+    'staff:view',
+    'staff:full',
+    'settings:view',
+    'settings:full',
+    'users:view',
+    'users:full',
+    'reports:view',
+    'reports:full',
+    'logs:view',
+    'logs:full',
+    'banquet:view_price',
+    'banquet:manage_payments',
+    'customers:view',
+    'customers:full',
+    'inventory:view',
+    'inventory:full',
+    'voice_calls:view',
+    'reception:view',
+    'payments:view',
+    'payments:full',
+    'orders:view',
+    'orders:take',
+    'orders:kds',
+    'orders:expedite',
+    'orders:void'
+  ],
   [UserRole.OWNER]: [
     'dashboard:view',
     'dashboard:full',
@@ -269,6 +309,8 @@ export class PermissionService {
 // peers or subordinates, never up the ladder.
 // WAITER and KITCHEN sit at the same rank (lateral assignment is fine).
 const ROLE_RANK: Record<UserRole, number> = {
+  // Sopra OWNER: fuori dalla gerarchia del tenant (Fase D2).
+  [UserRole.PLATFORM_ADMIN]: 5,
   [UserRole.OWNER]: 4,
   [UserRole.GENERAL_MANAGER]: 3,
   [UserRole.MANAGER]: 2,

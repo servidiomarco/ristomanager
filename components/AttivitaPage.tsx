@@ -64,6 +64,7 @@ const PRIORITY_DOTS: Record<TodoPriority, string> = {
 };
 
 const TEAM_LABELS: Record<UserRole, string> = {
+  [UserRole.PLATFORM_ADMIN]: 'Admin piattaforma',
   [UserRole.OWNER]: 'Proprietario',
   [UserRole.GENERAL_MANAGER]: 'General Manager',
   [UserRole.MANAGER]: 'Manager',
@@ -74,6 +75,7 @@ const TEAM_LABELS: Record<UserRole, string> = {
 
 // Mirrors auth/permissions.ts role hierarchy.
 const ROLE_RANK: Record<UserRole, number> = {
+  [UserRole.PLATFORM_ADMIN]: 5,
   [UserRole.OWNER]: 4,
   [UserRole.GENERAL_MANAGER]: 3,
   [UserRole.MANAGER]: 2,
