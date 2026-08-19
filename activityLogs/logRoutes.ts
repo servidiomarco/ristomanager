@@ -29,7 +29,7 @@ router.get('/', authenticate, requirePermission('logs:view'), async (req: Reques
       offset: offset ? parseInt(offset as string, 10) : 0
     };
 
-    const result = await LogService.getActivityLogs(filters);
+    const result = await LogService.getActivityLogs(req.tenantId!, filters);
     res.json(result);
   } catch (error) {
     console.error('Error fetching activity logs:', error);
@@ -40,7 +40,7 @@ router.get('/', authenticate, requirePermission('logs:view'), async (req: Reques
 // GET /activity-logs/stats - Get activity statistics
 router.get('/stats', authenticate, requirePermission('logs:view'), async (req: Request, res: Response) => {
   try {
-    const stats = await LogService.getActivityStats();
+    const stats = await LogService.getActivityStats(req.tenantId!);
     res.json(stats);
   } catch (error) {
     console.error('Error fetching activity stats:', error);
@@ -51,7 +51,7 @@ router.get('/stats', authenticate, requirePermission('logs:view'), async (req: R
 // GET /activity-logs/users - Get list of users with activity logs (for filter)
 router.get('/users', authenticate, requirePermission('logs:view'), async (req: Request, res: Response) => {
   try {
-    const users = await LogService.getLogUsers();
+    const users = await LogService.getLogUsers(req.tenantId!);
     res.json(users);
   } catch (error) {
     console.error('Error fetching log users:', error);

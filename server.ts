@@ -1802,6 +1802,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         // Log activity
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -1969,6 +1970,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         // tavolo erano invisibili all'audit (indagine tavolo 56, 04/08).
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -2152,6 +2154,7 @@ app.delete('/reservations/:id', authenticate, requirePermission('reservations:fu
         // Log activity
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -2242,6 +2245,7 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
 
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -3079,6 +3083,7 @@ app.post('/reservations/:id/bill/notify', authenticate, requirePermission('payme
             });
             if (req.user) {
                 LogService.logActivity(
+                    req.tenantId!,
                     req.user.userId,
                     req.user.email,
                     req.user.email,
@@ -3371,6 +3376,7 @@ app.post('/bills/splits/:id/refund', authenticate, requirePermission('payments:f
 
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId, req.user.email, req.user.email,
                 ActivityAction.UPDATE, ResourceType.RESERVATION,
                 row.reservation_id,
@@ -4396,7 +4402,8 @@ app.post('/messages/suggest-reply', authenticate, requirePermission('reservation
                 [key, req.tenantId!]
             ),
             queryWithRetry(
-                `SELECT title, content FROM ai_knowledge_entries WHERE is_active ORDER BY sort_order, id`
+                `SELECT title, content FROM ai_knowledge_entries WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`,
+                [req.tenantId!]
             ),
         ]);
         const messages = msgs.rows.reverse();
@@ -4429,9 +4436,9 @@ app.post('/messages/suggest-reply', authenticate, requirePermission('reservation
             // Best-effort — un errore qui non deve rompere il suggerimento.
             onUsage: (u) => {
                 queryWithRetry(
-                    `INSERT INTO ai_token_usage (provider, feature, model, prompt_tokens, output_tokens, total_tokens, user_email)
-                     VALUES ('anthropic', 'suggest_reply', $1, $2, $3, $4, $5)`,
-                    [u.model, u.promptTokens, u.outputTokens, u.totalTokens || (u.promptTokens + u.outputTokens), (req.user?.email || null)]
+                    `INSERT INTO ai_token_usage (provider, feature, model, prompt_tokens, output_tokens, total_tokens, user_email, tenant_id)
+                     VALUES ('anthropic', 'suggest_reply', $1, $2, $3, $4, $5, $6)`,
+                    [u.model, u.promptTokens, u.outputTokens, u.totalTokens || (u.promptTokens + u.outputTokens), (req.user?.email || null), req.tenantId!]
                 ).catch(err => console.error('ai_token_usage insert (suggest_reply) failed:', err));
             },
         });
@@ -4485,25 +4492,30 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
             queryWithRetry(
                 `SELECT direction, body, from_phone, to_phone
                    FROM outbound_messages
-                  WHERE channel IN ('sms','whatsapp')
+                  WHERE tenant_id = $2
+                    AND channel IN ('sms','whatsapp')
                     AND (right(to_phone_digits, 10) = $1::text OR right(from_phone_digits, 10) = $1::text)
-                  ORDER BY sent_at DESC LIMIT 15`, [key]),
-            queryWithRetry(`SELECT title, content FROM ai_knowledge_entries WHERE is_active ORDER BY sort_order, id`),
+                  ORDER BY sent_at DESC LIMIT 15`, [key, req.tenantId!]),
+            queryWithRetry(`SELECT title, content FROM ai_knowledge_entries WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
             getVoiceLargeGroupThreshold(req.tenantId!),
         ]);
         const messages = msgs.rows.reverse();
         if (messages.length === 0) return res.status(404).json({ error: 'Conversazione vuota' });
 
+        // Stesso scoping della gemella in /messages/suggest-reply: tenant
+        // sulla prenotazione e sui JOIN, o l'agente ragionerebbe sulla
+        // prenotazione omonima di un altro ristorante.
         const resv = await queryWithRetry(
             `SELECT r.id, r.customer_name, r.reservation_time, r.guests, r.notes,
                     r.reservation_status AS status, ro.name AS room_name
                FROM reservations r
-               LEFT JOIN tables t ON t.id = r.table_id
-               LEFT JOIN rooms ro ON ro.id = t.room_id
-              WHERE r.phone IS NOT NULL AND r.phone <> ''
+               LEFT JOIN tables t ON t.id = r.table_id AND t.tenant_id = r.tenant_id
+               LEFT JOIN rooms ro ON ro.id = t.room_id AND ro.tenant_id = t.tenant_id
+              WHERE r.tenant_id = $2
+                AND r.phone IS NOT NULL AND r.phone <> ''
                 AND ${PHONE_MATCH_KEY_SQL('r.phone')} = ${PHONE_MATCH_KEY_SQL('$1')}
               ORDER BY abs(extract(epoch FROM (r.reservation_time - CURRENT_TIMESTAMP))) ASC
-              LIMIT 1`, [key]);
+              LIMIT 1`, [key, req.tenantId!]);
 
         // Numero in formato utile agli strumenti: quello da cui il cliente scrive.
         const inbound = messages.find((m: any) => m.direction === 'inbound');
@@ -5264,6 +5276,7 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
 
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -5941,6 +5954,7 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
 
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -6018,6 +6032,7 @@ app.post('/tables', authenticate, requirePermission('floorplan:full'), async (re
         // Log activity
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -6099,6 +6114,7 @@ app.put('/tables/:id', authenticate, requirePermission('floorplan:update_status'
         // Log activity
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -6134,6 +6150,7 @@ app.delete('/tables/:id', authenticate, requirePermission('floorplan:full'), asy
         // Log activity
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -6214,6 +6231,7 @@ app.post('/table-merges', authenticate, requirePermission('floorplan:full'), asy
 
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -6257,6 +6275,7 @@ app.delete('/table-merges', authenticate, requirePermission('floorplan:full'), a
 
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -6375,6 +6394,7 @@ app.post('/table-hidden', authenticate, requirePermission('floorplan:full'), asy
 
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -6415,6 +6435,7 @@ app.delete('/table-hidden', authenticate, requirePermission('floorplan:full'), a
 
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -6527,6 +6548,7 @@ app.post('/room-closed', authenticate, requirePermission('floorplan:full'), asyn
 
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -6567,6 +6589,7 @@ app.delete('/room-closed', authenticate, requirePermission('floorplan:full'), as
 
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -6627,6 +6650,7 @@ app.post('/rooms', authenticate, requirePermission('floorplan:full'), async (req
         // Log activity
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -6666,6 +6690,7 @@ app.patch('/rooms/:id', authenticate, requirePermission('floorplan:full'), async
 
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -6699,6 +6724,7 @@ app.delete('/rooms/:id', authenticate, requirePermission('floorplan:full'), asyn
         // Log activity
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -6743,6 +6769,7 @@ app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, re
         // Log activity
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -6780,6 +6807,7 @@ app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req,
         // Log activity
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -6814,6 +6842,7 @@ app.delete('/dishes/:id', authenticate, requirePermission('menu:full'), async (r
         // Log activity
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -7473,6 +7502,7 @@ const upsertCustomerFromReservation = async (
 
         if (actor && newCustomer) {
             LogService.logActivity(
+                tenantId,
                 actor.userId,
                 actor.email,
                 actor.email,
@@ -7558,6 +7588,7 @@ const syncCustomerFromReservation = async (
 
         if (actor) {
             LogService.logActivity(
+                tenantId,
                 actor.userId,
                 actor.email,
                 actor.email,
@@ -7715,6 +7746,7 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
 
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -7891,6 +7923,7 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
 
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -8052,6 +8085,7 @@ app.post('/customers/:sourceId/merge-into/:targetId', authenticate, requirePermi
 
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -8085,6 +8119,7 @@ app.delete('/customers/:id', authenticate, requirePermission('customers:full'), 
 
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -8156,6 +8191,7 @@ app.post('/inventory/locations', authenticate, requirePermission('inventory:full
         const created = result.rows[0];
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId, req.user.email, req.user.email,
                 ActivityAction.CREATE, ResourceType.INVENTORY_LOCATION,
                 created.id, `${area} · ${created.name}`
@@ -8191,6 +8227,7 @@ app.put('/inventory/locations/:id', authenticate, requirePermission('inventory:f
         const updated = result.rows[0];
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId, req.user.email, req.user.email,
                 ActivityAction.UPDATE, ResourceType.INVENTORY_LOCATION,
                 updated.id, `${updated.area} · ${updated.name}`
@@ -8218,6 +8255,7 @@ app.delete('/inventory/locations/:id', authenticate, requirePermission('inventor
         await queryWithRetry('DELETE FROM inventory_locations WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId, req.user.email, req.user.email,
                 ActivityAction.DELETE, ResourceType.INVENTORY_LOCATION,
                 parseInt(id, 10), `${existing.rows[0].area} · ${existing.rows[0].name}`
@@ -8275,6 +8313,7 @@ app.post('/inventory/categories', authenticate, requirePermission('inventory:ful
         const created = result.rows[0];
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId, req.user.email, req.user.email,
                 ActivityAction.CREATE, ResourceType.INVENTORY_CATEGORY,
                 created.id, `${area} · ${created.name}`
@@ -8310,6 +8349,7 @@ app.put('/inventory/categories/:id', authenticate, requirePermission('inventory:
         const updated = result.rows[0];
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId, req.user.email, req.user.email,
                 ActivityAction.UPDATE, ResourceType.INVENTORY_CATEGORY,
                 updated.id, `${updated.area} · ${updated.name}`
@@ -8337,6 +8377,7 @@ app.delete('/inventory/categories/:id', authenticate, requirePermission('invento
         await queryWithRetry('DELETE FROM inventory_categories WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId, req.user.email, req.user.email,
                 ActivityAction.DELETE, ResourceType.INVENTORY_CATEGORY,
                 parseInt(id, 10), `${existing.rows[0].area} · ${existing.rows[0].name}`
@@ -8422,6 +8463,7 @@ app.post('/inventory/products', authenticate, requirePermission('inventory:full'
         const created = result.rows[0];
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId, req.user.email, req.user.email,
                 ActivityAction.CREATE, ResourceType.INVENTORY_PRODUCT,
                 created.id, `${area} · ${created.name}`
@@ -8485,6 +8527,7 @@ app.put('/inventory/products/:id', authenticate, requirePermission('inventory:fu
         const updated = result.rows[0];
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId, req.user.email, req.user.email,
                 ActivityAction.UPDATE, ResourceType.INVENTORY_PRODUCT,
                 updated.id, `${updated.area} · ${updated.name}`
@@ -8510,6 +8553,7 @@ app.delete('/inventory/products/:id', authenticate, requirePermission('inventory
         await queryWithRetry('DELETE FROM inventory_products WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId, req.user.email, req.user.email,
                 ActivityAction.DELETE, ResourceType.INVENTORY_PRODUCT,
                 parseInt(id, 10), `${existing.rows[0].area} · ${existing.rows[0].name}`
@@ -8669,6 +8713,7 @@ app.post('/inventory/movements', authenticate, requirePermission('inventory:full
 
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId, req.user.email, req.user.email,
                 ActivityAction.CREATE, ResourceType.INVENTORY_MOVEMENT,
                 movement.rows[0].id, `${v.p_name} @ ${v.l_name}`,
@@ -8795,6 +8840,7 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
         // Log activity
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -8865,6 +8911,7 @@ app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), asyn
         // Log activity
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -8904,6 +8951,7 @@ app.delete('/banquet-menus/:id', authenticate, requirePermission('menu:full'), a
         // Log activity
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -8989,6 +9037,7 @@ app.post('/banquet-menus/:id/payments', authenticate, requirePermission('banquet
 
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -9039,6 +9088,7 @@ app.delete('/banquet-menus/:id/payments/:paymentId', authenticate, requirePermis
 
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -9514,7 +9564,9 @@ app.get('/dev-board/cards', authenticate, requireDevBoardAdmin, async (req, res)
         const result = await queryWithRetry(
             `SELECT id, title, description, column_key, position, labels, created_at, updated_at
              FROM dev_board_cards
-             ORDER BY column_key, position, id`
+             WHERE tenant_id = $1
+             ORDER BY column_key, position, id`,
+            [req.tenantId!]
         );
         res.json(result.rows);
     } catch (err) {
@@ -9535,10 +9587,10 @@ app.post('/dev-board/cards', authenticate, requireDevBoardAdmin, async (req, res
             // $3 (column_key) compare sia nella VALUES sia nella subquery: senza
             // cast espliciti Postgres 16 rifiuta con "inconsistent types deduced
             // for parameter $3". Stesso motivo per cui la PUT usa $3::varchar.
-            `INSERT INTO dev_board_cards (title, description, column_key, position, labels)
-             VALUES ($1, $2, $3::varchar, (SELECT COALESCE(MAX(position), -1) + 1 FROM dev_board_cards WHERE column_key = $3::varchar), $4)
+            `INSERT INTO dev_board_cards (title, description, column_key, position, labels, tenant_id)
+             VALUES ($1, $2, $3::varchar, (SELECT COALESCE(MAX(position), -1) + 1 FROM dev_board_cards WHERE column_key = $3::varchar AND tenant_id = $5), $4, $5)
              RETURNING id, title, description, column_key, position, labels, created_at, updated_at`,
-            [String(title).trim(), description ? String(description).trim() || null : null, column, labels]
+            [String(title).trim(), description ? String(description).trim() || null : null, column, labels, req.tenantId!]
         );
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll('devboard:changed', {}, socketId);
@@ -9566,14 +9618,14 @@ app.put('/dev-board/cards/:id', authenticate, requireDevBoardAdmin, async (req, 
                 title = $1,
                 description = $2,
                 position = CASE WHEN $3::varchar IS NOT NULL AND $3::varchar <> column_key
-                    THEN (SELECT COALESCE(MAX(position), -1) + 1 FROM dev_board_cards WHERE column_key = $3::varchar)
+                    THEN (SELECT COALESCE(MAX(position), -1) + 1 FROM dev_board_cards WHERE column_key = $3::varchar AND tenant_id = $6)
                     ELSE position END,
                 column_key = COALESCE($3::varchar, column_key),
                 labels = COALESCE($5::text[], labels),
                 updated_at = NOW()
-             WHERE id = $4
+             WHERE id = $4 AND tenant_id = $6
              RETURNING id, title, description, column_key, position, labels, created_at, updated_at`,
-            [String(title).trim(), description ? String(description).trim() || null : null, column_key ?? null, id, labels]
+            [String(title).trim(), description ? String(description).trim() || null : null, column_key ?? null, id, labels, req.tenantId!]
         );
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Card non trovata' });
@@ -9599,8 +9651,8 @@ app.put('/dev-board/cards/:id/move', authenticate, requireDevBoardAdmin, async (
         }
         await client.query('BEGIN');
         const moved = await client.query(
-            `UPDATE dev_board_cards SET column_key = $1, updated_at = NOW() WHERE id = $2 RETURNING id`,
-            [column_key, id]
+            `UPDATE dev_board_cards SET column_key = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3 RETURNING id`,
+            [column_key, id, req.tenantId!]
         );
         if (moved.rows.length === 0) {
             await client.query('ROLLBACK');
@@ -9608,8 +9660,8 @@ app.put('/dev-board/cards/:id/move', authenticate, requireDevBoardAdmin, async (
         }
         for (let i = 0; i < ordered_ids.length; i++) {
             await client.query(
-                `UPDATE dev_board_cards SET position = $1 WHERE id = $2 AND column_key = $3`,
-                [i, ordered_ids[i], column_key]
+                `UPDATE dev_board_cards SET position = $1 WHERE id = $2 AND column_key = $3 AND tenant_id = $4`,
+                [i, ordered_ids[i], column_key, req.tenantId!]
             );
         }
         await client.query('COMMIT');
@@ -9628,7 +9680,7 @@ app.put('/dev-board/cards/:id/move', authenticate, requireDevBoardAdmin, async (
 app.delete('/dev-board/cards/:id', authenticate, requireDevBoardAdmin, async (req, res) => {
     try {
         const { id } = req.params;
-        const result = await queryWithRetry('DELETE FROM dev_board_cards WHERE id = $1 RETURNING id', [id]);
+        const result = await queryWithRetry('DELETE FROM dev_board_cards WHERE id = $1 AND tenant_id = $2 RETURNING id', [id, req.tenantId!]);
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Card non trovata' });
         }
@@ -10878,15 +10930,19 @@ app.post('/push/subscribe', authenticate, async (req: any, res) => {
             return res.status(400).json({ error: 'Invalid subscription payload' });
         }
 
+        // Il tenant segue l'utente anche sull'ON CONFLICT: lo stesso browser
+        // che si ri-registra con un account di un altro ristorante non deve
+        // lasciare la riga appesa al tenant vecchio.
         await queryWithRetry(
-            `INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, user_agent)
-             VALUES ($1, $2, $3, $4, $5)
+            `INSERT INTO push_subscriptions (tenant_id, user_id, endpoint, p256dh, auth, user_agent)
+             VALUES ($6, $1, $2, $3, $4, $5)
              ON CONFLICT (endpoint) DO UPDATE
-             SET user_id = EXCLUDED.user_id,
+             SET tenant_id = EXCLUDED.tenant_id,
+                 user_id = EXCLUDED.user_id,
                  p256dh = EXCLUDED.p256dh,
                  auth = EXCLUDED.auth,
                  user_agent = EXCLUDED.user_agent`,
-            [userId, endpoint, keys.p256dh, keys.auth, userAgent || null]
+            [userId, endpoint, keys.p256dh, keys.auth, userAgent || null, req.tenantId!]
         );
 
         res.status(201).json({ ok: true });
@@ -10905,8 +10961,8 @@ app.post('/push/unsubscribe', authenticate, async (req: any, res) => {
         if (!endpoint) return res.status(400).json({ error: 'endpoint required' });
 
         await queryWithRetry(
-            'DELETE FROM push_subscriptions WHERE endpoint = $1 AND user_id = $2',
-            [endpoint, userId]
+            'DELETE FROM push_subscriptions WHERE endpoint = $1 AND user_id = $2 AND tenant_id = $3',
+            [endpoint, userId, req.tenantId!]
         );
 
         res.json({ ok: true });
@@ -10916,7 +10972,7 @@ app.post('/push/unsubscribe', authenticate, async (req: any, res) => {
     }
 });
 
-app.get('/push/debug', authenticate, authorize(UserRole.OWNER, UserRole.GENERAL_MANAGER), async (_req, res) => {
+app.get('/push/debug', authenticate, authorize(UserRole.OWNER, UserRole.GENERAL_MANAGER), async (req: any, res) => {
     try {
         const result = await queryWithRetry(
             `SELECT ps.id, ps.user_id, u.email, u.full_name, u.role,
@@ -10924,7 +10980,9 @@ app.get('/push/debug', authenticate, authorize(UserRole.OWNER, UserRole.GENERAL_
                     LEFT(ps.endpoint, 60) || '...' AS endpoint_preview
              FROM push_subscriptions ps
              JOIN users u ON u.id = ps.user_id
-             ORDER BY u.full_name, ps.created_at DESC`
+             WHERE ps.tenant_id = $1
+             ORDER BY u.full_name, ps.created_at DESC`,
+            [req.tenantId!]
         );
         res.json({
             count: result.rows.length,
@@ -10972,8 +11030,10 @@ app.get('/notifications', authenticate, async (req: any, res) => {
         const unreadOnly = String(req.query.unread ?? '') === '1';
         const category = typeof req.query.category === 'string' && req.query.category.trim() ? String(req.query.category).trim() : null;
 
-        const where: string[] = ['recipient_user_id = $1'];
-        const params: any[] = [userId];
+        // Doppio filtro tenant+utente: l'utente basta oggi, ma col login
+        // multi-tenant di Fase C una riga orfana non deve mai attraversare.
+        const where: string[] = ['tenant_id = $1', 'recipient_user_id = $2'];
+        const params: any[] = [req.tenantId!, userId];
         if (!includeDismissed) where.push('dismissed_at IS NULL');
         if (unreadOnly) where.push('read_at IS NULL');
         if (category) {
@@ -11003,8 +11063,8 @@ app.get('/notifications/unread-count', authenticate, async (req: any, res) => {
         if (!userId) return res.status(401).json({ error: 'Unauthorized' });
         const r = await queryWithRetry(
             `SELECT COUNT(*)::int AS count FROM notifications
-             WHERE recipient_user_id = $1 AND read_at IS NULL AND dismissed_at IS NULL`,
-            [userId]
+             WHERE tenant_id = $2 AND recipient_user_id = $1 AND read_at IS NULL AND dismissed_at IS NULL`,
+            [userId, req.tenantId!]
         );
         res.json({ count: r.rows[0]?.count ?? 0 });
     } catch (err) {
@@ -11035,8 +11095,8 @@ app.get('/notifications/counts', authenticate, async (req: any, res) => {
                        OR category NOT IN ('reservation','voice','payment','message','email','system')
                 )::int AS general
              FROM notifications
-             WHERE recipient_user_id = $1 AND dismissed_at IS NULL`,
-            [userId]
+             WHERE tenant_id = $2 AND recipient_user_id = $1 AND dismissed_at IS NULL`,
+            [userId, req.tenantId!]
         );
         const row = r.rows[0] || {};
         res.json({
@@ -11066,8 +11126,8 @@ app.post('/notifications/:id/read', authenticate, async (req: any, res) => {
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
         await queryWithRetry(
             `UPDATE notifications SET read_at = CURRENT_TIMESTAMP
-             WHERE id = $1 AND recipient_user_id = $2 AND read_at IS NULL`,
-            [id, userId]
+             WHERE id = $1 AND recipient_user_id = $2 AND tenant_id = $3 AND read_at IS NULL`,
+            [id, userId, req.tenantId!]
         );
         res.json({ ok: true });
     } catch (err) {
@@ -11082,9 +11142,9 @@ app.post('/notifications/read-all', authenticate, async (req: any, res) => {
         if (!userId) return res.status(401).json({ error: 'Unauthorized' });
         const r = await queryWithRetry(
             `UPDATE notifications SET read_at = CURRENT_TIMESTAMP
-             WHERE recipient_user_id = $1 AND read_at IS NULL AND dismissed_at IS NULL
+             WHERE tenant_id = $2 AND recipient_user_id = $1 AND read_at IS NULL AND dismissed_at IS NULL
              RETURNING id`,
-            [userId]
+            [userId, req.tenantId!]
         );
         res.json({ ok: true, marked: r.rows.length });
     } catch (err) {
@@ -11102,8 +11162,8 @@ app.post('/notifications/:id/dismiss', authenticate, async (req: any, res) => {
         await queryWithRetry(
             `UPDATE notifications
              SET dismissed_at = CURRENT_TIMESTAMP, read_at = COALESCE(read_at, CURRENT_TIMESTAMP)
-             WHERE id = $1 AND recipient_user_id = $2 AND dismissed_at IS NULL`,
-            [id, userId]
+             WHERE id = $1 AND recipient_user_id = $2 AND tenant_id = $3 AND dismissed_at IS NULL`,
+            [id, userId, req.tenantId!]
         );
         res.json({ ok: true });
     } catch (err) {
@@ -13452,9 +13512,9 @@ app.post('/ai-usage', authenticate, async (req: any, res) => {
         const totalTokens = clampToken(req.body?.total_tokens) || (promptTokens + outputTokens);
 
         await queryWithRetry(
-            `INSERT INTO ai_token_usage (provider, feature, model, prompt_tokens, output_tokens, total_tokens, user_email)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [provider, feature, model, promptTokens, outputTokens, totalTokens, (req.user?.email || null)]
+            `INSERT INTO ai_token_usage (provider, feature, model, prompt_tokens, output_tokens, total_tokens, user_email, tenant_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [provider, feature, model, promptTokens, outputTokens, totalTokens, (req.user?.email || null), req.tenantId!]
         );
         res.status(201).json({ ok: true });
     } catch (err) {
@@ -13475,9 +13535,10 @@ app.get('/ai-usage/gemini', authenticate, requireDevBoardAdmin, async (req, res)
                     COUNT(*)::int                        AS calls,
                     MAX(created_at)                      AS last_at
              FROM ai_token_usage
-             WHERE provider <> 'elevenlabs'
+             WHERE tenant_id = $2
+               AND provider <> 'elevenlabs'
                AND created_at >= NOW() - make_interval(days => $1::int)`,
-            [days]
+            [days, req.tenantId!]
         );
         const dailyQ = queryWithRetry(
             `SELECT to_char(created_at AT TIME ZONE 'Europe/Rome', 'YYYY-MM-DD') AS day,
@@ -13486,11 +13547,12 @@ app.get('/ai-usage/gemini', authenticate, requireDevBoardAdmin, async (req, res)
                     COALESCE(SUM(total_tokens),0)::int  AS total_tokens,
                     COUNT(*)::int                        AS calls
              FROM ai_token_usage
-             WHERE provider <> 'elevenlabs'
+             WHERE tenant_id = $2
+               AND provider <> 'elevenlabs'
                AND created_at >= NOW() - make_interval(days => $1::int)
              GROUP BY day
              ORDER BY day`,
-            [days]
+            [days, req.tenantId!]
         );
         const byFeatureQ = queryWithRetry(
             `SELECT feature,
@@ -13498,11 +13560,12 @@ app.get('/ai-usage/gemini', authenticate, requireDevBoardAdmin, async (req, res)
                     COALESCE(SUM(total_tokens),0)::int AS total_tokens,
                     COUNT(*)::int AS calls
              FROM ai_token_usage
-             WHERE provider <> 'elevenlabs'
+             WHERE tenant_id = $2
+               AND provider <> 'elevenlabs'
                AND created_at >= NOW() - make_interval(days => $1::int)
              GROUP BY feature
              ORDER BY total_tokens DESC`,
-            [days]
+            [days, req.tenantId!]
         );
 
         const [totals, daily, byFeature] = await Promise.all([totalsQ, dailyQ, byFeatureQ]);
@@ -15032,6 +15095,7 @@ app.put('/settings/integrations/revolut', authenticate, requirePermission('setti
 
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -15208,6 +15272,7 @@ app.put('/settings/integrations/sumup', authenticate, requirePermission('setting
                 ? `provider attivo: ${providerLabel(providerChange)}`
                 : (updates.environment || 'campi credenziali');
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -15294,6 +15359,7 @@ app.put('/settings/payments/provider', authenticate, requirePermission('settings
             const flowLabel = flow === 'deposit' ? 'caparre' : 'conti al tavolo';
             if (req.user) {
                 LogService.logActivity(
+                    req.tenantId!,
                     req.user.userId,
                     req.user.email,
                     req.user.email,
@@ -15320,6 +15386,7 @@ app.put('/settings/payments/provider', authenticate, requirePermission('settings
 
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -15470,6 +15537,7 @@ app.put('/settings/integrations/smtp', authenticate, requirePermission('settings
 
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -15649,6 +15717,7 @@ app.put('/settings/integrations/imap', authenticate, requirePermission('settings
 
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -15762,6 +15831,7 @@ app.put('/settings/auto-deposit', authenticate, requirePermission('settings:full
 
         if (req.user) {
             LogService.logActivity(
+                req.tenantId!,
                 req.user.userId,
                 req.user.email,
                 req.user.email,
@@ -15797,11 +15867,12 @@ app.put('/settings/auto-deposit', authenticate, requirePermission('settings:full
 // possa vedere i messaggi (serve a mostrare il contesto del suggerimento),
 // scrittura solo settings:full.
 
-app.get('/settings/ai-knowledge', authenticate, requirePermission('reservations:view'), async (_req, res) => {
+app.get('/settings/ai-knowledge', authenticate, requirePermission('reservations:view'), async (req, res) => {
     try {
         const r = await queryWithRetry(
             `SELECT id, title, content, is_active, sort_order, updated_at
-               FROM ai_knowledge_entries ORDER BY sort_order, id`
+               FROM ai_knowledge_entries WHERE tenant_id = $1 ORDER BY sort_order, id`,
+            [req.tenantId!]
         );
         res.json({ entries: r.rows });
     } catch (err: any) {
@@ -15818,10 +15889,10 @@ app.post('/settings/ai-knowledge', authenticate, requirePermission('settings:ful
         if (!content) return res.status(400).json({ error: 'Contenuto mancante' });
         if (content.length > 2000) return res.status(400).json({ error: 'Contenuto troppo lungo (max 2000 caratteri)' });
         const r = await queryWithRetry(
-            `INSERT INTO ai_knowledge_entries (title, content, sort_order, updated_by_user_id)
-             VALUES ($1, $2, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM ai_knowledge_entries), $3)
+            `INSERT INTO ai_knowledge_entries (title, content, sort_order, updated_by_user_id, tenant_id)
+             VALUES ($1, $2, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM ai_knowledge_entries WHERE tenant_id = $4), $3, $4)
              RETURNING id, title, content, is_active, sort_order, updated_at`,
-            [title, content, req.user?.userId ?? null]
+            [title, content, req.user?.userId ?? null, req.tenantId!]
         );
         res.status(201).json(r.rows[0]);
     } catch (err: any) {
@@ -15852,8 +15923,9 @@ app.put('/settings/ai-knowledge/:id', authenticate, requirePermission('settings:
         if (sets.length === 0) return res.status(400).json({ error: 'Nessuna modifica' });
         params.push(req.user?.userId ?? null);
         sets.push(`updated_by_user_id = $${params.length}`, `updated_at = CURRENT_TIMESTAMP`);
+        params.push(req.tenantId!);
         const r = await queryWithRetry(
-            `UPDATE ai_knowledge_entries SET ${sets.join(', ')} WHERE id = $1
+            `UPDATE ai_knowledge_entries SET ${sets.join(', ')} WHERE id = $1 AND tenant_id = $${params.length}
              RETURNING id, title, content, is_active, sort_order, updated_at`,
             params
         );
@@ -15869,7 +15941,7 @@ app.delete('/settings/ai-knowledge/:id', authenticate, requirePermission('settin
     try {
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
-        const r = await queryWithRetry(`DELETE FROM ai_knowledge_entries WHERE id = $1 RETURNING id`, [id]);
+        const r = await queryWithRetry(`DELETE FROM ai_knowledge_entries WHERE id = $1 AND tenant_id = $2 RETURNING id`, [id, req.tenantId!]);
         if (r.rows.length === 0) return res.status(404).json({ error: 'Regola non trovata' });
         res.json({ ok: true });
     } catch (err: any) {
@@ -17295,6 +17367,7 @@ app.post('/orders', authenticate, requirePermission('orders:take'), async (req, 
         try { socketService?.broadcastToAll('order:created', created); } catch (_) {}
 
         LogService.logActivity(
+            req.tenantId!,
             req.user?.userId ?? null, req.user?.email ?? '', req.user?.email ?? '',
             ActivityAction.CREATE, ResourceType.ORDER, created.id,
             `Comanda tavolo ${tableId ?? '—'}`,
@@ -18731,6 +18804,7 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
         } catch (_) {}
 
         LogService.logActivity(
+            req.tenantId!,
             req.user?.userId ?? null, req.user?.email ?? '', req.user?.email ?? '',
             ActivityAction.UPDATE, ResourceType.ORDER, orderId,
             `Comanda chiusa · tavolo ${order.table_id ?? '—'}`,
@@ -18983,6 +19057,7 @@ app.post('/orders/items/:id/void', authenticate, requirePermission('orders:void'
         } catch (_) {}
 
         LogService.logActivity(
+            req.tenantId!,
             req.user?.userId ?? null, req.user?.email ?? '', req.user?.email ?? '',
             ActivityAction.UPDATE, ResourceType.ORDER, item.order_id,
             `Storno · ${item.qty}× ${item.name_snapshot}`,
@@ -19049,6 +19124,7 @@ app.post('/orders/:id/discount', authenticate, requirePermission('orders:void'),
         try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
 
         LogService.logActivity(
+            req.tenantId!,
             req.user?.userId ?? null, req.user?.email ?? '', req.user?.email ?? '',
             ActivityAction.UPDATE, ResourceType.ORDER, id,
             clear ? 'Sconto rimosso' : `Sconto ${type === 'PERCENT' ? `${value}%` : `${value} €`}`,
@@ -19136,6 +19212,7 @@ app.post('/orders/:id/transfer', authenticate, requirePermission('orders:take'),
         try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
 
         LogService.logActivity(
+            req.tenantId!,
             req.user?.userId ?? null, req.user?.email ?? '', req.user?.email ?? '',
             ActivityAction.UPDATE, ResourceType.ORDER, id,
             `Trasferimento al tavolo ${tbl.rows[0].name}`,
@@ -20186,11 +20263,12 @@ bookingTools.configureBookingTools({
     sendBookingConfirmation: (phone: string, text: string, resId: number, opts?: any) =>
         sendBookingConfirmation(PUBLIC_TENANT_ID, phone, text, resId, opts),
 
-    logActivity: LogService.logActivity.bind(LogService),
+    // Canali pubblici (voce/WhatsApp): il tenant è fissato qui, così
+    // bookingTools resta ignaro del threading fino alla Fase C. Vale anche
+    // per l'audit: logActivity ora esige il tenant come primo parametro.
+    logActivity: (...a: any[]) => (LogService.logActivity as any)(PUBLIC_TENANT_ID, ...a),
     activityAction: ActivityAction,
     resourceType: ResourceType,
-    // Canali pubblici (voce/WhatsApp): il tenant è fissato qui, così
-    // bookingTools resta ignaro del threading fino alla Fase C.
     pushSendToRoles: (roles: string[], payload: any, opts?: any) =>
         pushSendToRoles(PUBLIC_TENANT_ID, roles, payload, opts),
     // socketService è inizializzato dopo il listen: le lambda lo leggono al
