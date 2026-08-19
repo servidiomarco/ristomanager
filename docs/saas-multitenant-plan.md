@@ -130,10 +130,10 @@ Il pattern è quello già esistente di SumUp (`/webhook/sumup/:token`, unico web
 - Stripe Billing: subscription per tenant, base + add-on come subscription items; webhook Stripe → `tenants.status` e `tenant_features`. Nessun dato carta nel nostro DB.
 
 ### PR D4 — Ops multi-tenant
-- Scheduler (`server.ts:7157-7437`): i tick iterano per tenant; restano in-process finché `numReplicas: 1`, ma con lock advisory Postgres per essere pronti a scalare.
-- Backup: pg_dump automatizzato (i dump manuali in `backups/` non sono un processo).
-- CORS: chiudere `origin: true` (`server.ts:139`) su allowlist da `tenant_domains`; idem per Socket.IO (`socketService.ts:17-35`).
-- Ruotare le credenziali Vonage committate in `.env.example`.
+- Scheduler: fatto — ogni tick (promemoria, riconcilio quote, riconcilio pagamenti) gira sotto `pg_try_advisory_lock` (id 761001/761002/761003) su un client dedicato tenuto per la durata del tick; chi non ottiene il lock salta il giro. Restano in-process finché `numReplicas: 1`, ma il primo scale-out non duplica più nulla.
+- Backup: fatto — `scripts/backup-db.sh` (pg_dump `-Fc` da `$DATABASE_URL`, gzip, rotazione ultimi 14 in `backups/`). Cron del backup: da schedulare fuori dal repo (launchd/cron o Railway cron) — lo script è pronto.
+- CORS: fatto — `origin: true` sostituito dalla allowlist condivisa `services/corsAllowlist.ts` (nessun Origin, localhost, deploy preview Vercel/Railway, hostname di `CRM_APP_BASE_URL`/`PUBLIC_BOOKING_BASE_URL`, domini custom da `tenant_domains` con cache 60s), usata sia da Express sia dal handshake Socket.IO; `CORS_ALLOW_ALL=true` come scappatoia di debug. Test in `tests/api/cors.test.ts`.
+- Credenziali Vonage: rimosse da `.env.example` (placeholder) — la rotazione sul dashboard Vonage resta un passo manuale da fare, i valori esposti sono compromessi.
 - Timezone: `SET TIME ZONE 'Europe/Rome'` a livello pool (`db.ts:74`) va bene finché i tenant sono italiani; `tenants.timezone` esiste già per il futuro, ma niente lavoro ora.
 
 ---

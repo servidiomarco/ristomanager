@@ -2,6 +2,7 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 import { Server as HTTPServer } from 'http';
 import type { Reservation, Table, Room, Dish, BanquetMenu, UserRole, TableMerge, TableHiddenOverride, RoomClosedOverride } from '../types.js';
 import { AuthService, TokenPayload } from '../auth/authService.js';
+import { isAllowedOrigin } from './corsAllowlist.js';
 
 // Extended socket type with user data
 interface AuthenticatedSocket extends Socket {
@@ -14,24 +15,15 @@ export class SocketService {
   constructor(httpServer: HTTPServer) {
     this.io = new SocketIOServer(httpServer, {
       cors: {
+        // Fase D4 — stessa allowlist dell'API Express (corsAllowlist.ts):
+        // localhost, deploy preview Vercel/Railway, domini di piattaforma e
+        // domini custom dei tenant da tenant_domains. Prima era una lista
+        // hardcoded del solo Frantoio: ogni tenant nuovo con dominio proprio
+        // avrebbe caricato la SPA senza mai ricevere gli eventi real-time.
         origin: (origin, callback) => {
-          // Allow requests with no origin (mobile apps, Postman, etc.)
-          if (!origin) return callback(null, true);
-
-          // Allow localhost for development
-          if (origin.includes('localhost')) return callback(null, true);
-
-          // Allow all Vercel deployment URLs
-          if (origin.includes('vercel.app')) return callback(null, true);
-
-          // Allow Railway URLs
-          if (origin.includes('railway.app')) return callback(null, true);
-
-          // Allow custom production domain
-          if (origin.includes('crm.vecchiofrantoio.com')) return callback(null, true);
-
-          // Reject other origins
-          callback(new Error('Not allowed by CORS'));
+          isAllowedOrigin(origin)
+            .then(allow => (allow ? callback(null, true) : callback(new Error('Not allowed by CORS'))))
+            .catch(() => callback(new Error('Not allowed by CORS')));
         },
         methods: ['GET', 'POST'],
         credentials: true
