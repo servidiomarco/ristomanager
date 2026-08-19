@@ -134,6 +134,7 @@ import {
     listBookableRooms,
     getCappedRoomIds,
 } from './services/roomOccupancyService.js';
+import { isAllowedOrigin } from './services/corsAllowlist.js';
 import { toTitleCase } from './utils/text.js';
 import {
     getAvailableSlots,
@@ -156,9 +157,20 @@ const httpServer = createServer(app);
 // Socket service instance (initialized in startServer)
 let socketService: SocketService | undefined;
 
-// Flexible CORS configuration - temporarily allow all for debugging
+// Fase D4 — CORS chiuso su allowlist (services/corsAllowlist.ts): nessun
+// Origin (curl/print-agent/webhook), localhost, *.vercel.app / *.railway.app
+// (deploy preview), gli hostname di CRM_APP_BASE_URL / PUBLIC_BOOKING_BASE_URL
+// e i domini custom dei tenant da tenant_domains (cache 60s). La stessa
+// funzione governa il handshake Socket.IO in socketService.ts.
+// CORS_ALLOW_ALL=true riapre tutto (per debugging, com'era prima).
+// `allow=false` NON è un errore: il pacchetto cors omette gli header e la
+// richiesta prosegue — è il browser a bloccarla, come da spec CORS.
 const corsOptions = {
-  origin: true,  // Allow all origins temporarily
+  origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+    isAllowedOrigin(origin)
+      .then(allow => callback(null, allow))
+      .catch(err => callback(err instanceof Error ? err : new Error(String(err))));
+  },
   credentials: true
 };
 
@@ -7518,12 +7530,62 @@ async function runDailyBreadReminder(tenantId: number, targetRoles: string[] = [
     console.log(`🥖 Bread reminder for ${tomorrowIso}: ${kg}kg (${totalGuests} coperti)`);
 }
 
+// ============================================
+// SCHEDULER — advisory lock per replica singola
+// ============================================
+// Fase D4 — numReplicas è 1 oggi, ma il primo scale-out non deve duplicare
+// promemoria e riconciliazioni: due repliche che riconciliano lo stesso
+// split cancellerebbero/incasserebbero due volte, e ogni reminder
+// arriverebbe doppio. Ogni tick gira quindi sotto pg_try_advisory_lock con
+// un id dedicato per scheduler: chi non ottiene il lock salta il giro in
+// silenzio (l'altra replica lo sta già facendo).
+const SCHEDULER_LOCK_BILL_SPLIT_RECONCILE = 761001;
+const SCHEDULER_LOCK_PAYMENT_REQUEST_RECONCILE = 761002;
+const SCHEDULER_LOCK_REMINDERS = 761003;
+
+// Il lock advisory è di SESSIONE: va preso su un client dedicato tenuto per
+// tutta la durata del tick (sul pool condiviso un'altra query potrebbe
+// girare su una connessione diversa e il lock non proteggerebbe nulla), e
+// rilasciato nel finally insieme al client. pg_try_advisory_lock non
+// blocca: la replica che perde la corsa non si accoda, salta il giro.
+const runSchedulerTickWithLock = async (
+    lockId: number,
+    name: string,
+    tick: () => Promise<void>
+): Promise<void> => {
+    let client;
+    try {
+        client = await pool.connect();
+    } catch (err: any) {
+        // Pool esaurito o DB giù: il prossimo giro ritenta, come già fanno
+        // i tick stessi sugli errori di query.
+        console.error(`[scheduler:${name}] connessione per il lock fallita:`, err?.message || err);
+        return;
+    }
+    let acquired = false;
+    try {
+        const res = await client.query('SELECT pg_try_advisory_lock($1) AS locked', [lockId]);
+        acquired = res.rows[0]?.locked === true;
+        if (!acquired) {
+            console.debug(`[scheduler:${name}] tick saltato: lock ${lockId} tenuto da un'altra replica`);
+            return;
+        }
+        await tick();
+    } finally {
+        if (acquired) {
+            // Unlock esplicito prima del release: il client torna nel pool e
+            // la sessione resta viva, quindi il lock NON cadrebbe da solo.
+            try { await client.query('SELECT pg_advisory_unlock($1)', [lockId]); } catch (_) {}
+        }
+        client.release();
+    }
+};
+
 // Pay-at-table reconcile: every 60s scans CLAIMED splits whose 5-min TTL
 // has elapsed and either (a) polls the gateway to see if a webhook was
 // dropped, (b) marks the split ABANDONED so its capacity is released.
-// Runs in-process because we're already single-instance on Railway; if
-// that changes, wrap the loop with an advisory lock so only one node
-// processes each split.
+// Runs in-process; l'advisory lock qui sopra garantisce un solo esecutore
+// anche quando le repliche saranno più di una.
 const startBillSplitReconcileScheduler = () => {
     const tick = async () => {
         try {
@@ -7620,8 +7682,10 @@ const startBillSplitReconcileScheduler = () => {
             console.error('[bill-reconcile] scheduler tick failed:', err?.message || err);
         }
     };
-    tick();
-    setInterval(tick, 60 * 1000);
+    const lockedTick = () => runSchedulerTickWithLock(SCHEDULER_LOCK_BILL_SPLIT_RECONCILE, 'bill-reconcile', tick)
+        .catch(err => console.error('[bill-reconcile] lock wrapper failed:', err?.message || err));
+    lockedTick();
+    setInterval(lockedTick, 60 * 1000);
 };
 
 // Payment reconcile: every 2 minutes, poll the gateway for payment_requests
@@ -7685,8 +7749,10 @@ const startPaymentRequestReconcileScheduler = () => {
             console.error('[payment-reconcile] scheduler tick failed:', err?.message || err);
         }
     };
-    tick();
-    setInterval(tick, 2 * 60 * 1000);
+    const lockedTick = () => runSchedulerTickWithLock(SCHEDULER_LOCK_PAYMENT_REQUEST_RECONCILE, 'payment-reconcile', tick)
+        .catch(err => console.error('[payment-reconcile] lock wrapper failed:', err?.message || err));
+    lockedTick();
+    setInterval(lockedTick, 2 * 60 * 1000);
 };
 
 // Registry of hardcoded handlers for reminders that need dynamic content
@@ -7816,8 +7882,10 @@ const startRemindersScheduler = () => {
             console.error('Reminders scheduler error:', err);
         }
     };
-    tick();
-    setInterval(tick, 5 * 60 * 1000);
+    const lockedTick = () => runSchedulerTickWithLock(SCHEDULER_LOCK_REMINDERS, 'reminders', tick)
+        .catch((err: any) => console.error('[reminders] lock wrapper failed:', err?.message || err));
+    lockedTick();
+    setInterval(lockedTick, 5 * 60 * 1000);
 };
 
 // ============================================
