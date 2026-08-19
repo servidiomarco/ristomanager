@@ -60,9 +60,14 @@ export interface ActivityStats {
 
 export class LogService {
   /**
-   * Log an activity to the database
+   * Log an activity to the database.
+   * tenantId è il PRIMO parametro, obbligatorio (Fase B3.7): un call site
+   * nuovo non può dimenticarlo, il compilatore lo rifiuta — stesso pattern
+   * di pushService.sendToRoles. Senza, l'audit di un ristorante mostrerebbe
+   * le azioni dello staff di tutti gli altri.
    */
   static async logActivity(
+    tenantId: number,
     userId: number | null,
     userEmail: string,
     userName: string,
@@ -77,10 +82,11 @@ export class LogService {
     try {
       const result = await queryWithRetry(
         `INSERT INTO activity_logs
-         (user_id, user_email, user_name, action, resource_type, resource_id, resource_name, details, status, error_message)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         (tenant_id, user_id, user_email, user_name, action, resource_type, resource_id, resource_name, details, status, error_message)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING *`,
         [
+          tenantId,
           userId,
           userEmail,
           userName,
@@ -103,7 +109,7 @@ export class LogService {
   /**
    * Get activity logs with filters and pagination
    */
-  static async getActivityLogs(filters: LogFilters = {}): Promise<{ logs: ActivityLog[]; total: number }> {
+  static async getActivityLogs(tenantId: number, filters: LogFilters = {}): Promise<{ logs: ActivityLog[]; total: number }> {
     const {
       user_id,
       resource_type,
@@ -115,9 +121,11 @@ export class LogService {
       offset = 0
     } = filters;
 
-    const conditions: string[] = [];
-    const params: any[] = [];
-    let paramIndex = 1;
+    // Il tenant è la prima condizione, sempre presente: i filtri opzionali
+    // si sommano, non la sostituiscono.
+    const conditions: string[] = ['tenant_id = $1'];
+    const params: any[] = [tenantId];
+    let paramIndex = 2;
 
     if (user_id) {
       conditions.push(`user_id = $${paramIndex++}`);
@@ -179,14 +187,15 @@ export class LogService {
   /**
    * Get activity statistics
    */
-  static async getActivityStats(): Promise<ActivityStats> {
+  static async getActivityStats(tenantId: number): Promise<ActivityStats> {
     // Total logs
-    const totalResult = await queryWithRetry('SELECT COUNT(*) FROM activity_logs');
+    const totalResult = await queryWithRetry('SELECT COUNT(*) FROM activity_logs WHERE tenant_id = $1', [tenantId]);
     const total_logs = parseInt(totalResult.rows[0].count, 10);
 
     // Logs by action
     const actionResult = await queryWithRetry(
-      `SELECT action, COUNT(*) as count FROM activity_logs GROUP BY action`
+      `SELECT action, COUNT(*) as count FROM activity_logs WHERE tenant_id = $1 GROUP BY action`,
+      [tenantId]
     );
     const logs_by_action: Record<string, number> = {};
     for (const row of actionResult.rows) {
@@ -195,7 +204,8 @@ export class LogService {
 
     // Logs by resource type
     const resourceResult = await queryWithRetry(
-      `SELECT resource_type, COUNT(*) as count FROM activity_logs GROUP BY resource_type`
+      `SELECT resource_type, COUNT(*) as count FROM activity_logs WHERE tenant_id = $1 GROUP BY resource_type`,
+      [tenantId]
     );
     const logs_by_resource: Record<string, number> = {};
     for (const row of resourceResult.rows) {
@@ -206,10 +216,11 @@ export class LogService {
     const usersResult = await queryWithRetry(
       `SELECT user_id, user_name, COUNT(*) as count
        FROM activity_logs
-       WHERE user_id IS NOT NULL
+       WHERE tenant_id = $1 AND user_id IS NOT NULL
        GROUP BY user_id, user_name
        ORDER BY count DESC
-       LIMIT 5`
+       LIMIT 5`,
+      [tenantId]
     );
     const recent_users = usersResult.rows.map(row => ({
       user_id: row.user_id,
@@ -228,12 +239,13 @@ export class LogService {
   /**
    * Get list of users who have activity logs (for filter dropdown)
    */
-  static async getLogUsers(): Promise<{ id: number; name: string; email: string }[]> {
+  static async getLogUsers(tenantId: number): Promise<{ id: number; name: string; email: string }[]> {
     const result = await queryWithRetry(
       `SELECT DISTINCT user_id as id, user_name as name, user_email as email
        FROM activity_logs
-       WHERE user_id IS NOT NULL
-       ORDER BY user_name`
+       WHERE tenant_id = $1 AND user_id IS NOT NULL
+       ORDER BY user_name`,
+      [tenantId]
     );
     return result.rows;
   }

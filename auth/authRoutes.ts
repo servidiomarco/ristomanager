@@ -31,8 +31,10 @@ router.post('/login', async (req: Request, res: Response) => {
     // Get user's permissions from database
     const permissions = await RolePermissionService.getPermissionsForRole(result.user.tenant!.id, result.user.role);
 
-    // Log login activity
+    // Log login activity. Il tenant si legge dalla riga utente appena
+    // caricata: qui non c'è ancora un JWT da cui ricavarlo.
     LogService.logActivity(
+      result.user.tenant!.id,
       result.user.id,
       result.user.email,
       result.user.full_name,
@@ -60,6 +62,7 @@ router.post('/logout', authenticate, async (req: Request, res: Response) => {
     if (req.user) {
       // Log logout activity
       LogService.logActivity(
+        req.user.tenantId,
         req.user.userId,
         req.user.email,
         req.user.email,
@@ -215,6 +218,7 @@ router.post('/users', authenticate, authorize(UserRole.OWNER), async (req: Reque
     // Log activity
     if (req.user) {
       LogService.logActivity(
+        req.user.tenantId,
         req.user.userId,
         req.user.email,
         req.user.email,
@@ -261,6 +265,7 @@ router.put('/users/:id', authenticate, authorize(UserRole.OWNER), async (req: Re
     // Log activity
     if (req.user) {
       LogService.logActivity(
+        req.user.tenantId,
         req.user.userId,
         req.user.email,
         req.user.email,
@@ -305,6 +310,7 @@ router.delete('/users/:id', authenticate, authorize(UserRole.OWNER), async (req:
     // Log activity
     if (req.user) {
       LogService.logActivity(
+        req.user.tenantId,
         req.user.userId,
         req.user.email,
         req.user.email,

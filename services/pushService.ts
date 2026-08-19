@@ -159,7 +159,11 @@ const sendToSubscriptions = async (tenantId: number, subs: SubscriptionRow[], pa
 // there's already an unresolved notification with that tag — mirrors the
 // browser's own web-push tag semantics so operators don't see duplicates
 // pile up on retries.
+// tenantId obbligatorio (Fase B3.7): la riga in `notifications` è quella che
+// il centro notifiche rilegge scopato per tenant — una riga senza tenant
+// giusto sparirebbe dalla storia del destinatario.
 async function persistForUsers(
+    tenantId: number,
     userIds: number[],
     payload: PushPayload
 ): Promise<void> {
@@ -174,9 +178,9 @@ async function persistForUsers(
             if (payload.tag) {
                 const existing = await queryWithRetry(
                     `SELECT id FROM notifications
-                     WHERE recipient_user_id = $1 AND tag = $2 AND dismissed_at IS NULL
+                     WHERE tenant_id = $3 AND recipient_user_id = $1 AND tag = $2 AND dismissed_at IS NULL
                      ORDER BY sent_at DESC LIMIT 1`,
-                    [uid, payload.tag]
+                    [uid, payload.tag, tenantId]
                 );
                 if (existing.rows.length > 0) {
                     // Refresh the sent_at so the row bumps to the top of the
@@ -194,9 +198,9 @@ async function persistForUsers(
             }
             await queryWithRetry(
                 `INSERT INTO notifications
-                    (recipient_user_id, category, title, body, url, tag, metadata)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-                [uid, category, payload.title, payload.body, payload.url ?? null, payload.tag ?? null, meta]
+                    (tenant_id, recipient_user_id, category, title, body, url, tag, metadata)
+                 VALUES ($8, $1, $2, $3, $4, $5, $6, $7)`,
+                [uid, category, payload.title, payload.body, payload.url ?? null, payload.tag ?? null, meta, tenantId]
             );
         } catch (err) {
             console.warn('[push] persistForUsers failed for', uid, (err as any)?.message || err);
@@ -217,10 +221,9 @@ async function fetchUserIdsForRoles(tenantId: number, roles: string[], excludeUs
 }
 
 export const sendToUser = async (userId: number, payload: PushPayload) => {
-    await persistForUsers([userId], payload);
-    const subs = await fetchSubscriptionsForUser(userId);
-    // Il tenant del badge è quello del destinatario: si legge dalla sua riga
-    // utente, così le rotte chiamanti non devono threadare nulla.
+    // Il tenant (badge E riga notifica) è quello del destinatario: si legge
+    // dalla sua riga utente, così le rotte chiamanti non devono threadare
+    // nulla. Va risolto PRIMA di persistere, la notifica nasce già scopata.
     let tenantId = 1;
     try {
         const t = await queryWithRetry('SELECT tenant_id FROM users WHERE id = $1', [userId]);
@@ -228,6 +231,8 @@ export const sendToUser = async (userId: number, payload: PushPayload) => {
     } catch (err) {
         console.warn('[push] tenant lookup failed for user', userId, (err as any)?.message || err);
     }
+    await persistForUsers(tenantId, [userId], payload);
+    const subs = await fetchSubscriptionsForUser(userId);
     return sendToSubscriptions(tenantId, subs, payload);
 };
 
@@ -240,7 +245,7 @@ export const sendToRoles = async (
     options?: { excludeUserId?: number | null }
 ) => {
     const recipients = await fetchUserIdsForRoles(tenantId, roles, options?.excludeUserId);
-    await persistForUsers(recipients, payload);
+    await persistForUsers(tenantId, recipients, payload);
     const subs = await fetchSubscriptionsForRoles(tenantId, roles, options?.excludeUserId);
     return sendToSubscriptions(tenantId, subs, payload);
 };
