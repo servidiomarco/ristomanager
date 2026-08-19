@@ -365,6 +365,19 @@
 
 <script>
 (async function () {
+    // Multi-tenant (Fase C3): la stessa pagina serve tutti i ristoranti.
+    // Su /prenota/<slug> le chiamate /public/* vanno prefissate con lo slug
+    // (è lui a dire al server QUALE ristorante), e i link privacy portano
+    // lo slug per la stessa ragione. Senza slug (path storico /prenota)
+    // tutto resta com'era: il server risolve da dominio o fallback.
+    const slugMatch = location.pathname.match(/^\/prenota\/([a-z0-9][a-z0-9-]*)\/?$/);
+    const publicBase = slugMatch ? '/public/' + slugMatch[1] : '/public';
+    if (slugMatch) {
+        document.querySelectorAll('a[href="/privacy"]').forEach(a => {
+            a.setAttribute('href', '/privacy/' + slugMatch[1]);
+        });
+    }
+
     // Bootstrap: ask the server whether bookings are open. If not, leave the
     // maintenance card visible and skip all form wiring. Otherwise reveal the
     // form + phone CTA before running the rest of the init. Doing this from
@@ -386,7 +399,7 @@
 
     let contact = null;
     try {
-        const r = await fetch('/public/contact');
+        const r = await fetch(publicBase + '/contact');
         if (r.ok) contact = await r.json();
     } catch { /* network issue → stay on maintenance card (safe default) */ }
 
@@ -615,7 +628,7 @@
         if (!state.date) return;
         slotsContainer.innerHTML = '<p class="text-sm text-stone-400 text-center py-3">Caricamento orari…</p>';
         try {
-            const resp = await fetch(`/public/availability?date=${encodeURIComponent(state.date)}`);
+            const resp = await fetch(`${publicBase}/availability?date=${encodeURIComponent(state.date)}`);
             if (!resp.ok) throw new Error('availability fetch failed');
             state.availability = await resp.json();
         } catch (err) {
@@ -745,7 +758,7 @@
         if (!state.date || !state.shift || !state.guests) return;
         roomsContainer.innerHTML = '<p class="text-sm text-stone-400 text-center py-3">Caricamento sale…</p>';
         try {
-            const url = `/public/rooms?date=${encodeURIComponent(state.date)}&shift=${encodeURIComponent(state.shift)}&guests=${encodeURIComponent(state.guests)}`;
+            const url = `${publicBase}/rooms?date=${encodeURIComponent(state.date)}&shift=${encodeURIComponent(state.shift)}&guests=${encodeURIComponent(state.guests)}`;
             const resp = await fetch(url);
             if (!resp.ok) throw new Error('rooms fetch failed');
             const data = await resp.json();
@@ -853,7 +866,7 @@
         submitBtn.textContent = 'Invio in corso…';
 
         try {
-            const resp = await fetch('/public/reservations', {
+            const resp = await fetch(publicBase + '/reservations', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
