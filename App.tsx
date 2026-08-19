@@ -6,6 +6,7 @@ import { FloorPlan } from './components/FloorPlan';
 import { MenuManager } from './components/MenuManager';
 import { ReservationList } from './components/ReservationList';
 import { LoginPage } from './components/LoginPage';
+import { OnboardingWizard } from './components/OnboardingWizard';
 import { CookingPotLoader } from './components/CookingPotLoader';
 import { UserManagement } from './components/UserManagement';
 import { RolePermissions } from './components/RolePermissions';
@@ -1590,6 +1591,13 @@ const App: React.FC = () => {
   // Show login page if not authenticated
   if (!isAuthenticated) {
     return <LoginPage />;
+  }
+
+  // Primo accesso di un tenant appena provisionato (Fase D1): l'OWNER passa
+  // dal wizard prima di entrare. Solo lui — gli altri ruoli lavorano
+  // normalmente anche se il wizard non è stato completato.
+  if (user?.role === UserRole.OWNER && user.tenant?.needs_onboarding) {
+    return <OnboardingWizard />;
   }
 
   // Get role display name

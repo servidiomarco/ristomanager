@@ -104,7 +104,8 @@ export class AuthService {
     const result = await queryWithRetry(
       `SELECT u.id, u.email, u.password_hash, u.full_name, u.role, u.is_active,
               u.created_at, u.updated_at, u.last_login, u.preferred_landing_view,
-              u.tenant_id, t.status AS tenant_status, t.slug AS tenant_slug, t.name AS tenant_name
+              u.tenant_id, t.status AS tenant_status, t.slug AS tenant_slug, t.name AS tenant_name,
+              t.onboarding_completed_at IS NULL AS tenant_needs_onboarding
          FROM users u
          JOIN tenants t ON t.id = u.tenant_id
         WHERE u.email = $1`,
@@ -162,7 +163,8 @@ export class AuthService {
       tenant: {
         id: Number(userRow.tenant_id),
         slug: userRow.tenant_slug,
-        name: userRow.tenant_name
+        name: userRow.tenant_name,
+        needs_onboarding: userRow.tenant_needs_onboarding === true
       }
     };
 
@@ -232,7 +234,8 @@ export class AuthService {
     const result = await queryWithRetry(
       `SELECT u.id, u.email, u.full_name, u.role, u.is_active, u.created_at,
               u.updated_at, u.last_login, u.preferred_landing_view,
-              u.tenant_id, t.slug AS tenant_slug, t.name AS tenant_name
+              u.tenant_id, t.slug AS tenant_slug, t.name AS tenant_name,
+              t.onboarding_completed_at IS NULL AS tenant_needs_onboarding
          FROM users u
          JOIN tenants t ON t.id = u.tenant_id
         WHERE u.id = $1`,
@@ -257,7 +260,8 @@ export class AuthService {
       tenant: {
         id: Number(row.tenant_id),
         slug: row.tenant_slug,
-        name: row.tenant_name
+        name: row.tenant_name,
+        needs_onboarding: row.tenant_needs_onboarding === true
       }
     };
   }
@@ -340,15 +344,18 @@ export class AuthService {
     email: string,
     password: string,
     fullName: string,
-    role: UserRole
+    role: UserRole,
+    // Tenant esplicito: senza, l'INSERT cadeva sul DEFAULT 1 di Fase B e
+    // l'OWNER di un tenant nuovo creava il suo staff dentro il tenant 1.
+    tenantId: number
   ): Promise<User> {
     const passwordHash = await this.hashPassword(password);
 
     const result = await queryWithRetry(
-      `INSERT INTO users (email, password_hash, full_name, role)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO users (tenant_id, email, password_hash, full_name, role)
+       VALUES ($5, $1, $2, $3, $4)
        RETURNING id, email, full_name, role, is_active, created_at, updated_at`,
-      [email.toLowerCase(), passwordHash, fullName, role]
+      [email.toLowerCase(), passwordHash, fullName, role, tenantId]
     );
 
     const row = result.rows[0];

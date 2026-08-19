@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { User, UserRole, ViewState, LoginCredentials } from '../types';
 import { authApiService } from '../services/authApiService';
+import { completeOnboarding as apiCompleteOnboarding } from '../services/apiService';
 import { socketClient } from '../services/socketClient';
 import { AlertTriangle } from 'lucide-react';
 
@@ -51,6 +52,9 @@ interface AuthContextType {
   canViewLogs: () => boolean;
   getAccessToken: () => string | null;
   updatePreferences: (prefs: { preferred_landing_view?: string | null }) => Promise<void>;
+  /** Chiude il wizard di primo accesso (D1): server + stato locale, così
+   *  l'app compare senza rifare il login. */
+  completeOnboarding: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -155,6 +159,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(updated);
   }, []);
 
+  const completeOnboarding = useCallback(async () => {
+    await apiCompleteOnboarding();
+    // Il flag vive dentro user.tenant: si aggiorna in place, il prossimo
+    // /auth/me lo confermerà dal server.
+    setUser(prev => (prev && prev.tenant)
+      ? { ...prev, tenant: { ...prev.tenant, needs_onboarding: false } }
+      : prev);
+  }, []);
+
   const value: AuthContextType = {
     user,
     permissions,
@@ -168,7 +181,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     canManageUsers,
     canViewLogs,
     getAccessToken,
-    updatePreferences
+    updatePreferences,
+    completeOnboarding
   };
 
   return (

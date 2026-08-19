@@ -119,7 +119,7 @@ Il pattern è quello già esistente di SumUp (`/webhook/sumup/:token`, unico web
 
 ### PR D1 — Provisioning & onboarding
 - `POST /admin/tenants`: crea tenant, chiama `seedTenantDefaults()` (da A3), genera `webhook_token`, invita l'OWNER via email (sostituisce il seed `admin@ristomanager.com`, `db.ts:774`).
-- Wizard primo accesso: dati legali, sale/tavoli, orari, menu minimo.
+- Wizard primo accesso: fatto (coda di D1, dopo D4) — `tenants.onboarding_completed_at` (NULL = da fare, backfill a completato per i tenant pre-wizard), `needs_onboarding` dentro `user.tenant` da login e `/auth/me`, `POST /onboarding/complete` (solo OWNER, idempotente). `components/OnboardingWizard.tsx` al posto dell'app per il solo OWNER: dati legali, sale/tavoli, orari, menu minimo — i passi non si bloccano, si può entrare a mani vuote e finire dalle Impostazioni. Sistemato di passaggio `createUser`, che ignorava il tenant del chiamante e creava lo staff nel tenant 1 (DEFAULT di Fase B). Il gating UI sulle feature (nota C1) resta da fare.
 
 ### PR D2 — Pannello piattaforma
 - Ruolo `PLATFORM_ADMIN` sopra OWNER (fuori dalla gerarchia tenant): lista tenant, stato, feature, sospensione, impersonation con audit log.

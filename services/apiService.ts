@@ -1213,6 +1213,15 @@ export const updateLegalSettings = async (
   });
 };
 
+// Wizard di primo accesso (Fase D1): marca l'onboarding come completato.
+// Solo OWNER lato server; idempotente.
+export const completeOnboarding = async (): Promise<void> => {
+  await apiRequest<{ ok: boolean }>(`${API_URL}/onboarding/complete`, {
+    method: 'POST',
+    headers: getHeaders(),
+  });
+};
+
 export interface MarketingRecipient {
   id: number;
   name: string;
