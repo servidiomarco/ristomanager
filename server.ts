@@ -20,6 +20,15 @@ import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bo
 import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
 import { provisionTenant, ProvisioningError } from './services/tenantProvisioning.js';
 import {
+    createCheckoutSession,
+    createPortalSession,
+    applySubscriptionState,
+    constructWebhookEvent,
+    isBillingEnabled,
+    BillingError,
+    type SubscriptionLike,
+} from './services/billingService.js';
+import {
     generateSuggestedReply,
     isAiConfigured,
     AiReplyError,
@@ -15576,7 +15585,7 @@ app.get('/admin/tenants', platformAdminAuth, async (_req, res) => {
         // Feature attive come array di nomi e conteggio utenti in una query:
         // è la vista "lista tenant" del futuro pannello D2, non un report.
         const result = await queryWithRetry(
-            `SELECT t.id, t.slug, t.name, t.status, t.created_at,
+            `SELECT t.id, t.slug, t.name, t.status, t.billing_status, t.created_at,
                     COALESCE(
                         array_agg(f.feature ORDER BY f.feature) FILTER (WHERE f.enabled),
                         '{}'
@@ -15592,6 +15601,9 @@ app.get('/admin/tenants', platformAdminAuth, async (_req, res) => {
             slug: r.slug,
             name: r.name,
             status: r.status,
+            // NULL = tenant non a pagamento (grandfathered): il pannello lo
+            // distingue da un pagante moroso.
+            billing_status: r.billing_status,
             created_at: r.created_at,
             features: r.features,
             user_count: r.user_count,
@@ -15739,6 +15751,133 @@ app.post('/admin/tenants/:id/impersonate', platformAdminAuth, async (req, res) =
     } catch (err) {
         console.error('POST /admin/tenants/:id/impersonate error:', err);
         res.status(500).json({ error: 'Failed to impersonate tenant' });
+    }
+});
+
+// ============================================
+// BILLING STRIPE (Fase D3)
+// ============================================
+// Lean e webhook-driven: gli endpoint admin generano solo gli URL di
+// checkout/portal (nessun form carta da noi), lo stato del tenant lo detta
+// il webhook via applySubscriptionState (services/billingService.ts).
+// Tutto risponde 503 billing_disabled finché le env Stripe non ci sono:
+// il Frantoio (grandfathered, billing_status NULL) non è toccato.
+
+// Traduzione BillingError → HTTP: la fa la route, il servizio non conosce
+// gli status code.
+const billingErrorToResponse = (res: express.Response, err: unknown, routeLabel: string): void => {
+    if (err instanceof BillingError) {
+        const status = err.code === 'billing_disabled' ? 503
+            : err.code === 'tenant_not_found' ? 404
+            : err.code === 'stripe_customer_missing' ? 409
+            : 400;
+        res.status(status).json({ error: err.code, message: err.message });
+        return;
+    }
+    console.error(`${routeLabel} error:`, err);
+    res.status(500).json({ error: 'billing_error' });
+};
+
+app.post('/admin/tenants/:id/billing/checkout', platformAdminAuth, async (req, res) => {
+    const tenantId = Number(req.params.id);
+    if (!Number.isInteger(tenantId) || tenantId <= 0) {
+        return res.status(400).json({ error: 'invalid_tenant_id' });
+    }
+    const body = req.body ?? {};
+    let prices: string[] | undefined;
+    if (body.prices !== undefined) {
+        if (!Array.isArray(body.prices) || body.prices.length === 0
+            || body.prices.some((p: unknown) => typeof p !== 'string' || !p)) {
+            return res.status(400).json({ error: 'invalid_prices', message: 'prices deve essere un array non vuoto di price id Stripe' });
+        }
+        prices = body.prices;
+    }
+    // Le pagine di ritorno sono placeholder sul backend stesso: chi apre il
+    // checkout è l'admin di piattaforma, non serve una UI dedicata.
+    const origin = `${req.protocol}://${req.get('host')}`;
+    const successUrl = typeof body.success_url === 'string' && body.success_url ? body.success_url : `${origin}/admin/billing/success`;
+    const cancelUrl = typeof body.cancel_url === 'string' && body.cancel_url ? body.cancel_url : `${origin}/admin/billing/cancel`;
+    try {
+        const session = await createCheckoutSession(tenantId, { prices, successUrl, cancelUrl });
+        res.json({ url: session.url, session_id: session.sessionId });
+    } catch (err) {
+        billingErrorToResponse(res, err, 'POST /admin/tenants/:id/billing/checkout');
+    }
+});
+
+app.post('/admin/tenants/:id/billing/portal', platformAdminAuth, async (req, res) => {
+    const tenantId = Number(req.params.id);
+    if (!Number.isInteger(tenantId) || tenantId <= 0) {
+        return res.status(400).json({ error: 'invalid_tenant_id' });
+    }
+    const body = req.body ?? {};
+    const origin = `${req.protocol}://${req.get('host')}`;
+    const returnUrl = typeof body.return_url === 'string' && body.return_url ? body.return_url : `${origin}/admin/billing/return`;
+    try {
+        const session = await createPortalSession(tenantId, returnUrl);
+        res.json({ url: session.url });
+    } catch (err) {
+        billingErrorToResponse(res, err, 'POST /admin/tenants/:id/billing/portal');
+    }
+});
+
+// Webhook Stripe: l'UNICA via con cui lo stato della subscription entra nel
+// DB. Stripe firma i byte esatti del payload: la verifica usa req.rawBody
+// (catturato dal verify hook di express.json in testa al file), MAI il body
+// già parsato — una ri-serializzazione riordina le chiavi e rompe la firma.
+app.post('/webhook/stripe', async (req, res) => {
+    if (!process.env.STRIPE_WEBHOOK_SECRET || !isBillingEnabled()) {
+        // Env assente = funzionalità spenta, stessa semantica del pannello
+        // piattaforma: l'endpoint non deve esistere finché non è configurato.
+        return res.status(503).json({ error: 'billing_disabled', message: 'STRIPE_WEBHOOK_SECRET/STRIPE_SECRET_KEY non configurate.' });
+    }
+    const rawBody = (req as any).rawBody as Buffer | undefined;
+    if (!rawBody) {
+        return res.status(400).json({ error: 'missing_body' });
+    }
+    let event;
+    try {
+        event = constructWebhookEvent(rawBody, String(req.headers['stripe-signature'] ?? ''));
+    } catch (err: any) {
+        console.warn('[billing] firma webhook Stripe non valida:', err?.message || err);
+        return res.status(400).json({ error: 'invalid_signature' });
+    }
+    try {
+        switch (event.type) {
+            case 'customer.subscription.created':
+            case 'customer.subscription.updated':
+            case 'customer.subscription.deleted': {
+                const subscription = event.data.object as unknown as SubscriptionLike;
+                // deleted = subscription rimossa: si tratta come canceled
+                // qualunque status porti l'oggetto, il tenant va sospeso.
+                const effective = event.type === 'customer.subscription.deleted'
+                    ? { ...subscription, status: 'canceled' }
+                    : subscription;
+                const applied = await applySubscriptionState(effective);
+                if (applied && applied.tenantStatusChanged) {
+                    // Stessa invalidazione della PATCH admin: la risoluzione
+                    // slug/dominio filtra su status='active' ma è cache-ata —
+                    // senza questo una sospensione lascerebbe la pagina
+                    // pubblica viva fino allo scadere del TTL.
+                    tenantSlugCache.delete(applied.slug);
+                    for (const [domain, entry] of tenantDomainCache) {
+                        if (entry.hit.tenantId === applied.tenantId) tenantDomainCache.delete(domain);
+                    }
+                }
+                break;
+            }
+            default:
+                // Ogni altro evento si acka e basta: invoice.*, checkout.*…
+                // arrivano comunque (Stripe manda tutto ciò che è abilitato)
+                // ma la verità che ci serve è nella subscription.
+                break;
+        }
+        res.json({ received: true });
+    } catch (err) {
+        console.error('POST /webhook/stripe error:', err);
+        // 500 esplicito: Stripe ritenta con backoff, e un errore transitorio
+        // del DB non deve far perdere l'evento.
+        res.status(500).json({ error: 'webhook_processing_failed' });
     }
 });
 
