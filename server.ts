@@ -18,6 +18,7 @@ import * as bookingTools from './services/bookingTools.js';
 import * as whatsappAgent from './services/whatsappAgent.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
 import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
+import { provisionTenant, ProvisioningError } from './services/tenantProvisioning.js';
 import {
     generateSuggestedReply,
     isAiConfigured,
@@ -15443,6 +15444,181 @@ app.get('/settings/webhook-info', authenticate, requirePermission('settings:full
     } catch (err) {
         console.error('GET /settings/webhook-info error:', err);
         res.status(500).json({ error: 'Failed to fetch webhook info' });
+    }
+});
+
+// ============================================
+// PANNELLO PIATTAFORMA — PROVISIONING TENANT (Fase D1)
+// ============================================
+// Endpoint /admin/tenants: stanno SOPRA i tenant, quindi fuori dal JWT e da
+// requirePermission (che sono per-tenant per costruzione). Il gate è un token
+// di piattaforma da env: il ruolo PLATFORM_ADMIN e il pannello con audit log
+// arrivano in D2 — il token env è il bootstrap minimo per accendere i primi
+// tenant senza aprire una superficie self-service.
+const platformAdminAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const expected = process.env.PLATFORM_ADMIN_TOKEN || '';
+    if (!expected) {
+        // Env assente = funzionalità spenta, non "accesso libero": senza
+        // token configurato questi endpoint non devono esistere.
+        return res.status(503).json({ error: 'platform_admin_disabled', message: 'PLATFORM_ADMIN_TOKEN non configurato.' });
+    }
+    const provided = String(req.header('X-Platform-Admin-Token') ?? '');
+    // Confronto timing-safe: si hashano entrambi i lati per pareggiare le
+    // lunghezze (timingSafeEqual esige buffer uguali, e la lunghezza del
+    // token non deve trapelare dal tempo di risposta).
+    const a = crypto.createHash('sha256').update(provided).digest();
+    const b = crypto.createHash('sha256').update(expected).digest();
+    if (!crypto.timingSafeEqual(a, b)) {
+        return res.status(401).json({ error: 'invalid_platform_admin_token' });
+    }
+    next();
+};
+
+app.post('/admin/tenants', platformAdminAuth, async (req, res) => {
+    const body = req.body ?? {};
+    // Le feature richieste si validano qui (l'endpoint conosce HTTP, il
+    // servizio no): solo i tre nomi noti, solo boolean.
+    const features: Partial<Record<TenantFeature, boolean>> = {};
+    if (body.features !== undefined) {
+        if (typeof body.features !== 'object' || body.features === null || Array.isArray(body.features)) {
+            return res.status(400).json({ error: 'invalid_features', message: 'features deve essere un oggetto {voice|whatsapp|web_booking: boolean}' });
+        }
+        for (const [key, value] of Object.entries(body.features)) {
+            if (!(TENANT_FEATURES as readonly string[]).includes(key) || typeof value !== 'boolean') {
+                return res.status(400).json({ error: 'invalid_features', message: `Feature non valida: ${String(key).slice(0, 40)}` });
+            }
+            features[key as TenantFeature] = value;
+        }
+    }
+    try {
+        const result = await provisionTenant({
+            slug: body.slug,
+            name: body.name,
+            timezone: body.timezone,
+            owner_email: body.owner_email,
+            owner_full_name: body.owner_full_name,
+            features,
+        });
+        // La password temporanea esce SOLO da questa risposta: chi provisiona
+        // la consegna all'OWNER a voce/di persona. Niente email di invito —
+        // la casella SMTP del nuovo tenant non esiste ancora (arriva col
+        // wizard di onboarding, quando il tenant ha una casella sua).
+        res.status(201).json({
+            tenant: result.tenant,
+            owner_temp_password: result.ownerTempPassword,
+            webhook_token: result.tokens.webhook_token,
+            print_agent_token: result.tokens.print_agent_token,
+            booking_url: `${req.protocol}://${req.get('host')}/prenota/${result.tenant.slug}`,
+        });
+    } catch (err) {
+        if (err instanceof ProvisioningError) {
+            const conflict = err.code === 'slug_conflict' || err.code === 'email_conflict';
+            return res.status(conflict ? 409 : 400).json({ error: err.code, message: err.message });
+        }
+        console.error('POST /admin/tenants error:', err);
+        res.status(500).json({ error: 'Failed to provision tenant' });
+    }
+});
+
+app.get('/admin/tenants', platformAdminAuth, async (_req, res) => {
+    try {
+        // Feature attive come array di nomi e conteggio utenti in una query:
+        // è la vista "lista tenant" del futuro pannello D2, non un report.
+        const result = await queryWithRetry(
+            `SELECT t.id, t.slug, t.name, t.status, t.created_at,
+                    COALESCE(
+                        array_agg(f.feature ORDER BY f.feature) FILTER (WHERE f.enabled),
+                        '{}'
+                    ) AS features,
+                    (SELECT COUNT(*)::int FROM users u WHERE u.tenant_id = t.id) AS user_count
+             FROM tenants t
+             LEFT JOIN tenant_features f ON f.tenant_id = t.id
+             GROUP BY t.id
+             ORDER BY t.id`
+        );
+        res.json(result.rows.map((r: any) => ({
+            id: Number(r.id),
+            slug: r.slug,
+            name: r.name,
+            status: r.status,
+            created_at: r.created_at,
+            features: r.features,
+            user_count: r.user_count,
+        })));
+    } catch (err) {
+        console.error('GET /admin/tenants error:', err);
+        res.status(500).json({ error: 'Failed to list tenants' });
+    }
+});
+
+app.patch('/admin/tenants/:id', platformAdminAuth, async (req, res) => {
+    const tenantId = Number(req.params.id);
+    if (!Number.isInteger(tenantId) || tenantId <= 0) {
+        return res.status(400).json({ error: 'invalid_tenant_id' });
+    }
+    const body = req.body ?? {};
+    const status: string | undefined = body.status;
+    if (status !== undefined && status !== 'active' && status !== 'suspended') {
+        return res.status(400).json({ error: 'invalid_status', message: "status deve essere 'active' o 'suspended'" });
+    }
+    const featureUpdates: Array<{ feature: TenantFeature; enabled: boolean }> = [];
+    if (body.features !== undefined) {
+        if (typeof body.features !== 'object' || body.features === null || Array.isArray(body.features)) {
+            return res.status(400).json({ error: 'invalid_features', message: 'features deve essere un oggetto {voice|whatsapp|web_booking: boolean}' });
+        }
+        for (const [key, value] of Object.entries(body.features)) {
+            if (!(TENANT_FEATURES as readonly string[]).includes(key) || typeof value !== 'boolean') {
+                return res.status(400).json({ error: 'invalid_features', message: `Feature non valida: ${String(key).slice(0, 40)}` });
+            }
+            featureUpdates.push({ feature: key as TenantFeature, enabled: value });
+        }
+    }
+    if (status === undefined && featureUpdates.length === 0) {
+        return res.status(400).json({ error: 'no_updates', message: 'Niente da aggiornare: status e/o features' });
+    }
+    try {
+        const exists = await queryWithRetry('SELECT slug FROM tenants WHERE id = $1', [tenantId]);
+        if (exists.rows.length === 0) {
+            return res.status(404).json({ error: 'tenant_not_found' });
+        }
+        if (status !== undefined) {
+            await queryWithRetry(
+                `UPDATE tenants SET status = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+                [tenantId, status]
+            );
+            // La risoluzione slug/dominio filtra su status='active' ma è
+            // cache-ata: senza invalidazione una sospensione lascerebbe la
+            // pagina pubblica viva fino allo scadere del TTL.
+            tenantSlugCache.delete(String(exists.rows[0].slug));
+            for (const [domain, entry] of tenantDomainCache) {
+                if (entry.hit.tenantId === tenantId) tenantDomainCache.delete(domain);
+            }
+        }
+        for (const { feature, enabled } of featureUpdates) {
+            await queryWithRetry(
+                `INSERT INTO tenant_features (tenant_id, feature, enabled, updated_at)
+                 VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                 ON CONFLICT (tenant_id, feature) DO UPDATE
+                   SET enabled = EXCLUDED.enabled, updated_at = CURRENT_TIMESTAMP`,
+                [tenantId, feature, enabled]
+            );
+        }
+        if (featureUpdates.length > 0) {
+            // Stessa regola del PUT /settings/entitlements: il toggle vale
+            // subito, non allo scadere del TTL della cache.
+            invalidateTenantFeaturesCache(tenantId);
+        }
+        const tenantRes = await queryWithRetry(
+            'SELECT id, slug, name, status, timezone, created_at FROM tenants WHERE id = $1',
+            [tenantId]
+        );
+        res.json({
+            tenant: { ...tenantRes.rows[0], id: Number(tenantRes.rows[0].id) },
+            features: await getTenantFeatures(tenantId),
+        });
+    } catch (err) {
+        console.error('PATCH /admin/tenants/:id error:', err);
+        res.status(500).json({ error: 'Failed to update tenant' });
     }
 });
 
