@@ -305,7 +305,7 @@ app.post('/webhook/vonage-inbound', async (req, res) => {
                 from: String(from), to: '', body: String(messageText),
             });
             if (row && socketService) {
-                socketService.broadcastToAll('message:inbound', row);
+                socketService.broadcastToAll(PUBLIC_TENANT_ID, 'message:inbound', row);
             }
         } else {
             console.log('[Vonage] Non-text message received, ignoring');
@@ -400,7 +400,7 @@ app.post('/webhook/twilio-whatsapp', twilioUrlEncoded, async (req, res) => {
             provider: 'twilio', channel, from, to, body, sid, media,
         });
         if (row && socketService) {
-            socketService.broadcastToAll('message:inbound', row);
+            socketService.broadcastToAll(PUBLIC_TENANT_ID, 'message:inbound', row);
         }
     } catch (error) {
         console.error('[Twilio] Error processing inbound:', error);
@@ -446,7 +446,7 @@ app.post('/webhook/twilio-whatsapp-status', twilioUrlEncoded, async (req, res) =
             [status, errText, MessageSid, PUBLIC_TENANT_ID]
         );
         if (updated.rows[0] && socketService) {
-            try { socketService.broadcastReservationUpdated(updated.rows[0]); }
+            try { socketService.broadcastReservationUpdated(PUBLIC_TENANT_ID, updated.rows[0]); }
             catch (err) { console.warn('[Twilio] status broadcast failed:', err); }
         }
 
@@ -477,7 +477,7 @@ app.post('/webhook/twilio-whatsapp-status', twilioUrlEncoded, async (req, res) =
             // con l'orologio anche quando il messaggio e' fallito, e chi l'ha
             // mandato crede sia partito finche' non ricarica la pagina.
             if (updatedMsg.rows[0] && socketService) {
-                socketService.broadcastToAll('message:status', updatedMsg.rows[0]);
+                socketService.broadcastToAll(PUBLIC_TENANT_ID, 'message:status', updatedMsg.rows[0]);
             }
         } catch (err: any) {
             console.warn('[Twilio] outbound_messages update failed:', err?.message || err);
@@ -750,7 +750,7 @@ app.post('/webhook/resend-inbound', async (req, res) => {
         }
 
         if (insertedRow && socketService) {
-            try { socketService.broadcastToAll('inboundEmail:received', insertedRow); }
+            try { socketService.broadcastToAll(PUBLIC_TENANT_ID, 'inboundEmail:received', insertedRow); }
             catch (err) { console.warn('[Resend-inbound] broadcast failed:', err); }
         }
     } catch (err: any) {
@@ -1492,7 +1492,7 @@ async function broadcastReservationsUpdatedByIds(ids: number[]): Promise<void> {
             WHERE r.id = ANY($1::int[])
         `, [ids]);
         for (const row of result.rows) {
-            socketService.broadcastReservationSynced(row);
+            socketService.broadcastReservationSynced(Number(row.tenant_id) || PUBLIC_TENANT_ID, row);
         }
     } catch (err) {
         console.warn('[sync] broadcastReservationsUpdatedByIds failed:', err);
@@ -1828,7 +1828,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
 
         // Broadcast to all connected clients except the one who created it
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastReservationCreated(newReservation, socketId);
+        if (socketService) socketService.broadcastReservationCreated(req.tenantId!, newReservation, socketId);
 
         // reservation_time here is the client's naive Rome wall-clock string:
         // no asUtcInstant, the naive branch reads it verbatim (see fix #85).
@@ -2002,7 +2002,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
 
         // Broadcast to all connected clients except the one who updated it
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastReservationUpdated(updatedReservation, socketId);
+        if (socketService) socketService.broadcastReservationUpdated(req.tenantId!, updatedReservation, socketId);
 
         // Notify managers when a booking transitions to CANCELLED (soft cancel).
         // Skip if it was already CANCELLED — avoids duplicate notifications on
@@ -2167,7 +2167,7 @@ app.delete('/reservations/:id', authenticate, requirePermission('reservations:fu
 
         // Broadcast to all connected clients except the one who deleted it
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastReservationDeleted(Number(id), socketId);
+        if (socketService) socketService.broadcastReservationDeleted(req.tenantId!, Number(id), socketId);
 
         res.status(204).send();
     } catch (err) {
@@ -2258,8 +2258,8 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
         }
 
         if (socketService) {
-            socketService.broadcastReservationUpdated(updatedA);
-            socketService.broadcastReservationUpdated(updatedB);
+            socketService.broadcastReservationUpdated(req.tenantId!, updatedA);
+            socketService.broadcastReservationUpdated(req.tenantId!, updatedB);
         }
 
         res.json({ a: updatedA, b: updatedB });
@@ -2303,7 +2303,7 @@ async function promoteReservationIfPending(tenantId: number, reservationId: numb
         if (upd.rows.length === 0) return null;
         // Live views listen on this event to update badges/status pills.
         if (socketService) {
-            try { socketService.broadcastReservationUpdated(upd.rows[0]); }
+            try { socketService.broadcastReservationUpdated(tenantId, upd.rows[0]); }
             catch (err) { console.warn('[confirm] broadcast failed:', (err as any)?.message || err); }
         }
         return upd.rows[0];
@@ -2481,7 +2481,7 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
             [sent.messageId || null, reservation.id, req.tenantId!]
         );
         if (updated.rows[0] && socketService) {
-            try { socketService.broadcastReservationUpdated(updated.rows[0]); }
+            try { socketService.broadcastReservationUpdated(req.tenantId!, updated.rows[0]); }
             catch (err) { console.warn('[confirmation] email broadcast failed:', err); }
         }
 
@@ -2997,13 +2997,13 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
         );
         const bill = inserted.rows[0];
 
-        try { socketService?.broadcastToAll('bill:opened', bill); } catch (_) {}
+        try { socketService?.broadcastToAll(req.tenantId!, 'bill:opened', bill); } catch (_) {}
 
         // Porta subito nel conto gli acconti già pagati sulla prenotazione (una
         // caparra versata prima che il conto esistesse viene raccolta qui).
         const credit = await creditPaidDepositsToBill(req.tenantId!, bill.id).catch(() => ({ credited: 0, settled: false }));
         if (credit.credited > 0) {
-            try { socketService?.broadcastToAll('bill:updated', { id: bill.id, reservation_id: bill.reservation_id }); } catch (_) {}
+            try { socketService?.broadcastToAll(req.tenantId!, 'bill:updated', { id: bill.id, reservation_id: bill.reservation_id }); } catch (_) {}
         }
 
         const view = await loadBillView(req.tenantId!, bill.id);
@@ -3215,7 +3215,7 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
             client.release();
         }
 
-        try { socketService?.broadcastToAll('bill:closed', updatedRow); } catch (_) {}
+        try { socketService?.broadcastToAll(req.tenantId!, 'bill:closed', updatedRow); } catch (_) {}
 
         res.json(updatedRow);
     } catch (err: any) {
@@ -3257,7 +3257,7 @@ app.post('/bills/:id/void', authenticate, requirePermission('payments:full'), as
             return res.status(404).json({ error: 'Bill not found or already closed/voided' });
         }
 
-        try { socketService?.broadcastToAll('bill:voided', updated.rows[0]); } catch (_) {}
+        try { socketService?.broadcastToAll(req.tenantId!, 'bill:voided', updated.rows[0]); } catch (_) {}
 
         res.json(updated.rows[0]);
     } catch (err: any) {
@@ -3360,17 +3360,17 @@ app.post('/bills/splits/:id/refund', authenticate, requirePermission('payments:f
             );
             reopened = (billUpd.rowCount ?? 0) > 0;
             if (reopened && socketService) {
-                try { socketService.broadcastToAll('bill:opened', billUpd.rows[0]); } catch (_) {}
+                try { socketService.broadcastToAll(req.tenantId!, 'bill:opened', billUpd.rows[0]); } catch (_) {}
             }
         }
 
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) {
             try {
-                socketService.broadcastToAll('bill:split-refunded', {
+                socketService.broadcastToAll(req.tenantId!, 'bill:split-refunded', {
                     bill_id: row.table_bill_id, split_id: splitId, amount_cents: row.amount_cents,
                 }, socketId);
-                if (updatedPr) socketService.broadcastToAll('paymentRequest:updated', updatedPr);
+                if (updatedPr) socketService.broadcastToAll(req.tenantId!, 'paymentRequest:updated', updatedPr);
             } catch (_) {}
         }
 
@@ -3809,7 +3809,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         }
 
         try {
-            socketService?.broadcastToAll('bill:split-claimed', {
+            socketService?.broadcastToAll(bill.tenant_id, 'bill:split-claimed', {
                 bill_id: bill.id,
                 split_id: splitId,
                 kind,
@@ -3870,7 +3870,7 @@ app.post('/pay/:token/release', publicPayLimiter, async (req, res) => {
         }
 
         try {
-            socketService?.broadcastToAll('bill:split-released', {
+            socketService?.broadcastToAll(bill.tenant_id, 'bill:split-released', {
                 bill_id: bill.id,
                 split_id: splitId,
             });
@@ -4084,7 +4084,7 @@ app.post('/messages/conversations/:phoneDigits/read', authenticate, requirePermi
         // Broadcast so every open CRM tab (this operator and any other) can
         // decrement its nav badge without a re-fetch.
         if (updated.rows.length > 0 && socketService) {
-            socketService.broadcastToAll('message:read', {
+            socketService.broadcastToAll(req.tenantId!, 'message:read', {
                 phone_digits: key,
                 count: updated.rows.length,
             });
@@ -4216,7 +4216,7 @@ app.post('/email/threads/:emailKey/read', authenticate, requirePermission('reser
             [key, req.tenantId!]
         );
         if (updated.rows.length > 0 && socketService) {
-            socketService.broadcastToAll('email:read', {
+            socketService.broadcastToAll(req.tenantId!, 'email:read', {
                 email_key: key,
                 count: updated.rows.length,
             });
@@ -4299,7 +4299,7 @@ app.post('/email/send', authenticate, requirePermission('reservations:full'), as
         const message = inserted.rows[0];
 
         if (socketService) {
-            try { socketService.broadcastToAll('email:new', { email_key: toEmail.toLowerCase(), message }); }
+            try { socketService.broadcastToAll(req.tenantId!, 'email:new', { email_key: toEmail.toLowerCase(), message }); }
             catch (err) { console.warn('[email/send] socket broadcast failed:', (err as any)?.message || err); }
         }
         res.json({ ok: true, message });
@@ -4727,7 +4727,7 @@ app.post('/messages/send', authenticate, requirePermission('reservations:full'),
             ).catch(() => {});
         }
         if (row && socketService) {
-            socketService.broadcastToAll('message:outbound', row);
+            socketService.broadcastToAll(req.tenantId!, 'message:outbound', row);
         }
         res.json({ ok: true, message: row, channel: result.channel, sid: result.sid ?? null });
     } catch (err: any) {
@@ -5020,7 +5020,7 @@ app.post('/payments/mark-seen', authenticate, requirePermission('payments:view')
         );
         if (result.rows.length > 0) {
             const socketId = req.headers['x-socket-id'] as string;
-            if (socketService) socketService.broadcastToAll('payments:seen', { count: result.rows.length }, socketId);
+            if (socketService) socketService.broadcastToAll(req.tenantId!, 'payments:seen', { count: result.rows.length }, socketId);
         }
         res.json({ marked: result.rows.length });
     } catch (err: any) {
@@ -5287,7 +5287,7 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
             );
         }
 
-        try { socketService?.broadcastToAll('paymentRequest:created', paymentRequest); }
+        try { socketService?.broadcastToAll(req.tenantId!, 'paymentRequest:created', paymentRequest); }
         catch (err) { console.warn('[payments] socket broadcast failed:', (err as any)?.message || err); }
 
         // The booking card's payment badge reads latest_payment_* off the
@@ -5373,7 +5373,7 @@ async function applyBillSplitTransition(
         }
 
         try {
-            socketService?.broadcastToAll('bill:split-paid', {
+            socketService?.broadcastToAll(tenantId, 'bill:split-paid', {
                 bill_id: billId, split_id: splitId, amount_cents: amount,
             });
         } catch (_) {}
@@ -5397,7 +5397,7 @@ async function applyBillSplitTransition(
             [billId, tenantId]
         );
         if ((settled.rowCount ?? 0) > 0) {
-            try { socketService?.broadcastToAll('bill:settled', settled.rows[0]); } catch (_) {}
+            try { socketService?.broadcastToAll(tenantId, 'bill:settled', settled.rows[0]); } catch (_) {}
         }
         return;
     }
@@ -5412,7 +5412,7 @@ async function applyBillSplitTransition(
         );
         if ((upd.rowCount ?? 0) > 0) {
             try {
-                socketService?.broadcastToAll('bill:split-abandoned', {
+                socketService?.broadcastToAll(tenantId, 'bill:split-abandoned', {
                     bill_id: billId, split_id: splitId,
                 });
             } catch (_) {}
@@ -5502,7 +5502,7 @@ async function applyPaymentOrderTransition(
         client.release();
     }
 
-    try { socketService?.broadcastToAll('paymentRequest:updated', row); }
+    try { socketService?.broadcastToAll(Number(row.tenant_id) || PUBLIC_TENANT_ID, 'paymentRequest:updated', row); }
     catch (err) { console.warn('[payments] socket broadcast failed:', (err as any)?.message || err); }
 
     // Keep the booking card's payment badge live on webhook transitions
@@ -5566,7 +5566,7 @@ async function applyPaymentOrderTransition(
                         [reservation.id, row.tenant_id]
                     );
                     if (upd.rows[0] && socketService) {
-                        try { socketService.broadcastReservationUpdated(upd.rows[0]); }
+                        try { socketService.broadcastReservationUpdated(Number(row.tenant_id) || PUBLIC_TENANT_ID, upd.rows[0]); }
                         catch (err) { console.warn('[payments] reservation broadcast failed:', err); }
                     }
                 }
@@ -5620,10 +5620,10 @@ async function applyPaymentOrderTransition(
                 const credit = await creditPaidDepositsToBill(prTenantId, billId);
                 if (credit.credited > 0 || credit.settled) {
                     try {
-                        socketService?.broadcastToAll('bill:updated', { id: billId, reservation_id: row.reservation_id });
+                        socketService?.broadcastToAll(prTenantId, 'bill:updated', { id: billId, reservation_id: row.reservation_id });
                         if (credit.settled) {
                             const v = await loadBillView(prTenantId, billId);
-                            if (v?.bill) socketService?.broadcastToAll('bill:settled', v.bill);
+                            if (v?.bill) socketService?.broadcastToAll(prTenantId, 'bill:settled', v.bill);
                         }
                     } catch (_) {}
                 }
@@ -5918,7 +5918,7 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
         );
         const row = updated.rows[0];
 
-        try { socketService?.broadcastToAll('paymentRequest:updated', row); }
+        try { socketService?.broadcastToAll(req.tenantId!, 'paymentRequest:updated', row); }
         catch (err) { console.warn('[payments] refund broadcast failed:', (err as any)?.message || err); }
 
         if (row.reservation_id) broadcastReservationsUpdatedByIds([row.reservation_id]).catch(() => {});
@@ -5943,9 +5943,9 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
                     [s.table_bill_id, req.tenantId!]
                 );
                 try {
-                    socketService?.broadcastToAll('bill:split-refunded', { bill_id: s.table_bill_id });
-                    if ((reopened.rowCount ?? 0) > 0) socketService?.broadcastToAll('bill:opened', reopened.rows[0]);
-                    else socketService?.broadcastToAll('bill:updated', { id: s.table_bill_id });
+                    socketService?.broadcastToAll(req.tenantId!, 'bill:split-refunded', { bill_id: s.table_bill_id });
+                    if ((reopened.rowCount ?? 0) > 0) socketService?.broadcastToAll(req.tenantId!, 'bill:opened', reopened.rows[0]);
+                    else socketService?.broadcastToAll(req.tenantId!, 'bill:updated', { id: s.table_bill_id });
                 } catch (_) {}
             }
         } catch (err) {
@@ -6046,7 +6046,7 @@ app.post('/tables', authenticate, requirePermission('floorplan:full'), async (re
 
         // Broadcast to all connected clients except the one who created it
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastTableCreated(newTable, socketId);
+        if (socketService) socketService.broadcastTableCreated(req.tenantId!, newTable, socketId);
 
         res.status(201).json(newTable);
     } catch (err) {
@@ -6128,7 +6128,7 @@ app.put('/tables/:id', authenticate, requirePermission('floorplan:update_status'
 
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastTableUpdated(updatedTable, socketId);
+        if (socketService) socketService.broadcastTableUpdated(req.tenantId!, updatedTable, socketId);
 
         res.json(updatedTable);
     } catch (err) {
@@ -6162,7 +6162,7 @@ app.delete('/tables/:id', authenticate, requirePermission('floorplan:full'), asy
         }
 
         // Broadcast to all connected clients
-        if (socketService) socketService.broadcastTableDeleted(Number(id));
+        if (socketService) socketService.broadcastTableDeleted(req.tenantId!, Number(id));
 
         res.status(204).send();
     } catch (err) {
@@ -6246,7 +6246,7 @@ app.post('/table-merges', authenticate, requirePermission('floorplan:full'), asy
         // Broadcast to ALL clients (including originator) so the originating
         // client's local merge state updates from the socket event without
         // needing an extra refetch. The client listener upserts idempotently.
-        if (socketService) socketService.broadcastTableMergeCreated(merge);
+        if (socketService) socketService.broadcastTableMergeCreated(req.tenantId!, merge);
 
         res.status(201).json(merge);
     } catch (err) {
@@ -6287,7 +6287,7 @@ app.delete('/table-merges', authenticate, requirePermission('floorplan:full'), a
             );
         }
 
-        if (socketService) socketService.broadcastTableMergeDeleted(deleted);
+        if (socketService) socketService.broadcastTableMergeDeleted(req.tenantId!, deleted);
 
         res.json(deleted);
     } catch (err) {
@@ -6406,7 +6406,7 @@ app.post('/table-hidden', authenticate, requirePermission('floorplan:full'), asy
             );
         }
 
-        if (socketService) socketService.broadcastTableHiddenCreated(hidden);
+        if (socketService) socketService.broadcastTableHiddenCreated(req.tenantId!, hidden);
 
         res.status(201).json(hidden);
     } catch (err) {
@@ -6447,7 +6447,7 @@ app.delete('/table-hidden', authenticate, requirePermission('floorplan:full'), a
             );
         }
 
-        if (socketService) socketService.broadcastTableHiddenDeleted(deleted);
+        if (socketService) socketService.broadcastTableHiddenDeleted(req.tenantId!, deleted);
 
         res.json(deleted);
     } catch (err) {
@@ -6560,7 +6560,7 @@ app.post('/room-closed', authenticate, requirePermission('floorplan:full'), asyn
             );
         }
 
-        if (socketService) socketService.broadcastRoomClosedCreated(closed);
+        if (socketService) socketService.broadcastRoomClosedCreated(req.tenantId!, closed);
 
         res.status(201).json(closed);
     } catch (err) {
@@ -6601,7 +6601,7 @@ app.delete('/room-closed', authenticate, requirePermission('floorplan:full'), as
             );
         }
 
-        if (socketService) socketService.broadcastRoomClosedDeleted(deleted);
+        if (socketService) socketService.broadcastRoomClosedDeleted(req.tenantId!, deleted);
 
         res.json(deleted);
     } catch (err) {
@@ -6663,7 +6663,7 @@ app.post('/rooms', authenticate, requirePermission('floorplan:full'), async (req
         }
 
         // Broadcast to all connected clients
-        if (socketService) socketService.broadcastRoomCreated(newRoom);
+        if (socketService) socketService.broadcastRoomCreated(req.tenantId!, newRoom);
 
         res.status(201).json(newRoom);
     } catch (err) {
@@ -6702,7 +6702,7 @@ app.patch('/rooms/:id', authenticate, requirePermission('floorplan:full'), async
             );
         }
 
-        if (socketService) socketService.broadcastRoomUpdated(updatedRoom);
+        if (socketService) socketService.broadcastRoomUpdated(req.tenantId!, updatedRoom);
 
         res.json(updatedRoom);
     } catch (err) {
@@ -6736,7 +6736,7 @@ app.delete('/rooms/:id', authenticate, requirePermission('floorplan:full'), asyn
         }
 
         // Broadcast to all connected clients
-        if (socketService) socketService.broadcastRoomDeleted(Number(id));
+        if (socketService) socketService.broadcastRoomDeleted(req.tenantId!, Number(id));
 
         res.status(204).send();
     } catch (err) {
@@ -6782,7 +6782,7 @@ app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, re
         }
 
         // Broadcast to all connected clients
-        if (socketService) socketService.broadcastDishCreated(newDish);
+        if (socketService) socketService.broadcastDishCreated(req.tenantId!, newDish);
 
         res.status(201).json(newDish);
     } catch (err) {
@@ -6820,7 +6820,7 @@ app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req,
         }
 
         // Broadcast to all connected clients
-        if (socketService) socketService.broadcastDishUpdated(updatedDish);
+        if (socketService) socketService.broadcastDishUpdated(req.tenantId!, updatedDish);
 
         res.json(updatedDish);
     } catch (err) {
@@ -6854,7 +6854,7 @@ app.delete('/dishes/:id', authenticate, requirePermission('menu:full'), async (r
         }
 
         // Broadcast to all connected clients
-        if (socketService) socketService.broadcastDishDeleted(Number(id));
+        if (socketService) socketService.broadcastDishDeleted(req.tenantId!, Number(id));
 
         res.status(204).send();
     } catch (err) {
@@ -6944,7 +6944,7 @@ async function addBanquetToReminders(tenantId: number, banquetId: number, eventD
                 WHERE id = $4 AND tenant_id = $5
                 RETURNING ${TODO_FULL_SELECT}
             `, [newIds, buildReminderTitle(eventDate, hours), buildReminderDescription(eventDate), todo.id, tenantId]);
-            if (socketService && updated.rows[0]) socketService.broadcastToAll('todo:updated', updated.rows[0]);
+            if (socketService && updated.rows[0]) socketService.broadcastToAll(tenantId, 'todo:updated', updated.rows[0]);
         } else {
             const created = await queryWithRetry(`
                 INSERT INTO todos (
@@ -6962,7 +6962,7 @@ async function addBanquetToReminders(tenantId: number, banquetId: number, eventD
                 hours,
                 tenantId,
             ]);
-            if (socketService && created.rows[0]) socketService.broadcastToAll('todo:created', created.rows[0]);
+            if (socketService && created.rows[0]) socketService.broadcastToAll(tenantId, 'todo:created', created.rows[0]);
             if (created.rows[0]) {
                 pushSendToRoles(
                     tenantId,
@@ -6995,7 +6995,7 @@ async function removeBanquetFromReminders(tenantId: number, banquetId: number): 
 
         if (newIds.length === 0) {
             await queryWithRetry('DELETE FROM todos WHERE id = $1 AND tenant_id = $2', [todo.id, tenantId]);
-            if (socketService) socketService.broadcastToAll('todo:deleted', { id: todo.id });
+            if (socketService) socketService.broadcastToAll(tenantId, 'todo:deleted', { id: todo.id });
         } else {
             const updated = await queryWithRetry(`
                 UPDATE todos
@@ -7003,7 +7003,7 @@ async function removeBanquetFromReminders(tenantId: number, banquetId: number): 
                 WHERE id = $2 AND tenant_id = $3
                 RETURNING ${TODO_FULL_SELECT}
             `, [newIds, todo.id, tenantId]);
-            if (socketService && updated.rows[0]) socketService.broadcastToAll('todo:updated', updated.rows[0]);
+            if (socketService && updated.rows[0]) socketService.broadcastToAll(tenantId, 'todo:updated', updated.rows[0]);
         }
     }
 }
@@ -7106,7 +7106,7 @@ async function runDailyBreadReminder(tenantId: number, targetRoles: string[] = [
                 WHERE id = $3 AND tenant_id = $4
                 RETURNING ${TODO_FULL_SELECT}
             `, [title, description, todo.id, tenantId]);
-            if (socketService && updated.rows[0]) socketService.broadcastToAll('todo:updated', updated.rows[0]);
+            if (socketService && updated.rows[0]) socketService.broadcastToAll(tenantId, 'todo:updated', updated.rows[0]);
         }
     } else {
         const created = await queryWithRetry(`
@@ -7116,7 +7116,7 @@ async function runDailyBreadReminder(tenantId: number, targetRoles: string[] = [
             ) VALUES ($5, $1, $2, 'HIGH', 'INVENTORY', $3, 'OWNER', $4)
             RETURNING ${TODO_FULL_SELECT}
         `, [title, description, tomorrowIso, BREAD_AUTO_KIND, tenantId]);
-        if (socketService && created.rows[0]) socketService.broadcastToAll('todo:created', created.rows[0]);
+        if (socketService && created.rows[0]) socketService.broadcastToAll(tenantId, 'todo:created', created.rows[0]);
     }
 
     // Always fire the push (unless the todo is already completed): the push
@@ -7232,7 +7232,7 @@ const startBillSplitReconcileScheduler = () => {
                     );
                     if ((upd.rowCount ?? 0) > 0) {
                         try {
-                            socketService?.broadcastToAll('bill:split-abandoned', {
+                            socketService?.broadcastToAll(rowTenantId, 'bill:split-abandoned', {
                                 bill_id: upd.rows[0].table_bill_id,
                                 split_id: upd.rows[0].id,
                             });
@@ -8853,7 +8853,7 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
         }
 
         // Broadcast to all connected clients
-        if (socketService) socketService.broadcastBanquetCreated(newMenu);
+        if (socketService) socketService.broadcastBanquetCreated(req.tenantId!, newMenu);
 
         // Generate kitchen reminder todos (72h/48h/24h before event_date)
         addBanquetToReminders(req.tenantId!, newMenu.id, newMenu.event_date).catch(err => {
@@ -8924,7 +8924,7 @@ app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), asyn
         }
 
         // Broadcast to all connected clients
-        if (socketService) socketService.broadcastBanquetUpdated(updatedMenu);
+        if (socketService) socketService.broadcastBanquetUpdated(req.tenantId!, updatedMenu);
 
         // Re-sync kitchen reminder todos (handles event_date changes)
         syncBanquetReminders(req.tenantId!, parseInt(id, 10), updatedMenu.event_date).catch(err => {
@@ -8963,7 +8963,7 @@ app.delete('/banquet-menus/:id', authenticate, requirePermission('menu:full'), a
         }
 
         // Broadcast to all connected clients
-        if (socketService) socketService.broadcastBanquetDeleted(Number(id));
+        if (socketService) socketService.broadcastBanquetDeleted(req.tenantId!, Number(id));
 
         // Remove banquet from kitchen reminder todos
         removeBanquetFromReminders(req.tenantId!, Number(id)).catch(err => {
@@ -9060,7 +9060,7 @@ app.post('/banquet-menus/:id/payments', authenticate, requirePermission('banquet
              FROM banquet_menus b WHERE b.id = $1 AND b.tenant_id = $2`,
             [id, req.tenantId!]
         );
-        if (socketService && refreshed.rows[0]) socketService.broadcastBanquetUpdated(refreshed.rows[0]);
+        if (socketService && refreshed.rows[0]) socketService.broadcastBanquetUpdated(req.tenantId!, refreshed.rows[0]);
 
         res.status(201).json(newPayment);
     } catch (err) {
@@ -9110,7 +9110,7 @@ app.delete('/banquet-menus/:id/payments/:paymentId', authenticate, requirePermis
              FROM banquet_menus b WHERE b.id = $1 AND b.tenant_id = $2`,
             [id, req.tenantId!]
         );
-        if (socketService && refreshed.rows[0]) socketService.broadcastBanquetUpdated(refreshed.rows[0]);
+        if (socketService && refreshed.rows[0]) socketService.broadcastBanquetUpdated(req.tenantId!, refreshed.rows[0]);
 
         res.status(204).send();
     } catch (err) {
@@ -9295,7 +9295,7 @@ app.post('/todos', authenticate, async (req, res) => {
         const socketId = req.headers['x-socket-id'] as string;
         console.log('📝 Broadcasting todo:created', { todoId: newTodo.id, socketService: !!socketService });
         if (socketService) {
-            socketService.broadcastToAll('todo:created', newTodo, socketId);
+            socketService.broadcastToAll(req.tenantId!, 'todo:created', newTodo, socketId);
         } else {
             console.error('📝 socketService is undefined, cannot broadcast!');
         }
@@ -9440,7 +9440,7 @@ app.put('/todos/:id', authenticate, async (req, res) => {
 
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('todo:updated', updatedTodo, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'todo:updated', updatedTodo, socketId);
 
         const newAssignee = updatedTodo.assignedToUserId ?? null;
         if (
@@ -9507,7 +9507,7 @@ app.put('/todos/:id/toggle', authenticate, async (req, res) => {
 
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('todo:updated', updatedTodo, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'todo:updated', updatedTodo, socketId);
 
         res.json(updatedTodo);
     } catch (err) {
@@ -9528,7 +9528,7 @@ app.delete('/todos/:id', authenticate, async (req, res) => {
 
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('todo:deleted', { id }, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'todo:deleted', { id }, socketId);
 
         res.status(204).send();
     } catch (err) {
@@ -9593,7 +9593,7 @@ app.post('/dev-board/cards', authenticate, requireDevBoardAdmin, async (req, res
             [String(title).trim(), description ? String(description).trim() || null : null, column, labels, req.tenantId!]
         );
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('devboard:changed', {}, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'devboard:changed', {}, socketId);
         res.status(201).json(result.rows[0]);
     } catch (err) {
         console.error(err);
@@ -9631,7 +9631,7 @@ app.put('/dev-board/cards/:id', authenticate, requireDevBoardAdmin, async (req, 
             return res.status(404).json({ error: 'Card non trovata' });
         }
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('devboard:changed', {}, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'devboard:changed', {}, socketId);
         res.json(result.rows[0]);
     } catch (err) {
         console.error(err);
@@ -9666,7 +9666,7 @@ app.put('/dev-board/cards/:id/move', authenticate, requireDevBoardAdmin, async (
         }
         await client.query('COMMIT');
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('devboard:changed', {}, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'devboard:changed', {}, socketId);
         res.json({ ok: true });
     } catch (err) {
         await client.query('ROLLBACK').catch(() => {});
@@ -9685,7 +9685,7 @@ app.delete('/dev-board/cards/:id', authenticate, requireDevBoardAdmin, async (re
             return res.status(404).json({ error: 'Card non trovata' });
         }
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('devboard:changed', {}, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'devboard:changed', {}, socketId);
         res.status(204).send();
     } catch (err) {
         console.error(err);
@@ -9832,7 +9832,7 @@ app.post('/shopping', authenticate, async (req, res) => {
         const socketId = req.headers['x-socket-id'] as string;
         console.log('🛒 Broadcasting shopping:created', { itemId: newItem.id, socketService: !!socketService, excludeSocketId: socketId });
         if (socketService) {
-            socketService.broadcastToAll('shopping:created', newItem, socketId);
+            socketService.broadcastToAll(req.tenantId!, 'shopping:created', newItem, socketId);
             console.log('🛒 Broadcast sent successfully');
         } else {
             console.error('🛒 socketService is undefined, cannot broadcast!');
@@ -9938,7 +9938,7 @@ app.put('/shopping/:id', authenticate, async (req, res) => {
         const updatedItem = result.rows[0];
 
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('shopping:updated', updatedItem, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'shopping:updated', updatedItem, socketId);
 
         res.json(updatedItem);
     } catch (err) {
@@ -9985,7 +9985,7 @@ app.put('/shopping/:id/toggle', authenticate, async (req, res) => {
 
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('shopping:updated', updatedItem, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'shopping:updated', updatedItem, socketId);
 
         res.json(updatedItem);
     } catch (err) {
@@ -10007,7 +10007,7 @@ app.delete('/shopping/clear-checked', authenticate, async (req, res) => {
         }
 
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('shopping:cleared', { date: date || null }, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'shopping:cleared', { date: date || null }, socketId);
 
         res.status(204).send();
     } catch (err) {
@@ -10028,7 +10028,7 @@ app.delete('/shopping/:id', authenticate, async (req, res) => {
 
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('shopping:deleted', { id, date: result.rows[0].date }, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'shopping:deleted', { id, date: result.rows[0].date }, socketId);
 
         res.status(204).send();
     } catch (err) {
@@ -10102,7 +10102,7 @@ app.post('/suppliers', authenticate, async (req, res) => {
 
         const supplier = result.rows[0];
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('supplier:created', supplier, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'supplier:created', supplier, socketId);
 
         res.status(201).json(supplier);
     } catch (err) {
@@ -10151,7 +10151,7 @@ app.put('/suppliers/:id', authenticate, async (req, res) => {
 
         const supplier = result.rows[0];
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('supplier:updated', supplier, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'supplier:updated', supplier, socketId);
 
         // If categories were narrowed, orphan supplier_id on items whose category is no longer served
         if (normalizedCategories !== undefined) {
@@ -10179,7 +10179,7 @@ app.delete('/suppliers/:id', authenticate, async (req, res) => {
         }
 
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('supplier:deleted', { id }, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'supplier:deleted', { id }, socketId);
 
         res.status(204).send();
     } catch (err) {
@@ -10270,7 +10270,7 @@ app.post('/staff', authenticate, requirePermission('staff:full'), async (req, re
 
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('staff:created', staffMember, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'staff:created', staffMember, socketId);
 
         res.status(201).json(staffMember);
     } catch (err) {
@@ -10384,7 +10384,7 @@ app.post('/staff/shifts', authenticate, requirePermission('staff:full'), async (
 
         // Broadcast
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('shift:created', shiftData, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'shift:created', shiftData, socketId);
 
         res.status(201).json(shiftData);
     } catch (err) {
@@ -10482,7 +10482,7 @@ app.put('/staff/shifts/:id', authenticate, requirePermission('staff:full'), asyn
 
         // Broadcast
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('shift:updated', shiftData, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'shift:updated', shiftData, socketId);
 
         res.json(shiftData);
     } catch (err) {
@@ -10503,7 +10503,7 @@ app.delete('/staff/shifts/:id', authenticate, requirePermission('staff:full'), a
 
         // Broadcast
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('shift:deleted', { id }, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'shift:deleted', { id }, socketId);
 
         res.status(204).send();
     } catch (err) {
@@ -10610,7 +10610,7 @@ app.post('/staff/time-off', authenticate, requirePermission('staff:full'), async
 
         // Broadcast
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('timeoff:created', timeOff, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'timeoff:created', timeOff, socketId);
 
         res.status(201).json(timeOff);
     } catch (err) {
@@ -10665,7 +10665,7 @@ app.put('/staff/time-off/:id', authenticate, requirePermission('staff:full'), as
 
         // Broadcast
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('timeoff:updated', timeOff, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'timeoff:updated', timeOff, socketId);
 
         res.json(timeOff);
     } catch (err) {
@@ -10686,7 +10686,7 @@ app.delete('/staff/time-off/:id', authenticate, requirePermission('staff:full'),
 
         // Broadcast
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('timeoff:deleted', { id }, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'timeoff:deleted', { id }, socketId);
 
         res.status(204).send();
     } catch (err) {
@@ -10879,7 +10879,7 @@ app.put('/staff/:id', authenticate, requirePermission('staff:full'), async (req,
 
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('staff:updated', staffMember, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'staff:updated', staffMember, socketId);
 
         res.json(staffMember);
     } catch (err) {
@@ -10900,7 +10900,7 @@ app.delete('/staff/:id', authenticate, requirePermission('staff:full'), async (r
 
         // Broadcast to all connected clients
         const socketId = req.headers['x-socket-id'] as string;
-        if (socketService) socketService.broadcastToAll('staff:deleted', { id }, socketId);
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'staff:deleted', { id }, socketId);
 
         res.status(204).send();
     } catch (err) {
@@ -11251,7 +11251,7 @@ async function processWhatsAppBooking(phoneNumber: string, messageText: string) 
 
         // Broadcast via Socket.IO
         if (socketService) {
-            socketService.broadcastReservationCreated(newReservation);
+            socketService.broadcastReservationCreated(PUBLIC_TENANT_ID, newReservation);
         }
 
         // Auto-save WhatsApp contact to the rubrica.
@@ -12603,7 +12603,7 @@ async function recordConfirmationSent(
         [initialStatus, result.channel, result.sid ?? null, reservationId, tenantId]
     );
     if (updated.rows[0] && socketService) {
-        try { socketService.broadcastReservationUpdated(updated.rows[0]); }
+        try { socketService.broadcastReservationUpdated(tenantId, updated.rows[0]); }
         catch (err) { console.warn('[confirmation] broadcast failed:', err); }
     }
 }
@@ -14977,7 +14977,7 @@ app.put('/settings/features', authenticate, requirePermission('settings:full'), 
         // Le voci di menu legate ai flag (Comande/Cucina/Passe) si aggiornano
         // in tempo reale su tutti i dispositivi connessi, incluso chi ha
         // premuto l'interruttore.
-        try { socketService?.broadcastToAll('features:updated', flags); } catch (_) {}
+        try { socketService?.broadcastToAll(req.tenantId!, 'features:updated', flags); } catch (_) {}
         res.json(flags);
     } catch (err) {
         console.error('Error updating feature flags:', err);
@@ -16548,7 +16548,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
 
         // Notify staff dashboards in real time.
         if (socketService) {
-            try { socketService.broadcastReservationCreated(created); }
+            try { socketService.broadcastReservationCreated(PUBLIC_TENANT_ID, created); }
             catch (err) { console.warn('[public-booking] socket broadcast failed:', err); }
         }
         pushSendToRoles(
@@ -16617,7 +16617,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                     ]
                 );
                 depositCheckoutUrl = order.checkoutUrl;
-                try { socketService?.broadcastToAll('paymentRequest:created', insertedPayment.rows[0]); }
+                try { socketService?.broadcastToAll(PUBLIC_TENANT_ID, 'paymentRequest:created', insertedPayment.rows[0]); }
                 catch (err) { console.warn('[public-booking] payment socket broadcast failed:', err); }
                 // reservation:created è già partito col row grezzo, senza i
                 // campi latest_payment_*: senza questo nudge l'icona acconto
@@ -17364,7 +17364,7 @@ app.post('/orders', authenticate, requirePermission('orders:take'), async (req, 
             throw err;
         }
 
-        try { socketService?.broadcastToAll('order:created', created); } catch (_) {}
+        try { socketService?.broadcastToAll(req.tenantId!, 'order:created', created); } catch (_) {}
 
         LogService.logActivity(
             req.tenantId!,
@@ -17671,7 +17671,7 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
         const view = await loadOrderView(req.tenantId!, orderId);
         // Se la comanda è già agganciata a un conto, il totale lo segue.
         const sync = await resyncBillForOrder(req.tenantId!, orderId);
-        try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
+        try { socketService?.broadcastToAll(req.tenantId!, 'order:updated', view.order); } catch (_) {}
         res.status(201).json({ ...view, ...(sync?.warning ? { bill_warning: sync.warning } : {}) });
     } catch (err: any) {
         await client.query('ROLLBACK').catch(() => {});
@@ -17737,7 +17737,7 @@ app.patch('/orders/items/:id', authenticate, requirePermission('orders:take'), a
         await syncSystemLines(req.tenantId!, upd.rows[0].order_id);
         const view = await loadOrderView(req.tenantId!, upd.rows[0].order_id);
         const sync = await resyncBillForOrder(req.tenantId!, upd.rows[0].order_id);
-        try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
+        try { socketService?.broadcastToAll(req.tenantId!, 'order:updated', view.order); } catch (_) {}
         res.json({ ...view, ...(sync?.warning ? { bill_warning: sync.warning } : {}) });
     } catch (err: any) {
         console.error('PATCH /orders/items/:id error:', err);
@@ -17764,7 +17764,7 @@ app.delete('/orders/items/:id', authenticate, requirePermission('orders:take'), 
         await syncSystemLines(req.tenantId!, cur.rows[0].order_id);
         const view = await loadOrderView(req.tenantId!, cur.rows[0].order_id);
         const sync = await resyncBillForOrder(req.tenantId!, cur.rows[0].order_id);
-        try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
+        try { socketService?.broadcastToAll(req.tenantId!, 'order:updated', view.order); } catch (_) {}
         res.json({ ...view, ...(sync?.warning ? { bill_warning: sync.warning } : {}) });
     } catch (err: any) {
         console.error('DELETE /orders/items/:id error:', err);
@@ -17835,25 +17835,25 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
             // Il passe riceve ciò che attende di essere lanciato, i monitor di
             // partita solo ciò che è stato lanciato davvero.
             for (const c of stillQueued) {
-                socketService?.broadcastToAll('course:queued', {
+                socketService?.broadcastToAll(req.tenantId!, 'course:queued', {
                     order_id: orderId, course_no: c, table_id: view.order.table_id,
                     items: view.items.filter((i: any) => i.course_no === c && i.status === 'QUEUED'),
                 });
             }
             for (const c of fired) {
                 const firedItems = view.items.filter((i: any) => i.course_no === c && i.status === 'SENT');
-                socketService?.broadcastToAll('course:fired', {
+                socketService?.broadcastToAll(req.tenantId!, 'course:fired', {
                     order_id: orderId, course_no: c, table_id: view.order.table_id, items: firedItems,
                 });
                 // Ogni monitor riceve solo le righe della propria partita.
                 for (const st of new Set(firedItems.map((i: any) => i.station_id))) {
-                    socketService?.broadcastToStation(st as number | null, 'kds:fired', {
+                    socketService?.broadcastToStation(req.tenantId!, st as number | null, 'kds:fired', {
                         order_id: orderId, course_no: c, table_id: view.order.table_id,
                         items: firedItems.filter((i: any) => i.station_id === st),
                     });
                 }
             }
-            socketService?.broadcastToAll('order:updated', view.order);
+            socketService?.broadcastToAll(req.tenantId!, 'order:updated', view.order);
         } catch (_) {}
 
         res.json({ ...view, fire_mode: mode, fired_courses: fired, queued_courses: stillQueued });
@@ -17893,8 +17893,8 @@ app.post('/orders/:id/courses/:n/recall', authenticate, requirePermission('order
 
         const view = await loadOrderView(req.tenantId!, orderId);
         try {
-            socketService?.broadcastToAll('course:recalled', { order_id: orderId, course_no: courseNo });
-            socketService?.broadcastToAll('order:updated', view.order);
+            socketService?.broadcastToAll(req.tenantId!, 'course:recalled', { order_id: orderId, course_no: courseNo });
+            socketService?.broadcastToAll(req.tenantId!, 'order:updated', view.order);
         } catch (_) {}
         res.json(view);
     } catch (err: any) {
@@ -18049,8 +18049,8 @@ app.post('/kds/items/:id/status', authenticate, requirePermission('orders:kds'),
         const courseReady = live.length > 0 && pending.length === 0;
 
         try {
-            socketService?.broadcastToStation(item.station_id, 'kds:item', item);
-            socketService?.broadcastToAll('orderItem:status', {
+            socketService?.broadcastToStation(req.tenantId!, item.station_id, 'kds:item', item);
+            socketService?.broadcastToAll(req.tenantId!, 'orderItem:status', {
                 id: item.id, status: item.status, station_id: item.station_id,
                 order_id: item.order_id, course_no: item.course_no, ts: new Date().toISOString(),
             });
@@ -18062,7 +18062,7 @@ app.post('/kds/items/:id/status', authenticate, requirePermission('orders:kds'),
                 const syncDelta = readyTimes.length > 1
                     ? Math.round((Math.max(...readyTimes) - Math.min(...readyTimes)) / 1000)
                     : 0;
-                socketService?.broadcastToAll('course:ready', {
+                socketService?.broadcastToAll(req.tenantId!, 'course:ready', {
                     order_id: item.order_id, course_no: item.course_no, sync_delta_s: syncDelta,
                 });
             }
@@ -18231,12 +18231,12 @@ app.post('/orders/:id/courses/:n/fire', authenticate, requirePermission('orders:
 
         const view = await loadOrderView(req.tenantId!, orderId);
         try {
-            socketService?.broadcastToAll('course:fired', {
+            socketService?.broadcastToAll(req.tenantId!, 'course:fired', {
                 order_id: orderId, course_no: courseNo,
                 table_id: view.order.table_id, items: fired,
             });
             for (const st of new Set(fired.map((i: any) => i.station_id))) {
-                socketService?.broadcastToStation(st as number | null, 'kds:fired', {
+                socketService?.broadcastToStation(req.tenantId!, st as number | null, 'kds:fired', {
                     order_id: orderId, course_no: courseNo, table_id: view.order.table_id,
                     items: fired.filter((i: any) => i.station_id === st),
                 });
@@ -18299,7 +18299,7 @@ app.post('/orders/:id/courses/:n/refire', authenticate, requirePermission('order
 
         try {
             for (const st of new Set(upd.rows.map((i: any) => i.station_id))) {
-                socketService?.broadcastToStation(st as number | null, 'kds:fired', {
+                socketService?.broadcastToStation(req.tenantId!, st as number | null, 'kds:fired', {
                     order_id: orderId, course_no: courseNo,
                     items: upd.rows.filter((i: any) => i.station_id === st),
                 });
@@ -18336,7 +18336,7 @@ app.post('/orders/:id/courses/:n/call', authenticate, requirePermission('orders:
         const tableName = info.rows[0].table_name ?? '—';
 
         try {
-            socketService?.broadcastToAll('course:called', {
+            socketService?.broadcastToAll(req.tenantId!, 'course:called', {
                 order_id: orderId, course_no: courseNo, table_name: tableName,
             });
         } catch (_) {}
@@ -18595,7 +18595,7 @@ async function resyncBillForOrder(tenantId: number, orderId: number): Promise<{ 
         await client.query('BEGIN');
         const result = await syncBillTotalInTx(client, tenantId, billId);
         await client.query('COMMIT');
-        try { socketService?.broadcastToAll('bill:updated', result.bill); } catch (_) {}
+        try { socketService?.broadcastToAll(tenantId, 'bill:updated', result.bill); } catch (_) {}
         return null;
     } catch (err: any) {
         await client.query('ROLLBACK').catch(() => {});
@@ -18654,7 +18654,7 @@ app.patch('/orders/:id', authenticate, requirePermission('orders:take'), async (
         }
 
         const view = await loadOrderView(req.tenantId!, id);
-        try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
+        try { socketService?.broadcastToAll(req.tenantId!, 'order:updated', view.order); } catch (_) {}
         res.json(view);
     } catch (err: any) {
         console.error('PATCH /orders/:id error:', err);
@@ -18734,7 +18734,7 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
             );
             await client.query('COMMIT');
             client.release();
-            try { socketService?.broadcastToAll('order:updated', { ...order, status: 'CLOSED' }); } catch (_) {}
+            try { socketService?.broadcastToAll(req.tenantId!, 'order:updated', { ...order, status: 'CLOSED' }); } catch (_) {}
             return res.json({
                 order_id: orderId,
                 bill: null,
@@ -18799,8 +18799,8 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
         client.release();
 
         try {
-            socketService?.broadcastToAll('bill:updated', synced.bill);
-            socketService?.broadcastToAll('order:updated', { ...order, status: 'CLOSED', table_bill_id: billId });
+            socketService?.broadcastToAll(req.tenantId!, 'bill:updated', synced.bill);
+            socketService?.broadcastToAll(req.tenantId!, 'order:updated', { ...order, status: 'CLOSED', table_bill_id: billId });
         } catch (_) {}
 
         LogService.logActivity(
@@ -18926,7 +18926,7 @@ app.post('/tables/:id/bill', authenticate, requirePermission('payments:full'), a
         }
 
         const bill = inserted.rows[0];
-        try { socketService?.broadcastToAll('bill:opened', bill); } catch (_) {}
+        try { socketService?.broadcastToAll(req.tenantId!, 'bill:opened', bill); } catch (_) {}
         res.status(201).json({ bill, splits: [], paid_cents: 0, claimed_cents: 0, residual_cents: bill.total_cents });
     } catch (err: any) {
         if (sendPassepartoutError(res, err)) return;
@@ -19047,13 +19047,13 @@ app.post('/orders/items/:id/void', authenticate, requirePermission('orders:void'
         try {
             // La cucina deve vedere sparire la riga dal monitor: continuare a
             // cucinare un piatto stornato è spreco puro.
-            socketService?.broadcastToStation(item.station_id, 'orderItem:voided', {
+            socketService?.broadcastToStation(req.tenantId!, item.station_id, 'orderItem:voided', {
                 id: item.id, order_id: item.order_id, reason: item.void_reason,
             });
-            socketService?.broadcastToAll('orderItem:voided', {
+            socketService?.broadcastToAll(req.tenantId!, 'orderItem:voided', {
                 id: item.id, order_id: item.order_id, station_id: item.station_id, reason: item.void_reason,
             });
-            socketService?.broadcastToAll('order:updated', view.order);
+            socketService?.broadcastToAll(req.tenantId!, 'order:updated', view.order);
         } catch (_) {}
 
         LogService.logActivity(
@@ -19121,7 +19121,7 @@ app.post('/orders/:id/discount', authenticate, requirePermission('orders:void'),
 
         const view = await loadOrderView(req.tenantId!, id);
         const sync = await resyncBillForOrder(req.tenantId!, id);
-        try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
+        try { socketService?.broadcastToAll(req.tenantId!, 'order:updated', view.order); } catch (_) {}
 
         LogService.logActivity(
             req.tenantId!,
@@ -19209,7 +19209,7 @@ app.post('/orders/:id/transfer', authenticate, requirePermission('orders:take'),
         client.release();
 
         const view = await loadOrderView(req.tenantId!, id);
-        try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
+        try { socketService?.broadcastToAll(req.tenantId!, 'order:updated', view.order); } catch (_) {}
 
         LogService.logActivity(
             req.tenantId!,
@@ -20273,9 +20273,9 @@ bookingTools.configureBookingTools({
         pushSendToRoles(PUBLIC_TENANT_ID, roles, payload, opts),
     // socketService è inizializzato dopo il listen: le lambda lo leggono al
     // momento della chiamata, non alla configurazione.
-    broadcastReservationCreated: (r: any) => socketService?.broadcastReservationCreated(r),
-    broadcastReservationUpdated: (r: any) => socketService?.broadcastReservationUpdated(r),
-    broadcastPaymentRequestCreated: (r: any) => socketService?.broadcastToAll('paymentRequest:created', r),
+    broadcastReservationCreated: (r: any) => socketService?.broadcastReservationCreated(Number(r.tenant_id) || PUBLIC_TENANT_ID, r),
+    broadcastReservationUpdated: (r: any) => socketService?.broadcastReservationUpdated(Number(r.tenant_id) || PUBLIC_TENANT_ID, r),
+    broadcastPaymentRequestCreated: (r: any) => socketService?.broadcastToAll(Number(r.tenant_id) || PUBLIC_TENANT_ID, 'paymentRequest:created', r),
     broadcastReservationsUpdatedByIds,
 });
 

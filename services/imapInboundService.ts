@@ -369,7 +369,7 @@ async function handleMessage(msg: FetchMessageObject): Promise<void> {
     if (insertedRow) {
         const socket = socketProvider();
         if (socket) {
-            try { socket.broadcastToAll('inboundEmail:received', insertedRow); }
+            try { socket.broadcastToAll(PUBLIC_TENANT_ID, 'inboundEmail:received', insertedRow); }
             catch (err) { console.warn('[IMAP] broadcast failed:', err); }
         }
         // Wake the PWA / notifications center. Mirrors what logInboundMessage
