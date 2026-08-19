@@ -32,7 +32,8 @@ const VIEW_PERMISSIONS: Record<ViewState, string> = {
   [ViewState.EMAIL]: 'reservations:view',
   [ViewState.NOTIFICHE]: 'dashboard:view',
   [ViewState.MONITORING]: '', // gated by account email, not by permission — see canAccessView
-  [ViewState.DEVELOPMENT]: '' // gated by account email, not by permission — see canAccessView
+  [ViewState.DEVELOPMENT]: '', // gated by account email, not by permission — see canAccessView
+  [ViewState.PLATFORM]: '' // gated by role PLATFORM_ADMIN, not by permission — see canAccessView
 };
 
 /** The dev board is a project tool tied to one specific account, not a role. */
@@ -132,6 +133,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const canAccessView = useCallback((view: ViewState): boolean => {
     if (view === ViewState.DEVELOPMENT || view === ViewState.MONITORING) {
       return (user?.email || '').toLowerCase() === DEV_BOARD_ADMIN_EMAIL;
+    }
+    // Il pannello piattaforma è legato al ruolo, non a un permesso per-tenant:
+    // PLATFORM_ADMIN sta sopra i tenant e la matrice permessi è per-tenant.
+    if (view === ViewState.PLATFORM) {
+      return user?.role === UserRole.PLATFORM_ADMIN;
     }
     const requiredPermission = VIEW_PERMISSIONS[view];
     if (!requiredPermission) return false;

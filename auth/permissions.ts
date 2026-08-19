@@ -242,7 +242,11 @@ const VIEW_PERMISSIONS: Record<ViewState, Permission[]> = {
   // account email, not by role permissions — see requireDevBoardAdmin in
   // server.ts. No role can reach them through the permission system.
   [ViewState.MONITORING]: [],
-  [ViewState.DEVELOPMENT]: []
+  [ViewState.DEVELOPMENT]: [],
+  // Pannello piattaforma (Fase D2): gate sul ruolo PLATFORM_ADMIN (vedi
+  // canAccessView nel frontend e platformAdminAuth in server.ts), non sulla
+  // matrice per-tenant. Nessun permesso lo apre.
+  [ViewState.PLATFORM]: []
 };
 
 export class PermissionService {
