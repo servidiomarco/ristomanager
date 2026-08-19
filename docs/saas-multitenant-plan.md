@@ -77,7 +77,7 @@ La coda lunga: ~260 route in `server.ts` da scopare su `req.tenantId`. Un PR per
 11. Notifiche, push, activity log, dev board
 
 ### PR B4 — Row-Level Security
-- `ALTER TABLE … ENABLE ROW LEVEL SECURITY` + policy `USING (tenant_id = current_setting('app.tenant_id')::bigint)` su tutte le tabelle, attivata a valle di B3.
+- `ALTER TABLE … ENABLE/FORCE ROW LEVEL SECURITY` + policy su tutte le tabelle (FORCE perché l'app si connette come owner, che altrimenti bypassa). **Policy in due stadi**: nella fase di transizione il predicato ha fallback permissivo quando `app.tenant_id` non è impostata (la B3 ha scopato con predicati espliciti, non tutto passa da `withTenant`); PRIMA di accendere il tenant 2 il fallback si rimuove (policy rigida) migrando i percorsi caldi su `withTenant`, e cade anche il `DEFAULT 1` su `tenant_id`.
 - È la rete di sicurezza contro la query dimenticata: con 19k righe di server e nessuna copertura test storica, una svista in B3 è una certezza statistica. Con RLS una query non scopata ritorna zero righe invece dei dati di un altro ristorante.
 
 ### PR B5 — Socket.IO per tenant
