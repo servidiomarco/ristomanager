@@ -581,6 +581,9 @@ export interface User {
   id: number;
   email: string;
   full_name: string;
+  // Telefono personale, gestito solo dal profilo self-service. Opzionale:
+  // gli utenti creati prima della migration profilo-utente non ce l'hanno.
+  phone?: string | null;
   role: UserRole;
   is_active: boolean;
   created_at?: string;

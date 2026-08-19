@@ -400,6 +400,100 @@ class AuthApiService {
     }
     return user;
   }
+
+  // ============================================
+  // SELF-SERVICE PROFILE
+  // ============================================
+
+  // Update own name/phone. Same shape as updatePreferences: the server
+  // returns the fresh user (+permissions) and we mirror it into storage.
+  async updateProfile(data: { full_name?: string; phone?: string | null }): Promise<User> {
+    const response = await this.authFetch(`${API_URL}/auth/me/profile`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to update profile' }));
+      throw buildApiError(response.status, error, 'Failed to update profile');
+    }
+
+    const body = await response.json();
+    const user: User = { ...body };
+    delete (user as any).permissions;
+    localStorage.setItem(USER_KEY, JSON.stringify(user));
+    if (body.permissions) {
+      localStorage.setItem(PERMISSIONS_KEY, JSON.stringify(body.permissions));
+    }
+    return user;
+  }
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    const response = await this.authFetch(`${API_URL}/auth/me/password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to change password' }));
+      throw buildApiError(response.status, error, 'Failed to change password');
+    }
+  }
+
+  // Change own email. Il server ritorna token NUOVI (il JWT porta l'email:
+  // quelli vecchi mentirebbero) — vanno salvati subito, insieme allo user.
+  async changeEmail(newEmail: string, currentPassword: string): Promise<User> {
+    const response = await this.authFetch(`${API_URL}/auth/me/email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_email: newEmail, current_password: currentPassword })
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to change email' }));
+      throw buildApiError(response.status, error, 'Failed to change email');
+    }
+
+    const data: AuthResponse = await response.json();
+    this.storeAuth(data.accessToken, data.refreshToken, data.user, data.permissions || []);
+    return data.user;
+  }
+
+  // ============================================
+  // PASSWORD RESET (unauthenticated)
+  // ============================================
+
+  // Fire-and-forget by design: il server risponde sempre 200, che l'email
+  // esista o no — la UI mostra lo stesso messaggio in ogni caso.
+  async forgotPassword(email: string): Promise<void> {
+    const response = await fetch(`${API_URL}/auth/forgot-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+
+    if (!response.ok) {
+      // Solo rate limit o server down arrivano qui: nessuna informazione
+      // sull'esistenza dell'account.
+      const error = await response.json().catch(() => ({ error: 'Richiesta non riuscita' }));
+      throw buildApiError(response.status, error, 'Richiesta non riuscita');
+    }
+  }
+
+  async resetPassword(token: string, newPassword: string): Promise<void> {
+    const response = await fetch(`${API_URL}/auth/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, new_password: newPassword })
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Reset non riuscito' }));
+      throw buildApiError(response.status, error, 'Reset non riuscito');
+    }
+  }
 }
 
 export const authApiService = new AuthApiService();

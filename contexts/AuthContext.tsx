@@ -53,6 +53,12 @@ interface AuthContextType {
   canViewLogs: () => boolean;
   getAccessToken: () => string | null;
   updatePreferences: (prefs: { preferred_landing_view?: string | null }) => Promise<void>;
+  /** Profilo self-service: nome e telefono propri. */
+  updateProfile: (data: { full_name?: string; phone?: string | null }) => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  /** Cambio email: il service salva anche i token nuovi (il JWT porta
+   *  l'email), qui si aggiorna solo lo user in stato. */
+  changeEmail: (newEmail: string, currentPassword: string) => Promise<void>;
   /** Chiude il wizard di primo accesso (D1): server + stato locale, così
    *  l'app compare senza rifare il login. */
   completeOnboarding: () => Promise<void>;
@@ -165,6 +171,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(updated);
   }, []);
 
+  const updateProfile = useCallback(async (data: { full_name?: string; phone?: string | null }) => {
+    const updated = await authApiService.updateProfile(data);
+    setUser(updated);
+  }, []);
+
+  const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
+    await authApiService.changePassword(currentPassword, newPassword);
+  }, []);
+
+  const changeEmail = useCallback(async (newEmail: string, currentPassword: string) => {
+    // Il service ha già salvato token e user nuovi in storage; il socket si
+    // riconnette col token fresco, come dopo un login.
+    const updated = await authApiService.changeEmail(newEmail, currentPassword);
+    setUser(updated);
+    socketClient.reconnectWithToken();
+  }, []);
+
   const completeOnboarding = useCallback(async () => {
     await apiCompleteOnboarding();
     // Il flag vive dentro user.tenant: si aggiorna in place, il prossimo
@@ -188,6 +211,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     canViewLogs,
     getAccessToken,
     updatePreferences,
+    updateProfile,
+    changePassword,
+    changeEmail,
     completeOnboarding
   };
 
