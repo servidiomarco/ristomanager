@@ -562,6 +562,11 @@ export interface Customer {
 // ============================================
 
 export enum UserRole {
+  // Ruolo di piattaforma (Fase D2): sta SOPRA i tenant — lista tenant,
+  // sospensione, impersonation. Nessuna route di signup: gli utenti
+  // PLATFORM_ADMIN si creano solo a mano (SQL), mai dalla UI di gestione
+  // utenti di un ristorante.
+  PLATFORM_ADMIN = 'PLATFORM_ADMIN',
   OWNER = 'OWNER',
   GENERAL_MANAGER = 'GENERAL_MANAGER',
   MANAGER = 'MANAGER',

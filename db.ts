@@ -963,10 +963,14 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // Role CHECK constraint migration. Each new role we add (GENERAL_MANAGER,
         // RECEPTION, …) needs to be in the allow-list on *both* users and
         // role_permissions, otherwise INSERTs trip the constraint.
+        // PLATFORM_ADMIN (Fase D2): senza di lui in questa lista, il primo
+        // boot dopo la creazione di un vero platform admin farebbe fallire
+        // l'intera transazione di createSchema (la ADD CONSTRAINT valida le
+        // righe esistenti). Allineato alla migration platform-admin-role.
         await client.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`);
-        await client.query(`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER', 'KITCHEN'))`);
+        await client.query(`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('PLATFORM_ADMIN', 'OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER', 'KITCHEN'))`);
         await client.query(`ALTER TABLE role_permissions DROP CONSTRAINT IF EXISTS role_permissions_role_check`);
-        await client.query(`ALTER TABLE role_permissions ADD CONSTRAINT role_permissions_role_check CHECK (role IN ('OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER', 'KITCHEN'))`);
+        await client.query(`ALTER TABLE role_permissions ADD CONSTRAINT role_permissions_role_check CHECK (role IN ('PLATFORM_ADMIN', 'OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER', 'KITCHEN'))`);
 
         // Seed GENERAL_MANAGER default permissions if missing
         const generalManagerPermissions = [

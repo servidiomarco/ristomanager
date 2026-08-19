@@ -123,6 +123,8 @@ Il pattern è quello già esistente di SumUp (`/webhook/sumup/:token`, unico web
 
 ### PR D2 — Pannello piattaforma
 - Ruolo `PLATFORM_ADMIN` sopra OWNER (fuori dalla gerarchia tenant): lista tenant, stato, feature, sospensione, impersonation con audit log.
+- **Backend fatto**: ruolo nei CHECK (migration + re-assert al boot, perché createSchema congelato li ricrea a 6 ruoli), `/admin/tenants` accetta anche un JWT PLATFORM_ADMIN oltre al token env (bootstrap), `POST /admin/tenants/:id/impersonate` emette un access token da 15 minuti col claim `impersonated_by`, senza refresh token, loggato in activity_logs del tenant. Utenti PLATFORM_ADMIN solo via SQL, nessun signup.
+- **Il pannello UI è rimandato**: per ora si opera via API (token env o JWT platform admin).
 
 ### PR D3 — Billing
 - Stripe Billing: subscription per tenant, base + add-on come subscription items; webhook Stripe → `tenants.status` e `tenant_features`. Nessun dato carta nel nostro DB.

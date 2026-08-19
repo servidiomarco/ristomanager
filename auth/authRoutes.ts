@@ -222,6 +222,13 @@ router.post('/users', authenticate, authorize(UserRole.OWNER), async (req: Reque
       return res.status(400).json({ error: 'Invalid role' });
     }
 
+    // PLATFORM_ADMIN sta sopra i tenant: se un OWNER potesse crearlo da qui
+    // sarebbe una privilege escalation verso l'intera piattaforma. Si crea
+    // solo a mano via SQL (Fase D2).
+    if (role === UserRole.PLATFORM_ADMIN) {
+      return res.status(400).json({ error: 'Invalid role' });
+    }
+
     const user = await AuthService.createUser(email, password, full_name, role);
 
     // Log activity
@@ -256,6 +263,12 @@ router.put('/users/:id', authenticate, authorize(UserRole.OWNER), async (req: Re
     const { email, password, full_name, role, is_active } = req.body;
 
     if (role && !Object.values(UserRole).includes(role)) {
+      return res.status(400).json({ error: 'Invalid role' });
+    }
+
+    // Stessa guardia della POST: nessuna promozione a PLATFORM_ADMIN dalla
+    // gestione utenti di un tenant.
+    if (role === UserRole.PLATFORM_ADMIN) {
       return res.status(400).json({ error: 'Invalid role' });
     }
 
@@ -346,7 +359,9 @@ router.get('/permissions', authenticate, authorize(UserRole.OWNER), async (req: 
   try {
     res.json({
       features: ALL_PERMISSIONS,
-      roles: Object.values(UserRole)
+      // PLATFORM_ADMIN è un ruolo di piattaforma, non di tenant: nella
+      // matrice permessi di un ristorante non ha senso e non deve comparire.
+      roles: Object.values(UserRole).filter(r => r !== UserRole.PLATFORM_ADMIN)
     });
   } catch (error) {
     console.error('Get permissions error:', error);

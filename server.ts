@@ -37,6 +37,7 @@ import { Shift, PaymentStatus, UserRole } from './types.js';
 import authRoutes from './auth/authRoutes.js';
 import logRoutes from './activityLogs/logRoutes.js';
 import { authenticate, authorize, requirePermission } from './auth/authMiddleware.js';
+import { AuthService } from './auth/authService.js';
 import { RolePermissionService } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
@@ -15450,16 +15451,66 @@ app.get('/settings/webhook-info', authenticate, requirePermission('settings:full
 // ============================================
 // PANNELLO PIATTAFORMA — PROVISIONING TENANT (Fase D1)
 // ============================================
-// Endpoint /admin/tenants: stanno SOPRA i tenant, quindi fuori dal JWT e da
-// requirePermission (che sono per-tenant per costruzione). Il gate è un token
-// di piattaforma da env: il ruolo PLATFORM_ADMIN e il pannello con audit log
-// arrivano in D2 — il token env è il bootstrap minimo per accendere i primi
-// tenant senza aprire una superficie self-service.
+// Endpoint /admin/tenants: stanno SOPRA i tenant, quindi fuori da
+// requirePermission (che è per-tenant per costruzione). Due vie d'ingresso
+// (Fase D2): un JWT con ruolo PLATFORM_ADMIN — utenti creati SOLO a mano via
+// SQL, nessuna route di signup — oppure il token di piattaforma da env, che
+// resta come bootstrap (serve per creare il primo platform admin e per gli
+// script). Prima si tenta il JWT, poi si ripiega sull'env: così il 503
+// "funzionalità spenta" scatta solo quando non esiste NESSUNA via valida.
+// createSchema (congelato, db.ts) ricrea a OGNI boot i CHECK su users.role e
+// role_permissions.role con la lista storica a 6 ruoli, e gira PRIMA delle
+// migration — che essendo già applicate non ri-allargano niente. Senza questo
+// re-assert il ruolo PLATFORM_ADMIN sopravviverebbe un solo boot: la
+// migration 1787133785535_platform-admin-role resta la fonte versionata del
+// cambiamento, questa funzione (stessa SQL, idempotente: agisce solo se il
+// CHECK non contiene già PLATFORM_ADMIN) lo difende dal ri-restringimento.
+// Limite noto: se esiste già una riga con role='PLATFORM_ADMIN', la ADD
+// CONSTRAINT a 6 ruoli di createSchema fallisce e fa rollback dell'intera
+// transazione di createSchema — il CHECK largo sopravvive, ma quel boot
+// salta seed e scheduler. La sanatoria vera è aggiornare le due ALTER in
+// db.ts quando verrà scongelato.
+const ensurePlatformAdminRoleChecks = async (): Promise<void> => {
+    await queryWithRetry(`
+        DO $$
+        DECLARE c RECORD;
+        BEGIN
+            FOR c IN
+                SELECT conrelid::regclass AS tbl, conname
+                  FROM pg_constraint
+                 WHERE contype = 'c'
+                   AND conrelid IN ('users'::regclass, 'role_permissions'::regclass)
+                   AND pg_get_constraintdef(oid) ~ 'role.*''OWNER'''
+                   AND pg_get_constraintdef(oid) !~ 'PLATFORM_ADMIN'
+            LOOP
+                EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I', c.tbl, c.conname);
+                EXECUTE format(
+                    'ALTER TABLE %s ADD CONSTRAINT %I CHECK (role IN (''PLATFORM_ADMIN'', ''OWNER'', ''GENERAL_MANAGER'', ''MANAGER'', ''RECEPTION'', ''WAITER'', ''KITCHEN''))',
+                    c.tbl, c.conname
+                );
+            END LOOP;
+        END $$;
+    `);
+};
+
 const platformAdminAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        const payload = AuthService.verifyAccessToken(authHeader.substring(7));
+        if (payload && payload.role === UserRole.PLATFORM_ADMIN) {
+            // L'identità finisce in req.user per l'audit (impersonation):
+            // niente req.tenantId, questi endpoint non hanno un tenant.
+            req.user = payload;
+            return next();
+        }
+        // Bearer presente ma non da platform admin: si prova comunque la via
+        // env — un client potrebbe mandare entrambi gli header.
+    }
     const expected = process.env.PLATFORM_ADMIN_TOKEN || '';
     if (!expected) {
         // Env assente = funzionalità spenta, non "accesso libero": senza
-        // token configurato questi endpoint non devono esistere.
+        // token configurato (e senza JWT valido qui sopra) questi endpoint
+        // non devono esistere.
         return res.status(503).json({ error: 'platform_admin_disabled', message: 'PLATFORM_ADMIN_TOKEN non configurato.' });
     }
     const provided = String(req.header('X-Platform-Admin-Token') ?? '');
@@ -15619,6 +15670,75 @@ app.patch('/admin/tenants/:id', platformAdminAuth, async (req, res) => {
     } catch (err) {
         console.error('PATCH /admin/tenants/:id error:', err);
         res.status(500).json({ error: 'Failed to update tenant' });
+    }
+});
+
+// Impersonation (Fase D2): il platform admin entra in un tenant come il suo
+// primo OWNER attivo. Il token emesso è un access token normale — stesso
+// secret, stesso payload — quindi `authenticate` e tutte le route scoped lo
+// accettano senza codice dedicato; è però corto (15 min) e porta il claim
+// impersonated_by per l'audit. NESSUN refresh token: la sessione non può
+// rinnovarsi per costruzione (il refresh esige un token firmato col secret
+// di refresh, che qui non viene emesso). L'ingresso resta tracciato
+// nell'activity log del tenant bersaglio: l'OWNER vede che la piattaforma
+// è entrata, e chi.
+app.post('/admin/tenants/:id/impersonate', platformAdminAuth, async (req, res) => {
+    const tenantId = Number(req.params.id);
+    if (!Number.isInteger(tenantId) || tenantId <= 0) {
+        return res.status(400).json({ error: 'invalid_tenant_id' });
+    }
+    try {
+        const tenantRes = await queryWithRetry('SELECT id, slug FROM tenants WHERE id = $1', [tenantId]);
+        if (tenantRes.rows.length === 0) {
+            return res.status(404).json({ error: 'tenant_not_found' });
+        }
+        // Il primo OWNER attivo per id: deterministico, ed è l'account che il
+        // provisioning D1 crea per primo.
+        const ownerRes = await queryWithRetry(
+            `SELECT id, email, role FROM users
+              WHERE tenant_id = $1 AND role = 'OWNER' AND is_active = TRUE
+              ORDER BY id LIMIT 1`,
+            [tenantId]
+        );
+        if (ownerRes.rows.length === 0) {
+            return res.status(404).json({ error: 'owner_not_found', message: 'Il tenant non ha un OWNER attivo da impersonare.' });
+        }
+        const owner = ownerRes.rows[0];
+        // Chi impersona: l'email del JWT di piattaforma, o 'env-token' se
+        // l'ingresso è avvenuto col token di bootstrap da env.
+        const impersonatedBy = req.user?.email ?? 'env-token';
+        const accessToken = AuthService.generateImpersonationToken(
+            {
+                userId: owner.id,
+                email: owner.email,
+                role: owner.role as UserRole,
+                tenantId,
+            },
+            impersonatedBy
+        );
+        // user_id NULL: l'admin di piattaforma non è un utente del tenant.
+        // Azione LOGIN (l'enum ActivityAction è chiuso, niente IMPERSONATE):
+        // i dettagli dicono che è un'impersonation e da parte di chi.
+        await LogService.logActivity(
+            tenantId,
+            null,
+            impersonatedBy,
+            'Platform admin',
+            ActivityAction.LOGIN,
+            ResourceType.AUTH,
+            owner.id,
+            owner.email,
+            { impersonation: true, impersonated_by: impersonatedBy, target_email: owner.email }
+        );
+        res.json({
+            accessToken,
+            expires_in_seconds: AuthService.IMPERSONATION_TTL_SECONDS,
+            user: { email: owner.email, role: owner.role },
+            tenant: { id: tenantId, slug: tenantRes.rows[0].slug },
+        });
+    } catch (err) {
+        console.error('POST /admin/tenants/:id/impersonate error:', err);
+        res.status(500).json({ error: 'Failed to impersonate tenant' });
     }
 });
 
@@ -21027,6 +21147,14 @@ const startServer = async () => {
                         console.log('✅ Database migrations up to date');
                     } catch (migErr) {
                         console.error('❌ Database migrations failed:', migErr);
+                    }
+                    // Dopo le migration, sempre: createSchema qui sopra ha
+                    // appena ristretto i CHECK sui ruoli alla lista storica
+                    // (vedi ensurePlatformAdminRoleChecks per il perché).
+                    try {
+                        await ensurePlatformAdminRoleChecks();
+                    } catch (roleErr) {
+                        console.error('❌ Re-assert CHECK ruoli (PLATFORM_ADMIN) fallito:', roleErr);
                     }
                     // Warm della cache identità: i primi messaggi dopo il boot
                     // non devono uscire coi fallback se legal_config è compilato.

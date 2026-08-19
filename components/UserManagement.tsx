@@ -19,6 +19,10 @@ interface UserManagementProps {
 }
 
 const ROLE_NAMES: Record<UserRole, string> = {
+  // Ruolo di piattaforma: mai assegnabile da questa UI (il server rifiuta
+  // comunque), l'etichetta serve solo a mostrare un eventuale utente
+  // esistente senza la costante grezza.
+  [UserRole.PLATFORM_ADMIN]: 'Admin piattaforma',
   [UserRole.OWNER]: 'Proprietario',
   [UserRole.GENERAL_MANAGER]: 'General Manager',
   [UserRole.MANAGER]: 'Manager',
@@ -28,6 +32,7 @@ const ROLE_NAMES: Record<UserRole, string> = {
 };
 
 const ROLE_ICONS: Record<UserRole, React.ComponentType<{ className?: string }>> = {
+  [UserRole.PLATFORM_ADMIN]: Shield,
   [UserRole.OWNER]: Shield,
   [UserRole.GENERAL_MANAGER]: Shield,
   [UserRole.MANAGER]: UserIcon,
@@ -380,9 +385,13 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
                   onChange={(e) => setFormData({ ...formData, role: e.target.value as UserRole })}
                   className={dsSelect}
                 >
-                  {(Object.keys(ROLE_NAMES) as UserRole[]).map(role => (
-                    <option key={role} value={role}>{ROLE_NAMES[role]}</option>
-                  ))}
+                  {(Object.keys(ROLE_NAMES) as UserRole[])
+                    // Il ruolo di piattaforma non si assegna da qui: si crea
+                    // solo a mano via SQL, e il server rifiuta comunque.
+                    .filter(role => role !== UserRole.PLATFORM_ADMIN)
+                    .map(role => (
+                      <option key={role} value={role}>{ROLE_NAMES[role]}</option>
+                    ))}
                 </select>
               </Field>
             </div>
