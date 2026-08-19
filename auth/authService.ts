@@ -102,7 +102,7 @@ export class AuthService {
   // Login user
   static async login(email: string, password: string): Promise<{ user: User; tokens: AuthTokens } | { tenantSuspended: true } | null> {
     const result = await queryWithRetry(
-      `SELECT u.id, u.email, u.password_hash, u.full_name, u.role, u.is_active,
+      `SELECT u.id, u.email, u.password_hash, u.full_name, u.phone, u.role, u.is_active,
               u.created_at, u.updated_at, u.last_login, u.preferred_landing_view,
               u.tenant_id, t.status AS tenant_status, t.slug AS tenant_slug, t.name AS tenant_name,
               t.onboarding_completed_at IS NULL AS tenant_needs_onboarding
@@ -154,6 +154,7 @@ export class AuthService {
       id: userRow.id,
       email: userRow.email,
       full_name: userRow.full_name,
+      phone: userRow.phone ?? null,
       role: userRow.role as UserRole,
       is_active: userRow.is_active,
       created_at: userRow.created_at,
@@ -232,7 +233,7 @@ export class AuthService {
   // alla UI, che da lì sa nome e slug del ristorante).
   static async getUserById(userId: number): Promise<User | null> {
     const result = await queryWithRetry(
-      `SELECT u.id, u.email, u.full_name, u.role, u.is_active, u.created_at,
+      `SELECT u.id, u.email, u.full_name, u.phone, u.role, u.is_active, u.created_at,
               u.updated_at, u.last_login, u.preferred_landing_view,
               u.tenant_id, t.slug AS tenant_slug, t.name AS tenant_name,
               t.onboarding_completed_at IS NULL AS tenant_needs_onboarding
@@ -251,6 +252,7 @@ export class AuthService {
       id: row.id,
       email: row.email,
       full_name: row.full_name,
+      phone: row.phone ?? null,
       role: row.role as UserRole,
       is_active: row.is_active,
       created_at: row.created_at,
@@ -296,7 +298,7 @@ export class AuthService {
       `UPDATE users
        SET preferred_landing_view = $1, updated_at = CURRENT_TIMESTAMP
        WHERE id = $2
-       RETURNING id, email, full_name, role, is_active, created_at, updated_at, last_login, preferred_landing_view`,
+       RETURNING id, email, full_name, phone, role, is_active, created_at, updated_at, last_login, preferred_landing_view`,
       [view, userId]
     );
 
@@ -309,6 +311,10 @@ export class AuthService {
       id: row.id,
       email: row.email,
       full_name: row.full_name,
+      // phone incluso anche qui: il frontend sovrascrive lo user salvato con
+      // questa risposta, e senza il campo il telefono "sparirebbe" fino al
+      // prossimo /auth/me.
+      phone: row.phone ?? null,
       role: row.role as UserRole,
       is_active: row.is_active,
       created_at: row.created_at,
@@ -434,5 +440,189 @@ export class AuthService {
   static async deleteUser(userId: number): Promise<boolean> {
     const result = await queryWithRetry('DELETE FROM users WHERE id = $1 RETURNING id', [userId]);
     return result.rows.length > 0;
+  }
+
+  // ============================================
+  // SELF-SERVICE (profilo, password, email, reset)
+  // ============================================
+
+  // Update only name and phone for the user themselves. Narrower than
+  // updateUser on purpose (same reasoning as updatePreferredLanding): from
+  // here nobody can toccare role/email/is_active.
+  static async updateOwnProfile(
+    userId: number,
+    updates: { full_name?: string; phone?: string | null }
+  ): Promise<User | null> {
+    const fields: string[] = [];
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    if (updates.full_name !== undefined) {
+      fields.push(`full_name = $${paramIndex++}`);
+      values.push(updates.full_name);
+    }
+    if (updates.phone !== undefined) {
+      fields.push(`phone = $${paramIndex++}`);
+      values.push(updates.phone);
+    }
+
+    if (fields.length === 0) {
+      return this.getUserById(userId);
+    }
+
+    fields.push(`updated_at = CURRENT_TIMESTAMP`);
+    values.push(userId);
+
+    const result = await queryWithRetry(
+      `UPDATE users SET ${fields.join(', ')} WHERE id = $${paramIndex} RETURNING id`,
+      values
+    );
+    if (result.rows.length === 0) {
+      return null;
+    }
+    // Rilettura via getUserById: è la stessa forma (tenant incluso) che
+    // login e /auth/me ritornano, così il frontend può sovrascrivere lo
+    // user salvato senza perdere campi.
+    return this.getUserById(userId);
+  }
+
+  // Change own password after re-verifying the current one.
+  static async changeOwnPassword(
+    userId: number,
+    currentPassword: string,
+    newPassword: string
+  ): Promise<'ok' | 'wrong_password' | 'not_found'> {
+    const result = await queryWithRetry('SELECT password_hash FROM users WHERE id = $1', [userId]);
+    if (result.rows.length === 0) {
+      return 'not_found';
+    }
+
+    const isValid = await this.verifyPassword(currentPassword, result.rows[0].password_hash);
+    if (!isValid) {
+      return 'wrong_password';
+    }
+
+    const newHash = await this.hashPassword(newPassword);
+    // refresh_token_hash a NULL insieme alla password: le altre sessioni
+    // muoiono al primo refresh (l'access token residuo scade da solo entro
+    // 6h). È il comportamento atteso dopo un cambio password — chi lo cambia
+    // di solito lo fa perché teme che qualcun altro abbia la vecchia.
+    await queryWithRetry(
+      `UPDATE users
+       SET password_hash = $1, refresh_token_hash = NULL, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2`,
+      [newHash, userId]
+    );
+    return 'ok';
+  }
+
+  // Change own email after re-verifying the password. On success returns the
+  // fresh user AND fresh tokens: il JWT contiene l'email — senza nuovi token
+  // la sessione mente (ogni middleware leggerebbe ancora quella vecchia).
+  static async changeOwnEmail(
+    userId: number,
+    newEmail: string,
+    currentPassword: string
+  ): Promise<{ user: User; tokens: AuthTokens } | 'wrong_password' | 'email_conflict' | 'not_found'> {
+    const result = await queryWithRetry(
+      'SELECT password_hash, tenant_id, role FROM users WHERE id = $1',
+      [userId]
+    );
+    if (result.rows.length === 0) {
+      return 'not_found';
+    }
+
+    const row = result.rows[0];
+    const isValid = await this.verifyPassword(currentPassword, row.password_hash);
+    if (!isValid) {
+      return 'wrong_password';
+    }
+
+    const normalizedEmail = newEmail.toLowerCase().trim();
+    try {
+      await queryWithRetry(
+        'UPDATE users SET email = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+        [normalizedEmail, userId]
+      );
+    } catch (error: any) {
+      // UNIQUE globale su email: il controllo sta nel vincolo, non in una
+      // SELECT preventiva — così due richieste simultanee non passano entrambe.
+      if (error?.code === '23505') {
+        return 'email_conflict';
+      }
+      throw error;
+    }
+
+    const payload: TokenPayload = {
+      userId,
+      email: normalizedEmail,
+      role: row.role as UserRole,
+      tenantId: Number(row.tenant_id)
+    };
+    const tokens = this.generateTokens(payload);
+
+    // La rotazione dell'hash revoca il refresh token precedente: eventuali
+    // altre sessioni (che portano la vecchia email nel JWT) muoiono al primo
+    // refresh invece di continuare a mentire.
+    const refreshTokenHash = await this.hashRefreshToken(tokens.refreshToken);
+    await queryWithRetry('UPDATE users SET refresh_token_hash = $1 WHERE id = $2', [refreshTokenHash, userId]);
+
+    const user = await this.getUserById(userId);
+    if (!user) {
+      return 'not_found';
+    }
+    return { user, tokens };
+  }
+
+  // Il token di reset viaggia in chiaro solo nell'email; nel DB vive il suo
+  // SHA-256 hex (64 char): un dump del database non basta a resettare niente.
+  static digestResetToken(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
+  }
+
+  // Store the reset token hash + expiry for a user. Il token in chiaro lo
+  // genera la route (crypto.randomBytes) e finisce solo nell'email.
+  static async storeResetToken(userId: number, token: string, expiresAt: Date): Promise<void> {
+    await queryWithRetry(
+      `UPDATE users
+       SET reset_token_hash = $1, reset_token_expires_at = $2, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $3`,
+      [this.digestResetToken(token), expiresAt, userId]
+    );
+  }
+
+  // Consume a reset token: match su hash E scadenza, in un solo UPDATE così
+  // due richieste simultanee con lo stesso token non passano entrambe (la
+  // seconda non trova più la riga). Ritorna la riga per l'audit log.
+  static async resetPasswordWithToken(
+    token: string,
+    newPassword: string
+  ): Promise<{ id: number; email: string; full_name: string; tenantId: number } | null> {
+    const newHash = await this.hashPassword(newPassword);
+    const result = await queryWithRetry(
+      `UPDATE users
+       SET password_hash = $1,
+           -- single-use: il token si consuma qui, e refresh_token_hash a NULL
+           -- fa logout ovunque (chi aveva rubato la sessione la perde).
+           reset_token_hash = NULL,
+           reset_token_expires_at = NULL,
+           refresh_token_hash = NULL,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE reset_token_hash = $2
+         AND reset_token_expires_at > NOW()
+         AND is_active = TRUE
+       RETURNING id, email, full_name, tenant_id`,
+      [newHash, this.digestResetToken(token)]
+    );
+    if (result.rows.length === 0) {
+      return null;
+    }
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      email: row.email,
+      full_name: row.full_name,
+      tenantId: Number(row.tenant_id)
+    };
   }
 }

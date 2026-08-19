@@ -6,6 +6,7 @@ import { FloorPlan } from './components/FloorPlan';
 import { MenuManager } from './components/MenuManager';
 import { ReservationList } from './components/ReservationList';
 import { LoginPage } from './components/LoginPage';
+import { ProfiloSheet } from './components/ProfiloSheet';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { PlatformPanel, ImpersonationBanner } from './components/PlatformPanel';
 import { CookingPotLoader } from './components/CookingPotLoader';
@@ -913,6 +914,10 @@ const App: React.FC = () => {
   // Mobile chrome menus
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+
+  // Profilo self-service (nome, telefono, password, email) — aperto
+  // dall'area utente della sidebar e dal menu "Altro" su mobile.
+  const [showProfilo, setShowProfilo] = useState(false);
 
   // Socket.IO connection
   const { socket, isConnected } = useSocket();
@@ -1888,9 +1893,16 @@ const App: React.FC = () => {
           {/* User Info — level-2 row inside the level-1 sidebar card */}
           {sidebarCollapsed ? (
             <div className="flex flex-col items-center gap-2 py-2 rounded-[16px] bg-[var(--ds-surface-row)]">
-              <div className="w-10 h-10 rounded-full bg-[var(--ds-action-bg)] flex items-center justify-center text-[var(--ds-action-fg)] font-medium text-[13px]">
+              {/* L'avatar apre il profilo self-service — è l'unico appiglio
+                  quando la sidebar è chiusa. */}
+              <button
+                onClick={() => setShowProfilo(true)}
+                className="w-10 h-10 rounded-full bg-[var(--ds-action-bg)] flex items-center justify-center text-[var(--ds-action-fg)] font-medium text-[13px] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                title="Il tuo account"
+                aria-label="Il tuo account"
+              >
                 {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
-              </div>
+              </button>
               <button
                 onClick={logout}
                 className="p-2 text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-solid)] rounded-[12px] transition-colors"
@@ -1902,13 +1914,22 @@ const App: React.FC = () => {
             </div>
           ) : (
             <div className="flex items-center gap-3 p-3 rounded-[16px] bg-[var(--ds-surface-row)]">
-              <div className="w-10 h-10 shrink-0 rounded-full bg-[var(--ds-action-bg)] flex items-center justify-center text-[var(--ds-action-fg)] font-medium text-[13px]">
-                {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-[15px] font-semibold text-[var(--ds-text-primary)] tracking-[-0.01em] truncate">{user?.full_name || 'Utente'}</p>
-                <p className="text-[13px] text-[var(--ds-text-muted)] truncate">{user?.role ? getRoleDisplayName(user.role) : ''}</p>
-              </div>
+              {/* Avatar + nome sono un bottone: aprono il profilo. Esci resta
+                  un controllo separato — logout e profilo non si somigliano. */}
+              <button
+                onClick={() => setShowProfilo(true)}
+                className="flex flex-1 min-w-0 items-center gap-3 text-left rounded-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                title="Il tuo account"
+                aria-label="Il tuo account"
+              >
+                <div className="w-10 h-10 shrink-0 rounded-full bg-[var(--ds-action-bg)] flex items-center justify-center text-[var(--ds-action-fg)] font-medium text-[13px]">
+                  {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[15px] font-semibold text-[var(--ds-text-primary)] tracking-[-0.01em] truncate">{user?.full_name || 'Utente'}</p>
+                  <p className="text-[13px] text-[var(--ds-text-muted)] truncate">{user?.role ? getRoleDisplayName(user.role) : ''}</p>
+                </div>
+              </button>
               <button
                 onClick={logout}
                 className="p-1.5 text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-solid)] rounded-[10px] transition-colors"
@@ -2817,8 +2838,11 @@ const App: React.FC = () => {
                 </div>
               </div>
               <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
-              {/* User identity card */}
-              <div className="mx-4 mb-2 p-3 rounded-[16px] bg-[var(--ds-surface-row)] flex items-center gap-3">
+              {/* User identity card — tocco: apre il profilo self-service */}
+              <button
+                onClick={() => { setShowMoreMenu(false); setShowProfilo(true); }}
+                className="mx-4 mb-2 p-3 rounded-[16px] bg-[var(--ds-surface-row)] flex items-center gap-3 w-[calc(100%-2rem)] text-left"
+              >
                 <div className="w-10 h-10 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] flex items-center justify-center text-[13px] font-medium shrink-0">
                   {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
                 </div>
@@ -2826,7 +2850,8 @@ const App: React.FC = () => {
                   <p className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)] truncate">{user?.full_name || 'Utente'}</p>
                   <p className="text-[13px] text-[var(--ds-text-muted)] truncate">{user?.role ? getRoleDisplayName(user.role) : ''}</p>
                 </div>
-              </div>
+                <ChevronRight className="h-4 w-4 shrink-0 text-[var(--ds-text-subtle)]" />
+              </button>
               <div className="px-2 pb-2">
                 {NAV_GROUPS.filter(group => group.id !== 'sistema').map(group => {
                   const items = NAV_ITEMS.filter(item => item.group === group.id && !item.isTab && item.kind === 'link' && canSeeNavItem(item));
@@ -2906,6 +2931,13 @@ const App: React.FC = () => {
             </div>
           </div>
         )}
+
+        {/* Profilo self-service — nome, telefono, password, email */}
+        <ProfiloSheet
+          open={showProfilo}
+          onClose={() => setShowProfilo(false)}
+          roleLabel={user?.role ? getRoleDisplayName(user.role) : ''}
+        />
 
         {/* ElevenLabs voice-agent widget — temporarily hidden, will be
             re-enabled in the future. Component and import preserved. */}
