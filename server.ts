@@ -12,7 +12,7 @@ import path from 'path';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import QRCode from 'qrcode';
-import pool, { createSchema, queryWithRetry, runMigrations } from './db.js';
+import pool, { createSchema, queryWithRetry, runMigrations, tenantQuery } from './db.js';
 import { SocketService } from './services/socketService.js';
 import * as bookingTools from './services/bookingTools.js';
 import * as whatsappAgent from './services/whatsappAgent.js';
@@ -189,7 +189,7 @@ const jsonVerify = (req: any, _res: any, buf: Buffer) => { req.rawBody = buf; };
 const standardJson = express.json({ limit: '2mb', verify: jsonVerify });
 const largeJson = express.json({ limit: '8mb', verify: jsonVerify });
 app.use((req, res, next) => (
-    req.path === '/messages/attachments' ? largeJson(req, res, next) : standardJson(req, res, next)
+    req.path === '/messages/attachments' || req.path === '/media' ? largeJson(req, res, next) : standardJson(req, res, next)
 ));
 
 // Un body oltre il limite fa fallire il parser PRIMA della rotta: senza
@@ -4706,6 +4706,96 @@ app.post('/email/send', authenticate, requirePermission('reservations:full'), as
 // rifiuta comunque.
 const OUTBOUND_MEDIA_MAX_BYTES = 5 * 1024 * 1024;
 const OUTBOUND_MEDIA_TYPES = /^(image\/(jpeg|png|webp|gif)|video\/(mp4|3gpp)|audio\/(mpeg|ogg|amr|aac)|application\/pdf)$/;
+
+// --- Libreria media -------------------------------------------------------
+// NB: le query filtrano tenant_id ESPLICITAMENTE, non si affidano alla sola
+// Row-Level Security. La policy c'è ed è giusta, ma il ruolo con cui l'app si
+// collega al database (postgres) è superuser e la scavalca: RLS non si applica
+// mai a superuser né a ruoli con BYPASSRLS, nemmeno con FORCE. Finché non c'è
+// un ruolo applicativo dedicato, il filtro nella query è l'unica cosa che
+// isola davvero.
+// File caricati una volta e riusati molte (il menu di Ferragosto, la piantina
+// delle sale). Allegarne uno a un messaggio ne materializza una copia in
+// outbound_media: la via verso Twilio resta quella collaudata.
+
+app.get('/media', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    try {
+        const r = await tenantQuery(req.tenantId!,
+            `SELECT id, title, filename, content_type, size_bytes, created_at
+               FROM media_library WHERE tenant_id = $1 ORDER BY created_at DESC`, [req.tenantId!]);
+        res.json({ files: r.rows });
+    } catch (err: any) {
+        console.error('GET /media error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/media', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const title = String(req.body?.title ?? '').trim().slice(0, 120);
+        const filename = String(req.body?.filename ?? '').trim().slice(0, 200);
+        const contentType = String(req.body?.content_type ?? '').trim().toLowerCase();
+        const dataB64 = String(req.body?.data ?? '');
+        if (!title) return res.status(400).json({ error: 'Serve un nome per riconoscerlo' });
+        if (!filename) return res.status(400).json({ error: 'Nome del file mancante' });
+        if (!OUTBOUND_MEDIA_TYPES.test(contentType)) {
+            return res.status(415).json({ error: 'Tipo non ammesso: immagini, video, audio o PDF' });
+        }
+        const buf = Buffer.from(dataB64, 'base64');
+        if (buf.length === 0) return res.status(400).json({ error: 'File vuoto' });
+        if (buf.length > OUTBOUND_MEDIA_MAX_BYTES) {
+            return res.status(413).json({ error: 'File troppo grande: massimo 5 MB' });
+        }
+        const ins = await tenantQuery(req.tenantId!,
+            `INSERT INTO media_library (tenant_id, title, filename, content_type, bytes, size_bytes, created_by_user_id)
+             VALUES ($6, $1, $2, $3, $4, $5, $7)
+             RETURNING id, title, filename, content_type, size_bytes, created_at`,
+            [title, filename, contentType, buf, buf.length, req.tenantId!, req.user?.userId ?? null]);
+        res.status(201).json(ins.rows[0]);
+    } catch (err: any) {
+        console.error('POST /media error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/media/:id', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        const r = await tenantQuery(req.tenantId!,
+            `DELETE FROM media_library WHERE id = $1 AND tenant_id = $2 RETURNING id`, [id, req.tenantId!]);
+        if (r.rows.length === 0) return res.status(404).json({ error: 'File non trovato' });
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('DELETE /media/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Materializza una copia allegabile. Restituisce la stessa forma di
+// POST /messages/attachments, cosi' la Inbox non distingue fra un file appena
+// caricato e uno preso dalla libreria.
+app.post('/media/:id/attach', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        const f = await tenantQuery(req.tenantId!,
+            `SELECT filename, content_type, bytes, size_bytes FROM media_library WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]);
+        if (f.rows.length === 0) return res.status(404).json({ error: 'File non trovato' });
+        const row = f.rows[0];
+        const token = crypto.randomBytes(32).toString('base64url');
+        const ins = await tenantQuery(req.tenantId!,
+            `INSERT INTO outbound_media (tenant_id, token, content_type, filename, bytes, size_bytes, created_by_user_id)
+             VALUES ($6, $1, $2, $3, $4, $5, $7)
+             RETURNING id, token, content_type, filename, size_bytes`,
+            [token, row.content_type, row.filename, row.bytes, row.size_bytes, req.tenantId!, req.user?.userId ?? null]);
+        res.status(201).json(ins.rows[0]);
+    } catch (err: any) {
+        console.error('POST /media/:id/attach error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
 
 app.post('/messages/attachments', authenticate, requirePermission('reservations:full'), async (req, res) => {
     try {
