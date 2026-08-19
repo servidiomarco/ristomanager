@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowRight, Check, CalendarPlus, Paperclip, X as XIcon, Sparkles, Wand2 } from 'lucide-react';
+import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowRight, Check, CalendarPlus, Paperclip, X as XIcon, Sparkles, Wand2, FolderOpen } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
 import { SkeletonInboxList } from './SkeletonCards';
 import {
@@ -14,6 +14,7 @@ import {
 } from '../services/messagesApiService';
 import { socketClient } from '../services/socketClient';
 import { runAgent, confirmProposal, discardProposal, type AgentProposal } from '../services/aiMessagesApiService';
+import { listMedia, attachFromLibrary, type MediaFile } from '../services/mediaApiService';
 import { getFeatureFlags } from '../services/apiService';
 import { toTitleCase } from '../utils/text';
 import {
@@ -162,6 +163,9 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
   const [suggesting, setSuggesting] = useState(false);
   const [proposal, setProposal] = useState<AgentProposal | null>(null);
   const [proposalBusy, setProposalBusy] = useState(false);
+  // Libreria: si carica solo quando la apri, non a ogni conversazione.
+  const [libreriaAperta, setLibreriaAperta] = useState(false);
+  const [libreria, setLibreria] = useState<MediaFile[] | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [sending, setSending] = useState(false);
@@ -424,6 +428,36 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
       setProposalBusy(false);
     }
   }, [proposal, proposalBusy, loadConversations]);
+
+  // Allegare dalla libreria non ricarica niente dal telefono: il backend
+  // duplica il file già a bordo e restituisce un token come per un caricamento
+  // normale, quindi da qui in poi la via dell'invio è la stessa.
+  const handleApriLibreria = useCallback(async () => {
+    setLibreriaAperta(v => !v);
+    if (libreria !== null) return;
+    try {
+      const { files } = await listMedia();
+      setLibreria(files);
+    } catch (err: any) {
+      setSendError(err?.data?.error || 'Libreria non caricata');
+      setLibreria([]);
+    }
+  }, [libreria]);
+
+  const handleAllegaDallaLibreria = useCallback(async (f: MediaFile) => {
+    setUploading(true);
+    setSendError(null);
+    try {
+      const allegato = await attachFromLibrary(f.id);
+      setAttachments(prev => [...prev, allegato as any]);
+      setPreferredChannel('whatsapp');
+      setLibreriaAperta(false);
+    } catch (err: any) {
+      setSendError(err?.data?.error || 'Allegato non preparato');
+    } finally {
+      setUploading(false);
+    }
+  }, []);
 
   const handleDiscardProposal = useCallback(async () => {
     if (!proposal) return;
@@ -760,6 +794,44 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
                 )}
                 {sendError && <Callout tone="critical" icon={AlertTriangle}>{sendError}</Callout>}
 
+                {/* La libreria: l'elenco dei file già caricati in Impostazioni.
+                    Sta qui e non in un dialogo perché allegare il menù è un
+                    gesto da due secondi in mezzo a una conversazione. */}
+                {libreriaAperta && (
+                  <div className="rounded-[14px] border border-[var(--ds-border)] bg-[var(--ds-surface-row)] px-3 py-2.5">
+                    {libreria === null ? (
+                      <p className="flex items-center gap-2 py-1 text-[13px] text-[var(--ds-text-muted)]">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Carico la libreria…
+                      </p>
+                    ) : libreria.length === 0 ? (
+                      <p className="py-1 text-[13px] text-[var(--ds-text-muted)]">
+                        Nessun file in libreria. Si caricano da Impostazioni → Media.
+                      </p>
+                    ) : (
+                      <ul className="max-h-44 space-y-0.5 overflow-y-auto">
+                        {libreria.map(f => (
+                          <li key={f.id}>
+                            <button
+                              type="button"
+                              onClick={() => handleAllegaDallaLibreria(f)}
+                              disabled={uploading}
+                              className="flex w-full items-center gap-2.5 rounded-[10px] px-2 py-2 text-left transition-colors hover:bg-[var(--ds-surface)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                            >
+                              <Paperclip className="h-3.5 w-3.5 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
+                              <span className="min-w-0 flex-1 truncate text-[14px] text-[var(--ds-text-primary)]">{f.title}</span>
+                              <span className="flex-shrink-0 text-[12px] text-[var(--ds-text-subtle)]">
+                                {f.size_bytes >= 1024 * 1024
+                                  ? `${(f.size_bytes / 1024 / 1024).toFixed(1)} MB`
+                                  : `${Math.max(1, Math.round(f.size_bytes / 1024))} KB`}
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+
                 {/* La proposta dell'agente. Sta sopra il campo di scrittura e
                     non parte da sola: l'agente ha capito cosa fare, la
                     decisione resta di chi legge. */}
@@ -879,6 +951,16 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
                     className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleApriLibreria}
+                    disabled={uploading || sending}
+                    aria-label="Allega un file dalla libreria"
+                    title="Allega un file già caricato (menù, piantina…)"
+                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    <FolderOpen className="h-4 w-4" />
                   </button>
                   <textarea
                     ref={composerRef}

@@ -40,6 +40,7 @@ import { AutoDepositManager } from './components/AutoDepositManager';
 import { PayAtTableSettingsManager } from './components/PayAtTableSettingsManager';
 import { SalaCucinaSettingsManager } from './components/SalaCucinaSettingsManager';
 import { AiMessagesSettingsManager } from './components/AiMessagesSettingsManager';
+import { MediaLibraryManager } from './components/MediaLibraryManager';
 import { RevolutIntegrationCard } from './components/RevolutIntegrationCard';
 import { SumUpIntegrationCard } from './components/SumUpIntegrationCard';
 import { SmtpIntegrationCard } from './components/SmtpIntegrationCard';
@@ -2622,6 +2623,9 @@ const App: React.FC = () => {
                 </CardErrorBoundary>
                 <CardErrorBoundary label="Messaggi con AI">
                   <AiMessagesSettingsManager showToast={addToast} />
+                </CardErrorBoundary>
+                <CardErrorBoundary label="Media">
+                  <MediaLibraryManager showToast={addToast} />
                 </CardErrorBoundary>
                 <CardErrorBoundary label="Server Email (SMTP)">
                   <SmtpIntegrationCard showToast={addToast} />
