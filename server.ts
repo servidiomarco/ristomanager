@@ -271,6 +271,110 @@ const resolveWebhookTenantOr404 = async (
 };
 
 // ============================================
+// RISOLUZIONE TENANT SULLE SUPERFICI PUBBLICHE (slug e domini, Fase C3)
+// ============================================
+// La pagina /prenota e gli endpoint /public/* arrivano senza JWT: il tenant
+// si risolve (a) dallo :slug nel path, (b) dal dominio custom in
+// tenant_domains, (c) in fallback sul tenant 1. Stesso schema di cache dei
+// token webhook qui sopra (TTL breve, si cachano solo i match, stale-if-error):
+// slug e domini cambiano quasi mai.
+type TenantDomainHit = { tenantId: number; slug: string };
+const tenantSlugCache = new Map<string, { tenantId: number; refreshedAt: number }>();
+const tenantDomainCache = new Map<string, { hit: TenantDomainHit; refreshedAt: number }>();
+
+async function resolveTenantBySlug(slug: string): Promise<number | null> {
+    // Stessa CHECK della colonna tenants.slug: un segmento malformato
+    // (es. /prenota/logo.png arrivato qui per errore) si scarta senza
+    // toccare il DB.
+    if (!slug || slug.length > 60 || !/^[a-z0-9][a-z0-9-]*$/.test(slug)) return null;
+    const cached = tenantSlugCache.get(slug);
+    if (cached && Date.now() - cached.refreshedAt <= TENANT_TOKEN_TTL_MS) {
+        return cached.tenantId;
+    }
+    try {
+        // Solo tenant attivi: un tenant sospeso non deve continuare a
+        // raccogliere prenotazioni dalla sua pagina pubblica.
+        const result = await queryWithRetry(
+            `SELECT id FROM tenants WHERE slug = $1 AND status = 'active' LIMIT 1`,
+            [slug]
+        );
+        const id = result.rows[0]?.id != null ? Number(result.rows[0].id) : null;
+        if (id != null && Number.isFinite(id)) {
+            tenantSlugCache.set(slug, { tenantId: id, refreshedAt: Date.now() });
+            return id;
+        }
+        return null;
+    } catch (err) {
+        console.error('[public-tenant] lookup slug fallito:', (err as any)?.message || err);
+        return cached ? cached.tenantId : null;
+    }
+}
+
+// Ritorna anche lo slug (non solo l'id): il redirect della root deve
+// costruire /prenota/<slug> a partire dal solo hostname.
+async function resolveTenantByDomain(hostname: string): Promise<TenantDomainHit | null> {
+    const domain = String(hostname || '').trim().toLowerCase();
+    if (!domain || domain.length > 255) return null;
+    const cached = tenantDomainCache.get(domain);
+    if (cached && Date.now() - cached.refreshedAt <= TENANT_TOKEN_TTL_MS) {
+        return cached.hit;
+    }
+    try {
+        const result = await queryWithRetry(
+            `SELECT t.id, t.slug FROM tenant_domains d
+             JOIN tenants t ON t.id = d.tenant_id
+             WHERE d.domain = $1 AND t.status = 'active' LIMIT 1`,
+            [domain]
+        );
+        const row = result.rows[0];
+        if (row?.id != null && typeof row.slug === 'string') {
+            const hit: TenantDomainHit = { tenantId: Number(row.id), slug: row.slug };
+            tenantDomainCache.set(domain, { hit, refreshedAt: Date.now() });
+            return hit;
+        }
+        return null;
+    } catch (err) {
+        console.error('[public-tenant] lookup dominio fallito:', (err as any)?.message || err);
+        return cached ? cached.hit : null;
+    }
+}
+
+// Precedenza: (a) :slug esplicito nel path — se c'è ed è ignoto si risponde
+// 404, MAI il fallback (come per i webhook token: una pagina mal linkata non
+// deve cadere in silenzio sul tenant 1); (b) hostname in tenant_domains;
+// (c) fallback tenant 1 — le installazioni single-tenant e i path storici
+// (/prenota, /public/*) continuano a funzionare senza slug né dominio.
+async function resolveTenantForPublicRequest(req: express.Request): Promise<number | null> {
+    const slug = typeof req.params?.slug === 'string' ? req.params.slug : '';
+    if (slug) return resolveTenantBySlug(slug);
+    const byDomain = await resolveTenantByDomain(req.hostname);
+    if (byDomain) return byDomain.tenantId;
+    return PUBLIC_TENANT_ID;
+}
+
+const resolvePublicTenantOr404 = async (
+    req: express.Request,
+    res: express.Response
+): Promise<number | null> => {
+    const tenantId = await resolveTenantForPublicRequest(req);
+    if (tenantId == null) {
+        res.status(404).json({ error: 'unknown_slug' });
+        return null;
+    }
+    return tenantId;
+};
+
+// Adatta un handler condiviso (tenantId già risolto) alla firma di Express:
+// i path storici e i gemelli /public/:slug/* montano la stessa logica.
+const withPublicTenant = (
+    handler: (tenantId: number, req: express.Request, res: express.Response) => Promise<unknown>
+) => async (req: express.Request, res: express.Response) => {
+    const tenantId = await resolvePublicTenantOr404(req, res);
+    if (tenantId == null) return;
+    await handler(tenantId, req, res);
+};
+
+// ============================================
 // ENTITLEMENTS COMMERCIALI (tenant_features, Fase C1)
 // ============================================
 // Livello commerciale SOPRA i flag operativi di app_settings: il flag dice
@@ -310,10 +414,18 @@ app.use((_req, res, next) => {
   next();
 });
 
-// Health check endpoint for Railway. On the public booking subdomain
-// (prenotazioni.vecchiofrantoio.com) the root path redirects to /prenota
-// so visitors who type only the hostname land on the form.
-app.get('/', (req, res) => {
+// Health check endpoint for Railway. On a public booking domain the root
+// path redirects to the tenant's form so visitors who type only the
+// hostname land on it. Fase C3: il dominio→tenant vive in tenant_domains
+// (redirect data-driven, uno per ristorante); il confronto letterale resta
+// come ultima rete di sicurezza per il dominio storico del Frantoio — se la
+// riga seed manca (restore vecchio, migration non ancora passata) il QR già
+// stampato sui tavoli continua a funzionare.
+app.get('/', async (req, res) => {
+  const hit = await resolveTenantByDomain(req.hostname);
+  if (hit) {
+    return res.redirect(301, `/prenota/${hit.slug}`);
+  }
   if (req.hostname === 'prenotazioni.vecchiofrantoio.com') {
     return res.redirect(301, '/prenota');
   }
@@ -3808,9 +3920,11 @@ app.get('/pay/:token/qr.png', publicPayLimiter, async (req, res) => {
             return res.status(404).send('Not found');
         }
         // Il PNG non carica il conto di proposito (vedi sopra), quindi non c'è
-        // una riga da cui risalire al tenant: il flag resta sul tenant storico
-        // finché la Fase C2 non porta il tenant nell'URL del QR.
-        if (!(await getFeatureFlag(PUBLIC_TENANT_ID, 'pay_at_table_enabled', false))) {
+        // una riga da cui risalire al tenant: si risolve dal dominio chiamato
+        // (tenant_domains, Fase C3); senza dominio custom resta il tenant 1
+        // finché il token del conto non porterà il tenant nell'URL.
+        const qrTenantId = (await resolveTenantForPublicRequest(req)) ?? PUBLIC_TENANT_ID;
+        if (!(await getFeatureFlag(qrTenantId, 'pay_at_table_enabled', false))) {
             return res.status(404).send('Not found');
         }
         const publicUrl = `${payAtTableBaseUrl()}/pay/${token}`;
@@ -15294,11 +15408,18 @@ app.put('/settings/entitlements', authenticate, requirePermission('settings:full
 app.get('/settings/webhook-info', authenticate, requirePermission('settings:full'), async (req, res) => {
     try {
         const r = await queryWithRetry(
-            'SELECT webhook_token, print_agent_token FROM tenants WHERE id = $1',
+            'SELECT webhook_token, print_agent_token, slug FROM tenants WHERE id = $1',
             [req.tenantId!]
         );
         const webhookToken: string | null = r.rows[0]?.webhook_token ?? null;
         const printAgentToken: string | null = r.rows[0]?.print_agent_token ?? null;
+        const tenantSlug: string | null = r.rows[0]?.slug ?? null;
+        // Domini custom del tenant (Fase C3): mostrati accanto all'URL di
+        // prenotazione così chi configura il DNS vede cosa punta già qui.
+        const domainsRes = await queryWithRetry(
+            'SELECT domain, purpose FROM tenant_domains WHERE tenant_id = $1 ORDER BY domain',
+            [req.tenantId!]
+        );
         // Base pubblica dei webhook: in produzione i provider chiamano il
         // dominio del backend, quindi l'host della richiesta (dietro proxy,
         // trust-proxy è già attivo) è quello giusto anche in locale.
@@ -15308,6 +15429,8 @@ app.get('/settings/webhook-info', authenticate, requirePermission('settings:full
             webhook_token: webhookToken,
             print_agent_token: printAgentToken,
             webhook_base_url: webhookBase,
+            booking_url: tenantSlug ? `${base}/prenota/${tenantSlug}` : null,
+            domains: domainsRes.rows,
             examples: webhookBase ? {
                 elevenlabs_init_conversation: `${webhookBase}/elevenlabs/init-conversation`,
                 elevenlabs_post_call: `${webhookBase}/elevenlabs/post-call`,
@@ -16522,10 +16645,14 @@ const publicBookingLimiter = rateLimit({
     message: { error: 'rate_limited', message: 'Troppe richieste, riprova tra qualche minuto.' },
 });
 
-app.get('/public/availability', async (req, res) => {
+// Handler condivisi fra i path storici (/public/*, tenant dal dominio o
+// fallback tenant 1) e i gemelli /public/:slug/* (Fase C3): stesso schema
+// dei webhook C2 — la logica riceve il tenant già risolto, le route in
+// fondo alla sezione fanno solo la risoluzione (withPublicTenant).
+const handlePublicAvailability = async (tenantId: number, req: express.Request, res: express.Response) => {
     // Entitlement web_booking (C1): stessa forma 503/bookings_disabled del
     // flag operativo, che la pagina /prenota gestisce già.
-    if (!(await isFeatureEnabledForTenant(PUBLIC_TENANT_ID, 'web_booking'))) {
+    if (!(await isFeatureEnabledForTenant(tenantId, 'web_booking'))) {
         return res.status(503).json({ error: 'bookings_disabled', message: PUBLIC_BOOKINGS_DISABLED_MESSAGE });
     }
     const date = typeof req.query.date === 'string' ? req.query.date : '';
@@ -16535,9 +16662,9 @@ app.get('/public/availability', async (req, res) => {
 
     try {
         const [lunchSlotsRaw, dinnerSlotsRaw, blocks] = await Promise.all([
-            getAvailableSlots(PUBLIC_TENANT_ID, date, Shift.LUNCH),
-            getAvailableSlots(PUBLIC_TENANT_ID, date, Shift.DINNER),
-            getPublicBookingBlocks(PUBLIC_TENANT_ID),
+            getAvailableSlots(tenantId, date, Shift.LUNCH),
+            getAvailableSlots(tenantId, date, Shift.DINNER),
+            getPublicBookingBlocks(tenantId),
         ]);
         // Empty a shift's slot list if the operator has blocked it — the
         // public form treats "no slots" as "not bookable", so nothing else
@@ -16567,9 +16694,9 @@ app.get('/public/availability', async (req, res) => {
         console.error('GET /public/availability error:', err);
         res.status(500).json({ error: 'Failed to load availability' });
     }
-});
+};
 
-app.get('/public/rooms', async (req, res) => {
+const handlePublicRooms = async (tenantId: number, req: express.Request, res: express.Response) => {
     const date = typeof req.query.date === 'string' ? req.query.date : '';
     const shift = typeof req.query.shift === 'string' ? req.query.shift : '';
     const guests = Number(req.query.guests);
@@ -16587,30 +16714,30 @@ app.get('/public/rooms', async (req, res) => {
     try {
         // Stessa definizione di "tavolo assegnabile" usata dall'assegnazione
         // automatica: una sala compare solo se ha davvero qualcosa da dare.
-        const rooms = await listBookableRooms(PUBLIC_TENANT_ID, date, shift as Shift, guests);
+        const rooms = await listBookableRooms(tenantId, date, shift as Shift, guests);
         // `over_threshold` = la sala è oltre il proprio limite di occupazione
         // (default 70%): la prenotazione lì NON si auto-conferma ma diventa una
         // richiesta che approva lo staff. È esattamente lo stesso insieme usato
         // da pickSelfServiceTable per decidere confermato vs richiesta, quindi
         // l'etichetta sul form combacia sempre con l'esito reale del submit.
-        const cappedIds = new Set(await getCappedRoomIds(PUBLIC_TENANT_ID, date, shift as Shift));
+        const cappedIds = new Set(await getCappedRoomIds(tenantId, date, shift as Shift));
         const roomsWithFlag = rooms.map(r => ({ ...r, over_threshold: cappedIds.has(r.id) }));
         res.json({ rooms: roomsWithFlag });
     } catch (err: any) {
         console.error('GET /public/rooms error:', err);
         res.status(500).json({ error: 'Failed to load rooms' });
     }
-});
+};
 
 // Surfaces the restaurant's reachable phone number (the Vonage DID bound to
 // the ElevenLabs SIP trunk) and the public-bookings feature flag to the
 // /prenota page. Lets us swap the DID at porting time via VONAGE_VOICE_NUMBER
 // and pause/resume web bookings from Settings, no HTML edit needed.
-app.get('/public/contact', async (_req, res) => {
+const handlePublicContact = async (tenantId: number, _req: express.Request, res: express.Response) => {
     // bookingsEnabled = entitlement C1 (canale venduto) AND flag operativo
     // (canale acceso): la pagina già rende il form disattivato quando è false.
-    const bookingsEnabled = (await isFeatureEnabledForTenant(PUBLIC_TENANT_ID, 'web_booking'))
-        && (await getFeatureFlag(PUBLIC_TENANT_ID, 'public_bookings_enabled', false));
+    const bookingsEnabled = (await isFeatureEnabledForTenant(tenantId, 'web_booking'))
+        && (await getFeatureFlag(tenantId, 'public_bookings_enabled', false));
     const raw = (process.env.VONAGE_VOICE_NUMBER || '').replace(/[^\d+]/g, '');
     let voice: { phone: string; display: string } | null = null;
     if (raw) {
@@ -16626,12 +16753,19 @@ app.get('/public/contact', async (_req, res) => {
     }
     // La politica caparra serve alla pagina per scrivere importo e soglia
     // nella sezione condizioni: un solo posto da cambiare in Impostazioni.
-    const depositPolicy = await getAutoDepositPolicy(PUBLIC_TENANT_ID);
+    const depositPolicy = await getAutoDepositPolicy(tenantId);
     // Identità per titolo, footer e link del sito sulla pagina prenota, e
     // agent id per il widget vocale del CRM: dati pubblici per costruzione
     // (compaiono comunque nella pagina/bundle), serviti da qui perché la
     // pagina questo endpoint lo chiama già.
-    const identity = businessIdentity(PUBLIC_TENANT_ID);
+    // businessIdentity è sync col refresh in background e il fallback è il
+    // brand del Frantoio: alla PRIMA richiesta di un tenant appena risolto
+    // (slug/dominio) si attende il refresh, o la pagina di un ristorante
+    // mostrerebbe per qualche secondo il nome di un altro.
+    if (!identityCache.has(tenantId)) {
+        await refreshBusinessIdentity(tenantId).catch(() => {});
+    }
+    const identity = businessIdentity(tenantId);
     res.json({
         voice,
         bookingsEnabled,
@@ -16647,7 +16781,7 @@ app.get('/public/contact', async (_req, res) => {
         },
         voice_agent_id: (process.env.ELEVENLABS_AGENT_ID || '').trim(),
     });
-});
+};
 
 // Maintenance message used by both the public form and the API safety net.
 const PUBLIC_BOOKINGS_DISABLED_MESSAGE = 'Le prenotazioni web non sono disponibili al momento.';
@@ -16659,13 +16793,13 @@ const VOICE_AGENT_DISABLED_MESSAGE = 'Le prenotazioni telefoniche non sono dispo
 const buildVoiceSuspensionMessage = (callbackTime: string) =>
     `Le prenotazioni sono momentaneamente sospese. Richiami dopo le ${callbackTime} per verificare eventuali tavoli disponibili.`;
 
-app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
+const handlePublicReservationCreate = async (tenantId: number, req: express.Request, res: express.Response) => {
     // Entitlement web_booking (C1) prima del flag operativo: stessa risposta
     // in entrambi i casi, per la pagina non cambia nulla.
-    if (!(await isFeatureEnabledForTenant(PUBLIC_TENANT_ID, 'web_booking'))) {
+    if (!(await isFeatureEnabledForTenant(tenantId, 'web_booking'))) {
         return res.status(503).json({ error: 'bookings_disabled', message: PUBLIC_BOOKINGS_DISABLED_MESSAGE });
     }
-    if (!(await getFeatureFlag(PUBLIC_TENANT_ID, 'public_bookings_enabled', false))) {
+    if (!(await getFeatureFlag(tenantId, 'public_bookings_enabled', false))) {
         return res.status(503).json({ error: 'bookings_disabled', message: PUBLIC_BOOKINGS_DISABLED_MESSAGE });
     }
     try {
@@ -16741,7 +16875,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                  OR ($3::text IS NOT NULL AND lower(r.email) = $3::text)
                )
              ORDER BY r.id DESC LIMIT 1`,
-            [`${date}T${time}:00`, dupPhoneDigits, dupEmailLower, PUBLIC_TENANT_ID]
+            [`${date}T${time}:00`, dupPhoneDigits, dupEmailLower, tenantId]
         );
         if (dup.rows.length > 0) {
             const existing = dup.rows[0];
@@ -16759,7 +16893,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         // the availability grid so we refuse even if a slot happens to be
         // free. Prevents a race between the /public/availability call and
         // this create when the operator adds the block in between.
-        const blocks = await getPublicBookingBlocks(PUBLIC_TENANT_ID);
+        const blocks = await getPublicBookingBlocks(tenantId);
         if (isPublicBookingBlocked(date, shift as any, blocks)) {
             const isFullDay = blocks.some(b => b.date === date && b.shift === 'ALL');
             const scope = isFullDay ? 'per questa data' : (shift === Shift.LUNCH ? 'per il pranzo di questa data' : 'per la cena di questa data');
@@ -16770,7 +16904,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         }
 
         // Confirm the requested slot is on the current grid for that date+shift.
-        const validSlots = await getAvailableSlots(PUBLIC_TENANT_ID, date, shift as Shift);
+        const validSlots = await getAvailableSlots(tenantId, date, shift as Shift);
         if (!validSlots.includes(time)) {
             return res.status(409).json({ error: 'slot_unavailable', message: 'Lo slot scelto non è più disponibile' });
         }
@@ -16788,7 +16922,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                    AND id NOT IN (
                        SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3 AND tenant_id = $4
                    )`,
-                [requestedRoomId, date, shift, PUBLIC_TENANT_ID]
+                [requestedRoomId, date, shift, tenantId]
             );
             if (roomRes.rows[0]) {
                 requestedRoomName = roomRes.rows[0].name;
@@ -16826,7 +16960,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         // non è pagata il tavolo non è garantito, quindi in quel caso la
         // richiesta resta PENDING e la conferma arriva col pagamento.
         // Stessa policy condivisa col canale vocale (isAutoDepositRequired).
-        const depositRequired = await isAutoDepositRequired(PUBLIC_TENANT_ID, Math.trunc(guestsNum));
+        const depositRequired = await isAutoDepositRequired(tenantId, Math.trunc(guestsNum));
 
         // Conferma automatica: se la sala è ancora sotto il proprio limite di
         // occupazione assegniamo il tavolo e confermiamo subito; se il limite
@@ -16837,7 +16971,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         let autoTable: Awaited<ReturnType<typeof pickSelfServiceTable>> = null;
         if (!depositRequired) {
             try {
-                autoTable = await pickSelfServiceTable(PUBLIC_TENANT_ID, date, shift as Shift, Math.trunc(guestsNum), {
+                autoTable = await pickSelfServiceTable(tenantId, date, shift as Shift, Math.trunc(guestsNum), {
                     roomId: requestedRoomId && Number.isFinite(requestedRoomId) ? Math.trunc(requestedRoomId) : null,
                 });
             } catch (err) {
@@ -16862,7 +16996,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
              autoTable?.id ?? null,
              autoConfirmed ? 'CONFIRMED' : 'PENDING',
              !autoConfirmed,
-             PUBLIC_TENANT_ID]
+             tenantId]
         );
         const created = result.rows[0];
 
@@ -16871,7 +17005,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         // Se succede molliamo il tavolo e torniamo al flusso manuale: meglio
         // una conferma in meno che due clienti sullo stesso tavolo.
         if (autoConfirmed && autoTable) {
-            const clash = await findTableConflicts(PUBLIC_TENANT_ID, date, shift as string, [autoTable.id], {
+            const clash = await findTableConflicts(tenantId, date, shift as string, [autoTable.id], {
                 excludeReservationId: created.id,
             });
             if (clash.length > 0) {
@@ -16882,7 +17016,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                     `UPDATE reservations
                      SET table_id = NULL, reservation_status = 'PENDING', requires_review = true
                      WHERE id = $1 AND tenant_id = $2 RETURNING *`,
-                    [created.id, PUBLIC_TENANT_ID]
+                    [created.id, tenantId]
                 );
                 Object.assign(created, reverted.rows[0]);
                 autoTable = null;
@@ -16895,15 +17029,15 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         // staff never edit this booking from the internal app. Skipped for
         // email-only bookings — upsertCustomerFromReservation early-returns
         // without a phone.
-        await upsertCustomerFromReservation(PUBLIC_TENANT_ID, customer_name, phoneE164, emailNormalized, null);
+        await upsertCustomerFromReservation(tenantId, customer_name, phoneE164, emailNormalized, null);
 
         // Notify staff dashboards in real time.
         if (socketService) {
-            try { socketService.broadcastReservationCreated(PUBLIC_TENANT_ID, created); }
+            try { socketService.broadcastReservationCreated(tenantId, created); }
             catch (err) { console.warn('[public-booking] socket broadcast failed:', err); }
         }
         pushSendToRoles(
-            PUBLIC_TENANT_ID,
+            tenantId,
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
             {
                 category: 'reservation',
@@ -16937,12 +17071,12 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         // confirm manually.
         let depositCheckoutUrl: string | null = null;
         let depositAmountCents = 0;
-        const depositPolicy = depositRequired ? await getAutoDepositPolicy(PUBLIC_TENANT_ID) : null;
+        const depositPolicy = depositRequired ? await getAutoDepositPolicy(tenantId) : null;
         if (depositRequired) {
             depositAmountCents = guestsNum * (depositPolicy?.perPersonCents ?? DEPOSIT_DEFAULTS.perPersonCents);
             const orderDescription = `Caparra prenotazione #${created.id} - ${guestsLabel} ${dateLabel} ${time}`;
             try {
-                const order = await createPaymentOrder(PUBLIC_TENANT_ID, {
+                const order = await createPaymentOrder(tenantId, {
                     amount: depositAmountCents,
                     currency: 'EUR',
                     description: orderDescription,
@@ -16964,11 +17098,11 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                         order.id,
                         order.checkoutUrl,
                         JSON.stringify({ ...order.metadata, source: 'public_booking_auto_deposit' }),
-                        PUBLIC_TENANT_ID,
+                        tenantId,
                     ]
                 );
                 depositCheckoutUrl = order.checkoutUrl;
-                try { socketService?.broadcastToAll(PUBLIC_TENANT_ID, 'paymentRequest:created', insertedPayment.rows[0]); }
+                try { socketService?.broadcastToAll(tenantId, 'paymentRequest:created', insertedPayment.rows[0]); }
                 catch (err) { console.warn('[public-booking] payment socket broadcast failed:', err); }
                 // reservation:created è già partito col row grezzo, senza i
                 // campi latest_payment_*: senza questo nudge l'icona acconto
@@ -17026,7 +17160,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
 
         // SMS/WhatsApp ack — only if the guest gave us a phone number.
         if (phoneE164) {
-            sendBookingConfirmation(PUBLIC_TENANT_ID, phoneE164, ackText, created.id, { whatsappTemplate: waTemplate }).catch(err =>
+            sendBookingConfirmation(tenantId, phoneE164, ackText, created.id, { whatsappTemplate: waTemplate }).catch(err =>
                 console.error('[public-booking] confirmation send failed:', err?.message || err)
             );
         }
@@ -17038,8 +17172,8 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         if (emailNormalized) {
             (async () => {
                 try {
-                    if (!(await isSmtpConfigured(PUBLIC_TENANT_ID))) return;
-                    const emailStatus = await getSmtpConfigStatus(PUBLIC_TENANT_ID).catch(() => null);
+                    if (!(await isSmtpConfigured(tenantId))) return;
+                    const emailStatus = await getSmtpConfigStatus(tenantId).catch(() => null);
                     const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
                     const { subject, text, html } = confirmedNow
                         ? buildBookingConfirmationEmail({
@@ -17056,9 +17190,9 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                             notes: userNote,
                           });
                     try {
-                        const sent = await sendMail(PUBLIC_TENANT_ID, { to: emailNormalized, subject, text, html });
+                        const sent = await sendMail(tenantId, { to: emailNormalized, subject, text, html });
                         await logOutboundEmail({
-                            tenantId: PUBLIC_TENANT_ID,
+                            tenantId: tenantId,
                             provider: emailProvider,
                             to: emailNormalized,
                             subject,
@@ -17068,7 +17202,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                         });
                     } catch (sendErr: any) {
                         await logOutboundEmail({
-                            tenantId: PUBLIC_TENANT_ID,
+                            tenantId: tenantId,
                             provider: emailProvider,
                             to: emailNormalized,
                             subject,
@@ -17091,7 +17225,16 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         console.error('POST /public/reservations error:', err);
         res.status(500).json({ error: 'internal_error' });
     }
-});
+};
+
+// Path storici + gemelli /public/:slug/* sugli stessi handler. Sui path
+// storici il resolver non ritorna mai null (fallback tenant 1, o il tenant
+// del dominio custom chiamato); con uno slug ignoto la risposta è 404, mai
+// il fallback. Il rate limiter resta per-IP su entrambe le forme.
+app.get(['/public/availability', '/public/:slug/availability'], withPublicTenant(handlePublicAvailability));
+app.get(['/public/rooms', '/public/:slug/rooms'], withPublicTenant(handlePublicRooms));
+app.get(['/public/contact', '/public/:slug/contact'], withPublicTenant(handlePublicContact));
+app.post(['/public/reservations', '/public/:slug/reservations'], publicBookingLimiter, withPublicTenant(handlePublicReservationCreate));
 
 app.get('/prenota', (_req, res) => {
     // Force browsers to fetch a fresh copy on every visit. `no-cache` was
@@ -17109,9 +17252,20 @@ app.get('/prenota', (_req, res) => {
 // the legal settings so the restaurant edits it in one place (Impostazioni →
 // Legale) without touching HTML. Covers the personal data — and the special
 // category health data (allergies) — collected by the booking form.
-app.get(['/privacy', '/informativa-privacy'], async (_req, res) => {
+app.get(['/privacy', '/informativa-privacy', '/privacy/:slug'], async (req, res) => {
     try {
-        const c = await getLegalConfig(PUBLIC_TENANT_ID);
+        // Fase C3: tenant dallo :slug (la pagina /prenota/<slug> riscrive i
+        // suoi link privacy) o dal dominio custom; sui path storici senza né
+        // l'uno né l'altro resta il tenant 1 — i link già distribuiti
+        // (email, template WhatsApp) puntano lì e devono continuare a
+        // funzionare invariati.
+        const privacyTenantId = await resolveTenantForPublicRequest(req);
+        if (privacyTenantId == null) return res.status(404).send('Not found');
+        // Slug già validato dal resolver (charset [a-z0-9-]): sicuro dentro
+        // l'HTML del link di ritorno.
+        const privacySlug = typeof req.params.slug === 'string' ? req.params.slug : '';
+        const backHref = privacySlug ? `/prenota/${privacySlug}` : '/prenota';
+        const c = await getLegalConfig(privacyTenantId);
         const esc = (v: unknown): string => String(v ?? '').replace(/[&<>"']/g, ch => (
             { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] as string));
         const ph = (v: unknown, fallback: string): string => {
@@ -17147,7 +17301,7 @@ app.get(['/privacy', '/informativa-privacy'], async (_req, res) => {
   .back { display:inline-block; margin-bottom:20px; font-size:14px; color:#92400e; text-decoration:none; }
   footer { margin-top:32px; font-size:12px; color:#a8a29e; }
 </style></head><body><div class="wrap">
-  <a class="back" href="/prenota">← Torna alla prenotazione</a>
+  <a class="back" href="${backHref}">← Torna alla prenotazione</a>
   <div class="card">
     <h1>Informativa sul trattamento dei dati personali</h1>
     <p class="sub">Clienti e prenotazioni · resa ai sensi degli artt. 13-14 del Reg. (UE) 2016/679 (GDPR)</p>
@@ -17213,6 +17367,21 @@ app.get('/prenota/logo.png', (_req, res) => {
 app.get('/prenota/logo-dark.png', (_req, res) => {
     res.set('Cache-Control', 'public, max-age=86400');
     res.sendFile(path.join(process.cwd(), 'public', 'logo-vf-dark.png'));
+});
+
+// Pagina di prenotazione per slug (Fase C3): stesso HTML di /prenota — è il
+// JS inline della pagina a leggere lo slug dal path e a instradare le sue
+// chiamate su /public/<slug>/*. Registrata DOPO /prenota/logo*.png:
+// Express dispatcha in ordine di registrazione e :slug catturerebbe anche
+// i loghi. Slug ignoto o tenant sospeso → 404, mai il fallback.
+app.get('/prenota/:slug', async (req, res) => {
+    const tenantId = await resolveTenantBySlug(String(req.params.slug || ''));
+    if (tenantId == null) return res.status(404).send('Not found');
+    // Stessi header anti-cache di /prenota (Safari/iOS webview, vedi sopra).
+    res.set('Cache-Control', 'no-store, must-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    res.sendFile(path.join(process.cwd(), 'public', 'prenota.html'));
 });
 
 // WhatsApp diagnostic — sends a real message via the active provider and
