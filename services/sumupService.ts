@@ -50,8 +50,9 @@ export interface SumUpConfig {
 
 // Short TTL cache, mirroring revolutService: keeps the hot path cheap while
 // still picking up a manual DB edit. Explicit invalidation after a save.
+// Una entry per tenant (Fase B3.6): ogni ristorante ha il suo merchant SumUp.
 const CACHE_TTL_MS = 30_000;
-let cache: { config: SumUpConfig; loadedAt: number } | null = null;
+const cache = new Map<number, { config: SumUpConfig; loadedAt: number }>();
 
 interface RawCredentials {
     environment: SumUpEnvironment;
@@ -93,13 +94,14 @@ function assemble(raw: RawCredentials): SumUpConfig {
 
 // Merge the DB row over env-var defaults field by field. Empty strings in the
 // DB count as "not set" so a partial save behaves as expected.
-async function loadFromDb(): Promise<SumUpConfig> {
+async function loadFromDb(tenantId: number): Promise<SumUpConfig> {
     const defaults = envDefaults();
     try {
         const result = await queryWithRetry(
             `SELECT environment, api_key, webhook_secret,
                     sumup_merchant_code, sumup_sandbox_api_key, sumup_sandbox_merchant_code
-             FROM integration_settings WHERE provider = 'sumup' LIMIT 1`
+             FROM integration_settings WHERE tenant_id = $1 AND provider = 'sumup' LIMIT 1`,
+            [tenantId]
         );
         const row = result.rows[0];
         if (!row) return assemble(defaults);
@@ -121,29 +123,30 @@ async function loadFromDb(): Promise<SumUpConfig> {
     }
 }
 
-async function getConfig(force = false): Promise<SumUpConfig> {
+async function getConfig(tenantId: number, force = false): Promise<SumUpConfig> {
     const now = Date.now();
-    if (!force && cache && now - cache.loadedAt < CACHE_TTL_MS) return cache.config;
-    const config = await loadFromDb();
-    cache = { config, loadedAt: now };
+    const cached = cache.get(tenantId);
+    if (!force && cached && now - cached.loadedAt < CACHE_TTL_MS) return cached.config;
+    const config = await loadFromDb(tenantId);
+    cache.set(tenantId, { config, loadedAt: now });
     return config;
 }
 
 // Called by the settings endpoint after a successful DB write so the next
 // checkout picks up the new values immediately.
 export function invalidateSumUpConfigCache(): void {
-    cache = null;
+    cache.clear();
 }
 
 // "Configured" means the ACTIVE environment has both halves of the credential
 // pair — a key without a merchant code can't create a checkout.
-export async function isSumUpConfigured(): Promise<boolean> {
-    const config = await getConfig();
+export async function isSumUpConfigured(tenantId: number): Promise<boolean> {
+    const config = await getConfig(tenantId);
     return !!(config.apiKey && config.merchantCode);
 }
 
 // Snapshot for GET /settings/integrations/sumup — never leaks a full secret.
-export async function getSumUpConfigStatus(): Promise<{
+export async function getSumUpConfigStatus(tenantId: number): Promise<{
     environment: SumUpEnvironment;
     api_base: string;
     configured: boolean;
@@ -160,7 +163,7 @@ export async function getSumUpConfigStatus(): Promise<{
     has_callback_secret: boolean;
     callback_secret_last4: string | null;
 }> {
-    const config = await getConfig(true);
+    const config = await getConfig(tenantId, true);
     return {
         environment: config.environment,
         api_base: config.apiBase,
@@ -182,8 +185,8 @@ export async function getSumUpConfigStatus(): Promise<{
 
 // The token that ends up in the return_url path. Exposed so the webhook route
 // can compare it against what SumUp called us back on.
-export async function getSumUpCallbackSecret(): Promise<string> {
-    const config = await getConfig();
+export async function getSumUpCallbackSecret(tenantId: number): Promise<string> {
+    const config = await getConfig(tenantId);
     return config.callbackSecret;
 }
 
@@ -279,8 +282,8 @@ async function sumupFetch(
     return parsed;
 }
 
-async function requireConfig(): Promise<SumUpConfig> {
-    const config = await getConfig();
+async function requireConfig(tenantId: number): Promise<SumUpConfig> {
+    const config = await getConfig(tenantId);
     if (!config.apiKey || !config.merchantCode) {
         throw new Error(
             `SumUp non è configurato per l'ambiente ${config.environment} (API key o merchant code mancante)`
@@ -291,8 +294,8 @@ async function requireConfig(): Promise<SumUpConfig> {
 
 // POST /v0.1/checkouts with hosted_checkout.enabled — returns the checkout
 // plus the SumUp-hosted payment page URL we hand to the guest.
-export async function createCheckout(input: SumUpCreateCheckoutInput): Promise<SumUpCheckout> {
-    const config = await requireConfig();
+export async function createCheckout(tenantId: number, input: SumUpCreateCheckoutInput): Promise<SumUpCheckout> {
+    const config = await requireConfig(tenantId);
 
     const body: Record<string, unknown> = {
         checkout_reference: buildCheckoutReference(input.reference),
@@ -324,8 +327,8 @@ export async function createCheckout(input: SumUpCreateCheckoutInput): Promise<S
 
 // GET /v0.1/checkouts/{id} — authoritative state. Used by the callback
 // handler (which never trusts the posted body) and by manual reconciliation.
-export async function getCheckout(checkoutId: string): Promise<SumUpCheckout> {
-    const config = await requireConfig();
+export async function getCheckout(tenantId: number, checkoutId: string): Promise<SumUpCheckout> {
+    const config = await requireConfig(tenantId);
     const parsed = await sumupFetch(config, `/v0.1/checkouts/${encodeURIComponent(checkoutId)}`, { method: 'GET' });
     if (!parsed || typeof parsed !== 'object' || !parsed.id) {
         console.error('[SumUp] Unexpected getCheckout response shape:', parsed);
@@ -340,8 +343,8 @@ export async function getCheckout(checkoutId: string): Promise<SumUpCheckout> {
 // guest can pay a share someone else has already re-claimed.
 // SumUp answers 409 CHECKOUT_PROCESSED when it is too late; we surface that
 // so the caller re-reads the checkout and reconciles instead of guessing.
-export async function deactivateCheckout(checkoutId: string): Promise<SumUpCheckout> {
-    const config = await requireConfig();
+export async function deactivateCheckout(tenantId: number, checkoutId: string): Promise<SumUpCheckout> {
+    const config = await requireConfig(tenantId);
     const parsed = await sumupFetch(config, `/v0.1/checkouts/${encodeURIComponent(checkoutId)}`, { method: 'DELETE' });
     return (parsed && typeof parsed === 'object' ? parsed : { id: checkoutId, status: 'EXPIRED' }) as SumUpCheckout;
 }
@@ -389,6 +392,7 @@ function describeSumUpProblem(body: any): string {
 }
 
 export async function refundCheckout(
+    tenantId: number,
     checkoutId: string,
     amountMinor: number,
     _currency: string,
@@ -404,11 +408,11 @@ export async function refundCheckout(
     // SumUp's refundable total differs by even a cent from our record.
     fullRefund: boolean = true
 ): Promise<any> {
-    const config = await requireConfig();
+    const config = await requireConfig(tenantId);
 
     let transactionId = knownTransactionId || null;
     if (!transactionId) {
-        const checkout = await getCheckout(checkoutId);
+        const checkout = await getCheckout(tenantId, checkoutId);
         transactionId = extractTransactionId(checkout);
         if (!transactionId) {
             throw new Error(

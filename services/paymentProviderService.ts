@@ -94,8 +94,8 @@ export async function setActivePaymentProvider(tenantId: number, provider: Payme
     invalidateActivePaymentProviderCache();
 }
 
-export async function isProviderConfigured(provider: PaymentProvider): Promise<boolean> {
-    return provider === 'sumup' ? isSumUpConfigured() : isRevolutConfigured();
+export async function isProviderConfigured(tenantId: number, provider: PaymentProvider): Promise<boolean> {
+    return provider === 'sumup' ? isSumUpConfigured(tenantId) : isRevolutConfigured(tenantId);
 }
 
 // ============================================
@@ -169,13 +169,13 @@ export async function setPaymentProviderForFlow(tenantId: number, flow: PaymentF
 // "Possiamo incassare adesso su QUESTO flusso?" — chiede al provider
 // effettivo del flusso (override o globale).
 export async function isPaymentConfiguredForFlow(tenantId: number, flow: PaymentFlow): Promise<boolean> {
-    return isProviderConfigured(await getPaymentProviderForFlow(tenantId, flow));
+    return isProviderConfigured(tenantId, await getPaymentProviderForFlow(tenantId, flow));
 }
 
 // "Can we take a payment right now?" — asks the ACTIVE provider only, which
 // is what every create-payment guard in server.ts wants.
 export async function isPaymentConfigured(tenantId: number): Promise<boolean> {
-    return isProviderConfigured(await getActivePaymentProvider(tenantId));
+    return isProviderConfigured(tenantId, await getActivePaymentProvider(tenantId));
 }
 
 // Italian label used in the 503 bodies the UI surfaces verbatim.
@@ -257,8 +257,8 @@ function normaliseCreationStatus(provider: PaymentProvider, state: string | unde
 // Server-to-server callback URL registered on every SumUp checkout. The token
 // is a cheap first-line filter — the handler still re-reads the checkout from
 // SumUp before believing anything, because the callback body is unsigned.
-async function sumupReturnUrl(): Promise<string | undefined> {
-    const secret = await getSumUpCallbackSecret();
+async function sumupReturnUrl(tenantId: number): Promise<string | undefined> {
+    const secret = await getSumUpCallbackSecret(tenantId);
     if (!secret) {
         // Not fatal — the reconcile poller will still settle the payment —
         // but it costs us real-time updates, so make it visible in the logs
@@ -278,8 +278,8 @@ export async function createPaymentOrder(tenantId: number, input: CreatePaymentO
         : await getActivePaymentProvider(tenantId);
 
     if (provider === 'sumup') {
-        const returnUrl = await sumupReturnUrl();
-        const checkout = await sumupCreateCheckout({
+        const returnUrl = await sumupReturnUrl(tenantId);
+        const checkout = await sumupCreateCheckout(tenantId, {
             amount: input.amount,
             currency: input.currency,
             description: input.description,
@@ -303,7 +303,7 @@ export async function createPaymentOrder(tenantId: number, input: CreatePaymentO
         };
     }
 
-    const order = await revolutCreateOrder({
+    const order = await revolutCreateOrder(tenantId, {
         amount: input.amount,
         currency: input.currency,
         description: input.description,
@@ -328,25 +328,26 @@ export interface FetchedOrder {
 }
 
 // Read the authoritative state of an existing order from the provider that
-// owns it.
-export async function fetchPaymentOrder(provider: PaymentProvider, orderId: string): Promise<FetchedOrder> {
+// owns it. tenantId = tenant della payment_request (webhook e scheduler lo
+// prendono dalla riga, le route autenticate da req.tenantId!).
+export async function fetchPaymentOrder(tenantId: number, provider: PaymentProvider, orderId: string): Promise<FetchedOrder> {
     if (provider === 'sumup') {
-        const checkout = await sumupGetCheckout(orderId);
+        const checkout = await sumupGetCheckout(tenantId, orderId);
         const state = String(checkout.status || '');
         return { state, event: providerStateToEvent(provider, state), raw: checkout };
     }
-    const order = await revolutGetOrder(orderId);
+    const order = await revolutGetOrder(tenantId, orderId);
     const state = String(order.state || '');
     return { state, event: providerStateToEvent(provider, state), raw: order };
 }
 
 // Void a not-yet-paid order so its checkout page stops accepting money.
-export async function cancelPaymentOrder(provider: PaymentProvider, orderId: string): Promise<void> {
+export async function cancelPaymentOrder(tenantId: number, provider: PaymentProvider, orderId: string): Promise<void> {
     if (provider === 'sumup') {
-        await sumupDeactivateCheckout(orderId);
+        await sumupDeactivateCheckout(tenantId, orderId);
         return;
     }
-    await revolutCancelOrder(orderId);
+    await revolutCancelOrder(tenantId, orderId);
 }
 
 // Send money back for a completed order. `knownTransactionId` is only used by
@@ -354,6 +355,7 @@ export async function cancelPaymentOrder(provider: PaymentProvider, orderId: str
 // callers pass metadata.sumup_transaction_id when they have it so we don't
 // have to re-derive it from the checkout.
 export async function refundPaymentOrder(
+    tenantId: number,
     provider: PaymentProvider,
     orderId: string,
     amountMinor: number,
@@ -362,9 +364,9 @@ export async function refundPaymentOrder(
     knownTransactionId?: string | null
 ): Promise<any> {
     if (provider === 'sumup') {
-        return sumupRefundCheckout(orderId, amountMinor, currency, description, knownTransactionId);
+        return sumupRefundCheckout(tenantId, orderId, amountMinor, currency, description, knownTransactionId);
     }
-    return revolutRefundOrder(orderId, amountMinor, currency, description);
+    return revolutRefundOrder(tenantId, orderId, amountMinor, currency, description);
 }
 
 // Extra fields worth persisting on payment_requests.metadata once we know an

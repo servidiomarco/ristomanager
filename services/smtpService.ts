@@ -36,8 +36,10 @@ export interface EmailConfig {
     resendInboundSecret: string;
 }
 
+// Una entry per tenant (Fase B3.6): ogni ristorante manda dal proprio
+// mittente, con le proprie credenziali SMTP/Resend.
 const CACHE_TTL_MS = 30_000;
-let cache: { config: EmailConfig; loadedAt: number } | null = null;
+const cache = new Map<number, { config: EmailConfig; loadedAt: number }>();
 
 function envDefaults(): EmailConfig {
     const providerEnv = (process.env.EMAIL_PROVIDER || '').toLowerCase();
@@ -56,14 +58,15 @@ function envDefaults(): EmailConfig {
     };
 }
 
-async function loadFromDb(): Promise<EmailConfig> {
+async function loadFromDb(tenantId: number): Promise<EmailConfig> {
     const defaults = envDefaults();
     try {
         const result = await queryWithRetry(
             `SELECT email_provider, resend_api_key, resend_inbound_secret,
                     smtp_host, smtp_port, smtp_secure, smtp_user, smtp_password,
                     smtp_from_email, smtp_from_name, smtp_reply_to
-             FROM integration_settings WHERE provider = 'smtp' LIMIT 1`
+             FROM integration_settings WHERE tenant_id = $1 AND provider = 'smtp' LIMIT 1`,
+            [tenantId]
         );
         const row = result.rows[0];
         if (!row) return defaults;
@@ -88,16 +91,17 @@ async function loadFromDb(): Promise<EmailConfig> {
     }
 }
 
-async function getConfig(force = false): Promise<EmailConfig> {
+async function getConfig(tenantId: number, force = false): Promise<EmailConfig> {
     const now = Date.now();
-    if (!force && cache && now - cache.loadedAt < CACHE_TTL_MS) return cache.config;
-    const config = await loadFromDb();
-    cache = { config, loadedAt: now };
+    const cached = cache.get(tenantId);
+    if (!force && cached && now - cached.loadedAt < CACHE_TTL_MS) return cached.config;
+    const config = await loadFromDb(tenantId);
+    cache.set(tenantId, { config, loadedAt: now });
     return config;
 }
 
 export function invalidateSmtpConfigCache(): void {
-    cache = null;
+    cache.clear();
 }
 
 function isProviderConfigured(c: EmailConfig): boolean {
@@ -106,8 +110,8 @@ function isProviderConfigured(c: EmailConfig): boolean {
     return !!(c.host && c.port && c.user && c.password);
 }
 
-export async function isSmtpConfigured(): Promise<boolean> {
-    const c = await getConfig();
+export async function isSmtpConfigured(tenantId: number): Promise<boolean> {
+    const c = await getConfig(tenantId);
     return isProviderConfigured(c);
 }
 
@@ -129,8 +133,8 @@ export interface SmtpStatus {
     configured: boolean;
 }
 
-export async function getSmtpConfigStatus(): Promise<SmtpStatus> {
-    const c = await getConfig(true);
+export async function getSmtpConfigStatus(tenantId: number): Promise<SmtpStatus> {
+    const c = await getConfig(tenantId, true);
     return {
         provider: c.provider,
         host: c.host,
@@ -153,8 +157,8 @@ export async function getSmtpConfigStatus(): Promise<SmtpStatus> {
 // Exposed for the inbound webhook: it needs the Resend API key to fetch the
 // full email body (webhooks only carry metadata) and the Svix secret to
 // verify each POST. Returns null when the corresponding value is missing.
-export async function getResendInboundContext(): Promise<{ apiKey: string; signingSecret: string } | null> {
-    const c = await getConfig();
+export async function getResendInboundContext(tenantId: number): Promise<{ apiKey: string; signingSecret: string } | null> {
+    const c = await getConfig(tenantId);
     if (!c.resendApiKey || !c.resendInboundSecret) return null;
     return { apiKey: c.resendApiKey, signingSecret: c.resendInboundSecret };
 }
@@ -238,8 +242,8 @@ async function sendViaResend(config: EmailConfig, input: SendMailInput): Promise
     };
 }
 
-export async function sendMail(input: SendMailInput): Promise<SendMailResult> {
-    const config = await getConfig();
+export async function sendMail(tenantId: number, input: SendMailInput): Promise<SendMailResult> {
+    const config = await getConfig(tenantId);
     if (!isProviderConfigured(config)) {
         throw new Error('Email non è configurato');
     }
@@ -250,8 +254,8 @@ export async function sendMail(input: SendMailInput): Promise<SendMailResult> {
 
 // Best-effort connectivity check. For SMTP it opens the TCP handshake and
 // TLS negotiation. For Resend it hits the account endpoint with the API key.
-export async function verifySmtpConnection(): Promise<{ ok: boolean; error?: string }> {
-    const config = await getConfig(true);
+export async function verifySmtpConnection(tenantId: number): Promise<{ ok: boolean; error?: string }> {
+    const config = await getConfig(tenantId, true);
     if (!isProviderConfigured(config)) {
         return { ok: false, error: 'Email non è configurato' };
     }
