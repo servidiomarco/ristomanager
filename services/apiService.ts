@@ -1213,6 +1213,106 @@ export const updateLegalSettings = async (
   });
 };
 
+// Wizard di primo accesso (Fase D1): marca l'onboarding come completato.
+// Solo OWNER lato server; idempotente.
+export const completeOnboarding = async (): Promise<void> => {
+  await apiRequest<{ ok: boolean }>(`${API_URL}/onboarding/complete`, {
+    method: 'POST',
+    headers: getHeaders(),
+  });
+};
+
+// ============================================
+// PANNELLO PIATTAFORMA (Fase D2) — rotte /admin/tenants
+// ============================================
+// Autenticate col JWT PLATFORM_ADMIN via il normale bearer di getHeaders():
+// il server prova prima il JWT, l'env token resta per gli script.
+
+export type AdminTenantFeature = 'voice' | 'whatsapp' | 'web_booking';
+export const ADMIN_TENANT_FEATURES: AdminTenantFeature[] = ['voice', 'whatsapp', 'web_booking'];
+
+export interface AdminTenant {
+  id: number;
+  slug: string;
+  name: string;
+  status: 'active' | 'suspended';
+  // NULL = tenant non a pagamento (grandfathered), da distinguere da un
+  // pagante moroso.
+  billing_status: string | null;
+  created_at: string;
+  features: AdminTenantFeature[];
+  user_count: number;
+}
+
+export interface AdminTenantProvisioned {
+  tenant: { id: number; slug: string; name: string; status: string; timezone: string; created_at: string };
+  // Escono SOLO da questa risposta: il pannello li mostra una volta e basta.
+  owner_temp_password: string;
+  webhook_token: string;
+  print_agent_token: string;
+  booking_url: string;
+}
+
+export const adminListTenants = async (): Promise<AdminTenant[]> => {
+  return apiRequest<AdminTenant[]>(`${API_URL}/admin/tenants`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const adminCreateTenant = async (input: {
+  name: string;
+  slug: string;
+  owner_email: string;
+  features?: Partial<Record<AdminTenantFeature, boolean>>;
+}): Promise<AdminTenantProvisioned> => {
+  return apiRequest<AdminTenantProvisioned>(`${API_URL}/admin/tenants`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(input),
+  });
+};
+
+export const adminUpdateTenant = async (
+  id: number,
+  patch: { status?: 'active' | 'suspended'; features?: Partial<Record<AdminTenantFeature, boolean>> }
+): Promise<{ tenant: AdminTenantProvisioned['tenant']; features: Record<AdminTenantFeature, boolean> }> => {
+  return apiRequest(`${API_URL}/admin/tenants/${id}`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify(patch),
+  });
+};
+
+export const adminImpersonateTenant = async (id: number): Promise<{
+  accessToken: string;
+  expires_in_seconds: number;
+  user: { email: string; role: string };
+  tenant: { id: number; slug: string };
+}> => {
+  return apiRequest(`${API_URL}/admin/tenants/${id}/impersonate`, {
+    method: 'POST',
+    headers: getHeaders(),
+  });
+};
+
+// Billing Stripe (Fase D3): il server risponde 503 billing_disabled finché
+// le env Stripe non ci sono — il chiamante lo intercetta via err.status.
+export const adminBillingCheckout = async (id: number): Promise<{ url: string; session_id?: string }> => {
+  return apiRequest(`${API_URL}/admin/tenants/${id}/billing/checkout`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({}),
+  });
+};
+
+export const adminBillingPortal = async (id: number): Promise<{ url: string }> => {
+  return apiRequest(`${API_URL}/admin/tenants/${id}/billing/portal`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({}),
+  });
+};
+
 export interface MarketingRecipient {
   id: number;
   name: string;

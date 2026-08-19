@@ -534,7 +534,9 @@ export enum ViewState {
   SETTINGS = 'SETTINGS',
   PAGAMENTI = 'PAGAMENTI',
   MONITORING = 'MONITORING',
-  DEVELOPMENT = 'DEVELOPMENT'
+  DEVELOPMENT = 'DEVELOPMENT',
+  // Pannello piattaforma (Fase D2): sopra i tenant, solo PLATFORM_ADMIN.
+  PLATFORM = 'PLATFORM'
 }
 
 export interface Customer {
@@ -594,6 +596,9 @@ export interface User {
     slug: string;
     name: string;
     features?: { voice: boolean; whatsapp: boolean; web_booking: boolean };
+    // true finché l'OWNER non completa il wizard di primo accesso (D1):
+    // la SPA lo mostra al posto dell'app, solo all'OWNER.
+    needs_onboarding?: boolean;
   };
 }
 

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { User, UserRole, ViewState, LoginCredentials } from '../types';
 import { authApiService } from '../services/authApiService';
+import { completeOnboarding as apiCompleteOnboarding } from '../services/apiService';
 import { socketClient } from '../services/socketClient';
 import { AlertTriangle } from 'lucide-react';
 
@@ -31,7 +32,8 @@ const VIEW_PERMISSIONS: Record<ViewState, string> = {
   [ViewState.EMAIL]: 'reservations:view',
   [ViewState.NOTIFICHE]: 'dashboard:view',
   [ViewState.MONITORING]: '', // gated by account email, not by permission — see canAccessView
-  [ViewState.DEVELOPMENT]: '' // gated by account email, not by permission — see canAccessView
+  [ViewState.DEVELOPMENT]: '', // gated by account email, not by permission — see canAccessView
+  [ViewState.PLATFORM]: '' // gated by role PLATFORM_ADMIN, not by permission — see canAccessView
 };
 
 /** The dev board is a project tool tied to one specific account, not a role. */
@@ -51,6 +53,9 @@ interface AuthContextType {
   canViewLogs: () => boolean;
   getAccessToken: () => string | null;
   updatePreferences: (prefs: { preferred_landing_view?: string | null }) => Promise<void>;
+  /** Chiude il wizard di primo accesso (D1): server + stato locale, così
+   *  l'app compare senza rifare il login. */
+  completeOnboarding: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -129,6 +134,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (view === ViewState.DEVELOPMENT || view === ViewState.MONITORING) {
       return (user?.email || '').toLowerCase() === DEV_BOARD_ADMIN_EMAIL;
     }
+    // Il pannello piattaforma è legato al ruolo, non a un permesso per-tenant:
+    // PLATFORM_ADMIN sta sopra i tenant e la matrice permessi è per-tenant.
+    if (view === ViewState.PLATFORM) {
+      return user?.role === UserRole.PLATFORM_ADMIN;
+    }
     const requiredPermission = VIEW_PERMISSIONS[view];
     if (!requiredPermission) return false;
     return permissions.includes(requiredPermission);
@@ -155,6 +165,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(updated);
   }, []);
 
+  const completeOnboarding = useCallback(async () => {
+    await apiCompleteOnboarding();
+    // Il flag vive dentro user.tenant: si aggiorna in place, il prossimo
+    // /auth/me lo confermerà dal server.
+    setUser(prev => (prev && prev.tenant)
+      ? { ...prev, tenant: { ...prev.tenant, needs_onboarding: false } }
+      : prev);
+  }, []);
+
   const value: AuthContextType = {
     user,
     permissions,
@@ -168,7 +187,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     canManageUsers,
     canViewLogs,
     getAccessToken,
-    updatePreferences
+    updatePreferences,
+    completeOnboarding
   };
 
   return (

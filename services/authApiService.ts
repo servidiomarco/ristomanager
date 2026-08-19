@@ -245,6 +245,41 @@ class AuthApiService {
     return !!this.getAccessToken();
   }
 
+  // ============================================
+  // IMPERSONATION (pannello piattaforma, Fase D2)
+  // ============================================
+  // Le chiavi di storage restano private a questa classe: chi impersona
+  // scatta una foto della sessione corrente, la sostituisce col token corto
+  // e la ripristina alla fine — senza conoscere i nomi delle chiavi.
+
+  /** La sessione corrente così com'è in storage, per ripristinarla dopo. */
+  getSessionSnapshot(): Record<string, string | null> {
+    return {
+      [ACCESS_TOKEN_KEY]: localStorage.getItem(ACCESS_TOKEN_KEY),
+      [REFRESH_TOKEN_KEY]: localStorage.getItem(REFRESH_TOKEN_KEY),
+      [USER_KEY]: localStorage.getItem(USER_KEY),
+      [PERMISSIONS_KEY]: localStorage.getItem(PERMISSIONS_KEY),
+    };
+  }
+
+  restoreSessionSnapshot(snapshot: Record<string, string | null>): void {
+    for (const key of [ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, USER_KEY, PERMISSIONS_KEY]) {
+      const value = snapshot[key];
+      if (typeof value === 'string') localStorage.setItem(key, value);
+      else localStorage.removeItem(key);
+    }
+  }
+
+  /** Sostituisce la sessione col token di impersonation. Il refresh token
+   *  viene RIMOSSO di proposito: il server non ne emette uno (la sessione
+   *  impersonata scade e basta), e lasciare quello del platform admin
+   *  farebbe rientrare la sua identità al primo 401. Utente e permessi
+   *  restano: il prossimo /auth/me li riscrive con quelli dell'OWNER. */
+  enterImpersonation(accessToken: string): void {
+    localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+  }
+
   // Internal: fetch with auth header + automatic refresh on 401
   private async authFetch(url: string, init: RequestInit = {}, retried = false): Promise<Response> {
     const token = this.getAccessToken();

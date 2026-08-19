@@ -60,6 +60,9 @@ describe('auth', () => {
             // Entitlements commerciali (Fase C1): il tenant 1 è grandfathered,
             // il seed della migration tenant-features li accende tutti.
             features: { voice: true, whatsapp: true, web_booking: true },
+            // Onboarding (coda D1): i tenant nati prima del wizard sono
+            // backfillati a completato.
+            needs_onboarding: false,
         });
 
         // Il claim tenantId sta nel payload del JWT (segmento centrale).

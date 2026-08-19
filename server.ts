@@ -15430,6 +15430,27 @@ app.put('/settings/features', authenticate, requirePermission('settings:full'), 
 });
 
 // ============================================
+// ONBOARDING — wizard di primo accesso (Fase D1)
+// ============================================
+// L'OWNER di un tenant appena provisionato vede il wizard al posto dell'app
+// (App.tsx guarda user.tenant.needs_onboarding); qui si marca il traguardo.
+// Solo OWNER: è il suo wizard — un MANAGER non deve poterlo spegnere per
+// conto del proprietario. Idempotente: il secondo tocco non sposta la data.
+app.post('/onboarding/complete', authenticate, authorize(UserRole.OWNER), async (req, res) => {
+    try {
+        await queryWithRetry(
+            `UPDATE tenants SET onboarding_completed_at = CURRENT_TIMESTAMP
+              WHERE id = $1 AND onboarding_completed_at IS NULL`,
+            [req.tenantId!]
+        );
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('POST /onboarding/complete error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
 // ENTITLEMENTS (tenant_features, Fase C1)
 // ============================================
 // Livello commerciale sopra i flag operativi qui sopra: /settings/features

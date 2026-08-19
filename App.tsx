@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2 } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
 import { MenuManager } from './components/MenuManager';
 import { ReservationList } from './components/ReservationList';
 import { LoginPage } from './components/LoginPage';
+import { OnboardingWizard } from './components/OnboardingWizard';
+import { PlatformPanel, ImpersonationBanner } from './components/PlatformPanel';
 import { CookingPotLoader } from './components/CookingPotLoader';
 import { UserManagement } from './components/UserManagement';
 import { RolePermissions } from './components/RolePermissions';
@@ -158,6 +160,8 @@ const NAV_ITEMS: NavItem[] = [
   { kind: 'link', label: 'Utenti', Icon: Users, group: 'gestione', isTab: false, view: ViewState.USERS, sidebarCollapse: false, requiresUserManagement: true },
 
   // Sistema
+  // Visibile solo al ruolo PLATFORM_ADMIN (gate per ruolo in canAccessView)
+  { kind: 'link', label: 'Piattaforma', Icon: Building2, group: 'sistema', isTab: false, view: ViewState.PLATFORM, sidebarCollapse: false },
   { kind: 'link', label: 'Impostazioni', Icon: Settings, group: 'sistema', isTab: false, view: ViewState.SETTINGS, sidebarCollapse: false },
   // Visibili solo all'account admin (gate email-based in canAccessView)
   { kind: 'link', label: 'Consumi AI', Icon: Gauge, group: 'sistema', isTab: false, view: ViewState.MONITORING, sidebarCollapse: false },
@@ -665,6 +669,15 @@ const App: React.FC = () => {
         appliedPreferredLandingRef.current = true;
         return;
       }
+    }
+
+    // Il platform admin parte dal pannello: la sua giornata sta sopra i
+    // tenant, non nel servizio di uno di essi. Un preferred_landing_view
+    // esplicito o un deep-link ?view= vincono comunque (gestiti sopra).
+    if (!appliedPreferredLandingRef.current && user.role === UserRole.PLATFORM_ADMIN && accessibleViews.includes(ViewState.PLATFORM)) {
+      setView(ViewState.PLATFORM);
+      appliedPreferredLandingRef.current = true;
+      return;
     }
     appliedPreferredLandingRef.current = true;
 
@@ -1592,6 +1605,20 @@ const App: React.FC = () => {
     return <LoginPage />;
   }
 
+  // Primo accesso di un tenant appena provisionato (Fase D1): l'OWNER passa
+  // dal wizard prima di entrare. Solo lui — gli altri ruoli lavorano
+  // normalmente anche se il wizard non è stato completato.
+  if (user?.role === UserRole.OWNER && user.tenant?.needs_onboarding) {
+    // Anche qui il banner: un platform admin che impersona l'OWNER di un
+    // tenant appena nato vede il wizard, e deve poter tornare al pannello.
+    return (
+      <>
+        <ImpersonationBanner />
+        <OnboardingWizard />
+      </>
+    );
+  }
+
   // Get role display name
   const getRoleDisplayName = (role: UserRole): string => {
     const roleNames: Record<UserRole, string> = {
@@ -1693,6 +1720,10 @@ const App: React.FC = () => {
       {/* Version banner — shows when the running bundle is older than the
           server. Fixed at the top, above every view. */}
       <AppVersionBanner />
+      {/* Impersonation (Fase D2) — fisso sopra ogni vista finché il token
+          porta il claim impersonated_by; il bottone ripristina la sessione
+          del platform admin e ricarica. */}
+      <ImpersonationBanner />
       {/* Skip link for keyboard users */}
       <a href="#main" className="skip-link">Salta al contenuto</a>
 
@@ -2399,6 +2430,10 @@ const App: React.FC = () => {
           <MonitoringPage />
         )}
 
+        {view === ViewState.PLATFORM && canAccessView(ViewState.PLATFORM) && (
+          <PlatformPanel showToast={addToast} />
+        )}
+
         {view === ViewState.RECEPTION && (
           <ReceptionPage
             globalDate={globalDate}
@@ -2477,6 +2512,7 @@ const App: React.FC = () => {
                       [ViewState.SETTINGS]: 'Impostazioni',
                       [ViewState.MONITORING]: 'Consumi AI',
                       [ViewState.DEVELOPMENT]: 'Development',
+                      [ViewState.PLATFORM]: 'Piattaforma',
                     };
                     return (
                       <option key={v} value={v}>{labels[v]}</option>

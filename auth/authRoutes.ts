@@ -229,7 +229,7 @@ router.post('/users', authenticate, authorize(UserRole.OWNER), async (req: Reque
       return res.status(400).json({ error: 'Invalid role' });
     }
 
-    const user = await AuthService.createUser(email, password, full_name, role);
+    const user = await AuthService.createUser(email, password, full_name, role, req.user!.tenantId);
 
     // Log activity
     if (req.user) {
