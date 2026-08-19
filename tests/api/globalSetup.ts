@@ -56,6 +56,9 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             JWT_SECRET: 'test-jwt-secret',
             JWT_REFRESH_SECRET: 'test-jwt-refresh-secret',
             DEFAULT_OWNER_PASSWORD: OWNER_PASSWORD,
+            // Gate degli endpoint /admin/tenants (Fase D1): senza questo i
+            // test di provisioning riceverebbero solo 503.
+            PLATFORM_ADMIN_TOKEN: 'test-platform-token',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
     });
