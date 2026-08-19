@@ -156,6 +156,17 @@ export const runMigrations = async (): Promise<void> => {
         if (applied.length > 0) {
             console.log(`Migrations applicate (${applied.length}): ${applied.map(m => m.name).join(', ')}`);
         }
+        // I superuser bypassano la Row-Level Security anche con FORCE: se
+        // l'app è connessa così, le policy della Fase B4 sono decorative.
+        // Va creato un ruolo applicativo non-superuser PRIMA di accendere
+        // il secondo tenant. Warning, non errore: con un solo tenant non
+        // c'è niente da isolare.
+        const su = await client.query(
+            `SELECT rolsuper FROM pg_roles WHERE rolname = current_user`
+        );
+        if (su.rows[0]?.rolsuper) {
+            console.warn('⚠️  Connessione al database da SUPERUSER: la Row-Level Security è bypassata. Creare un ruolo applicativo dedicato prima del secondo tenant.');
+        }
     } finally {
         await client.end();
     }
