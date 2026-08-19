@@ -4,6 +4,7 @@ import { authenticate, authorize } from './authMiddleware.js';
 import { UserRole, ViewState } from '../types.js';
 import { RolePermissionService, ALL_PERMISSIONS, Permission } from './permissionService.js';
 import { LogService, ActivityAction, ResourceType } from '../activityLogs/logService.js';
+import { getTenantFeatures } from '../services/entitlements.js';
 
 const router = Router();
 
@@ -31,6 +32,11 @@ router.post('/login', async (req: Request, res: Response) => {
     // Get user's permissions from database
     const permissions = await RolePermissionService.getPermissionsForRole(result.user.tenant!.id, result.user.role);
 
+    // Entitlements commerciali (Fase C1) dentro il tenant: il frontend li
+    // legge da qui per sapere quali canali (voice/whatsapp/web_booking) il
+    // ristorante ha comprato. Il gating UI arriva col wizard (Fase D).
+    const features = await getTenantFeatures(result.user.tenant!.id);
+
     // Log login activity. Il tenant si legge dalla riga utente appena
     // caricata: qui non c'è ancora un JWT da cui ricavarlo.
     LogService.logActivity(
@@ -45,7 +51,7 @@ router.post('/login', async (req: Request, res: Response) => {
     );
 
     res.json({
-      user: result.user,
+      user: { ...result.user, tenant: { ...result.user.tenant!, features } },
       permissions,
       accessToken: result.tokens.accessToken,
       refreshToken: result.tokens.refreshToken
@@ -122,7 +128,10 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
     // Get user's permissions from database
     const permissions = await RolePermissionService.getPermissionsForRole(req.user.tenantId, user.role);
 
-    res.json({ ...user, permissions });
+    // Entitlements commerciali (C1) — stessa forma della risposta di login.
+    const features = await getTenantFeatures(req.user.tenantId);
+
+    res.json({ ...user, tenant: user.tenant ? { ...user.tenant, features } : user.tenant, permissions });
   } catch (error) {
     console.error('Get current user error:', error);
     res.status(500).json({ error: 'Internal server error' });

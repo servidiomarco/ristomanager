@@ -57,6 +57,9 @@ describe('auth', () => {
             id: 1,
             slug: 'vecchio-frantoio',
             name: 'Il Vecchio Frantoio',
+            // Entitlements commerciali (Fase C1): il tenant 1 è grandfathered,
+            // il seed della migration tenant-features li accende tutti.
+            features: { voice: true, whatsapp: true, web_booking: true },
         });
 
         // Il claim tenantId sta nel payload del JWT (segmento centrale).

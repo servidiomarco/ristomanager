@@ -94,6 +94,7 @@ La coda lunga: ~260 route in `server.ts` da scopare su `req.tenantId`. Un PR per
 - Tabella `tenant_features` (`tenant_id`, `feature`, `enabled`, `config JSONB`) con feature: `voice`, `whatsapp`, `web_booking` (+ margine per le prossime).
 - Middleware `requireFeature('voice')` sulle route dei canali; frontend nasconde le sezioni non attive (via `/auth/me`).
 - I flag oggi in `app_settings` (`voice_agent_enabled`, `public_bookings_enabled`) restano come interruttori *operativi* del tenant; l'entitlement è il livello commerciale sopra di essi.
+- Nota (implementazione C1): il gating UI è rimandato alla Fase D (wizard D1) — `/auth/me` e il login espongono già `tenant.features`, il frontend per ora non nasconde nulla.
 
 ### PR C2 — Webhook instradabili per tenant
 Il pattern è quello già esistente di SumUp (`/webhook/sumup/:token`, unico webhook già discriminato):
