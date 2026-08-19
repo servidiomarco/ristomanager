@@ -28,8 +28,10 @@ export interface RevolutConfig {
 // In-memory cache to keep the hot path (createOrder, verifyWebhookSignature)
 // synchronous where possible. TTL is short so a manual DB edit still
 // propagates; explicit invalidation is preferred after PUT /settings/....
+// Una entry per tenant (Fase B3.6): con una sola entry le credenziali del
+// primo ristorante che paga resterebbero "attive" per tutti fino al TTL.
 const CACHE_TTL_MS = 30_000;
-let cache: { config: RevolutConfig; loadedAt: number } | null = null;
+const cache = new Map<number, { config: RevolutConfig; loadedAt: number }>();
 
 // Env-only defaults used before the DB is reachable or when no row exists.
 function envDefaults(): RevolutConfig {
@@ -51,12 +53,15 @@ function baseForEnvironment(env: RevolutEnvironment): string {
 
 // Merge DB row over env-var defaults on a per-field basis. Empty strings in
 // the DB are treated as "not set" so partial saves work as expected.
-async function loadFromDb(): Promise<RevolutConfig> {
+// tenantId obbligatorio: la PK è (tenant_id, provider), ogni ristorante ha il
+// suo account Revolut.
+async function loadFromDb(tenantId: number): Promise<RevolutConfig> {
     const defaults = envDefaults();
     try {
         const result = await queryWithRetry(
             `SELECT environment, api_key, webhook_secret, api_version
-             FROM integration_settings WHERE provider = 'revolut' LIMIT 1`
+             FROM integration_settings WHERE tenant_id = $1 AND provider = 'revolut' LIMIT 1`,
+            [tenantId]
         );
         const row = result.rows[0];
         if (!row) return defaults;
@@ -78,30 +83,31 @@ async function loadFromDb(): Promise<RevolutConfig> {
     }
 }
 
-async function getConfig(force = false): Promise<RevolutConfig> {
+async function getConfig(tenantId: number, force = false): Promise<RevolutConfig> {
     const now = Date.now();
-    if (!force && cache && now - cache.loadedAt < CACHE_TTL_MS) return cache.config;
-    const config = await loadFromDb();
-    cache = { config, loadedAt: now };
+    const cached = cache.get(tenantId);
+    if (!force && cached && now - cached.loadedAt < CACHE_TTL_MS) return cached.config;
+    const config = await loadFromDb(tenantId);
+    cache.set(tenantId, { config, loadedAt: now });
     return config;
 }
 
 // Called by the settings endpoint after a successful DB write so the next
 // createOrder/verifyWebhookSignature picks up the new values immediately.
 export function invalidateRevolutConfigCache(): void {
-    cache = null;
+    cache.clear();
 }
 
 // Kept as an async function so future callers can await a fresh config load
 // (the /settings endpoint uses this). Callers that only care about "do we
 // have any API key at all" can await this cheaply — it's cached.
-export async function isRevolutConfigured(): Promise<boolean> {
-    const config = await getConfig();
+export async function isRevolutConfigured(tenantId: number): Promise<boolean> {
+    const config = await getConfig(tenantId);
     return !!config.apiKey;
 }
 
 // Snapshot of the current config, without secrets. Used by GET /settings/....
-export async function getRevolutConfigStatus(): Promise<{
+export async function getRevolutConfigStatus(tenantId: number): Promise<{
     environment: RevolutEnvironment;
     api_base: string;
     api_version: string;
@@ -110,7 +116,7 @@ export async function getRevolutConfigStatus(): Promise<{
     api_key_last4: string | null;
     webhook_secret_last4: string | null;
 }> {
-    const config = await getConfig(true);
+    const config = await getConfig(tenantId, true);
     return {
         environment: config.environment,
         api_base: config.apiBase,
@@ -148,8 +154,8 @@ export interface RevolutOrder {
 // POST /api/orders — creates a hosted-checkout order and returns the payment
 // URL to hand to the customer. Throws on non-2xx responses; the error message
 // includes the Revolut error body to make debugging easier.
-export async function createOrder(input: RevolutCreateOrderInput): Promise<RevolutOrder> {
-    const config = await getConfig();
+export async function createOrder(tenantId: number, input: RevolutCreateOrderInput): Promise<RevolutOrder> {
+    const config = await getConfig(tenantId);
     if (!config.apiKey) {
         throw new Error('Revolut is not configured (API key missing)');
     }
@@ -196,8 +202,8 @@ export async function createOrder(input: RevolutCreateOrderInput): Promise<Revol
 // pay a share that has already been re-claimed by someone else (overpayment).
 // Throws on non-2xx EXCEPT when Revolut refuses because the order is already
 // in a terminal state — callers must re-getOrder and reconcile in that case.
-export async function cancelOrder(orderId: string): Promise<RevolutOrder> {
-    const config = await getConfig();
+export async function cancelOrder(tenantId: number, orderId: string): Promise<RevolutOrder> {
+    const config = await getConfig(tenantId);
     if (!config.apiKey) {
         throw new Error('Revolut is not configured (API key missing)');
     }
@@ -226,8 +232,8 @@ export async function cancelOrder(orderId: string): Promise<RevolutOrder> {
 // POST /api/orders/{id}/refund — sends money back to the customer for a
 // COMPLETED order. Amount is in minor units and may be partial; we only ever
 // refund whole splits, so callers pass the split's amount_cents verbatim.
-export async function refundOrder(orderId: string, amountMinor: number, currency: string, description?: string): Promise<any> {
-    const config = await getConfig();
+export async function refundOrder(tenantId: number, orderId: string, amountMinor: number, currency: string, description?: string): Promise<any> {
+    const config = await getConfig(tenantId);
     if (!config.apiKey) {
         throw new Error('Revolut is not configured (API key missing)');
     }
@@ -263,8 +269,8 @@ export async function refundOrder(orderId: string, amountMinor: number, currency
 // by the manual reconciliation endpoint when a webhook was missed (e.g. an
 // order created before the webhook endpoint existed, or a delivery Revolut
 // gave up on). Returns the raw response as-is: callers care about `state`.
-export async function getOrder(orderId: string): Promise<RevolutOrder> {
-    const config = await getConfig();
+export async function getOrder(tenantId: number, orderId: string): Promise<RevolutOrder> {
+    const config = await getConfig(tenantId);
     if (!config.apiKey) {
         throw new Error('Revolut is not configured (API key missing)');
     }
@@ -316,8 +322,11 @@ export interface WebhookVerificationResult {
 // `v1.{timestamp}.{rawBody}`, HMAC-SHA256 with the webhook signing secret.
 // `Revolut-Request-Timestamp` header prevents replay attacks — we reject
 // requests older than 5 minutes.
-export async function verifyWebhookSignature(req: express.Request): Promise<WebhookVerificationResult> {
-    const config = await getConfig();
+// tenantId: il webhook lo risolve dalla riga payment_requests (order_id →
+// tenant) PRIMA di verificare la firma, così il segreto è quello del
+// ristorante che ha creato l'ordine.
+export async function verifyWebhookSignature(tenantId: number, req: express.Request): Promise<WebhookVerificationResult> {
+    const config = await getConfig(tenantId);
     if (!config.webhookSecret) {
         return { valid: false, reason: 'webhook signing secret not set' };
     }

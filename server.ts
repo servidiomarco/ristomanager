@@ -659,7 +659,9 @@ async function fetchResendReceivedEmail(id: string, apiKey: string): Promise<Res
 }
 
 app.post('/webhook/resend-inbound', async (req, res) => {
-    const context = await getResendInboundContext();
+    // Webhook senza JWT: la casella inbound resta quella del tenant
+    // storico finché la Fase C2 non threada il tenant nel routing email.
+    const context = await getResendInboundContext(PUBLIC_TENANT_ID);
     if (!context) {
         console.warn('[Resend-inbound] not configured (missing api key or webhook secret)');
         return res.status(503).json({ error: 'inbound_not_configured' });
@@ -2057,8 +2059,8 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             if (updatedReservation.email) {
                 (async () => {
                     try {
-                        if (!(await isSmtpConfigured())) return;
-                        const emailStatus = await getSmtpConfigStatus().catch(() => null);
+                        if (!(await isSmtpConfigured(req.tenantId!))) return;
+                        const emailStatus = await getSmtpConfigStatus(req.tenantId!).catch(() => null);
                         const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
                         const { subject, text, html } = buildBookingConfirmationEmail({
                             customerName: updatedReservation.customer_name,
@@ -2067,7 +2069,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                             roomName,
                         });
                         try {
-                            const sent = await sendMail({ to: String(updatedReservation.email), subject, text, html });
+                            const sent = await sendMail(req.tenantId!, { to: String(updatedReservation.email), subject, text, html });
                             await logOutboundEmail({
                                 tenantId: req.tenantId!,
                                 provider: emailProvider,
@@ -2416,7 +2418,7 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
         if (!reservation.email) {
             return res.status(400).json({ error: 'Nessuna email per questa prenotazione' });
         }
-        if (!(await isSmtpConfigured())) {
+        if (!(await isSmtpConfigured(req.tenantId!))) {
             return res.status(400).json({ error: 'SMTP non è configurato. Configura il server email in Impostazioni.' });
         }
 
@@ -2428,11 +2430,11 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
             roomName,
         });
 
-        const emailStatus = await getSmtpConfigStatus().catch(() => null);
+        const emailStatus = await getSmtpConfigStatus(req.tenantId!).catch(() => null);
         const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
         let sent;
         try {
-            sent = await sendMail({
+            sent = await sendMail(req.tenantId!, {
                 to: String(reservation.email),
                 subject,
                 text,
@@ -2526,7 +2528,7 @@ app.post('/reservations/:id/send-custom-email', authenticate, requirePermission(
         if (!reservation.email) {
             return res.status(400).json({ error: 'Nessuna email per questa prenotazione' });
         }
-        if (!(await isSmtpConfigured())) {
+        if (!(await isSmtpConfigured(req.tenantId!))) {
             return res.status(400).json({ error: 'SMTP non è configurato. Configura il server email in Impostazioni.' });
         }
 
@@ -2536,12 +2538,12 @@ app.post('/reservations/:id/send-custom-email', authenticate, requirePermission(
             body,
         });
 
-        const emailStatus = await getSmtpConfigStatus().catch(() => null);
+        const emailStatus = await getSmtpConfigStatus(req.tenantId!).catch(() => null);
         const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
 
         let sent;
         try {
-            sent = await sendMail({
+            sent = await sendMail(req.tenantId!, {
                 to: String(reservation.email),
                 subject: finalSubject,
                 text,
@@ -2648,13 +2650,11 @@ app.get('/reservations/:id/bill', authenticate, requirePermission('payments:view
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
 
         const billIdRs = await queryWithRetry(
-            // Il JOIN sulla prenotazione del tenant fa da guardia FK: un id di
-            // un altro ristorante cade nel 404 come un id inesistente. La
-            // scopatura piena di table_bills arriva col dominio pagamenti.
+            // Conto scopato sul tenant: un reservation_id di un altro
+            // ristorante cade nel 404 come un id inesistente.
             `SELECT tb.id FROM table_bills tb
-             JOIN reservations r ON r.id = tb.reservation_id AND r.tenant_id = tb.tenant_id
              WHERE tb.reservation_id = $1
-               AND r.tenant_id = $2
+               AND tb.tenant_id = $2
                AND tb.status IN ('OPEN', 'LOCKED', 'SETTLED', 'SETTLED_PARTIAL')
              ORDER BY tb.opened_at DESC
              LIMIT 1`,
@@ -2663,7 +2663,7 @@ app.get('/reservations/:id/bill', authenticate, requirePermission('payments:view
         if (billIdRs.rows.length === 0) {
             return res.status(404).json({ error: 'No active bill for this reservation' });
         }
-        const view = await loadBillView(billIdRs.rows[0].id);
+        const view = await loadBillView(req.tenantId!, billIdRs.rows[0].id);
         if (!view) return res.status(404).json({ error: 'No active bill for this reservation' });
         res.json(view);
     } catch (err: any) {
@@ -2749,15 +2749,18 @@ app.get('/passepartout/tavolo/:nome', authenticate, requirePermission('payments:
 // pagamento senza doppioni. Clampa alla capienza residua: un acconto più grande
 // del totale non sfonda il trigger di somma; l'eccedenza resta sull'acconto e va
 // rimborsata a mano (come un pagamento in eccesso).
-async function creditPaidDepositsToBill(billId: number): Promise<{ credited: number; splits: any[]; settled: boolean }> {
+// tenantId: quello del conto (req.tenantId! dalle route, il tenant della
+// payment_request dai webhook) — scopa conto, acconti e quote sullo stesso
+// ristorante.
+async function creditPaidDepositsToBill(tenantId: number, billId: number): Promise<{ credited: number; splits: any[]; settled: boolean }> {
     const client = await pool.connect();
     const created: any[] = [];
     let settled = false;
     try {
         await client.query('BEGIN');
         const billRs = await client.query(
-            `SELECT id, reservation_id, total_cents, status FROM table_bills WHERE id = $1 FOR UPDATE`,
-            [billId]
+            `SELECT id, reservation_id, total_cents, status FROM table_bills WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+            [billId, tenantId]
         );
         if (billRs.rowCount === 0) { await client.query('ROLLBACK'); return { credited: 0, splits: [], settled: false }; }
         const bill = billRs.rows[0];
@@ -2773,6 +2776,7 @@ async function creditPaidDepositsToBill(billId: number): Promise<{ credited: num
             `SELECT pr.id, pr.amount_cents, pr.completed_at
              FROM payment_requests pr
              WHERE pr.reservation_id = $1
+               AND pr.tenant_id = $2
                AND pr.table_bill_split_id IS NULL
                AND UPPER(pr.status) IN ('COMPLETED', 'PAID')
                AND pr.completed_at IS NOT NULL
@@ -2781,7 +2785,7 @@ async function creditPaidDepositsToBill(billId: number): Promise<{ credited: num
                    WHERE s.payment_request_id = pr.id AND s.kind = 'deposit'
                )
              ORDER BY pr.completed_at ASC`,
-            [bill.reservation_id]
+            [bill.reservation_id, tenantId]
         );
 
         for (const dep of deposits.rows) {
@@ -2796,11 +2800,11 @@ async function creditPaidDepositsToBill(billId: number): Promise<{ credited: num
             if (credit <= 0) continue; // conto già coperto: l'acconto resta eccedenza da rimborsare
             const ins = await client.query(
                 `INSERT INTO table_bill_splits
-                    (table_bill_id, kind, amount_cents, claimant_label, claimed_at, expires_at, payment_request_id, status, paid_at)
-                 VALUES ($1, 'deposit', $2, 'Acconto', $3, NULL, $4, 'PAID', $3)
+                    (tenant_id, table_bill_id, kind, amount_cents, claimant_label, claimed_at, expires_at, payment_request_id, status, paid_at)
+                 VALUES ($5, $1, 'deposit', $2, 'Acconto', $3, NULL, $4, 'PAID', $3)
                  ON CONFLICT (payment_request_id) WHERE kind = 'deposit' DO NOTHING
                  RETURNING *`,
-                [billId, credit, dep.completed_at, dep.id]
+                [billId, credit, dep.completed_at, dep.id, tenantId]
             );
             if (ins.rowCount) created.push(ins.rows[0]);
         }
@@ -2837,28 +2841,29 @@ async function creditPaidDepositsToBill(billId: number): Promise<{ credited: num
 // COMPLETED), a prescindere da quanto se ne è potuto applicare al conto. Serve
 // a mostrare l'acconto reale e a calcolare quanto va rimborsato al cliente
 // quando la caparra supera il totale del conto.
-async function depositPaidCentsForReservation(reservationId: number | null): Promise<number> {
+async function depositPaidCentsForReservation(tenantId: number, reservationId: number | null): Promise<number> {
     if (!reservationId) return 0;
     const r = await queryWithRetry(
         `SELECT COALESCE(SUM(amount_cents), 0)::int AS s
          FROM payment_requests
          WHERE reservation_id = $1
+           AND tenant_id = $2
            AND table_bill_split_id IS NULL
            AND UPPER(status) IN ('COMPLETED', 'PAID')
            AND completed_at IS NOT NULL`,
-        [reservationId]
+        [reservationId, tenantId]
     );
     return r.rows[0].s;
 }
 
-async function loadBillView(billId: number): Promise<any | null> {
+async function loadBillView(tenantId: number, billId: number): Promise<any | null> {
     const billResult = await queryWithRetry(
         `SELECT id, reservation_id, table_id, total_cents, covers, currency,
                 items, status, share_token, opened_at, closed_at,
                 opened_by_user_id, closed_by_user_id, external_ref,
                 cash_settled_cents, tip_cents, notes
-         FROM table_bills WHERE id = $1`,
-        [billId]
+         FROM table_bills WHERE id = $1 AND tenant_id = $2`,
+        [billId, tenantId]
     );
     if (billResult.rows.length === 0) return null;
     const bill = billResult.rows[0];
@@ -2884,7 +2889,7 @@ async function loadBillView(billId: number): Promise<any | null> {
     const residual_cents = Math.max(0, bill.total_cents - totals.paid_cents - totals.claimed_cents);
     // Acconto pieno versato e quota non assorbita dal conto (da rimborsare al
     // cliente quando la caparra supera il totale).
-    const deposit_paid_cents = await depositPaidCentsForReservation(bill.reservation_id);
+    const deposit_paid_cents = await depositPaidCentsForReservation(tenantId, bill.reservation_id);
     const refund_due_cents = Math.max(0, deposit_paid_cents - totals.deposit_credit_cents);
     return {
         bill,
@@ -2957,9 +2962,10 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
         const existing = await queryWithRetry(
             `SELECT id, status FROM table_bills
              WHERE reservation_id = $1
+               AND tenant_id = $2
                AND status IN ('OPEN','LOCKED','SETTLED','SETTLED_PARTIAL')
              LIMIT 1`,
-            [id]
+            [id, req.tenantId!]
         );
         if (existing.rows.length > 0) {
             return res.status(409).json({
@@ -2973,9 +2979,9 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
 
         const inserted = await queryWithRetry(
             `INSERT INTO table_bills
-                (reservation_id, table_id, total_cents, covers, share_token, opened_by_user_id,
+                (tenant_id, reservation_id, table_id, total_cents, covers, share_token, opened_by_user_id,
                  items, external_ref, service_date, shift)
-             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10)
+             VALUES ($11, $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10)
              RETURNING id, reservation_id, table_id, total_cents, covers, currency,
                        items, status, share_token, opened_at, closed_at,
                        opened_by_user_id, closed_by_user_id, external_ref,
@@ -2983,7 +2989,7 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
             [id, resRow.rows[0].table_id, totalRounded, covers, shareToken, req.user?.userId ?? null,
              ppPayload ? JSON.stringify(ppPayload.items) : null,
              ppPayload?.external_ref ?? null,
-             resolveService().service_date, resolveService().shift]
+             resolveService().service_date, resolveService().shift, req.tenantId!]
         );
         const bill = inserted.rows[0];
 
@@ -2991,12 +2997,12 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
 
         // Porta subito nel conto gli acconti già pagati sulla prenotazione (una
         // caparra versata prima che il conto esistesse viene raccolta qui).
-        const credit = await creditPaidDepositsToBill(bill.id).catch(() => ({ credited: 0, settled: false }));
+        const credit = await creditPaidDepositsToBill(req.tenantId!, bill.id).catch(() => ({ credited: 0, settled: false }));
         if (credit.credited > 0) {
             try { socketService?.broadcastToAll('bill:updated', { id: bill.id, reservation_id: bill.reservation_id }); } catch (_) {}
         }
 
-        const view = await loadBillView(bill.id);
+        const view = await loadBillView(req.tenantId!, bill.id);
         res.status(201).json(view ?? {
             bill, splits: [], paid_cents: 0, claimed_cents: 0, deposit_credit_cents: 0,
             residual_cents: bill.total_cents,
@@ -3040,10 +3046,11 @@ app.post('/reservations/:id/bill/notify', authenticate, requirePermission('payme
             `SELECT id, total_cents, covers, share_token, status
              FROM table_bills
              WHERE reservation_id = $1
+               AND tenant_id = $2
                AND status IN ('OPEN','LOCKED')
              ORDER BY opened_at DESC
              LIMIT 1`,
-            [id]
+            [id, req.tenantId!]
         );
         if (billRow.rowCount === 0) {
             return res.status(404).json({ error: 'Nessun conto aperto per questa prenotazione' });
@@ -3134,8 +3141,9 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
         try {
             await client.query('BEGIN');
             const billRs = await client.query(
-                `SELECT id, total_cents, status FROM table_bills WHERE id = $1 FOR UPDATE`,
-                [id]
+                // Scopato sul tenant: un bill id altrui fa 404 come un id inesistente.
+                `SELECT id, total_cents, status FROM table_bills WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+                [id, req.tenantId!]
             );
             if (billRs.rowCount === 0 || !['OPEN','LOCKED','SETTLED','SETTLED_PARTIAL'].includes(billRs.rows[0].status)) {
                 await client.query('ROLLBACK');
@@ -3186,12 +3194,12 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
                      tip_cents = $5,
                      notes = COALESCE($6, notes),
                      share_token = NULL
-                 WHERE id = $1
+                 WHERE id = $1 AND tenant_id = $7
                  RETURNING id, reservation_id, table_id, total_cents, covers, currency,
                            items, status, share_token, opened_at, closed_at,
                            opened_by_user_id, closed_by_user_id, external_ref,
                            cash_settled_cents, tip_cents, notes`,
-                [id, finalStatus, req.user?.userId ?? null, Math.round(cashCents), Math.round(tipCents), notesForDb]
+                [id, finalStatus, req.user?.userId ?? null, Math.round(cashCents), Math.round(tipCents), notesForDb, req.tenantId!]
             );
             updatedRow = upd.rows[0];
             await client.query('COMMIT');
@@ -3232,12 +3240,13 @@ app.post('/bills/:id/void', authenticate, requirePermission('payments:full'), as
                  notes = COALESCE($3, notes),
                  share_token = NULL
              WHERE id = $1
+               AND tenant_id = $4
                AND status IN ('OPEN','LOCKED','SETTLED','SETTLED_PARTIAL')
              RETURNING id, reservation_id, table_id, total_cents, covers, currency,
                        items, status, share_token, opened_at, closed_at,
                        opened_by_user_id, closed_by_user_id, external_ref,
                        cash_settled_cents, tip_cents, notes`,
-            [id, req.user?.userId ?? null, notes]
+            [id, req.user?.userId ?? null, notes, req.tenantId!]
         );
         if (updated.rows.length === 0) {
             return res.status(404).json({ error: 'Bill not found or already closed/voided' });
@@ -3276,8 +3285,8 @@ app.post('/bills/splits/:id/refund', authenticate, requirePermission('payments:f
              FROM table_bill_splits s
              JOIN table_bills b ON b.id = s.table_bill_id
              LEFT JOIN payment_requests pr ON pr.id = s.payment_request_id
-             WHERE s.id = $1`,
-            [splitId]
+             WHERE s.id = $1 AND b.tenant_id = $2`,
+            [splitId, req.tenantId!]
         );
         if (rs.rowCount === 0) return res.status(404).json({ error: 'Quota non trovata' });
         const row = rs.rows[0];
@@ -3305,6 +3314,7 @@ app.post('/bills/splits/:id/refund', authenticate, requirePermission('payments:f
         // Refund through the provider that took the money, not the one that
         // happens to be active now.
         await refundPaymentOrder(
+            req.tenantId!,
             row.provider,
             row.provider_order_id,
             row.amount_cents,
@@ -3419,9 +3429,12 @@ const publicSplitView = (s: any) => ({
 // Helper: fetches a bill by share_token limited to active states. Returns
 // null if not found / not active — callers respond with 404 in both cases
 // so we don't leak whether the token ever existed.
+// Lookup GLOBALE di proposito: lo share_token È il meccanismo con cui il
+// flusso senza JWT risale alla riga, e quindi al tenant — la riga trovata
+// porta il suo tenant_id e tutto ciò che segue è scopato su quello.
 async function loadBillByToken(token: string) {
     const rs = await queryWithRetry(
-        `SELECT id, reservation_id, table_id, total_cents, covers, currency,
+        `SELECT id, tenant_id, reservation_id, table_id, total_cents, covers, currency,
                 items, status, share_token, opened_at, closed_at,
                 opened_by_user_id, closed_by_user_id, external_ref,
                 cash_settled_cents, tip_cents, notes
@@ -3442,15 +3455,16 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => {
         const token = String(req.params.token || '');
         if (!token || token.length < 20) return res.status(404).json({ error: 'Not found' });
 
-        // When the operator disables the feature mid-service, guests scanning
-        // a still-valid QR get a 404 like any expired token — the waiter
-        // handles the payment through the normal channel.
-        if (!(await getFeatureFlag(PUBLIC_TENANT_ID, 'pay_at_table_enabled', false))) {
-            return res.status(404).json({ error: 'Not found' });
-        }
-
         const bill = await loadBillByToken(token);
         if (!bill) return res.status(404).json({ error: 'Not found' });
+
+        // When the operator disables the feature mid-service, guests scanning
+        // a still-valid QR get a 404 like any expired token — the waiter
+        // handles the payment through the normal channel. Il flag è quello del
+        // ristorante del conto, risolto dalla riga stessa.
+        if (!(await getFeatureFlag(bill.tenant_id, 'pay_at_table_enabled', false))) {
+            return res.status(404).json({ error: 'Not found' });
+        }
 
         const splitsRows = await queryWithRetry(
             `SELECT kind, amount_cents, claimant_label, status
@@ -3537,6 +3551,9 @@ app.get('/pay/:token/qr.png', publicPayLimiter, async (req, res) => {
         if (!token || token.length < 20 || !/^[A-Za-z0-9_-]+$/.test(token)) {
             return res.status(404).send('Not found');
         }
+        // Il PNG non carica il conto di proposito (vedi sopra), quindi non c'è
+        // una riga da cui risalire al tenant: il flag resta sul tenant storico
+        // finché la Fase C2 non porta il tenant nell'URL del QR.
         if (!(await getFeatureFlag(PUBLIC_TENANT_ID, 'pay_at_table_enabled', false))) {
             return res.status(404).send('Not found');
         }
@@ -3575,10 +3592,6 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         const token = String(req.params.token || '');
         if (!token || token.length < 20) return res.status(404).json({ error: 'Not found' });
 
-        if (!(await getFeatureFlag(PUBLIC_TENANT_ID, 'pay_at_table_enabled', false))) {
-            return res.status(404).json({ error: 'Not found' });
-        }
-
         const kind = String(req.body?.kind || '');
         if (kind !== 'equal_share' && kind !== 'fixed_amount' && kind !== 'per_item') {
             return res.status(400).json({ error: 'kind must be equal_share, fixed_amount or per_item' });
@@ -3592,7 +3605,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         // t.name is the REAL table number shown in the room (e.g. "23"), not
         // the internal id — it feeds the payment descriptions below.
         const billRs = await client.query(
-            `SELECT b.id, b.total_cents, b.covers, b.status, b.reservation_id, b.items,
+            `SELECT b.id, b.tenant_id, b.total_cents, b.covers, b.status, b.reservation_id, b.items,
                     t.name AS table_name
              FROM table_bills b
              LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
@@ -3606,6 +3619,12 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
             return res.status(404).json({ error: 'Not found' });
         }
         const bill = billRs.rows[0];
+        // Il flag del ristorante del conto: risolto DOPO il lookup per token,
+        // perché è la riga a dire di chi è il conto.
+        if (!(await getFeatureFlag(bill.tenant_id, 'pay_at_table_enabled', false))) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Not found' });
+        }
         const billLabel = bill.table_name ? `tavolo ${bill.table_name}` : `conto #${bill.id}`;
 
         // Compute claimed_cents under the lock so the residual is
@@ -3706,11 +3725,11 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         try {
             const ins = await client.query(
                 `INSERT INTO table_bill_splits
-                    (table_bill_id, kind, amount_cents, claimant_label, expires_at, status, item_ids)
-                 VALUES ($1, $2, $3, $4, $5, 'CLAIMED', $6::jsonb)
+                    (tenant_id, table_bill_id, kind, amount_cents, claimant_label, expires_at, status, item_ids)
+                 VALUES ($7, $1, $2, $3, $4, $5, 'CLAIMED', $6::jsonb)
                  RETURNING id`,
                 [bill.id, kind, amount, claimantLabel, expiresAt.toISOString(),
-                 claimedItemIds ? JSON.stringify(claimedItemIds) : null]
+                 claimedItemIds ? JSON.stringify(claimedItemIds) : null, bill.tenant_id]
             );
             splitId = ins.rows[0].id;
         } catch (err: any) {
@@ -3733,10 +3752,12 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         let checkoutUrl: string | null = null;
         let paymentRequestId: number | null = null;
         try {
-            if (!(await isPaymentConfiguredForFlow(PUBLIC_TENANT_ID, 'bill'))) {
-                throw new Error(`${providerLabel(await getPaymentProviderForFlow(PUBLIC_TENANT_ID, 'bill'))} not configured`);
+            // Gateway e credenziali del ristorante del conto, non del tenant
+            // storico: il denaro deve arrivare sul merchant giusto.
+            if (!(await isPaymentConfiguredForFlow(bill.tenant_id, 'bill'))) {
+                throw new Error(`${providerLabel(await getPaymentProviderForFlow(bill.tenant_id, 'bill'))} not configured`);
             }
-            const order = await createPaymentOrder(PUBLIC_TENANT_ID, {
+            const order = await createPaymentOrder(bill.tenant_id, {
                 amount,
                 currency: 'EUR',
                 description: `Conto ${billLabel} - quota${claimantLabel ? ' ' + claimantLabel : ''}`,
@@ -3751,9 +3772,9 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
 
             const prIns = await queryWithRetry(
                 `INSERT INTO payment_requests
-                    (reservation_id, amount_cents, currency, description, status, provider,
+                    (tenant_id, reservation_id, amount_cents, currency, description, status, provider,
                      provider_order_id, checkout_url, table_bill_split_id, metadata)
-                 VALUES ($1, $2, 'EUR', $3, $4, $5, $6, $7, $8, $9)
+                 VALUES ($10, $1, $2, 'EUR', $3, $4, $5, $6, $7, $8, $9)
                  RETURNING id`,
                 [
                     bill.reservation_id || null,
@@ -3765,6 +3786,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
                     order.checkoutUrl,
                     splitId,
                     JSON.stringify({ ...order.metadata, bill_split_id: splitId }),
+                    bill.tenant_id,
                 ]
             );
             paymentRequestId = prIns.rows[0].id;
@@ -3816,10 +3838,6 @@ app.post('/pay/:token/release', publicPayLimiter, async (req, res) => {
         const token = String(req.params.token || '');
         if (!token || token.length < 20) return res.status(404).json({ error: 'Not found' });
 
-        if (!(await getFeatureFlag(PUBLIC_TENANT_ID, 'pay_at_table_enabled', false))) {
-            return res.status(404).json({ error: 'Not found' });
-        }
-
         const splitId = Number(req.body?.split_id);
         if (!Number.isFinite(splitId) || splitId <= 0) {
             return res.status(400).json({ error: 'split_id required' });
@@ -3827,6 +3845,10 @@ app.post('/pay/:token/release', publicPayLimiter, async (req, res) => {
 
         const bill = await loadBillByToken(token);
         if (!bill) return res.status(404).json({ error: 'Not found' });
+        // Flag del ristorante del conto, risolto dalla riga (vedi GET /pay/:token).
+        if (!(await getFeatureFlag(bill.tenant_id, 'pay_at_table_enabled', false))) {
+            return res.status(404).json({ error: 'Not found' });
+        }
 
         const upd = await queryWithRetry(
             `UPDATE table_bill_splits
@@ -4216,7 +4238,7 @@ app.post('/email/send', authenticate, requirePermission('reservations:full'), as
         }
         if (!subj || subj.length > 200) return res.status(400).json({ error: 'Oggetto richiesto (max 200)' });
         if (!bod || bod.length > 5000) return res.status(400).json({ error: 'Corpo richiesto (max 5000)' });
-        if (!(await isSmtpConfigured())) {
+        if (!(await isSmtpConfigured(req.tenantId!))) {
             return res.status(503).json({ error: 'SMTP non configurato — vai in Impostazioni' });
         }
         // Reservation_id from the client may be stale (thread summary points
@@ -4247,7 +4269,7 @@ app.post('/email/send', authenticate, requirePermission('reservations:full'), as
             subject: subj,
             body: bod,
         });
-        const sendResult = await sendMail({
+        const sendResult = await sendMail(req.tenantId!, {
             to: toEmail,
             subject: template.subject,
             text: template.text,
@@ -4750,11 +4772,12 @@ const DEPOSIT_DEFAULTS = { minGuests: 9, perPersonCents: 1000 };
 
 // Politica caparra in un posto solo: soglia e importo servono anche alla
 // pagina pubblica e ai messaggi, non solo alla decisione "serve o no".
-async function getAutoDepositPolicy(): Promise<{ enabled: boolean; minGuests: number; perPersonCents: number }> {
+async function getAutoDepositPolicy(tenantId: number): Promise<{ enabled: boolean; minGuests: number; perPersonCents: number }> {
     try {
         const cfgRow = await queryWithRetry(
             `SELECT auto_deposit_enabled, auto_deposit_min_guests, auto_deposit_per_person_cents
-               FROM integration_settings WHERE provider = 'revolut'`
+               FROM integration_settings WHERE tenant_id = $1 AND provider = 'revolut'`,
+            [tenantId]
         );
         const r = cfgRow.rows[0];
         const n = Number(r?.auto_deposit_min_guests);
@@ -4771,7 +4794,7 @@ async function getAutoDepositPolicy(): Promise<{ enabled: boolean; minGuests: nu
 }
 
 async function isAutoDepositRequired(tenantId: number, guests: number): Promise<boolean> {
-    const policy = await getAutoDepositPolicy();
+    const policy = await getAutoDepositPolicy(tenantId);
     if (!policy.enabled || guests < policy.minGuests) return false;
     try {
         return await isPaymentConfiguredForFlow(tenantId, 'deposit');
@@ -4866,8 +4889,10 @@ app.get('/payments', authenticate, requirePermission('payments:view'), async (re
         const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '100'), 10) || 100, 1), 200);
         const offset = Math.max(parseInt(String(req.query.offset ?? '0'), 10) || 0, 0);
 
-        const where: string[] = [];
-        const params: any[] = [];
+        // Il tenant è la prima condizione, sempre presente: la lista dei
+        // pagamenti è per ristorante, i filtri si sommano dopo.
+        const where: string[] = ['pr.tenant_id = $1'];
+        const params: any[] = [req.tenantId!];
 
         if (from && /^\d{4}-\d{2}-\d{2}$/.test(from)) {
             params.push(from);
@@ -4956,12 +4981,13 @@ app.get('/payments', authenticate, requirePermission('payments:view'), async (re
 // visti. La colonna seen_at viene marcata da /payments/mark-seen quando
 // l'operatore apre la pagina — così il conteggio è condiviso tra dispositivi
 // (a differenza di un last-seen in localStorage).
-app.get('/payments/unseen-count', authenticate, requirePermission('payments:view'), async (_req, res) => {
+app.get('/payments/unseen-count', authenticate, requirePermission('payments:view'), async (req, res) => {
     try {
         const result = await queryWithRetry(
             `SELECT COUNT(*)::int AS count
              FROM payment_requests
-             WHERE upper(status) IN ('COMPLETED','PAID') AND seen_at IS NULL`
+             WHERE tenant_id = $1 AND upper(status) IN ('COMPLETED','PAID') AND seen_at IS NULL`,
+            [req.tenantId!]
         );
         res.json({ count: result.rows[0]?.count ?? 0 });
     } catch (err: any) {
@@ -4976,8 +5002,9 @@ app.post('/payments/mark-seen', authenticate, requirePermission('payments:view')
     try {
         const result = await queryWithRetry(
             `UPDATE payment_requests SET seen_at = NOW()
-             WHERE upper(status) IN ('COMPLETED','PAID') AND seen_at IS NULL
-             RETURNING id`
+             WHERE tenant_id = $1 AND upper(status) IN ('COMPLETED','PAID') AND seen_at IS NULL
+             RETURNING id`,
+            [req.tenantId!]
         );
         if (result.rows.length > 0) {
             const socketId = req.headers['x-socket-id'] as string;
@@ -5003,8 +5030,8 @@ app.get('/payments/:id/messages', authenticate, requirePermission('payments:view
             `SELECT pr.reservation_id, pr.checkout_url, r.phone, r.email
              FROM payment_requests pr
              LEFT JOIN reservations r ON r.id = pr.reservation_id AND r.tenant_id = pr.tenant_id
-             WHERE pr.id = $1`,
-            [id]
+             WHERE pr.id = $1 AND pr.tenant_id = $2`,
+            [id, req.tenantId!]
         );
         if (payRow.rows.length === 0) return res.status(404).json({ error: 'Not found' });
         const row = payRow.rows[0];
@@ -5071,9 +5098,9 @@ app.get('/payments/requests', authenticate, requirePermission('reservations:view
                     provider_order_id, checkout_url, delivery_channel, delivery_provider_sid,
                     delivery_error, created_by_user_id, created_at, updated_at, completed_at, metadata
              FROM payment_requests
-             WHERE reservation_id = $1
+             WHERE reservation_id = $1 AND tenant_id = $2
              ORDER BY created_at DESC`,
-            [reservationId]
+            [reservationId, req.tenantId!]
         );
         res.json(result.rows);
     } catch (err: any) {
@@ -5123,7 +5150,7 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
         // back to SMS when WhatsApp isn't configured — so no hard gate there.
         if (channel === 'email') {
             if (!reservation.email) return res.status(400).json({ error: 'La prenotazione non ha un indirizzo email' });
-            if (!(await isSmtpConfigured())) return res.status(400).json({ error: 'Email non configurata (server SMTP mancante)' });
+            if (!(await isSmtpConfigured(req.tenantId!))) return res.status(400).json({ error: 'Email non configurata (server SMTP mancante)' });
         } else {
             if (!reservation.phone) return res.status(400).json({ error: 'La prenotazione non ha un numero di telefono' });
             if (channel === 'sms' && !isTwilioSmsConfigured()) return res.status(400).json({ error: 'SMS non configurato' });
@@ -5145,9 +5172,9 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
 
         const inserted = await queryWithRetry(
             `INSERT INTO payment_requests
-                (reservation_id, amount_cents, currency, description, status, provider,
+                (tenant_id, reservation_id, amount_cents, currency, description, status, provider,
                  provider_order_id, checkout_url, created_by_user_id, metadata)
-             VALUES ($1, $2, 'EUR', $3, $4, $5, $6, $7, $8, $9)
+             VALUES ($10, $1, $2, 'EUR', $3, $4, $5, $6, $7, $8, $9)
              RETURNING *`,
             [
                 reservation.id,
@@ -5159,6 +5186,7 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
                 order.checkoutUrl,
                 req.user?.userId ?? null,
                 JSON.stringify(order.metadata),
+                req.tenantId!,
             ]
         );
         const paymentRequest = inserted.rows[0];
@@ -5192,10 +5220,10 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
                     checkoutUrl: order.checkoutUrl,
                     description: orderDescription,
                 });
-                const emailStatus = await getSmtpConfigStatus().catch(() => null);
+                const emailStatus = await getSmtpConfigStatus(req.tenantId!).catch(() => null);
                 const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
                 try {
-                    const sent = await sendMail({ to: String(reservation.email), subject, text, html });
+                    const sent = await sendMail(req.tenantId!, { to: String(reservation.email), subject, text, html });
                     await logOutboundEmail({ tenantId: req.tenantId!, provider: emailProvider, to: String(reservation.email), subject, body: text, messageId: sent.messageId || null, reservationId: reservation.id });
                     return { channel: 'email', sid: sent.messageId || null };
                 } catch (sendErr: any) {
@@ -5267,6 +5295,9 @@ app.post('/payments/requests', authenticate, requirePermission('reservations:ful
 // Kept separate from applyPaymentOrderTransition so the split logic can
 // evolve without touching the deposit flow.
 async function applyBillSplitTransition(
+    // tenantId: quello della payment_request che ha innescato la transizione
+    // (webhook/riconciliatore, nessun JWT in mano).
+    tenantId: number,
     splitId: number,
     event: string,
     isFirstCompletion: boolean,
@@ -5274,8 +5305,8 @@ async function applyBillSplitTransition(
     // First: find the parent bill_id so we can broadcast and, on
     // completion, promote the bill to SETTLED under a single query.
     const splitRs = await queryWithRetry(
-        `SELECT table_bill_id, amount_cents, status FROM table_bill_splits WHERE id = $1`,
-        [splitId]
+        `SELECT table_bill_id, amount_cents, status FROM table_bill_splits WHERE id = $1 AND tenant_id = $2`,
+        [splitId, tenantId]
     );
     if (splitRs.rowCount === 0) {
         console.warn('[bill-split] transition: split not found', splitId);
@@ -5312,7 +5343,7 @@ async function applyBillSplitTransition(
                 // the staff must refund it by hand (until the dedicated
                 // refund endpoint lands).
                 console.error('[bill-split] OVERPAYMENT: split', splitId, 'paid after abandon, bill', billId, 'has no capacity left:', resErr?.message);
-                pushSendToRoles(PUBLIC_TENANT_ID, ['OWNER', 'GENERAL_MANAGER', 'MANAGER'], {
+                pushSendToRoles(tenantId, ['OWNER', 'GENERAL_MANAGER', 'MANAGER'], {
                     category: 'payment',
                     title: 'Pagamento in eccesso da rimborsare',
                     body: `${formatEuroMinor(amount)} pagati su un conto già saldato (conto #${billId}). Serve un rimborso manuale da Revolut.`,
@@ -5342,6 +5373,7 @@ async function applyBillSplitTransition(
             `UPDATE table_bills b
              SET status = 'SETTLED'
              WHERE b.id = $1
+               AND b.tenant_id = $2
                AND b.status IN ('OPEN','LOCKED')
                AND b.total_cents = (
                    SELECT COALESCE(SUM(amount_cents), 0)
@@ -5349,7 +5381,7 @@ async function applyBillSplitTransition(
                    WHERE table_bill_id = $1 AND status = 'PAID'
                )
              RETURNING id, reservation_id, table_id, total_cents, covers, status`,
-            [billId]
+            [billId, tenantId]
         );
         if ((settled.rowCount ?? 0) > 0) {
             try { socketService?.broadcastToAll('bill:settled', settled.rows[0]); } catch (_) {}
@@ -5473,7 +5505,8 @@ async function applyPaymentOrderTransition(
     // cancelled/failed (mark ABANDONED so the capacity is freed).
     if (billSplitId) {
         try {
-            await applyBillSplitTransition(billSplitId, event, isFirstCompletion);
+            // Il tenant viaggia con la riga payment_requests appena aggiornata.
+            await applyBillSplitTransition(Number(row.tenant_id) || PUBLIC_TENANT_ID, billSplitId, event, isFirstCompletion);
         } catch (err: any) {
             console.error('[payments] bill split transition failed for split', billSplitId, err?.message || err);
         }
@@ -5484,7 +5517,8 @@ async function applyPaymentOrderTransition(
     // want a "grazie, la tua prenotazione è confermata" WhatsApp.
     if (isFirstCompletion && !billSplitId) {
         const bodyLine = `${formatEuroMinor(row.amount_cents)} da prenotazione #${row.reservation_id ?? '?'}`;
-        pushSendToRoles(PUBLIC_TENANT_ID, ['OWNER', 'GENERAL_MANAGER', 'MANAGER'], {
+        // La push arriva allo staff del ristorante della payment_request.
+        pushSendToRoles(Number(row.tenant_id) || PUBLIC_TENANT_ID, ['OWNER', 'GENERAL_MANAGER', 'MANAGER'], {
             category: 'payment',
             title: 'Pagamento ricevuto',
             body: bodyLine,
@@ -5558,20 +5592,24 @@ async function applyPaymentOrderTransition(
     if (isFirstCompletion && row.reservation_id && !billSplitId) {
         (async () => {
             try {
+                // Il conto è quello del tenant della payment_request: gli id
+                // prenotazione sono globali, senza filtro si aggancerebbe il
+                // conto di un altro ristorante.
+                const prTenantId = Number(row.tenant_id) || PUBLIC_TENANT_ID;
                 const billRs = await queryWithRetry(
                     `SELECT id FROM table_bills
-                     WHERE reservation_id = $1 AND status IN ('OPEN', 'LOCKED')
+                     WHERE reservation_id = $1 AND tenant_id = $2 AND status IN ('OPEN', 'LOCKED')
                      ORDER BY opened_at DESC LIMIT 1`,
-                    [row.reservation_id]
+                    [row.reservation_id, prTenantId]
                 );
                 if ((billRs.rowCount ?? 0) === 0) return;
                 const billId = billRs.rows[0].id;
-                const credit = await creditPaidDepositsToBill(billId);
+                const credit = await creditPaidDepositsToBill(prTenantId, billId);
                 if (credit.credited > 0 || credit.settled) {
                     try {
                         socketService?.broadcastToAll('bill:updated', { id: billId, reservation_id: row.reservation_id });
                         if (credit.settled) {
-                            const v = await loadBillView(billId);
+                            const v = await loadBillView(prTenantId, billId);
                             if (v?.bill) socketService?.broadcastToAll('bill:settled', v.bill);
                         }
                     } catch (_) {}
@@ -5592,16 +5630,32 @@ async function applyPaymentOrderTransition(
 // "first-completion" side-effects on the old `completed_at` being NULL under
 // a row-level lock.
 app.post('/webhook/revolut', async (req, res) => {
-    const verification = await verifyRevolutWebhook(req);
-    if (!verification.valid) {
-        console.warn('[Revolut] webhook rejected:', verification.reason);
-        return res.status(401).json({ error: 'invalid signature', reason: verification.reason });
-    }
-
     try {
         const body = req.body || {};
         const event = String(body.event || '').toUpperCase();
         const orderId: string | undefined = body.order_id || body.data?.order_id || body.data?.id;
+
+        // Prima si risale al tenant dall'order_id (lookup globale su
+        // provider_order_id: È il meccanismo con cui il webhook trova la
+        // riga), POI si verifica la firma col segreto di QUEL ristorante.
+        // Ordine senza riga (o order_id assente): si ripiega sul segreto del
+        // tenant storico — resta così finché la Fase C2 non dà a ogni tenant
+        // il proprio endpoint webhook.
+        let webhookTenantId = PUBLIC_TENANT_ID;
+        if (orderId) {
+            const t = await queryWithRetry(
+                `SELECT tenant_id FROM payment_requests WHERE provider_order_id = $1 LIMIT 1`,
+                [orderId]
+            ).catch(() => ({ rows: [] as any[] }));
+            if (t.rows[0]?.tenant_id != null) webhookTenantId = Number(t.rows[0].tenant_id);
+        }
+
+        const verification = await verifyRevolutWebhook(webhookTenantId, req);
+        if (!verification.valid) {
+            console.warn('[Revolut] webhook rejected:', verification.reason);
+            return res.status(401).json({ error: 'invalid signature', reason: verification.reason });
+        }
+
         if (!orderId) {
             console.warn('[Revolut] webhook missing order_id, event=', event);
             return res.status(200).json({ ok: true, ignored: 'missing order_id' });
@@ -5630,12 +5684,6 @@ app.post('/webhook/revolut', async (req, res) => {
 // provider_order_id and gate first-completion side-effects on completed_at.
 app.post('/webhook/sumup/:token', async (req, res) => {
     try {
-        const expected = await getSumUpCallbackSecret();
-        if (!callbackTokenMatches(req.params.token, expected)) {
-            console.warn('[SumUp] callback rejected: token mismatch');
-            return res.status(401).json({ error: 'invalid token' });
-        }
-
         // SumUp has shipped a few payload shapes over the years (and wraps
         // the resource under `payload`/`data` in some of them), so probe the
         // plausible spots rather than pinning one.
@@ -5644,6 +5692,29 @@ app.post('/webhook/sumup/:token', async (req, res) => {
             body.id || body.checkout_id ||
             body.payload?.id || body.payload?.checkout_id ||
             body.data?.id || body.data?.checkout_id;
+
+        // Prima il tenant dal checkout id (lookup globale su
+        // provider_order_id, come per Revolut), POI il confronto col token di
+        // callback di QUEL ristorante. Il body qui serve solo a capire QUALE
+        // riga si è mossa — lo stato viene comunque riletto dall'API — quindi
+        // usarlo per risolvere il tenant prima della verifica non allarga la
+        // superficie. Senza riga si ripiega sul segreto del tenant storico,
+        // finché la Fase C2 non dà a ogni tenant il proprio endpoint.
+        let webhookTenantId = PUBLIC_TENANT_ID;
+        if (checkoutId) {
+            const t = await queryWithRetry(
+                `SELECT tenant_id FROM payment_requests WHERE provider_order_id = $1 LIMIT 1`,
+                [checkoutId]
+            ).catch(() => ({ rows: [] as any[] }));
+            if (t.rows[0]?.tenant_id != null) webhookTenantId = Number(t.rows[0].tenant_id);
+        }
+
+        const expected = await getSumUpCallbackSecret(webhookTenantId);
+        if (!callbackTokenMatches(req.params.token, expected)) {
+            console.warn('[SumUp] callback rejected: token mismatch');
+            return res.status(401).json({ error: 'invalid token' });
+        }
+
         if (!checkoutId) {
             console.warn('[SumUp] callback missing checkout id, body keys=', Object.keys(body));
             return res.status(200).json({ ok: true, ignored: 'missing checkout id' });
@@ -5656,7 +5727,7 @@ app.post('/webhook/sumup/:token', async (req, res) => {
         res.status(200).json({ ok: true });
 
         try {
-            const fetched = await fetchPaymentOrder('sumup', checkoutId);
+            const fetched = await fetchPaymentOrder(webhookTenantId, 'sumup', checkoutId);
             if (!fetched.event) {
                 console.log('[SumUp] callback: checkout', checkoutId, 'still', fetched.state, '— nothing to apply');
                 return;
@@ -5687,8 +5758,9 @@ app.post('/payments/:id/reconcile', authenticate, requirePermission('payments:fu
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
 
         const paymentRes = await queryWithRetry(
-            `SELECT id, provider, provider_order_id FROM payment_requests WHERE id = $1`,
-            [id]
+            // Scopato sul tenant: un payment id altrui fa 404 come inesistente.
+            `SELECT id, provider, provider_order_id FROM payment_requests WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]
         );
         if (paymentRes.rowCount === 0) return res.status(404).json({ error: 'Payment not found' });
         const payment = paymentRes.rows[0];
@@ -5703,13 +5775,13 @@ app.post('/payments/:id/reconcile', authenticate, requirePermission('payments:fu
         if (!payment.provider_order_id) {
             return res.status(400).json({ error: 'Nessun order ID associato al pagamento' });
         }
-        if (!(await isProviderConfigured(provider))) {
+        if (!(await isProviderConfigured(req.tenantId!, provider))) {
             return res.status(503).json({ error: `${label} non è configurato (credenziali mancanti)` });
         }
 
         let fetched;
         try {
-            fetched = await fetchPaymentOrder(provider, payment.provider_order_id);
+            fetched = await fetchPaymentOrder(req.tenantId!, provider, payment.provider_order_id);
         } catch (err: any) {
             console.error('[payments] reconcile fetch failed:', err?.message || err);
             return res.status(502).json({ error: `Lettura ordine ${label} fallita`, detail: err?.message || String(err) });
@@ -5774,10 +5846,11 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
 
         const paymentRes = await queryWithRetry(
+            // Scopato sul tenant: un payment id altrui fa 404 come inesistente.
             `SELECT id, provider, provider_order_id, status, amount_cents, currency,
                     description, reservation_id, table_bill_split_id, metadata
-             FROM payment_requests WHERE id = $1`,
-            [id]
+             FROM payment_requests WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]
         );
         if (paymentRes.rowCount === 0) return res.status(404).json({ error: 'Pagamento non trovato' });
         const payment = paymentRes.rows[0];
@@ -5794,12 +5867,13 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
             return res.status(409).json({ error: 'Nessun ordine di pagamento collegato' });
         }
         const provider: PaymentProvider = payment.provider;
-        if (!(await isProviderConfigured(provider))) {
+        if (!(await isProviderConfigured(req.tenantId!, provider))) {
             return res.status(503).json({ error: `${providerLabel(provider)} non è configurato (credenziali mancanti)` });
         }
 
         try {
             await refundPaymentOrder(
+                req.tenantId!,
                 provider,
                 payment.provider_order_id,
                 payment.amount_cents,
@@ -5843,17 +5917,17 @@ app.post('/payments/:id/refund', authenticate, requirePermission('payments:full'
             const revoked = await queryWithRetry(
                 `UPDATE table_bill_splits
                  SET status = 'REFUNDED', released_at = CURRENT_TIMESTAMP
-                 WHERE payment_request_id = $1 AND kind = 'deposit' AND status = 'PAID'
+                 WHERE payment_request_id = $1 AND tenant_id = $2 AND kind = 'deposit' AND status = 'PAID'
                  RETURNING table_bill_id`,
-                [payment.id]
+                [payment.id, req.tenantId!]
             );
             for (const s of revoked.rows) {
                 const reopened = await queryWithRetry(
                     `UPDATE table_bills SET status = 'OPEN', closed_at = NULL
-                     WHERE id = $1 AND status = 'SETTLED'
+                     WHERE id = $1 AND tenant_id = $2 AND status = 'SETTLED'
                        AND total_cents > (SELECT COALESCE(SUM(amount_cents), 0) FROM table_bill_splits WHERE table_bill_id = $1 AND status = 'PAID')
                      RETURNING *`,
-                    [s.table_bill_id]
+                    [s.table_bill_id, req.tenantId!]
                 );
                 try {
                     socketService?.broadcastToAll('bill:split-refunded', { bill_id: s.table_bill_id });
@@ -7048,8 +7122,11 @@ async function runDailyBreadReminder(tenantId: number, targetRoles: string[] = [
 const startBillSplitReconcileScheduler = () => {
     const tick = async () => {
         try {
+            // Nessun filtro tenant qui, di proposito: il tick è l'unico punto
+            // che serve TUTTI i ristoranti; ogni riga porta il proprio
+            // tenant_id a valle (credenziali gateway, transizioni).
             const stale = await queryWithRetry(
-                `SELECT s.id AS split_id, s.payment_request_id,
+                `SELECT s.id AS split_id, s.tenant_id, s.payment_request_id,
                         pr.provider, pr.provider_order_id
                  FROM table_bill_splits s
                  LEFT JOIN payment_requests pr ON pr.id = s.payment_request_id
@@ -7062,6 +7139,7 @@ const startBillSplitReconcileScheduler = () => {
 
             for (const row of stale.rows) {
                 const orderId: string | null = row.provider_order_id || null;
+                const rowTenantId = Number(row.tenant_id) || PUBLIC_TENANT_ID;
                 // Talk to the provider that created this order, whatever is
                 // active now.
                 const provider: PaymentProvider = isPaymentProvider(row.provider) ? row.provider : 'revolut';
@@ -7071,7 +7149,7 @@ const startBillSplitReconcileScheduler = () => {
                 // order is really in and reapply the transition.
                 if (orderId) {
                     try {
-                        const fetched = await fetchPaymentOrder(provider, orderId);
+                        const fetched = await fetchPaymentOrder(rowTenantId, provider, orderId);
                         if (fetched.event) {
                             await applyPaymentOrderTransition(orderId, fetched.event, transitionMetadata(provider, fetched.raw));
                             handled = true;
@@ -7082,7 +7160,7 @@ const startBillSplitReconcileScheduler = () => {
                             // guest pay a share someone else re-claims →
                             // double incasso (successo davvero, conto #12).
                             try {
-                                await cancelPaymentOrder(provider, orderId);
+                                await cancelPaymentOrder(rowTenantId, provider, orderId);
                                 await applyPaymentOrderTransition(orderId, 'ORDER_CANCELLED');
                                 handled = true;
                             } catch (cancelErr: any) {
@@ -7092,7 +7170,7 @@ const startBillSplitReconcileScheduler = () => {
                                 // claim — next tick retries. NEVER free
                                 // capacity while a payable order is out there.
                                 try {
-                                    const fresh = await fetchPaymentOrder(provider, orderId);
+                                    const fresh = await fetchPaymentOrder(rowTenantId, provider, orderId);
                                     if (fresh.event) {
                                         await applyPaymentOrderTransition(orderId, fresh.event, transitionMetadata(provider, fresh.raw));
                                     } else {
@@ -7159,8 +7237,10 @@ const startBillSplitReconcileScheduler = () => {
 const startPaymentRequestReconcileScheduler = () => {
     const tick = async () => {
         try {
+            // Come il riconciliatore delle quote: il tick legge le righe di
+            // TUTTI i ristoranti, ogni riga porta il proprio tenant_id a valle.
             const open = await queryWithRetry(
-                `SELECT id, provider, provider_order_id
+                `SELECT id, tenant_id, provider, provider_order_id
                  FROM payment_requests
                  WHERE status IN ('PENDING', 'AUTHORISED')
                    AND provider_order_id IS NOT NULL
@@ -7174,9 +7254,10 @@ const startPaymentRequestReconcileScheduler = () => {
             for (const row of open.rows) {
                 if (!isPaymentProvider(row.provider)) continue;
                 const provider: PaymentProvider = row.provider;
+                const rowTenantId = Number(row.tenant_id) || PUBLIC_TENANT_ID;
                 try {
-                    if (!(await isProviderConfigured(provider))) continue;
-                    const fetched = await fetchPaymentOrder(provider, row.provider_order_id);
+                    if (!(await isProviderConfigured(rowTenantId, provider))) continue;
+                    const fetched = await fetchPaymentOrder(rowTenantId, provider, row.provider_order_id);
                     if (!fetched.event) continue; // still genuinely pending
                     const result = await applyPaymentOrderTransition(
                         row.provider_order_id,
@@ -14848,9 +14929,9 @@ app.put('/settings/features', authenticate, requirePermission('settings:full'), 
 // UI can render the current state without leaking credentials. PUT accepts
 // partial updates: any field left out is preserved. Sending an empty string
 // clears that field back to the env-var fallback.
-app.get('/settings/integrations/revolut', authenticate, requirePermission('settings:full'), async (_req, res) => {
+app.get('/settings/integrations/revolut', authenticate, requirePermission('settings:full'), async (req, res) => {
     try {
-        const status = await getRevolutConfigStatus();
+        const status = await getRevolutConfigStatus(req.tenantId!);
 
         // integration_settings may not exist yet on a brand-new deploy where
         // the schema-init CTE that creates it hasn't finished running. Treat
@@ -14860,7 +14941,8 @@ app.get('/settings/integrations/revolut', authenticate, requirePermission('setti
         let updatedByEmail: string | null = null;
         try {
             const meta = await queryWithRetry(
-                `SELECT updated_at, updated_by_user_id FROM integration_settings WHERE provider = 'revolut'`
+                `SELECT updated_at, updated_by_user_id FROM integration_settings WHERE tenant_id = $1 AND provider = 'revolut'`,
+                [req.tenantId!]
             );
             const row = meta.rows[0];
             if (row) {
@@ -14927,20 +15009,22 @@ app.put('/settings/integrations/revolut', authenticate, requirePermission('setti
 
         // Insert: fill known columns; for columns not provided, insert NULL
         // (environment defaults to 'sandbox' via the table default).
-        const insertCols = ['provider', ...providedCols, 'updated_by_user_id', 'updated_at'];
+        // La PK è (tenant_id, provider): la riga è del ristorante, e gli
+        // indici dei placeholder scalano di uno per il tenant in testa.
+        const insertCols = ['tenant_id', 'provider', ...providedCols, 'updated_by_user_id', 'updated_at'];
         const insertPlaceholders = insertCols.map((_, i) => `$${i + 1}`).join(', ');
-        const insertValues = ['revolut', ...providedVals, userId, new Date()];
+        const insertValues = [req.tenantId!, 'revolut', ...providedVals, userId, new Date()];
 
         const updateSet = [
-            ...providedCols.map((c, i) => `${c} = $${i + 2}`),
-            `updated_by_user_id = $${providedCols.length + 2}`,
+            ...providedCols.map((c, i) => `${c} = $${i + 3}`),
+            `updated_by_user_id = $${providedCols.length + 3}`,
             `updated_at = CURRENT_TIMESTAMP`,
         ].join(', ');
 
         await queryWithRetry(
             `INSERT INTO integration_settings (${insertCols.join(', ')})
              VALUES (${insertPlaceholders})
-             ON CONFLICT (provider) DO UPDATE SET ${updateSet}`,
+             ON CONFLICT (tenant_id, provider) DO UPDATE SET ${updateSet}`,
             insertValues
         );
 
@@ -14958,7 +15042,7 @@ app.put('/settings/integrations/revolut', authenticate, requirePermission('setti
             );
         }
 
-        const status = await getRevolutConfigStatus();
+        const status = await getRevolutConfigStatus(req.tenantId!);
         res.json({ ...status, updated_at: new Date().toISOString(), updated_by: req.user?.email ?? null });
     } catch (err: any) {
         console.error('PUT /settings/integrations/revolut error:', err);
@@ -14978,7 +15062,7 @@ app.put('/settings/integrations/revolut', authenticate, requirePermission('setti
 // operator can keep sandbox credentials around and flip back to test.
 app.get('/settings/integrations/sumup', authenticate, requirePermission('settings:full'), async (req, res) => {
     try {
-        const status = await getSumUpConfigStatus();
+        const status = await getSumUpConfigStatus(req.tenantId!);
         const activeProvider = await getActivePaymentProvider(req.tenantId!);
 
         // Same defensive read as the Revolut card: on a brand-new deploy the
@@ -14988,7 +15072,8 @@ app.get('/settings/integrations/sumup', authenticate, requirePermission('setting
         let updatedByEmail: string | null = null;
         try {
             const meta = await queryWithRetry(
-                `SELECT updated_at, updated_by_user_id FROM integration_settings WHERE provider = 'sumup'`
+                `SELECT updated_at, updated_by_user_id FROM integration_settings WHERE tenant_id = $1 AND provider = 'sumup'`,
+                [req.tenantId!]
             );
             const row = meta.rows[0];
             if (row) {
@@ -15073,7 +15158,7 @@ app.put('/settings/integrations/sumup', authenticate, requirePermission('setting
         // asking the operator to invent a secret. Without it we can't
         // register a return_url and payments would only settle on reconcile.
         if (Object.keys(updates).length > 0 && updates.webhook_secret === undefined) {
-            const existing = await getSumUpConfigStatus();
+            const existing = await getSumUpConfigStatus(req.tenantId!);
             if (!existing.has_callback_secret) {
                 updates.webhook_secret = crypto.randomBytes(24).toString('hex');
             }
@@ -15086,20 +15171,21 @@ app.put('/settings/integrations/sumup', authenticate, requirePermission('setting
             const providedVals = providedCols.map(c => updates[c]);
             const userId = req.user?.userId ?? null;
 
-            const insertCols = ['provider', ...providedCols, 'updated_by_user_id', 'updated_at'];
+            // PK (tenant_id, provider): vedi il PUT Revolut qui sopra.
+            const insertCols = ['tenant_id', 'provider', ...providedCols, 'updated_by_user_id', 'updated_at'];
             const insertPlaceholders = insertCols.map((_, i) => `$${i + 1}`).join(', ');
-            const insertValues = ['sumup', ...providedVals, userId, new Date()];
+            const insertValues = [req.tenantId!, 'sumup', ...providedVals, userId, new Date()];
 
             const updateSet = [
-                ...providedCols.map((c, i) => `${c} = $${i + 2}`),
-                `updated_by_user_id = $${providedCols.length + 2}`,
+                ...providedCols.map((c, i) => `${c} = $${i + 3}`),
+                `updated_by_user_id = $${providedCols.length + 3}`,
                 `updated_at = CURRENT_TIMESTAMP`,
             ].join(', ');
 
             await queryWithRetry(
                 `INSERT INTO integration_settings (${insertCols.join(', ')})
                  VALUES (${insertPlaceholders})
-                 ON CONFLICT (provider) DO UPDATE SET ${updateSet}`,
+                 ON CONFLICT (tenant_id, provider) DO UPDATE SET ${updateSet}`,
                 insertValues
             );
             invalidateSumUpConfigCache();
@@ -15109,7 +15195,7 @@ app.put('/settings/integrations/sumup', authenticate, requirePermission('setting
             // Refuse to route live payments at a gateway that can't take
             // them — the failure would otherwise only show up on the guest's
             // checkout link.
-            if (!(await isProviderConfigured(providerChange))) {
+            if (!(await isProviderConfigured(req.tenantId!, providerChange))) {
                 return res.status(400).json({
                     error: `${providerLabel(providerChange)} non è configurato: completa le credenziali prima di attivarlo`,
                 });
@@ -15132,7 +15218,7 @@ app.put('/settings/integrations/sumup', authenticate, requirePermission('setting
             );
         }
 
-        const status = await getSumUpConfigStatus();
+        const status = await getSumUpConfigStatus(req.tenantId!);
         const activeProvider = await getActivePaymentProvider(req.tenantId!);
         res.json({
             ...status,
@@ -15161,7 +15247,7 @@ app.get('/settings/payments/provider', authenticate, async (req, res) => {
         const active = await getActivePaymentProvider(req.tenantId!);
         const configured: Record<string, boolean> = {};
         for (const provider of PAYMENT_PROVIDERS) {
-            configured[provider] = await isProviderConfigured(provider);
+            configured[provider] = await isProviderConfigured(req.tenantId!, provider);
         }
         // Per-flow overrides (caparre e conti al tavolo): override = scelta
         // esplicita o null (= segue il globale), effective = provider che
@@ -15199,7 +15285,7 @@ app.put('/settings/payments/provider', authenticate, requirePermission('settings
             if (provider !== null && !isPaymentProvider(provider)) {
                 return res.status(400).json({ error: 'invalid_provider' });
             }
-            if (provider !== null && !(await isProviderConfigured(provider))) {
+            if (provider !== null && !(await isProviderConfigured(req.tenantId!, provider))) {
                 return res.status(400).json({
                     error: `${providerLabel(provider)} non è configurato: completa le credenziali prima di attivarlo`,
                 });
@@ -15225,7 +15311,7 @@ app.put('/settings/payments/provider', authenticate, requirePermission('settings
         if (!isPaymentProvider(provider)) {
             return res.status(400).json({ error: 'invalid_provider' });
         }
-        if (!(await isProviderConfigured(provider))) {
+        if (!(await isProviderConfigured(req.tenantId!, provider))) {
             return res.status(400).json({
                 error: `${providerLabel(provider)} non è configurato: completa le credenziali prima di attivarlo`,
             });
@@ -15255,14 +15341,15 @@ app.put('/settings/payments/provider', authenticate, requirePermission('settings
 // ============================================
 // Same shape as the Revolut endpoints above: GET returns a masked snapshot,
 // PUT accepts partial updates (empty string = clear back to env fallback).
-app.get('/settings/integrations/smtp', authenticate, requirePermission('settings:full'), async (_req, res) => {
+app.get('/settings/integrations/smtp', authenticate, requirePermission('settings:full'), async (req, res) => {
     try {
-        const status = await getSmtpConfigStatus();
+        const status = await getSmtpConfigStatus(req.tenantId!);
         let updatedAt: string | null = null;
         let updatedByEmail: string | null = null;
         try {
             const meta = await queryWithRetry(
-                `SELECT updated_at, updated_by_user_id FROM integration_settings WHERE provider = 'smtp'`
+                `SELECT updated_at, updated_by_user_id FROM integration_settings WHERE tenant_id = $1 AND provider = 'smtp'`,
+                [req.tenantId!]
             );
             const row = meta.rows[0];
             if (row) {
@@ -15362,19 +15449,20 @@ app.put('/settings/integrations/smtp', authenticate, requirePermission('settings
         const providedVals = providedCols.map(c => updates[c]);
         const userId = req.user?.userId ?? null;
 
-        const insertCols = ['provider', ...providedCols, 'updated_by_user_id', 'updated_at'];
+        // PK (tenant_id, provider): vedi il PUT Revolut qui sopra.
+        const insertCols = ['tenant_id', 'provider', ...providedCols, 'updated_by_user_id', 'updated_at'];
         const insertPlaceholders = insertCols.map((_, i) => `$${i + 1}`).join(', ');
-        const insertValues = ['smtp', ...providedVals, userId, new Date()];
+        const insertValues = [req.tenantId!, 'smtp', ...providedVals, userId, new Date()];
         const updateSet = [
-            ...providedCols.map((c, i) => `${c} = $${i + 2}`),
-            `updated_by_user_id = $${providedCols.length + 2}`,
+            ...providedCols.map((c, i) => `${c} = $${i + 3}`),
+            `updated_by_user_id = $${providedCols.length + 3}`,
             `updated_at = CURRENT_TIMESTAMP`,
         ].join(', ');
 
         await queryWithRetry(
             `INSERT INTO integration_settings (${insertCols.join(', ')})
              VALUES (${insertPlaceholders})
-             ON CONFLICT (provider) DO UPDATE SET ${updateSet}`,
+             ON CONFLICT (tenant_id, provider) DO UPDATE SET ${updateSet}`,
             insertValues
         );
 
@@ -15392,7 +15480,7 @@ app.put('/settings/integrations/smtp', authenticate, requirePermission('settings
             );
         }
 
-        const status = await getSmtpConfigStatus();
+        const status = await getSmtpConfigStatus(req.tenantId!);
         res.json({ ...status, updated_at: new Date().toISOString(), updated_by: req.user?.email ?? null });
     } catch (err: any) {
         console.error('PUT /settings/integrations/smtp error:', err);
@@ -15409,13 +15497,13 @@ app.post('/settings/integrations/smtp/test', authenticate, requirePermission('se
         if (!to || !/@/.test(to)) {
             return res.status(400).json({ error: 'Indirizzo destinatario mancante o non valido' });
         }
-        const verify = await verifySmtpConnection();
+        const verify = await verifySmtpConnection(req.tenantId!);
         if (!verify.ok) {
             console.warn('[SMTP] verify failed before test send:', verify.error);
             return res.status(400).json({ error: verify.error || 'Verifica SMTP fallita' });
         }
         try {
-            const info = await sendMail({
+            const info = await sendMail(req.tenantId!, {
                 to,
                 subject: 'Test SMTP RistoManager',
                 text: 'Questo è un messaggio di test dal tuo CRM RistoManager. Se lo hai ricevuto, la configurazione SMTP funziona correttamente.',
@@ -15444,14 +15532,15 @@ app.post('/settings/integrations/smtp/test', authenticate, requirePermission('se
 // Config lives on the same integration_settings row as SMTP (provider='smtp')
 // but under imap_* columns. Toggling `enabled` restarts the long-lived
 // IMAP+IDLE listener so config changes take effect without a redeploy.
-app.get('/settings/integrations/imap', authenticate, requirePermission('settings:full'), async (_req, res) => {
+app.get('/settings/integrations/imap', authenticate, requirePermission('settings:full'), async (req, res) => {
     try {
-        const status = await getImapConfigStatus();
+        const status = await getImapConfigStatus(req.tenantId!);
         let updatedAt: string | null = null;
         let updatedByEmail: string | null = null;
         try {
             const meta = await queryWithRetry(
-                `SELECT updated_at, updated_by_user_id FROM integration_settings WHERE provider = 'smtp'`
+                `SELECT updated_at, updated_by_user_id FROM integration_settings WHERE tenant_id = $1 AND provider = 'smtp'`,
+                [req.tenantId!]
             );
             const row = meta.rows[0];
             if (row) {
@@ -15532,19 +15621,20 @@ app.put('/settings/integrations/imap', authenticate, requirePermission('settings
         const providedVals = providedCols.map(c => updates[c]);
         const userId = req.user?.userId ?? null;
 
-        const insertCols = ['provider', ...providedCols, 'updated_by_user_id', 'updated_at'];
+        // PK (tenant_id, provider): vedi il PUT Revolut qui sopra.
+        const insertCols = ['tenant_id', 'provider', ...providedCols, 'updated_by_user_id', 'updated_at'];
         const insertPlaceholders = insertCols.map((_, i) => `$${i + 1}`).join(', ');
-        const insertValues = ['smtp', ...providedVals, userId, new Date()];
+        const insertValues = [req.tenantId!, 'smtp', ...providedVals, userId, new Date()];
         const updateSet = [
-            ...providedCols.map((c, i) => `${c} = $${i + 2}`),
-            `updated_by_user_id = $${providedCols.length + 2}`,
+            ...providedCols.map((c, i) => `${c} = $${i + 3}`),
+            `updated_by_user_id = $${providedCols.length + 3}`,
             `updated_at = CURRENT_TIMESTAMP`,
         ].join(', ');
 
         await queryWithRetry(
             `INSERT INTO integration_settings (${insertCols.join(', ')})
              VALUES (${insertPlaceholders})
-             ON CONFLICT (provider) DO UPDATE SET ${updateSet}`,
+             ON CONFLICT (tenant_id, provider) DO UPDATE SET ${updateSet}`,
             insertValues
         );
 
@@ -15569,7 +15659,7 @@ app.put('/settings/integrations/imap', authenticate, requirePermission('settings
             );
         }
 
-        const status = await getImapConfigStatus();
+        const status = await getImapConfigStatus(req.tenantId!);
         res.json({ ...status, updated_at: new Date().toISOString(), updated_by: req.user?.email ?? null });
     } catch (err: any) {
         console.error('PUT /settings/integrations/imap error:', err);
@@ -15577,9 +15667,9 @@ app.put('/settings/integrations/imap', authenticate, requirePermission('settings
     }
 });
 
-app.post('/settings/integrations/imap/test', authenticate, requirePermission('settings:full'), async (_req, res) => {
+app.post('/settings/integrations/imap/test', authenticate, requirePermission('settings:full'), async (req, res) => {
     try {
-        const verify = await verifyImapConnection();
+        const verify = await verifyImapConnection(req.tenantId!);
         if (!verify.ok) {
             console.warn('[IMAP] verify failed:', verify.error);
             return res.status(400).json({ error: verify.error || 'Verifica IMAP fallita' });
@@ -15605,8 +15695,8 @@ app.post('/settings/integrations/imap/test', authenticate, requirePermission('se
 app.get('/settings/auto-deposit', authenticate, async (req, res) => {
     try {
         const activeProvider = await getActivePaymentProvider(req.tenantId!);
-        const paymentConfigured = await isProviderConfigured(activeProvider);
-        const policy = await getAutoDepositPolicy();
+        const paymentConfigured = await isProviderConfigured(req.tenantId!, activeProvider);
+        const policy = await getAutoDepositPolicy(req.tenantId!);
         res.json({
             enabled: policy.enabled,
             min_guests: policy.minGuests,
@@ -15654,18 +15744,19 @@ app.put('/settings/auto-deposit', authenticate, requirePermission('settings:full
 
         // UPSERT so the first save works even when the Revolut row doesn't
         // exist yet (e.g. auto-deposit configured before credentials).
-        const cols = ['provider', ...updates.map(u => u.col), 'updated_by_user_id', 'updated_at'];
+        // PK (tenant_id, provider): la policy caparra è per ristorante.
+        const cols = ['tenant_id', 'provider', ...updates.map(u => u.col), 'updated_by_user_id', 'updated_at'];
         const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
-        const values: any[] = ['revolut', ...updates.map(u => u.val), req.user?.userId ?? null, new Date()];
+        const values: any[] = [req.tenantId!, 'revolut', ...updates.map(u => u.val), req.user?.userId ?? null, new Date()];
         const updateSet = [
-            ...updates.map((u, i) => `${u.col} = $${i + 2}`),
-            `updated_by_user_id = $${updates.length + 2}`,
+            ...updates.map((u, i) => `${u.col} = $${i + 3}`),
+            `updated_by_user_id = $${updates.length + 3}`,
             `updated_at = CURRENT_TIMESTAMP`,
         ].join(', ');
         await queryWithRetry(
             `INSERT INTO integration_settings (${cols.join(', ')})
              VALUES (${placeholders})
-             ON CONFLICT (provider) DO UPDATE SET ${updateSet}`,
+             ON CONFLICT (tenant_id, provider) DO UPDATE SET ${updateSet}`,
             values
         );
 
@@ -15682,8 +15773,8 @@ app.put('/settings/auto-deposit', authenticate, requirePermission('settings:full
         }
 
         const activeProvider = await getActivePaymentProvider(req.tenantId!);
-        const paymentConfigured = await isProviderConfigured(activeProvider);
-        const after = await getAutoDepositPolicy();
+        const paymentConfigured = await isProviderConfigured(req.tenantId!, activeProvider);
+        const after = await getAutoDepositPolicy(req.tenantId!);
         res.json({
             enabled: after.enabled,
             min_guests: after.minGuests,
@@ -16117,7 +16208,7 @@ app.get('/public/contact', async (_req, res) => {
     }
     // La politica caparra serve alla pagina per scrivere importo e soglia
     // nella sezione condizioni: un solo posto da cambiare in Impostazioni.
-    const depositPolicy = await getAutoDepositPolicy();
+    const depositPolicy = await getAutoDepositPolicy(PUBLIC_TENANT_ID);
     // Identità per titolo, footer e link del sito sulla pagina prenota, e
     // agent id per il widget vocale del CRM: dati pubblici per costruzione
     // (compaiono comunque nella pagina/bundle), serviti da qui perché la
@@ -16423,7 +16514,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         // confirm manually.
         let depositCheckoutUrl: string | null = null;
         let depositAmountCents = 0;
-        const depositPolicy = depositRequired ? await getAutoDepositPolicy() : null;
+        const depositPolicy = depositRequired ? await getAutoDepositPolicy(PUBLIC_TENANT_ID) : null;
         if (depositRequired) {
             depositAmountCents = guestsNum * (depositPolicy?.perPersonCents ?? DEPOSIT_DEFAULTS.perPersonCents);
             const orderDescription = `Caparra prenotazione #${created.id} - ${guestsLabel} ${dateLabel} ${time}`;
@@ -16437,9 +16528,9 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                 });
                 const insertedPayment = await queryWithRetry(
                     `INSERT INTO payment_requests
-                        (reservation_id, amount_cents, currency, description, status, provider,
+                        (tenant_id, reservation_id, amount_cents, currency, description, status, provider,
                          provider_order_id, checkout_url, metadata)
-                     VALUES ($1, $2, 'EUR', $3, $4, $5, $6, $7, $8)
+                     VALUES ($9, $1, $2, 'EUR', $3, $4, $5, $6, $7, $8)
                      RETURNING *`,
                     [
                         created.id,
@@ -16450,6 +16541,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                         order.id,
                         order.checkoutUrl,
                         JSON.stringify({ ...order.metadata, source: 'public_booking_auto_deposit' }),
+                        PUBLIC_TENANT_ID,
                     ]
                 );
                 depositCheckoutUrl = order.checkoutUrl;
@@ -16523,8 +16615,8 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
         if (emailNormalized) {
             (async () => {
                 try {
-                    if (!(await isSmtpConfigured())) return;
-                    const emailStatus = await getSmtpConfigStatus().catch(() => null);
+                    if (!(await isSmtpConfigured(PUBLIC_TENANT_ID))) return;
+                    const emailStatus = await getSmtpConfigStatus(PUBLIC_TENANT_ID).catch(() => null);
                     const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
                     const { subject, text, html } = confirmedNow
                         ? buildBookingConfirmationEmail({
@@ -16541,7 +16633,7 @@ app.post('/public/reservations', publicBookingLimiter, async (req, res) => {
                             notes: userNote,
                           });
                     try {
-                        const sent = await sendMail({ to: emailNormalized, subject, text, html });
+                        const sent = await sendMail(PUBLIC_TENANT_ID, { to: emailNormalized, subject, text, html });
                         await logOutboundEmail({
                             tenantId: PUBLIC_TENANT_ID,
                             provider: emailProvider,
@@ -16965,8 +17057,8 @@ const deriveCourseStatus = (items: any[]): string => {
 };
 
 // Vista completa della comanda: righe, uscite e totali già sommati.
-async function loadOrderView(orderId: number): Promise<any | null> {
-    const o = await queryWithRetry(`SELECT * FROM orders WHERE id = $1`, [orderId]);
+async function loadOrderView(tenantId: number, orderId: number): Promise<any | null> {
+    const o = await queryWithRetry(`SELECT * FROM orders WHERE id = $1 AND tenant_id = $2`, [orderId, tenantId]);
     if (o.rows.length === 0) return null;
     const it = await queryWithRetry(
         `SELECT * FROM order_items WHERE order_id = $1 ORDER BY course_no, id`,
@@ -17011,13 +17103,16 @@ async function loadOrderView(orderId: number): Promise<any | null> {
 // Le righe senza prep_minutes valgono 0 e partono subito — comportamento
 // identico a un KDS non scaglionato, che è ciò che serve finché il campo non
 // è popolato.
-async function fireCourseInTx(client: any, orderId: number, courseNo: number): Promise<any[]> {
+async function fireCourseInTx(client: any, tenantId: number, orderId: number, courseNo: number): Promise<any[]> {
+    // Scopato sul tenant: la rotta del passe non pre-verifica la comanda, e
+    // senza filtro un order_id altrui lancerebbe l'uscita di un altro locale.
     const upd = await client.query(
         `WITH prep AS (
              SELECT oi.id, COALESCE(d.prep_minutes, 0) AS p
              FROM order_items oi
              LEFT JOIN dishes d ON d.id = oi.dish_id AND d.tenant_id = oi.tenant_id
              WHERE oi.order_id = $1 AND oi.course_no = $2 AND oi.status = 'QUEUED'
+               AND oi.tenant_id = $3
          ), mx AS (
              SELECT COALESCE(MAX(p), 0) AS m FROM prep
          )
@@ -17029,10 +17124,10 @@ async function fireCourseInTx(client: any, orderId: number, courseNo: number): P
          FROM prep, mx
          WHERE oi.id = prep.id
          RETURNING oi.*`,
-        [orderId, courseNo]
+        [orderId, courseNo, tenantId]
     );
     if (upd.rows.length > 0) {
-        await enqueueCoursePrintsInTx(client, orderId, courseNo, upd.rows);
+        await enqueueCoursePrintsInTx(client, tenantId, orderId, courseNo, upd.rows);
     }
     return upd.rows;
 }
@@ -17043,24 +17138,23 @@ async function fireCourseInTx(client: any, orderId: number, courseNo: number): P
 // Partite senza stampante (printer NULL) restano solo a schermo. Best-effort
 // NON è questo: un errore qui annulla il lancio, ed è voluto — un'uscita
 // lanciata di cui la cucina non sa niente è il caso peggiore.
-async function enqueueCoursePrintsInTx(client: any, orderId: number, courseNo: number, firedRows: any[]): Promise<void> {
+async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: number, courseNo: number, firedRows: any[]): Promise<void> {
     const ctx = await client.query(
-        `SELECT o.covers, o.tenant_id, t.name AS table_name
+        `SELECT o.covers, t.name AS table_name
          FROM orders o LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
-         WHERE o.id = $1`,
-        [orderId]
+         WHERE o.id = $1 AND o.tenant_id = $2`,
+        [orderId, tenantId]
     );
     const tableName = ctx.rows[0]?.table_name ?? null;
     const covers = ctx.rows[0]?.covers ?? null;
+
     // Il tenant della comanda pilota il lookup dei centri: senza filtro una
     // station_id altrui manderebbe la comanda sulla termica di un altro locale.
-    const orderTenantId = ctx.rows[0]?.tenant_id ?? PUBLIC_TENANT_ID;
-
     const stationIds = [...new Set(firedRows.map(r => r.station_id).filter((s: any) => s != null))];
     if (stationIds.length === 0) return;
     const st = await client.query(
         `SELECT id, name, printer FROM stations WHERE id = ANY($1::int[]) AND tenant_id = $2 AND printer IS NOT NULL`,
-        [stationIds, orderTenantId]
+        [stationIds, tenantId]
     );
 
     for (const station of st.rows) {
@@ -17074,8 +17168,8 @@ async function enqueueCoursePrintsInTx(client: any, orderId: number, courseNo: n
             }));
         if (items.length === 0) continue;
         await client.query(
-            `INSERT INTO print_jobs (kind, payload, printer)
-             VALUES ('COMANDA', $1, $2)`,
+            `INSERT INTO print_jobs (tenant_id, kind, payload, printer)
+             VALUES ($3, 'COMANDA', $1, $2)`,
             [JSON.stringify({
                 order_id: orderId,
                 course_no: courseNo,
@@ -17083,7 +17177,7 @@ async function enqueueCoursePrintsInTx(client: any, orderId: number, courseNo: n
                 covers,
                 station_name: station.name,
                 items,
-            }), station.printer]
+            }), station.printer, tenantId]
         );
     }
 }
@@ -17102,9 +17196,14 @@ app.post('/orders', authenticate, requirePermission('orders:take'), async (req, 
             ? (req.headers['idempotency-key'] as string).slice(0, 80)
             : null;
         if (idemKey) {
-            const prev = await queryWithRetry(`SELECT id FROM orders WHERE idempotency_key = $1`, [idemKey]);
+            // Il vincolo ora è (tenant_id, idempotency_key): la chiave la
+            // genera il client, due ristoranti non devono pestarsi i replay.
+            const prev = await queryWithRetry(
+                `SELECT id FROM orders WHERE tenant_id = $2 AND idempotency_key = $1`,
+                [idemKey, req.tenantId!]
+            );
             if (prev.rows.length > 0) {
-                return res.json({ ...(await loadOrderView(prev.rows[0].id)), replayed: true });
+                return res.json({ ...(await loadOrderView(req.tenantId!, prev.rows[0].id)), replayed: true });
             }
         }
 
@@ -17163,12 +17262,12 @@ app.post('/orders', authenticate, requirePermission('orders:take'), async (req, 
         try {
             const ins = await queryWithRetry(
                 `INSERT INTO orders
-                    (reservation_id, table_id, order_type, price_list_id, covers, notes,
+                    (tenant_id, reservation_id, table_id, order_type, price_list_id, covers, notes,
                      opened_by_user_id, idempotency_key, service_date, shift)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                 VALUES ($11, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                  RETURNING *`,
                 [reservationId, tableId, orderType, priceListId, Math.round(covers), notes,
-                 req.user?.userId ?? null, idemKey, service.service_date, service.shift]
+                 req.user?.userId ?? null, idemKey, service.service_date, service.shift, req.tenantId!]
             );
             created = ins.rows[0];
         } catch (err: any) {
@@ -17179,14 +17278,15 @@ app.post('/orders', authenticate, requirePermission('orders:take'), async (req, 
                 const existing = await queryWithRetry(
                     `SELECT id FROM orders
                      WHERE status = 'OPEN'
+                       AND tenant_id = $5
                        AND ((table_id = $1 AND $1 IS NOT NULL
                              AND service_date = $3 AND shift = $4)
                          OR (reservation_id = $2 AND $2 IS NOT NULL))
                      LIMIT 1`,
-                    [tableId, reservationId, service.service_date, service.shift]
+                    [tableId, reservationId, service.service_date, service.shift, req.tenantId!]
                 );
                 if (existing.rows.length > 0) {
-                    return res.json({ ...(await loadOrderView(existing.rows[0].id)), reused: true });
+                    return res.json({ ...(await loadOrderView(req.tenantId!, existing.rows[0].id)), reused: true });
                 }
             }
             throw err;
@@ -17201,7 +17301,7 @@ app.post('/orders', authenticate, requirePermission('orders:take'), async (req, 
             { reservation_id: reservationId, table_id: tableId, covers: created.covers }
         ).catch(() => {});
 
-        res.status(201).json(await loadOrderView(created.id));
+        res.status(201).json(await loadOrderView(req.tenantId!, created.id));
     } catch (err: any) {
         console.error('POST /orders error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
@@ -17242,7 +17342,7 @@ app.get('/orders/:id', authenticate, requirePermission('orders:view'), async (re
         if (!(await ordersEnabledGuard(req, res))) return;
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
-        const view = await loadOrderView(id);
+        const view = await loadOrderView(req.tenantId!, id);
         if (!view) return res.status(404).json({ error: 'Comanda non trovata' });
         res.json(view);
     } catch (err: any) {
@@ -17278,8 +17378,9 @@ app.get('/tables/bills-status', authenticate, requirePermission('orders:view'), 
              LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
              WHERE b.table_id IS NOT NULL
                AND b.status IN ('OPEN','LOCKED')
+               AND b.tenant_id = $3
                AND b.service_date = $1 AND b.shift = $2`,
-            [service.service_date, service.shift]
+            [service.service_date, service.shift, req.tenantId!]
         );
         const bills = rows.rows
             .map((r: any) => ({
@@ -17325,12 +17426,13 @@ app.get('/tables/:id/order', authenticate, requirePermission('orders:view'), asy
         const r = await queryWithRetry(
             `SELECT id FROM orders
              WHERE table_id = $1 AND status = 'OPEN'
+               AND tenant_id = $4
                AND service_date = $2 AND shift = $3
              LIMIT 1`,
-            [tableId, service.service_date, service.shift]
+            [tableId, service.service_date, service.shift, req.tenantId!]
         );
         if (r.rows.length === 0) return res.status(404).json({ error: 'Nessuna comanda aperta su questo tavolo' });
-        res.json(await loadOrderView(r.rows[0].id));
+        res.json(await loadOrderView(req.tenantId!, r.rows[0].id));
     } catch (err: any) {
         console.error('GET /tables/:id/order error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
@@ -17366,7 +17468,8 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
 
         await client.query('BEGIN');
 
-        const ord = await client.query(`SELECT * FROM orders WHERE id = $1 FOR UPDATE`, [orderId]);
+        // Comanda del tenant o 404: gli id sono globali.
+        const ord = await client.query(`SELECT * FROM orders WHERE id = $1 AND tenant_id = $2 FOR UPDATE`, [orderId, req.tenantId!]);
         if (ord.rows.length === 0) {
             await client.query('ROLLBACK'); client.release();
             return res.status(404).json({ error: 'Comanda non trovata' });
@@ -17473,16 +17576,18 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
                 : (batchKey ? `${batchKey}:${i}` : null);
 
             await client.query(
+                // ON CONFLICT sul nuovo vincolo composto (tenant_id, key):
+                // il replay vale dentro il ristorante, non attraverso.
                 `INSERT INTO order_items
-                    (order_id, dish_id, name_snapshot, unit_price_cents, modifiers, qty,
+                    (tenant_id, order_id, dish_id, name_snapshot, unit_price_cents, modifiers, qty,
                      course_no, seat_no, station_id, note, created_by_user_id, idempotency_key)
-                 VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12)
-                 ON CONFLICT (idempotency_key) DO NOTHING`,
+                 VALUES ($13, $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12)
+                 ON CONFLICT (tenant_id, idempotency_key) DO NOTHING`,
                 [orderId, dishId, dish.rows[0].name, unitPrice,
                  modifiers ? JSON.stringify(modifiers) : null, qty, courseNo, seatNo,
                  Number.isFinite(stationId) ? stationId : null,
                  typeof raw?.note === 'string' ? raw.note.slice(0, 300) : null,
-                 req.user?.userId ?? null, itemKey]
+                 req.user?.userId ?? null, itemKey, req.tenantId!]
             );
         }
 
@@ -17490,9 +17595,9 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
         client.release();
 
         await syncSystemLines(req.tenantId!, orderId);
-        const view = await loadOrderView(orderId);
+        const view = await loadOrderView(req.tenantId!, orderId);
         // Se la comanda è già agganciata a un conto, il totale lo segue.
-        const sync = await resyncBillForOrder(orderId);
+        const sync = await resyncBillForOrder(req.tenantId!, orderId);
         try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
         res.status(201).json({ ...view, ...(sync?.warning ? { bill_warning: sync.warning } : {}) });
     } catch (err: any) {
@@ -17511,7 +17616,7 @@ app.patch('/orders/items/:id', authenticate, requirePermission('orders:take'), a
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
 
-        const cur = await queryWithRetry(`SELECT * FROM order_items WHERE id = $1`, [id]);
+        const cur = await queryWithRetry(`SELECT * FROM order_items WHERE id = $1 AND tenant_id = $2`, [id, req.tenantId!]);
         if (cur.rows.length === 0) return res.status(404).json({ error: 'Riga non trovata' });
         if (cur.rows[0].status !== 'DRAFT') {
             return res.status(409).json({
@@ -17550,14 +17655,15 @@ app.patch('/orders/items/:id', authenticate, requirePermission('orders:take'), a
         if (sets.length === 0) return res.status(400).json({ error: 'Nessun campo da aggiornare' });
 
         vals.push(id);
+        vals.push(req.tenantId!);
         const upd = await queryWithRetry(
-            `UPDATE order_items SET ${sets.join(', ')} WHERE id = $${vals.length} RETURNING order_id`,
+            `UPDATE order_items SET ${sets.join(', ')} WHERE id = $${vals.length - 1} AND tenant_id = $${vals.length} RETURNING order_id`,
             vals
         );
 
         await syncSystemLines(req.tenantId!, upd.rows[0].order_id);
-        const view = await loadOrderView(upd.rows[0].order_id);
-        const sync = await resyncBillForOrder(upd.rows[0].order_id);
+        const view = await loadOrderView(req.tenantId!, upd.rows[0].order_id);
+        const sync = await resyncBillForOrder(req.tenantId!, upd.rows[0].order_id);
         try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
         res.json({ ...view, ...(sync?.warning ? { bill_warning: sync.warning } : {}) });
     } catch (err: any) {
@@ -17572,7 +17678,7 @@ app.delete('/orders/items/:id', authenticate, requirePermission('orders:take'), 
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
 
-        const cur = await queryWithRetry(`SELECT order_id, status FROM order_items WHERE id = $1`, [id]);
+        const cur = await queryWithRetry(`SELECT order_id, status FROM order_items WHERE id = $1 AND tenant_id = $2`, [id, req.tenantId!]);
         if (cur.rows.length === 0) return res.status(404).json({ error: 'Riga non trovata' });
         if (cur.rows[0].status !== 'DRAFT') {
             return res.status(409).json({
@@ -17580,11 +17686,11 @@ app.delete('/orders/items/:id', authenticate, requirePermission('orders:take'), 
                 status: cur.rows[0].status,
             });
         }
-        await queryWithRetry(`DELETE FROM order_items WHERE id = $1`, [id]);
+        await queryWithRetry(`DELETE FROM order_items WHERE id = $1 AND tenant_id = $2`, [id, req.tenantId!]);
 
         await syncSystemLines(req.tenantId!, cur.rows[0].order_id);
-        const view = await loadOrderView(cur.rows[0].order_id);
-        const sync = await resyncBillForOrder(cur.rows[0].order_id);
+        const view = await loadOrderView(req.tenantId!, cur.rows[0].order_id);
+        const sync = await resyncBillForOrder(req.tenantId!, cur.rows[0].order_id);
         try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
         res.json({ ...view, ...(sync?.warning ? { bill_warning: sync.warning } : {}) });
     } catch (err: any) {
@@ -17614,7 +17720,7 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
         const mode = await getCourseFireMode(req.tenantId!);
         await client.query('BEGIN');
 
-        const ord = await client.query(`SELECT * FROM orders WHERE id = $1 FOR UPDATE`, [orderId]);
+        const ord = await client.query(`SELECT * FROM orders WHERE id = $1 AND tenant_id = $2 FOR UPDATE`, [orderId, req.tenantId!]);
         if (ord.rows.length === 0) {
             await client.query('ROLLBACK'); client.release();
             return res.status(404).json({ error: 'Comanda non trovata' });
@@ -17643,14 +17749,14 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
                      : [];
         const fired: number[] = [];
         for (const c of toFire) {
-            const rows = await fireCourseInTx(client, orderId, c);
+            const rows = await fireCourseInTx(client, req.tenantId!, orderId, c);
             if (rows.length > 0) fired.push(c);
         }
 
         await client.query('COMMIT');
         client.release();
 
-        const view = await loadOrderView(orderId);
+        const view = await loadOrderView(req.tenantId!, orderId);
         const stillQueued = proposedCourses.filter(c => !fired.includes(c));
         try {
             // Il passe riceve ciò che attende di essere lanciato, i monitor di
@@ -17702,8 +17808,9 @@ app.post('/orders/:id/courses/:n/recall', authenticate, requirePermission('order
             `UPDATE order_items
              SET status = 'DRAFT', queued_at = NULL
              WHERE order_id = $1 AND course_no = $2 AND status = 'QUEUED' AND fired_at IS NULL
+               AND tenant_id = $3
              RETURNING id`,
-            [orderId, courseNo]
+            [orderId, courseNo, req.tenantId!]
         );
         if (upd.rows.length === 0) {
             return res.status(409).json({
@@ -17711,7 +17818,7 @@ app.post('/orders/:id/courses/:n/recall', authenticate, requirePermission('order
             });
         }
 
-        const view = await loadOrderView(orderId);
+        const view = await loadOrderView(req.tenantId!, orderId);
         try {
             socketService?.broadcastToAll('course:recalled', { order_id: orderId, course_no: courseNo });
             socketService?.broadcastToAll('order:updated', view.order);
@@ -17767,11 +17874,12 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
                  LIMIT 1
              ) c ON true
              WHERE oi.status IN ('SENT','PREPARING','READY')
+               AND o.tenant_id = $4
                AND o.service_date = $2 AND o.shift = $3
                AND ($1::int IS NULL OR oi.station_id = $1)
                AND ($1::int IS NOT NULL OR oi.station_id IS NULL)
              ORDER BY oi.station_start_at NULLS FIRST, oi.id`,
-            [stationId, service.service_date, service.shift]
+            [stationId, service.service_date, service.shift, req.tenantId!]
         );
 
         // Lo stato dell'uscita serve al monitor per sapere se sta facendo
@@ -17784,11 +17892,12 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
                 `SELECT order_id, course_no, status, ready_at, station_id
                  FROM order_items
                  WHERE status <> 'VOIDED'
+                   AND tenant_id = $2
                    AND (order_id, course_no) IN (
                        SELECT (split_part(k, ':', 1))::int, (split_part(k, ':', 2))::int
                        FROM unnest($1::text[]) AS k
                    )`,
-                [keys]
+                [keys, req.tenantId!]
             );
             siblings = sib.rows;
         }
@@ -17841,12 +17950,12 @@ app.post('/kds/items/:id/status', authenticate, requirePermission('orders:kds'),
              SET status = $2::varchar,
                  started_at = CASE WHEN started_at IS NULL THEN CURRENT_TIMESTAMP ELSE started_at END,
                  ready_at   = CASE WHEN $2::text = 'READY' THEN CURRENT_TIMESTAMP ELSE ready_at END
-             WHERE id = $1 AND status = ANY($3::varchar[])
+             WHERE id = $1 AND tenant_id = $4 AND status = ANY($3::varchar[])
              RETURNING *`,
-            [id, next, allowedFrom]
+            [id, next, allowedFrom, req.tenantId!]
         );
         if (upd.rows.length === 0) {
-            const cur = await queryWithRetry(`SELECT status FROM order_items WHERE id = $1`, [id]);
+            const cur = await queryWithRetry(`SELECT status FROM order_items WHERE id = $1 AND tenant_id = $2`, [id, req.tenantId!]);
             if (cur.rows.length === 0) return res.status(404).json({ error: 'Riga non trovata' });
             return res.status(409).json({
                 error: `Transizione non ammessa da ${cur.rows[0].status} a ${next}`,
@@ -17927,10 +18036,11 @@ app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), as
              LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
              LEFT JOIN reservations r ON r.id = o.reservation_id AND r.tenant_id = o.tenant_id
              WHERE o.status = 'OPEN'
+               AND o.tenant_id = $3
                AND o.service_date = $1 AND o.shift = $2
                AND oi.status IN ('QUEUED','SENT','PREPARING','READY')
              ORDER BY oi.course_no, oi.id`,
-            [service.service_date, service.shift]
+            [service.service_date, service.shift, req.tenantId!]
         );
 
         const nowMs = Date.now();
@@ -18038,7 +18148,7 @@ app.post('/orders/:id/courses/:n/fire', authenticate, requirePermission('orders:
         }
 
         await client.query('BEGIN');
-        const fired = await fireCourseInTx(client, orderId, courseNo);
+        const fired = await fireCourseInTx(client, req.tenantId!, orderId, courseNo);
         if (fired.length === 0) {
             await client.query('ROLLBACK'); client.release();
             return res.status(409).json({ error: "L'uscita non è in attesa di lancio" });
@@ -18046,7 +18156,7 @@ app.post('/orders/:id/courses/:n/fire', authenticate, requirePermission('orders:
         await client.query('COMMIT');
         client.release();
 
-        const view = await loadOrderView(orderId);
+        const view = await loadOrderView(req.tenantId!, orderId);
         try {
             socketService?.broadcastToAll('course:fired', {
                 order_id: orderId, course_no: courseNo,
@@ -18094,6 +18204,7 @@ app.post('/orders/:id/courses/:n/refire', authenticate, requirePermission('order
                  FROM order_items oi
                  LEFT JOIN dishes d ON d.id = oi.dish_id AND d.tenant_id = oi.tenant_id
                  WHERE oi.order_id = $1 AND oi.course_no = $2 AND oi.status = 'SENT'
+                   AND oi.tenant_id = $3
              ), mx AS (
                  SELECT COALESCE(MAX(p), 0) AS m FROM prep
              )
@@ -18104,7 +18215,7 @@ app.post('/orders/:id/courses/:n/refire', authenticate, requirePermission('order
              FROM prep, mx
              WHERE oi.id = prep.id
              RETURNING oi.*`,
-            [orderId, courseNo]
+            [orderId, courseNo, req.tenantId!]
         );
         if (upd.rows.length === 0) {
             await client.query('ROLLBACK'); client.release();
@@ -18145,8 +18256,8 @@ app.post('/orders/:id/courses/:n/call', authenticate, requirePermission('orders:
         const info = await queryWithRetry(
             `SELECT t.name AS table_name
              FROM orders o LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
-             WHERE o.id = $1`,
-            [orderId]
+             WHERE o.id = $1 AND o.tenant_id = $2`,
+            [orderId, req.tenantId!]
         );
         if (info.rows.length === 0) return res.status(404).json({ error: 'Comanda non trovata' });
         const tableName = info.rows[0].table_name ?? '—';
@@ -18234,17 +18345,18 @@ async function billItemsSnapshot(client: any, billId: number): Promise<any[]> {
 // senza caparra syncBillTotalInTx si comporta esattamente come prima.
 // Non promuove a SETTLED: durante la composizione della comanda sarebbe
 // prematuro (la chiusura conto conteggia già l'acconto fra le quote PAID).
-async function maintainDepositCredit(client: any, billId: number, reservationId: number | null, newTotal: number): Promise<void> {
+async function maintainDepositCredit(client: any, tenantId: number, billId: number, reservationId: number | null, newTotal: number): Promise<void> {
     if (!reservationId) return;
     const deposits = await client.query(
         `SELECT pr.id, pr.amount_cents, pr.completed_at
          FROM payment_requests pr
          WHERE pr.reservation_id = $1
+           AND pr.tenant_id = $2
            AND pr.table_bill_split_id IS NULL
            AND UPPER(pr.status) IN ('COMPLETED', 'PAID')
            AND pr.completed_at IS NOT NULL
          ORDER BY pr.completed_at ASC`,
-        [reservationId]
+        [reservationId, tenantId]
     );
     if (deposits.rowCount === 0) return; // nessun acconto → nessun effetto
 
@@ -18286,20 +18398,20 @@ async function maintainDepositCredit(client: any, billId: number, reservationId:
         } else if (want > 0) {
             await client.query(
                 `INSERT INTO table_bill_splits
-                    (table_bill_id, kind, amount_cents, claimant_label, claimed_at, expires_at, payment_request_id, status, paid_at)
-                 VALUES ($1, 'deposit', $2, 'Acconto', $3, NULL, $4, 'PAID', $3)
+                    (tenant_id, table_bill_id, kind, amount_cents, claimant_label, claimed_at, expires_at, payment_request_id, status, paid_at)
+                 VALUES ($5, $1, 'deposit', $2, 'Acconto', $3, NULL, $4, 'PAID', $3)
                  ON CONFLICT (payment_request_id) WHERE kind = 'deposit'
                  DO UPDATE SET amount_cents = EXCLUDED.amount_cents, status = 'PAID', released_at = NULL`,
-                [billId, want, dep.completed_at, dep.id]
+                [billId, want, dep.completed_at, dep.id, tenantId]
             );
         }
     }
 }
 
-async function syncBillTotalInTx(client: any, billId: number): Promise<any> {
+async function syncBillTotalInTx(client: any, tenantId: number, billId: number): Promise<any> {
     const billRs = await client.query(
-        `SELECT id, reservation_id, total_cents, status FROM table_bills WHERE id = $1 FOR UPDATE`,
-        [billId]
+        `SELECT id, reservation_id, total_cents, status FROM table_bills WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+        [billId, tenantId]
     );
     if (billRs.rowCount === 0) throw new BillSyncError('Conto non trovato', { bill_id: billId });
     const bill = billRs.rows[0];
@@ -18381,7 +18493,7 @@ async function syncBillTotalInTx(client: any, billId: number): Promise<any> {
     // Ridimensiona l'acconto alla capienza residua (dopo i rilasci): la quota
     // 'deposit' cresce/cala col conto invece di restare bloccata all'apertura.
     // No-op se la prenotazione non ha acconti.
-    await maintainDepositCredit(client, billId, bill.reservation_id, newTotal);
+    await maintainDepositCredit(client, tenantId, billId, bill.reservation_id, newTotal);
 
     const items = await billItemsSnapshot(client, billId);
     const upd = await client.query(
@@ -18400,15 +18512,15 @@ async function syncBillTotalInTx(client: any, billId: number): Promise<any> {
 // Riallineamento fuori transazione, usato dopo ogni mutazione di riga. Non
 // deve mai far fallire l'operazione sulla comanda: se il conto non si può
 // aggiornare lo segnaliamo, ma la riga resta com'è.
-async function resyncBillForOrder(orderId: number): Promise<{ warning?: string } | null> {
-    const o = await queryWithRetry(`SELECT table_bill_id FROM orders WHERE id = $1`, [orderId]);
+async function resyncBillForOrder(tenantId: number, orderId: number): Promise<{ warning?: string } | null> {
+    const o = await queryWithRetry(`SELECT table_bill_id FROM orders WHERE id = $1 AND tenant_id = $2`, [orderId, tenantId]);
     const billId = o.rows[0]?.table_bill_id;
     if (!billId) return null;
 
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        const result = await syncBillTotalInTx(client, billId);
+        const result = await syncBillTotalInTx(client, tenantId, billId);
         await client.query('COMMIT');
         try { socketService?.broadcastToAll('bill:updated', result.bill); } catch (_) {}
         return null;
@@ -18448,8 +18560,9 @@ app.patch('/orders/:id', authenticate, requirePermission('orders:take'), async (
         if (sets.length === 0) return res.status(400).json({ error: 'Nessun campo da aggiornare' });
 
         vals.push(id);
+        vals.push(req.tenantId!);
         const upd = await queryWithRetry(
-            `UPDATE orders SET ${sets.join(', ')} WHERE id = $${vals.length} AND status = 'OPEN' RETURNING *`,
+            `UPDATE orders SET ${sets.join(', ')} WHERE id = $${vals.length - 1} AND tenant_id = $${vals.length} AND status = 'OPEN' RETURNING *`,
             vals
         );
         if (upd.rows.length === 0) return res.status(404).json({ error: 'Comanda non trovata o non aperta' });
@@ -18457,17 +18570,17 @@ app.patch('/orders/:id', authenticate, requirePermission('orders:take'), async (
         // Cambiare i coperti cambia la riga "Coperto".
         if (req.body?.covers != null) {
             await syncSystemLines(req.tenantId!, id);
-            await resyncBillForOrder(id);
+            await resyncBillForOrder(req.tenantId!, id);
         }
         // I coperti viaggiano anche sul conto: è il divisore dello split equo.
         if (upd.rows[0].table_bill_id && req.body?.covers != null) {
             await queryWithRetry(
-                `UPDATE table_bills SET covers = $2 WHERE id = $1`,
-                [upd.rows[0].table_bill_id, upd.rows[0].covers]
+                `UPDATE table_bills SET covers = $2 WHERE id = $1 AND tenant_id = $3`,
+                [upd.rows[0].table_bill_id, upd.rows[0].covers, req.tenantId!]
             );
         }
 
-        const view = await loadOrderView(id);
+        const view = await loadOrderView(req.tenantId!, id);
         try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
         res.json(view);
     } catch (err: any) {
@@ -18488,7 +18601,7 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
         if (!Number.isFinite(orderId)) { client.release(); return res.status(400).json({ error: 'id non valido' }); }
 
         await client.query('BEGIN');
-        const ordRs = await client.query(`SELECT * FROM orders WHERE id = $1 FOR UPDATE`, [orderId]);
+        const ordRs = await client.query(`SELECT * FROM orders WHERE id = $1 AND tenant_id = $2 FOR UPDATE`, [orderId, req.tenantId!]);
         if (ordRs.rows.length === 0) {
             await client.query('ROLLBACK'); client.release();
             return res.status(404).json({ error: 'Comanda non trovata' });
@@ -18567,11 +18680,12 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
             const existing = await client.query(
                 `SELECT id FROM table_bills
                  WHERE status IN ('OPEN','LOCKED','SETTLED','SETTLED_PARTIAL')
+                   AND tenant_id = $5
                    AND ((reservation_id = $1 AND $1 IS NOT NULL)
                      OR (table_id = $2 AND $2 IS NOT NULL AND reservation_id IS NULL))
                    AND service_date = $3 AND shift = $4
                  ORDER BY opened_at DESC LIMIT 1`,
-                [order.reservation_id, order.table_id, order.service_date, order.shift]
+                [order.reservation_id, order.table_id, order.service_date, order.shift, req.tenantId!]
             );
             if (existing.rows.length > 0) {
                 billId = existing.rows[0].id;
@@ -18579,12 +18693,12 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
                 const shareToken = crypto.randomBytes(24).toString('base64url');
                 const ins = await client.query(
                     `INSERT INTO table_bills
-                        (reservation_id, table_id, total_cents, covers, share_token, opened_by_user_id,
+                        (tenant_id, reservation_id, table_id, total_cents, covers, share_token, opened_by_user_id,
                          service_date, shift)
-                     VALUES ($1, $2, 1, $3, $4, $5, $6, $7)
+                     VALUES ($8, $1, $2, 1, $3, $4, $5, $6, $7)
                      RETURNING id`,
                     [order.reservation_id, order.table_id, order.covers, shareToken, req.user?.userId ?? null,
-                     order.service_date, order.shift]
+                     order.service_date, order.shift, req.tenantId!]
                 );
                 billId = ins.rows[0].id;
             }
@@ -18593,7 +18707,7 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
 
         let synced;
         try {
-            synced = await syncBillTotalInTx(client, billId!);
+            synced = await syncBillTotalInTx(client, req.tenantId!, billId!);
         } catch (err: any) {
             await client.query('ROLLBACK'); client.release();
             if (err instanceof BillSyncError) {
@@ -18634,7 +18748,7 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
              FROM table_bill_splits WHERE table_bill_id = $1`,
             [billId]
         );
-        const depositPaid = await depositPaidCentsForReservation(synced.bill.reservation_id);
+        const depositPaid = await depositPaidCentsForReservation(req.tenantId!, synced.bill.reservation_id);
         res.json({
             order_id: orderId,
             bill: {
@@ -18706,9 +18820,9 @@ app.post('/tables/:id/bill', authenticate, requirePermission('payments:full'), a
         try {
             inserted = await queryWithRetry(
                 `INSERT INTO table_bills
-                    (reservation_id, table_id, total_cents, covers, share_token, opened_by_user_id,
+                    (tenant_id, reservation_id, table_id, total_cents, covers, share_token, opened_by_user_id,
                      items, external_ref, service_date, shift)
-                 VALUES (NULL, $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9)
+                 VALUES ($10, NULL, $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9)
                  RETURNING id, reservation_id, table_id, total_cents, covers, currency,
                            items, status, share_token, opened_at, closed_at,
                            opened_by_user_id, closed_by_user_id, external_ref,
@@ -18716,17 +18830,17 @@ app.post('/tables/:id/bill', authenticate, requirePermission('payments:full'), a
                 [tableId, Math.round(totalCents), covers, shareToken, req.user?.userId ?? null,
                  ppPayload ? JSON.stringify(ppPayload.items) : null,
                  ppPayload?.external_ref ?? null,
-                 resolveService().service_date, resolveService().shift]
+                 resolveService().service_date, resolveService().shift, req.tenantId!]
             );
         } catch (err: any) {
             // L'indice unico ha fatto il suo lavoro: c'è già un conto attivo.
             if (err?.code === '23505') {
                 const existing = await queryWithRetry(
                     `SELECT id, status FROM table_bills
-                     WHERE table_id = $1 AND reservation_id IS NULL
+                     WHERE table_id = $1 AND tenant_id = $2 AND reservation_id IS NULL
                        AND status IN ('OPEN','LOCKED','SETTLED','SETTLED_PARTIAL')
                      LIMIT 1`,
-                    [tableId]
+                    [tableId, req.tenantId!]
                 );
                 return res.status(409).json({
                     error: 'Il tavolo ha già un conto attivo',
@@ -18777,9 +18891,9 @@ async function syncSystemLinesInTx(client: any, tenantId: number, orderId: numbe
     if (coverCents > 0 && covers > 0) {
         await client.query(
             `INSERT INTO order_items
-                (order_id, name_snapshot, unit_price_cents, qty, course_no, status, line_kind)
-             VALUES ($1, 'Coperto', $2, $3, 1, 'SERVED', 'COVER')`,
-            [orderId, coverCents, covers]
+                (tenant_id, order_id, name_snapshot, unit_price_cents, qty, course_no, status, line_kind)
+             VALUES ($4, $1, 'Coperto', $2, $3, 1, 'SERVED', 'COVER')`,
+            [orderId, coverCents, covers, tenantId]
         );
     }
 
@@ -18802,9 +18916,9 @@ async function syncSystemLinesInTx(client: any, tenantId: number, orderId: numbe
         if (amount > 0) {
             await client.query(
                 `INSERT INTO order_items
-                    (order_id, name_snapshot, unit_price_cents, qty, course_no, status, line_kind)
-                 VALUES ($1, $2, $3, 1, 1, 'SERVED', 'SERVICE')`,
-                [orderId, `Servizio ${servicePct}%`, amount]
+                    (tenant_id, order_id, name_snapshot, unit_price_cents, qty, course_no, status, line_kind)
+                 VALUES ($4, $1, $2, $3, 1, 1, 'SERVED', 'SERVICE')`,
+                [orderId, `Servizio ${servicePct}%`, amount, tenantId]
             );
         }
     }
@@ -18841,20 +18955,20 @@ app.post('/orders/items/:id/void', authenticate, requirePermission('orders:void'
             `UPDATE order_items
              SET status = 'VOIDED', voided_at = CURRENT_TIMESTAMP,
                  voided_by_user_id = $2, void_reason = $3
-             WHERE id = $1 AND status <> 'VOIDED'
+             WHERE id = $1 AND tenant_id = $4 AND status <> 'VOIDED'
              RETURNING *`,
-            [id, req.user?.userId ?? null, reason.slice(0, 300)]
+            [id, req.user?.userId ?? null, reason.slice(0, 300), req.tenantId!]
         );
         if (upd.rows.length === 0) {
-            const cur = await queryWithRetry(`SELECT status FROM order_items WHERE id = $1`, [id]);
+            const cur = await queryWithRetry(`SELECT status FROM order_items WHERE id = $1 AND tenant_id = $2`, [id, req.tenantId!]);
             if (cur.rows.length === 0) return res.status(404).json({ error: 'Riga non trovata' });
             return res.status(409).json({ error: 'Riga già stornata' });
         }
         const item = upd.rows[0];
 
         await syncSystemLines(req.tenantId!, item.order_id);
-        const view = await loadOrderView(item.order_id);
-        const sync = await resyncBillForOrder(item.order_id);
+        const view = await loadOrderView(req.tenantId!, item.order_id);
+        const sync = await resyncBillForOrder(req.tenantId!, item.order_id);
 
         try {
             // La cucina deve vedere sparire la riga dal monitor: continuare a
@@ -18924,14 +19038,14 @@ app.post('/orders/:id/discount', authenticate, requirePermission('orders:void'),
             `UPDATE orders
              SET discount_type = $2, discount_value = $3, discount_reason = $4,
                  discount_by_user_id = $5
-             WHERE id = $1 AND status = 'OPEN'
+             WHERE id = $1 AND tenant_id = $6 AND status = 'OPEN'
              RETURNING *`,
-            [id, type, value, reason, clear ? null : (req.user?.userId ?? null)]
+            [id, type, value, reason, clear ? null : (req.user?.userId ?? null), req.tenantId!]
         );
         if (upd.rows.length === 0) return res.status(404).json({ error: 'Comanda non trovata o non aperta' });
 
-        const view = await loadOrderView(id);
-        const sync = await resyncBillForOrder(id);
+        const view = await loadOrderView(req.tenantId!, id);
+        const sync = await resyncBillForOrder(req.tenantId!, id);
         try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
 
         LogService.logActivity(
@@ -18963,7 +19077,7 @@ app.post('/orders/:id/transfer', authenticate, requirePermission('orders:take'),
         }
 
         await client.query('BEGIN');
-        const ord = await client.query(`SELECT * FROM orders WHERE id = $1 FOR UPDATE`, [id]);
+        const ord = await client.query(`SELECT * FROM orders WHERE id = $1 AND tenant_id = $2 FOR UPDATE`, [id, req.tenantId!]);
         if (ord.rows.length === 0) {
             await client.query('ROLLBACK'); client.release();
             return res.status(404).json({ error: 'Comanda non trovata' });
@@ -18984,8 +19098,8 @@ app.post('/orders/:id/transfer', authenticate, requirePermission('orders:take'),
             return res.status(404).json({ error: 'Tavolo di destinazione non trovato' });
         }
         const busy = await client.query(
-            `SELECT id FROM orders WHERE table_id = $1 AND status = 'OPEN' AND id <> $2 LIMIT 1`,
-            [targetId, id]
+            `SELECT id FROM orders WHERE table_id = $1 AND tenant_id = $3 AND status = 'OPEN' AND id <> $2 LIMIT 1`,
+            [targetId, id, req.tenantId!]
         );
         if (busy.rows.length > 0) {
             await client.query('ROLLBACK'); client.release();
@@ -19018,7 +19132,7 @@ app.post('/orders/:id/transfer', authenticate, requirePermission('orders:take'),
         await client.query('COMMIT');
         client.release();
 
-        const view = await loadOrderView(id);
+        const view = await loadOrderView(req.tenantId!, id);
         try { socketService?.broadcastToAll('order:updated', view.order); } catch (_) {}
 
         LogService.logActivity(
@@ -19151,11 +19265,12 @@ app.get('/reports/kitchen', authenticate, requirePermission('orders:expedite'), 
              FROM order_items oi
              LEFT JOIN stations s ON s.id = oi.station_id AND s.tenant_id = oi.tenant_id
              WHERE oi.ready_at IS NOT NULL AND oi.line_kind = 'DISH'
+               AND oi.tenant_id = $3
                AND ($1::date IS NULL OR oi.fired_at >= $1::date)
                AND ($2::date IS NULL OR oi.fired_at < ($2::date + INTERVAL '1 day'))
              GROUP BY s.id, s.name
              ORDER BY s.sort_order NULLS LAST, s.id`,
-            [from, to]
+            [from, to, req.tenantId!]
         );
 
         // Delta di sincronia per uscita completata.
@@ -19166,6 +19281,7 @@ app.get('/reports/kitchen', authenticate, requirePermission('orders:expedite'), 
                         COUNT(DISTINCT oi.station_id)::int AS partite
                  FROM order_items oi
                  WHERE oi.status IN ('READY','SERVED') AND oi.line_kind = 'DISH'
+                   AND oi.tenant_id = $3
                    AND oi.ready_at IS NOT NULL
                    AND ($1::date IS NULL OR oi.fired_at >= $1::date)
                    AND ($2::date IS NULL OR oi.fired_at < ($2::date + INTERVAL '1 day'))
@@ -19178,7 +19294,7 @@ app.get('/reports/kitchen', authenticate, requirePermission('orders:expedite'), 
                     ROUND((PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(epoch FROM delta)))::numeric/60.0, 1) AS delta_mediano_min,
                     ROUND(MAX(EXTRACT(epoch FROM delta))/60.0, 1) AS delta_massimo_min
              FROM uscite`,
-            [from, to]
+            [from, to, req.tenantId!]
         );
 
         // Attesa al passe: quanto restano ferme le proposte prima del lancio.
@@ -19194,11 +19310,12 @@ app.get('/reports/kitchen', authenticate, requirePermission('orders:expedite'), 
                  SELECT MIN(queued_at) AS queued_at, MIN(fired_at) AS fired_at
                  FROM order_items
                  WHERE queued_at IS NOT NULL AND fired_at IS NOT NULL AND line_kind = 'DISH'
+                   AND tenant_id = $3
                    AND ($1::date IS NULL OR fired_at >= $1::date)
                    AND ($2::date IS NULL OR fired_at < ($2::date + INTERVAL '1 day'))
                  GROUP BY order_id, course_no
              ) q`,
-            [from, to]
+            [from, to, req.tenantId!]
         );
 
         // Scarto: cosa è stato stornato e perché. La motivazione è
@@ -19211,12 +19328,13 @@ app.get('/reports/kitchen', authenticate, requirePermission('orders:expedite'), 
                     ), 0)) * oi.qty)::int AS valore_cents
              FROM order_items oi
              WHERE oi.status = 'VOIDED' AND oi.line_kind = 'DISH'
+               AND oi.tenant_id = $3
                AND ($1::date IS NULL OR oi.voided_at >= $1::date)
                AND ($2::date IS NULL OR oi.voided_at < ($2::date + INTERVAL '1 day'))
              GROUP BY oi.void_reason
              ORDER BY valore_cents DESC NULLS LAST
              LIMIT 10`,
-            [from, to]
+            [from, to, req.tenantId!]
         );
 
         res.json({
@@ -19293,6 +19411,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
              LEFT JOIN reservations r ON r.id = b.reservation_id AND r.tenant_id = b.tenant_id
              LEFT JOIN table_bill_splits s ON s.table_bill_id = b.id
              WHERE b.status = ANY($3::varchar[])
+               AND b.tenant_id = $4
                AND ($1::date IS NULL OR COALESCE(
                         (SELECT o.service_date FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
                         CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) < 5
@@ -19304,7 +19423,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                              THEN 'LUNCH' ELSE 'DINNER' END) = $2::varchar)
              GROUP BY b.id, t.name, r.customer_name
              ORDER BY b.closed_at DESC NULLS LAST, b.opened_at DESC`,
-            [filterDate, filterShift, statuses]
+            [filterDate, filterShift, statuses, req.tenantId!]
         );
 
         // Comande aperte in servizi DIVERSI da quello selezionato: restano come
@@ -19328,11 +19447,12 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
              LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
              LEFT JOIN order_items oi ON oi.order_id = o.id
              WHERE o.status = 'OPEN'
+               AND o.tenant_id = $3
                AND (o.service_date <> $1::date
                     OR ($2::varchar IS NOT NULL AND o.shift <> $2::varchar))
              GROUP BY o.id, t.name
              ORDER BY o.service_date DESC, o.opened_at DESC`,
-            [staleDate, staleShift]
+            [staleDate, staleShift, req.tenantId!]
         );
 
         res.json({
@@ -19393,8 +19513,8 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
         const b = await queryWithRetry(
             `SELECT b.*, t.name AS table_name FROM table_bills b
              LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
-             WHERE b.id = $1`,
-            [billId]
+             WHERE b.id = $1 AND b.tenant_id = $2`,
+            [billId, req.tenantId!]
         );
         if (b.rows.length === 0) return res.status(404).json({ error: 'Conto non trovato' });
         const bill = b.rows[0];
@@ -19424,7 +19544,7 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
         );
         const depositCreditCents = billTotalsRs.rows[0].deposit_credit_cents;
         const residualCents = Math.max(0, bill.total_cents - billTotalsRs.rows[0].live_cents);
-        const depositPaidCents = await depositPaidCentsForReservation(bill.reservation_id);
+        const depositPaidCents = await depositPaidCentsForReservation(req.tenantId!, bill.reservation_id);
         const refundDueCents = Math.max(0, depositPaidCents - depositCreditCents);
 
         // Priorità: stampante esplicita nel body → instradamento configurato
@@ -19442,8 +19562,8 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
             return res.status(409).json({ error: 'qr_unavailable', message: 'Il conto non ha più un QR valido' });
         }
         const ins = await queryWithRetry(
-            `INSERT INTO print_jobs (kind, payload, printer, created_by_user_id)
-             VALUES ($4, $1, $3, $2) RETURNING id`,
+            `INSERT INTO print_jobs (tenant_id, kind, payload, printer, created_by_user_id)
+             VALUES ($5, $4, $1, $3, $2) RETURNING id`,
             [JSON.stringify({
                 bill_id: bill.id,
                 table_name: bill.table_name ?? null,
@@ -19455,7 +19575,7 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
                 residual_cents: residualCents,
                 items,
                 share_url: shareUrl,
-            }), req.user?.userId ?? null, printer, kind]
+            }), req.user?.userId ?? null, printer, kind, req.tenantId!]
         );
         res.status(201).json({ id: ins.rows[0].id, status: 'PENDING' });
     } catch (err: any) {
@@ -19485,9 +19605,13 @@ app.get('/print-agent/config', printAgentAuth, async (_req, res) => {
 
 app.get('/print-agent/jobs', printAgentAuth, async (_req, res) => {
     try {
+        // L'agente si autentica col token d'installazione, non col JWT: la
+        // coda resta quella del tenant storico finché il token non porterà il
+        // suo (Fase C2, agente per tenant).
         const rows = await queryWithRetry(
             `SELECT id, kind, payload, printer, attempts FROM print_jobs
-             WHERE status = 'PENDING' ORDER BY id LIMIT 10`
+             WHERE status = 'PENDING' AND tenant_id = $1 ORDER BY id LIMIT 10`,
+            [PUBLIC_TENANT_ID]
         );
         res.json({ jobs: rows.rows });
     } catch (err: any) {
@@ -19501,9 +19625,10 @@ app.post('/print-agent/jobs/:id/ack', printAgentAuth, async (req, res) => {
         const id = Number(req.params.id);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
         if (req.body?.ok) {
+            // Stesso perimetro del poll: solo i job del tenant dell'agente.
             await queryWithRetry(
                 `UPDATE print_jobs SET status = 'PRINTED', printed_at = CURRENT_TIMESTAMP, error = NULL
-                 WHERE id = $1`, [id]
+                 WHERE id = $1 AND tenant_id = $2`, [id, PUBLIC_TENANT_ID]
             );
         } else {
             // Dopo troppi tentativi il job si arena come FAILED invece di
@@ -19513,8 +19638,8 @@ app.post('/print-agent/jobs/:id/ack', printAgentAuth, async (req, res) => {
                  SET attempts = attempts + 1,
                      error = $2,
                      status = CASE WHEN attempts + 1 >= 20 THEN 'FAILED' ELSE 'PENDING' END
-                 WHERE id = $1`,
-                [id, String(req.body?.error ?? 'errore sconosciuto').slice(0, 500)]
+                 WHERE id = $1 AND tenant_id = $3`,
+                [id, String(req.body?.error ?? 'errore sconosciuto').slice(0, 500), PUBLIC_TENANT_ID]
             );
         }
         res.json({ ok: true });
@@ -19557,7 +19682,7 @@ app.get('/sala/config', authenticate, async (req, res) => {
             getCourseFireMode(req.tenantId!),
             queryWithRetry(`SELECT id, name, color, sort_order, is_active, printer FROM stations WHERE tenant_id = $1 ORDER BY sort_order, id`, [req.tenantId!]),
             queryWithRetry(`SELECT id, name, host, port, kind, is_active, notes FROM printers WHERE tenant_id = $1 ORDER BY kind, name`, [req.tenantId!]),
-            queryWithRetry(`SELECT status, COUNT(*)::int AS n FROM print_jobs WHERE status IN ('PENDING','FAILED') GROUP BY status`),
+            queryWithRetry(`SELECT status, COUNT(*)::int AS n FROM print_jobs WHERE tenant_id = $1 AND status IN ('PENDING','FAILED') GROUP BY status`, [req.tenantId!]),
             getPrintRoutes(req.tenantId!),
             queryWithRetry(`SELECT DISTINCT category FROM dishes WHERE tenant_id = $1 AND category IS NOT NULL AND category <> '' ORDER BY category`, [req.tenantId!]),
             queryWithRetry(`SELECT category, station_id FROM category_stations WHERE tenant_id = $1`, [req.tenantId!]),
@@ -19815,10 +19940,10 @@ app.post('/sala/printers/:id/test', authenticate, requirePermission('settings:fu
         if (p.rows[0].kind !== 'THERMAL') return res.status(400).json({ error: 'La stampante fiscale non accetta stampe di prova (Fase 2)' });
         if (!p.rows[0].is_active) return res.status(400).json({ error: 'Stampante disattivata' });
         const ins = await queryWithRetry(
-            `INSERT INTO print_jobs (kind, payload, printer, created_by_user_id)
-             VALUES ('TEST', $1, $2, $3) RETURNING id`,
+            `INSERT INTO print_jobs (tenant_id, kind, payload, printer, created_by_user_id)
+             VALUES ($4, 'TEST', $1, $2, $3) RETURNING id`,
             [JSON.stringify({ printer_name: p.rows[0].name, host: p.rows[0].host, port: p.rows[0].port }),
-             p.rows[0].name, req.user?.userId ?? null]
+             p.rows[0].name, req.user?.userId ?? null, req.tenantId!]
         );
         res.status(201).json({ id: ins.rows[0].id, status: 'PENDING' });
     } catch (err: any) {
@@ -20052,7 +20177,7 @@ bookingTools.configureBookingTools({
     getLargeGroupThreshold: () => getVoiceLargeGroupThreshold(PUBLIC_TENANT_ID),
 
     isAutoDepositRequired: (guests: number) => isAutoDepositRequired(PUBLIC_TENANT_ID, guests),
-    getAutoDepositPolicy,
+    getAutoDepositPolicy: () => getAutoDepositPolicy(PUBLIC_TENANT_ID),
     depositDefaultPerPersonCents: DEPOSIT_DEFAULTS.perPersonCents,
     createPaymentOrder: (p: any) => createPaymentOrder(PUBLIC_TENANT_ID, p),
     queryWithRetry,

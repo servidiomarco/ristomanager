@@ -52,8 +52,11 @@ export interface ImapStatus {
     connected: boolean;
 }
 
+// Cache per tenant (Fase B3.6): la config vive sulla riga (tenant_id, 'smtp').
+// Il listener long-lived resta UNO, sulla mailbox del tenant storico, ma le
+// letture di stato dalle Impostazioni sono già scopate sul tenant richiesto.
 const CACHE_TTL_MS = 30_000;
-let cache: { config: ImapConfig; loadedAt: number } | null = null;
+const cache = new Map<number, { config: ImapConfig; loadedAt: number }>();
 
 function envDefaults(): ImapConfig {
     return {
@@ -67,13 +70,14 @@ function envDefaults(): ImapConfig {
     };
 }
 
-async function loadFromDb(): Promise<ImapConfig> {
+async function loadFromDb(tenantId: number): Promise<ImapConfig> {
     const defaults = envDefaults();
     try {
         const result = await queryWithRetry(
             `SELECT imap_host, imap_port, imap_secure, imap_user, imap_password,
                     imap_enabled, imap_last_seen_uid
-             FROM integration_settings WHERE provider = 'smtp' LIMIT 1`
+             FROM integration_settings WHERE tenant_id = $1 AND provider = 'smtp' LIMIT 1`,
+            [tenantId]
         );
         const row = result.rows[0];
         if (!row) return defaults;
@@ -95,24 +99,25 @@ async function loadFromDb(): Promise<ImapConfig> {
     }
 }
 
-async function getConfig(force = false): Promise<ImapConfig> {
+async function getConfig(tenantId: number, force = false): Promise<ImapConfig> {
     const now = Date.now();
-    if (!force && cache && now - cache.loadedAt < CACHE_TTL_MS) return cache.config;
-    const config = await loadFromDb();
-    cache = { config, loadedAt: now };
+    const cached = cache.get(tenantId);
+    if (!force && cached && now - cached.loadedAt < CACHE_TTL_MS) return cached.config;
+    const config = await loadFromDb(tenantId);
+    cache.set(tenantId, { config, loadedAt: now });
     return config;
 }
 
 export function invalidateImapConfigCache(): void {
-    cache = null;
+    cache.clear();
 }
 
 function isImapConfigured(c: ImapConfig): boolean {
     return !!(c.host && c.port && c.user && c.password);
 }
 
-export async function getImapConfigStatus(): Promise<ImapStatus> {
-    const c = await getConfig(true);
+export async function getImapConfigStatus(tenantId: number): Promise<ImapStatus> {
+    const c = await getConfig(tenantId, true);
     return {
         host: c.host,
         port: c.port,
@@ -159,7 +164,9 @@ function scheduleReconnect(): void {
 
 async function connectAndListen(): Promise<void> {
     if (stopping) return;
-    const config = await getConfig(true);
+    // Il listener è unico e legge la mailbox del tenant storico (mirror in
+    // testa al file): il multi-mailbox arriva con la Fase C2.
+    const config = await getConfig(PUBLIC_TENANT_ID, true);
     if (!config.enabled) {
         console.log('[IMAP] disabled in settings — not connecting');
         return;
@@ -247,7 +254,7 @@ function processNewMessages(client: ImapFlow): Promise<void> {
 
 async function doProcess(client: ImapFlow): Promise<void> {
     if (!client.usable) return;
-    const config = await getConfig(true);
+    const config = await getConfig(PUBLIC_TENANT_ID, true);
     const since = (config.lastSeenUid ?? 0) + 1;
     const range = `${since}:*`;
 
@@ -387,14 +394,19 @@ async function handleMessage(msg: FetchMessageObject): Promise<void> {
 
 async function persistLastSeenUid(uid: number): Promise<void> {
     try {
+        // Watermark sulla riga del tenant della mailbox: senza filtro, con la
+        // PK (tenant_id, provider), l'UPDATE toccherebbe la riga smtp di OGNI
+        // ristorante.
         await queryWithRetry(
             `UPDATE integration_settings SET imap_last_seen_uid = $1
-             WHERE provider = 'smtp' AND (imap_last_seen_uid IS NULL OR imap_last_seen_uid < $1)`,
-            [uid]
+             WHERE tenant_id = $2 AND provider = 'smtp'
+               AND (imap_last_seen_uid IS NULL OR imap_last_seen_uid < $1)`,
+            [uid, PUBLIC_TENANT_ID]
         );
         // Refresh cache so the next doProcess() sees the new watermark
         // without waiting for the TTL.
-        if (cache) cache.config.lastSeenUid = uid;
+        const cached = cache.get(PUBLIC_TENANT_ID);
+        if (cached) cached.config.lastSeenUid = uid;
     } catch (err: any) {
         console.warn('[IMAP] persistLastSeenUid failed:', err?.message || err);
     }
@@ -440,8 +452,8 @@ export async function restartImapInboundService(): Promise<void> {
 // Best-effort connectivity check used by the settings "Test connection"
 // button. Opens a fresh short-lived connection so it never disturbs the
 // long-lived listener.
-export async function verifyImapConnection(): Promise<{ ok: boolean; error?: string }> {
-    const config = await getConfig(true);
+export async function verifyImapConnection(tenantId: number): Promise<{ ok: boolean; error?: string }> {
+    const config = await getConfig(tenantId, true);
     if (!isImapConfigured(config)) {
         return { ok: false, error: 'IMAP non è configurato' };
     }

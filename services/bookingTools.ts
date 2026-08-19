@@ -26,6 +26,11 @@
 
 import { Shift } from '../types.js';
 
+// I canali self-service (voce, WhatsApp) non hanno JWT: come in
+// elevenlabsService, il tenant resta quello storico finché la Fase C non
+// threada il tenant nella configurazione del canale.
+const PUBLIC_TENANT_ID = 1;
+
 // ---------------------------------------------------------------------------
 // Contratto
 // ---------------------------------------------------------------------------
@@ -392,14 +397,15 @@ export async function createReservation(
                 });
                 const insertedPayment = await d.queryWithRetry(
                     `INSERT INTO payment_requests
-                        (reservation_id, amount_cents, currency, description, status, provider,
+                        (tenant_id, reservation_id, amount_cents, currency, description, status, provider,
                          provider_order_id, checkout_url, metadata)
-                     VALUES ($1, $2, 'EUR', $3, $4, $5, $6, $7, $8)
+                     VALUES ($9, $1, $2, 'EUR', $3, $4, $5, $6, $7, $8)
                      RETURNING *`,
                     [
                         created.id, depositAmountCents, orderDescription, order.status, order.provider,
                         order.id, order.checkoutUrl,
                         JSON.stringify({ ...order.metadata, source: `${channel.id}_auto_deposit` }),
+                        PUBLIC_TENANT_ID,
                     ]
                 );
                 depositCheckoutUrl = order.checkoutUrl;
