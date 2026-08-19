@@ -94,7 +94,7 @@ import {
     getImapConfigStatus,
     verifyImapConnection,
     startImapInboundService,
-    restartImapInboundService,
+    restartImapForTenant,
     invalidateImapConfigCache,
 } from './services/imapInboundService.js';
 import {
@@ -16059,7 +16059,7 @@ app.post('/settings/integrations/smtp/test', authenticate, requirePermission('se
 // INTEGRATION SETTINGS (IMAP inbound polling)
 // ============================================
 // Config lives on the same integration_settings row as SMTP (provider='smtp')
-// but under imap_* columns. Toggling `enabled` restarts the long-lived
+// but under imap_* columns. Toggling `enabled` restarts the tenant's
 // IMAP+IDLE listener so config changes take effect without a redeploy.
 app.get('/settings/integrations/imap', authenticate, requirePermission('settings:full'), async (req, res) => {
     try {
@@ -16167,12 +16167,13 @@ app.put('/settings/integrations/imap', authenticate, requirePermission('settings
             insertValues
         );
 
-        invalidateImapConfigCache();
+        invalidateImapConfigCache(req.tenantId!);
 
         // Restart the listener so credentials / enabled toggle take effect
         // right away. Fire-and-forget: HTTP response should not block on the
-        // IMAP handshake, which can be slow.
-        restartImapInboundService().catch((err) => {
+        // IMAP handshake, which can be slow. Solo il listener di QUESTO
+        // tenant: gli altri restano connessi.
+        restartImapForTenant(req.tenantId!).catch((err) => {
             console.error('[IMAP] restart after update failed:', err?.message || err);
         });
 
@@ -20899,6 +20900,8 @@ const startServer = async () => {
                     try {
                         // Fire-and-forget: the IMAP handshake can take seconds
                         // and we don't want to block schema-init callbacks.
+                        // Da C4 è un supervisore: un listener per ogni tenant
+                        // attivo con imap_enabled, non più solo il tenant 1.
                         startImapInboundService(() => socketService).catch((imapErr) => {
                             console.error('IMAP inbound service startup error:', imapErr);
                         });
