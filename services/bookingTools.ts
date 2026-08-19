@@ -26,10 +26,11 @@
 
 import { Shift } from '../types.js';
 
-// I canali self-service (voce, WhatsApp) non hanno JWT: come in
-// elevenlabsService, il tenant resta quello storico finché la Fase C non
-// threada il tenant nella configurazione del canale.
-const PUBLIC_TENANT_ID = 1;
+// Il tenant arriva come primo parametro di ogni tool (Fase C2): i canali
+// self-service non hanno JWT, quindi è l'adattatore del canale a risolverlo
+// (token webhook per la voce, req.tenantId per le proposte WhatsApp) e a
+// passarlo qui. Le dipendenze tenant-scoped lo ricevono a loro volta come
+// primo argomento.
 
 // ---------------------------------------------------------------------------
 // Contratto
@@ -55,7 +56,7 @@ export interface ToolChannel {
     /** Titoli delle push allo staff. */
     pushTitles: { created: string; cancelled: string; modified: string };
     /** Aggancio all'audit del canale (per la voce: la riga in voice_calls). */
-    linkConversation?: (p: { conversationId: string; phone: string; reservationId: number }) => void;
+    linkConversation?: (p: { tenantId: number; conversationId: string; phone: string; reservationId: number }) => void;
 }
 
 export const VOICE_CHANNEL: ToolChannel = {
@@ -103,32 +104,32 @@ export interface BookingToolsDeps {
     toTitleCase: (v: any) => string;
     reservationPushLabel: (d: any) => string;
 
-    findAvailability: (p: any) => Promise<any>;
-    getAvailableSlots: (date: string, shift: Shift) => Promise<string[]>;
-    createVoiceReservation: (p: any) => Promise<any>;
-    cancelVoiceReservation: (p: any) => Promise<any>;
-    modifyVoiceReservation: (p: any) => Promise<any>;
-    recordVoiceCall: (p: any) => Promise<any>;
-    upsertCustomerFromReservation: (name: string, phone: string, a: any, b: any) => Promise<any>;
+    findAvailability: (tenantId: number, p: any) => Promise<any>;
+    getAvailableSlots: (tenantId: number, date: string, shift: Shift) => Promise<string[]>;
+    createVoiceReservation: (tenantId: number, p: any) => Promise<any>;
+    cancelVoiceReservation: (tenantId: number, p: any) => Promise<any>;
+    modifyVoiceReservation: (tenantId: number, p: any) => Promise<any>;
+    recordVoiceCall: (tenantId: number, p: any) => Promise<any>;
+    upsertCustomerFromReservation: (tenantId: number, name: string, phone: string, a: any, b: any) => Promise<any>;
 
-    getVoiceDateBlocks: () => Promise<any>;
+    getVoiceDateBlocks: (tenantId: number) => Promise<any>;
     findVoiceDateBlock: (date: string, shift: 'LUNCH' | 'DINNER', blocks: any) => any;
     buildVoiceDateBlockMessage: (date: string, shift: 'LUNCH' | 'DINNER', block: any) => string;
-    getLargeGroupThreshold: () => Promise<number>;
+    getLargeGroupThreshold: (tenantId: number) => Promise<number>;
 
-    isAutoDepositRequired: (guests: number) => Promise<boolean>;
-    getAutoDepositPolicy: () => Promise<{ enabled: boolean; minGuests: number; perPersonCents: number }>;
+    isAutoDepositRequired: (tenantId: number, guests: number) => Promise<boolean>;
+    getAutoDepositPolicy: (tenantId: number) => Promise<{ enabled: boolean; minGuests: number; perPersonCents: number }>;
     depositDefaultPerPersonCents: number;
-    createPaymentOrder: (p: any) => Promise<any>;
+    createPaymentOrder: (tenantId: number, p: any) => Promise<any>;
     queryWithRetry: (sql: string, params?: any[]) => Promise<any>;
     buildDepositRequestMessage: (...a: any[]) => string;
     buildBookingDepositRequestTemplate: (...a: any[]) => any;
-    sendBookingConfirmation: (phone: string, text: string, resId: number, opts?: any) => Promise<any>;
+    sendBookingConfirmation: (tenantId: number, phone: string, text: string, resId: number, opts?: any) => Promise<any>;
 
-    logActivity: (...a: any[]) => void;
+    logActivity: (tenantId: number, ...a: any[]) => void;
     activityAction: { CREATE: any; UPDATE: any; DELETE: any };
     resourceType: { RESERVATION: any };
-    pushSendToRoles: (roles: string[], payload: any, opts?: any) => Promise<any>;
+    pushSendToRoles: (tenantId: number, roles: string[], payload: any, opts?: any) => Promise<any>;
     broadcastReservationCreated: (r: any) => void;
     broadcastReservationUpdated: (r: any) => void;
     broadcastPaymentRequestCreated: (r: any) => void;
@@ -177,6 +178,7 @@ export interface CheckAvailabilityParams {
 }
 
 export async function checkAvailability(
+    tenantId: number,
     p: CheckAvailabilityParams,
     channel: ToolChannel = VOICE_CHANNEL
 ): Promise<ToolOutcome> {
@@ -202,7 +204,7 @@ export async function checkAvailability(
 
     // Data bloccata dall'operatore (feste a menù fisso ecc.): non si prenota e
     // non si leggono nemmeno i tavoli liberi, si invita a richiamare.
-    const dateBlock = d.findVoiceDateBlock(normalizedDate, rawShift, await d.getVoiceDateBlocks());
+    const dateBlock = d.findVoiceDateBlock(normalizedDate, rawShift, await d.getVoiceDateBlocks(tenantId));
     if (dateBlock) {
         console.log(`${channel.logPrefix} check-availability blocked date`, { date: normalizedDate, shift: rawShift, block: dateBlock });
         return fail('date_blocked', d.buildVoiceDateBlockMessage(normalizedDate, rawShift, dateBlock), {
@@ -215,14 +217,14 @@ export async function checkAvailability(
     // grande risulta sempre senza posto anche a sala vuota (successo il
     // 2026-07-17 con 11 persone). Invece di insegnare al modello a ragionare
     // sull'unione dei tavoli, sopra soglia si passa la mano.
-    const threshold = await d.getLargeGroupThreshold();
+    const threshold = await d.getLargeGroupThreshold(tenantId);
     if (guests > threshold) {
         console.log(`${channel.logPrefix} check-availability handoff (large group)`, { date: normalizedDate, shift: rawShift, guests, threshold });
         return fail('large_group', MSG.largeGroup(threshold));
     }
 
     try {
-        const result = await d.findAvailability({
+        const result = await d.findAvailability(tenantId, {
             date: normalizedDate,
             shift: rawShift as Shift,
             guests: Math.trunc(guests),
@@ -268,6 +270,7 @@ const NAME_PLACEHOLDERS = new Set([
 ]);
 
 export async function createReservation(
+    tenantId: number,
     p: CreateReservationParams,
     channel: ToolChannel = VOICE_CHANNEL
 ): Promise<ToolOutcome> {
@@ -316,7 +319,7 @@ export async function createReservation(
 
     // Doppia difesa sul blocco data: un modello che salta il controllo di
     // disponibilità non deve comunque poter prenotare un giorno riservato.
-    const dateBlock = d.findVoiceDateBlock(normalizedDate, rawShift, await d.getVoiceDateBlocks());
+    const dateBlock = d.findVoiceDateBlock(normalizedDate, rawShift, await d.getVoiceDateBlocks(tenantId));
     if (dateBlock) {
         console.log(`${channel.logPrefix} create-reservation blocked date`, { date: normalizedDate, shift: rawShift, block: dateBlock, conversation_id: conversationId });
         return fail('date_blocked', d.buildVoiceDateBlockMessage(normalizedDate, rawShift, dateBlock));
@@ -325,7 +328,7 @@ export async function createReservation(
     // L'orario deve stare sulla griglia degli slot, altrimenti la prenotazione
     // non torna uguale passando dal modulo di modifica manuale. La griglia
     // dipende da opening_hours + special_closures, quindi cambia per giorno.
-    const validSlots = await d.getAvailableSlots(normalizedDate, rawShift as Shift);
+    const validSlots = await d.getAvailableSlots(tenantId, normalizedDate, rawShift as Shift);
     if (!validSlots.includes(normalizedTime)) {
         const shiftLabel = (rawShift as Shift) === Shift.LUNCH ? 'il pranzo' : 'la cena';
         console.warn(`${channel.logPrefix} create-reservation rejected: invalid_slot`, {
@@ -338,7 +341,7 @@ export async function createReservation(
     }
     if (!Number.isFinite(guests) || guests < 1 || guests > 50) return fail('invalid_guests', MSG.invalidGuests);
 
-    const threshold = await d.getLargeGroupThreshold();
+    const threshold = await d.getLargeGroupThreshold(tenantId);
     if (guests > threshold) {
         console.log(`${channel.logPrefix} create-reservation blocked (large group)`, { guests, threshold, conversation_id: conversationId });
         return fail('large_group', MSG.largeGroup(threshold));
@@ -352,7 +355,7 @@ export async function createReservation(
     // La colonna è TIMESTAMPTZ: lasciamo interpretare a Postgres nel fuso del
     // server (Europe/Rome in produzione).
     const reservationTime = `${normalizedDate}T${normalizedTime}:00`;
-    const depositRequired = await d.isAutoDepositRequired(Math.trunc(guests));
+    const depositRequired = await d.isAutoDepositRequired(tenantId, Math.trunc(guests));
 
     try {
         console.log(`${channel.logPrefix} create-reservation start`, {
@@ -362,7 +365,7 @@ export async function createReservation(
             location_preference: locationPreference, phone_source: phoneSource,
             deposit_required: depositRequired,
         });
-        const created = await d.createVoiceReservation({
+        const created = await d.createVoiceReservation(tenantId, {
             customer_name: customerName,
             phone: phoneRaw,
             reservation_time: reservationTime,
@@ -380,7 +383,7 @@ export async function createReservation(
         // completa a mano dalla scheda.
         let depositCheckoutUrl: string | null = null;
         let depositAmountCents = 0;
-        const depositPolicy = depositRequired ? await d.getAutoDepositPolicy() : null;
+        const depositPolicy = depositRequired ? await d.getAutoDepositPolicy(tenantId) : null;
         if (depositRequired) {
             depositAmountCents = Math.trunc(guests) * (depositPolicy?.perPersonCents ?? d.depositDefaultPerPersonCents);
             const [yyyy, mm, dd] = normalizedDate.split('-');
@@ -388,7 +391,7 @@ export async function createReservation(
             const depositGuestsLabel = `${Math.trunc(guests)} ${Math.trunc(guests) === 1 ? 'persona' : 'persone'}`;
             const orderDescription = `Caparra prenotazione #${created.id} - ${depositGuestsLabel} ${depositDateLabel} ${normalizedTime}`;
             try {
-                const order = await d.createPaymentOrder({
+                const order = await d.createPaymentOrder(tenantId, {
                     amount: depositAmountCents,
                     currency: 'EUR',
                     description: orderDescription,
@@ -405,7 +408,7 @@ export async function createReservation(
                         created.id, depositAmountCents, orderDescription, order.status, order.provider,
                         order.id, order.checkoutUrl,
                         JSON.stringify({ ...order.metadata, source: `${channel.id}_auto_deposit` }),
-                        PUBLIC_TENANT_ID,
+                        tenantId,
                     ]
                 );
                 depositCheckoutUrl = order.checkoutUrl;
@@ -420,7 +423,7 @@ export async function createReservation(
                     d.toTitleCase(created.customer_name), depositGuestsLabel, depositDateLabel,
                     normalizedTime, depositAmountCents, order.checkoutUrl
                 );
-                d.sendBookingConfirmation(created.phone, smsText, created.id, { whatsappTemplate }).catch((err: any) =>
+                d.sendBookingConfirmation(tenantId, created.phone, smsText, created.id, { whatsappTemplate }).catch((err: any) =>
                     console.error(`${channel.logPrefix} deposit link send failed:`, err?.message || err)
                 );
             } catch (err: any) {
@@ -431,6 +434,7 @@ export async function createReservation(
 
         if (conversationId && channel.linkConversation) {
             channel.linkConversation({
+                tenantId,
                 conversationId,
                 phone: d.normalizeItalianPhone(phoneRaw),
                 reservationId: created.id,
@@ -439,9 +443,10 @@ export async function createReservation(
 
         // Rubrica: il canale self-service è il modo più comune in cui un
         // cliente nuovo compare la prima volta nel sistema.
-        await d.upsertCustomerFromReservation(customerName, phoneRaw, null, null);
+        await d.upsertCustomerFromReservation(tenantId, customerName, phoneRaw, null, null);
 
         d.logActivity(
+            tenantId,
             null, channel.actorEmail, channel.actorName,
             d.activityAction.CREATE, d.resourceType.RESERVATION,
             created.id, created.customer_name,
@@ -468,6 +473,7 @@ export async function createReservation(
 
         const reservationLabel = d.reservationPushLabel(d.asUtcInstant(created.reservation_time));
         d.pushSendToRoles(
+            tenantId,
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
             {
                 category: 'reservation',
@@ -532,6 +538,7 @@ export interface CancelReservationParams {
 }
 
 export async function cancelReservation(
+    tenantId: number,
     p: CancelReservationParams,
     channel: ToolChannel = VOICE_CHANNEL
 ): Promise<ToolOutcome> {
@@ -567,7 +574,7 @@ export async function cancelReservation(
             phone_raw: phoneRaw, phone_source: phoneSource,
             normalized_date: normalizedDate, normalized_time: normalizedTime, conversation_id: conversationId,
         });
-        const outcome = await d.cancelVoiceReservation({
+        const outcome = await d.cancelVoiceReservation(tenantId, {
             phone: phoneRaw, date: normalizedDate, time: normalizedTime, conversation_id: conversationId,
         });
 
@@ -615,11 +622,12 @@ export async function cancelReservation(
 
         if (conversationId && channel.linkConversation) {
             channel.linkConversation({
-                conversationId, phone: d.normalizeItalianPhone(phoneRaw), reservationId: cancelled.id,
+                tenantId, conversationId, phone: d.normalizeItalianPhone(phoneRaw), reservationId: cancelled.id,
             });
         }
 
         d.logActivity(
+            tenantId,
             null, channel.actorEmail, channel.actorName,
             d.activityAction.DELETE, d.resourceType.RESERVATION,
             cancelled.id, cancelled.customer_name,
@@ -641,6 +649,7 @@ export async function cancelReservation(
 
         const reservationLabel = d.reservationPushLabel(d.asUtcInstant(cancelled.reservation_time));
         d.pushSendToRoles(
+            tenantId,
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
             {
                 category: 'reservation',
@@ -686,6 +695,7 @@ export interface ModifyReservationParams extends CancelReservationParams {
 }
 
 export async function modifyReservation(
+    tenantId: number,
     p: ModifyReservationParams,
     channel: ToolChannel = VOICE_CHANNEL
 ): Promise<ToolOutcome> {
@@ -757,7 +767,7 @@ export async function modifyReservation(
             new_date: newDate, new_time: newTime, new_shift: newShift, new_guests: newGuests,
             new_location: newLocation, has_new_notes: !!newNotes, conversation_id: conversationId,
         });
-        const outcome = await d.modifyVoiceReservation({
+        const outcome = await d.modifyVoiceReservation(tenantId, {
             phone: phoneRaw, date: normalizedDate, time: normalizedTime, conversation_id: conversationId,
             new_date: newDate, new_time: newTime, new_shift: newShift, new_guests: newGuests,
             new_location_preference: newLocation, new_notes: newNotes,
@@ -808,11 +818,12 @@ export async function modifyReservation(
 
         if (conversationId && channel.linkConversation) {
             channel.linkConversation({
-                conversationId, phone: d.normalizeItalianPhone(phoneRaw), reservationId: after.id,
+                tenantId, conversationId, phone: d.normalizeItalianPhone(phoneRaw), reservationId: after.id,
             });
         }
 
         d.logActivity(
+            tenantId,
             null, channel.actorEmail, channel.actorName,
             d.activityAction.UPDATE, d.resourceType.RESERVATION,
             after.id, after.customer_name,
@@ -845,6 +856,7 @@ export async function modifyReservation(
 
         const reservationLabel = d.reservationPushLabel(d.asUtcInstant(after.reservation_time));
         d.pushSendToRoles(
+            tenantId,
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
             {
                 category: 'reservation',

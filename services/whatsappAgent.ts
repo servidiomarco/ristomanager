@@ -41,6 +41,9 @@ const MAX_TOKEN = 4096;
 const STRUMENTI_DI_SCRITTURA = new Set(['create_reservation', 'modify_reservation', 'cancel_reservation']);
 
 export interface AgentContext {
+    /** Tenant della conversazione: la route autenticata passa req.tenantId,
+     *  e gli strumenti di prenotazione lo esigono come primo parametro (C2). */
+    tenantId: number;
     phoneDigits: string;
     /** Messaggi della conversazione, dal più vecchio al più recente. */
     messages: Array<{ direction: 'inbound' | 'outbound'; body: string }>;
@@ -349,7 +352,7 @@ export async function runAgent(ctx: AgentContext): Promise<AgentResult> {
 
         // --- sola lettura: si esegue davvero e si prosegue -------------------
         if (nome === 'check_availability') {
-            const outcome = await bookingTools.checkAvailability(args, WHATSAPP_CHANNEL);
+            const outcome = await bookingTools.checkAvailability(ctx.tenantId, args, WHATSAPP_CHANNEL);
             checks.push({ tool: nome, args, result: outcome.body });
             messages.push({ role: 'assistant', content: response.content });
             messages.push({
