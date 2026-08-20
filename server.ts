@@ -168,6 +168,13 @@ const httpServer = createServer(app);
 // Socket service instance (initialized in startServer)
 let socketService: SocketService | undefined;
 
+// true solo a migrazioni completate: è il gate di /ready. La listen parte
+// PRIMA di createSchema/runMigrations (deliberato: il boot non deve morire
+// per un DB lento), quindi /health dice "processo vivo" ma non "pronto a
+// servire" — l'healthcheck di Railway punta a /ready proprio per questo:
+// un container con lo schema indietro non deve mai prendere il traffico.
+let databaseReady = false;
+
 // Fase D4 — CORS chiuso su allowlist (services/corsAllowlist.ts): nessun
 // Origin (curl/print-agent/webhook), localhost, *.vercel.app / *.railway.app
 // (deploy preview), gli hostname di CRM_APP_BASE_URL / PUBLIC_BOOKING_BASE_URL
@@ -473,6 +480,22 @@ app.get('/health', (req, res) => {
     server: 'running',
     socketio: socketService ? 'initialized' : 'not initialized'
   });
+});
+
+// Readiness vera: 200 solo a migrazioni completate E database raggiungibile.
+// /health qui sopra risponde 200 appena la listen è su — prima ancora che
+// lo schema esista — ed è la trappola documentata in CLAUDE.md. È QUESTO
+// l'endpoint per healthcheck di deploy e probe dei test.
+app.get('/ready', async (_req, res) => {
+  if (!databaseReady) {
+    return res.status(503).json({ ready: false, reason: 'migrations_pending' });
+  }
+  try {
+    await pool.query('SELECT 1');
+    res.json({ ready: true });
+  } catch {
+    res.status(503).json({ ready: false, reason: 'db_unreachable' });
+  }
 });
 
 // Public build version. The Vite bundle bakes the same short SHA in via
@@ -21868,6 +21891,9 @@ const startServer = async () => {
                     try {
                         await runMigrations();
                         console.log('✅ Database migrations up to date');
+                        // Solo qui: se le migration falliscono /ready resta
+                        // 503 e Railway tiene in servizio il container vecchio.
+                        databaseReady = true;
                     } catch (migErr) {
                         console.error('❌ Database migrations failed:', migErr);
                     }
