@@ -70,4 +70,42 @@ describe('row-level security', () => {
         expect(altrui.rows[0].c).toBe(0);
         await db.query('ROLLBACK');
     });
+
+    // Modalità RIGIDA (app.rls_strict = 'on'): il fallback permissivo muore.
+    // In produzione si accende con ALTER DATABASE ... SET app.rls_strict='on'
+    // (reversibile con RESET); qui la GUC si imposta nella sessione di prova,
+    // che per la policy è indistinguibile.
+    it('strict: senza contesto si fallisce CHIUSO — zero righe e INSERT rifiutato', async () => {
+        await db.query('BEGIN');
+        await db.query(`SET LOCAL ROLE rls_probe`);
+        await db.query(`SELECT set_config('app.rls_strict', 'on', true)`);
+        const r = await db.query(`SELECT COUNT(*)::int AS c FROM dishes`);
+        expect(r.rows[0].c).toBe(0);
+        await expect(
+            db.query(`INSERT INTO dishes (tenant_id, name, price) VALUES (1, 'Orfano', 1)`)
+        ).rejects.toThrow(/row-level security/i);
+        await db.query('ROLLBACK');
+    });
+
+    it('strict: il bypass di piattaforma dichiarato passa (boot, migration, scheduler)', async () => {
+        await db.query('BEGIN');
+        await db.query(`SET LOCAL ROLE rls_probe`);
+        await db.query(`SELECT set_config('app.rls_strict', 'on', true)`);
+        await db.query(`SELECT set_config('app.rls_bypass', 'on', true)`);
+        const r = await db.query(`SELECT COUNT(*)::int AS c FROM dishes WHERE name = 'Piatto Fantasma'`);
+        expect(r.rows[0].c).toBe(1);
+        await db.query('ROLLBACK');
+    });
+
+    it('strict: col contesto tenant l\'isolamento resta identico', async () => {
+        await db.query('BEGIN');
+        await db.query(`SET LOCAL ROLE rls_probe`);
+        await db.query(`SELECT set_config('app.rls_strict', 'on', true)`);
+        await db.query(`SELECT set_config('app.tenant_id', '2', true)`);
+        const suo = await db.query(`SELECT COUNT(*)::int AS c FROM dishes WHERE name = 'Piatto Fantasma'`);
+        expect(suo.rows[0].c).toBe(1);
+        const altrui = await db.query(`SELECT COUNT(*)::int AS c FROM dishes WHERE tenant_id = 1`);
+        expect(altrui.rows[0].c).toBe(0);
+        await db.query('ROLLBACK');
+    });
 });

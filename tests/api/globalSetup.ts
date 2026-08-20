@@ -42,6 +42,37 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
         await admin.end();
     }
 
+    // Modalità certificazione RLS rigida (TEST_STRICT_RLS=1, opzionale): il
+    // SERVER dei test gira con un ruolo non-superuser che ha app.rls_strict
+    // acceso a livello di ruolo — l'intera suite diventa la prova che ogni
+    // percorso dell'app dichiara il proprio contesto. I client diretti dei
+    // singoli file restano superuser (seed e cleanup non c'entrano con la
+    // policy). In CI resta spenta: è una prova da lanciare deliberatamente.
+    let serverDbUrl = dbUrl;
+    if (process.env.TEST_STRICT_RLS === '1') {
+        const ROLE = 'app_test_rls';
+        const admin2 = new Client({ connectionString: dbUrl });
+        await admin2.connect();
+        try {
+            await admin2.query(`DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${ROLE}') THEN
+                    CREATE ROLE ${ROLE} LOGIN;
+                END IF;
+            END $$`);
+            await admin2.query(`ALTER ROLE ${ROLE} LOGIN PASSWORD '${ROLE}' NOSUPERUSER NOCREATEDB NOCREATEROLE`);
+            await admin2.query(`ALTER ROLE ${ROLE} SET app.rls_strict = 'on'`);
+            await admin2.query(`GRANT CREATE, CONNECT, TEMP ON DATABASE "${dbName}" TO ${ROLE}`);
+            await admin2.query(`GRANT USAGE, CREATE ON SCHEMA public TO ${ROLE}`);
+        } finally {
+            await admin2.end();
+        }
+        const roleUrl = new URL(dbUrl);
+        roleUrl.username = ROLE;
+        roleUrl.password = ROLE;
+        serverDbUrl = roleUrl.toString();
+        console.log('[globalSetup] TEST_STRICT_RLS=1: server con ruolo non-superuser e RLS rigida accesa');
+    }
+
     const distServer = path.resolve('dist/server.js');
     if (!existsSync(distServer)) {
         throw new Error('dist/server.js mancante: `npm test` compila prima il server (npm run build:server).');
@@ -51,7 +82,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     const child: ChildProcess = spawn('node', [distServer], {
         env: {
             ...process.env,
-            DATABASE_URL: dbUrl,
+            DATABASE_URL: serverDbUrl,
             PORT: String(port),
             JWT_SECRET: 'test-jwt-secret',
             JWT_REFRESH_SECRET: 'test-jwt-refresh-secret',

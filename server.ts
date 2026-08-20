@@ -12,7 +12,7 @@ import path from 'path';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import QRCode from 'qrcode';
-import pool, { createSchema, queryWithRetry, runMigrations, tenantQuery } from './db.js';
+import pool, { createSchema, queryWithRetry, runMigrations, tenantQuery, runWithTenantContext, runAsPlatform } from './db.js';
 import { SocketService } from './services/socketService.js';
 import * as bookingTools from './services/bookingTools.js';
 import * as whatsappAgent from './services/whatsappAgent.js';
@@ -361,12 +361,16 @@ async function resolveTenantByDomain(hostname: string): Promise<TenantDomainHit 
         return cached.hit;
     }
     try {
-        const result = await queryWithRetry(
+        // Risoluzione di piattaforma per natura: "di chi è questo hostname"
+        // si decide PRIMA che esista un tenant — con la RLS rigida, senza
+        // questa dichiarazione la lookup tornerebbe vuota e i domini custom
+        // smetterebbero di instradare.
+        const result = await runAsPlatform(() => queryWithRetry(
             `SELECT t.id, t.slug FROM tenant_domains d
              JOIN tenants t ON t.id = d.tenant_id
              WHERE d.domain = $1 AND t.status = 'active' LIMIT 1`,
             [domain]
-        );
+        ));
         const row = result.rows[0];
         if (row?.id != null && typeof row.slug === 'string') {
             const hit: TenantDomainHit = { tenantId: Number(row.id), slug: row.slug };
@@ -412,7 +416,9 @@ const withPublicTenant = (
 ) => async (req: express.Request, res: express.Response) => {
     const tenantId = await resolvePublicTenantOr404(req, res);
     if (tenantId == null) return;
-    await handler(tenantId, req, res);
+    // Contesto tenant per tutto il handler: le query pubbliche si scopano
+    // da sole anche a policy RLS rigida.
+    await runWithTenantContext(tenantId, () => handler(tenantId, req, res));
 };
 
 // ============================================
@@ -583,11 +589,11 @@ async function handleVonageInbound(tenantId: number, req: express.Request, res: 
 }
 
 // Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
-app.post('/webhook/vonage-inbound', (req, res) => { void handleVonageInbound(PUBLIC_TENANT_ID, req, res); });
+app.post('/webhook/vonage-inbound', (req, res) => { void runWithTenantContext(PUBLIC_TENANT_ID, () => handleVonageInbound(PUBLIC_TENANT_ID, req, res)); });
 app.post('/webhook/t/:tenantToken/vonage-inbound', async (req, res) => {
     const tenantId = await resolveWebhookTenantOr404(req, res);
     if (tenantId == null) return;
-    await handleVonageInbound(tenantId, req, res);
+    await runWithTenantContext(tenantId, () => handleVonageInbound(tenantId, req, res));
 });
 
 // Vonage WhatsApp status updates webhook. Solo log: il tenant serve appena
@@ -703,11 +709,11 @@ async function handleTwilioWhatsAppInbound(tenantId: number, req: express.Reques
 }
 
 // Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
-app.post('/webhook/twilio-whatsapp', twilioUrlEncoded, (req, res) => { void handleTwilioWhatsAppInbound(PUBLIC_TENANT_ID, req, res); });
+app.post('/webhook/twilio-whatsapp', twilioUrlEncoded, (req, res) => { void runWithTenantContext(PUBLIC_TENANT_ID, () => handleTwilioWhatsAppInbound(PUBLIC_TENANT_ID, req, res)); });
 app.post('/webhook/t/:tenantToken/twilio-whatsapp', twilioUrlEncoded, async (req, res) => {
     const tenantId = await resolveWebhookTenantOr404(req, res);
     if (tenantId == null) return;
-    await handleTwilioWhatsAppInbound(tenantId, req, res);
+    await runWithTenantContext(tenantId, () => handleTwilioWhatsAppInbound(tenantId, req, res));
 });
 
 // Twilio delivery status callbacks (sent/delivered/read/failed). Applies to
@@ -805,11 +811,11 @@ async function handleTwilioWhatsAppStatus(tenantId: number, req: express.Request
 }
 
 // Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
-app.post('/webhook/twilio-whatsapp-status', twilioUrlEncoded, (req, res) => { void handleTwilioWhatsAppStatus(PUBLIC_TENANT_ID, req, res); });
+app.post('/webhook/twilio-whatsapp-status', twilioUrlEncoded, (req, res) => { void runWithTenantContext(PUBLIC_TENANT_ID, () => handleTwilioWhatsAppStatus(PUBLIC_TENANT_ID, req, res)); });
 app.post('/webhook/t/:tenantToken/twilio-whatsapp-status', twilioUrlEncoded, async (req, res) => {
     const tenantId = await resolveWebhookTenantOr404(req, res);
     if (tenantId == null) return;
-    await handleTwilioWhatsAppStatus(tenantId, req, res);
+    await runWithTenantContext(tenantId, () => handleTwilioWhatsAppStatus(tenantId, req, res));
 });
 
 // Twilio WhatsApp error codes that mean "this specific recipient can't be
@@ -1075,11 +1081,11 @@ async function handleResendInbound(tenantId: number, req: express.Request, res: 
 }
 
 // Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
-app.post('/webhook/resend-inbound', (req, res) => { void handleResendInbound(PUBLIC_TENANT_ID, req, res); });
+app.post('/webhook/resend-inbound', (req, res) => { void runWithTenantContext(PUBLIC_TENANT_ID, () => handleResendInbound(PUBLIC_TENANT_ID, req, res)); });
 app.post('/webhook/t/:tenantToken/resend-inbound', async (req, res) => {
     const tenantId = await resolveWebhookTenantOr404(req, res);
     if (tenantId == null) return;
-    await handleResendInbound(tenantId, req, res);
+    await runWithTenantContext(tenantId, () => handleResendInbound(tenantId, req, res));
 });
 
 // ============================================
@@ -1367,11 +1373,11 @@ async function handleElevenLabsInitConversation(tenantId: number, req: express.R
 }
 
 // Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
-app.post('/webhook/elevenlabs/init-conversation', (req, res) => { void handleElevenLabsInitConversation(PUBLIC_TENANT_ID, req, res); });
+app.post('/webhook/elevenlabs/init-conversation', (req, res) => { void runWithTenantContext(PUBLIC_TENANT_ID, () => handleElevenLabsInitConversation(PUBLIC_TENANT_ID, req, res)); });
 app.post('/webhook/t/:tenantToken/elevenlabs/init-conversation', async (req, res) => {
     const tenantId = await resolveWebhookTenantOr404(req, res);
     if (tenantId == null) return;
-    await handleElevenLabsInitConversation(tenantId, req, res);
+    await runWithTenantContext(tenantId, () => handleElevenLabsInitConversation(tenantId, req, res));
 });
 
 // Tool 0 — lookup_customer  (defensive no-op fallback)
@@ -1456,11 +1462,11 @@ async function handleElevenLabsLookupCustomer(tenantId: number, req: express.Req
 }
 
 // Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
-app.post('/webhook/elevenlabs/lookup-customer', (req, res) => { void handleElevenLabsLookupCustomer(PUBLIC_TENANT_ID, req, res); });
+app.post('/webhook/elevenlabs/lookup-customer', (req, res) => { void runWithTenantContext(PUBLIC_TENANT_ID, () => handleElevenLabsLookupCustomer(PUBLIC_TENANT_ID, req, res)); });
 app.post('/webhook/t/:tenantToken/elevenlabs/lookup-customer', async (req, res) => {
     const tenantId = await resolveWebhookTenantOr404(req, res);
     if (tenantId == null) return;
-    await handleElevenLabsLookupCustomer(tenantId, req, res);
+    await runWithTenantContext(tenantId, () => handleElevenLabsLookupCustomer(tenantId, req, res));
 });
 
 // Tool 1 — check_availability
@@ -1511,11 +1517,11 @@ async function handleElevenLabsCheckAvailability(tenantId: number, req: express.
 }
 
 // Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
-app.post('/webhook/elevenlabs/check-availability', (req, res) => { void handleElevenLabsCheckAvailability(PUBLIC_TENANT_ID, req, res); });
+app.post('/webhook/elevenlabs/check-availability', (req, res) => { void runWithTenantContext(PUBLIC_TENANT_ID, () => handleElevenLabsCheckAvailability(PUBLIC_TENANT_ID, req, res)); });
 app.post('/webhook/t/:tenantToken/elevenlabs/check-availability', async (req, res) => {
     const tenantId = await resolveWebhookTenantOr404(req, res);
     if (tenantId == null) return;
-    await handleElevenLabsCheckAvailability(tenantId, req, res);
+    await runWithTenantContext(tenantId, () => handleElevenLabsCheckAvailability(tenantId, req, res));
 });
 
 // Tool 2 — create_reservation
@@ -1529,11 +1535,11 @@ async function handleElevenLabsCreateReservation(tenantId: number, req: express.
 }
 
 // Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
-app.post('/webhook/elevenlabs/create-reservation', (req, res) => { void handleElevenLabsCreateReservation(PUBLIC_TENANT_ID, req, res); });
+app.post('/webhook/elevenlabs/create-reservation', (req, res) => { void runWithTenantContext(PUBLIC_TENANT_ID, () => handleElevenLabsCreateReservation(PUBLIC_TENANT_ID, req, res)); });
 app.post('/webhook/t/:tenantToken/elevenlabs/create-reservation', async (req, res) => {
     const tenantId = await resolveWebhookTenantOr404(req, res);
     if (tenantId == null) return;
-    await handleElevenLabsCreateReservation(tenantId, req, res);
+    await runWithTenantContext(tenantId, () => handleElevenLabsCreateReservation(tenantId, req, res));
 });
 
 // Cancellazione. L'agente chiede data (e all'occorrenza orario) e ripete il
@@ -1548,11 +1554,11 @@ async function handleElevenLabsCancelReservation(tenantId: number, req: express.
 }
 
 // Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
-app.post('/webhook/elevenlabs/cancel-reservation', (req, res) => { void handleElevenLabsCancelReservation(PUBLIC_TENANT_ID, req, res); });
+app.post('/webhook/elevenlabs/cancel-reservation', (req, res) => { void runWithTenantContext(PUBLIC_TENANT_ID, () => handleElevenLabsCancelReservation(PUBLIC_TENANT_ID, req, res)); });
 app.post('/webhook/t/:tenantToken/elevenlabs/cancel-reservation', async (req, res) => {
     const tenantId = await resolveWebhookTenantOr404(req, res);
     if (tenantId == null) return;
-    await handleElevenLabsCancelReservation(tenantId, req, res);
+    await runWithTenantContext(tenantId, () => handleElevenLabsCancelReservation(tenantId, req, res));
 });
 
 // Modifica di una prenotazione esistente (data/orario/turno/coperti/zona/note).
@@ -1565,11 +1571,11 @@ async function handleElevenLabsModifyReservation(tenantId: number, req: express.
 }
 
 // Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
-app.post('/webhook/elevenlabs/modify-reservation', (req, res) => { void handleElevenLabsModifyReservation(PUBLIC_TENANT_ID, req, res); });
+app.post('/webhook/elevenlabs/modify-reservation', (req, res) => { void runWithTenantContext(PUBLIC_TENANT_ID, () => handleElevenLabsModifyReservation(PUBLIC_TENANT_ID, req, res)); });
 app.post('/webhook/t/:tenantToken/elevenlabs/modify-reservation', async (req, res) => {
     const tenantId = await resolveWebhookTenantOr404(req, res);
     if (tenantId == null) return;
-    await handleElevenLabsModifyReservation(tenantId, req, res);
+    await runWithTenantContext(tenantId, () => handleElevenLabsModifyReservation(tenantId, req, res));
 });
 
 // Post-call webhook — fires when the conversation ends.
@@ -1805,11 +1811,11 @@ async function handleElevenLabsPostCall(tenantId: number, req: express.Request, 
 }
 
 // Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
-app.post('/webhook/elevenlabs/post-call', (req, res) => { void handleElevenLabsPostCall(PUBLIC_TENANT_ID, req, res); });
+app.post('/webhook/elevenlabs/post-call', (req, res) => { void runWithTenantContext(PUBLIC_TENANT_ID, () => handleElevenLabsPostCall(PUBLIC_TENANT_ID, req, res)); });
 app.post('/webhook/t/:tenantToken/elevenlabs/post-call', async (req, res) => {
     const tenantId = await resolveWebhookTenantOr404(req, res);
     if (tenantId == null) return;
-    await handleElevenLabsPostCall(tenantId, req, res);
+    await runWithTenantContext(tenantId, () => handleElevenLabsPostCall(tenantId, req, res));
 });
 
 // ============================================
@@ -3854,7 +3860,7 @@ async function loadBillByToken(token: string) {
 // GET /pay/:token — the mobile page fetches this on load and after any
 // action. Response mirrors the authenticated GET, minus internal ids on
 // the splits.
-app.get('/pay/:token', publicPayLimiter, async (req, res) => {
+app.get('/pay/:token', publicPayLimiter, async (req, res) => runAsPlatform(async () => {
     try {
         const token = String(req.params.token || '');
         if (!token || token.length < 20) return res.status(404).json({ error: 'Not found' });
@@ -3940,7 +3946,7 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => {
         console.error('GET /pay/:token error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
-});
+}));
 
 // GET /pay/:token/qr.png — publicly-fetchable PNG of the pay page URL,
 // used as the header media in the WhatsApp template so guests see the
@@ -3949,7 +3955,7 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => {
 // data leak), and Meta's template approval / cache warm-up hits this
 // endpoint with the sample token, which won't correspond to any real
 // bill. Gated on the feature flag and on a minimum token shape.
-app.get('/pay/:token/qr.png', publicPayLimiter, async (req, res) => {
+app.get('/pay/:token/qr.png', publicPayLimiter, async (req, res) => runAsPlatform(async () => {
     try {
         const token = String(req.params.token || '');
         if (!token || token.length < 20 || !/^[A-Za-z0-9_-]+$/.test(token)) {
@@ -3979,7 +3985,7 @@ app.get('/pay/:token/qr.png', publicPayLimiter, async (req, res) => {
         console.error('GET /pay/:token/qr.png error:', err);
         res.status(500).send('Internal server error');
     }
-});
+}));
 
 // POST /pay/:token/claim — reserves a split and creates a Revolut order.
 // Body: { kind: 'equal_share'|'fixed_amount', amount_cents?: number,
@@ -3992,7 +3998,7 @@ app.get('/pay/:token/qr.png', publicPayLimiter, async (req, res) => {
 // claims (two guests scanning at the same instant). The trigger from PR 1
 // is the ultimate authority — if it fires we surface a 409 with the
 // current max_allowed.
-app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (req, res) => {
+app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (req, res) => runAsPlatform(async () => {
     const client = await pool.connect();
     try {
         const token = String(req.params.token || '');
@@ -4233,13 +4239,13 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
     } finally {
         client.release();
     }
-});
+}));
 
 // POST /pay/:token/release — voluntarily gives up an unpaid claim. Both
 // the split_id and the token must match — this prevents someone with the
 // token from cancelling a split they didn't create (still not
 // authenticated, but at least you need to know the id you're releasing).
-app.post('/pay/:token/release', publicPayLimiter, async (req, res) => {
+app.post('/pay/:token/release', publicPayLimiter, async (req, res) => runAsPlatform(async () => {
     try {
         const token = String(req.params.token || '');
         if (!token || token.length < 20) return res.status(404).json({ error: 'Not found' });
@@ -4281,7 +4287,7 @@ app.post('/pay/:token/release', publicPayLimiter, async (req, res) => {
         console.error('POST /pay/:token/release error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
-});
+}));
 
 
 // ============================================
@@ -4891,7 +4897,7 @@ app.post('/messages/attachments', authenticate, requirePermission('reservations:
 // credenziali. La protezione e' il token da 32 byte nel path — e' anche il
 // motivo per cui qui NON c'e' filtro tenant: il token e' unico globale e
 // non indovinabile, il tenant e' implicito nella riga trovata.
-app.get('/public/media/:token', async (req, res) => {
+app.get('/public/media/:token', async (req, res) => runAsPlatform(async () => {
     try {
         const token = String(req.params.token || '');
         if (!/^[A-Za-z0-9_-]{20,64}$/.test(token)) return res.status(404).send('Not found');
@@ -4909,7 +4915,7 @@ app.get('/public/media/:token', async (req, res) => {
         console.error('GET /public/media error:', err);
         res.status(500).send('Internal server error');
     }
-});
+}));
 
 // Risposta suggerita per una conversazione. Non invia nulla: restituisce il
 // testo che il cameriere trova nel campo di scrittura, da leggere e mandare
@@ -6181,7 +6187,7 @@ async function applyPaymentOrderTransition(
 // side-effects because we key on `provider_order_id` and gate the
 // "first-completion" side-effects on the old `completed_at` being NULL under
 // a row-level lock.
-app.post('/webhook/revolut', async (req, res) => {
+app.post('/webhook/revolut', async (req, res) => runAsPlatform(async () => {
     try {
         const body = req.body || {};
         const event = String(body.event || '').toUpperCase();
@@ -6220,7 +6226,7 @@ app.post('/webhook/revolut', async (req, res) => {
         console.error('POST /webhook/revolut error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
-});
+}));
 
 // SumUp callback receiver. SumUp pings the `return_url` we register on each
 // checkout when its status changes, but — unlike Revolut — that request is
@@ -6234,7 +6240,7 @@ app.post('/webhook/revolut', async (req, res) => {
 //
 // Idempotent for the same reason the Revolut receiver is: we key on
 // provider_order_id and gate first-completion side-effects on completed_at.
-app.post('/webhook/sumup/:token', async (req, res) => {
+app.post('/webhook/sumup/:token', async (req, res) => runAsPlatform(async () => {
     try {
         // SumUp has shipped a few payload shapes over the years (and wraps
         // the resource under `payload`/`data` in some of them), so probe the
@@ -6296,7 +6302,7 @@ app.post('/webhook/sumup/:token', async (req, res) => {
         console.error('POST /webhook/sumup error:', err);
         if (!res.headersSent) res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
-});
+}));
 
 // Manual reconciliation: poll the gateway for the current state of the order
 // associated with a payment_request and apply the corresponding transition.
@@ -7721,7 +7727,9 @@ const runSchedulerTickWithLock = async (
             console.debug(`[scheduler:${name}] tick saltato: lock ${lockId} tenuto da un'altra replica`);
             return;
         }
-        await tick();
+        // Lavoro di piattaforma dichiarato: i tick attraversano i tenant per
+        // mestiere (promemoria e riconcili di tutti i ristoranti insieme).
+        await runAsPlatform(() => tick());
     } finally {
         if (acquired) {
             // Unlock esplicito prima del release: il client torna nel pool e
@@ -15956,6 +15964,62 @@ app.get('/settings/webhook-info', authenticate, requirePermission('settings:full
 // transazione di createSchema — il CHECK largo sopravvive, ma quel boot
 // salta seed e scheduler. La sanatoria vera è aggiornare le due ALTER in
 // db.ts quando verrà scongelato.
+// Re-assert delle policy RLS a OGNI boot, dopo createSchema e le migration.
+// Due ragioni per cui non basta una migration:
+//  1. createSchema (congelato) ricrea la policy vecchia su media_library a
+//     ogni avvio: una formula cambiata solo via migration regredirebbe al
+//     boot successivo. Stesso problema dei CHECK ruoli qui sotto.
+//  2. La passata dinamica copre anche le tabelle nate DOPO la B4 senza una
+//     policy propria: prima restavano le uniche leggibili da tutti.
+// La formula ha tre modi, decisi da GUC di sessione/database:
+//  - contesto tenant (app.tenant_id, messo da AsyncLocalStorage in db.ts):
+//    isolamento rigido, da sempre;
+//  - nessun contesto + app.rls_strict spento: fallback permissivo — il
+//    comportamento storico, finché il flip non viene deciso;
+//  - nessun contesto + app.rls_strict acceso: passa SOLO chi ha dichiarato
+//    app.rls_bypass (boot, migration, scheduler): tutto il resto fallisce
+//    CHIUSO. Il flip è un ALTER DATABASE ... SET app.rls_strict = 'on',
+//    reversibile all'istante con RESET — niente deploy.
+const ensureRlsPolicies = async (): Promise<void> => {
+    await queryWithRetry(`
+        DO $$
+        DECLARE t RECORD;
+        BEGIN
+            FOR t IN
+                SELECT tablename
+                  FROM pg_tables
+                 WHERE schemaname = 'public'
+                   AND tablename NOT IN ('pgmigrations', 'tenants')
+            LOOP
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                     WHERE table_schema = 'public'
+                       AND table_name = t.tablename
+                       AND column_name = 'tenant_id'
+                ) THEN
+                    RAISE WARNING 'RLS saltata: % non ha tenant_id', t.tablename;
+                    CONTINUE;
+                END IF;
+                EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t.tablename);
+                EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t.tablename);
+                EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON %I', t.tablename);
+                EXECUTE format(
+                    'CREATE POLICY tenant_isolation ON %I '
+                    || 'USING (tenant_id = NULLIF(current_setting(''app.tenant_id'', true), '''')::bigint '
+                    ||   'OR (NULLIF(current_setting(''app.tenant_id'', true), '''') IS NULL '
+                    ||     'AND (current_setting(''app.rls_strict'', true) IS DISTINCT FROM ''on'' '
+                    ||       'OR current_setting(''app.rls_bypass'', true) = ''on''))) '
+                    || 'WITH CHECK (tenant_id = NULLIF(current_setting(''app.tenant_id'', true), '''')::bigint '
+                    ||   'OR (NULLIF(current_setting(''app.tenant_id'', true), '''') IS NULL '
+                    ||     'AND (current_setting(''app.rls_strict'', true) IS DISTINCT FROM ''on'' '
+                    ||       'OR current_setting(''app.rls_bypass'', true) = ''on'')))',
+                    t.tablename
+                );
+            END LOOP;
+        END $$;
+    `);
+};
+
 const ensurePlatformAdminRoleChecks = async (): Promise<void> => {
     await queryWithRetry(`
         DO $$
@@ -15987,7 +16051,7 @@ const platformAdminAuth = (req: express.Request, res: express.Response, next: ex
             // L'identità finisce in req.user per l'audit (impersonation):
             // niente req.tenantId, questi endpoint non hanno un tenant.
             req.user = payload;
-            return next();
+            return runAsPlatform(() => next());
         }
         // Bearer presente ma non da platform admin: si prova comunque la via
         // env — un client potrebbe mandare entrambi gli header.
@@ -16008,7 +16072,7 @@ const platformAdminAuth = (req: express.Request, res: express.Response, next: ex
     if (!crypto.timingSafeEqual(a, b)) {
         return res.status(401).json({ error: 'invalid_platform_admin_token' });
     }
-    next();
+    runAsPlatform(() => next());
 };
 
 app.post('/admin/tenants', platformAdminAuth, async (req, res) => {
@@ -16437,7 +16501,7 @@ app.get('/admin/billing/return', (_req, res) => {
 // DB. Stripe firma i byte esatti del payload: la verifica usa req.rawBody
 // (catturato dal verify hook di express.json in testa al file), MAI il body
 // già parsato — una ri-serializzazione riordina le chiavi e rompe la firma.
-app.post('/webhook/stripe', async (req, res) => {
+app.post('/webhook/stripe', async (req, res) => runAsPlatform(async () => {
     if (!process.env.STRIPE_WEBHOOK_SECRET || !isBillingEnabled()) {
         // Env assente = funzionalità spenta, stessa semantica del pannello
         // piattaforma: l'endpoint non deve esistere finché non è configurato.
@@ -16505,7 +16569,7 @@ app.post('/webhook/stripe', async (req, res) => {
         // del DB non deve far perdere l'evento.
         res.status(500).json({ error: 'webhook_processing_failed' });
     }
-});
+}));
 
 // ============================================
 // INTEGRATION SETTINGS (Revolut)
@@ -21880,8 +21944,10 @@ const startServer = async () => {
             }
 
             // Initialize database schema in background, then backfill banquet reminders
-            createSchema()
-                .then(async () => {
+            // Tutta la catena di boot è lavoro di piattaforma dichiarato:
+            // schema, migration, seed e warm-up attraversano i tenant.
+            runAsPlatform(() => createSchema())
+                .then(async () => await runAsPlatform(async () => {
                     console.log('✅ Database schema initialized');
                     // Le migration girano DOPO createSchema: la baseline
                     // congelata crea le tabelle, le migration le evolvono.
@@ -21904,6 +21970,15 @@ const startServer = async () => {
                         await ensurePlatformAdminRoleChecks();
                     } catch (roleErr) {
                         console.error('❌ Re-assert CHECK ruoli (PLATFORM_ADMIN) fallito:', roleErr);
+                    }
+                    // Dopo createSchema E le migration, sempre: la baseline
+                    // congelata ricrea policy con la formula vecchia (vedi
+                    // ensureRlsPolicies per il perché).
+                    try {
+                        await ensureRlsPolicies();
+                        console.log('✅ Policy RLS riallineate (formula strict-capable)');
+                    } catch (rlsErr) {
+                        console.error('❌ Re-assert policy RLS fallito:', rlsErr);
                     }
                     // Warm della cache identità: i primi messaggi dopo il boot
                     // non devono uscire coi fallback se legal_config è compilato.
@@ -21961,7 +22036,7 @@ const startServer = async () => {
                     } catch (imapErr) {
                         console.error('IMAP inbound service failed to start:', imapErr);
                     }
-                })
+                }))
                 .catch((dbError) => {
                     console.error('Database initialization failed:', dbError);
                     console.error('Server will continue running, but database operations may fail');

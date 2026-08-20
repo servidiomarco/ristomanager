@@ -1,5 +1,5 @@
 import webpush from 'web-push';
-import { queryWithRetry } from '../db.js';
+import { queryWithRetry, runAsPlatform } from '../db.js';
 
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
@@ -257,10 +257,14 @@ export const sendToRoles = async (
 // di ciascun destinatario.
 export const sendToPlatformAdmins = async (payload: PushPayload) => {
     try {
-        const r = await queryWithRetry(
-            `SELECT id FROM users WHERE role = 'PLATFORM_ADMIN' AND is_active = TRUE`
-        );
-        await Promise.all(r.rows.map((row: any) => sendToUser(Number(row.id), payload)));
+        // Lettura di piattaforma dichiarata: i destinatari stanno sopra i
+        // tenant, e il chiamante (webhook Stripe) può avere ogni contesto.
+        await runAsPlatform(async () => {
+            const r = await queryWithRetry(
+                `SELECT id FROM users WHERE role = 'PLATFORM_ADMIN' AND is_active = TRUE`
+            );
+            await Promise.all(r.rows.map((row: any) => sendToUser(Number(row.id), payload)));
+        });
     } catch (err) {
         console.warn('[push] sendToPlatformAdmins failed:', (err as any)?.message || err);
     }
