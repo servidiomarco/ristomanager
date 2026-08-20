@@ -2742,7 +2742,7 @@ const App: React.FC = () => {
           aria-label="Navigazione mobile"
         >
           <div className="flex items-stretch py-2 px-2 gap-1">
-            {canAccessView(ViewState.DASHBOARD) && (
+            {view !== ViewState.PLATFORM && canAccessView(ViewState.DASHBOARD) && (
               <BottomNavItem
                 icon={<LayoutDashboard size={20} />}
                 label="Dashboard"
@@ -2759,7 +2759,7 @@ const App: React.FC = () => {
                 }}
               />
             )}
-            {canAccessView(ViewState.RESERVATIONS) && (
+            {view !== ViewState.PLATFORM && canAccessView(ViewState.RESERVATIONS) && (
               <BottomNavItem
                 icon={<Calendar size={20} />}
                 label="Prenotazioni"
@@ -2767,8 +2767,10 @@ const App: React.FC = () => {
                 onClick={() => setView(ViewState.RESERVATIONS)}
               />
             )}
-            {/* Center "+" — circular, raised above the nav — opens context-aware action sheet */}
-            <div className="flex-1 flex justify-center items-end">
+            {/* Center "+" — circular, raised above the nav — opens context-aware action sheet.
+                Nascosto sulla vista Piattaforma: le azioni rapide creano dati
+                del tenant dell'admin, non dei clienti del SaaS. */}
+            {view !== ViewState.PLATFORM && <div className="flex-1 flex justify-center items-end">
               <button
                 type="button"
                 onClick={() => setShowCreateSheet(v => !v)}
@@ -2777,10 +2779,10 @@ const App: React.FC = () => {
               >
                 <Plus className="h-6 w-6 transition-transform duration-200" style={{ transform: showCreateSheet ? 'rotate(45deg)' : 'rotate(0deg)' }} />
               </button>
-            </div>
+            </div>}
             {/* Comunicazioni replaces the old Notifiche tab, which duplicated
                 the top-bar bell. The badge rolls up all three channels. */}
-            {commsTargetView !== undefined && (
+            {view !== ViewState.PLATFORM && commsTargetView !== undefined && (
               <BottomNavItem
                 icon={<MessagesSquare size={20} />}
                 label="Comunicazioni"
