@@ -19,7 +19,7 @@
 
 import { ImapFlow, type FetchMessageObject } from 'imapflow';
 import { simpleParser, type ParsedMail, type AddressObject } from 'mailparser';
-import { queryWithRetry } from '../db.js';
+import { queryWithRetry, runWithTenantContext, runAsPlatform } from '../db.js';
 import type { SocketService } from './socketService.js';
 import { sendToRoles as pushSendToRoles } from './pushService.js';
 import {
@@ -336,7 +336,12 @@ async function desiredTenantIds(): Promise<Set<number>> {
     return desired;
 }
 
+// Sweep di piattaforma: legge i tenant abilitati attraversandoli tutti.
 async function superviseOnce(): Promise<void> {
+    return runAsPlatform(() => superviseOnceInner());
+}
+
+async function superviseOnceInner(): Promise<void> {
     const desired = await desiredTenantIds();
     // Spegni i listener dei tenant disabilitati/sospesi nel frattempo.
     for (const tenantId of Array.from(listeners.keys())) {
@@ -415,7 +420,13 @@ function extractAddressList(addr: AddressObject | AddressObject[] | undefined): 
     return null;
 }
 
+// Le callback IMAP nascono fuori da ogni richiesta HTTP: il contesto tenant
+// va aperto qui, o con la RLS rigida ogni INSERT del messaggio fallirebbe.
 async function handleMessage(tenantId: number, msg: FetchMessageObject): Promise<void> {
+    return runWithTenantContext(tenantId, () => handleMessageInner(tenantId, msg));
+}
+
+async function handleMessageInner(tenantId: number, msg: FetchMessageObject): Promise<void> {
     if (!msg.source) return;
     const parsed: ParsedMail = await simpleParser(msg.source);
 

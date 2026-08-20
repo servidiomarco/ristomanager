@@ -104,12 +104,106 @@ const isRestartError = (err: any): boolean => {
 
 const sleepMs = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// ============================================
+// CONTESTO TENANT AUTOMATICO (AsyncLocalStorage)
+// ============================================
+// La policy RLS rigida esige che OGNI query dichiari per chi sta lavorando:
+// riscrivere ~500 call site su withTenant sarebbe un B3-bis. Invece il
+// contesto viaggia con l'async flow: authenticate (e i resolver di webhook,
+// scheduler, boot) lo aprono UNA volta, e da qui in giù queryWithRetry e i
+// client presi dal pool si scopano da soli.
+//
+//   runWithTenantContext(tenantId, fn)  → query scopate su quel tenant
+//   runAsPlatform(fn)                   → lavoro di piattaforma dichiarato
+//                                         (boot, migration, scheduler,
+//                                         sweep cross-tenant): col flag
+//                                         rigido acceso passa, ma è una
+//                                         scelta esplicita nel codice, non
+//                                         un fallback silenzioso.
+//
+// Finché app.rls_strict non è acceso a livello database, tutto questo non
+// cambia il comportamento delle query SENZA contesto: il fallback permissivo
+// resta. Con contesto, la policy è già rigida oggi (era il contratto B4).
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+type TenantContext = { tenantId?: number; platform?: boolean };
+const tenantContext = new AsyncLocalStorage<TenantContext>();
+
+export const runWithTenantContext = <T>(tenantId: number, fn: () => T): T =>
+    tenantContext.run({ tenantId: Number(tenantId) }, fn);
+
+export const runAsPlatform = <T>(fn: () => T): T =>
+    tenantContext.run({ platform: true }, fn);
+
+// SET di sessione sul client appena preso dal pool, RESET alla release: il
+// client torna in pool pulito qualunque cosa sia successa nel mezzo. I
+// valori sono sanificati (Number / letterale fisso), niente input utente.
+const applyContextToClient = async (client: import('pg').PoolClient): Promise<void> => {
+    const ctx = tenantContext.getStore();
+    if (!ctx) return;
+    if (ctx.tenantId) {
+        await client.query(`SELECT set_config('app.tenant_id', '${Number(ctx.tenantId)}', false)`);
+    } else if (ctx.platform) {
+        await client.query(`SELECT set_config('app.rls_bypass', 'on', false)`);
+    }
+};
+
+// pool.connect() incartato: ogni checkout — incluse le 23 transazioni
+// manuali BEGIN/COMMIT di server.ts — eredita il contesto senza saperlo.
+// La release fa il RESET prima di restituire il client al pool; se il
+// RESET fallisce (connessione morta) si distrugge il client (release(err)).
+const originalConnect = pool.connect.bind(pool);
+(pool as any).connect = (cb?: any): any => {
+    // Percorso a CALLBACK: è quello che pg usa INTERNAMENTE per pool.query.
+    // Va lasciato nudo — le query contestuali passano dal ramo promise di
+    // queryWithRetry, e incartare la callback appenderebbe pool.query per
+    // sempre (il wrapper promise non la invocherebbe mai).
+    if (typeof cb === 'function') return originalConnect(cb);
+    return wrappedConnect();
+};
+
+const wrappedConnect = async (): Promise<import('pg').PoolClient> => {
+    const client: import('pg').PoolClient = await originalConnect();
+    const ctx = tenantContext.getStore();
+    if (!ctx) return client;
+    try {
+        await applyContextToClient(client);
+    } catch (err) {
+        client.release(err as Error);
+        throw err;
+    }
+    const originalRelease = client.release.bind(client);
+    let released = false;
+    client.release = (err?: Error | boolean) => {
+        if (released) return;
+        released = true;
+        if (err) return originalRelease(err as any);
+        client.query(`RESET app.tenant_id`)
+            .then(() => client.query(`RESET app.rls_bypass`))
+            .then(() => originalRelease())
+            .catch(resetErr => originalRelease(resetErr as Error));
+    };
+    return client;
+};
+
 export const queryWithRetry = async (text: string, params?: any[]): Promise<{ rows: any[]; rowCount: number | null }> => {
     const maxAttempts = 3;
     let lastErr: any;
+    // Con un contesto attivo la query passa da un client con set_config;
+    // senza, resta il pool.query nudo di sempre (nessun costo aggiuntivo).
+    const contextual = tenantContext.getStore() !== undefined;
+    const runOnce = async () => {
+        if (!contextual) return pool.query(text, params);
+        const client = await pool.connect();
+        try {
+            return await client.query(text, params);
+        } finally {
+            client.release();
+        }
+    };
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-            return await pool.query(text, params);
+            return await runOnce();
         } catch (err: any) {
             lastErr = err;
             if (!isTransient(err) || attempt === maxAttempts) throw err;
@@ -147,6 +241,10 @@ export const runMigrations = async (): Promise<void> => {
         // Stessa sessione Europe/Rome del pool (vedi pool.on('connect')):
         // una migration deve vedere il database come lo vedono le route.
         await client.query("SET TIME ZONE 'Europe/Rome'");
+        // Lavoro di piattaforma dichiarato: i backfill delle migration
+        // attraversano i tenant per mestiere. Con la policy rigida accesa,
+        // senza questo flag ogni INSERT..SELECT cross-tenant morirebbe.
+        await client.query("SELECT set_config('app.rls_bypass', 'on', false)");
         const applied = await runMigrationRunner({
             dbClient: client,
             dir: path.resolve(process.cwd(), 'migrations'),
@@ -515,7 +613,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             END $$;
         `);
 
-        // Track origin of each reservation: MANUAL (CRM), WHATSAPP (Vonage), VOICE (ElevenLabs).
+        // Track origin of each reservation: MANUAL (CRM), WHATSAPP (inbound), VOICE (ElevenLabs).
         await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'MANUAL';`);
         await client.query(`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS requires_review BOOLEAN DEFAULT false;`);
         // Children sub-count of `guests`. Server enforces 0 <= children <= guests.
@@ -1818,7 +1916,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // INTEGRATION SETTINGS (per-provider secrets + environment)
         // ============================================
         // One row per external provider (currently only Revolut). Values are
-        // stored in plaintext to match the existing Twilio/Meta/Vonage pattern;
+        // stored in plaintext to match the existing Twilio/Meta pattern;
         // add row-level encryption at the same time for all providers if we
         // need it later. Any NULL/empty column here falls back to the matching
         // env var at read time (see services/revolutService.ts), so an install

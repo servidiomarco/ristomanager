@@ -8,7 +8,7 @@ import { RolePermissionService, ALL_PERMISSIONS, Permission } from './permission
 import { LogService, ActivityAction, ResourceType } from '../activityLogs/logService.js';
 import { getTenantFeatures } from '../services/entitlements.js';
 import { isSmtpConfigured, sendMail } from '../services/smtpService.js';
-import { queryWithRetry } from '../db.js';
+import { queryWithRetry, runAsPlatform } from '../db.js';
 
 const router = Router();
 
@@ -18,7 +18,11 @@ const router = Router();
 const MIN_PASSWORD_LENGTH = 8;
 
 // POST /auth/login - User login
-router.post('/login', async (req: Request, res: Response) => {
+// runAsPlatform (qui e su refresh/forgot/reset): le route PRE-auth risolvono
+// l'identità per email/token su TUTTA la piattaforma — non c'è ancora un
+// tenant. Con la RLS rigida, senza questa dichiarazione la SELECT su users
+// tornerebbe vuota e ogni login fallirebbe.
+router.post('/login', (req: Request, res: Response) => runAsPlatform(async () => {
   try {
     const { email, password } = req.body;
 
@@ -69,7 +73,7 @@ router.post('/login', async (req: Request, res: Response) => {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
-});
+}));
 
 // POST /auth/logout - User logout
 router.post('/logout', authenticate, async (req: Request, res: Response) => {
@@ -97,7 +101,7 @@ router.post('/logout', authenticate, async (req: Request, res: Response) => {
 });
 
 // POST /auth/refresh - Refresh access token
-router.post('/refresh', async (req: Request, res: Response) => {
+router.post('/refresh', (req: Request, res: Response) => runAsPlatform(async () => {
   try {
     const { refreshToken } = req.body;
 
@@ -119,7 +123,7 @@ router.post('/refresh', async (req: Request, res: Response) => {
     console.error('Refresh error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
-});
+}));
 
 // GET /auth/me - Get current user with permissions
 router.get('/me', authenticate, async (req: Request, res: Response) => {
@@ -359,7 +363,7 @@ const forgotPasswordLimiter = rateLimit({
 // per email esistente, inesistente, utente disattivato o SMTP mancante.
 // Qualunque differenza (status, corpo, perfino un errore 500) direbbe a un
 // attaccante quali indirizzi hanno un account.
-router.post('/forgot-password', forgotPasswordLimiter, async (req: Request, res: Response) => {
+router.post('/forgot-password', forgotPasswordLimiter, (req: Request, res: Response) => runAsPlatform(async () => {
   const uniformReply = () => res.json({ ok: true });
 
   try {
@@ -434,10 +438,10 @@ router.post('/forgot-password', forgotPasswordLimiter, async (req: Request, res:
     console.error('Forgot password error:', error);
     return uniformReply();
   }
-});
+}));
 
 // POST /auth/reset-password - Consume a reset token and set a new password
-router.post('/reset-password', async (req: Request, res: Response) => {
+router.post('/reset-password', (req: Request, res: Response) => runAsPlatform(async () => {
   try {
     const { token, new_password } = req.body as { token?: unknown; new_password?: unknown };
 
@@ -472,7 +476,7 @@ router.post('/reset-password', async (req: Request, res: Response) => {
     console.error('Reset password error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
-});
+}));
 
 // ============================================
 // USER MANAGEMENT ROUTES (Owner only)

@@ -15,7 +15,7 @@
 //   6. I domini custom dei tenant letti da tenant_domains, con cache a TTL
 //      (60s) così un dominio appena registrato funziona senza redeploy e
 //      il DB non viene interrogato a ogni preflight.
-import { queryWithRetry } from '../db.js';
+import { queryWithRetry, runAsPlatform } from '../db.js';
 
 // TTL della cache dei domini tenant: 60s è il compromesso fra "un dominio
 // nuovo funziona quasi subito" e "niente query per ogni richiesta".
@@ -29,7 +29,9 @@ let tenantDomainsRefreshing: Promise<void> | null = null;
 
 const refreshTenantDomains = async (): Promise<void> => {
     try {
-        const res = await queryWithRetry('SELECT domain FROM tenant_domains');
+        // Lettura di piattaforma: la allowlist CORS è per definizione l'unione
+        // dei domini di TUTTI i tenant.
+        const res = await runAsPlatform(() => queryWithRetry('SELECT domain FROM tenant_domains'));
         tenantDomainsCache = new Set(
             res.rows.map((r: { domain: string }) => String(r.domain).trim().toLowerCase())
         );

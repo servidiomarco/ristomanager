@@ -3,6 +3,7 @@ import { AuthService, TokenPayload } from './authService.js';
 import { Permission } from './permissions.js';
 import { RolePermissionService } from './permissionService.js';
 import { UserRole } from '../types.js';
+import { runWithTenantContext, runAsPlatform } from '../db.js';
 
 // Extend Express Request to include user info
 declare global {
@@ -40,7 +41,14 @@ export const authenticate = (req: Request, res: Response, next: NextFunction) =>
 
   req.user = { ...payload, tenantId: normalizeTenantId(payload) };
   req.tenantId = req.user.tenantId;
-  next();
+  // Il resto della richiesta gira nel contesto del tenant: da qui in giù
+  // ogni query del pool si scopa da sola (RLS rigida compresa, quando
+  // accesa). PLATFORM_ADMIN è piattaforma per definizione: le sue letture
+  // (pannello, impersonation) attraversano i tenant di mestiere.
+  if (req.user.role === UserRole.PLATFORM_ADMIN) {
+    return runAsPlatform(() => next());
+  }
+  return runWithTenantContext(req.tenantId, () => next());
 };
 
 // Authorization middleware factory - checks role permissions
