@@ -1356,6 +1356,19 @@ export const adminBillingPortal = async (id: number): Promise<{ url: string }> =
   });
 };
 
+// Picker add-on: modifica gli item della subscription Stripe del tenant
+// (prorazione automatica) e ritorna le feature risultanti.
+export const adminUpdateAddons = async (
+  id: number,
+  features: Partial<Record<AdminTenantFeature, boolean>>
+): Promise<{ billing_status: string | null; features: Record<AdminTenantFeature, boolean> }> => {
+  return apiRequest(`${API_URL}/admin/tenants/${id}/billing/addons`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify({ features }),
+  });
+};
+
 export interface MarketingRecipient {
   id: number;
   name: string;

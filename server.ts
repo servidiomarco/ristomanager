@@ -23,6 +23,7 @@ import {
     createCheckoutSession,
     createPortalSession,
     applySubscriptionState,
+    updateSubscriptionAddons,
     constructWebhookEvent,
     isBillingEnabled,
     getStripe,
@@ -16290,6 +16291,7 @@ const billingErrorToResponse = (res: express.Response, err: unknown, routeLabel:
         const status = err.code === 'billing_disabled' ? 503
             : err.code === 'tenant_not_found' ? 404
             : err.code === 'stripe_customer_missing' ? 409
+            : err.code === 'no_subscription' ? 409
             : 400;
         res.status(status).json({ error: err.code, message: err.message });
         return;
@@ -16339,6 +16341,43 @@ app.post('/admin/tenants/:id/billing/portal', platformAdminAuth, async (req, res
         res.json({ url: session.url });
     } catch (err) {
         billingErrorToResponse(res, err, 'POST /admin/tenants/:id/billing/portal');
+    }
+});
+
+// Picker add-on del pannello: accende/spegne moduli sulla subscription del
+// tenant (item aggiunti/rimossi con prorazione). Le feature a DB si
+// allineano subito dallo stato Stripe risultante — il webhook che seguirà è
+// una conferma, non un'attesa.
+app.patch('/admin/tenants/:id/billing/addons', platformAdminAuth, async (req, res) => {
+    const tenantId = Number(req.params.id);
+    if (!Number.isInteger(tenantId) || tenantId <= 0) {
+        return res.status(400).json({ error: 'invalid_tenant_id' });
+    }
+    const raw = (req.body ?? {}).features;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        return res.status(400).json({ error: 'invalid_features', message: 'features deve essere un oggetto {feature: boolean}' });
+    }
+    const desired: Partial<Record<TenantFeature, boolean>> = {};
+    for (const [key, value] of Object.entries(raw)) {
+        if (!(TENANT_FEATURES as readonly string[]).includes(key)) {
+            return res.status(400).json({ error: 'invalid_features', message: `Feature non valida: ${String(key).slice(0, 40)}` });
+        }
+        if (typeof value !== 'boolean') {
+            return res.status(400).json({ error: 'invalid_features', message: `Valore non booleano per ${key}` });
+        }
+        desired[key as TenantFeature] = value;
+    }
+    if (Object.keys(desired).length === 0) {
+        return res.status(400).json({ error: 'invalid_features', message: 'Nessuna feature da aggiornare' });
+    }
+    try {
+        const applied = await updateSubscriptionAddons(tenantId, desired);
+        res.json({
+            billing_status: applied.billingStatus,
+            features: await getTenantFeatures(tenantId),
+        });
+    } catch (err) {
+        billingErrorToResponse(res, err, 'PATCH /admin/tenants/:id/billing/addons');
     }
 });
 

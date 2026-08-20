@@ -193,4 +193,26 @@ describe('billing Stripe (Fase D3)', () => {
         });
         expect(applied).toBeNull();
     });
+
+    it('picker add-on: 401 senza header, 400 su body malformato, 409 senza subscription', async () => {
+        const noAuth = await api().patch('/admin/tenants/1/billing/addons').send({ features: { voice: true } });
+        expect(noAuth.status).toBe(401);
+
+        const badBody = await api().patch('/admin/tenants/1/billing/addons').set(ADMIN_HEADER).send({ features: { voice: 'sì' } });
+        expect(badBody.status).toBe(400);
+        const badKey = await api().patch('/admin/tenants/1/billing/addons').set(ADMIN_HEADER).send({ features: { telegram: true } });
+        expect(badKey.status).toBe(400);
+
+        // Il tenant 1 non ha una subscription: l'errore è SUO, e arriva
+        // prima del check sulla chiave Stripe (assente nei test).
+        const noSub = await api().patch('/admin/tenants/1/billing/addons').set(ADMIN_HEADER).send({ features: { voice: true } });
+        expect(noSub.status).toBe(409);
+        expect(noSub.body.error).toBe('no_subscription');
+
+        // Il tenant di test HA una subscription (scritta dalle sync sopra):
+        // qui si arriva fino a Stripe, che senza chiave è spento → 503.
+        const disabled = await api().patch(`/admin/tenants/${tenantId}/billing/addons`).set(ADMIN_HEADER).send({ features: { voice: false } });
+        expect(disabled.status).toBe(503);
+        expect(disabled.body.error).toBe('billing_disabled');
+    });
 });
