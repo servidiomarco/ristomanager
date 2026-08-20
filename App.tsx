@@ -375,12 +375,16 @@ const App: React.FC = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const isPaletteHotkey = (e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K');
       if (!isPaletteHotkey) return;
+      // Sulla vista Piattaforma la ricerca globale pescherebbe nei dati del
+      // tenant dell'admin: meglio nessuna palette che quella del ristorante
+      // sbagliato.
+      if (view === ViewState.PLATFORM) return;
       e.preventDefault();
       setPaletteOpen(true);
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [view]);
 
   // Close the global create menu on outside click (pointer down outside the +/panel)
   useEffect(() => {
@@ -1969,7 +1973,7 @@ const App: React.FC = () => {
                w-1/2) so it takes exactly the free space between the mobile logo
                and the right actions — with the sidebar open at lg the content
                area shrinks and a fixed half would overflow into the "+" button. */}
-           <div className={`hidden md:flex items-center gap-2.5 flex-1 min-w-0 ${[ViewState.SETTINGS, ViewState.USERS, ViewState.CLIENTI, ViewState.STAFF].includes(view) ? '!hidden' : ''}`}>
+           <div className={`hidden md:flex items-center gap-2.5 flex-1 min-w-0 ${[ViewState.SETTINGS, ViewState.USERS, ViewState.CLIENTI, ViewState.STAFF, ViewState.PLATFORM].includes(view) ? '!hidden' : ''}`}>
              <DateNavigator
                value={globalDateStr}
                onChange={(dateOnly) => {
@@ -2024,7 +2028,7 @@ const App: React.FC = () => {
            </div>
 
            {/* Right cluster — order is deliberate: Live · Search · Bell · Plus */}
-           <div className="ml-auto flex items-center gap-2 flex-shrink-0 pl-2">
+           <div className={`ml-auto flex items-center gap-2 flex-shrink-0 pl-2 ${view === ViewState.PLATFORM ? '!hidden' : ''}`}>
 
               {/* Connection state + current time, merged into one pill.
                   Connected uses the `seated` family; offline uses `critical`.
