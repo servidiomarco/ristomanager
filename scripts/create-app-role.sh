@@ -36,9 +36,37 @@ SQL
 
 # createSchema/migrations girano al boot con la STESSA connessione dell'app:
 # devono poter creare tabelle. CREATE sul database, non sullo schema di
-# terzi: il ruolo resta non-superuser e non-owner, quindi la RLS si applica.
+# terzi: il ruolo resta non-superuser, quindi la RLS si applica.
 DBNAME=$(node -e "process.stdout.write(new URL(process.argv[1]).pathname.slice(1))" "$DATABASE_URL")
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "GRANT CREATE ON SCHEMA public TO ${ROLE}; GRANT CREATE, CONNECT, TEMP ON DATABASE \"${DBNAME}\" TO ${ROLE};"
+
+# OWNERSHIP degli oggetti ESISTENTI. I soli grant non bastano su un database
+# già popolato: createSchema fa ALTER TABLE ... ADD COLUMN a OGNI boot e
+# ricrea funzioni con CREATE OR REPLACE — entrambe richiedono la ownership,
+# non i privilegi. Su un DB vergine il problema non si vede (è il ruolo a
+# creare tutto); su produzione, senza questo blocco, il primo boot col ruolo
+# nuovo muore di "must be owner of table". La RLS non si indebolisce: le
+# policy della B4 sono con FORCE proprio perché il disegno prevede l'app
+# come owner (vedi commento in cima alla migration row-level-security).
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<SQL
+DO \$\$
+DECLARE r RECORD;
+BEGIN
+    FOR r IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
+        EXECUTE format('ALTER TABLE public.%I OWNER TO ${ROLE}', r.tablename);
+    END LOOP;
+    FOR r IN SELECT sequencename FROM pg_sequences WHERE schemaname = 'public' LOOP
+        EXECUTE format('ALTER SEQUENCE public.%I OWNER TO ${ROLE}', r.sequencename);
+    END LOOP;
+    FOR r IN
+        SELECT p.proname, pg_get_function_identity_arguments(p.oid) AS args
+          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'public'
+    LOOP
+        EXECUTE format('ALTER FUNCTION public.%I(%s) OWNER TO ${ROLE}', r.proname, r.args);
+    END LOOP;
+END \$\$;
+SQL
 
 NEWURL=$(node -e "const u=new URL(process.argv[1]); u.username='${ROLE}'; u.password='${PASSWORD}'; process.stdout.write(u.toString())" "$DATABASE_URL")
 echo
