@@ -1777,18 +1777,32 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // actually free. Answers persist and sync to every device; a plain dismiss
   // only snoozes the question on this screen.
   const [overdueSnoozes, setOverdueSnoozes] = useState<Record<number, number>>({});
-  const overduePromptRes = useMemo(() => {
-    if (!canEdit) return null;
+  // Tutti i tavoli in attesa di risposta, non solo il primo: a fine servizio
+  // ne scadono parecchi insieme e chi e' in sala vuole sapere quanti ne restano
+  // — e poterli togliere di mezzo in un colpo invece che uno per volta.
+  const overdueQueue = useMemo(() => {
+    if (!canEdit) return [] as Reservation[];
     const today = formatLocalDate(new Date(nowTick));
-    return reservations.find(r =>
+    return reservations.filter(r =>
       getRomeDatePart(r.reservation_time) === today &&
       getReservationState(r) === 'arrived' &&
       isOverdue(r, nowTick) &&
       (overdueSnoozes[r.id] ?? 0) <= nowTick
-    ) ?? null;
+    );
   }, [reservations, nowTick, canEdit, overdueSnoozes]);
+  const overduePromptRes = overdueQueue[0] ?? null;
   const snoozeOverduePrompt = (res: Reservation) => {
     setOverdueSnoozes(prev => ({ ...prev, [res.id]: nowTick + OVERDUE_SNOOZE_MIN * 60_000 }));
+  };
+  // Rimanda tutta la coda insieme. Come il rinvio singolo non cambia lo stato
+  // di nessuna prenotazione: e' un "non ora", non un "libera i tavoli".
+  const snoozeAllOverduePrompts = () => {
+    const scadenza = nowTick + OVERDUE_SNOOZE_MIN * 60_000;
+    setOverdueSnoozes(prev => {
+      const next = { ...prev };
+      for (const r of overdueQueue) next[r.id] = scadenza;
+      return next;
+    });
   };
 
   // Voice input handler
@@ -6606,10 +6620,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     {toTitleCase(res.customer_name)} · {formatTime(res.reservation_time)}{table ? ` · Tavolo ${table.name}` : ''}
                   </p>
                 </div>
-                <button onClick={() => snoozeOverduePrompt(res)}
-                  className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
-                  <X className="h-5 w-5" />
-                </button>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  {/* Compare solo quando ce n'e' piu' d'uno: con un tavolo solo
+                      farebbe esattamente quello che fa la X accanto. */}
+                  {overdueQueue.length > 1 && (
+                    <button type="button" onClick={snoozeAllOverduePrompts}
+                      title={`Rimanda tutti i ${overdueQueue.length} avvisi di ${OVERDUE_SNOOZE_MIN} minuti`}
+                      className="px-2.5 h-8 rounded-lg text-[13px] font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                      Chiudi tutti · {overdueQueue.length}
+                    </button>
+                  )}
+                  <button onClick={() => snoozeOverduePrompt(res)}
+                    aria-label="Chiudi questo avviso"
+                    className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
               </div>
               <div className="p-4 space-y-3">
                 <p className="text-sm text-[var(--color-fg)]">
