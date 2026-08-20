@@ -16312,8 +16312,9 @@ app.post('/admin/tenants/:id/billing/checkout', platformAdminAuth, async (req, r
         }
         prices = body.prices;
     }
-    // Le pagine di ritorno sono placeholder sul backend stesso: chi apre il
-    // checkout è l'admin di piattaforma, non serve una UI dedicata.
+    // Le pagine di ritorno vivono sul backend stesso (GET qui sotto): chi
+    // apre il checkout è l'admin di piattaforma in un'altra scheda — basta
+    // una riga che dica com'è andata, senza UI dedicata.
     const origin = `${req.protocol}://${req.get('host')}`;
     const successUrl = typeof body.success_url === 'string' && body.success_url ? body.success_url : `${origin}/admin/billing/success`;
     const cancelUrl = typeof body.cancel_url === 'string' && body.cancel_url ? body.cancel_url : `${origin}/admin/billing/cancel`;
@@ -16339,6 +16340,35 @@ app.post('/admin/tenants/:id/billing/portal', platformAdminAuth, async (req, res
     } catch (err) {
         billingErrorToResponse(res, err, 'POST /admin/tenants/:id/billing/portal');
     }
+});
+
+// Pagine di ritorno di checkout e portal. Prima non esistevano e Stripe
+// atterrava su "Cannot GET /admin/billing/success" — pagamento riuscito,
+// faccia di errore. Una riga di esito e nient'altro: chi arriva qui è
+// l'admin con il pannello aperto nell'altra scheda.
+const billingReturnPage = (title: string, message: string): string => `<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${title}</title>
+<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:-apple-system,system-ui,sans-serif;background:#ededf1;color:#1c1c21}main{text-align:center;padding:32px}h1{font-size:22px;margin:0 0 8px}p{font-size:15px;color:#5c5c66;margin:0}</style>
+</head><body><main><h1>${title}</h1><p>${message}</p></main></body></html>`;
+
+app.get('/admin/billing/success', (_req, res) => {
+    res.type('html').send(billingReturnPage(
+        'Abbonamento attivato',
+        'Il webhook Stripe sta aggiornando il cliente. Puoi chiudere questa scheda e tornare al pannello.'
+    ));
+});
+app.get('/admin/billing/cancel', (_req, res) => {
+    res.type('html').send(billingReturnPage(
+        'Pagamento annullato',
+        'Nessun addebito. Puoi chiudere questa scheda e riprovare dal pannello.'
+    ));
+});
+app.get('/admin/billing/return', (_req, res) => {
+    res.type('html').send(billingReturnPage(
+        'Fatturazione aggiornata',
+        'Le modifiche fatte nel portal arrivano al pannello via webhook. Puoi chiudere questa scheda.'
+    ));
 });
 
 // Webhook Stripe: l'UNICA via con cui lo stato della subscription entra nel
