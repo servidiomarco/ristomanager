@@ -25,6 +25,7 @@ import {
     applySubscriptionState,
     constructWebhookEvent,
     isBillingEnabled,
+    getStripe,
     BillingError,
     type SubscriptionLike,
 } from './services/billingService.js';
@@ -50,7 +51,7 @@ import { AuthService } from './auth/authService.js';
 import { RolePermissionService } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
-import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles } from './services/pushService.js';
+import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles, sendToPlatformAdmins as pushSendToPlatformAdmins } from './services/pushService.js';
 import {
     isRevolutConfigured,
     verifyWebhookSignature as verifyRevolutWebhook,
@@ -16032,12 +16033,21 @@ app.post('/admin/tenants', platformAdminAuth, async (req, res) => {
     }
 });
 
+// URL del customer sul Dashboard Stripe. La modalità (test/live) si deduce
+// dal prefisso della chiave: un id di test aperto sull'URL live darebbe un
+// "customer non trovato" che sembra un dato perso.
+const stripeDashboardCustomerUrl = (customerId: string | null): string | null => {
+    if (!customerId) return null;
+    const testMode = (process.env.STRIPE_SECRET_KEY || '').startsWith('sk_test');
+    return `https://dashboard.stripe.com/${testMode ? 'test/' : ''}customers/${customerId}`;
+};
+
 app.get('/admin/tenants', platformAdminAuth, async (_req, res) => {
     try {
         // Feature attive come array di nomi e conteggio utenti in una query:
         // è la vista "lista tenant" del futuro pannello D2, non un report.
         const result = await queryWithRetry(
-            `SELECT t.id, t.slug, t.name, t.status, t.billing_status, t.created_at,
+            `SELECT t.id, t.slug, t.name, t.status, t.billing_status, t.stripe_customer_id, t.created_at,
                     COALESCE(
                         array_agg(f.feature ORDER BY f.feature) FILTER (WHERE f.enabled),
                         '{}'
@@ -16056,6 +16066,9 @@ app.get('/admin/tenants', platformAdminAuth, async (_req, res) => {
             // NULL = tenant non a pagamento (grandfathered): il pannello lo
             // distingue da un pagante moroso.
             billing_status: r.billing_status,
+            // Link diretto al customer sul Dashboard Stripe; null per i
+            // tenant senza billing.
+            stripe_customer_url: stripeDashboardCustomerUrl(r.stripe_customer_id ?? null),
             created_at: r.created_at,
             features: r.features,
             user_count: r.user_count,
@@ -16063,6 +16076,61 @@ app.get('/admin/tenants', platformAdminAuth, async (_req, res) => {
     } catch (err) {
         console.error('GET /admin/tenants error:', err);
         res.status(500).json({ error: 'Failed to list tenants' });
+    }
+});
+
+// Riepilogo billing per la testata del pannello: MRR dalla verità Stripe
+// (le subscription attive, normalizzate al mese) + conteggi dei tenant per
+// stato billing dal nostro DB. Un solo giro per apertura pannello: niente
+// cache, la lista subscription di una piattaforma giovane è corta.
+app.get('/admin/billing/summary', platformAdminAuth, async (_req, res) => {
+    if (!isBillingEnabled()) {
+        return res.status(503).json({ error: 'billing_disabled', message: 'STRIPE_SECRET_KEY non configurata' });
+    }
+    try {
+        const counts = await queryWithRetry(
+            `SELECT billing_status, COUNT(*)::int AS n
+               FROM tenants GROUP BY billing_status`
+        );
+        let paying = 0, pastDue = 0, trialing = 0, grandfathered = 0;
+        for (const row of counts.rows) {
+            const n = Number(row.n);
+            if (row.billing_status === null) grandfathered += n;
+            else if (row.billing_status === 'past_due') { pastDue += n; paying += n; }
+            else if (row.billing_status === 'trialing') trialing += n;
+            else if (row.billing_status === 'active') paying += n;
+        }
+
+        // MRR: somma degli item delle subscription attive e in past_due
+        // (Stripe le conta nel MRR finché non muoiono), annuale diviso 12.
+        const stripe = getStripe();
+        let mrrCents = 0;
+        for (const status of ['active', 'past_due'] as const) {
+            for await (const sub of stripe.subscriptions.list({ status, limit: 100 })) {
+                for (const item of sub.items.data) {
+                    const price = item.price;
+                    if (!price?.recurring || typeof price.unit_amount !== 'number') continue;
+                    const qty = item.quantity ?? 1;
+                    const amount = price.unit_amount * qty;
+                    mrrCents += price.recurring.interval === 'year'
+                        ? Math.round(amount / 12)
+                        : price.recurring.interval === 'month'
+                            ? amount
+                            : 0;
+                }
+            }
+        }
+
+        res.json({
+            mrr_cents: mrrCents,
+            paying_tenants: paying,
+            past_due_tenants: pastDue,
+            trialing_tenants: trialing,
+            grandfathered_tenants: grandfathered,
+        });
+    } catch (err: any) {
+        console.error('GET /admin/billing/summary error:', err?.message || err);
+        res.status(502).json({ error: 'stripe_error', message: 'Riepilogo Stripe non disponibile' });
     }
 });
 
@@ -16315,6 +16383,20 @@ app.post('/webhook/stripe', async (req, res) => {
                     for (const [domain, entry] of tenantDomainCache) {
                         if (entry.hit.tenantId === applied.tenantId) tenantDomainCache.delete(domain);
                     }
+                }
+                // Avviso ai platform admin sulla TRANSIZIONE a past_due (non
+                // a ogni retry Stripe: i webhook della stessa morosità
+                // arrivano più volte). Il tag deduplica anche lato centro
+                // notifiche. La sospensione vera (canceled/unpaid) non ha
+                // bisogno di push: la fa già la sync spegnendo il tenant.
+                if (applied && applied.billingStatus === 'past_due' && applied.previousBillingStatus !== 'past_due') {
+                    pushSendToPlatformAdmins({
+                        category: 'billing',
+                        title: 'Pagamento non riuscito',
+                        body: `${applied.name}: abbonamento in past_due, Stripe sta ritentando l'addebito.`,
+                        url: '/?view=PLATFORM',
+                        tag: `billing-past-due-${applied.tenantId}`,
+                    }).catch(err => console.warn('[billing] push past_due fallita:', (err as any)?.message || err));
                 }
                 break;
             }

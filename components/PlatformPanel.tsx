@@ -1,16 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Building2, Check, Copy, Plus, RefreshCw } from 'lucide-react';
 import {
-  ModalShell, FormCard, Field, Callout, EmptyState, StatusPill, CountBadge,
+  ModalShell, FormCard, Field, Callout, EmptyState, StatusPill, CountBadge, StatStrip,
   dsInput, dsButton,
 } from './ds';
 import { useAuth } from '../contexts/AuthContext';
 import { authApiService } from '../services/authApiService';
 import {
   adminListTenants, adminCreateTenant, adminUpdateTenant, adminImpersonateTenant,
-  adminBillingCheckout, adminBillingPortal,
+  adminBillingCheckout, adminBillingPortal, adminBillingSummary,
   ADMIN_TENANT_FEATURES,
-  type AdminTenant, type AdminTenantFeature, type AdminTenantProvisioned,
+  type AdminTenant, type AdminTenantFeature, type AdminTenantProvisioned, type AdminBillingSummary,
 } from '../services/apiService';
 import type { ApiError } from '../services/apiError';
 
@@ -328,6 +328,17 @@ const TenantCard: React.FC<{
           <button type="button" className={dsButton.quiet} onClick={openBilling} disabled={busy === 'billing'}>
             {tenant.billing_status ? 'Fatturazione' : 'Attiva abbonamento'}
           </button>
+          {tenant.stripe_customer_url && (
+            <a
+              href={tenant.stripe_customer_url}
+              target="_blank"
+              rel="noreferrer"
+              className={dsButton.quiet}
+              title="Apri il customer sul Dashboard Stripe"
+            >
+              Stripe
+            </a>
+          )}
           <button type="button" className={dsButton.quiet} onClick={() => setConfirmingStatus(true)}>
             {suspended ? 'Riattiva' : 'Sospendi'}
           </button>
@@ -518,6 +529,9 @@ export const PlatformPanel: React.FC<{ showToast: ShowToast }> = ({ showToast })
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
+  // Riepilogo billing (MRR da Stripe): null finché non arriva, e resta null
+  // se il billing non è configurato (503) — la strip semplicemente non c'è.
+  const [summary, setSummary] = useState<AdminBillingSummary | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -528,6 +542,8 @@ export const PlatformPanel: React.FC<{ showToast: ShowToast }> = ({ showToast })
     } finally {
       setLoading(false);
     }
+    // Fuori dal try della lista: un errore Stripe non deve oscurare i clienti.
+    adminBillingSummary().then(setSummary).catch(() => setSummary(null));
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -552,6 +568,31 @@ export const PlatformPanel: React.FC<{ showToast: ShowToast }> = ({ showToast })
               Nuovo cliente
             </button>
           </div>
+
+          {/* La strip vive solo quando il billing risponde: MRR dalla verità
+              Stripe, conteggi dal nostro DB. past_due tinge il segmento — è
+              l'unico numero qui che chiede un'azione. */}
+          {summary && (
+            <StatStrip
+              layout="stacked"
+              className="mb-4"
+              stats={[
+                {
+                  value: `€ ${(summary.mrr_cents / 100).toLocaleString('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`,
+                  label: 'MRR',
+                },
+                { value: summary.paying_tenants, label: 'paganti' },
+                {
+                  value: summary.past_due_tenants,
+                  label: 'past due',
+                  tone: summary.past_due_tenants > 0 ? 'critical' : undefined,
+                  tint: summary.past_due_tenants > 0,
+                },
+                { value: summary.trialing_tenants, label: 'in prova', hideBelow: 'sm' },
+                { value: summary.grandfathered_tenants, label: 'senza billing', hideBelow: 'sm' },
+              ]}
+            />
+          )}
 
           {loading && (
             <div className="space-y-3">
