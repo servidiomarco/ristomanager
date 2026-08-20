@@ -1,12 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Mail, Send, Loader2, RefreshCw, CheckCircle2, Clock, AlertTriangle, ArrowRight, Check, ArrowDownLeft, ArrowUpRight, Reply } from 'lucide-react';
+import { Mail, Send, Loader2, RefreshCw, CheckCircle2, Clock, AlertTriangle, ArrowRight, Check, ArrowDownLeft, ArrowUpRight, Reply, Paperclip, X as XIcon, FolderOpen } from 'lucide-react';
 import { CookingPotLoader } from './CookingPotLoader';
 import { SkeletonInboxList, SkeletonEmailThread } from './SkeletonCards';
 import {
   emailApiService,
+  publicMediaUrl,
   EmailThreadSummary,
   EmailMessage,
 } from '../services/emailApiService';
+import { uploadAttachment, type UploadedAttachment } from '../services/messagesApiService';
+import { listMedia, attachFromLibrary, type MediaFile } from '../services/mediaApiService';
 import { socketClient } from '../services/socketClient';
 import { toTitleCase } from '../utils/text';
 import {
@@ -81,6 +84,13 @@ const EmailPage: React.FC = () => {
   const [sendError, setSendError] = useState<string | null>(null);
   const [newEmailOpen, setNewEmailOpen] = useState(false);
   const [newRecipient, setNewRecipient] = useState('');
+  // Allegati: stessa via della Inbox (outbound_media + token), ma via email
+  // i byte viaggiano dentro il messaggio, non su un URL per Twilio.
+  const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
+  const [libreriaAperta, setLibreriaAperta] = useState(false);
+  const [libreria, setLibreria] = useState<MediaFile[] | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -220,6 +230,52 @@ const EmailPage: React.FC = () => {
     requestAnimationFrame(() => composerRef.current?.focus());
   };
 
+  // Carica subito il file scelto: al momento dell'invio serve solo il token,
+  // così l'attesa dell'upload non si somma a quella dell'invio.
+  const handlePickFiles = useCallback(async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    setSendError(null);
+    try {
+      const uploaded: UploadedAttachment[] = [];
+      for (const file of Array.from(files).slice(0, 5)) {
+        uploaded.push(await uploadAttachment(file));
+      }
+      setAttachments(prev => [...prev, ...uploaded]);
+    } catch (err: any) {
+      setSendError(err?.message || 'Caricamento allegato non riuscito');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }, []);
+
+  const handleApriLibreria = useCallback(async () => {
+    setLibreriaAperta(v => !v);
+    if (libreria !== null) return;
+    try {
+      const { files } = await listMedia();
+      setLibreria(files);
+    } catch (err: any) {
+      setSendError(err?.data?.error || 'Libreria non caricata');
+      setLibreria([]);
+    }
+  }, [libreria]);
+
+  const handleAllegaDallaLibreria = useCallback(async (f: MediaFile) => {
+    setUploading(true);
+    setSendError(null);
+    try {
+      const allegato = await attachFromLibrary(f.id);
+      setAttachments(prev => [...prev, allegato as UploadedAttachment]);
+      setLibreriaAperta(false);
+    } catch (err: any) {
+      setSendError(err?.data?.error || 'Allegato non preparato');
+    } finally {
+      setUploading(false);
+    }
+  }, []);
+
   const handleSendReply = useCallback(async () => {
     if (!selected || !subject.trim() || !bodyText.trim() || sending) return;
     setSending(true);
@@ -232,9 +288,12 @@ const EmailPage: React.FC = () => {
         body: bodyText.trim(),
         reservation_id: selected.last_reservation_id,
         in_reply_to: lastMsgId,
+        attachment_tokens: attachments.map(a => a.token),
       });
       setSubject('');
       setBodyText('');
+      setAttachments([]);
+      setLibreriaAperta(false);
       // Timeline refresh via socket, but we also force it in case the socket
       // is disconnected — otherwise the sent email would not appear.
       loadThread(selected.email_key);
@@ -244,7 +303,7 @@ const EmailPage: React.FC = () => {
     } finally {
       setSending(false);
     }
-  }, [selected, subject, bodyText, sending, messages, loadThread, loadThreads]);
+  }, [selected, subject, bodyText, sending, messages, attachments, loadThread, loadThreads]);
 
   const handleSendNew = useCallback(async () => {
     if (!newRecipient.trim() || !subject.trim() || !bodyText.trim() || sending) return;
@@ -252,11 +311,18 @@ const EmailPage: React.FC = () => {
     setSendError(null);
     try {
       const to = newRecipient.trim();
-      await emailApiService.send({ to, subject: subject.trim(), body: bodyText.trim() });
+      await emailApiService.send({
+        to,
+        subject: subject.trim(),
+        body: bodyText.trim(),
+        attachment_tokens: attachments.map(a => a.token),
+      });
       setNewEmailOpen(false);
       setNewRecipient('');
       setSubject('');
       setBodyText('');
+      setAttachments([]);
+      setLibreriaAperta(false);
       // Open the fresh thread so the operator sees the sent email.
       const key = to.toLowerCase();
       setSelectedKey(key);
@@ -266,9 +332,68 @@ const EmailPage: React.FC = () => {
     } finally {
       setSending(false);
     }
-  }, [newRecipient, subject, bodyText, sending, loadThreads]);
+  }, [newRecipient, subject, bodyText, sending, attachments, loadThreads]);
 
   // Timeline grouped by day for readability. Same helper used in InboxPage.
+  // Chips degli allegati pronti a partire e pannello della libreria: stessi
+  // pezzi nel composer di risposta e nel modal "Nuova email", quindi vivono
+  // qui una volta sola.
+  const renderAttachmentChips = () => attachments.map(a => (
+    <span
+      key={a.token}
+      className="inline-flex max-w-[220px] items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] py-1 pl-3 pr-1.5 text-[13px] text-[var(--ds-text-primary)]"
+    >
+      <Paperclip className="h-3.5 w-3.5 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
+      <span className="truncate">{a.filename || a.content_type}</span>
+      <span className="flex-shrink-0 text-[12px] text-[var(--ds-text-muted)]">
+        {Math.max(1, Math.round(a.size_bytes / 1024))} KB
+      </span>
+      <button
+        type="button"
+        onClick={() => setAttachments(prev => prev.filter(x => x.token !== a.token))}
+        aria-label={`Togli ${a.filename || 'allegato'}`}
+        className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
+      >
+        <XIcon className="h-3 w-3" />
+      </button>
+    </span>
+  ));
+
+  const renderLibreria = () => (
+    <div className="rounded-[14px] border border-[var(--ds-border)] bg-[var(--ds-surface-row)] px-3 py-2.5">
+      {libreria === null ? (
+        <p className="flex items-center gap-2 py-1 text-[13px] text-[var(--ds-text-muted)]">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Carico la libreria…
+        </p>
+      ) : libreria.length === 0 ? (
+        <p className="py-1 text-[13px] text-[var(--ds-text-muted)]">
+          Nessun file in libreria. Si caricano da Impostazioni → Media.
+        </p>
+      ) : (
+        <ul className="max-h-44 space-y-0.5 overflow-y-auto">
+          {libreria.map(f => (
+            <li key={f.id}>
+              <button
+                type="button"
+                onClick={() => handleAllegaDallaLibreria(f)}
+                disabled={uploading}
+                className="flex w-full items-center gap-2.5 rounded-[10px] px-2 py-2 text-left transition-colors hover:bg-[var(--ds-surface)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              >
+                <Paperclip className="h-3.5 w-3.5 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
+                <span className="min-w-0 flex-1 truncate text-[14px] text-[var(--ds-text-primary)]">{f.title}</span>
+                <span className="flex-shrink-0 text-[12px] text-[var(--ds-text-subtle)]">
+                  {f.size_bytes >= 1024 * 1024
+                    ? `${(f.size_bytes / 1024 / 1024).toFixed(1)} MB`
+                    : `${Math.max(1, Math.round(f.size_bytes / 1024))} KB`}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+
   const grouped = useMemo(() => {
     const out: { day: string; items: EmailMessage[] }[] = [];
     for (const m of messages) {
@@ -353,6 +478,16 @@ const EmailPage: React.FC = () => {
 
   return (
     <>
+      {/* Un solo input file, sempre montato: lo usano sia il composer di
+          risposta sia il modal "Nuova email". */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,audio/mpeg,audio/ogg,application/pdf"
+        multiple
+        hidden
+        onChange={e => handlePickFiles(e.target.files)}
+      />
       <SplitPane
         detailOpen={!!selectedKey}
         toolbar={
@@ -468,6 +603,24 @@ const EmailPage: React.FC = () => {
                                 <div className="mb-1.5 text-[15px] font-semibold">{m.subject}</div>
                               )}
                               <p className="whitespace-pre-wrap text-[15px] leading-relaxed">{m.body}</p>
+                              {Array.isArray(m.media) && m.media.length > 0 && (
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  {m.media.map(att => (
+                                    <a
+                                      key={att.token}
+                                      href={publicMediaUrl(att.token)}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className={`inline-flex max-w-[240px] items-center gap-1.5 rounded-full px-3 py-1 text-[13px] underline-offset-2 hover:underline ${
+                                        isOut ? 'bg-white/15 text-white' : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
+                                      }`}
+                                    >
+                                      <Paperclip className="h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+                                      <span className="truncate">{att.filename || att.content_type || 'allegato'}</span>
+                                    </a>
+                                  ))}
+                                </div>
+                              )}
                               <div className={`mt-1.5 flex items-center gap-1.5 text-[12px] ${isOut ? 'text-white/75' : 'text-[var(--ds-text-muted)]'}`}>
                                 <span className="tabular-nums">{formatTime(m.sent_at)}</span>
                                 {statusIcon(m)}
@@ -486,6 +639,10 @@ const EmailPage: React.FC = () => {
 
               {/* Reply composer: subject and body as cards, send inside the body. */}
               <div className="flex-shrink-0 space-y-2 px-4 pb-4 pt-3 sm:px-6 lg:px-8">
+                {attachments.length > 0 && (
+                  <div className="flex flex-wrap gap-2">{renderAttachmentChips()}</div>
+                )}
+                {libreriaAperta && renderLibreria()}
                 <input
                   type="text"
                   value={subject}
@@ -495,6 +652,26 @@ const EmailPage: React.FC = () => {
                   className="h-11 w-full rounded-full bg-[var(--ds-surface)] px-4 text-[15px] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 />
                 <div className="flex items-end gap-2 rounded-[24px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading || sending}
+                    aria-label="Allega un file"
+                    title="Allega foto, PDF o audio"
+                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleApriLibreria}
+                    disabled={uploading || sending}
+                    aria-label="Allega un file dalla libreria"
+                    title="Allega un file già caricato (menù, piantina…)"
+                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    <FolderOpen className="h-4 w-4" />
+                  </button>
                   <textarea
                     ref={composerRef}
                     value={bodyText}
@@ -579,6 +756,33 @@ const EmailPage: React.FC = () => {
                 placeholder="Ciao, ci scriviamo per…"
                 className={`${dsTextarea} resize-y`}
               />
+            </Field>
+            <Field label="Allegati">
+              <div className="space-y-2">
+                {attachments.length > 0 && (
+                  <div className="flex flex-wrap gap-2">{renderAttachmentChips()}</div>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading || sending}
+                    className={dsButton.quiet}
+                  >
+                    {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                    Allega file
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleApriLibreria}
+                    disabled={uploading || sending}
+                    className={dsButton.quiet}
+                  >
+                    <FolderOpen className="h-4 w-4" /> Libreria
+                  </button>
+                </div>
+                {libreriaAperta && renderLibreria()}
+              </div>
             </Field>
             {sendError && <Callout tone="critical" icon={AlertTriangle}>{sendError}</Callout>}
           </div>

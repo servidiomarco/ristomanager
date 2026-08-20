@@ -180,6 +180,8 @@ export interface SendMailInput {
     subject: string;
     text: string;
     html?: string;
+    /** Allegati già in memoria (dalla libreria media o da outbound_media). */
+    attachments?: Array<{ filename: string; contentType: string; content: Buffer }>;
 }
 
 export interface SendMailResult {
@@ -203,6 +205,9 @@ async function sendViaSmtp(config: EmailConfig, input: SendMailInput): Promise<S
         subject: input.subject,
         text: input.text,
         html: input.html,
+        attachments: input.attachments?.length
+            ? input.attachments.map(a => ({ filename: a.filename, content: a.content, contentType: a.contentType }))
+            : undefined,
     });
     return {
         messageId: String(info.messageId ?? ''),
@@ -226,6 +231,15 @@ async function sendViaResend(config: EmailConfig, input: SendMailInput): Promise
             subject: input.subject,
             text: input.text,
             html: input.html,
+            // Resend vuole il contenuto in base64; content_type è opzionale
+            // ma senza, alcuni client mostrano l'allegato come binario anonimo.
+            attachments: input.attachments?.length
+                ? input.attachments.map(a => ({
+                    filename: a.filename,
+                    content: a.content.toString('base64'),
+                    content_type: a.contentType,
+                }))
+                : undefined,
         }),
     });
     const bodyText = await response.text();

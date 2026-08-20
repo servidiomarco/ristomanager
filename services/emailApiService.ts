@@ -9,6 +9,9 @@ const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production
 
 export type EmailDirection = 'inbound' | 'outbound';
 
+/** URL scaricabile di un allegato partito: il token da 32 byte è la protezione. */
+export const publicMediaUrl = (token: string): string => `${API_URL}/public/media/${token}`;
+
 export interface EmailThreadSummary {
   email_key: string;                    // lowercased email address, the thread key
   email: string;                        // as-typed casing for display
@@ -36,6 +39,8 @@ export interface EmailMessage {
   message_id: string | null;
   in_reply_to: string | null;
   reservation_id: number | null;
+  /** Allegati partiti con l'email: nome file e token per il download. */
+  media?: Array<{ token: string; filename: string | null; content_type?: string; size_bytes?: number }> | null;
   sent_at: string;
   delivered_at: string | null;
   failed_at: string | null;
@@ -100,6 +105,8 @@ class EmailApiService {
     body: string;
     reservation_id?: number | null;
     in_reply_to?: string | null;
+    /** Token di outbound_media (upload diretto o libreria): partono come veri allegati MIME. */
+    attachment_tokens?: string[];
   }): Promise<{ ok: true; message: EmailMessage }> {
     return apiRequest(`${API_URL}/email/send`, {
       method: 'POST',
