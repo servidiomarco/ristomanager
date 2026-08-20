@@ -18,7 +18,9 @@ export type BillingErrorCode =
     | 'billing_disabled'
     | 'tenant_not_found'
     | 'stripe_customer_missing'
-    | 'no_prices';
+    | 'no_prices'
+    | 'no_subscription'
+    | 'price_not_configured';
 
 export class BillingError extends Error {
     code: BillingErrorCode;
@@ -158,6 +160,67 @@ export async function createPortalSession(
         return_url: returnUrl,
     });
     return { url: session.url };
+}
+
+// Picker add-on del pannello: accende/spegne moduli su una subscription GIÀ
+// attiva aggiungendo o togliendo subscription item, con prorazione. Al
+// termine si applica subito lo stato risultante (applySubscriptionState):
+// il webhook arriverà comunque, ma il pannello non deve aspettarlo — la
+// doppia applicazione è idempotente per costruzione.
+export async function updateSubscriptionAddons(
+    tenantId: number,
+    desired: Partial<Record<TenantFeature, boolean>>
+): Promise<AppliedSubscriptionState> {
+    const tenantRes = await queryWithRetry(
+        'SELECT stripe_subscription_id FROM tenants WHERE id = $1',
+        [tenantId]
+    );
+    if (tenantRes.rows.length === 0) {
+        throw new BillingError('tenant_not_found', `Tenant ${tenantId} inesistente.`);
+    }
+    // Prima della chiave Stripe, così un tenant senza abbonamento riceve il
+    // SUO errore anche in ambienti col billing spento (e nei test).
+    const subscriptionId: string | null = tenantRes.rows[0].stripe_subscription_id ?? null;
+    if (!subscriptionId) {
+        throw new BillingError('no_subscription', 'Il tenant non ha una subscription attiva: parti da "Attiva abbonamento".');
+    }
+    const stripe = getStripe();
+
+    const mapping = priceToFeature();
+    const priceOfFeature = new Map<TenantFeature, string>();
+    for (const [priceId, feature] of mapping) priceOfFeature.set(feature, priceId);
+
+    const sub = await stripe.subscriptions.retrieve(subscriptionId);
+    const itemOfPrice = new Map<string, string>();
+    for (const item of sub.items.data) {
+        if (item.price?.id) itemOfPrice.set(item.price.id, item.id);
+    }
+
+    const changes: Array<{ id?: string; price?: string; deleted?: boolean }> = [];
+    for (const [feature, want] of Object.entries(desired) as Array<[TenantFeature, boolean]>) {
+        const priceId = priceOfFeature.get(feature);
+        if (!priceId) {
+            throw new BillingError('price_not_configured', `Nessun price Stripe configurato per "${feature}" (env STRIPE_PRICE_*).`);
+        }
+        const existingItem = itemOfPrice.get(priceId);
+        if (want && !existingItem) changes.push({ price: priceId });
+        if (!want && existingItem) changes.push({ id: existingItem, deleted: true });
+    }
+
+    // Già allineato (doppio click, o riallineo dopo un webhook): niente
+    // chiamata di update, ma il DB si risincronizza comunque dallo stato vero.
+    const effective = changes.length === 0
+        ? sub
+        : await stripe.subscriptions.update(subscriptionId, {
+            items: changes,
+            proration_behavior: 'create_prorations',
+        });
+
+    const applied = await applySubscriptionState(effective as unknown as SubscriptionLike);
+    if (!applied) {
+        throw new BillingError('tenant_not_found', 'Il customer della subscription non corrisponde a nessun tenant.');
+    }
+    return applied;
 }
 
 // Forma minima della subscription che serve alla sync: strutturale invece di

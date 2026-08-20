@@ -8,7 +8,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { authApiService } from '../services/authApiService';
 import {
   adminListTenants, adminCreateTenant, adminUpdateTenant, adminImpersonateTenant,
-  adminBillingCheckout, adminBillingPortal, adminBillingSummary,
+  adminBillingCheckout, adminBillingPortal, adminBillingSummary, adminUpdateAddons,
   ADMIN_TENANT_FEATURES,
   type AdminTenant, type AdminTenantFeature, type AdminTenantProvisioned, type AdminBillingSummary,
 } from '../services/apiService';
@@ -179,13 +179,24 @@ const TenantCard: React.FC<{
   showToast: ShowToast;
 }> = ({ tenant, onPatched, onRevert, showToast }) => {
   const [confirmingStatus, setConfirmingStatus] = useState(false);
-  const [busy, setBusy] = useState<'status' | 'impersonate' | 'billing' | null>(null);
+  const [busy, setBusy] = useState<'status' | 'impersonate' | 'billing' | 'addon' | null>(null);
+  // Add-on in attesa di conferma: su un tenant abbonato la chip non scatta
+  // da sola — cambia la fattura, e i soldi non si toccano per sbaglio.
+  const [pendingAddon, setPendingAddon] = useState<AdminTenantFeature | null>(null);
   const suspended = tenant.status === 'suspended';
   const billing = billingPill(tenant.billing_status);
+  const abbonato = tenant.billing_status !== null;
 
   // Toggle feature: PATCH ottimistico — la chip si accende subito, e se il
   // server dice di no si torna com'era, con il motivo nel toast.
+  // Solo per i tenant SENZA billing (grandfathered): su un abbonato lo
+  // stesso toggle verrebbe riallineato agli item Stripe dal prossimo
+  // webhook, quindi lì la chip passa dal picker qui sotto.
   const toggleFeature = async (feature: AdminTenantFeature) => {
+    if (abbonato) {
+      setPendingAddon(prev => (prev === feature ? null : feature));
+      return;
+    }
     const enabled = !tenant.features.includes(feature);
     const prev = tenant;
     const optimistic: AdminTenant = {
@@ -205,6 +216,29 @@ const TenantCard: React.FC<{
     } catch (err) {
       onRevert(prev);
       showToast((err as ApiError).message || 'Aggiornamento feature non riuscito', 'error');
+    }
+  };
+
+  // Picker add-on: modifica gli item della subscription (prorazione Stripe)
+  // e riallinea la card alla risposta. Niente ottimismo qui: è denaro.
+  const confirmAddon = async () => {
+    if (!pendingAddon) return;
+    const feature = pendingAddon;
+    const enabling = !tenant.features.includes(feature);
+    setBusy('addon');
+    try {
+      const res = await adminUpdateAddons(tenant.id, { [feature]: enabling });
+      onPatched({
+        ...tenant,
+        billing_status: res.billing_status,
+        features: ADMIN_TENANT_FEATURES.filter(f => res.features[f]),
+      });
+      showToast(`Modulo ${FEATURE_LABEL[feature]} ${enabling ? 'aggiunto' : 'rimosso'} dall'abbonamento`, 'success');
+      setPendingAddon(null);
+    } catch (err) {
+      showToast((err as ApiError).message || 'Aggiornamento abbonamento non riuscito', 'error');
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -296,6 +330,27 @@ const TenantCard: React.FC<{
           );
         })}
       </div>
+
+      {/* Conferma add-on (solo tenant abbonati): tocca la fattura, quindi
+          niente scatto diretto della chip — stessa forma della conferma di
+          sospensione. */}
+      {pendingAddon && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+          <p className="min-w-0 flex-1 text-[14px] text-[var(--ds-text-primary)]">
+            {tenant.features.includes(pendingAddon)
+              ? `Rimuovere «${FEATURE_LABEL[pendingAddon]}» dall'abbonamento? Il credito residuo viene prorato.`
+              : `Aggiungere «${FEATURE_LABEL[pendingAddon]}» all'abbonamento? L'addebito parte prorato da oggi.`}
+          </p>
+          <div className="flex flex-shrink-0 gap-2">
+            <button type="button" className={dsButton.secondary} onClick={() => setPendingAddon(null)} disabled={busy === 'addon'}>
+              Annulla
+            </button>
+            <button type="button" className={dsButton.primary} onClick={confirmAddon} disabled={busy === 'addon'}>
+              {busy === 'addon' ? 'Aggiorno…' : 'Conferma'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Azioni. La conferma di sospensione è inline: prende il posto della
           riga, niente window.confirm. */}
