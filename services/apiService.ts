@@ -1265,10 +1265,27 @@ export interface AdminTenant {
   // NULL = tenant non a pagamento (grandfathered), da distinguere da un
   // pagante moroso.
   billing_status: string | null;
+  // Link al customer sul Dashboard Stripe (test/live deciso dal server);
+  // null per i tenant senza billing.
+  stripe_customer_url: string | null;
   created_at: string;
   features: AdminTenantFeature[];
   user_count: number;
 }
+
+export interface AdminBillingSummary {
+  mrr_cents: number;
+  paying_tenants: number;
+  past_due_tenants: number;
+  trialing_tenants: number;
+  grandfathered_tenants: number;
+}
+
+export const adminBillingSummary = async (): Promise<AdminBillingSummary> => {
+  return apiRequest<AdminBillingSummary>(`${API_URL}/admin/billing/summary`, {
+    headers: getHeaders(false),
+  });
+};
 
 export interface AdminTenantProvisioned {
   tenant: { id: number; slug: string; name: string; status: string; timezone: string; created_at: string };

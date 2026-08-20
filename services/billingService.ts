@@ -173,7 +173,11 @@ export interface SubscriptionLike {
 export interface AppliedSubscriptionState {
     tenantId: number;
     slug: string;
+    name: string;
     billingStatus: string;
+    // Il billing_status PRIMA di questo evento: serve al webhook per
+    // notificare solo le TRANSIZIONI (es. → past_due), non ogni retry.
+    previousBillingStatus: string | null;
     tenantStatus: 'active' | 'suspended';
     // true quando tenants.status è cambiato: il chiamante (webhook in
     // server.ts) deve invalidare le cache slug/dominio, come fa la PATCH
@@ -205,7 +209,7 @@ export async function applySubscriptionState(
         return null;
     }
     const tenantRes = await queryWithRetry(
-        'SELECT id, slug, status FROM tenants WHERE stripe_customer_id = $1',
+        'SELECT id, slug, name, status, billing_status FROM tenants WHERE stripe_customer_id = $1',
         [customerId]
     );
     if (tenantRes.rows.length === 0) {
@@ -214,7 +218,9 @@ export async function applySubscriptionState(
     }
     const tenantId = Number(tenantRes.rows[0].id);
     const slug: string = tenantRes.rows[0].slug;
+    const name: string = tenantRes.rows[0].name;
     const previousStatus: string = tenantRes.rows[0].status;
+    const previousBillingStatus: string | null = tenantRes.rows[0].billing_status ?? null;
 
     const billingStatus = subscription.status;
     // Stati fuori da entrambe le liste (es. 'incomplete', 'paused'): lo
@@ -269,7 +275,9 @@ export async function applySubscriptionState(
     return {
         tenantId,
         slug,
+        name,
         billingStatus,
+        previousBillingStatus,
         tenantStatus,
         tenantStatusChanged: tenantStatus !== previousStatus,
     };

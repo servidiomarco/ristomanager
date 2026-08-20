@@ -249,3 +249,19 @@ export const sendToRoles = async (
     const subs = await fetchSubscriptionsForRoles(tenantId, roles, options?.excludeUserId);
     return sendToSubscriptions(tenantId, subs, payload);
 };
+
+// I platform admin stanno SOPRA i tenant (D2): la loro notifica non passa da
+// sendToRoles, che esige un tenant e giustamente non attraversa i confini.
+// Qui si risolvono per ruolo su tutta la piattaforma e si passa da
+// sendToUser, che scopa badge e riga notifica sul tenant di appartenenza
+// di ciascun destinatario.
+export const sendToPlatformAdmins = async (payload: PushPayload) => {
+    try {
+        const r = await queryWithRetry(
+            `SELECT id FROM users WHERE role = 'PLATFORM_ADMIN' AND is_active = TRUE`
+        );
+        await Promise.all(r.rows.map((row: any) => sendToUser(Number(row.id), payload)));
+    } catch (err) {
+        console.warn('[push] sendToPlatformAdmins failed:', (err as any)?.message || err);
+    }
+};

@@ -120,10 +120,29 @@ describe('billing Stripe (Fase D3)', () => {
     it("past_due → billing_status registrato ma il ristorante resta acceso", async () => {
         const applied = await applySubscriptionState(fakeSubscription('past_due', [PRICE_VOICE]));
         expect(applied?.tenantStatus).toBe('active');
+        // La transizione è visibile al chiamante: è quello che il webhook usa
+        // per notificare i platform admin solo al PASSAGGIO a past_due, non a
+        // ogni retry.
+        expect(applied?.billingStatus).toBe('past_due');
+        expect(applied?.previousBillingStatus).toBe('active');
 
         const row = await tenantRow(tenantId);
         expect(row.status).toBe('active');
         expect(row.billing_status).toBe('past_due');
+    });
+
+    it('summary billing: 503 senza Stripe configurato; la lista admin porta il link al customer', async () => {
+        const summary = await api().get('/admin/billing/summary').set(ADMIN_HEADER);
+        expect(summary.status).toBe(503);
+        expect(summary.body.error).toBe('billing_disabled');
+
+        const list = await api().get('/admin/tenants').set(ADMIN_HEADER);
+        expect(list.status).toBe(200);
+        const mine = list.body.find((t: any) => t.id === tenantId);
+        expect(mine.stripe_customer_url).toContain(CUSTOMER_ID);
+        // Il tenant 1 non ha un customer Stripe: niente link.
+        const frantoio = list.body.find((t: any) => t.id === 1);
+        expect(frantoio.stripe_customer_url).toBeNull();
     });
 
     it('canceled → tenant sospeso e feature spente', async () => {
