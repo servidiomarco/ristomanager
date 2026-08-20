@@ -268,7 +268,7 @@ const SettingsNavCard: React.FC<{
 );
 
 const App: React.FC = () => {
-  const { user, isAuthenticated, isLoading: authLoading, logout, canAccessView, canManageUsers, hasPermission, getAccessibleViews, canViewLogs, updatePreferences } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading, logout, canAccessView, canManageUsers, hasPermission, hasFeature, getAccessibleViews, canViewLogs, updatePreferences } = useAuth();
 
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
   // Una schermata che si prende tutto lo schermo sul telefono: la barra di
@@ -2610,14 +2610,18 @@ const App: React.FC = () => {
                   <ReservationAllergensManager showToast={addToast} />
                 </SettingsDisclosure>
 
-                <SettingsDisclosure
-                  icon={CreditCard}
-                  iconTone="positive"
-                  title="Caparra automatica"
-                  description="Per le prenotazioni web sopra una certa soglia di coperti invia un link Revolut per la caparra (€10/persona) via SMS."
-                >
-                  <AutoDepositManager showToast={addToast} />
-                </SettingsDisclosure>
+                {/* Solo col modulo prenotazioni web nel piano: la caparra
+                    automatica esiste soltanto per le web booking. */}
+                {hasFeature('web_booking') && (
+                  <SettingsDisclosure
+                    icon={CreditCard}
+                    iconTone="positive"
+                    title="Caparra automatica"
+                    description="Per le prenotazioni web sopra una certa soglia di coperti invia un link Revolut per la caparra (€10/persona) via SMS."
+                  >
+                    <AutoDepositManager showToast={addToast} />
+                  </SettingsDisclosure>
+                )}
               </div>
             </SettingsSection>
 

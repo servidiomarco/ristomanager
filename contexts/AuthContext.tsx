@@ -39,6 +39,16 @@ const VIEW_PERMISSIONS: Record<ViewState, string> = {
 /** The dev board is a project tool tied to one specific account, not a role. */
 const DEV_BOARD_ADMIN_EMAIL = 'admin@ristomanager.com';
 
+// Entitlements commerciali (Fase C1, gating UI della nota D1): la vista di un
+// canale non compreso nel piano non compare proprio — niente bottone che
+// risponde 403. L'enforcement vero resta il server; qui si toglie solo la
+// porta dalla parete. EMAIL non c'è: l'email è canale base, non un add-on.
+export type TenantFeatureKey = 'voice' | 'whatsapp' | 'web_booking';
+const VIEW_FEATURES: Partial<Record<ViewState, TenantFeatureKey>> = {
+  [ViewState.CONVERSAZIONI]: 'voice',
+  [ViewState.MESSAGGI]: 'whatsapp',
+};
+
 interface AuthContextType {
   user: User | null;
   permissions: string[];
@@ -47,6 +57,10 @@ interface AuthContextType {
   login: (credentials: LoginCredentials) => Promise<void>;
   logout: () => Promise<void>;
   hasPermission: (permission: string) => boolean;
+  /** Entitlement commerciale del tenant. `features` assente (sessione nata
+   *  prima della Fase C1) = tutto acceso: meglio non nascondere che
+   *  nascondere per sbaglio — il server fa comunque da guardia. */
+  hasFeature: (feature: TenantFeatureKey) => boolean;
   canAccessView: (view: ViewState) => boolean;
   getAccessibleViews: () => ViewState[];
   canManageUsers: () => boolean;
@@ -136,6 +150,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return permissions.includes(permission);
   }, [permissions]);
 
+  const hasFeature = useCallback((feature: TenantFeatureKey): boolean => {
+    const features = user?.tenant?.features;
+    if (!features) return true;
+    return features[feature] !== false;
+  }, [user]);
+
   const canAccessView = useCallback((view: ViewState): boolean => {
     if (view === ViewState.DEVELOPMENT || view === ViewState.MONITORING) {
       return (user?.email || '').toLowerCase() === DEV_BOARD_ADMIN_EMAIL;
@@ -145,10 +165,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (view === ViewState.PLATFORM) {
       return user?.role === UserRole.PLATFORM_ADMIN;
     }
+    // Prima l'entitlement, poi il permesso: un canale fuori dal piano non
+    // appare a nessun ruolo, nemmeno all'OWNER.
+    const requiredFeature = VIEW_FEATURES[view];
+    if (requiredFeature && !hasFeature(requiredFeature)) return false;
     const requiredPermission = VIEW_PERMISSIONS[view];
     if (!requiredPermission) return false;
     return permissions.includes(requiredPermission);
-  }, [permissions, user]);
+  }, [permissions, user, hasFeature]);
 
   const getAccessibleViews = useCallback((): ViewState[] => {
     return Object.values(ViewState).filter(view => canAccessView(view));
@@ -205,6 +229,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     login,
     logout,
     hasPermission,
+    hasFeature,
     canAccessView,
     getAccessibleViews,
     canManageUsers,
