@@ -57,6 +57,9 @@ interface ChannelMeta {
     description: string;
     onLabel: string;
     offLabel: string;
+    /** Entitlement commerciale che sblocca la sezione: senza, non compare —
+     *  un interruttore per un modulo non compreso nel piano è solo confusione. */
+    feature: 'voice' | 'whatsapp' | 'web_booking';
 }
 
 const CHANNELS: ChannelMeta[] = [
@@ -67,6 +70,7 @@ const CHANNELS: ChannelMeta[] = [
         description: 'Sofia prende le chiamate e gestisce prenotazioni, modifiche e cancellazioni via telefono.',
         onLabel: 'Attivo',
         offLabel: 'Sospeso',
+        feature: 'voice',
     },
     {
         key: 'public_bookings_enabled',
@@ -75,12 +79,15 @@ const CHANNELS: ChannelMeta[] = [
         description: 'Modulo /prenota pubblico raggiungibile da Google e siti esterni.',
         onLabel: 'Attive',
         offLabel: 'Sospese',
+        feature: 'web_booking',
     },
 ];
 
 export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
-    const { hasPermission } = useAuth();
+    const { hasPermission, hasFeature } = useAuth();
     const canEdit = hasPermission('settings:full');
+    // Gating UI sugli entitlements (nota C1): restano solo i canali del piano.
+    const visibleChannels = CHANNELS.filter(meta => hasFeature(meta.feature));
 
     const [flags, setFlags] = useState<FeatureFlags | null>(null);
     const [channels, setChannels] = useState<ChannelSettings | null>(null);
@@ -483,7 +490,12 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
 
     return (
         <div className="space-y-3">
-            {CHANNELS.map((meta) => {
+            {visibleChannels.length === 0 && (
+                <p className="rounded-[16px] bg-[var(--ds-surface)] px-4 py-3 text-[14px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)]">
+                    Nessun canale incluso nel piano attuale.
+                </p>
+            )}
+            {visibleChannels.map((meta) => {
                 const enabled = flags[meta.key];
                 const isSaving = savingKey === meta.key;
                 const isVoice = meta.key === 'voice_agent_enabled';
