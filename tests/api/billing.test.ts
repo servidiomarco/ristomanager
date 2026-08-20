@@ -101,6 +101,14 @@ describe('billing Stripe (Fase D3)', () => {
         expect(res.status).toBe(401);
     });
 
+    it('le pagine di ritorno esistono (Stripe ci atterra dopo checkout e portal)', async () => {
+        for (const path of ['/admin/billing/success', '/admin/billing/cancel', '/admin/billing/return']) {
+            const res = await api().get(path);
+            expect(res.status).toBe(200);
+            expect(res.headers['content-type']).toContain('text/html');
+        }
+    });
+
     it('subscription active con price voice → feature voice accesa, le altre spente', async () => {
         const applied = await applySubscriptionState(
             // Il price base non è in mappa: deve essere ignorato dalla sync.
