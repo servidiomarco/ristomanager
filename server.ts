@@ -135,6 +135,15 @@ import {
     getCappedRoomIds,
 } from './services/roomOccupancyService.js';
 import { isAllowedOrigin } from './services/corsAllowlist.js';
+import {
+    getBookingChannelPolicy,
+    saveBookingChannelPolicy,
+    normalizeSourcePolicy,
+    resolveBookingChannels,
+    BOOKING_SOURCES,
+    type BookingSource,
+    type BookingChannelPolicyMap,
+} from './services/bookingChannelPolicy.js';
 import { toTitleCase } from './utils/text.js';
 import {
     getAvailableSlots,
@@ -2418,148 +2427,67 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             (updatedReservation?.phone || updatedReservation?.email)
         ) {
             const roomName = await resolveReservationRoomName(updatedReservation);
-            // Web booking email-first (ex PR #84): se l'ospite ha dato l'email
-            // l'SMS si salta — ma solo quando l'email può davvero partire
-            // (provider configurato), o la conferma non arriverebbe da nessun
-            // canale. Le prenotazioni non-web (VOICE/MANUAL) non cambiano.
-            const confirmEmailReady = !!updatedReservation.email
-                && await isSmtpConfigured(req.tenantId!).catch(() => false);
-            const preferEmailOnly = updatedReservation?.source === 'GOOGLE' && confirmEmailReady;
-            if (updatedReservation.phone && !preferEmailOnly) {
-                sendBookingConfirmation(
-                    req.tenantId!,
-                    updatedReservation.phone,
-                    buildConfirmationMessage(
-                        updatedReservation.customer_name,
-                        updatedReservation.reservation_time,
-                        updatedReservation.guests,
-                        roomName
-                    ),
-                    updatedReservation.id,
-                    {
-                        whatsappTemplate: buildBookingConfirmedTemplate(
-                            updatedReservation.customer_name,
-                            updatedReservation.reservation_time,
-                            updatedReservation.guests
-                        ),
-                    }
-                ).catch(err => console.error('Auto-confirmation send failed:', err));
-            }
-            // Fire the email confirmation in parallel if the guest gave us an
-            // email address. Non-blocking; failures are logged in
-            // outbound_messages so staff can see them in the timeline.
-            if (updatedReservation.email) {
-                (async () => {
-                    try {
-                        if (!(await isSmtpConfigured(req.tenantId!))) return;
-                        const emailStatus = await getSmtpConfigStatus(req.tenantId!).catch(() => null);
-                        const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
-                        const { subject, text, html } = buildBookingConfirmationEmail({
-                            customerName: updatedReservation.customer_name,
-                            reservationTime: updatedReservation.reservation_time,
-                            guests: updatedReservation.guests,
-                            roomName,
-                        });
-                        try {
-                            const sent = await sendMail(req.tenantId!, { to: String(updatedReservation.email), subject, text, html });
-                            await logOutboundEmail({
-                                tenantId: req.tenantId!,
-                                provider: emailProvider,
-                                to: String(updatedReservation.email),
-                                subject,
-                                body: text,
-                                messageId: sent.messageId || null,
-                                reservationId: updatedReservation.id,
-                            });
-                        } catch (sendErr: any) {
-                            await logOutboundEmail({
-                                tenantId: req.tenantId!,
-                                provider: emailProvider,
-                                to: String(updatedReservation.email),
-                                subject,
-                                body: text,
-                                reservationId: updatedReservation.id,
-                                errorMessage: sendErr?.message || String(sendErr),
-                            });
-                            throw sendErr;
-                        }
-                    } catch (err: any) {
-                        console.error('Auto-confirmation email failed:', err?.message || err);
-                    }
-                })();
-            }
+            // Canale (o canali) decisi dalla policy per fonte in Impostazioni
+            // → Canali di risposta; il default riproduce la condotta storica.
+            dispatchBookingNotification({
+                tenantId: req.tenantId!,
+                source: updatedReservation.source,
+                phone: updatedReservation.phone,
+                email: updatedReservation.email,
+                reservationId: updatedReservation.id,
+                smsText: buildConfirmationMessage(
+                    updatedReservation.customer_name,
+                    updatedReservation.reservation_time,
+                    updatedReservation.guests,
+                    roomName
+                ),
+                whatsappTemplate: buildBookingConfirmedTemplate(
+                    updatedReservation.customer_name,
+                    updatedReservation.reservation_time,
+                    updatedReservation.guests
+                ),
+                buildEmail: () => buildBookingConfirmationEmail({
+                    customerName: updatedReservation.customer_name,
+                    reservationTime: updatedReservation.reservation_time,
+                    guests: updatedReservation.guests,
+                    roomName,
+                }),
+                kind: 'confirmation',
+            }).catch(err => console.error('Auto-confirmation send failed:', err));
         }
 
         // Auto-send the decline notice on any → DECLINED. The guest is told
         // the request could not be accepted and invited to call for an
-        // alternative date/time. Web booking email-first (ex PR #84): con
-        // un'email che può davvero partire l'SMS si salta e la disdetta
-        // viaggia via email; altrimenti SMS come sempre. Fire and forget.
+        // alternative date/time. Canali dalla policy per fonte (Impostazioni
+        // → Canali di risposta). Fire and forget.
         if (
             previousStatus !== 'DECLINED' &&
             reservation_status === 'DECLINED' &&
             (updatedReservation?.phone || updatedReservation?.email)
         ) {
-            const declineEmailReady = updatedReservation?.source === 'GOOGLE'
-                && !!updatedReservation.email
-                && await isSmtpConfigured(req.tenantId!).catch(() => false);
-            if (updatedReservation.phone && !declineEmailReady) {
-                sendBookingConfirmation(
-                    req.tenantId!,
-                    updatedReservation.phone,
-                    buildDeclineMessage(
-                        updatedReservation.customer_name,
-                        updatedReservation.reservation_time,
-                        updatedReservation.guests
-                    ),
-                    updatedReservation.id,
-                    {
-                        whatsappTemplate: buildBookingDeclinedTemplate(
-                            updatedReservation.customer_name,
-                            updatedReservation.reservation_time,
-                            updatedReservation.guests
-                        ),
-                    }
-                ).catch(err => console.error('Auto-decline send failed:', err));
-            }
-            if (declineEmailReady) {
-                (async () => {
-                    try {
-                        const emailStatus = await getSmtpConfigStatus(req.tenantId!).catch(() => null);
-                        const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
-                        const { subject, text, html } = buildBookingDeclineEmail({
-                            customerName: updatedReservation.customer_name,
-                            reservationTime: updatedReservation.reservation_time,
-                            guests: updatedReservation.guests,
-                        });
-                        try {
-                            const sent = await sendMail(req.tenantId!, { to: String(updatedReservation.email), subject, text, html });
-                            await logOutboundEmail({
-                                tenantId: req.tenantId!,
-                                provider: emailProvider,
-                                to: String(updatedReservation.email),
-                                subject,
-                                body: text,
-                                messageId: sent.messageId || null,
-                                reservationId: updatedReservation.id,
-                            });
-                        } catch (sendErr: any) {
-                            await logOutboundEmail({
-                                tenantId: req.tenantId!,
-                                provider: emailProvider,
-                                to: String(updatedReservation.email),
-                                subject,
-                                body: text,
-                                reservationId: updatedReservation.id,
-                                errorMessage: sendErr?.message || String(sendErr),
-                            });
-                            throw sendErr;
-                        }
-                    } catch (err: any) {
-                        console.error('Auto-decline email failed:', err?.message || err);
-                    }
-                })();
-            }
+            dispatchBookingNotification({
+                tenantId: req.tenantId!,
+                source: updatedReservation.source,
+                phone: updatedReservation.phone,
+                email: updatedReservation.email,
+                reservationId: updatedReservation.id,
+                smsText: buildDeclineMessage(
+                    updatedReservation.customer_name,
+                    updatedReservation.reservation_time,
+                    updatedReservation.guests
+                ),
+                whatsappTemplate: buildBookingDeclinedTemplate(
+                    updatedReservation.customer_name,
+                    updatedReservation.reservation_time,
+                    updatedReservation.guests
+                ),
+                buildEmail: () => buildBookingDeclineEmail({
+                    customerName: updatedReservation.customer_name,
+                    reservationTime: updatedReservation.reservation_time,
+                    guests: updatedReservation.guests,
+                }),
+                kind: 'decline',
+            }).catch(err => console.error('Auto-decline send failed:', err));
         }
 
         res.json(updatedReservation);
@@ -13199,17 +13127,25 @@ async function sendBookingConfirmation(
     to: string,
     text: string,
     reservationId?: number | null,
-    opts?: { whatsappTemplate?: WhatsAppTemplateOpts }
+    // forceChannel: un binario solo, SENZA il fallback interno WA→SMS — lo
+    // usa dispatchBookingNotification, dove il fallback è governato dalla
+    // policy del tenant e non deve avvenire due volte. Senza forceChannel il
+    // comportamento resta quello storico per tutti gli altri chiamanti.
+    opts?: { whatsappTemplate?: WhatsAppTemplateOpts; forceChannel?: 'whatsapp' | 'sms' }
 ): Promise<OutboundConfirmationResult> {
     const template = opts?.whatsappTemplate;
-    const tryWhatsApp = !!template && isTwilioWhatsAppConfigured();
+    const force = opts?.forceChannel;
+    const tryWhatsApp = force === 'sms' ? false : (!!template && isTwilioWhatsAppConfigured());
+    if (force === 'whatsapp' && !tryWhatsApp) {
+        throw new Error('WhatsApp non configurato o template mancante');
+    }
     let result: OutboundConfirmationResult;
     try {
         result = tryWhatsApp
             ? await sendWhatsAppText(tenantId, to, text, reservationId, template)
             : await sendTwilioSms(tenantId, to, text, reservationId);
     } catch (err: any) {
-        if (tryWhatsApp && isTwilioSmsConfigured()) {
+        if (tryWhatsApp && !force && isTwilioSmsConfigured()) {
             console.warn('[confirmation] WA send failed, falling back to SMS:', err?.message || err);
             result = await sendTwilioSms(tenantId, to, text, reservationId);
         } else {
@@ -13252,6 +13188,114 @@ async function recordConfirmationSent(
     if (updated.rows[0] && socketService) {
         try { socketService.broadcastReservationUpdated(tenantId, updated.rows[0]); }
         catch (err) { console.warn('[confirmation] broadcast failed:', err); }
+    }
+}
+
+// ============================================
+// DISPATCH NOTIFICHE PRENOTAZIONE — canali da policy (Impostazioni)
+// ============================================
+// Punto unico da cui partono richiesta, conferma e disdetta verso l'ospite.
+// La policy del tenant (services/bookingChannelPolicy.ts) dà l'ordine dei
+// canali per fonte; qui si tenta il primo davvero disponibile e si scala al
+// successivo solo su errore IMMEDIATO di invio — la mancata consegna
+// asincrona (callback Twilio) arriva minuti dopo e non è un fallback
+// affidabile, quindi non viene promessa. I chiamanti lanciano e proseguono.
+async function dispatchBookingNotification(params: {
+    tenantId: number;
+    /** reservations.source; fonte ignota → policy MANUAL. */
+    source: string | null | undefined;
+    phone?: string | null;
+    email?: string | null;
+    reservationId?: number | null;
+    smsText: string;
+    whatsappTemplate?: WhatsAppTemplateOpts;
+    /** Assente = questa notifica non ha una versione email. */
+    buildEmail?: () => { subject: string; text: string; html: string };
+    /** Etichetta nei log: 'ack' | 'confirmation' | 'decline'. */
+    kind: string;
+}): Promise<void> {
+    const { tenantId, kind } = params;
+    const phone = (params.phone || '').trim();
+    const email = (params.email || '').trim();
+
+    const sendEmailNotification = async (): Promise<void> => {
+        const emailStatus = await getSmtpConfigStatus(tenantId).catch(() => null);
+        const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
+        const { subject, text, html } = params.buildEmail!();
+        try {
+            const sent = await sendMail(tenantId, { to: email, subject, text, html });
+            await logOutboundEmail({
+                tenantId,
+                provider: emailProvider,
+                to: email,
+                subject,
+                body: text,
+                messageId: sent.messageId || null,
+                reservationId: params.reservationId ?? null,
+            });
+        } catch (sendErr: any) {
+            await logOutboundEmail({
+                tenantId,
+                provider: emailProvider,
+                to: email,
+                subject,
+                body: text,
+                reservationId: params.reservationId ?? null,
+                errorMessage: sendErr?.message || String(sendErr),
+            }).catch(() => {});
+            throw sendErr;
+        }
+    };
+
+    try {
+        const policyMap = await getBookingChannelPolicy(tenantId);
+        const src: BookingSource = (BOOKING_SOURCES as readonly string[]).includes(String(params.source))
+            ? params.source as BookingSource
+            : 'MANUAL';
+        const smtpReady = !!params.buildEmail && !!email
+            && await isSmtpConfigured(tenantId).catch(() => false);
+        const { attempts, emailCopy } = resolveBookingChannels(policyMap[src], {
+            hasPhone: !!phone,
+            hasEmail: !!email,
+            smtpReady,
+            whatsappReady: !!params.whatsappTemplate && isTwilioWhatsAppConfigured(),
+            smsReady: isTwilioSmsConfigured(),
+        });
+
+        if (attempts.length === 0) {
+            // Non è un errore della richiesta: l'ospite non ha lasciato recapiti
+            // utilizzabili o i provider non sono configurati. Si logga e basta.
+            console.warn(`[booking-notify:${kind}] nessun canale disponibile (tenant ${tenantId}, prenotazione ${params.reservationId ?? '—'})`);
+        }
+        let delivered = false;
+        for (const channel of attempts) {
+            try {
+                if (channel === 'email') {
+                    await sendEmailNotification();
+                } else {
+                    await sendBookingConfirmation(tenantId, phone, params.smsText, params.reservationId ?? null, {
+                        whatsappTemplate: channel === 'whatsapp' ? params.whatsappTemplate : undefined,
+                        forceChannel: channel,
+                    });
+                }
+                delivered = true;
+                break;
+            } catch (err: any) {
+                console.warn(`[booking-notify:${kind}] canale ${channel} fallito, provo il successivo:`, err?.message || err);
+            }
+        }
+        if (!delivered && attempts.length > 0) {
+            console.error(`[booking-notify:${kind}] tutti i canali falliti (tenant ${tenantId}, prenotazione ${params.reservationId ?? '—'})`);
+        }
+        // Copia email (comportamento storico telefono+email in parallelo):
+        // parte in aggiunta al canale scelto, mai come doppione dell'email
+        // già inviata come canale primario (resolveBookingChannels la esclude).
+        if (emailCopy) {
+            await sendEmailNotification().catch(err =>
+                console.warn(`[booking-notify:${kind}] email in copia fallita:`, err?.message || err));
+        }
+    } catch (err: any) {
+        console.error(`[booking-notify:${kind}] dispatch fallito:`, err?.message || err);
     }
 }
 
@@ -15633,6 +15677,58 @@ app.put('/settings/features', authenticate, requirePermission('settings:full'), 
 });
 
 // ============================================
+// CANALI DI RISPOSTA PRENOTAZIONI (bookingChannelPolicy)
+// ============================================
+// Per ogni fonte di prenotazione, l'ordine dei canali con cui rispondere
+// all'ospite (richiesta/conferma/disdetta) e l'eventuale email in copia.
+// La lettura è aperta a ogni utente autenticato (la card la mostra a tutti),
+// la modifica richiede settings:full come le altre impostazioni.
+app.get('/settings/booking-channels', authenticate, async (req, res) => {
+    try {
+        res.json(await getBookingChannelPolicy(req.tenantId!));
+    } catch (err) {
+        console.error('GET /settings/booking-channels error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/settings/booking-channels', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const body = req.body ?? {};
+        if (typeof body !== 'object' || Array.isArray(body)) {
+            return res.status(400).json({ error: 'invalid_body', message: 'Il body deve essere un oggetto {fonte: policy}' });
+        }
+        // Update parziale: le fonti assenti restano come sono; ogni fonte
+        // presente deve essere valida per intero, o si rifiuta tutto.
+        const current = await getBookingChannelPolicy(req.tenantId!);
+        const next: BookingChannelPolicyMap = { ...current };
+        let touched = false;
+        for (const [key, value] of Object.entries(body)) {
+            if (!(BOOKING_SOURCES as readonly string[]).includes(key)) {
+                return res.status(400).json({ error: 'invalid_source', message: `Fonte non valida: ${String(key).slice(0, 20)}` });
+            }
+            const normalized = normalizeSourcePolicy(value);
+            if (!normalized) {
+                return res.status(400).json({
+                    error: 'invalid_policy',
+                    message: `Policy non valida per ${key}: serve priority (canali unici tra email|whatsapp|sms, almeno uno) ed email_copy booleano`,
+                });
+            }
+            next[key as BookingSource] = normalized;
+            touched = true;
+        }
+        if (!touched) {
+            return res.status(400).json({ error: 'empty_body', message: 'Nessuna fonte da aggiornare' });
+        }
+        await saveBookingChannelPolicy(req.tenantId!, next);
+        res.json(next);
+    } catch (err) {
+        console.error('PUT /settings/booking-channels error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
 // ONBOARDING — wizard di primo accesso (Fase D1)
 // ============================================
 // L'OWNER di un tenant appena provisionato vede il wizard al posto dell'app
@@ -17886,85 +17982,46 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
             }
         }
 
-        // Web booking email-first (ex PR #84): con un'email l'ack viaggia solo
-        // via email — gratuita, e col link caparra nel corpo — e l'SMS si
-        // salta. MA solo se il provider email del tenant è configurato: si
-        // decide PRIMA di saltare l'SMS, o un tenant senza SMTP lascerebbe
-        // l'ospite senza alcun ack. SMS resta il canale per chi dà solo il
-        // telefono.
-        const emailAckReady = !!emailNormalized && await isSmtpConfigured(tenantId).catch(() => false);
-        if (phoneE164 && !emailAckReady) {
-            sendBookingConfirmation(tenantId, phoneE164, ackText, created.id, { whatsappTemplate: waTemplate }).catch(err =>
-                console.error('[public-booking] confirmation send failed:', err?.message || err)
-            );
-        }
-
-        // Email ack — fire-and-forget. Requires an email on the booking and a
-        // configured provider (SMTP or Resend). Failures are logged into
-        // outbound_messages just like the manual /confirm-email endpoint so
-        // staff can see them in the reservation card timeline.
-        if (emailNormalized) {
-            (async () => {
-                try {
-                    if (!(await isSmtpConfigured(tenantId))) return;
-                    const emailStatus = await getSmtpConfigStatus(tenantId).catch(() => null);
-                    const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
-                    // Stessa priorità dell'ackText SMS: prima la caparra (il
-                    // link ora vive nell'email, l'SMS con l'email non parte),
-                    // poi la conferma, poi la semplice ricevuta.
-                    const { subject, text, html } = depositCheckoutUrl
-                        ? buildBookingRequestEmail({
-                            customerName: toTitleCase(customer_name),
-                            reservationTime: reservation_time,
-                            guests: guestsNum,
-                            roomName: requestedRoomName,
-                            notes: userNote,
-                            depositAmountCents: depositAmountCents || null,
-                            depositCheckoutUrl,
-                            depositPerPersonCents: depositPolicy?.perPersonCents ?? null,
-                          })
-                        : confirmedNow
-                        ? buildBookingConfirmationEmail({
-                            customerName: toTitleCase(customer_name),
-                            reservationTime: created.reservation_time,
-                            guests: guestsNum,
-                            roomName: ackRoomName,
-                          })
-                        : buildBookingRequestEmail({
-                            customerName: toTitleCase(customer_name),
-                            reservationTime: reservation_time,
-                            guests: guestsNum,
-                            roomName: requestedRoomName,
-                            notes: userNote,
-                          });
-                    try {
-                        const sent = await sendMail(tenantId, { to: emailNormalized, subject, text, html });
-                        await logOutboundEmail({
-                            tenantId: tenantId,
-                            provider: emailProvider,
-                            to: emailNormalized,
-                            subject,
-                            body: text,
-                            messageId: sent.messageId || null,
-                            reservationId: created.id,
-                        });
-                    } catch (sendErr: any) {
-                        await logOutboundEmail({
-                            tenantId: tenantId,
-                            provider: emailProvider,
-                            to: emailNormalized,
-                            subject,
-                            body: text,
-                            reservationId: created.id,
-                            errorMessage: sendErr?.message || String(sendErr),
-                        });
-                        throw sendErr;
-                    }
-                } catch (err: any) {
-                    console.error('[public-booking] email ack failed:', err?.message || err);
-                }
-            })();
-        }
+        // Ack all'ospite sui canali decisi dalla policy per fonte GOOGLE
+        // (Impostazioni → Canali di risposta). L'email — quando è il canale
+        // scelto o è in copia — ricalca la priorità dell'ackText SMS: prima
+        // la caparra (il link deve viaggiare nel canale che parte davvero),
+        // poi la conferma, poi la semplice ricevuta.
+        dispatchBookingNotification({
+            tenantId,
+            source: 'GOOGLE',
+            phone: phoneE164,
+            email: emailNormalized,
+            reservationId: created.id,
+            smsText: ackText,
+            whatsappTemplate: waTemplate,
+            buildEmail: () => depositCheckoutUrl
+                ? buildBookingRequestEmail({
+                    customerName: toTitleCase(customer_name),
+                    reservationTime: reservation_time,
+                    guests: guestsNum,
+                    roomName: requestedRoomName,
+                    notes: userNote,
+                    depositAmountCents: depositAmountCents || null,
+                    depositCheckoutUrl,
+                    depositPerPersonCents: depositPolicy?.perPersonCents ?? null,
+                  })
+                : confirmedNow
+                ? buildBookingConfirmationEmail({
+                    customerName: toTitleCase(customer_name),
+                    reservationTime: created.reservation_time,
+                    guests: guestsNum,
+                    roomName: ackRoomName,
+                  })
+                : buildBookingRequestEmail({
+                    customerName: toTitleCase(customer_name),
+                    reservationTime: reservation_time,
+                    guests: guestsNum,
+                    roomName: requestedRoomName,
+                    notes: userNote,
+                  }),
+            kind: 'ack',
+        }).catch(err => console.error('[public-booking] ack dispatch failed:', err?.message || err));
 
         // `confirmed` pilota il testo della schermata finale del form. `room`
         // è il nome della sala (mai il tavolo: vedi ackRoomName).

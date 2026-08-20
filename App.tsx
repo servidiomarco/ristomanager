@@ -8,6 +8,7 @@ import { ReservationList } from './components/ReservationList';
 import { LoginPage } from './components/LoginPage';
 import { ProfiloSheet } from './components/ProfiloSheet';
 import { OnboardingWizard } from './components/OnboardingWizard';
+import { BookingChannelsManager } from './components/BookingChannelsManager';
 import { PlatformPanel, ImpersonationBanner } from './components/PlatformPanel';
 import { CookingPotLoader } from './components/CookingPotLoader';
 import { UserManagement } from './components/UserManagement';
@@ -2577,7 +2578,16 @@ const App: React.FC = () => {
             {/* Canali di prenotazione — collapsible per-channel cards: enable/disable
                 toggle in the header, channel-specific settings inside the body. */}
             <SettingsSection label="Canali di prenotazione">
-              <FeatureTogglesManager showToast={addToast} />
+              <div className="space-y-3">
+                <FeatureTogglesManager showToast={addToast} />
+                <SettingsDisclosure
+                  icon={MessagesSquare}
+                  title="Canali di risposta"
+                  description="Con quale strumento rispondere all'ospite per ogni fonte di prenotazione: ordine di priorità e fallback tra email, WhatsApp e SMS."
+                >
+                  <BookingChannelsManager showToast={addToast} />
+                </SettingsDisclosure>
+              </div>
             </SettingsSection>
 
             {/* Opzioni prenotazioni — customizable chip lists (note rapide + intolleranze) surfaced in the reservation modal */}

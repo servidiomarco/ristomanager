@@ -1213,6 +1213,32 @@ export const updateLegalSettings = async (
   });
 };
 
+// Canali di risposta prenotazioni (Impostazioni → Canali di prenotazione):
+// per ogni fonte, l'ordine dei canali con cui rispondere all'ospite.
+export type BookingChannel = 'email' | 'whatsapp' | 'sms';
+export type BookingSource = 'GOOGLE' | 'VOICE' | 'WHATSAPP' | 'MANUAL';
+export interface SourceChannelPolicy {
+  priority: BookingChannel[];
+  email_copy: boolean;
+}
+export type BookingChannelPolicyMap = Record<BookingSource, SourceChannelPolicy>;
+
+export const getBookingChannelSettings = async (): Promise<BookingChannelPolicyMap> => {
+  return apiRequest<BookingChannelPolicyMap>(`${API_URL}/settings/booking-channels`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const updateBookingChannelSettings = async (
+  updates: Partial<BookingChannelPolicyMap>
+): Promise<BookingChannelPolicyMap> => {
+  return apiRequest<BookingChannelPolicyMap>(`${API_URL}/settings/booking-channels`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(updates),
+  });
+};
+
 // Wizard di primo accesso (Fase D1): marca l'onboarding come completato.
 // Solo OWNER lato server; idempotente.
 export const completeOnboarding = async (): Promise<void> => {
