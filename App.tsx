@@ -2694,9 +2694,13 @@ const App: React.FC = () => {
                 <CardErrorBoundary label="SumUp">
                   <SumUpIntegrationCard showToast={addToast} />
                 </CardErrorBoundary>
-                <CardErrorBoundary label="Conto al tavolo">
-                  <PayAtTableSettingsManager showToast={addToast} />
-                </CardErrorBoundary>
+                {/* Add-on commerciale: senza pay_at_table nel piano la card
+                    non compare (e il server maschera comunque il flag). */}
+                {hasFeature('pay_at_table') && (
+                  <CardErrorBoundary label="Conto al tavolo">
+                    <PayAtTableSettingsManager showToast={addToast} />
+                  </CardErrorBoundary>
+                )}
                 <CardErrorBoundary label="Sala & Cucina">
                   <SalaCucinaSettingsManager showToast={addToast} />
                 </CardErrorBoundary>

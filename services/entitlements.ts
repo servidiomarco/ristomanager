@@ -11,11 +11,11 @@
 // stato venduto. Feature assente a DB = non venduta = spenta.
 import { queryWithRetry } from '../db.js';
 
-export const TENANT_FEATURES = ['voice', 'whatsapp', 'web_booking'] as const;
+export const TENANT_FEATURES = ['voice', 'whatsapp', 'web_booking', 'pay_at_table'] as const;
 export type TenantFeature = (typeof TENANT_FEATURES)[number];
 export type TenantFeatureMap = Record<TenantFeature, boolean>;
 
-const ALL_DISABLED: TenantFeatureMap = { voice: false, whatsapp: false, web_booking: false };
+const ALL_DISABLED: TenantFeatureMap = { voice: false, whatsapp: false, web_booking: false, pay_at_table: false };
 
 // Cache per tenant con TTL breve, stesso schema di identityCache
 // (businessIdentity in server.ts): gli entitlement si leggono su ogni

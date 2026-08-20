@@ -9,7 +9,7 @@ import { api, ownerToken, bearer } from './helpers';
 // l'endpoint scarta gli slot già passati e il test dipenderebbe dall'orologio.
 const DATA_FUTURA = '2027-03-10';
 
-const TUTTO_ATTIVO = { voice: true, whatsapp: true, web_booking: true };
+const TUTTO_ATTIVO = { voice: true, whatsapp: true, web_booking: true, pay_at_table: true };
 
 describe('entitlements (tenant_features)', () => {
     // Qualunque cosa succeda nei test, il tenant 1 torna com'era: i file di
@@ -90,6 +90,38 @@ describe('entitlements (tenant_features)', () => {
         const availOk = await api().get('/public/availability').query({ date: DATA_FUTURA });
         expect(availOk.status).toBe(200);
         expect(availOk.body.date).toBe(DATA_FUTURA);
+    });
+
+    it('pay_at_table spento → il flag operativo si maschera e le route del conto rispondono 403', async () => {
+        const token = await ownerToken();
+
+        // Il ristoratore accende il flag operativo…
+        const flagOn = await api().put('/settings/features').set(bearer(token)).send({ pay_at_table_enabled: true });
+        expect(flagOn.status).toBe(200);
+
+        // …ma senza l'add-on venduto la lettura lo maschera a false, e le
+        // route del modulo chiudono comunque.
+        const put = await api().put('/settings/entitlements').set(bearer(token)).send({ pay_at_table: false });
+        expect(put.status).toBe(200);
+
+        const masked = await api().get('/settings/features').set(bearer(token));
+        expect(masked.status).toBe(200);
+        expect(masked.body.pay_at_table_enabled).toBe(false);
+
+        const bill = await api().post('/reservations/999999/bill').set(bearer(token)).send({});
+        expect(bill.status).toBe(403);
+        expect(bill.body.error).toBe('feature_disabled');
+
+        // Rivenduto: il flag operativo riemerge com'era, senza ritoccarlo.
+        const put2 = await api().put('/settings/entitlements').set(bearer(token)).send({ pay_at_table: true });
+        expect(put2.status).toBe(200);
+
+        const visible = await api().get('/settings/features').set(bearer(token));
+        expect(visible.body.pay_at_table_enabled).toBe(true);
+
+        // Si rispegne il flag operativo per non cambiare stato ai file dopo.
+        const flagOff = await api().put('/settings/features').set(bearer(token)).send({ pay_at_table_enabled: false });
+        expect(flagOff.status).toBe(200);
     });
 
     it('voice spento → 403 feature_not_enabled sulle route /voice-calls', async () => {

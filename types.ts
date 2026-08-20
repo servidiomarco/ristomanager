@@ -598,7 +598,7 @@ export interface User {
     id: number;
     slug: string;
     name: string;
-    features?: { voice: boolean; whatsapp: boolean; web_booking: boolean };
+    features?: { voice: boolean; whatsapp: boolean; web_booking: boolean; pay_at_table: boolean };
     // true finché l'OWNER non completa il wizard di primo accesso (D1):
     // la SPA lo mostra al posto dell'app, solo all'OWNER.
     needs_onboarding?: boolean;

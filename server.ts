@@ -3271,9 +3271,18 @@ async function loadBillView(tenantId: number, billId: number): Promise<any | nul
     };
 }
 
+// Conto al tavolo attivo davvero: VENDUTO (entitlement pay_at_table, si
+// compra) E ACCESO dal ristoratore (flag operativo in Impostazioni). Ogni
+// route del modulo — staff e pubbliche via token — passa da qui: senza
+// entitlement il flag operativo non basta più.
+async function isPayAtTableActive(tenantId: number): Promise<boolean> {
+    if (!(await isFeatureEnabledForTenant(tenantId, 'pay_at_table'))) return false;
+    return getFeatureFlag(tenantId, 'pay_at_table_enabled', false);
+}
+
 app.post('/reservations/:id/bill', authenticate, requirePermission('payments:full'), async (req, res) => {
     try {
-        if (!(await getFeatureFlag(req.tenantId!, 'pay_at_table_enabled', false))) {
+        if (!(await isPayAtTableActive(req.tenantId!))) {
             return res.status(403).json({
                 error: 'feature_disabled',
                 message: 'Il conto al tavolo è disattivato. Attivalo da Impostazioni → Conto al tavolo.',
@@ -3390,7 +3399,7 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
 // esplicito con il canale usato.
 app.post('/reservations/:id/bill/notify', authenticate, requirePermission('payments:full'), async (req, res) => {
     try {
-        if (!(await getFeatureFlag(req.tenantId!, 'pay_at_table_enabled', false))) {
+        if (!(await isPayAtTableActive(req.tenantId!))) {
             return res.status(403).json({
                 error: 'feature_disabled',
                 message: 'Il conto al tavolo è disattivato. Attivalo da Impostazioni → Conto al tavolo.',
@@ -3832,7 +3841,7 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => {
         // a still-valid QR get a 404 like any expired token — the waiter
         // handles the payment through the normal channel. Il flag è quello del
         // ristorante del conto, risolto dalla riga stessa.
-        if (!(await getFeatureFlag(bill.tenant_id, 'pay_at_table_enabled', false))) {
+        if (!(await isPayAtTableActive(bill.tenant_id))) {
             return res.status(404).json({ error: 'Not found' });
         }
 
@@ -3926,7 +3935,7 @@ app.get('/pay/:token/qr.png', publicPayLimiter, async (req, res) => {
         // (tenant_domains, Fase C3); senza dominio custom resta il tenant 1
         // finché il token del conto non porterà il tenant nell'URL.
         const qrTenantId = (await resolveTenantForPublicRequest(req)) ?? PUBLIC_TENANT_ID;
-        if (!(await getFeatureFlag(qrTenantId, 'pay_at_table_enabled', false))) {
+        if (!(await isPayAtTableActive(qrTenantId))) {
             return res.status(404).send('Not found');
         }
         const publicUrl = `${payAtTableBaseUrl()}/pay/${token}`;
@@ -3993,7 +4002,7 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         const bill = billRs.rows[0];
         // Il flag del ristorante del conto: risolto DOPO il lookup per token,
         // perché è la riga a dire di chi è il conto.
-        if (!(await getFeatureFlag(bill.tenant_id, 'pay_at_table_enabled', false))) {
+        if (!(await isPayAtTableActive(bill.tenant_id))) {
             await client.query('ROLLBACK');
             return res.status(404).json({ error: 'Not found' });
         }
@@ -4218,7 +4227,7 @@ app.post('/pay/:token/release', publicPayLimiter, async (req, res) => {
         const bill = await loadBillByToken(token);
         if (!bill) return res.status(404).json({ error: 'Not found' });
         // Flag del ristorante del conto, risolto dalla riga (vedi GET /pay/:token).
-        if (!(await getFeatureFlag(bill.tenant_id, 'pay_at_table_enabled', false))) {
+        if (!(await isPayAtTableActive(bill.tenant_id))) {
             return res.status(404).json({ error: 'Not found' });
         }
 
@@ -14983,6 +14992,13 @@ app.get('/settings/features', authenticate, async (req, res) => {
         for (const row of result.rows) {
             flags[row.key] = Boolean(row.value);
         }
+        // Senza l'add-on venduto il flag operativo si maschera a false: ogni
+        // superficie della SPA che lo legge (Pagamenti, prenotazioni, card
+        // Impostazioni) vede il modulo spento da UN punto solo, senza dover
+        // conoscere gli entitlement una per una.
+        if (!(await isFeatureEnabledForTenant(req.tenantId!, 'pay_at_table'))) {
+            flags.pay_at_table_enabled = false;
+        }
         res.json(flags);
     } catch (err) {
         console.error('Error fetching feature flags:', err);
@@ -20221,7 +20237,7 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
 // era già nullable, mancava solo l'ingresso.
 app.post('/tables/:id/bill', authenticate, requirePermission('payments:full'), async (req, res) => {
     try {
-        if (!(await getFeatureFlag(req.tenantId!, 'pay_at_table_enabled', false))) {
+        if (!(await isPayAtTableActive(req.tenantId!))) {
             return res.status(403).json({
                 error: 'feature_disabled',
                 message: 'Il conto al tavolo è disattivato. Attivalo da Impostazioni → Conto al tavolo.',
@@ -20807,7 +20823,7 @@ app.get('/reports/kitchen', authenticate, requirePermission('orders:expedite'), 
 // endpoint elenca i conti attivi per tavolo, con o senza prenotazione.
 app.get('/bills/open', authenticate, requirePermission('payments:view'), async (req, res) => {
     try {
-        if (!(await getFeatureFlag(req.tenantId!, 'pay_at_table_enabled', false))) {
+        if (!(await isPayAtTableActive(req.tenantId!))) {
             return res.json({ bills: [] });
         }
 

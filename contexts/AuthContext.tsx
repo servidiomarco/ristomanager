@@ -43,7 +43,7 @@ const DEV_BOARD_ADMIN_EMAIL = 'admin@ristomanager.com';
 // canale non compreso nel piano non compare proprio — niente bottone che
 // risponde 403. L'enforcement vero resta il server; qui si toglie solo la
 // porta dalla parete. EMAIL non c'è: l'email è canale base, non un add-on.
-export type TenantFeatureKey = 'voice' | 'whatsapp' | 'web_booking';
+export type TenantFeatureKey = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table';
 const VIEW_FEATURES: Partial<Record<ViewState, TenantFeatureKey>> = {
   [ViewState.CONVERSAZIONI]: 'voice',
   [ViewState.MESSAGGI]: 'whatsapp',
