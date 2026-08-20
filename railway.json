@@ -9,7 +9,7 @@
     "numReplicas": 1,
     "memory": "512MB",
     "cpu": "500m",
-    "healthcheckPath": "/health",
-    "healthcheckTimeout": 100
+    "healthcheckPath": "/ready",
+    "healthcheckTimeout": 300
   }
 }
