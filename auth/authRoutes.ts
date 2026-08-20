@@ -481,8 +481,7 @@ router.post('/reset-password', async (req: Request, res: Response) => {
 // GET /auth/users - List all users
 router.get('/users', authenticate, authorize(UserRole.OWNER), async (req: Request, res: Response) => {
   try {
-    console.log('Fetching all users...');
-    const users = await AuthService.getAllUsers();
+    const users = await AuthService.getAllUsers(req.user!.tenantId);
     console.log(`Found ${users.length} users`);
     res.json(users);
   } catch (error: any) {
@@ -500,7 +499,7 @@ router.get(
   authorize(UserRole.OWNER, UserRole.GENERAL_MANAGER, UserRole.MANAGER),
   async (req: Request, res: Response) => {
     try {
-      const users = await AuthService.getAssignableUsers(req.user!.role);
+      const users = await AuthService.getAssignableUsers(req.user!.role, req.user!.tenantId);
       res.json(users);
     } catch (error: any) {
       console.error('Get assignable users error:', error.message);
@@ -572,7 +571,7 @@ router.put('/users/:id', authenticate, authorize(UserRole.OWNER), async (req: Re
       return res.status(400).json({ error: 'Invalid role' });
     }
 
-    const user = await AuthService.updateUser(userId, {
+    const user = await AuthService.updateUser(userId, req.user!.tenantId, {
       email,
       password,
       full_name,
@@ -623,7 +622,7 @@ router.delete('/users/:id', authenticate, authorize(UserRole.OWNER), async (req:
     const userToDelete = await AuthService.getUserById(userId);
     const userEmail = userToDelete?.email;
 
-    const deleted = await AuthService.deleteUser(userId);
+    const deleted = await AuthService.deleteUser(userId, req.user!.tenantId);
 
     if (!deleted) {
       return res.status(404).json({ error: 'User not found' });

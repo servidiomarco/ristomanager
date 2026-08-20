@@ -269,9 +269,17 @@ export class AuthService {
   }
 
   // Get all users
-  static async getAllUsers(): Promise<User[]> {
+  // tenantId obbligatorio: senza filtro la lista utenti era di TUTTA la
+  // piattaforma — l'owner del tenant Demo vedeva lo staff del Frantoio.
+  // PLATFORM_ADMIN escluso sempre: sta sopra i tenant, non appartiene alla
+  // gestione utenti di nessun ristorante.
+  static async getAllUsers(tenantId: number): Promise<User[]> {
     const result = await queryWithRetry(
-      'SELECT id, email, full_name, role, is_active, created_at, updated_at, last_login, preferred_landing_view FROM users ORDER BY created_at DESC'
+      `SELECT id, email, full_name, role, is_active, created_at, updated_at, last_login, preferred_landing_view
+         FROM users
+        WHERE tenant_id = $1 AND role <> 'PLATFORM_ADMIN'
+        ORDER BY created_at DESC`,
+      [tenantId]
     );
 
     return result.rows.map(row => ({
@@ -327,16 +335,17 @@ export class AuthService {
   // Minimal user projection for assignment pickers (no email or audit fields).
   // Returns only active users at or below the actor's rank, sorted alphabetically.
   static async getAssignableUsers(
-    actorRole: UserRole
+    actorRole: UserRole,
+    tenantId: number
   ): Promise<Array<{ id: number; full_name: string; role: UserRole }>> {
     const allowedRoles = getAssignableRoles(actorRole);
     if (allowedRoles.length === 0) return [];
     const result = await queryWithRetry(
       `SELECT id, full_name, role
        FROM users
-       WHERE is_active = TRUE AND role = ANY($1::text[])
+       WHERE is_active = TRUE AND role = ANY($1::text[]) AND tenant_id = $2
        ORDER BY full_name`,
-      [allowedRoles]
+      [allowedRoles, tenantId]
     );
     return result.rows.map(row => ({
       id: row.id,
@@ -377,8 +386,12 @@ export class AuthService {
   }
 
   // Update user
+  // tenantId obbligatorio: senza, un OWNER poteva modificare (password
+  // inclusa) un utente di un ALTRO ristorante conoscendone l'id. Il target
+  // PLATFORM_ADMIN è fuori portata per la stessa ragione della lista.
   static async updateUser(
     userId: number,
+    tenantId: number,
     updates: { email?: string; full_name?: string; role?: UserRole; is_active?: boolean; password?: string }
   ): Promise<User | null> {
     const fields: string[] = [];
@@ -413,8 +426,11 @@ export class AuthService {
 
     fields.push(`updated_at = CURRENT_TIMESTAMP`);
     values.push(userId);
+    values.push(tenantId);
 
-    const query = `UPDATE users SET ${fields.join(', ')} WHERE id = $${paramIndex} RETURNING id, email, full_name, role, is_active, created_at, updated_at, last_login, preferred_landing_view`;
+    const query = `UPDATE users SET ${fields.join(', ')}
+                   WHERE id = $${paramIndex} AND tenant_id = $${paramIndex + 1} AND role <> 'PLATFORM_ADMIN'
+                   RETURNING id, email, full_name, role, is_active, created_at, updated_at, last_login, preferred_landing_view`;
 
     const result = await queryWithRetry(query, values);
 
@@ -436,9 +452,13 @@ export class AuthService {
     };
   }
 
-  // Delete user
-  static async deleteUser(userId: number): Promise<boolean> {
-    const result = await queryWithRetry('DELETE FROM users WHERE id = $1 RETURNING id', [userId]);
+  // Delete user — stesso scoping di updateUser: solo il proprio tenant,
+  // mai un PLATFORM_ADMIN.
+  static async deleteUser(userId: number, tenantId: number): Promise<boolean> {
+    const result = await queryWithRetry(
+      `DELETE FROM users WHERE id = $1 AND tenant_id = $2 AND role <> 'PLATFORM_ADMIN' RETURNING id`,
+      [userId, tenantId]
+    );
     return result.rows.length > 0;
   }
 
