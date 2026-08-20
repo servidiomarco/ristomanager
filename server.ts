@@ -4549,7 +4549,7 @@ app.get('/email/threads/:emailKey', authenticate, requirePermission('reservation
         if (!key || !key.includes('@')) return res.status(400).json({ error: 'Invalid email_key' });
         const result = await queryWithRetry(
             `SELECT id, provider, channel, direction, from_email, to_email, subject, body,
-                    status, provider_sid, message_id, in_reply_to, reservation_id,
+                    status, provider_sid, message_id, in_reply_to, reservation_id, media,
                     sent_at, delivered_at, failed_at, read_at, error_code, error_message
              FROM outbound_messages
              WHERE tenant_id = $2
@@ -4613,6 +4613,44 @@ app.post('/email/send', authenticate, requirePermission('reservations:full'), as
         if (!(await isSmtpConfigured(req.tenantId!))) {
             return res.status(503).json({ error: 'SMTP non configurato — vai in Impostazioni' });
         }
+
+        // Allegati: stessi token di outbound_media usati da WhatsApp (upload
+        // diretto o libreria via /media/:id/attach), ma qui i byte viaggiano
+        // DENTRO il messaggio — niente URL pubblico da scaricare, quindi
+        // funziona anche in locale. Il totale è limitato sotto i tetti
+        // classici dei provider (25 MB lordi con il +33% del base64).
+        const attachmentTokens: string[] = Array.isArray(req.body?.attachment_tokens)
+            ? req.body.attachment_tokens.map((t: any) => String(t)).filter(Boolean).slice(0, 5)
+            : [];
+        let emailAttachments: Array<{ filename: string; contentType: string; content: Buffer }> = [];
+        let attachmentMeta: Array<{ token: string; filename: string | null; content_type: string; size_bytes: number }> = [];
+        if (attachmentTokens.length > 0) {
+            const found = await queryWithRetry(
+                `SELECT token, filename, content_type, bytes, size_bytes
+                   FROM outbound_media WHERE token = ANY($1) AND tenant_id = $2`,
+                [attachmentTokens, req.tenantId!]
+            );
+            const byToken = new Map(found.rows.map((r: any) => [r.token, r]));
+            if (attachmentTokens.some(t => !byToken.has(t))) {
+                return res.status(400).json({ error: 'Allegato non trovato' });
+            }
+            const rows = attachmentTokens.map(t => byToken.get(t)!);
+            const totalBytes = rows.reduce((sum: number, r: any) => sum + Number(r.size_bytes || 0), 0);
+            if (totalBytes > 15 * 1024 * 1024) {
+                return res.status(413).json({ error: 'Allegati troppo pesanti: massimo 15 MB in totale' });
+            }
+            emailAttachments = rows.map((r: any) => ({
+                filename: r.filename || 'allegato',
+                contentType: r.content_type,
+                content: r.bytes,
+            }));
+            attachmentMeta = rows.map((r: any) => ({
+                token: r.token,
+                filename: r.filename ?? null,
+                content_type: r.content_type,
+                size_bytes: Number(r.size_bytes || 0),
+            }));
+        }
         // Reservation_id from the client may be stale (thread summary points
         // to a reservation that got deleted between fetch and send). If the
         // row no longer exists, clear the FK so the INSERT doesn't blow up —
@@ -4646,23 +4684,33 @@ app.post('/email/send', authenticate, requirePermission('reservations:full'), as
             subject: template.subject,
             text: template.text,
             html: template.html,
+            attachments: emailAttachments.length > 0 ? emailAttachments : undefined,
         });
         // in_reply_to is persisted for our own thread reconstruction even if
         // the underlying provider doesn't propagate the RFC header — it's a
         // hint about the composer's intent, not authoritative Message-ID
         // threading data.
+        // `media` sulla riga come per WhatsApp: la timeline mostra cosa è
+        // partito davvero (nome file e token per il download).
         const inserted = await queryWithRetry(
             `INSERT INTO outbound_messages
                 (tenant_id, provider, channel, direction, to_email, subject, body, status,
-                 message_id, in_reply_to, reservation_id, sent_at)
+                 message_id, in_reply_to, reservation_id, media, sent_at)
              VALUES ($7, 'smtp', 'email', 'outbound', $1, $2, $3, 'sent',
-                     $4, $5, $6, CURRENT_TIMESTAMP)
+                     $4, $5, $6, $8::jsonb, CURRENT_TIMESTAMP)
              RETURNING id, provider, channel, direction, from_email, to_email,
                        subject, body, status, provider_sid, message_id, in_reply_to,
-                       reservation_id, sent_at`,
-            [toEmail, subj, bod, sendResult.messageId || null, inReplyTo, reservationId, req.tenantId!]
+                       reservation_id, media, sent_at`,
+            [toEmail, subj, bod, sendResult.messageId || null, inReplyTo, reservationId, req.tenantId!,
+             attachmentMeta.length > 0 ? JSON.stringify(attachmentMeta) : null]
         );
         const message = inserted.rows[0];
+        if (attachmentTokens.length > 0) {
+            await queryWithRetry(
+                `UPDATE outbound_media SET message_id = $1 WHERE token = ANY($2) AND tenant_id = $3`,
+                [message.id, attachmentTokens, req.tenantId!]
+            ).catch(() => {});
+        }
 
         if (socketService) {
             try { socketService.broadcastToAll(req.tenantId!, 'email:new', { email_key: toEmail.toLowerCase(), message }); }
