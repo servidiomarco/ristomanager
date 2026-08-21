@@ -10285,7 +10285,7 @@ const sanitizeDevBoardLabels = (input: any): string[] | null =>
 app.get('/dev-board/cards', authenticate, requireDevBoardAdmin, async (req, res) => {
     try {
         const result = await queryWithRetry(
-            `SELECT id, title, description, column_key, position, labels, created_at, updated_at
+            `SELECT id, title, description, column_key, position, labels, claude_status, claude_note, claude_run_url, created_at, updated_at
              FROM dev_board_cards
              WHERE tenant_id = $1
              ORDER BY column_key, position, id`,
@@ -10312,7 +10312,7 @@ app.post('/dev-board/cards', authenticate, requireDevBoardAdmin, async (req, res
             // for parameter $3". Stesso motivo per cui la PUT usa $3::varchar.
             `INSERT INTO dev_board_cards (title, description, column_key, position, labels, tenant_id)
              VALUES ($1, $2, $3::varchar, (SELECT COALESCE(MAX(position), -1) + 1 FROM dev_board_cards WHERE column_key = $3::varchar AND tenant_id = $5), $4, $5)
-             RETURNING id, title, description, column_key, position, labels, created_at, updated_at`,
+             RETURNING id, title, description, column_key, position, labels, claude_status, claude_note, claude_run_url, created_at, updated_at`,
             [String(title).trim(), description ? String(description).trim() || null : null, column, labels, req.tenantId!]
         );
         const socketId = req.headers['x-socket-id'] as string;
@@ -10347,7 +10347,7 @@ app.put('/dev-board/cards/:id', authenticate, requireDevBoardAdmin, async (req, 
                 labels = COALESCE($5::text[], labels),
                 updated_at = NOW()
              WHERE id = $4 AND tenant_id = $6
-             RETURNING id, title, description, column_key, position, labels, created_at, updated_at`,
+             RETURNING id, title, description, column_key, position, labels, claude_status, claude_note, claude_run_url, created_at, updated_at`,
             [String(title).trim(), description ? String(description).trim() || null : null, column_key ?? null, id, labels, req.tenantId!]
         );
         if (result.rows.length === 0) {
@@ -10410,6 +10410,137 @@ app.delete('/dev-board/cards/:id', authenticate, requireDevBoardAdmin, async (re
         const socketId = req.headers['x-socket-id'] as string;
         if (socketService) socketService.broadcastToAll(req.tenantId!, 'devboard:changed', {}, socketId);
         res.status(204).send();
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
+// DEV BOARD × CLAUDE — Approva per Claude: il processo parte subito
+// ============================================
+// L'approvazione dispatcha il workflow GitHub claude-dev-task.yml
+// (workflow_dispatch) che esegue Claude Code sul task della card e apre una
+// PR; il workflow riporta lo stato qui via callback pubblica con segreto
+// condiviso. Env necessari (Railway): DEV_BOARD_GITHUB_TOKEN (PAT con scope
+// actions:write sul repo), DEV_BOARD_CLAUDE_SECRET (uguale al secret GitHub);
+// opzionale DEV_BOARD_GITHUB_REPO. Lato GitHub: secrets ANTHROPIC_API_KEY e
+// DEV_BOARD_CLAUDE_SECRET.
+const DEV_BOARD_GITHUB_REPO = process.env.DEV_BOARD_GITHUB_REPO || 'servidiomarco/ristomanager';
+const DEV_BOARD_GITHUB_TOKEN = process.env.DEV_BOARD_GITHUB_TOKEN || '';
+const DEV_BOARD_CLAUDE_SECRET = process.env.DEV_BOARD_CLAUDE_SECRET || '';
+const DEV_BOARD_CLAUDE_STATUSES = ['queued', 'running', 'done', 'failed'];
+
+app.post('/dev-board/cards/:id/claude/approve', authenticate, requireDevBoardAdmin, async (req, res) => {
+    try {
+        if (!DEV_BOARD_GITHUB_TOKEN || !DEV_BOARD_CLAUDE_SECRET) {
+            return res.status(503).json({ error: 'Integrazione Claude non configurata: servono DEV_BOARD_GITHUB_TOKEN e DEV_BOARD_CLAUDE_SECRET su Railway.' });
+        }
+        const { id } = req.params;
+        const cardResult = await queryWithRetry(
+            `SELECT id, title, description, claude_status FROM dev_board_cards WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        const card = cardResult.rows[0];
+        if (!card) {
+            return res.status(404).json({ error: 'Card non trovata' });
+        }
+        if (card.claude_status === 'queued' || card.claude_status === 'running') {
+            return res.status(409).json({ error: 'Claude sta già lavorando su questa card' });
+        }
+        const dispatch = await fetch(
+            `https://api.github.com/repos/${DEV_BOARD_GITHUB_REPO}/actions/workflows/claude-dev-task.yml/dispatches`,
+            {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${DEV_BOARD_GITHUB_TOKEN}`,
+                    'Accept': 'application/vnd.github+json',
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    ref: 'main',
+                    inputs: {
+                        card_id: String(card.id),
+                        title: String(card.title).slice(0, 500),
+                        description: String(card.description || '').slice(0, 2000),
+                    },
+                }),
+            }
+        );
+        if (!dispatch.ok) {
+            const detail = await dispatch.text().catch(() => '');
+            console.error('[DevBoard×Claude] dispatch failed:', dispatch.status, detail);
+            return res.status(502).json({ error: `Dispatch GitHub fallito (${dispatch.status})` });
+        }
+        const result = await queryWithRetry(
+            `UPDATE dev_board_cards
+             SET claude_status = 'queued', claude_note = NULL, claude_run_url = NULL, updated_at = NOW()
+             WHERE id = $1 AND tenant_id = $2
+             RETURNING id, title, description, column_key, position, labels, claude_status, claude_note, claude_run_url, created_at, updated_at`,
+            [id, req.tenantId!]
+        );
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'devboard:changed', {}, socketId);
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/dev-board/cards/:id/claude/reset', authenticate, requireDevBoardAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await queryWithRetry(
+            `UPDATE dev_board_cards
+             SET claude_status = NULL, claude_note = NULL, claude_run_url = NULL, updated_at = NOW()
+             WHERE id = $1 AND tenant_id = $2
+             RETURNING id, title, description, column_key, position, labels, claude_status, claude_note, claude_run_url, created_at, updated_at`,
+            [id, req.tenantId!]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Card non trovata' });
+        }
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'devboard:changed', {}, socketId);
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Callback del workflow (pubblica, protetta dal segreto condiviso): il job
+// riporta running all'avvio e done/failed alla fine, con la PR in nota.
+app.post('/dev-board/claude-callback', async (req, res) => {
+    try {
+        if (!DEV_BOARD_CLAUDE_SECRET || req.headers['x-claude-callback-secret'] !== DEV_BOARD_CLAUDE_SECRET) {
+            return res.status(401).json({ error: 'unauthorized' });
+        }
+        const { card_id, status, note, run_url } = req.body || {};
+        if (!card_id || !DEV_BOARD_CLAUDE_STATUSES.includes(status)) {
+            return res.status(400).json({ error: 'card_id o status non validi' });
+        }
+        const result = await queryWithRetry(
+            `UPDATE dev_board_cards
+             SET claude_status = $2,
+                 claude_note = COALESCE($3, claude_note),
+                 claude_run_url = COALESCE($4, claude_run_url),
+                 updated_at = NOW()
+             WHERE id = $1
+             RETURNING id, tenant_id`,
+            [
+                Number(card_id),
+                status,
+                note ? String(note).slice(0, 2000) : null,
+                run_url ? String(run_url).slice(0, 500) : null,
+            ]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Card non trovata' });
+        }
+        if (socketService) socketService.broadcastToAll(Number(result.rows[0].tenant_id), 'devboard:changed', {});
+        res.json({ ok: true });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Internal server error' });
