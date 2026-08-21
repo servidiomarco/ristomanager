@@ -4775,12 +4775,10 @@ const OUTBOUND_MEDIA_MAX_BYTES = 5 * 1024 * 1024;
 const OUTBOUND_MEDIA_TYPES = /^(image\/(jpeg|png|webp|gif)|video\/(mp4|3gpp)|audio\/(mpeg|ogg|amr|aac)|application\/pdf)$/;
 
 // --- Libreria media -------------------------------------------------------
-// NB: le query filtrano tenant_id ESPLICITAMENTE, non si affidano alla sola
-// Row-Level Security. La policy c'è ed è giusta, ma il ruolo con cui l'app si
-// collega al database (postgres) è superuser e la scavalca: RLS non si applica
-// mai a superuser né a ruoli con BYPASSRLS, nemmeno con FORCE. Finché non c'è
-// un ruolo applicativo dedicato, il filtro nella query è l'unica cosa che
-// isola davvero.
+// Il filtro esplicito su tenant_id resta anche ora che la RLS isola davvero
+// (ruolo app_ristomanager, non superuser, con app.rls_strict acceso): costa
+// nulla e regge se un giorno una route venisse chiamata fuori dal contesto
+// tenant. Cintura e bretelle, non l'unica difesa come era in origine.
 // File caricati una volta e riusati molte (il menu di Ferragosto, la piantina
 // delle sale). Allegarne uno a un messaggio ne materializza una copia in
 // outbound_media: la via verso Twilio resta quella collaudata.
