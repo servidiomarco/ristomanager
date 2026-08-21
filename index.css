@@ -776,6 +776,20 @@ body {
   .print-only { display: block; }
   .no-print { display: none !important; }
   @page { size: A4; margin: 1.5cm; }
+
+  /* Paracadute per utils/printDocument.ts: i documenti autonomi (banchetti,
+     HACCP, lista della spesa) si stampano da un iframe nascosto. Se un browser
+     ignora la richiesta e stampa la pagina che lo ospita, almeno esce il
+     documento invece dell'interfaccia dell'app. */
+  html.is-printing-frame #risto-print-frame {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 100vh;
+    opacity: 1 !important;
+    z-index: auto !important;
+  }
 }
 
 /* ===========================================================================

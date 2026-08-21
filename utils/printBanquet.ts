@@ -1,4 +1,5 @@
 import { BanquetMenu, Dish, Shift } from '../types';
+import { printHtmlDocument } from './printDocument';
 
 const ITALIAN_DATE_OPTS: Intl.DateTimeFormatOptions = {
   weekday: 'long',
@@ -414,21 +415,8 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
   </div>` : ''}
 
   <footer>Documento generato il ${escapeHtml(new Date().toLocaleDateString('it-IT'))}</footer>
-
-  <script>
-    window.addEventListener('load', () => {
-      setTimeout(() => window.print(), 200);
-    });
-  </script>
 </body>
 </html>`;
 
-  const win = window.open('', '_blank');
-  if (!win) {
-    alert('Sblocca i popup per scaricare il PDF.');
-    return;
-  }
-  win.document.open();
-  win.document.write(html);
-  win.document.close();
+  printHtmlDocument(html, { popupMessage: 'Sblocca i popup per scaricare il PDF.' });
 };
