@@ -97,7 +97,22 @@ jobs:
             NOTE="Completato senza PR (vedi log della run)."
           else
             STATUS=failed
-            NOTE="Run fallita o annullata (vedi log)."
+            # L'action non stampa il transcript nel log: l'unico posto dove
+            # l'errore vero è leggibile è il json di esecuzione. Un estratto
+            # sulla card evita di dover aprire GitHub per capire se riprovare.
+            DETAIL=$(python3 -c "
+          import json, glob
+          try:
+              path = glob.glob('/home/runner/work/_temp/claude-execution-output.json')[0]
+              data = json.load(open(path))
+              items = data if isinstance(data, list) else [data]
+              res = [x for x in items if x.get('type') == 'result']
+              msg = (res[-1].get('result') or res[-1].get('subtype') or '') if res else ''
+              print(str(msg)[:180].replace('\"', chr(39)))
+          except Exception:
+              print('')
+          " 2>/dev/null || true)
+            NOTE="Run fallita o annullata (vedi log). ${DETAIL}"
           fi
           curl -sS -X POST "$BACKEND_URL/dev-board/claude-callback" \
             -H "Content-Type: application/json" \
