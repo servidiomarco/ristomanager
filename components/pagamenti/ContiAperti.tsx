@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Loader2, QrCode, TriangleAlert, Check } from 'lucide-react';
-import type { OpenBillRow, StaleOrderRow } from '../../services/billsApiService';
+import { Loader2, QrCode, TriangleAlert, Check, X } from 'lucide-react';
+import { printBill, type OpenBillRow, type StaleOrderRow } from '../../services/billsApiService';
 import { toTitleCase } from '../../utils/text';
 import { Callout, EmptyState, SectionHeader, StatusPill } from '../ds';
 import { formatEuro, formatServiceDay, shiftLabel } from './paymentsView';
@@ -32,11 +32,18 @@ const BillCard: React.FC<{
   onSelect: () => void;
   onClose: (opts?: SettleOpts) => void;
   closing: boolean;
-}> = ({ bill, active, onSelect, onClose, closing }) => {
+  /** Selezione multipla per la stampa QR in blocco: sostituisce l'apertura del
+   *  conto col semplice spunta/deseleziona, ed esclude i conti senza un QR
+   *  attivo invece di lasciarli spuntabili per poi fallire in stampa. */
+  selectionMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
+}> = ({ bill, active, onSelect, onClose, closing, selectionMode, selected, onToggleSelect }) => {
   const [settleOpen, setSettleOpen] = useState(false);
   const pct = bill.total_cents > 0
     ? Math.min(100, Math.round((bill.paid_cents / bill.total_cents) * 100))
     : 0;
+  const qrAvailable = !!bill.share_token;
 
   return (
     // The selectable region and Chiudi are siblings, not nested: a button
@@ -48,74 +55,99 @@ const BillCard: React.FC<{
     >
       <button
         type="button"
-        onClick={onSelect}
-        className="flex flex-col gap-3 p-4 pb-3 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)]"
+        onClick={selectionMode ? onToggleSelect : onSelect}
+        disabled={selectionMode && !qrAvailable}
+        aria-pressed={selectionMode ? selected : undefined}
+        className={`flex items-start gap-3 p-4 pb-3 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] ${
+          selectionMode && !qrAvailable ? 'opacity-40' : ''
+        }`}
       >
-        <div className="flex items-baseline justify-between gap-2">
-          <div className="min-w-0">
-            <span className="text-[17px] font-semibold text-[var(--ds-text-primary)]">
-              Tav. {bill.table_name ?? '—'}
-            </span>
-            <span className="ml-2 text-[14px] text-[var(--ds-text-muted)]">
-              {bill.customer_name ? toTitleCase(bill.customer_name) : 'senza prenotazione'}
-            </span>
-          </div>
-          <span className="flex-shrink-0 text-[13px] text-[var(--ds-text-muted)] tabular-nums">
-            {bill.covers} cop.
+        {selectionMode && (
+          <span
+            aria-hidden
+            className={`mt-0.5 inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-[8px] transition-colors ${
+              selected
+                ? 'bg-[var(--ds-seated-solid)] text-[#ffffff]'
+                : 'bg-[var(--ds-surface)] ring-1 ring-inset ring-[var(--ds-border-strong)]'
+            }`}
+          >
+            {selected && <Check className="h-3.5 w-3.5" />}
           </span>
-        </div>
-
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <span className="text-[28px] font-semibold leading-none tracking-[-0.02em] text-[var(--ds-text-primary)] tabular-nums">
-            {euro(bill.total_cents)}
-          </span>
-          <span className="text-[13px] font-medium text-[var(--ds-critical-text)] tabular-nums">
-            {bill.paid_cents > 0 && `incassato ${euro(bill.paid_cents)} · `}
-            residuo {euro(bill.residual_cents)}
-          </span>
-        </div>
-
-        {/* Only drawn once something has actually been collected: a bar sitting
-            at zero on every card is noise, not information. */}
-        {bill.paid_cents > 0 && (
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--ds-border)]">
-            <div
-              className="h-full rounded-full bg-[var(--ds-seated-solid)] transition-all"
-              style={{ width: `${pct}%` }}
-            />
-          </div>
         )}
+        <span className="flex min-w-0 flex-1 flex-col gap-3">
+          <span className="flex items-baseline justify-between gap-2">
+            <span className="min-w-0">
+              <span className="text-[17px] font-semibold text-[var(--ds-text-primary)]">
+                Tav. {bill.table_name ?? '—'}
+              </span>
+              <span className="ml-2 text-[14px] text-[var(--ds-text-muted)]">
+                {bill.customer_name ? toTitleCase(bill.customer_name) : 'senza prenotazione'}
+              </span>
+            </span>
+            <span className="flex-shrink-0 text-[13px] text-[var(--ds-text-muted)] tabular-nums">
+              {bill.covers} cop.
+            </span>
+          </span>
 
-        {(!bill.is_current_service || bill.open_orders > 0) && (
-          <div className="flex flex-wrap items-center gap-2">
-            {!bill.is_current_service && (
-              <StatusPill tone="pending">
-                {formatServiceDay(bill.service_date)} · {shiftLabel(bill.shift)}
-              </StatusPill>
-            )}
-            {bill.open_orders > 0 && (
-              <StatusPill tone="pending" title="Il totale può ancora cambiare">
-                comanda aperta
-              </StatusPill>
-            )}
-          </div>
-        )}
+          <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span className="text-[28px] font-semibold leading-none tracking-[-0.02em] text-[var(--ds-text-primary)] tabular-nums">
+              {euro(bill.total_cents)}
+            </span>
+            <span className="text-[13px] font-medium text-[var(--ds-critical-text)] tabular-nums">
+              {bill.paid_cents > 0 && `incassato ${euro(bill.paid_cents)} · `}
+              residuo {euro(bill.residual_cents)}
+            </span>
+          </span>
+
+          {/* Only drawn once something has actually been collected: a bar sitting
+              at zero on every card is noise, not information. */}
+          {bill.paid_cents > 0 && (
+            <span className="block h-1.5 w-full overflow-hidden rounded-full bg-[var(--ds-border)]">
+              <span
+                className="block h-full rounded-full bg-[var(--ds-seated-solid)] transition-all"
+                style={{ width: `${pct}%` }}
+              />
+            </span>
+          )}
+
+          {selectionMode && !qrAvailable ? (
+            <span className="flex flex-wrap items-center gap-2">
+              <StatusPill tone="pending">QR non attivo</StatusPill>
+            </span>
+          ) : (!bill.is_current_service || bill.open_orders > 0) && (
+            <span className="flex flex-wrap items-center gap-2">
+              {!bill.is_current_service && (
+                <StatusPill tone="pending">
+                  {formatServiceDay(bill.service_date)} · {shiftLabel(bill.shift)}
+                </StatusPill>
+              )}
+              {bill.open_orders > 0 && (
+                <StatusPill tone="pending" title="Il totale può ancora cambiare">
+                  comanda aperta
+                </StatusPill>
+              )}
+            </span>
+          )}
+        </span>
       </button>
 
       {/* Chiudi apre il dialog di incasso (contanti + mancia) invece di scrivere
           il residuo come ammanco senza chiedere: era l'unico modo di pagare la
-          carta. */}
-      <div className="px-4 pb-3">
-        <button
-          type="button"
-          onClick={() => setSettleOpen(true)}
-          disabled={closing}
-          className="inline-flex h-10 w-full items-center justify-center rounded-full bg-[var(--ds-seated-tint)] px-4 text-[14px] font-medium text-[var(--ds-seated-text)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-        >
-          {closing ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Chiudi'}
-        </button>
-      </div>
-      {settleOpen && (
+          carta. Nascosto in selezione multipla: lì il tap sceglie il tavolo,
+          non chiude il conto. */}
+      {!selectionMode && (
+        <div className="px-4 pb-3">
+          <button
+            type="button"
+            onClick={() => setSettleOpen(true)}
+            disabled={closing}
+            className="inline-flex h-10 w-full items-center justify-center rounded-full bg-[var(--ds-seated-tint)] px-4 text-[14px] font-medium text-[var(--ds-seated-text)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            {closing ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Chiudi'}
+          </button>
+        </div>
+      )}
+      {!selectionMode && settleOpen && (
         <SettleDialog
           bill={bill}
           busy={closing}
@@ -149,6 +181,36 @@ export const ContiAperti: React.FC<{
   bills, stale, service, loading, error, closingId, onCloseBill, selectedId, onSelect, query = '', closedView = false,
 }) => {
   const [onlyResidual, setOnlyResidual] = useState(false);
+
+  // Stampa QR in blocco: "uno o più tavoli" in un solo giro, invece di aprire
+  // ogni conto per stampare il suo QR singolarmente.
+  const [qrSelectionMode, setQrSelectionMode] = useState(false);
+  const [qrSelectedIds, setQrSelectedIds] = useState<Set<number>>(new Set());
+  const [qrPrinting, setQrPrinting] = useState(false);
+  const [qrResult, setQrResult] = useState<{ ok: number; failed: number } | null>(null);
+
+  const toggleQrSelected = (id: number) => setQrSelectedIds(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  const exitQrSelection = () => {
+    setQrSelectionMode(false);
+    setQrSelectedIds(new Set());
+  };
+
+  const printQrSelection = async () => {
+    if (qrSelectedIds.size === 0 || qrPrinting) return;
+    setQrPrinting(true);
+    const ids = [...qrSelectedIds];
+    const results = await Promise.allSettled(ids.map(id => printBill(id, 'QR')));
+    const ok = results.filter(r => r.status === 'fulfilled').length;
+    setQrPrinting(false);
+    setQrResult({ ok, failed: results.length - ok });
+    setTimeout(() => setQrResult(null), 4000);
+    exitQrSelection();
+  };
 
   const q = query.trim().toLowerCase();
   const matches = (b: OpenBillRow) =>
@@ -307,9 +369,61 @@ export const ContiAperti: React.FC<{
               <SectionHeader
                 tone="attention"
                 meta={`${daChiudere.length} cont${daChiudere.length === 1 ? 'o' : 'i'} · ${euro(residualTotal)} di residuo`}
+                action={daChiudere.some(b => b.share_token) ? (
+                  // Un interruttore, non una porta a senso unico: resta lì e si
+                  // accende invece di sparire, così l'intestazione non trema al tap.
+                  <button
+                    type="button"
+                    onClick={() => (qrSelectionMode ? exitQrSelection() : setQrSelectionMode(true))}
+                    aria-pressed={qrSelectionMode}
+                    className={`inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                      qrSelectionMode
+                        ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                        : 'text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface)] hover:text-[var(--ds-text-primary)]'
+                    }`}
+                  >
+                    <QrCode className="h-3.5 w-3.5" aria-hidden /> Stampa QR
+                  </button>
+                ) : undefined}
               >
                 Da chiudere
               </SectionHeader>
+
+              {qrSelectionMode && (
+                <div className="sticky top-0 z-10 mb-2 flex items-center gap-2 rounded-full bg-[var(--ds-action-bg)] py-2 pl-4 pr-2 shadow-[var(--ds-shadow-raised)]">
+                  <span className="min-w-0 flex-1 truncate text-[14px] text-[var(--ds-action-fg)]">
+                    {qrSelectedIds.size === 0
+                      ? 'Tocca i tavoli da stampare'
+                      : `${qrSelectedIds.size} tavol${qrSelectedIds.size === 1 ? 'o' : 'i'} selezionat${qrSelectedIds.size === 1 ? 'o' : 'i'}`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={printQrSelection}
+                    disabled={qrSelectedIds.size === 0 || qrPrinting}
+                    className="inline-flex h-10 flex-shrink-0 items-center gap-1.5 rounded-full bg-white/15 px-3.5 text-[13px] font-medium text-[var(--ds-action-fg)] transition-colors hover:bg-white/25 disabled:opacity-40"
+                  >
+                    {qrPrinting ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
+                    Stampa
+                  </button>
+                  <button
+                    type="button"
+                    onClick={exitQrSelection}
+                    aria-label="Esci dalla selezione"
+                    className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-action-fg)] transition-colors hover:bg-white/10"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+
+              {qrResult && (
+                <Callout tone={qrResult.failed === 0 ? 'positive' : 'critical'} icon={qrResult.failed === 0 ? Check : TriangleAlert} className="mb-2">
+                  {qrResult.failed === 0
+                    ? `QR in stampa per ${qrResult.ok} tavol${qrResult.ok === 1 ? 'o' : 'i'}.`
+                    : `${qrResult.ok} in stampa, ${qrResult.failed} non riuscit${qrResult.failed === 1 ? 'o' : 'i'}.`}
+                </Callout>
+              )}
+
               <div className="space-y-3">
                 {daChiudere.map(b => (
                   <BillCard
@@ -319,6 +433,9 @@ export const ContiAperti: React.FC<{
                     closing={closingId === b.id}
                     onSelect={() => onSelect(b)}
                     onClose={(opts) => onCloseBill(b, opts)}
+                    selectionMode={qrSelectionMode}
+                    selected={qrSelectedIds.has(b.id)}
+                    onToggleSelect={() => toggleQrSelected(b.id)}
                   />
                 ))}
               </div>
