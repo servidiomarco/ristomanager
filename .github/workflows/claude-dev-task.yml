@@ -1,0 +1,101 @@
+# Esecuzione di una card del dev board da parte di Claude Code.
+#
+# Dispatchato dal backend quando l'admin preme «Approva per Claude» sulla
+# pagina Development (POST /dev-board/cards/:id/claude/approve). Il job
+# riporta lo stato sulla card via callback: running all'avvio, done/failed
+# alla fine (con l'URL della PR in nota se Claude l'ha aperta).
+#
+# Secrets richiesti sul repo: ANTHROPIC_API_KEY, DEV_BOARD_CLAUDE_SECRET
+# (identico all'env DEV_BOARD_CLAUDE_SECRET su Railway).
+name: Claude dev task
+
+on:
+  workflow_dispatch:
+    inputs:
+      card_id:
+        description: 'ID della card del dev board'
+        required: true
+        type: string
+      title:
+        description: 'Titolo della card'
+        required: true
+        type: string
+      description:
+        description: 'Descrizione della card'
+        required: false
+        type: string
+        default: ''
+
+env:
+  BACKEND_URL: https://ristomanager-production.up.railway.app
+
+jobs:
+  claude:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Segnala avvio alla board
+        run: |
+          curl -sS -X POST "$BACKEND_URL/dev-board/claude-callback" \
+            -H "Content-Type: application/json" \
+            -H "X-Claude-Callback-Secret: ${{ secrets.DEV_BOARD_CLAUDE_SECRET }}" \
+            -d "{\"card_id\": ${{ inputs.card_id }}, \"status\": \"running\", \"run_url\": \"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" || true
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Esegui Claude Code sul task
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            Sei su una card del dev board del progetto (pagina Development del CRM).
+            Leggi CLAUDE.md e rispetta le convenzioni del repo (design system ds/,
+            commenti in italiano che spiegano il perché, commit message in italiano).
+
+            TASK (card #${{ inputs.card_id }}): ${{ inputs.title }}
+
+            DETTAGLI: ${{ inputs.description }}
+
+            Implementa il task. Poi:
+            1. Crea il branch claude/dev-card-${{ inputs.card_id }} e committa lì.
+            2. Verifica che `npm run build:server` e `npm run build` passino.
+            3. Apri una pull request verso main con titolo in italiano che riprende
+               la card, e nel body cita "Card dev board #${{ inputs.card_id }}".
+            Non fare push su main. Se il task non è realizzabile, spiega perché
+            nel log e non aprire la PR.
+          claude_args: "--max-turns 80"
+
+      - name: Trova la PR aperta da Claude
+        id: pr
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_URL=$(gh pr list --repo "${{ github.repository }}" --head "claude/dev-card-${{ inputs.card_id }}" --json url -q '.[0].url' 2>/dev/null || true)
+          echo "url=$PR_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Segnala esito alla board
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ] && [ -n "${{ steps.pr.outputs.url }}" ]; then
+            STATUS=done
+            NOTE="PR aperta: ${{ steps.pr.outputs.url }}"
+          elif [ "${{ job.status }}" = "success" ]; then
+            STATUS=done
+            NOTE="Completato senza PR (vedi log della run)."
+          else
+            STATUS=failed
+            NOTE="Run fallita o annullata (vedi log)."
+          fi
+          curl -sS -X POST "$BACKEND_URL/dev-board/claude-callback" \
+            -H "Content-Type: application/json" \
+            -H "X-Claude-Callback-Secret: ${{ secrets.DEV_BOARD_CLAUDE_SECRET }}" \
+            -d "{\"card_id\": ${{ inputs.card_id }}, \"status\": \"$STATUS\", \"note\": \"$NOTE\"}" || true

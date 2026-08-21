@@ -2408,6 +2408,19 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`
             ALTER TABLE dev_board_cards ADD COLUMN IF NOT EXISTS labels TEXT[] NOT NULL DEFAULT '{}';
         `);
+        // Esecuzione via Claude (Approva per Claude): l'approvazione dispatcha
+        // il workflow GitHub claude-dev-task.yml, che riporta qui lo stato via
+        // callback. claude_status: NULL (mai richiesto) | queued | running |
+        // done | failed; claude_run_url punta alla run (poi alla PR in nota).
+        await client.query(`
+            ALTER TABLE dev_board_cards ADD COLUMN IF NOT EXISTS claude_status VARCHAR(20);
+        `);
+        await client.query(`
+            ALTER TABLE dev_board_cards ADD COLUMN IF NOT EXISTS claude_note TEXT;
+        `);
+        await client.query(`
+            ALTER TABLE dev_board_cards ADD COLUMN IF NOT EXISTS claude_run_url TEXT;
+        `);
         const existingDevCardCount = await client.query(`SELECT COUNT(*)::int AS n FROM dev_board_cards;`);
         if (existingDevCardCount.rows[0]?.n === 0) {
             // La baseline dev'essere autoconsistente: questo seed cita tenant_id,

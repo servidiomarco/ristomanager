@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, X, Trash2, Loader2, GripVertical, RefreshCw } from 'lucide-react';
+import { Plus, X, Trash2, Loader2, GripVertical, RefreshCw, Bot, RotateCcw, ExternalLink } from 'lucide-react';
 import {
-  DevBoardCard, DevBoardColumnKey, DevBoardLabelKey,
+  DevBoardCard, DevBoardColumnKey, DevBoardLabelKey, DevBoardClaudeStatus,
   getDevBoardCards, createDevBoardCard, updateDevBoardCard, moveDevBoardCard, deleteDevBoardCard,
+  approveDevBoardCardForClaude, resetDevBoardCardClaude,
 } from '../services/devBoardApiService';
 import { socketClient } from '../services/socketClient';
 import {
@@ -62,6 +63,18 @@ const LABELS: LabelMeta[] = [
 ];
 
 const labelMeta = (key: DevBoardLabelKey): LabelMeta | undefined => LABELS.find(l => l.key === key);
+
+/* Stati del processo Claude sulla card, stesse famiglie di stato del resto
+   della board: in coda chiede attesa (pending), in lavorazione è imminente
+   (arriving), fatto è chiuso bene (seated), fallito chiede un'azione
+   (critical). Il chip è l'action-strip della card: racconta a che punto è il
+   processo senza aprire nulla. */
+const CLAUDE_STATUS_META: Record<Exclude<DevBoardClaudeStatus, null>, { label: string; chipClass: string; dot: string; pulse?: boolean }> = {
+  queued:  { label: 'In coda',          chipClass: 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]', dot: 'bg-[var(--ds-pending-solid)]' },
+  running: { label: 'Claude ci lavora', chipClass: 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]', dot: 'bg-[var(--ds-arriving-solid)]', pulse: true },
+  done:    { label: 'Fatto da Claude',  chipClass: 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]', dot: 'bg-[var(--ds-seated-solid)]' },
+  failed:  { label: 'Errore',           chipClass: 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]', dot: 'bg-[var(--ds-critical-solid)]' },
+};
 
 const formatCardDate = (iso: string): string => {
   const d = new Date(iso);
@@ -201,6 +214,38 @@ export const DevelopmentPage: React.FC = () => {
     } catch (err: any) {
       setError(err?.message || 'Errore eliminazione');
       load();
+    }
+  };
+
+  // --- Claude -------------------------------------------------------------
+
+  const [busyClaudeId, setBusyClaudeId] = useState<number | null>(null);
+
+  /** Approva per Claude: il processo parte subito (dispatch del workflow);
+   *  gli stati successivi arrivano dal callback via socket. */
+  const approveForClaude = async (card: DevBoardCard) => {
+    if (busyClaudeId != null) return;
+    setBusyClaudeId(card.id);
+    try {
+      const updated = await approveDevBoardCardForClaude(card.id);
+      setCards(prev => prev.map(c => c.id === updated.id ? updated : c));
+    } catch (err: any) {
+      setError(err?.message || 'Errore avvio Claude');
+    } finally {
+      setBusyClaudeId(null);
+    }
+  };
+
+  const resetClaude = async (card: DevBoardCard) => {
+    if (busyClaudeId != null) return;
+    setBusyClaudeId(card.id);
+    try {
+      const updated = await resetDevBoardCardClaude(card.id);
+      setCards(prev => prev.map(c => c.id === updated.id ? updated : c));
+    } catch (err: any) {
+      setError(err?.message || 'Errore reset');
+    } finally {
+      setBusyClaudeId(null);
     }
   };
 
@@ -372,6 +417,79 @@ export const DevelopmentPage: React.FC = () => {
                           <p className="mt-1.5 text-[12px] text-[var(--ds-text-muted)]">
                             {formatCardDate(card.updated_at || card.created_at)}
                           </p>
+
+                          {/* Action strip Claude: stato del processo + azioni.
+                              stopPropagation ovunque — i click qui non devono
+                              aprire il modal della card. */}
+                          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                            {card.claude_status == null ? (
+                              <button
+                                type="button"
+                                disabled={busyClaudeId === card.id}
+                                onClick={(e) => { e.stopPropagation(); approveForClaude(card); }}
+                                className="inline-flex h-8 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-3 text-[12px] font-semibold text-[var(--ds-action-fg)] opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100 hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+                              >
+                                {busyClaudeId === card.id
+                                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  : <Bot className="h-3.5 w-3.5" aria-hidden />}
+                                Approva per Claude
+                              </button>
+                            ) : (
+                              <>
+                                {(() => {
+                                  const meta = CLAUDE_STATUS_META[card.claude_status];
+                                  return (
+                                    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-semibold leading-none ${meta.chipClass}`}>
+                                      <span className={`h-1.5 w-1.5 rounded-full ${meta.dot} ${meta.pulse ? 'animate-pulse' : ''}`} aria-hidden />
+                                      <Bot className="h-3 w-3" aria-hidden />
+                                      {meta.label}
+                                    </span>
+                                  );
+                                })()}
+                                {card.claude_run_url && (card.claude_status === 'queued' || card.claude_status === 'running') && (
+                                  <a
+                                    href={card.claude_run_url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="inline-flex h-8 items-center gap-1 rounded-full px-2 text-[12px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface)]"
+                                  >
+                                    <ExternalLink className="h-3 w-3" aria-hidden /> Log
+                                  </a>
+                                )}
+                                {card.claude_status === 'done' && card.claude_note?.includes('http') && (
+                                  <a
+                                    href={card.claude_note.slice(card.claude_note.indexOf('http')).split(/\s/)[0]}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="inline-flex h-8 items-center gap-1 rounded-full px-2 text-[12px] font-semibold text-[var(--ds-seated-text)] transition-colors hover:bg-[var(--ds-seated-tint)]"
+                                  >
+                                    <ExternalLink className="h-3 w-3" aria-hidden /> Vedi PR
+                                  </a>
+                                )}
+                                {(card.claude_status === 'failed' || card.claude_status === 'done') && (
+                                  <button
+                                    type="button"
+                                    disabled={busyClaudeId === card.id}
+                                    title={card.claude_status === 'failed' ? 'Riprova' : 'Rilancia'}
+                                    onClick={(e) => { e.stopPropagation(); approveForClaude(card); }}
+                                    className="inline-flex h-8 items-center gap-1 rounded-full px-2 text-[12px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface)] disabled:opacity-40"
+                                  >
+                                    {busyClaudeId === card.id
+                                      ? <Loader2 className="h-3 w-3 animate-spin" />
+                                      : <RotateCcw className="h-3 w-3" aria-hidden />}
+                                    {card.claude_status === 'failed' ? 'Riprova' : 'Rilancia'}
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </div>
+                          {card.claude_status === 'failed' && card.claude_note && (
+                            <p className="mt-1 line-clamp-2 text-[12px] leading-snug text-[var(--ds-critical-text)]">
+                              {card.claude_note}
+                            </p>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -440,13 +558,29 @@ export const DevelopmentPage: React.FC = () => {
         bodyClassName="space-y-4 p-5 sm:p-6"
         footerStart={
           editDraft?.id != null ? (
-            <button
-              type="button"
-              onClick={() => { const card = cards.find(c => c.id === editDraft.id); if (card) setDeleteCandidate(card); }}
-              className="inline-flex h-11 items-center gap-1.5 rounded-full px-4 text-[15px] font-medium text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)]"
-            >
-              <Trash2 className="h-4 w-4" aria-hidden /> Elimina
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => { const card = cards.find(c => c.id === editDraft.id); if (card) setDeleteCandidate(card); }}
+                className="inline-flex h-11 items-center gap-1.5 rounded-full px-4 text-[15px] font-medium text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)]"
+              >
+                <Trash2 className="h-4 w-4" aria-hidden /> Elimina
+              </button>
+              {(() => {
+                // Sblocco per stati rimasti appesi (run cancellata a mano su
+                // GitHub, callback perso): azzera il tracking, non il workflow.
+                const card = cards.find(c => c.id === editDraft.id);
+                return card?.claude_status ? (
+                  <button
+                    type="button"
+                    onClick={() => { resetClaude(card); setEditDraft(null); }}
+                    className="inline-flex h-11 items-center gap-1.5 rounded-full px-4 text-[15px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)]"
+                  >
+                    <RotateCcw className="h-4 w-4" aria-hidden /> Azzera Claude
+                  </button>
+                ) : null;
+              })()}
+            </div>
           ) : undefined
         }
         footer={

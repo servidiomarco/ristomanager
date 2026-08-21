@@ -10,6 +10,10 @@ export type DevBoardColumnKey = 'in_progress' | 'review' | 'nice_to_have' | 'pau
  *  DevelopmentPage.tsx, il server sanitizza sulla stessa lista. */
 export type DevBoardLabelKey = 'comande' | 'prenotazioni' | 'pagamenti' | 'stampa' | 'bug' | 'infra';
 
+/** Stato dell'esecuzione via Claude: null = mai richiesta; queued = workflow
+ *  dispatchato; running/done/failed riportati dal workflow via callback. */
+export type DevBoardClaudeStatus = 'queued' | 'running' | 'done' | 'failed' | null;
+
 export interface DevBoardCard {
   id: number;
   title: string;
@@ -17,6 +21,9 @@ export interface DevBoardCard {
   column_key: DevBoardColumnKey;
   position: number;
   labels: DevBoardLabelKey[];
+  claude_status: DevBoardClaudeStatus;
+  claude_note: string | null;
+  claude_run_url: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -124,3 +131,18 @@ export const deleteDevBoardCard = (id: number): Promise<void> =>
     method: 'DELETE',
     headers: getHeaders(false),
   }, false);
+
+/** Approva per Claude: il backend dispatcha il workflow GitHub e la card
+ *  passa a 'queued'; da lì lo stato arriva via socket devboard:changed. */
+export const approveDevBoardCardForClaude = (id: number): Promise<DevBoardCard> =>
+  apiRequest(`${API_URL}/dev-board/cards/${id}/claude/approve`, {
+    method: 'POST',
+    headers: getHeaders(false),
+  });
+
+/** Azzera il tracking Claude (dopo un failed, o per rilanciare). */
+export const resetDevBoardCardClaude = (id: number): Promise<DevBoardCard> =>
+  apiRequest(`${API_URL}/dev-board/cards/${id}/claude/reset`, {
+    method: 'POST',
+    headers: getHeaders(false),
+  });
