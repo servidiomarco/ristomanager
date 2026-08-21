@@ -6,6 +6,7 @@ import {
   HaccpProductionLog,
   HaccpOilAction,
 } from '../services/haccpApiService';
+import { printHtmlDocument } from './printDocument';
 
 const ITALIAN_DATE_OPTS: Intl.DateTimeFormatOptions = {
   weekday: 'long',
@@ -370,21 +371,8 @@ export const printHaccpReport = (input: PrintHaccpInput): void => {
   </div>
 
   <footer>Documento generato il ${escapeHtml(new Date().toLocaleString('it-IT'))}</footer>
-
-  <script>
-    window.addEventListener('load', () => {
-      setTimeout(() => window.print(), 200);
-    });
-  </script>
 </body>
 </html>`;
 
-  const win = window.open('', '_blank');
-  if (!win) {
-    alert('Sblocca i popup per stampare il report.');
-    return;
-  }
-  win.document.open();
-  win.document.write(html);
-  win.document.close();
+  printHtmlDocument(html, { popupMessage: 'Sblocca i popup per stampare il report.' });
 };
