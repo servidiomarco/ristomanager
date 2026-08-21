@@ -41,6 +41,21 @@ describe('row-level security', () => {
         await db.end();
     });
 
+    it('il DEFAULT 1 non esiste più: una INSERT senza tenant muore di NOT NULL', async () => {
+        // La calamita è stata rimossa (migration drop-default-tenant-id):
+        // una query dimenticata non finisce più silenziosamente nel tenant 1
+        // — fallisce rumorosa, superuser compreso.
+        await expect(
+            db.query(`INSERT INTO dishes (name, price) VALUES ('Senza Padrone', 1)`)
+        ).rejects.toThrow(/null value in column "tenant_id"/i);
+        const residui = await db.query(
+            `SELECT COUNT(*)::int AS c FROM information_schema.columns
+              WHERE table_schema = 'public' AND column_name = 'tenant_id'
+                AND column_default IS NOT NULL`
+        );
+        expect(residui.rows[0].c).toBe(0);
+    });
+
     it('senza contesto la policy è permissiva (fase di transizione)', async () => {
         const r = await db.query(`SELECT COUNT(*)::int AS c FROM dishes WHERE name = 'Piatto Fantasma'`);
         expect(r.rows[0].c).toBe(1);

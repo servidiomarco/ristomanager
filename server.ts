@@ -17617,11 +17617,11 @@ app.put('/settings/reservation-allergens', authenticate, requirePermission('sett
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        await client.query('DELETE FROM reservation_allergen_presets');
+        await client.query('DELETE FROM reservation_allergen_presets WHERE tenant_id = $1', [req.tenantId!]);
         for (let i = 0; i < cleaned.length; i++) {
             await client.query(
-                `INSERT INTO reservation_allergen_presets (label, sort_order) VALUES ($1, $2)`,
-                [cleaned[i], (i + 1) * 10]
+                `INSERT INTO reservation_allergen_presets (tenant_id, label, sort_order) VALUES ($3, $1, $2)`,
+                [cleaned[i], (i + 1) * 10, req.tenantId!]
             );
         }
         await client.query('COMMIT');
@@ -17703,20 +17703,20 @@ app.put('/settings/reservation-notes', authenticate, requirePermission('settings
     try {
         await client.query('BEGIN');
         // Wiping presets cascades to variants via ON DELETE CASCADE.
-        await client.query('DELETE FROM reservation_note_presets');
+        await client.query('DELETE FROM reservation_note_presets WHERE tenant_id = $1', [req.tenantId!]);
         for (let i = 0; i < cleaned.length; i++) {
             const c = cleaned[i];
             const ins = await client.query(
-                `INSERT INTO reservation_note_presets (label, sort_order, icon, has_quantity)
-                 VALUES ($1, $2, $3, $4) RETURNING id`,
-                [c.label, (i + 1) * 10, c.icon, c.has_quantity]
+                `INSERT INTO reservation_note_presets (tenant_id, label, sort_order, icon, has_quantity)
+                 VALUES ($5, $1, $2, $3, $4) RETURNING id`,
+                [c.label, (i + 1) * 10, c.icon, c.has_quantity, req.tenantId!]
             );
             const presetId = ins.rows[0].id;
             for (let j = 0; j < c.variants.length; j++) {
                 await client.query(
-                    `INSERT INTO reservation_note_preset_variants (preset_id, label, sort_order)
-                     VALUES ($1, $2, $3)`,
-                    [presetId, c.variants[j], (j + 1) * 10]
+                    `INSERT INTO reservation_note_preset_variants (tenant_id, preset_id, label, sort_order)
+                     VALUES ($4, $1, $2, $3)`,
+                    [presetId, c.variants[j], (j + 1) * 10, req.tenantId!]
                 );
             }
         }
