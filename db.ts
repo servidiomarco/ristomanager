@@ -470,16 +470,21 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // deploy. Runs only when table_merges is empty (first time).
         const mergeCount = await client.query('SELECT COUNT(*)::int AS c FROM table_merges');
         if (mergeCount.rows[0].c === 0) {
+            // La baseline dev'essere autoconsistente: questo seed cita tenant_id,
+            // ma sui database VERGINI la colonna arriva solo con la migration B1,
+            // che gira DOPO createSchema. No-op ovunque tranne il primo boot di un
+            // DB nuovo; il DEFAULT transitorio cade con drop-default-tenant-id.
+            await client.query(`ALTER TABLE table_merges ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1;`);
             await client.query(`
-                INSERT INTO table_merges (date, shift, primary_id, merged_ids)
-                SELECT CURRENT_DATE, 'LUNCH', id, merged_with
+                INSERT INTO table_merges (tenant_id, date, shift, primary_id, merged_ids)
+                SELECT 1, CURRENT_DATE, 'LUNCH', id, merged_with
                 FROM tables
                 WHERE merged_with IS NOT NULL AND array_length(merged_with, 1) > 0
                 ON CONFLICT DO NOTHING;
             `);
             await client.query(`
-                INSERT INTO table_merges (date, shift, primary_id, merged_ids)
-                SELECT CURRENT_DATE, 'DINNER', id, merged_with
+                INSERT INTO table_merges (tenant_id, date, shift, primary_id, merged_ids)
+                SELECT 1, CURRENT_DATE, 'DINNER', id, merged_with
                 FROM tables
                 WHERE merged_with IS NOT NULL AND array_length(merged_with, 1) > 0
                 ON CONFLICT DO NOTHING;
@@ -970,9 +975,14 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             const salt = await bcrypt.genSalt(12);
             const passwordHash = await bcrypt.hash(defaultPassword, salt);
 
+            // La baseline dev'essere autoconsistente: questo seed cita tenant_id,
+            // ma sui database VERGINI la colonna arriva solo con la migration B1,
+            // che gira DOPO createSchema. No-op ovunque tranne il primo boot di un
+            // DB nuovo; il DEFAULT transitorio cade con drop-default-tenant-id.
+            await client.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1;`);
             await client.query(
-                `INSERT INTO users (email, password_hash, full_name, role)
-                 VALUES ($1, $2, $3, $4)`,
+                `INSERT INTO users (tenant_id, email, password_hash, full_name, role)
+                 VALUES (1, $1, $2, $3, $4)`,
                 [defaultEmail, passwordHash, 'Admin Owner', 'OWNER']
             );
             console.log(`Default owner account created: ${defaultEmail}`);
@@ -1022,8 +1032,13 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             ];
 
             for (const [role, permission] of defaultPermissions) {
+                // La baseline dev'essere autoconsistente: questo seed cita tenant_id,
+                // ma sui database VERGINI la colonna arriva solo con la migration B1,
+                // che gira DOPO createSchema. No-op ovunque tranne il primo boot di un
+                // DB nuovo; il DEFAULT transitorio cade con drop-default-tenant-id.
+                await client.query(`ALTER TABLE role_permissions ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1;`);
                 await client.query(
-                    'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                    'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
                     [role, permission]
                 );
             }
@@ -1038,7 +1053,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of logsPermissions) {
             await client.query(
-                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
                 [role, permission]
             );
         }
@@ -1052,7 +1067,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of staffPermissions) {
             await client.query(
-                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
                 [role, permission]
             );
         }
@@ -1082,7 +1097,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of generalManagerPermissions) {
             await client.query(
-                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
                 [role, permission]
             );
         }
@@ -1094,7 +1109,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of banquetPricePermissions) {
             await client.query(
-                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
                 [role, permission]
             );
         }
@@ -1107,7 +1122,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of banquetPaymentPermissions) {
             await client.query(
-                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
                 [role, permission]
             );
         }
@@ -1131,7 +1146,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of receptionRoleSeedPermissions) {
             await client.query(
-                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
                 [role, permission]
             );
         }
@@ -1495,7 +1510,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of customerPermissions) {
             await client.query(
-                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
                 [role, permission]
             );
         }
@@ -1511,9 +1526,14 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // on phone.
         const customerCount = await client.query('SELECT COUNT(*)::int AS c FROM customers');
         if (customerCount.rows[0].c === 0) {
+            // La baseline dev'essere autoconsistente: questo seed cita tenant_id,
+            // ma sui database VERGINI la colonna arriva solo con la migration B1,
+            // che gira DOPO createSchema. No-op ovunque tranne il primo boot di un
+            // DB nuovo; il DEFAULT transitorio cade con drop-default-tenant-id.
+            await client.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1;`);
             await client.query(`
-                INSERT INTO customers (name, phone, email, auto_imported)
-                SELECT name, phone, email, TRUE
+                INSERT INTO customers (tenant_id, name, phone, email, auto_imported)
+                SELECT 1, name, phone, email, TRUE
                 FROM (
                     SELECT
                         INITCAP(TRIM(customer_name)) AS name,
@@ -1643,7 +1663,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of inventoryPermissions) {
             await client.query(
-                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
                 [role, permission]
             );
         }
@@ -1656,7 +1676,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of voiceCallsPermissions) {
             await client.query(
-                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
                 [role, permission]
             );
         }
@@ -1670,7 +1690,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of receptionPermissions) {
             await client.query(
-                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
                 [role, permission]
             );
         }
@@ -1687,7 +1707,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of paymentsPermissions) {
             await client.query(
-                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
                 [role, permission]
             );
         }
@@ -1792,10 +1812,15 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // behaves like any other reminder (fully editable), but its
         // system_key keys into the runDailyBreadReminder handler so the
         // "N kg per M coperti" body stays auto-computed.
+        // La baseline dev'essere autoconsistente: questo seed cita tenant_id,
+        // ma sui database VERGINI la colonna arriva solo con la migration B1,
+        // che gira DOPO createSchema. No-op ovunque tranne il primo boot di un
+        // DB nuovo; il DEFAULT transitorio cade con drop-default-tenant-id.
+        await client.query(`ALTER TABLE reminders ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1;`);
         await client.query(`
             INSERT INTO reminders
-                (title, description, kind, frequency, schedule_time, target_roles, active, system_key)
-            SELECT
+                (tenant_id, title, description, kind, frequency, schedule_time, target_roles, active, system_key)
+            SELECT 1,
                 'Promemoria pane',
                 'Calcola automaticamente i kg di pane per il giorno seguente in base ai coperti previsti.',
                 'RECURRING', 'DAILY', '20:00',
@@ -1820,9 +1845,14 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         `);
         // Seed default schedule once (matches the slot grid previously hardcoded
         // in services/elevenlabsService.ts so behaviour is unchanged on first deploy).
+        // La baseline dev'essere autoconsistente: questo seed cita tenant_id,
+        // ma sui database VERGINI la colonna arriva solo con la migration B1,
+        // che gira DOPO createSchema. No-op ovunque tranne il primo boot di un
+        // DB nuovo; il DEFAULT transitorio cade con drop-default-tenant-id.
+        await client.query(`ALTER TABLE opening_hours ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1;`);
         await client.query(`
-            INSERT INTO opening_hours (weekday, lunch_open, lunch_close, dinner_open, dinner_close, slot_minutes)
-            SELECT g.weekday, '13:00'::time, '14:00'::time, '19:30'::time, '23:30'::time, 30
+            INSERT INTO opening_hours (tenant_id, weekday, lunch_open, lunch_close, dinner_open, dinner_close, slot_minutes)
+            SELECT 1, g.weekday, '13:00'::time, '14:00'::time, '19:30'::time, '23:30'::time, 30
             FROM generate_series(0, 6) AS g(weekday)
             ON CONFLICT DO NOTHING;
         `);
@@ -1869,10 +1899,15 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // Seed defaults: public bookings start OFF (mirrors the previous env
         // var default), voice agent starts ON to avoid silently dropping
         // existing call traffic when this migration runs in prod.
+        // La baseline dev'essere autoconsistente: questo seed cita tenant_id,
+        // ma sui database VERGINI la colonna arriva solo con la migration B1,
+        // che gira DOPO createSchema. No-op ovunque tranne il primo boot di un
+        // DB nuovo; il DEFAULT transitorio cade con drop-default-tenant-id.
+        await client.query(`ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1;`);
         await client.query(`
-            INSERT INTO app_settings (key, value) VALUES
-                ('public_bookings_enabled', false),
-                ('voice_agent_enabled',      true)
+            INSERT INTO app_settings (tenant_id, key, value) VALUES
+                (1, 'public_bookings_enabled', false),
+                (1, 'voice_agent_enabled',      true)
             ON CONFLICT DO NOTHING;
         `);
         // Some settings are numeric (e.g. thresholds), so `value` needs to be
@@ -1885,8 +1920,8 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // human callback instead of hitting the tools. Seeded at 8 to match
         // the value hardcoded in the webhook before this became configurable.
         await client.query(`
-            INSERT INTO app_settings (key, int_value) VALUES
-                ('voice_large_group_threshold', 8)
+            INSERT INTO app_settings (tenant_id, key, int_value) VALUES
+                (1, 'voice_large_group_threshold', 8)
             ON CONFLICT DO NOTHING;
         `);
         // Some settings carry text values (HH:MM, labels, …). Same rule as
@@ -1897,18 +1932,18 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // a suspension notice pointing the caller at a fallback callback
         // time. Seed OFF + default 19:00 so a fresh install is safe.
         await client.query(`
-            INSERT INTO app_settings (key, value) VALUES
-                ('voice_bookings_suspended', false)
+            INSERT INTO app_settings (tenant_id, key, value) VALUES
+                (1, 'voice_bookings_suspended', false)
             ON CONFLICT DO NOTHING;
         `);
         await client.query(`
-            INSERT INTO app_settings (key, text_value) VALUES
-                ('voice_bookings_suspension_callback_time', '19:00')
+            INSERT INTO app_settings (tenant_id, key, text_value) VALUES
+                (1, 'voice_bookings_suspension_callback_time', '19:00')
             ON CONFLICT DO NOTHING;
         `);
         await client.query(`
-            INSERT INTO app_settings (key, text_value) VALUES
-                ('voice_bookings_suspension_schedule', '[]')
+            INSERT INTO app_settings (tenant_id, key, text_value) VALUES
+                (1, 'voice_bookings_suspension_schedule', '[]')
             ON CONFLICT DO NOTHING;
         `);
 
@@ -2005,8 +2040,8 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // to 'revolut' so installs upgrading into this migration behave
         // exactly as they did before.
         await client.query(`
-            INSERT INTO app_settings (key, text_value) VALUES
-                ('active_payment_provider', 'revolut')
+            INSERT INTO app_settings (tenant_id, key, text_value) VALUES
+                (1, 'active_payment_provider', 'revolut')
             ON CONFLICT DO NOTHING;
         `);
 
@@ -2176,14 +2211,19 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`ALTER TABLE reservation_note_presets ADD COLUMN IF NOT EXISTS has_quantity BOOLEAN NOT NULL DEFAULT FALSE;`);
         const existingPresetCount = await client.query(`SELECT COUNT(*)::int AS n FROM reservation_note_presets;`);
         if (existingPresetCount.rows[0]?.n === 0) {
+            // La baseline dev'essere autoconsistente: questo seed cita tenant_id,
+            // ma sui database VERGINI la colonna arriva solo con la migration B1,
+            // che gira DOPO createSchema. No-op ovunque tranne il primo boot di un
+            // DB nuovo; il DEFAULT transitorio cade con drop-default-tenant-id.
+            await client.query(`ALTER TABLE reservation_note_presets ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1;`);
             await client.query(`
-                INSERT INTO reservation_note_presets (label, sort_order, icon) VALUES
-                    ('Seggiolone',       10, 'baby'),
-                    ('Cane',             20, 'dog'),
-                    ('Compleanno',       30, 'cake'),
-                    ('Anniversario',     40, 'heart'),
-                    ('Tavolo tranquillo',50, 'volume-x'),
-                    ('Vista',            60, 'mountain');
+                INSERT INTO reservation_note_presets (tenant_id, label, sort_order, icon) VALUES
+                    (1, 'Seggiolone',       10, 'baby'),
+                    (1, 'Cane',             20, 'dog'),
+                    (1, 'Compleanno',       30, 'cake'),
+                    (1, 'Anniversario',     40, 'heart'),
+                    (1, 'Tavolo tranquillo',50, 'volume-x'),
+                    (1, 'Vista',            60, 'mountain');
             `);
         }
 
@@ -2218,22 +2258,27 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         `);
         const existingAllergenPresetCount = await client.query(`SELECT COUNT(*)::int AS n FROM reservation_allergen_presets;`);
         if (existingAllergenPresetCount.rows[0]?.n === 0) {
+            // La baseline dev'essere autoconsistente: questo seed cita tenant_id,
+            // ma sui database VERGINI la colonna arriva solo con la migration B1,
+            // che gira DOPO createSchema. No-op ovunque tranne il primo boot di un
+            // DB nuovo; il DEFAULT transitorio cade con drop-default-tenant-id.
+            await client.query(`ALTER TABLE reservation_allergen_presets ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1;`);
             await client.query(`
-                INSERT INTO reservation_allergen_presets (label, sort_order) VALUES
-                    ('Glutine',          10),
-                    ('Crostacei',        20),
-                    ('Uova',             30),
-                    ('Pesce',            40),
-                    ('Arachidi',         50),
-                    ('Soia',             60),
-                    ('Latte',            70),
-                    ('Frutta a guscio',  80),
-                    ('Sedano',           90),
-                    ('Senape',          100),
-                    ('Sesamo',          110),
-                    ('Solfiti',         120),
-                    ('Lupini',          130),
-                    ('Molluschi',       140);
+                INSERT INTO reservation_allergen_presets (tenant_id, label, sort_order) VALUES
+                    (1, 'Glutine',          10),
+                    (1, 'Crostacei',        20),
+                    (1, 'Uova',             30),
+                    (1, 'Pesce',            40),
+                    (1, 'Arachidi',         50),
+                    (1, 'Soia',             60),
+                    (1, 'Latte',            70),
+                    (1, 'Frutta a guscio',  80),
+                    (1, 'Sedano',           90),
+                    (1, 'Senape',          100),
+                    (1, 'Sesamo',          110),
+                    (1, 'Solfiti',         120),
+                    (1, 'Lupini',          130),
+                    (1, 'Molluschi',       140);
             `);
         }
 
@@ -2365,13 +2410,18 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         `);
         const existingDevCardCount = await client.query(`SELECT COUNT(*)::int AS n FROM dev_board_cards;`);
         if (existingDevCardCount.rows[0]?.n === 0) {
+            // La baseline dev'essere autoconsistente: questo seed cita tenant_id,
+            // ma sui database VERGINI la colonna arriva solo con la migration B1,
+            // che gira DOPO createSchema. No-op ovunque tranne il primo boot di un
+            // DB nuovo; il DEFAULT transitorio cade con drop-default-tenant-id.
+            await client.query(`ALTER TABLE dev_board_cards ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1;`);
             await client.query(`
-                INSERT INTO dev_board_cards (title, description, column_key, position) VALUES
-                    ('Pay-at-table + split bill (Fase 1)', 'QR effimero, Revolut hosted checkout, split equal/custom.', 'in_progress', 0),
-                    ('Integrazione Passepartout (Fase 2)', 'Sblocca item-level split e scontrino fiscale. In attesa di risposte dal rivenditore.', 'paused', 0),
-                    ('Redesign UX 2.0', 'Stati time-derived, check-in zero friction, hero dashboard, GDPR.', 'done', 0),
-                    ('Popup tavolo scaduto + coerenza stati timed', 'Prompt "Tavolo ancora occupato?" e board lista/modal allineati sullo stato derivato.', 'done', 1),
-                    ('Template WhatsApp via Twilio', '5/5 template Utility approvati e collegati; SMS resta fallback automatico.', 'done', 2);
+                INSERT INTO dev_board_cards (tenant_id, title, description, column_key, position) VALUES
+                    (1, 'Pay-at-table + split bill (Fase 1)', 'QR effimero, Revolut hosted checkout, split equal/custom.', 'in_progress', 0),
+                    (1, 'Integrazione Passepartout (Fase 2)', 'Sblocca item-level split e scontrino fiscale. In attesa di risposte dal rivenditore.', 'paused', 0),
+                    (1, 'Redesign UX 2.0', 'Stati time-derived, check-in zero friction, hero dashboard, GDPR.', 'done', 0),
+                    (1, 'Popup tavolo scaduto + coerenza stati timed', 'Prompt "Tavolo ancora occupato?" e board lista/modal allineati sullo stato derivato.', 'done', 1),
+                    (1, 'Template WhatsApp via Twilio', '5/5 template Utility approvati e collegati; SMS resta fallback automatico.', 'done', 2);
             `);
         }
 
@@ -2441,9 +2491,14 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             CREATE UNIQUE INDEX IF NOT EXISTS idx_price_lists_name
                 ON menu_price_lists(LOWER(name));
         `);
+        // La baseline dev'essere autoconsistente: questo seed cita tenant_id,
+        // ma sui database VERGINI la colonna arriva solo con la migration B1,
+        // che gira DOPO createSchema. No-op ovunque tranne il primo boot di un
+        // DB nuovo; il DEFAULT transitorio cade con drop-default-tenant-id.
+        await client.query(`ALTER TABLE menu_price_lists ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1;`);
         await client.query(`
-            INSERT INTO menu_price_lists (name, is_default, sort_order)
-            VALUES ('Sala', TRUE, 0)
+            INSERT INTO menu_price_lists (tenant_id, name, is_default, sort_order)
+            VALUES (1, 'Sala', TRUE, 0)
             ON CONFLICT DO NOTHING;
         `);
 
@@ -2465,9 +2520,14 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         //
         // GREATEST(0, ...) evita che un prezzo negativo già in tabella faccia
         // fallire il CHECK: un dato assurdo non deve impedire il boot dell'app.
+        // La baseline dev'essere autoconsistente: questo seed cita tenant_id,
+        // ma sui database VERGINI la colonna arriva solo con la migration B1,
+        // che gira DOPO createSchema. No-op ovunque tranne il primo boot di un
+        // DB nuovo; il DEFAULT transitorio cade con drop-default-tenant-id.
+        await client.query(`ALTER TABLE dish_prices ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1;`);
         await client.query(`
-            INSERT INTO dish_prices (dish_id, price_list_id, price_cents)
-            SELECT d.id, pl.id, GREATEST(0, ROUND(d.price * 100))::int
+            INSERT INTO dish_prices (tenant_id, dish_id, price_list_id, price_cents)
+            SELECT 1, d.id, pl.id, GREATEST(0, ROUND(d.price * 100))::int
             FROM dishes d
             CROSS JOIN menu_price_lists pl
             WHERE pl.is_default
@@ -2532,11 +2592,16 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`
             CREATE UNIQUE INDEX IF NOT EXISTS idx_stations_name ON stations(LOWER(name));
         `);
+        // La baseline dev'essere autoconsistente: questo seed cita tenant_id,
+        // ma sui database VERGINI la colonna arriva solo con la migration B1,
+        // che gira DOPO createSchema. No-op ovunque tranne il primo boot di un
+        // DB nuovo; il DEFAULT transitorio cade con drop-default-tenant-id.
+        await client.query(`ALTER TABLE stations ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1;`);
         await client.query(`
-            INSERT INTO stations (name, color, sort_order) VALUES
-                ('Antipasti', 'emerald', 1),
-                ('Primi',     'amber',   2),
-                ('Griglia',   'rose',    3)
+            INSERT INTO stations (tenant_id, name, color, sort_order) VALUES
+                (1, 'Antipasti', 'emerald', 1),
+                (1, 'Primi',     'amber',   2),
+                (1, 'Griglia',   'rose',    3)
             ON CONFLICT DO NOTHING;
         `);
 
@@ -2655,14 +2720,14 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // QUEUED e in cucina non arriverebbe nulla. Si passa ad AUTO_FIRST
         // nello stesso deploy che porta online il passe.
         await client.query(`
-            INSERT INTO app_settings (key, text_value) VALUES
-                ('course_fire_mode', 'AUTO_ALL')
+            INSERT INTO app_settings (tenant_id, key, text_value) VALUES
+                (1, 'course_fire_mode', 'AUTO_ALL')
             ON CONFLICT DO NOTHING;
         `);
         // Il modulo comande resta spento finché non c'è una UI che lo usi.
         await client.query(`
-            INSERT INTO app_settings (key, value) VALUES
-                ('table_orders_enabled', false)
+            INSERT INTO app_settings (tenant_id, key, value) VALUES
+                (1, 'table_orders_enabled', false)
             ON CONFLICT DO NOTHING;
         `);
 
@@ -2760,9 +2825,9 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         // Coperto e servizio, spenti di partenza: chi non li applica non deve
         // ritrovarseli sul conto dopo un aggiornamento.
         await client.query(`
-            INSERT INTO app_settings (key, int_value) VALUES
-                ('cover_charge_cents', 0),
-                ('service_charge_percent', 0)
+            INSERT INTO app_settings (tenant_id, key, int_value) VALUES
+                (1, 'cover_charge_cents', 0),
+                (1, 'service_charge_percent', 0)
             ON CONFLICT DO NOTHING;
         `);
 
@@ -2785,7 +2850,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 WHERE key = 'course_fire_mode' AND text_value = 'AUTO_ALL';
             `);
             await client.query(`
-                INSERT INTO app_settings (key, value) VALUES ('course_fire_mode_passe_migrated', true)
+                INSERT INTO app_settings (tenant_id, key, value) VALUES (1, 'course_fire_mode_passe_migrated', true)
                 ON CONFLICT DO NOTHING;
             `);
         }
@@ -2919,7 +2984,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of orderPermissions) {
             await client.query(
-                'INSERT INTO role_permissions (role, permission) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
                 [role, permission]
             );
         }
