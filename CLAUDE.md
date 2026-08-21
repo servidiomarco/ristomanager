@@ -33,6 +33,8 @@ Two shell scripts stand up a full local stack, each seeding its own Postgres dat
 
 There is no `.env` in the repo (gitignored). Both `services/apiService.ts` and `services/socketClient.ts` fall back to `https://ristomanager-production.up.railway.app` when `VITE_API_URL` is unset, and Vite ignores `.env.production` in dev mode. So a bare `npm run dev` reads **and writes the live restaurant database** — every Conferma, Assegna, or delete click is real. Create a `.env` with `VITE_API_URL=http://localhost:3000` before doing anything interactive.
 
+**`.env.local` overrides `.env`** in Vite's precedence order — and for months a gitignored `.env.local` on the dev machine pointed `VITE_API_URL` at production, silently defeating any correct `.env` (this was the actual root cause of the warning above; found and fixed 2026-08-21). If dev traffic inexplicably hits production, check `.env.local` first.
+
 ## Architecture
 
 ### Two applications, one repository
