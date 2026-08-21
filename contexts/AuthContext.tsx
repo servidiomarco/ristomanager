@@ -3,6 +3,7 @@ import { User, UserRole, ViewState, LoginCredentials } from '../types';
 import { authApiService } from '../services/authApiService';
 import { completeOnboarding as apiCompleteOnboarding } from '../services/apiService';
 import { socketClient } from '../services/socketClient';
+import { syncPushSubscription, detachPushSubscription } from '../services/pushClient';
 import { AlertTriangle } from 'lucide-react';
 
 // Permission type (must match backend)
@@ -103,6 +104,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setPermissions(authApiService.getPermissions());
             // Connect socket for already authenticated user
             socketClient.connect();
+            // La subscription push del browser deve appartenere a CHI è
+            // loggato, non a chi la registrò: il re-claim è silenzioso.
+            syncPushSubscription();
           } else {
             authApiService.clearAuth();
           }
@@ -137,9 +141,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setPermissions(response.permissions || []);
     // Reconnect socket with the new auth token
     socketClient.reconnectWithToken();
+    // L'endpoint push del browser passa di proprietà all'utente appena
+    // entrato (fire-and-forget: il login non dipende dalle notifiche).
+    syncPushSubscription();
   }, []);
 
   const logout = useCallback(async () => {
+    // PRIMA di buttare i token: lo sgancio della subscription a server ha
+    // bisogno dell'auth. Un browser senza sessione non riceve più push;
+    // la subscription del browser resta viva e il prossimo login la
+    // riassegna in silenzio.
+    await detachPushSubscription();
     await authApiService.logout();
     setUser(null);
     setPermissions([]);

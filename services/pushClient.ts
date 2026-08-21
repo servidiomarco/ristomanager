@@ -158,6 +158,56 @@ export const enablePushNotifications = async (): Promise<PushSubscription> => {
     return sub;
 };
 
+// La subscription push vive nel BROWSER e sopravvive a logout e cambi di
+// account: senza questo sync, le notifiche seguono l'utente che l'ha
+// registrata mesi fa, non chi è loggato adesso (il platform admin che
+// riceveva le push del ristorante). Da chiamare a ogni login/ripristino
+// sessione: se il permesso è già concesso e l'endpoint esiste, lo
+// ri-registra per l'utente corrente (l'ON CONFLICT del server riassegna
+// user e tenant). Nessun prompt, nessuna subscription nuova: solo il
+// passaggio di proprietà. Silenzioso per costruzione — il login non deve
+// mai fallire per colpa delle notifiche.
+export const syncPushSubscription = async (): Promise<void> => {
+    try {
+        if (!isPushSupported()) return;
+        if (Notification.permission !== 'granted') return;
+        const sub = await getCurrentSubscription();
+        if (!sub) return;
+        const json = sub.toJSON() as { endpoint?: string; keys?: { p256dh?: string; auth?: string } };
+        if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) return;
+        await fetch(`${API_URL}/push/subscribe`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({
+                endpoint: json.endpoint,
+                keys: json.keys,
+                userAgent: navigator.userAgent,
+            }),
+        });
+    } catch (err) {
+        console.warn('Push subscription sync failed', err);
+    }
+};
+
+// Al logout la riga a server va sganciata: un browser senza sessione non
+// deve ricevere niente. La subscription del BROWSER resta viva di
+// proposito — al prossimo login syncPushSubscription la riassegna senza
+// nuovi permessi. Va chiamata PRIMA di buttare i token (serve l'auth).
+export const detachPushSubscription = async (): Promise<void> => {
+    try {
+        if (!isPushSupported()) return;
+        const sub = await getCurrentSubscription();
+        if (!sub) return;
+        await fetch(`${API_URL}/push/unsubscribe`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ endpoint: sub.endpoint }),
+        });
+    } catch (err) {
+        console.warn('Push subscription detach failed', err);
+    }
+};
+
 export const disablePushNotifications = async (): Promise<void> => {
     const sub = await getCurrentSubscription();
     if (!sub) return;
