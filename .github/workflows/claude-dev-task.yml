@@ -5,7 +5,8 @@
 # riporta lo stato sulla card via callback: running all'avvio, done/failed
 # alla fine (con l'URL della PR in nota se Claude l'ha aperta).
 #
-# Secrets richiesti sul repo: ANTHROPIC_API_KEY, DEV_BOARD_CLAUDE_SECRET
+# Secrets richiesti sul repo: CLAUDE_CODE_OAUTH_TOKEN (abbonamento Claude
+# Max — si rigenera con `claude setup-token`) e DEV_BOARD_CLAUDE_SECRET
 # (identico all'env DEV_BOARD_CLAUDE_SECRET su Railway).
 name: Claude dev task
 
@@ -53,7 +54,10 @@ jobs:
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Abbonamento Claude Max, non credito API: le run del dev board non
+          # consumano il saldo della chiave usata dai messaggi AI (che il
+          # 21/08 si è esaurito a metà run: "Credit balance is too low").
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
             Sei su una card del dev board del progetto (pagina Development del CRM).
