@@ -10,6 +10,10 @@ export interface GeminiUsageTotals {
   output_tokens: number;
   total_tokens: number;
   calls: number;
+  /** Dollari, calcolati dal listino sul backend. */
+  cost_usd: number;
+  /** Generazioni con un modello senza prezzo in tabella: escluse dal costo. */
+  unpriced_calls: number;
   last_at: string | null;
 }
 
@@ -19,6 +23,7 @@ export interface GeminiUsageDay {
   output_tokens: number;
   total_tokens: number;
   calls: number;
+  cost_usd: number;
 }
 
 export interface GeminiUsageFeature {
@@ -26,6 +31,8 @@ export interface GeminiUsageFeature {
   model: string;
   total_tokens: number;
   calls: number;
+  cost_usd: number;
+  unpriced_calls: number;
 }
 
 export interface GeminiUsage {
@@ -33,6 +40,8 @@ export interface GeminiUsage {
   totals: GeminiUsageTotals;
   daily: GeminiUsageDay[];
   byFeature: GeminiUsageFeature[];
+  /** Tasso usato per mostrare gli euro; la fattura resta in dollari. */
+  usdEur: number;
 }
 
 export interface ElevenLabsSubscription {

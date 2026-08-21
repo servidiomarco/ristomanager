@@ -22,10 +22,19 @@ const FEATURE_LABELS: Record<string, string> = {
   dashboard_report: 'Report Dashboard',
   banquet_menu: 'Proposta menu banchetto',
   suggest_reply: 'Risposta suggerita messaggi',
+  whatsapp_agent: 'Agente WhatsApp',
 };
 const featureLabel = (key: string): string => FEATURE_LABELS[key] || key;
 
 const nf = new Intl.NumberFormat('it-IT');
+// Sotto il centesimo si scrivono tre decimali: "0,00 €" su una spesa vera
+// sembra un errore, e chi legge smette di fidarsi del numero.
+const formatEuro = (usd: number | null | undefined, tasso: number): string => {
+  const eur = (usd ?? 0) * tasso;
+  if (eur === 0) return '0 €';
+  if (eur < 0.01) return `${eur.toFixed(3).replace('.', ',')} €`;
+  return `${eur.toFixed(2).replace('.', ',')} €`;
+};
 const formatInt = (n: number | null | undefined): string => nf.format(Math.round(n ?? 0));
 
 // Secondi → "1h 23m" / "12m 05s" / "42s", per i minuti di conversazione di Sofia.
@@ -299,7 +308,7 @@ export const MonitoringPage: React.FC = () => {
               <SectionCard
                 icon={<Bot className="h-5 w-5" />}
                 title="Analisi AI (modelli di testo)"
-                subtitle={`Ultimi ${days} giorni · token registrati a ogni generazione (storico dal momento dell'attivazione del tracciamento)`}
+                subtitle={`Ultimi ${days} giorni · costi stimati dal listino per modello, convertiti a ${(gemini?.usdEur ?? 0.92).toString().replace('.', ',')} €/$ — la fattura Anthropic è in dollari`}
               >
                 <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
                   <StatTile
@@ -308,14 +317,20 @@ export const MonitoringPage: React.FC = () => {
                     value={formatInt(gemini?.totals.total_tokens)}
                   />
                   <StatTile
-                    icon={<Sparkles className="h-3.5 w-3.5" />}
-                    label="Token input"
-                    value={formatInt(gemini?.totals.prompt_tokens)}
+                    icon={<Coins className="h-3.5 w-3.5" />}
+                    label={`Costo (${days}g)`}
+                    value={formatEuro(gemini?.totals.cost_usd, gemini?.usdEur ?? 0.92)}
+                    hint={(gemini?.totals.unpriced_calls ?? 0) > 0
+                      ? `${formatInt(gemini?.totals.unpriced_calls)} generazioni senza listino, escluse`
+                      : `in + out: ${formatInt(gemini?.totals.prompt_tokens)} + ${formatInt(gemini?.totals.output_tokens)}`}
                   />
                   <StatTile
                     icon={<Sparkles className="h-3.5 w-3.5" />}
-                    label="Token output"
-                    value={formatInt(gemini?.totals.output_tokens)}
+                    label="Costo medio"
+                    value={gemini && gemini.totals.calls > 0
+                      ? formatEuro(gemini.totals.cost_usd / gemini.totals.calls, gemini.usdEur)
+                      : '—'}
+                    hint="a generazione"
                   />
                   <StatTile
                     icon={<Bot className="h-3.5 w-3.5" />}
@@ -350,6 +365,7 @@ export const MonitoringPage: React.FC = () => {
                           <th className="px-3 py-2 font-medium">Funzione</th>
                           <th className="px-3 py-2 text-right font-medium">Generazioni</th>
                           <th className="px-3 py-2 text-right font-medium">Token</th>
+                          <th className="px-3 py-2 text-right font-medium">Costo</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -360,7 +376,12 @@ export const MonitoringPage: React.FC = () => {
                               {f.model && <span className="ml-1.5 text-[11px] text-[var(--ds-text-muted)]">{f.model}</span>}
                             </td>
                             <td className="tabular px-3 py-2 text-right text-[var(--ds-text-secondary)]">{formatInt(f.calls)}</td>
-                            <td className="tabular px-3 py-2 text-right font-semibold text-[var(--ds-text-primary)]">{formatInt(f.total_tokens)}</td>
+                            <td className="tabular px-3 py-2 text-right text-[var(--ds-text-secondary)]">{formatInt(f.total_tokens)}</td>
+                            <td className="tabular px-3 py-2 text-right font-semibold text-[var(--ds-text-primary)]">
+                              {f.unpriced_calls === f.calls
+                                ? <span className="font-normal text-[var(--ds-text-muted)]" title="Modello senza listino in tabella">n/d</span>
+                                : formatEuro(f.cost_usd, gemini.usdEur)}
+                            </td>
                           </tr>
                         ))}
                       </tbody>

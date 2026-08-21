@@ -17,6 +17,7 @@ import { SocketService } from './services/socketService.js';
 import * as bookingTools from './services/bookingTools.js';
 import * as whatsappAgent from './services/whatsappAgent.js';
 import * as aiReport from './services/aiReportService.js';
+import { COST_USD_SQL, UNPRICED_SQL, USD_EUR } from './services/aiPricing.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
 import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
 import { provisionTenant, ProvisioningError } from './services/tenantProvisioning.js';
@@ -5181,6 +5182,19 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
             largeGroupThreshold: soglia,
             restaurantName: businessIdentity().name,
         });
+
+        // Il giro dell'agente interroga il modello da 1 a 3 volte: qui si
+        // registra la somma. Finora non si registrava NIENTE — la stellina
+        // della Inbox chiama questo endpoint, non suggest-reply, e la pagina
+        // Consumi mostrava zero mentre si spendeva davvero.
+        if (result.usage.calls > 0) {
+            const u = result.usage;
+            queryWithRetry(
+                `INSERT INTO ai_token_usage (provider, feature, model, prompt_tokens, output_tokens, total_tokens, user_email, tenant_id)
+                 VALUES ('anthropic', 'whatsapp_agent', $1, $2, $3, $4, $5, $6)`,
+                [u.model, u.promptTokens, u.outputTokens, u.totalTokens, (req.user?.email || null), req.tenantId!]
+            ).catch(err => console.error('ai_token_usage insert (whatsapp_agent) failed:', err));
+        }
 
         let proposta: any = null;
         if (result.proposal) {
@@ -14420,6 +14434,8 @@ app.get('/ai-usage/gemini', authenticate, requireDevBoardAdmin, async (req, res)
                     COALESCE(SUM(output_tokens),0)::int AS output_tokens,
                     COALESCE(SUM(total_tokens),0)::int  AS total_tokens,
                     COUNT(*)::int                        AS calls,
+                    COALESCE(SUM(${COST_USD_SQL}),0)::float AS cost_usd,
+                    COUNT(*) FILTER (WHERE ${UNPRICED_SQL})::int AS unpriced_calls,
                     MAX(created_at)                      AS last_at
              FROM ai_token_usage
              WHERE tenant_id = $2
@@ -14432,7 +14448,8 @@ app.get('/ai-usage/gemini', authenticate, requireDevBoardAdmin, async (req, res)
                     COALESCE(SUM(prompt_tokens),0)::int AS prompt_tokens,
                     COALESCE(SUM(output_tokens),0)::int AS output_tokens,
                     COALESCE(SUM(total_tokens),0)::int  AS total_tokens,
-                    COUNT(*)::int                        AS calls
+                    COUNT(*)::int                        AS calls,
+                    COALESCE(SUM(${COST_USD_SQL}),0)::float AS cost_usd
              FROM ai_token_usage
              WHERE tenant_id = $2
                AND provider <> 'elevenlabs'
@@ -14445,7 +14462,9 @@ app.get('/ai-usage/gemini', authenticate, requireDevBoardAdmin, async (req, res)
             `SELECT feature,
                     COALESCE(MAX(model), '') AS model,
                     COALESCE(SUM(total_tokens),0)::int AS total_tokens,
-                    COUNT(*)::int AS calls
+                    COUNT(*)::int AS calls,
+                    COALESCE(SUM(${COST_USD_SQL}),0)::float AS cost_usd,
+                    COUNT(*) FILTER (WHERE ${UNPRICED_SQL})::int AS unpriced_calls
              FROM ai_token_usage
              WHERE tenant_id = $2
                AND provider <> 'elevenlabs'
@@ -14461,6 +14480,9 @@ app.get('/ai-usage/gemini', authenticate, requireDevBoardAdmin, async (req, res)
             totals: totals.rows[0],
             daily: daily.rows,
             byFeature: byFeature.rows,
+            // Il tasso viaggia col dato: la pagina non deve avere una sua
+            // idea di quanto vale un dollaro.
+            usdEur: USD_EUR,
         });
     } catch (err) {
         console.error('GET /ai-usage/gemini error:', err);
