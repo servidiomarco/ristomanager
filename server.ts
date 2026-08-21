@@ -10521,7 +10521,12 @@ app.post('/dev-board/claude-callback', async (req, res) => {
         if (!card_id || !DEV_BOARD_CLAUDE_STATUSES.includes(status)) {
             return res.status(400).json({ error: 'card_id o status non validi' });
         }
-        const result = await queryWithRetry(
+        // runAsPlatform: la rotta è fuori da authenticate, quindi non ha
+        // contesto tenant — con l'RLS strict una query nuda non vedrebbe
+        // nessuna riga ("Card non trovata" sul collaudo del 21/08). Il
+        // segreto condiviso è già il gate; il bypass è il contratto delle
+        // operazioni di sistema cross-tenant.
+        const result = await runAsPlatform(() => queryWithRetry(
             `UPDATE dev_board_cards
              SET claude_status = $2,
                  claude_note = COALESCE($3, claude_note),
@@ -10535,7 +10540,7 @@ app.post('/dev-board/claude-callback', async (req, res) => {
                 note ? String(note).slice(0, 2000) : null,
                 run_url ? String(run_url).slice(0, 500) : null,
             ]
-        );
+        ));
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Card non trovata' });
         }
