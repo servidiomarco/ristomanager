@@ -2096,43 +2096,6 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         await client.query(`CREATE INDEX IF NOT EXISTS idx_outbound_media_token ON outbound_media(token);`);
 
         // ============================================
-        // LIBRERIA MEDIA
-        // ============================================
-        // File caricati una volta e riutilizzati molte: il menù di Ferragosto,
-        // la piantina delle sale, il modulo per i gruppi. Distinta da
-        // outbound_media, che è l'artefatto di UN invio: lì ogni riga ha il suo
-        // token usa-e-getta e muore con il messaggio. Qui sta il catalogo.
-        //
-        // Allegare un file dalla libreria ne materializza una copia in
-        // outbound_media: la via di invio verso Twilio resta quella collaudata,
-        // token compreso, e non va toccata.
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS media_library (
-                id            SERIAL PRIMARY KEY,
-                tenant_id     BIGINT NOT NULL DEFAULT 1,
-                title         TEXT NOT NULL,
-                filename      TEXT NOT NULL,
-                content_type  VARCHAR(100) NOT NULL,
-                bytes         BYTEA NOT NULL,
-                size_bytes    INTEGER NOT NULL,
-                created_at    TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-                created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
-            );
-        `);
-        await client.query(`CREATE INDEX IF NOT EXISTS idx_media_library_tenant ON media_library(tenant_id, created_at DESC);`);
-        // La migrazione che ha acceso la Row-Level Security ha girato una volta
-        // sola sulle tabelle di allora: una tabella nata dopo deve dichiarare
-        // la propria policy, o resterebbe l'unica leggibile da tutti.
-        await client.query(`ALTER TABLE media_library ENABLE ROW LEVEL SECURITY;`);
-        await client.query(`ALTER TABLE media_library FORCE ROW LEVEL SECURITY;`);
-        await client.query(`DROP POLICY IF EXISTS tenant_isolation ON media_library;`);
-        await client.query(`
-            CREATE POLICY tenant_isolation ON media_library
-            USING (tenant_id = COALESCE(NULLIF(current_setting('app.tenant_id', true), '')::bigint, tenant_id))
-            WITH CHECK (tenant_id = COALESCE(NULLIF(current_setting('app.tenant_id', true), '')::bigint, tenant_id));
-        `);
-
-        // ============================================
         // PROPOSTE DELL'AGENTE WHATSAPP
         // ============================================
         // L'agente non scrive mai sulle prenotazioni da solo: quando capisce
