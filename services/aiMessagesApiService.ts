@@ -112,3 +112,12 @@ export const suggestReply = (phoneDigits: string): Promise<SuggestReplyResult> =
   apiRequest(`${API_URL}/messages/suggest-reply`, {
     method: 'POST', headers: getHeaders(), body: JSON.stringify({ phone_digits: phoneDigits }),
   });
+
+/**
+ * Report di andamento della dashboard. Gli aggregati li calcola il backend:
+ * da qui parte solo la finestra di giorni e torna il Markdown già scritto.
+ */
+export const generateAiReport = (days = 30): Promise<{ report: string; days: number }> =>
+  apiRequest(`${API_URL}/reports/ai-summary`, {
+    method: 'POST', headers: getHeaders(), body: JSON.stringify({ days }),
+  });

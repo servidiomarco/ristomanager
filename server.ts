@@ -16,6 +16,7 @@ import pool, { createSchema, queryWithRetry, runMigrations, tenantQuery, runWith
 import { SocketService } from './services/socketService.js';
 import * as bookingTools from './services/bookingTools.js';
 import * as whatsappAgent from './services/whatsappAgent.js';
+import * as aiReport from './services/aiReportService.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
 import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
 import { provisionTenant, ProvisioningError } from './services/tenantProvisioning.js';
@@ -4773,6 +4774,113 @@ app.post('/email/send', authenticate, requirePermission('reservations:full'), as
 // rifiuta comunque.
 const OUTBOUND_MEDIA_MAX_BYTES = 5 * 1024 * 1024;
 const OUTBOUND_MEDIA_TYPES = /^(image\/(jpeg|png|webp|gif)|video\/(mp4|3gpp)|audio\/(mpeg|ogg|amr|aac)|application\/pdf)$/;
+
+// --- Report AI della dashboard --------------------------------------------
+// Gli aggregati li calcola Postgres; il modello riceve numeri gia' confrontati
+// col periodo precedente e li spiega. La versione precedente girava nel
+// browser e mandava dieci prenotazioni grezze: dava consigli validi per
+// qualsiasi ristorante, cioe' per nessuno.
+
+app.post('/reports/ai-summary', authenticate, requirePermission('reports:view'), async (req, res) => {
+    try {
+        if (!aiReport.isReportConfigured()) {
+            return res.status(503).json({ error: 'not_configured', message: 'ANTHROPIC_API_KEY non configurata sul backend' });
+        }
+        const giorni = Math.min(90, Math.max(7, parseInt(String(req.body?.days ?? 30), 10) || 30));
+
+        // Finestra corrente e precedente della stessa ampiezza: senza il
+        // confronto il modello non puo' dire se un numero e' buono o brutto.
+        //
+        // TUTTE le query si fermano a NOW(). Nella prima versione i totali
+        // escludevano il futuro e i dettagli no: sullo stesso periodo davano
+        // numeri diversi e il report si contraddiceva da solo — se ne e'
+        // accorto il modello al primo collaudo, elencando l'incoerenza fra
+        // totali e dettaglio per giorno. "Ultimi 30 giorni" e' cio' che e'
+        // successo, non cio' che e' prenotato.
+        const totali = async (da: string, a: string) => {
+            const r = await queryWithRetry(
+                `SELECT COUNT(*)::int AS prenotazioni,
+                        COALESCE(SUM(guests), 0)::int AS coperti,
+                        COALESCE(SUM(children), 0)::int AS bambini,
+                        COUNT(*) FILTER (WHERE reservation_status = 'CANCELLED')::int AS cancellate,
+                        COUNT(*) FILTER (WHERE reservation_status = 'NO_SHOW')::int AS no_show
+                   FROM reservations
+                  WHERE reservation_time >= NOW() - $1::interval
+                    AND reservation_time <  NOW() - $2::interval`,
+                [da, a]);
+            return r.rows[0];
+        };
+
+        const [periodo, precedente, perGiorno, perOra, perCanale, perSala, posti] = await Promise.all([
+            totali(`${giorni} days`, '0 days'),
+            totali(`${giorni * 2} days`, `${giorni} days`),
+            queryWithRetry(
+                `SELECT EXTRACT(DOW FROM reservation_time AT TIME ZONE 'Europe/Rome')::int AS giorno,
+                        COUNT(*)::int AS prenotazioni, COALESCE(SUM(guests),0)::int AS coperti
+                   FROM reservations
+                  WHERE reservation_time >= NOW() - $1::interval
+                    AND reservation_time < NOW()
+                    AND reservation_status NOT IN ('CANCELLED','DECLINED')
+                  GROUP BY 1 ORDER BY 1`, [`${giorni} days`]),
+            queryWithRetry(
+                `SELECT EXTRACT(HOUR FROM reservation_time AT TIME ZONE 'Europe/Rome')::int AS ora,
+                        COUNT(*)::int AS prenotazioni, COALESCE(SUM(guests),0)::int AS coperti
+                   FROM reservations
+                  WHERE reservation_time >= NOW() - $1::interval
+                    AND reservation_time < NOW()
+                    AND reservation_status NOT IN ('CANCELLED','DECLINED')
+                  GROUP BY 1 HAVING COUNT(*) > 2 ORDER BY 1`, [`${giorni} days`]),
+            queryWithRetry(
+                `SELECT COALESCE(source, 'MANUAL') AS canale, COUNT(*)::int AS prenotazioni
+                   FROM reservations
+                  WHERE reservation_time >= NOW() - $1::interval AND reservation_time < NOW()
+                  GROUP BY 1 ORDER BY 2 DESC`, [`${giorni} days`]),
+            queryWithRetry(
+                `SELECT COALESCE(ro.name, '(nessuna sala)') AS sala,
+                        COUNT(*)::int AS prenotazioni, COALESCE(SUM(r.guests),0)::int AS coperti
+                   FROM reservations r
+                   LEFT JOIN tables t ON t.id = r.table_id
+                   LEFT JOIN rooms ro ON ro.id = t.room_id
+                  WHERE r.reservation_time >= NOW() - $1::interval
+                    AND r.reservation_time < NOW()
+                    AND r.reservation_status NOT IN ('CANCELLED','DECLINED')
+                  GROUP BY 1 ORDER BY 3 DESC`, [`${giorni} days`]),
+            queryWithRetry(`SELECT COALESCE(SUM(seats), 0)::int AS posti FROM tables`),
+        ]);
+
+        let usage: aiReport.ReportUsage | null = null;
+        const markdown = await aiReport.generateDashboardReport({
+            giorni,
+            periodo, precedente,
+            per_giorno: perGiorno.rows,
+            per_ora: perOra.rows,
+            per_canale: perCanale.rows,
+            per_sala: perSala.rows,
+            posti_totali: posti.rows[0]?.posti ?? 0,
+            restaurantName: businessIdentity().name,
+        }, u => { usage = u; });
+
+        // Telemetria per la pagina Consumi AI. Best-effort: un errore qui non
+        // deve far perdere un report gia' pagato.
+        if (usage) {
+            const u = usage as aiReport.ReportUsage;
+            queryWithRetry(
+                `INSERT INTO ai_token_usage (provider, feature, model, prompt_tokens, output_tokens, total_tokens, user_email, tenant_id)
+                 VALUES ('anthropic', 'dashboard_report', $1, $2, $3, $4, $5, $6)`,
+                [u.model, u.promptTokens, u.outputTokens, u.totalTokens, (req.user?.email || null), req.tenantId!]
+            ).catch(err => console.error('ai_token_usage insert (dashboard_report) failed:', err));
+        }
+
+        res.json({ report: markdown, days: giorni });
+    } catch (err: any) {
+        if (err instanceof aiReport.AiReportError) {
+            const status = err.kind === 'not_configured' ? 503 : err.kind === 'no_data' ? 400 : 502;
+            return res.status(status).json({ error: err.kind, message: err.message });
+        }
+        console.error('POST /reports/ai-summary error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
 
 // --- Libreria media -------------------------------------------------------
 // Il filtro esplicito su tenant_id resta anche ora che la RLS isola davvero

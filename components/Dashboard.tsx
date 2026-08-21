@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Reservation, Table, Dish, Room, Shift, ReservationStatus, ReservationSource, TodoPriority, TodoCategory, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu } from '../types';
-import { generateRestaurantReport } from '../services/geminiService';
 import { ShoppingCategory, ShoppingItem } from '../services/shoppingApiService';
 import { getLowStockInventory, LowStockItem, getReservationAllergenPresets } from '../services/apiService';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
@@ -17,6 +16,7 @@ import { DateNavigator } from './DateNavigator';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Sparkles, Loader2, ChevronRight, Calendar, Plus, Check, Clock, Flag, AlertTriangle, CheckCircle2, ListTodo, ShoppingCart, Coffee, ChefHat, Package, Sun, Sunset, Armchair, Trees, Mountain, Waves, TreePine, Tent, Columns3, MapPin, StickyNote, Wheat, ListChecks, Phone as PhoneIcon, Globe, Mic, MessageCircle, User as UserIcon, Users as UsersIcon, X, ArrowRight, Ban, HelpCircle, LayoutGrid, UtensilsCrossed, BarChart3 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { generateAiReport } from '../services/aiMessagesApiService';
 import { useAuth } from '../contexts/AuthContext';
 import { useShopping } from '../contexts/ShoppingContext';
 import { useTodos } from '../contexts/TodosContext';
@@ -199,6 +199,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const { items: shoppingItems, addItem: addShoppingItemCtx, toggleItem: toggleShoppingItemCtx } = useShopping();
   const { todos, addTodo: addTodoCtx, toggleTodo: toggleTodoCtx } = useTodos();
   const [report, setReport] = useState<string | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   // On desktop, date/shift are driven by App-level props (header controls).
@@ -458,11 +460,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     fetchStaff(selectedDateStr);
   }, [selectedDateStr, fetchStaff]);
 
+  // Il report costa qualche centesimo e una decina di secondi: si genera
+  // quando lo si chiede, non a ogni apertura della dashboard.
   const handleGenerateReport = async () => {
-    setLoading(true);
-    const result = await generateRestaurantReport(reservations, tables, dishes);
-    setReport(result);
-    setLoading(false);
+    setReportLoading(true);
+    setReportError(null);
+    try {
+      const { report } = await generateAiReport(30);
+      setReport(report);
+    } catch (err: any) {
+      setReportError(err?.data?.message || err?.message || 'Report non generato');
+    } finally {
+      setReportLoading(false);
+    }
   };
 
   const handleToggleTodo = async (id: string) => {
@@ -2150,18 +2160,42 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         );
       })()}
 
-      {/* AI Report Section */}
-      {report && (
-        <div className="bg-[var(--ds-surface)] p-4 sm:p-5 rounded-[20px] shadow-[var(--ds-shadow-card)] animate-fade-in">
-          <div className="flex items-center gap-2 mb-4">
-            <Sparkles className="h-4 w-4 text-[var(--color-fg-muted)]" />
-            <h2 className="text-base font-semibold text-[var(--color-fg)]">Analisi AI Gemini</h2>
+      {/* Report di andamento. Il calcolo sta sul backend: qui si chiede e si
+          legge. Prima di questa scheda esisteva un blocco identico che non si
+          e' mai visto, perche' nessun pulsante lo riempiva. */}
+      <div className="bg-[var(--ds-surface)] p-4 sm:p-5 rounded-[20px] shadow-[var(--ds-shadow-card)]">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2 min-w-0">
+            <Sparkles className="h-4 w-4 flex-shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold text-[var(--color-fg)]">Come sta andando</h2>
+              <p className="text-[13px] text-[var(--color-fg-muted)]">
+                Lettura degli ultimi 30 giorni, a confronto con i 30 precedenti.
+              </p>
+            </div>
           </div>
-          <div className="prose prose-sm max-w-none text-[var(--color-fg-muted)]">
+          <button
+            type="button"
+            onClick={handleGenerateReport}
+            disabled={reportLoading}
+            className="inline-flex h-10 flex-shrink-0 items-center gap-2 rounded-[10px] bg-[var(--color-fg)] px-4 text-[14px] font-semibold text-[var(--ds-surface)] transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            {reportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            {reportLoading ? 'Ci penso…' : report ? 'Rigenera' : 'Genera'}
+          </button>
+        </div>
+
+        {reportError && (
+          <p className="mt-3 rounded-[10px] bg-[var(--ds-surface-row)] px-3 py-2 text-[13px] text-[var(--color-fg-muted)]">
+            {reportError}
+          </p>
+        )}
+        {report && (
+          <div className="prose prose-sm mt-4 max-w-none text-[var(--color-fg-muted)] animate-fade-in">
             <ReactMarkdown>{report}</ReactMarkdown>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Pending reservation quick-action modal. Rendered via Portal so it
           escapes the Dashboard's stacking context. Handles the two common
