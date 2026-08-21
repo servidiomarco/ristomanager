@@ -446,7 +446,7 @@ export const DevelopmentPage: React.FC = () => {
                                     </span>
                                   );
                                 })()}
-                                {card.claude_run_url && (card.claude_status === 'queued' || card.claude_status === 'running') && (
+                                {card.claude_run_url && (
                                   <a
                                     href={card.claude_run_url}
                                     target="_blank"
