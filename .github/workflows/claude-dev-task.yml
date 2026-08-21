@@ -71,7 +71,11 @@ jobs:
                la card, e nel body cita "Card dev board #${{ inputs.card_id }}".
             Non fare push su main. Se il task non è realizzabile, spiega perché
             nel log e non aprire la PR.
-          claude_args: "--max-turns 80"
+          # Senza allowlist l'action nega Bash a Claude: al collaudo del 21/08
+          # ha chiuso "success" con 8 permessi negati e nessun branch/PR. Il
+          # runner è effimero e isolato: Bash pieno qui è il costo d'ingresso
+          # perché git/npm/gh funzionino.
+          claude_args: '--max-turns 80 --allowedTools "Bash,Edit,MultiEdit,Write,Read,Glob,Grep,TodoWrite,WebFetch"'
 
       - name: Trova la PR aperta da Claude
         id: pr
