@@ -6,6 +6,11 @@ on:
   pull_request:
   push:
     branches: [main]
+  # I branch pushati dal workflow claude-dev-task (GITHUB_TOKEN) non innescano
+  # pull_request per la regola anti-ricorsione di GitHub: quel workflow
+  # dispatcha la CI esplicitamente sul branch della card — i check si
+  # agganciano allo stesso SHA e la PR li vede.
+  workflow_dispatch:
 
 jobs:
   typecheck-build:

@@ -38,6 +38,7 @@ jobs:
       contents: write
       pull-requests: write
       id-token: write
+      actions: write # per dispatchare ci.yml sul branch della card
     steps:
       - name: Segnala avvio alla board
         run: |
@@ -89,6 +90,12 @@ jobs:
         run: |
           PR_URL=$(gh pr list --repo "${{ github.repository }}" --head "claude/dev-card-${{ inputs.card_id }}" --json url -q '.[0].url' 2>/dev/null || true)
           echo "url=$PR_URL" >> "$GITHUB_OUTPUT"
+          # Il push del branch è avvenuto col GITHUB_TOKEN, che per la regola
+          # anti-ricorsione non innesca pull_request: la CI va dispatchata
+          # esplicitamente (i workflow_dispatch sono esenti dalla regola).
+          if [ -n "$PR_URL" ]; then
+            gh workflow run ci.yml --repo "${{ github.repository }}" --ref "claude/dev-card-${{ inputs.card_id }}" || true
+          fi
 
       - name: Segnala esito alla board
         if: always()
