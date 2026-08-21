@@ -70,6 +70,16 @@ export interface AgentProposal {
     summary: string;
 }
 
+/** Token consumati da UN giro dell'agente, sommati su tutte le chiamate. */
+export interface AgentUsage {
+    model: string;
+    promptTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    /** Quante volte si è interrogato il modello: il giro ne fa da 1 a 3. */
+    calls: number;
+}
+
 export interface AgentResult {
     /** Testo proposto per il cliente; null se l'agente non sa che dire. */
     reply: string | null;
@@ -79,6 +89,12 @@ export interface AgentResult {
     checks: Array<{ tool: string; args: Record<string, any>; result: any }>;
     /** Perché non c'è una proposta né una risposta, quando capita. */
     reason?: string;
+    /**
+     * Consumo dell'intero giro. Va sommato su TUTTE le chiamate: il ciclo può
+     * interrogare il modello più volte (verifica disponibilità, poi la frase di
+     * attesa), e contarne una sola sottostimerebbe la spesa di due terzi.
+     */
+    usage: AgentUsage;
 }
 
 export class AgentError extends Error {
@@ -269,6 +285,13 @@ export async function runAgent(ctx: AgentContext): Promise<AgentResult> {
     const tools = declarations(ctx.largeGroupThreshold);
     const system = buildSystem(ctx);
     const checks: AgentResult['checks'] = [];
+    const usage: AgentUsage = { model: MODEL, promptTokens: 0, outputTokens: 0, totalTokens: 0, calls: 0 };
+    const conta = (m: Anthropic.Message) => {
+        usage.promptTokens += m.usage.input_tokens ?? 0;
+        usage.outputTokens += m.usage.output_tokens ?? 0;
+        usage.totalTokens = usage.promptTokens + usage.outputTokens;
+        usage.calls += 1;
+    };
 
     // La conversazione come storia di turni: il modello deve vedere chi ha
     // detto cosa, non un blocco di testo indistinto.
@@ -281,7 +304,7 @@ export async function runAgent(ctx: AgentContext): Promise<AgentResult> {
         }));
     // La storia deve iniziare da un messaggio del cliente.
     while (messages.length && messages[0].role !== 'user') messages.shift();
-    if (messages.length === 0) return { reply: null, proposal: null, checks, reason: 'Nessun messaggio del cliente da interpretare' };
+    if (messages.length === 0) return { reply: null, proposal: null, checks, usage, reason: 'Nessun messaggio del cliente da interpretare' };
 
     const chiedi = (extra: Partial<Anthropic.MessageCreateParams> = {}) =>
         client.messages.create({
@@ -298,6 +321,7 @@ export async function runAgent(ctx: AgentContext): Promise<AgentResult> {
         let response: Anthropic.Message;
         try {
             response = await chiedi();
+            conta(response);
         } catch (err: any) {
             throw new AgentError(err?.message || 'Errore dal modello', 'upstream');
         }
@@ -305,13 +329,13 @@ export async function runAgent(ctx: AgentContext): Promise<AgentResult> {
         // I classificatori possono rifiutare: va guardato PRIMA di leggere il
         // contenuto, che in quel caso è vuoto o troncato.
         if (response.stop_reason === 'refusal') {
-            return { reply: null, proposal: null, checks, reason: 'Il modello ha rifiutato di rispondere a questo messaggio' };
+            return { reply: null, proposal: null, checks, usage, reason: 'Il modello ha rifiutato di rispondere a questo messaggio' };
         }
 
         const call = chiamataDi(response);
         if (!call) {
             const testo = testoDi(response);
-            return { reply: testo || null, proposal: null, checks, reason: testo ? undefined : 'Il modello non ha prodotto una risposta' };
+            return { reply: testo || null, proposal: null, checks, usage, reason: testo ? undefined : 'Il modello non ha prodotto una risposta' };
         }
 
         const nome = call.name;
@@ -341,13 +365,14 @@ export async function runAgent(ctx: AgentContext): Promise<AgentResult> {
                         { role: 'user', content: 'Scrivi solo il messaggio da inviare al cliente: digli che stai verificando e che confermi a breve. Una o due frasi, senza dare per fatta la modifica.' },
                     ],
                 });
+                conta(r2);
                 reply = r2.stop_reason === 'refusal' ? null : (testoDi(r2) || null);
             } catch (err: any) {
                 // La proposta resta valida anche senza frase pronta: lo staff
                 // scrive di suo. Ma il motivo va detto, non nascosto.
                 replyError = err?.message || 'testo di attesa non generato';
             }
-            return { reply, proposal, checks, reason: replyError };
+            return { reply, proposal, checks, usage, reason: replyError };
         }
 
         // --- sola lettura: si esegue davvero e si prosegue -------------------
@@ -367,8 +392,8 @@ export async function runAgent(ctx: AgentContext): Promise<AgentResult> {
         }
 
         // Strumento sconosciuto: non inventiamo, ci fermiamo.
-        return { reply: null, proposal: null, checks, reason: `Il modello ha chiesto uno strumento sconosciuto: ${nome}` };
+        return { reply: null, proposal: null, checks, usage, reason: `Il modello ha chiesto uno strumento sconosciuto: ${nome}` };
     }
 
-    return { reply: null, proposal: null, checks, reason: 'Troppi passaggi senza arrivare a una risposta' };
+    return { reply: null, proposal: null, checks, usage, reason: 'Troppi passaggi senza arrivare a una risposta' };
 }
