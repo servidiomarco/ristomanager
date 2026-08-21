@@ -535,6 +535,7 @@ export enum ViewState {
   PAGAMENTI = 'PAGAMENTI',
   MONITORING = 'MONITORING',
   DEVELOPMENT = 'DEVELOPMENT',
+  ROADMAP = 'ROADMAP',
   // Pannello piattaforma (Fase D2): sopra i tenant, solo PLATFORM_ADMIN.
   PLATFORM = 'PLATFORM'
 }

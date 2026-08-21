@@ -108,6 +108,17 @@ Working rules that are easy to violate:
 - **Tailwind extracts class names statically.** A template-built class such as `` `bg-[var(--ds-${family}-tint)]` `` never ships. Write the full literal for every branch.
 - Touch targets are 44px minimum; `useMediaQuery` picks the component *tree* (sheet vs pane) where CSS cannot.
 
+## Roadmap queue (pagina Roadmap, solo account admin)
+
+La pagina Roadmap (`components/RoadmapPage.tsx`, gate email come il dev board) contiene il piano di lancio del brand Sympotia. I task con `claude_prompt` sono destinati a Claude: l'admin li approva dalla pagina (status `queued`) e le sessioni Claude Code li eseguono. Quando l'utente chiede di "eseguire la roadmap" (o all'inizio di una sessione di lavoro su Sympotia):
+
+1. `node scripts/roadmap.mjs list` — mostra i task approvati con il loro prompt (serve `DATABASE_URL`).
+2. `node scripts/roadmap.mjs start <id>` — prendi in carico prima di lavorarlo.
+3. Esegui quello che chiede il prompt del task.
+4. `node scripts/roadmap.mjs done <id> "esito in una frase"` — chiudi: la nota compare in pagina.
+
+Non eseguire task che non sono in coda (`queued`): l'approvazione dalla pagina È il consenso dell'utente.
+
 ## Conventions
 
 - Commit messages in Italian, matching the existing log (`Riveste Prenotazioni e Reception sul nuovo design system`).

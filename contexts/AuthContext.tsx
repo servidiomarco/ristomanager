@@ -33,6 +33,7 @@ const VIEW_PERMISSIONS: Record<ViewState, string> = {
   [ViewState.NOTIFICHE]: 'dashboard:view',
   [ViewState.MONITORING]: '', // gated by account email, not by permission — see canAccessView
   [ViewState.DEVELOPMENT]: '', // gated by account email, not by permission — see canAccessView
+  [ViewState.ROADMAP]: '', // gated by account email, not by permission — see canAccessView
   [ViewState.PLATFORM]: '' // gated by role PLATFORM_ADMIN, not by permission — see canAccessView
 };
 
@@ -157,7 +158,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [user]);
 
   const canAccessView = useCallback((view: ViewState): boolean => {
-    if (view === ViewState.DEVELOPMENT || view === ViewState.MONITORING) {
+    if (view === ViewState.DEVELOPMENT || view === ViewState.MONITORING || view === ViewState.ROADMAP) {
       return (user?.email || '').toLowerCase() === DEV_BOARD_ADMIN_EMAIL;
     }
     // Il pannello piattaforma è legato al ruolo, non a un permesso per-tenant:

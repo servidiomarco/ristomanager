@@ -10417,6 +10417,127 @@ app.delete('/dev-board/cards/:id', authenticate, requireDevBoardAdmin, async (re
 });
 
 // ============================================
+// ROADMAP — pagina Roadmap, riservata all'account admin
+// ============================================
+// Stesso gate email del dev board: è uno strumento di progetto, non un
+// permesso di ruolo. I task con claude_prompt seguono il flusso
+// todo → queued (approvato dall'admin in pagina) → in_progress → done,
+// dove queued→in_progress→done è mosso da scripts/roadmap.mjs nelle
+// sessioni Claude Code. I task manuali saltano da todo a done.
+const ROADMAP_PHASES = ['domini', 'legale', 'euipo', 'branding'];
+const ROADMAP_STATUSES = ['todo', 'queued', 'in_progress', 'done'];
+
+app.get('/roadmap/tasks', authenticate, requireDevBoardAdmin, async (req, res) => {
+    try {
+        const result = await queryWithRetry(
+            `SELECT id, phase_key, title, description, claude_prompt, result_note, status, position, created_at, updated_at
+             FROM roadmap_tasks
+             WHERE tenant_id = $1
+             ORDER BY phase_key, position, id`,
+            [req.tenantId!]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/roadmap/tasks', authenticate, requireDevBoardAdmin, async (req, res) => {
+    try {
+        const { title, description, phase_key, claude_prompt } = req.body;
+        if (!title || !String(title).trim()) {
+            return res.status(400).json({ error: 'Titolo obbligatorio' });
+        }
+        const phase = ROADMAP_PHASES.includes(phase_key) ? phase_key : 'domini';
+        const result = await queryWithRetry(
+            `INSERT INTO roadmap_tasks (title, description, claude_prompt, phase_key, position, tenant_id)
+             VALUES ($1, $2, $3, $4::varchar, (SELECT COALESCE(MAX(position), -1) + 1 FROM roadmap_tasks WHERE phase_key = $4::varchar AND tenant_id = $5), $5)
+             RETURNING id, phase_key, title, description, claude_prompt, result_note, status, position, created_at, updated_at`,
+            [
+                String(title).trim(),
+                description ? String(description).trim() || null : null,
+                claude_prompt ? String(claude_prompt).trim() || null : null,
+                phase,
+                req.tenantId!,
+            ]
+        );
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'roadmap:changed', {}, socketId);
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/roadmap/tasks/:id', authenticate, requireDevBoardAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { title, description, phase_key, claude_prompt, result_note, status } = req.body;
+        if (title !== undefined && !String(title).trim()) {
+            return res.status(400).json({ error: 'Titolo obbligatorio' });
+        }
+        if (status !== undefined && !ROADMAP_STATUSES.includes(status)) {
+            return res.status(400).json({ error: 'Stato non valido' });
+        }
+        if (phase_key !== undefined && !ROADMAP_PHASES.includes(phase_key)) {
+            return res.status(400).json({ error: 'Fase non valida' });
+        }
+        const result = await queryWithRetry(
+            `UPDATE roadmap_tasks SET
+                title = COALESCE($1, title),
+                description = CASE WHEN $2::boolean THEN $3 ELSE description END,
+                claude_prompt = CASE WHEN $4::boolean THEN $5 ELSE claude_prompt END,
+                result_note = CASE WHEN $6::boolean THEN $7 ELSE result_note END,
+                phase_key = COALESCE($8, phase_key),
+                status = COALESCE($9, status),
+                updated_at = NOW()
+             WHERE id = $10 AND tenant_id = $11
+             RETURNING id, phase_key, title, description, claude_prompt, result_note, status, position, created_at, updated_at`,
+            [
+                title !== undefined ? String(title).trim() : null,
+                description !== undefined,
+                description !== undefined ? (String(description ?? '').trim() || null) : null,
+                claude_prompt !== undefined,
+                claude_prompt !== undefined ? (String(claude_prompt ?? '').trim() || null) : null,
+                result_note !== undefined,
+                result_note !== undefined ? (String(result_note ?? '').trim() || null) : null,
+                phase_key ?? null,
+                status ?? null,
+                id,
+                req.tenantId!,
+            ]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Task non trovato' });
+        }
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'roadmap:changed', {}, socketId);
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/roadmap/tasks/:id', authenticate, requireDevBoardAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await queryWithRetry('DELETE FROM roadmap_tasks WHERE id = $1 AND tenant_id = $2 RETURNING id', [id, req.tenantId!]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Task non trovato' });
+        }
+        const socketId = req.headers['x-socket-id'] as string;
+        if (socketService) socketService.broadcastToAll(req.tenantId!, 'roadmap:changed', {}, socketId);
+        res.status(204).send();
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
 // SHOPPING LIST - require authentication
 // ============================================
 app.get('/shopping', authenticate, async (req, res) => {

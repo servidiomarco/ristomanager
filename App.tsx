@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2 } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -30,6 +30,7 @@ import EmailPage from './components/EmailPage';
 import NotifichePage from './components/NotifichePage';
 import PagamentiPage from './components/PagamentiPage';
 import { DevelopmentPage } from './components/DevelopmentPage';
+import { RoadmapPage } from './components/RoadmapPage';
 import { MonitoringPage } from './components/MonitoringPage';
 import ReceptionPage from './components/ReceptionPage';
 import { AttivitaPage } from './components/AttivitaPage';
@@ -169,6 +170,7 @@ const NAV_ITEMS: NavItem[] = [
   // Visibili solo all'account admin (gate email-based in canAccessView)
   { kind: 'link', label: 'Consumi AI', Icon: Gauge, group: 'sistema', isTab: false, view: ViewState.MONITORING, sidebarCollapse: false },
   { kind: 'link', label: 'Development', Icon: Kanban, group: 'sistema', isTab: false, view: ViewState.DEVELOPMENT, sidebarCollapse: false },
+  { kind: 'link', label: 'Roadmap', Icon: Milestone, group: 'sistema', isTab: false, view: ViewState.ROADMAP, sidebarCollapse: false },
   { kind: 'theme', label: 'Modalità scura', Icon: Moon, group: 'sistema', isTab: false },
 ];
 
@@ -2462,6 +2464,10 @@ const App: React.FC = () => {
           <DevelopmentPage />
         )}
 
+        {view === ViewState.ROADMAP && (
+          <RoadmapPage />
+        )}
+
         {view === ViewState.MONITORING && (
           <MonitoringPage />
         )}
@@ -2548,6 +2554,7 @@ const App: React.FC = () => {
                       [ViewState.SETTINGS]: 'Impostazioni',
                       [ViewState.MONITORING]: 'Consumi AI',
                       [ViewState.DEVELOPMENT]: 'Development',
+                      [ViewState.ROADMAP]: 'Roadmap',
                       [ViewState.PLATFORM]: 'Piattaforma',
                     };
                     return (

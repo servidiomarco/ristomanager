@@ -2426,6 +2426,53 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         }
 
         // ============================================
+        // ROADMAP (pagina Roadmap, solo account admin)
+        // ============================================
+        // Piano di esecuzione del rebranding Sympotia: fasi in sequenza, task
+        // dentro le fasi. I task con claude_prompt sono eseguibili da Claude:
+        // dalla pagina l'admin li approva (status 'queued'), le sessioni Claude
+        // Code li leggono con scripts/roadmap.mjs, li lavorano e li chiudono
+        // scrivendo l'esito in result_note. I task manuali (registrar, studi
+        // marchi) si spuntano a mano.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS roadmap_tasks (
+                id            SERIAL PRIMARY KEY,
+                phase_key     VARCHAR(20) NOT NULL,
+                title         VARCHAR(200) NOT NULL,
+                description   TEXT,
+                claude_prompt TEXT,
+                result_note   TEXT,
+                status        VARCHAR(20) NOT NULL DEFAULT 'todo',
+                position      INTEGER NOT NULL DEFAULT 0,
+                tenant_id     BIGINT NOT NULL DEFAULT 1,
+                created_at    TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                updated_at    TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await client.query(`
+            CREATE INDEX IF NOT EXISTS idx_roadmap_tasks_phase ON roadmap_tasks(phase_key, position);
+        `);
+        const existingRoadmapCount = await client.query(`SELECT COUNT(*)::int AS n FROM roadmap_tasks;`);
+        if (existingRoadmapCount.rows[0]?.n === 0) {
+            // Seed dal dossier naming (toDo/01-roadmap-esecuzione-sympotia.md).
+            await client.query(`
+                INSERT INTO roadmap_tasks (tenant_id, phase_key, position, title, description, claude_prompt) VALUES
+                    (1, 'domini', 0, 'Registrare sympotia.com / .ai / .io', 'Tripletta verificata libera il 21/08/2026 (~€120/anno). L''unica azione non rinviabile: rischio asimmetrico.', NULL),
+                    (1, 'domini', 1, 'Difesa perimetrale: antamia.com + sintrofia.com', 'Prima riserva e vicina semantica (+€25/anno).', NULL),
+                    (1, 'domini', 2, 'Prenotare handle @sympotia', 'Instagram, LinkedIn (company page), X, TikTok. Anche se restano vuoti per mesi.', NULL),
+                    (1, 'legale', 0, 'Finalizzare la mail per i consulenti marchi', 'Bozza già pronta in toDo/03-bozza-mail-consulente-marchi.md.', 'Rileggi toDo/03-bozza-mail-consulente-marchi.md, riesegui lo screening TMview su SYMPOTIA e sull''EUTM SYMPOSIA di Brandon Medical per verificare che nulla sia cambiato, aggiorna la bozza con eventuali novità e consegna la versione finale pronta da inviare.'),
+                    (1, 'legale', 1, 'Inviare la richiesta a 2–3 studi marchi', 'Consulenti CPI (ordine-brevetti.it) o studi tipo Bugnion / Barzanò & Zanardo / Jacobacci. Budget atteso €300–600.', NULL),
+                    (1, 'legale', 2, 'Valutare i preventivi e incaricare lo studio', 'Punto unico da validare: convivenza con EUTM SYMPOSIA (Brandon Medical, cl. 9+38).', NULL),
+                    (1, 'euipo', 0, 'Deposito EUTM classi 9/35/42', 'Al lancio pubblico (UE = first-to-file). ~€850 + onorario. Specificazione: "software gestionale per ristorazione e ospitalità".', NULL),
+                    (1, 'branding', 0, 'Identità visiva Sympotia', 'Logo, palette, tono di voce.', 'Proponi 2–3 direzioni di identità visiva per il brand Sympotia (logo concettuale, palette coerente con le CSS var --ds-*, tono di voce IT/EN), come pagine HTML di anteprima da salvare in toDo/.'),
+                    (1, 'branding', 1, 'Keyword map IT/EN per il sito di lancio', 'SEO per il lancio SaaS sui mercati EU.', 'Costruisci la keyword map IT/EN per il sito di lancio di Sympotia (CRM e prenotazioni per la ristorazione): cluster per intento, volumi stimati, mappa keyword→pagina, e salvala in toDo/.'),
+                    (1, 'branding', 2, 'Redirect 301 dai domini ristomanager', 'Dopo l''acquisto dei domini Sympotia.', 'Prepara la configurazione dei redirect 301 dai domini ristomanager/vecchiofrantoio verso i domini sympotia (vercel.json e/o backend Railway), senza applicarla in produzione: apri una proposta di modifica da rivedere.'),
+                    (1, 'branding', 3, 'Rebranding agente vocale: «Sofia by Sympotia»', 'Aggiornare il prompt ElevenLabs.', 'Aggiorna scripts/update-elevenlabs-prompt.mjs e i testi dell''agente vocale Sofia perché si presenti come «Sofia di Sympotia»; prepara la modifica senza eseguirla in produzione.'),
+                    (1, 'branding', 4, 'Aggiornare sender Twilio/WhatsApp', 'Nome mittente e template col nuovo brand.', NULL);
+            `);
+        }
+
+        // ============================================
         // CONSUMI AI — token Gemini
         // ============================================
         // Ogni chiamata a Gemini (report Dashboard, e in futuro i messaggi AI)
