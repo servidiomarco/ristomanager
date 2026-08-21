@@ -243,6 +243,7 @@ const VIEW_PERMISSIONS: Record<ViewState, Permission[]> = {
   // server.ts. No role can reach them through the permission system.
   [ViewState.MONITORING]: [],
   [ViewState.DEVELOPMENT]: [],
+  [ViewState.ROADMAP]: [],
   // Pannello piattaforma (Fase D2): gate sul ruolo PLATFORM_ADMIN (vedi
   // canAccessView nel frontend e platformAdminAuth in server.ts), non sulla
   // matrice per-tenant. Nessun permesso lo apre.
