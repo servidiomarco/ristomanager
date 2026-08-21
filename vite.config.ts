@@ -12,8 +12,6 @@ export default defineConfig(({ mode }) => {
       },
       plugins: [react(), tailwindcss()],
       define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
         // Build-time app version. Read from whichever host is doing the SPA
         // build: Vercel (frontend at crm.vecchiofrantoio.com) exposes
         // VERCEL_GIT_COMMIT_SHA, Railway (backend, or if the SPA is ever

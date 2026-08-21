@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Reservation, Table, Dish, Room, Shift, ReservationStatus, ReservationSource, TodoPriority, TodoCategory, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu } from '../types';
-import { generateRestaurantReport } from '../services/geminiService';
 import { ShoppingCategory, ShoppingItem } from '../services/shoppingApiService';
 import { getLowStockInventory, LowStockItem, getReservationAllergenPresets } from '../services/apiService';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
@@ -198,7 +197,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const { user } = useAuth();
   const { items: shoppingItems, addItem: addShoppingItemCtx, toggleItem: toggleShoppingItemCtx } = useShopping();
   const { todos, addTodo: addTodoCtx, toggleTodo: toggleTodoCtx } = useTodos();
-  const [report, setReport] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   // On desktop, date/shift are driven by App-level props (header controls).
@@ -457,13 +455,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   useEffect(() => {
     fetchStaff(selectedDateStr);
   }, [selectedDateStr, fetchStaff]);
-
-  const handleGenerateReport = async () => {
-    setLoading(true);
-    const result = await generateRestaurantReport(reservations, tables, dishes);
-    setReport(result);
-    setLoading(false);
-  };
 
   const handleToggleTodo = async (id: string) => {
     try {
@@ -2149,19 +2140,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           </div>
         );
       })()}
-
-      {/* AI Report Section */}
-      {report && (
-        <div className="bg-[var(--ds-surface)] p-4 sm:p-5 rounded-[20px] shadow-[var(--ds-shadow-card)] animate-fade-in">
-          <div className="flex items-center gap-2 mb-4">
-            <Sparkles className="h-4 w-4 text-[var(--color-fg-muted)]" />
-            <h2 className="text-base font-semibold text-[var(--color-fg)]">Analisi AI Gemini</h2>
-          </div>
-          <div className="prose prose-sm max-w-none text-[var(--color-fg-muted)]">
-            <ReactMarkdown>{report}</ReactMarkdown>
-          </div>
-        </div>
-      )}
 
       {/* Pending reservation quick-action modal. Rendered via Portal so it
           escapes the Dashboard's stacking context. Handles the two common
