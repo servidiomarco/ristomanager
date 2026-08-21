@@ -962,6 +962,15 @@ const App: React.FC = () => {
   }, [isAuthenticated]);
 
   const fetchData = async () => {
+    // L'admin piattaforma non opera il CRM del tenant: per scelta (D2) non ha
+    // righe nella matrice permessi, quindi questi cinque endpoint gli
+    // risponderebbero 403 — il toast "insufficient permissions" a ogni login.
+    // Atterra sulla vista Piattaforma; i dati di un ristorante li vede solo
+    // impersonando, con un token da OWNER di quel tenant.
+    if (user?.role === UserRole.PLATFORM_ADMIN) {
+      setIsInitialDataLoading(false);
+      return;
+    }
     try {
       const [roomsData, tablesData, dishesData, banquetMenusData, reservationsData] = await Promise.all([
         getRooms(),
