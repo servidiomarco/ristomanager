@@ -5,6 +5,14 @@ import { queryWithRetry } from '../db.js';
 import { User, UserRole } from '../types.js';
 import { getAssignableRoles } from './permissions.js';
 
+// In produzione i segreti DEVONO arrivare dall'ambiente: per mesi Railway è
+// andato in produzione senza JWT_SECRET e i token erano firmati col fallback
+// committato qui sotto — chiunque leggesse il sorgente poteva coniarsi un
+// token OWNER valido (scoperto e sanato il 2026-08-22). Il boot fallisce
+// piuttosto che ripetere quella condizione.
+if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || !process.env.JWT_REFRESH_SECRET)) {
+  throw new Error('JWT_SECRET e JWT_REFRESH_SECRET sono obbligatori in produzione');
+}
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret-change-in-production';
 const JWT_EXPIRES_IN = '6h';
