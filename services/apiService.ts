@@ -1274,6 +1274,7 @@ export interface LegalSettings {
   business_tagline: string;
   public_phone: string;
   public_whatsapp: string;
+  public_address: string;
   maps_url: string;
   data_processors: string;
   retention_customer: string;

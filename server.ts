@@ -12712,6 +12712,7 @@ type BusinessIdentity = {
     tagline: string;    // footer delle email
     phone: string;      // telefono come lo legge un umano
     whatsapp: string;   // numero WhatsApp come lo legge un umano
+    address: string;    // indirizzo del locale, come etichetta leggibile
     mapsUrl: string;
     websiteUrl: string;
 };
@@ -12722,6 +12723,7 @@ const IDENTITY_FALLBACK: BusinessIdentity = {
     tagline: 'Cucina Tradizionale',
     phone: '0985 876578',
     whatsapp: '+39 389 591 6494',
+    address: '',
     mapsUrl: 'https://maps.app.goo.gl/pf1DjUYzkhi1sStP8',
     websiteUrl: 'https://www.vecchiofrantoio.com',
 };
@@ -12758,6 +12760,7 @@ async function refreshBusinessIdentity(tenantId: number): Promise<void> {
             tagline: s(legal.business_tagline) || IDENTITY_FALLBACK.tagline,
             phone: s(legal.public_phone) || IDENTITY_FALLBACK.phone,
             whatsapp: s(legal.public_whatsapp) || IDENTITY_FALLBACK.whatsapp,
+            address: s(legal.public_address) || IDENTITY_FALLBACK.address,
             mapsUrl: s(legal.maps_url) || IDENTITY_FALLBACK.mapsUrl,
             websiteUrl: s(legal.website_url) || IDENTITY_FALLBACK.websiteUrl,
         },
@@ -16472,6 +16475,9 @@ const LEGAL_STRING_FIELDS = [
     'business_tagline',    // Sottotitolo nel footer delle email e della pagina prenota
     'public_phone',        // Telefono mostrato ai clienti (messaggi ed email)
     'public_whatsapp',     // Numero WhatsApp mostrato ai clienti
+    'public_address',      // Indirizzo del locale mostrato ai clienti (pagina prenota).
+                           // NON è company_address: la sede legale può essere
+                           // lo studio del commercialista in un'altra città.
     'maps_url',            // Link "Come raggiungerci" (Google Maps)
     'data_processors',     // Elenco responsabili/fornitori (testo multiriga)
     'retention_customer',  // Conservazione dati cliente (es. "24 mesi")
@@ -19092,6 +19098,99 @@ const publicBookingLimiter = rateLimit({
     message: { error: 'rate_limited', message: 'Troppe richieste, riprova tra qualche minuto.' },
 });
 
+// Orizzonte massimo di un calendario pubblico. Non è una preferenza estetica:
+// senza tetto una chiamata con to=+5 anni farebbe girare il loop 1800 volte e
+// il client potrebbe chiedere un intervallo arbitrario.
+const PUBLIC_CALENDAR_MAX_DAYS = 62;
+// Quota di coperti oltre la quale il giorno si mostra "quasi pieno" sul
+// calendario. È un SEMAFORO, non la regola che decide confermato vs richiesta:
+// quella resta room-per-room in getCappedRoomIds e viene letta da
+// /public/rooms sulla data scelta. Tenerle separate è voluto — il pallino
+// serve a far scegliere un altro giorno, non a promettere un esito.
+const PUBLIC_CALENDAR_BUSY_RATIO = 0.7;
+
+/**
+ * Stato giorno per giorno per il calendario di /prenota.
+ *
+ * Costa un numero FISSO di query (orari, chiusure, blocchi, coperti, posti) e
+ * poi calcola in memoria: la versione ovvia — getAvailableSlots per ogni data
+ * e turno — sarebbe 124 andate e ritorno al database per due mesi di
+ * calendario, su un endpoint pubblico e non autenticato.
+ */
+async function buildPublicCalendar(
+    tenantId: number,
+    from: string,
+    to: string,
+    romeToday: string,
+): Promise<Array<{ date: string; status: 'open' | 'busy' | 'closed'; reason: string | null }>> {
+    const [hoursRows, closures, blocks, coversResult, seatsResult] = await Promise.all([
+        getAllOpeningHours(tenantId),
+        listClosures(tenantId, from),
+        getPublicBookingBlocks(tenantId),
+        queryWithRetry(
+            `SELECT to_char(reservation_time AT TIME ZONE 'Europe/Rome', 'YYYY-MM-DD') AS day,
+                    COALESCE(SUM(guests), 0)::int AS seats
+             FROM reservations
+             WHERE tenant_id = $1
+               AND DATE(reservation_time AT TIME ZONE 'Europe/Rome') BETWEEN $2::date AND $3::date
+               AND COALESCE(reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')
+             GROUP BY 1`,
+            [tenantId, from, to]
+        ),
+        queryWithRetry(
+            `SELECT COALESCE(SUM(capacity), 0)::int AS seats
+             FROM tables
+             WHERE tenant_id = $1 AND COALESCE(is_hidden, false) = false`,
+            [tenantId]
+        ),
+    ]);
+
+    const hoursByWeekday = new Map(hoursRows.map(h => [h.weekday, h]));
+    const coversByDay = new Map<string, number>(
+        coversResult.rows.map((r: any) => [r.day as string, Number(r.seats) || 0])
+    );
+    const totalSeats = Number(seatsResult.rows[0]?.seats) || 0;
+
+    // Una chiusura con shift NULL chiude l'intera giornata; il motivo scritto
+    // dall'operatore viaggia fino al calendario, così "chiuso" non è muto.
+    const closureByDate = new Map<string, { lunch: boolean; dinner: boolean; reason: string | null }>();
+    for (const c of closures) {
+        const entry = closureByDate.get(c.date) ?? { lunch: false, dinner: false, reason: null };
+        if (c.shift === null) { entry.lunch = true; entry.dinner = true; }
+        else if (c.shift === Shift.LUNCH) entry.lunch = true;
+        else if (c.shift === Shift.DINNER) entry.dinner = true;
+        if (c.reason && !entry.reason) entry.reason = c.reason;
+        closureByDate.set(c.date, entry);
+    }
+
+    const days: Array<{ date: string; status: 'open' | 'busy' | 'closed'; reason: string | null }> = [];
+    for (let cursor = from; cursor <= to; cursor = addDaysIso(cursor, 1)) {
+        // Il passato non è "chiuso" per scelta dell'operatore, ma per il
+        // cliente il pallino è lo stesso: non ci si può prenotare.
+        if (cursor < romeToday) {
+            days.push({ date: cursor, status: 'closed', reason: null });
+            continue;
+        }
+        const hours = hoursByWeekday.get(new Date(cursor + 'T00:00:00').getDay());
+        const closure = closureByDate.get(cursor);
+        const lunchOpen = !!(hours?.lunch_open && hours?.lunch_close)
+            && !closure?.lunch
+            && !isPublicBookingBlocked(cursor, Shift.LUNCH as any, blocks);
+        const dinnerOpen = !!(hours?.dinner_open && hours?.dinner_close)
+            && !closure?.dinner
+            && !isPublicBookingBlocked(cursor, Shift.DINNER as any, blocks);
+
+        if (!lunchOpen && !dinnerOpen) {
+            days.push({ date: cursor, status: 'closed', reason: closure?.reason ?? null });
+            continue;
+        }
+        const busy = totalSeats > 0
+            && (coversByDay.get(cursor) ?? 0) >= totalSeats * PUBLIC_CALENDAR_BUSY_RATIO;
+        days.push({ date: cursor, status: busy ? 'busy' : 'open', reason: null });
+    }
+    return days;
+}
+
 // Handler condivisi fra i path storici (/public/*, tenant dal dominio o
 // fallback tenant 1) e i gemelli /public/:slug/* (Fase C3): stesso schema
 // dei webhook C2 — la logica riceve il tenant già risolto, le route in
@@ -19102,6 +19201,35 @@ const handlePublicAvailability = async (tenantId: number, req: express.Request, 
     if (!(await isFeatureEnabledForTenant(tenantId, 'web_booking'))) {
         return res.status(503).json({ error: 'bookings_disabled', message: PUBLIC_BOOKINGS_DISABLED_MESSAGE });
     }
+
+    // Roma, non il fuso del server: su Railway (UTC) `new Date()` in estate è
+    // due ore indietro, e fra mezzanotte e le 02:00 "oggi" cadeva sul giorno
+    // prima — il calendario avrebbe aperto una data già passata.
+    const romeToday = getItalianTodayIso();
+
+    // Forma a intervallo (calendario di /prenota): stessa route, perché il
+    // client chiede la stessa cosa — cosa è prenotabile — solo su più giorni.
+    const from = typeof req.query.from === 'string' ? req.query.from : '';
+    const to = typeof req.query.to === 'string' ? req.query.to : '';
+    if (from || to) {
+        if (!ISO_DATE_RE.test(from) || !ISO_DATE_RE.test(to)) {
+            return res.status(400).json({ error: 'invalid_range', message: 'from e to devono essere YYYY-MM-DD' });
+        }
+        if (to < from) {
+            return res.status(400).json({ error: 'invalid_range', message: 'to non può precedere from' });
+        }
+        const cappedTo = to > addDaysIso(from, PUBLIC_CALENDAR_MAX_DAYS - 1)
+            ? addDaysIso(from, PUBLIC_CALENDAR_MAX_DAYS - 1)
+            : to;
+        try {
+            const days = await buildPublicCalendar(tenantId, from, cappedTo, romeToday);
+            return res.json({ from, to: cappedTo, days });
+        } catch (err: any) {
+            console.error('GET /public/availability (range) error:', err);
+            return res.status(500).json({ error: 'Failed to load calendar' });
+        }
+    }
+
     const date = typeof req.query.date === 'string' ? req.query.date : '';
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
         return res.status(400).json({ error: 'invalid_date', message: 'date deve essere YYYY-MM-DD' });
@@ -19120,10 +19248,13 @@ const handlePublicAvailability = async (tenantId: number, req: express.Request, 
         const dinnerSlots = isPublicBookingBlocked(date, Shift.DINNER as any, blocks) ? [] : dinnerSlotsRaw;
 
         // Drop past slots when the requested date is today (Europe/Rome).
-        const now = new Date();
-        const todayIso = now.toISOString().slice(0, 10);
-        const isToday = date === todayIso;
-        const currentMinutes = now.getHours() * 60 + now.getMinutes();
+        // Il commento diceva Roma da sempre, il codice leggeva il fuso del
+        // server: su Railway (UTC, +2 d'estate) alle 21:30 italiane risultavano
+        // ancora liberi gli slot delle 20:00, e la richiesta arrivava in sala
+        // per un orario passato.
+        const isToday = date === romeToday;
+        const romeNow = getItalianDateParts(new Date());
+        const currentMinutes = Number(romeNow.hour) * 60 + Number(romeNow.minute);
         const filterFuture = (slots: string[]) => {
             if (!isToday) return slots;
             return slots.filter(s => {
@@ -19225,6 +19356,12 @@ const handlePublicContact = async (tenantId: number, _req: express.Request, res:
             name: identity.name,
             tagline: identity.tagline,
             website_url: identity.websiteUrl,
+            // Pillola "dove siamo" sulla testata: l'etichetta è l'indirizzo
+            // scritto in Impostazioni, il link la mappa già configurata.
+            // Senza indirizzo la pagina mostra comunque la pillola, con un
+            // testo generico — il link è la cosa che serve davvero.
+            address: identity.address,
+            maps_url: identity.mapsUrl,
         },
         voice_agent_id: (process.env.ELEVENLABS_AGENT_ID || '').trim(),
     });
@@ -19295,6 +19432,13 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
         if (!Number.isFinite(guestsNum) || guestsNum < 1 || guestsNum > 20) {
             return res.status(400).json({ error: 'invalid_guests', message: 'Numero ospiti non valido' });
         }
+        // I bambini sono un SOTTOINSIEME dei coperti, non un extra: la pagina
+        // chiede "persone a tavola" e poi "di cui bambini". Sommarli qui
+        // raddoppierebbe il tavolo. Assente o incoerente → 0, come prima.
+        const childrenRaw = Number(body.children);
+        const childrenNum = Number.isFinite(childrenRaw)
+            ? Math.min(Math.max(Math.trunc(childrenRaw), 0), Math.trunc(guestsNum))
+            : 0;
 
         // Idempotenza di fatto contro i doppi invii: la linea del cliente cade
         // DOPO che la POST e' arrivata ma prima della risposta, il form mostra
@@ -19451,14 +19595,15 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                 reservation_status, source, requires_review,
                 consent_data_health, consent_updated_at, tenant_id
             )
-            VALUES ($1, $2, $3, $4, 0, $10, $5, $6, $7, 'PENDING', 'WAITING', $11, 'GOOGLE', $12, $8, $9, $13)
+            VALUES ($1, $2, $3, $4, $14, $10, $5, $6, $7, 'PENDING', 'WAITING', $11, 'GOOGLE', $12, $8, $9, $13)
             RETURNING *`,
             [customer_name, reservation_time, shift, Math.trunc(guestsNum), notes, emailNormalized, phoneE164,
              consentHealth, consentUpdatedAt,
              autoTable?.id ?? null,
              autoConfirmed ? 'CONFIRMED' : 'PENDING',
              !autoConfirmed,
-             tenantId]
+             tenantId,
+             childrenNum]
         );
         const created = result.rows[0];
 
