@@ -10,9 +10,10 @@ interface Props {
 
 const PROMPT_MAX = 4000;
 
-// Nota: questo testo è solo salvato — nessuna automazione lo legge ancora.
-// È l'istruzione che il gestore scrive per sé (o per una futura logica AI)
-// su come assegnare o spostare i tavoli in base alle prenotazioni in arrivo.
+// Card dev board #26: questo testo alimenta la proposta AI di assegnazione
+// tavolo per le prenotazioni che arrivano senza tavolo da sito, WhatsApp o
+// Sofia. Affianca la logica esistente, non la sostituisce — e con il campo
+// vuoto la proposta resta spenta.
 export const TableAssignmentAiPromptCard: React.FC<Props> = ({ showToast }) => {
   const { hasPermission } = useAuth();
   const canEdit = hasPermission('settings:full');
@@ -64,7 +65,7 @@ export const TableAssignmentAiPromptCard: React.FC<Props> = ({ showToast }) => {
           </div>
           <div className="min-w-0">
             <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Prompt logica tavoli per AI</h4>
-            <p className="text-[13px] text-[var(--ds-text-muted)]">Istruzioni su come assegnare o spostare i tavoli in base alle prenotazioni in arrivo.</p>
+            <p className="text-[13px] text-[var(--ds-text-muted)]">Istruzioni su come assegnare o unire i tavoli: alimentano il suggerimento AI per le prenotazioni senza tavolo dal sito, WhatsApp e Sofia.</p>
           </div>
         </div>
         <ChevronDown className="w-5 h-5 text-[var(--ds-text-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />

@@ -130,6 +130,20 @@ export interface TableMerge {
   merged_ids: number[];
 }
 
+// Card dev board #26: proposta AI di assegnazione tavolo per una
+// prenotazione nata senza tavolo (sito, WhatsApp, Sofia). Solo un
+// suggerimento — diventa scrittura reale solo alla conferma dello staff.
+export interface TableAssignmentSuggestion {
+  id: number;
+  reservation_id: number;
+  table_id: number;
+  table_name: string | null;
+  merge_with_table_ids: number[];
+  summary: string;
+  status: 'PENDING' | 'CONFIRMED' | 'DISMISSED' | 'SUPERSEDED' | 'DISCARDED';
+  created_at: string;
+}
+
 export interface TableHiddenOverride {
   id: number;
   date: string; // YYYY-MM-DD
