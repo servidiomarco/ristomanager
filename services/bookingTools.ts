@@ -134,6 +134,11 @@ export interface BookingToolsDeps {
     broadcastReservationUpdated: (r: any) => void;
     broadcastPaymentRequestCreated: (r: any) => void;
     broadcastReservationsUpdatedByIds: (ids: number[]) => Promise<any>;
+
+    /** Card #26: se la prenotazione è nata senza tavolo, prova a proporne uno
+     *  via AI (prompt di Impostazioni + stato reale della sala). Fire-and-
+     *  forget: non deve rallentare né far fallire la creazione. */
+    suggestTableAssignment: (tenantId: number, reservationId: number) => void;
 }
 
 let D: BookingToolsDeps | null = null;
@@ -460,6 +465,13 @@ export async function createReservation(
                 shift: created.shift,
             }
         );
+
+        // Card #26: prenotazione nata senza tavolo (nessun fit automatico, o
+        // caparra ancora da pagare) → prova a proporne uno via AI. Copre sia
+        // la voce che WhatsApp: entrambi i canali passano da qui.
+        if (created.table_id == null) {
+            d.suggestTableAssignment(tenantId, created.id);
+        }
 
         try {
             d.broadcastReservationCreated(created);
