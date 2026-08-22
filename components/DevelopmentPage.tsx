@@ -413,9 +413,11 @@ export const DevelopmentPage: React.FC = () => {
                             </p>
                           )}
                           {/* Non in maiuscolo: "05 ago" a 10px in capitali
-                              perde la forma della parola e non guadagna nulla. */}
-                          <p className="mt-1.5 text-[12px] text-[var(--ds-text-muted)]">
-                            {formatCardDate(card.updated_at || card.created_at)}
+                              perde la forma della parola e non guadagna nulla.
+                              L'id è il riferimento con cui si cita la card
+                              (a Claude, nelle PR: "Card dev board #23"). */}
+                          <p className="mt-1.5 text-[12px] tabular-nums text-[var(--ds-text-muted)]">
+                            #{card.id} · {formatCardDate(card.updated_at || card.created_at)}
                           </p>
 
                           {/* Action strip Claude: stato del processo + azioni.
@@ -552,7 +554,7 @@ export const DevelopmentPage: React.FC = () => {
       <ModalShell
         open={!!editDraft}
         onClose={() => setEditDraft(null)}
-        title={editDraft?.id == null ? 'Nuova card' : 'Modifica card'}
+        title={editDraft?.id == null ? 'Nuova card' : `Card #${editDraft.id}`}
         size="sm"
         closeOnEscape
         bodyClassName="space-y-4 p-5 sm:p-6"
