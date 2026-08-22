@@ -111,6 +111,8 @@ export interface BookingToolsDeps {
     modifyVoiceReservation: (tenantId: number, p: any) => Promise<any>;
     recordVoiceCall: (tenantId: number, p: any) => Promise<any>;
     upsertCustomerFromReservation: (tenantId: number, name: string, phone: string, a: any, b: any) => Promise<any>;
+    /** Card #27 — true se il numero appartiene a un cliente in blacklist. */
+    isPhoneBlacklisted: (tenantId: number, phone: string) => Promise<boolean>;
 
     getVoiceDateBlocks: (tenantId: number) => Promise<any>;
     findVoiceDateBlock: (date: string, shift: 'LUNCH' | 'DINNER', blocks: any) => any;
@@ -309,6 +311,15 @@ export async function createReservation(
         return fail('invalid_customer_name', 'Serve il nome reale del cliente per registrare la prenotazione. Chieda nome e cognome al cliente e riprovi.');
     }
     if (!phoneRaw) return fail('invalid_phone', MSG.invalidPhoneCreate);
+
+    // Card #27 — blacklist: la voce (Sofia) rifiuta da sola, con una frase
+    // neutra che non nomina la lista. WhatsApp invece passa di proposito: le
+    // sue proposte le conferma comunque lo staff, che nel CRM vede l'avviso
+    // e decide — stesso trattamento delle prenotazioni manuali.
+    if (channel.id === 'voice' && await d.isPhoneBlacklisted(tenantId, phoneRaw)) {
+        console.log(`${channel.logPrefix} create-reservation blocked (blacklist)`, { conversation_id: conversationId });
+        return fail('customer_blacklisted', 'Mi dispiace, al momento non posso registrare questa prenotazione. Il ristorante resta a disposizione per assisterla direttamente.');
+    }
 
     const normalizedDate = d.parseFlexibleDate(p.date);
     if (!normalizedDate) {
