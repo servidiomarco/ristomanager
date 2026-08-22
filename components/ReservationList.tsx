@@ -12,7 +12,7 @@ import { MessaggiPanel } from './prenotazione/MessaggiPanel';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, RoomClosedOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill, NoteSelection } from '../types';
 import { Banknote, Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, ListFilter, Map as MapIcon, List, MessageCircle, Mail, Armchair, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap } from '../services/apiService';
+import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, sendReservationReminder, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap } from '../services/apiService';
 import { billsApiService, printBill } from '../services/billsApiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { CookingPotLoader } from './CookingPotLoader';
@@ -1745,14 +1745,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       }
   };
 
-  const handleSendReminder = (res: Reservation) => {
-      if (res.reminder_sent) {
-          showToast('Promemoria già inviato per questa prenotazione', 'info');
-          return;
-      }
-      onUpdateReservation({ ...res, reminder_sent: true });
-      showToast(`Promemoria inviato a ${toTitleCase(res.customer_name)}`, 'success');
-  };
+  // (Il vecchio handleSendReminder che marcava reminder_sent SENZA inviare
+  // niente è stato rimosso: il reminder vero vive nel tab Comunicazione e
+  // passa dal server — WhatsApp col template approvato, SMS finché non c'è.)
 
   // State keys, colors and the field patches live in ./reservationState —
   // the single source of truth shared with Reception, FloorPlan & co.
@@ -2714,6 +2709,26 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           const rows = await getReservationMessages(reservationId);
           setOutboundMessages(rows);
       } catch { /* non-fatal — timeline will refresh on next open */ }
+  };
+
+  // Reminder manuale dal tab Comunicazione: il server sceglie il canale
+  // (WhatsApp col template approvato, SMS finché non c'è) e marca
+  // reminder_sent — qui si specchia lo stato e si aggiorna la timeline.
+  const [reminderSending, setReminderSending] = useState(false);
+  const handleSendReminder = async () => {
+      const id = formData.id;
+      if (!id || reminderSending) return;
+      setReminderSending(true);
+      try {
+          const res = await sendReservationReminder(id as number);
+          setFormData(prev => ({ ...prev, reminder_sent: true }));
+          showToast(res.channel === 'whatsapp' ? 'Reminder inviato su WhatsApp' : 'Reminder inviato via SMS', 'success');
+          refreshOutboundTimeline(id as number);
+      } catch (err: any) {
+          showToast(err?.data?.message || err?.message || 'Invio reminder non riuscito', 'error');
+      } finally {
+          setReminderSending(false);
+      }
   };
 
   const handlePickConfirmationChannel = async (channel: 'sms' | 'whatsapp' | 'email') => {
@@ -6108,6 +6123,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             reservation: { ...(formData as Reservation) },
                             fromSave: false,
                           })}
+                          onSendReminder={handleSendReminder}
+                          reminderSending={reminderSending}
+                          reminderSent={formData.reminder_sent === true}
                         />
                       </div>
                     )}

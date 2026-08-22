@@ -117,4 +117,56 @@ describe('reservations', () => {
 
         await api().delete(`/reservations/${prima.body.id}`).set(bearer(token));
     });
+
+    it('reminder manuale: guardie su id, telefono e stato; senza provider SMS l\'invio fallisce rumoroso', async () => {
+        // Prenotazione senza telefono → 400 no_phone.
+        const senzaTel = await api().post('/reservations').set(bearer(token)).send({
+            customer_name: 'Reminder Senza Tel',
+            reservation_time: ORARIO_CENA,
+            shift: 'DINNER',
+            guests: 2,
+            table_id: tableId,
+        });
+        expect(senzaTel.status).toBe(201);
+        const r1 = await api().post(`/reservations/${senzaTel.body.id}/send-reminder`).set(bearer(token));
+        expect(r1.status).toBe(400);
+        expect(r1.body.error).toBe('no_phone');
+
+        // Con telefono ma Twilio non configurato nei test: l'endpoint deve
+        // fallire ESPLICITO (502), mai fingere l'invio — il vecchio pulsante
+        // marcava reminder_sent senza spedire niente.
+        const conTel = await api().post('/reservations').set(bearer(token)).send({
+            customer_name: 'Reminder Con Tel',
+            reservation_time: ORARIO_CENA,
+            shift: 'DINNER',
+            guests: 2,
+            phone: '+39 333 0000001',
+        });
+        expect(conTel.status).toBe(201);
+        const r2 = await api().post(`/reservations/${conTel.body.id}/send-reminder`).set(bearer(token));
+        expect(r2.status).toBe(502);
+        expect(r2.body.error).toBe('send_failed');
+        // E reminder_sent NON deve risultare marcato.
+        const dopo = await api().get('/reservations').set(bearer(token));
+        const row = dopo.body.find((x: any) => x.id === conTel.body.id);
+        expect(row.reminder_sent).toBe(false);
+
+        // Prenotazione cancellata → 409.
+        await api().put(`/reservations/${conTel.body.id}`).set(bearer(token)).send({
+            customer_name: 'Reminder Con Tel',
+            reservation_time: ORARIO_CENA,
+            shift: 'DINNER',
+            guests: 2,
+            phone: '+39 333 0000001',
+            reservation_status: 'CANCELLED',
+        });
+        const r3 = await api().post(`/reservations/${conTel.body.id}/send-reminder`).set(bearer(token));
+        expect(r3.status).toBe(409);
+
+        const r404 = await api().post('/reservations/999999/send-reminder').set(bearer(token));
+        expect(r404.status).toBe(404);
+
+        await api().delete(`/reservations/${senzaTel.body.id}`).set(bearer(token));
+        await api().delete(`/reservations/${conTel.body.id}`).set(bearer(token));
+    });
 });
