@@ -16493,17 +16493,25 @@ async function maybeSuggestTableAssignment(tenantId: number, reservationId: numb
     }
 }
 
-// GET /table-assignment-suggestions?date=YYYY-MM-DD&shift=LUNCH|DINNER
-// Solo le proposte pendenti per il servizio guardato: la lista prenotazioni
-// non ha motivo di sapere di quelle già risolte.
+// GET /table-assignment-suggestions[?date=YYYY-MM-DD&shift=LUNCH|DINNER]
+// Solo le proposte pendenti: la lista prenotazioni non ha motivo di sapere
+// di quelle già risolte. Senza date/shift torna tutte le pendenti del
+// tenant — sono poche per natura (una per prenotazione senza tavolo), la
+// lista le tiene aggiornate via socket una volta caricate.
 app.get('/table-assignment-suggestions', authenticate, async (req, res) => {
     try {
         const { date, shift } = req.query;
-        if (!date || !shift) {
-            return res.status(400).json({ error: 'date and shift query params are required' });
+        if ((date && !shift) || (shift && !date)) {
+            return res.status(400).json({ error: 'date and shift must be provided together' });
         }
-        if (shift !== 'LUNCH' && shift !== 'DINNER') {
+        if (shift && shift !== 'LUNCH' && shift !== 'DINNER') {
             return res.status(400).json({ error: 'shift must be LUNCH or DINNER' });
+        }
+        const params: any[] = [req.tenantId!];
+        let scopeFilter = '';
+        if (date && shift) {
+            params.push(date, shift);
+            scopeFilter = `AND DATE(r.reservation_time) = $2::date AND r.shift = $3`;
         }
         const result = await queryWithRetry(
             `SELECT tas.*, t.name AS table_name
@@ -16511,9 +16519,9 @@ app.get('/table-assignment-suggestions', authenticate, async (req, res) => {
                JOIN reservations r ON r.id = tas.reservation_id AND r.tenant_id = tas.tenant_id
                JOIN tables t ON t.id = tas.table_id AND t.tenant_id = tas.tenant_id
               WHERE tas.tenant_id = $1 AND tas.status = 'PENDING'
-                AND DATE(r.reservation_time) = $2::date AND r.shift = $3
+                ${scopeFilter}
               ORDER BY tas.created_at DESC`,
-            [req.tenantId!, date, shift]
+            params
         );
         res.json(result.rows.map(tableAssignmentSuggestionRow));
     } catch (err) {
@@ -16609,6 +16617,9 @@ app.post('/table-assignment-suggestions/:id/confirm', authenticate, requirePermi
         if (socketService) {
             socketService.broadcastReservationUpdated(req.tenantId!, updatedReservation);
             if (merge) socketService.broadcastTableMergeCreated(req.tenantId!, merge);
+            // Gli altri terminali collegati devono togliere il chip: senza
+            // questo evento resterebbe visibile finché non ricaricano.
+            socketService.broadcastToAll(req.tenantId!, 'tableAssignmentSuggestion:resolved', tableAssignmentSuggestionRow({ ...suggestion, status: 'CONFIRMED' }));
         }
 
         res.json({ reservation: updatedReservation, merge });
@@ -16627,10 +16638,13 @@ app.post('/table-assignment-suggestions/:id/dismiss', authenticate, requirePermi
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
         const r = await queryWithRetry(
             `UPDATE table_assignment_suggestions SET status = 'DISMISSED', resolved_at = CURRENT_TIMESTAMP, resolved_by_user_id = $2
-              WHERE id = $1 AND tenant_id = $3 AND status = 'PENDING' RETURNING id`,
+              WHERE id = $1 AND tenant_id = $3 AND status = 'PENDING' RETURNING *`,
             [id, req.user?.userId ?? null, req.tenantId!]
         );
         if (r.rows.length === 0) return res.status(409).json({ error: 'Proposta non più in attesa' });
+        if (socketService) {
+            socketService.broadcastToAll(req.tenantId!, 'tableAssignmentSuggestion:resolved', tableAssignmentSuggestionRow(r.rows[0]));
+        }
         res.json({ ok: true });
     } catch (err: any) {
         console.error('POST /table-assignment-suggestions/:id/dismiss error:', err);

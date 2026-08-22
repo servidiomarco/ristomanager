@@ -1,4 +1,4 @@
-import { Reservation, Table, Room, Dish, BanquetMenu, BanquetPayment, TableMerge, TableHiddenOverride, RoomClosedOverride, Shift, Customer, InventoryArea, InventoryLocation, InventoryProduct, InventoryStockRow, InventoryMovement, InventoryMovementReason, InventoryCategory, PaymentRequest } from '../types';
+import { Reservation, Table, Room, Dish, BanquetMenu, BanquetPayment, TableMerge, TableHiddenOverride, RoomClosedOverride, Shift, Customer, InventoryArea, InventoryLocation, InventoryProduct, InventoryStockRow, InventoryMovement, InventoryMovementReason, InventoryCategory, PaymentRequest, TableAssignmentSuggestion } from '../types';
 import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
 import { buildApiError } from './apiError';
@@ -190,6 +190,30 @@ export const deleteTableMerge = async (
     method: 'DELETE',
     headers: getHeaders(),
     body: JSON.stringify({ date, shift, primary_id }),
+  }, false);
+};
+
+// ============================================
+// TABLE ASSIGNMENT AI — proposte (card dev board #26)
+// ============================================
+
+export const getTableAssignmentSuggestions = async (): Promise<TableAssignmentSuggestion[]> => {
+  return apiRequest<TableAssignmentSuggestion[]>(`${API_URL}/table-assignment-suggestions`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const confirmTableAssignmentSuggestion = async (id: number): Promise<{ reservation: Reservation; merge: TableMerge | null }> => {
+  return apiRequest(`${API_URL}/table-assignment-suggestions/${id}/confirm`, {
+    method: 'POST',
+    headers: getHeaders(),
+  });
+};
+
+export const dismissTableAssignmentSuggestion = async (id: number): Promise<void> => {
+  return apiRequest<void>(`${API_URL}/table-assignment-suggestions/${id}/dismiss`, {
+    method: 'POST',
+    headers: getHeaders(),
   }, false);
 };
 

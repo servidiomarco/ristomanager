@@ -9,10 +9,10 @@ import { BillSheet } from './pagamenti/BillSheet';
 import { BillFigures, billStateLabel } from './prenotazione/BillFigures';
 import { PaymentRequestRow } from './prenotazione/PaymentRequestRow';
 import { MessaggiPanel } from './prenotazione/MessaggiPanel';
-import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, RoomClosedOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill, NoteSelection } from '../types';
+import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, RoomClosedOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill, NoteSelection, TableAssignmentSuggestion } from '../types';
 import { Banknote, Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, ListFilter, Map as MapIcon, List, MessageCircle, Mail, Armchair, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, sendReservationReminder, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap } from '../services/apiService';
+import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, sendReservationReminder, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap, getTableAssignmentSuggestions, confirmTableAssignmentSuggestion, dismissTableAssignmentSuggestion } from '../services/apiService';
 import { billsApiService, printBill } from '../services/billsApiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { CookingPotLoader } from './CookingPotLoader';
@@ -1222,6 +1222,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [hiddenTableIds, setHiddenTableIds] = useState<Set<number>>(new Set());
   const [showHidden, setShowHidden] = useState(false);
 
+  // Proposte AI di assegnazione tavolo (card dev board #26): poche per
+  // natura (una per prenotazione senza tavolo), quindi si caricano tutte le
+  // pendenti del tenant una volta e si tengono aggiornate via socket, senza
+  // legarle al focalDate/focalShift del form (che con selectedShift='ALL'
+  // coprirebbe solo metà servizio).
+  const [tableAssignmentSuggestions, setTableAssignmentSuggestions] = useState<Map<number, TableAssignmentSuggestion>>(new Map());
+
   const focalDate = isFormOpen && formData.reservation_time
     ? formData.reservation_time.split('T')[0]
     : selectedDate.split('T')[0];
@@ -1443,6 +1450,65 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       socket.off('roomClosed:deleted', onDeleted);
     };
   }, [socket, focalDate, focalShift]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getTableAssignmentSuggestions()
+      .then(rows => {
+        if (cancelled) return;
+        setTableAssignmentSuggestions(new Map(rows.map(s => [s.reservation_id, s])));
+      })
+      .catch(err => console.error('Error fetching table assignment suggestions:', err));
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!socket) return;
+    const onCreated = (s: TableAssignmentSuggestion) => {
+      setTableAssignmentSuggestions(prev => new Map(prev).set(s.reservation_id, s));
+    };
+    const onResolved = (s: TableAssignmentSuggestion) => {
+      setTableAssignmentSuggestions(prev => {
+        if (prev.get(s.reservation_id)?.id !== s.id) return prev;
+        const next = new Map(prev);
+        next.delete(s.reservation_id);
+        return next;
+      });
+    };
+    socket.on('tableAssignmentSuggestion:created', onCreated);
+    socket.on('tableAssignmentSuggestion:resolved', onResolved);
+    return () => {
+      socket.off('tableAssignmentSuggestion:created', onCreated);
+      socket.off('tableAssignmentSuggestion:resolved', onResolved);
+    };
+  }, [socket]);
+
+  const handleConfirmTableSuggestion = async (suggestion: TableAssignmentSuggestion) => {
+    try {
+      const { reservation } = await confirmTableAssignmentSuggestion(suggestion.id);
+      setTableAssignmentSuggestions(prev => {
+        const next = new Map(prev);
+        next.delete(suggestion.reservation_id);
+        return next;
+      });
+      showToast(`Tavolo ${suggestion.table_name || ''} assegnato a ${toTitleCase(reservation.customer_name)}`, 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Impossibile confermare il tavolo suggerito', 'error');
+    }
+  };
+
+  const handleDismissTableSuggestion = async (suggestion: TableAssignmentSuggestion) => {
+    setTableAssignmentSuggestions(prev => {
+      const next = new Map(prev);
+      next.delete(suggestion.reservation_id);
+      return next;
+    });
+    try {
+      await dismissTableAssignmentSuggestion(suggestion.id);
+    } catch (err: any) {
+      showToast(err?.message || 'Impossibile ignorare il suggerimento', 'error');
+    }
+  };
 
   const displayTables = useMemo(
     () => applyMerges(tables, tableMerges),
@@ -3275,9 +3341,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const preferredMatch = res.customer_preferred_table_id != null && res.customer_preferred_table_id === res.table_id;
     const preferredMissed = res.customer_preferred_table_id != null && res.customer_preferred_table_id !== res.table_id;
     const dietary = parseDietary(res.notes, allergenPresets);
+    // Solo se il tavolo è ancora libero: appena qualcuno lo assegna (a mano o
+    // confermando questa stessa proposta) res.table_id smette di essere
+    // null e il chip sparisce da solo, senza bisogno di un evento dedicato.
+    const tableSuggestion = res.table_id == null ? tableAssignmentSuggestions.get(res.id) : undefined;
     // The third line only exists when something needs it — an empty flex row
     // still costs its gap, and most bookings carry none of these.
-    const hasWideAttributes = !!turno || preferredMatch || preferredMissed
+    const hasWideAttributes = !!turno || preferredMatch || preferredMissed || !!tableSuggestion
       || dietary.allergies.length > 0 || dietary.intolerances.length > 0;
 
     // One set of glyphs, rendered in two spots: beside the name on ≥sm, on
@@ -3384,6 +3454,30 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 {preferredMissed && (
                   <StatusPill tone="pending" title={`Preferito: ${res.customer_preferred_table_name || ''}`}>
                     <Armchair className="h-3 w-3 flex-shrink-0" aria-hidden /> Preferito non disponibile
+                  </StatusPill>
+                )}
+                {tableSuggestion && (
+                  <StatusPill tone="info" title={tableSuggestion.summary} className="pr-1">
+                    <Wand2 className="h-3 w-3 flex-shrink-0" aria-hidden />
+                    Tavolo {tableSuggestion.table_name || tableSuggestion.table_id}
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); handleConfirmTableSuggestion(tableSuggestion); }}
+                      className="flex h-5 w-5 items-center justify-center rounded-full hover:bg-black/10 dark:hover:bg-white/10"
+                      title="Conferma tavolo suggerito"
+                      aria-label="Conferma tavolo suggerito"
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); handleDismissTableSuggestion(tableSuggestion); }}
+                      className="flex h-5 w-5 items-center justify-center rounded-full hover:bg-black/10 dark:hover:bg-white/10"
+                      title="Ignora suggerimento"
+                      aria-label="Ignora suggerimento"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
                   </StatusPill>
                 )}
               </div>
