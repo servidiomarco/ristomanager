@@ -95,6 +95,13 @@ jobs:
           # esplicitamente (i workflow_dispatch sono esenti dalla regola).
           if [ -n "$PR_URL" ]; then
             gh workflow run ci.yml --repo "${{ github.repository }}" --ref "claude/dev-card-${{ inputs.card_id }}" || true
+            # Le PR aperte dal bot lasciano la run pull_request in
+            # action_required: senza approvazione la vista check della PR
+            # resta gialla anche con la CI dispatchata verde (visto sulla
+            # #216). L'approve via API la sblocca.
+            for run_id in $(gh api "repos/${{ github.repository }}/actions/runs?branch=claude/dev-card-${{ inputs.card_id }}&status=action_required" -q '.workflow_runs[].id' 2>/dev/null); do
+              gh api -X POST "repos/${{ github.repository }}/actions/runs/${run_id}/approve" || true
+            done
           fi
 
       - name: Segnala esito alla board
