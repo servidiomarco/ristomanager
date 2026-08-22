@@ -117,8 +117,11 @@ jobs:
             STATUS=done
             NOTE="PR aperta: ${{ steps.pr.outputs.url }}"
           elif [ "${{ job.status }}" = "success" ]; then
-            STATUS=done
-            NOTE="Completato senza PR (vedi log della run)."
+            # Il 22/08 due run sono morte in 25 secondi senza branch né PR e le
+            # card sono finite su "Fatto": un job verde NON è lavoro consegnato.
+            # Senza PR la card resta in mano all'umano, mai marcata done.
+            STATUS=failed
+            NOTE="Chiusa senza PR: nessun lavoro consegnato (vedi log della run)."
           else
             STATUS=failed
             # L'action non stampa il transcript nel log: l'unico posto dove
