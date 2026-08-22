@@ -499,6 +499,18 @@ export interface OutboundMessage {
   error_message: string | null;
 }
 
+// Reminder manuale della prenotazione: WhatsApp col template approvato,
+// SMS finché non lo è (decide il server). Ritorna il canale usato davvero.
+export const sendReservationReminder = async (
+  reservationId: number
+): Promise<{ ok: true; channel: 'whatsapp' | 'sms' }> => {
+  return apiRequest(`${API_URL}/reservations/${reservationId}/send-reminder`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({}),
+  });
+};
+
 export const getReservationMessages = async (reservationId: number): Promise<OutboundMessage[]> => {
   const response = await apiRequest<{ items: OutboundMessage[] }>(
     `${API_URL}/reservations/${reservationId}/messages`,

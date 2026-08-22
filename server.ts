@@ -2328,7 +2328,8 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
         // and without a race with concurrent updates.
         const result = await queryWithRetry(
             `WITH old AS (
-                SELECT reservation_status AS prev_status, table_id AS prev_table_id
+                SELECT reservation_status AS prev_status, table_id AS prev_table_id,
+                       reservation_time AS prev_reservation_time, guests AS prev_guests
                 FROM reservations WHERE id = $14 AND tenant_id = $18
             ), upd AS (
                 UPDATE reservations
@@ -2342,6 +2343,8 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             )
             SELECT upd.*, u.full_name AS created_by_user_name, (SELECT prev_status FROM old) AS prev_status,
                    (SELECT prev_table_id FROM old) AS prev_table_id,
+                   (SELECT prev_reservation_time FROM old) AS prev_reservation_time,
+                   (SELECT prev_guests FROM old) AS prev_guests,
                    c.is_vip AS customer_is_vip,
                    c.preferred_table_id AS customer_preferred_table_id,
                    pt.name AS customer_preferred_table_name,
@@ -2523,6 +2526,49 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             }).catch(err => console.error('Auto-decline send failed:', err));
         }
 
+        // Avviso di modifica: una prenotazione GIÀ confermata che cambia ora
+        // o coperti va comunicata subito — il cliente non deve scoprirlo al
+        // tavolo. Solo su transizione CONFIRMED→CONFIRMED (il passaggio da
+        // PENDING ha già la sua conferma qui sopra); WhatsApp col template
+        // approvato (TWILIO_WA_CONTENT_SID_BOOKING_UPDATED), SMS finché non
+        // c'è. recordConfirmation: false — l'esito non deve sovrascrivere lo
+        // stato di consegna della conferma sulla card.
+        if (
+            previousStatus === 'CONFIRMED' &&
+            (reservation_status ?? 'CONFIRMED') === 'CONFIRMED' &&
+            updatedReservation?.phone
+        ) {
+            const prevTime = updatedReservation?.prev_reservation_time
+                ? new Date(updatedReservation.prev_reservation_time).getTime()
+                : null;
+            const nextTime = updatedReservation?.reservation_time
+                ? new Date(updatedReservation.reservation_time).getTime()
+                : null;
+            const prevGuests = updatedReservation?.prev_guests != null ? Number(updatedReservation.prev_guests) : null;
+            const timeChanged = prevTime != null && nextTime != null && prevTime !== nextTime;
+            const guestsChanged = prevGuests != null && Number(updatedReservation.guests) !== prevGuests;
+            if (timeChanged || guestsChanged) {
+                sendBookingConfirmation(
+                    req.tenantId!,
+                    updatedReservation.phone,
+                    buildUpdateMessage(
+                        updatedReservation.customer_name,
+                        updatedReservation.reservation_time,
+                        updatedReservation.guests
+                    ),
+                    updatedReservation.id,
+                    {
+                        whatsappTemplate: buildBookingUpdatedTemplate(
+                            updatedReservation.customer_name,
+                            updatedReservation.reservation_time,
+                            updatedReservation.guests
+                        ),
+                        recordConfirmation: false,
+                    }
+                ).catch(err => console.error('Avviso modifica prenotazione fallito:', err));
+            }
+        }
+
         res.json(updatedReservation);
     } catch (err: any) {
         console.error('PUT /reservations/:id error:', err);
@@ -2533,6 +2579,54 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             code: err?.code,
             constraint: err?.constraint,
         });
+    }
+});
+
+// Reminder manuale dal tab Comunicazione del modal. WhatsApp col template
+// approvato, SMS finché TWILIO_WA_CONTENT_SID_BOOKING_REMINDER non è
+// impostata. Marca reminder_sent e broadcast, così la card lo racconta.
+app.post('/reservations/:id/send-reminder', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        const r = await queryWithRetry(
+            `SELECT r.*, ro.name AS room_name
+               FROM reservations r
+               LEFT JOIN tables t ON t.id = r.table_id AND t.tenant_id = r.tenant_id
+               LEFT JOIN rooms ro ON ro.id = t.room_id AND ro.tenant_id = t.tenant_id
+              WHERE r.id = $1 AND r.tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        const resv = r.rows[0];
+        if (!resv) return res.status(404).json({ error: 'Prenotazione non trovata' });
+        if (!resv.phone) return res.status(400).json({ error: 'no_phone', message: 'La prenotazione non ha un numero di telefono.' });
+        // Un reminder per una prenotazione morta è solo confusione per il cliente.
+        if (['CANCELLED', 'DECLINED', 'NO_SHOW'].includes(resv.reservation_status)) {
+            return res.status(409).json({ error: 'invalid_status', message: `La prenotazione è ${resv.reservation_status}: niente reminder.` });
+        }
+
+        const sendResult = await sendBookingConfirmation(
+            req.tenantId!,
+            resv.phone,
+            buildReminderMessage(resv.customer_name, resv.reservation_time, resv.guests, resv.room_name),
+            id,
+            {
+                whatsappTemplate: buildBookingReminderTemplate(resv.customer_name, resv.reservation_time, resv.guests),
+                recordConfirmation: false,
+            }
+        );
+
+        const upd = await queryWithRetry(
+            `UPDATE reservations SET reminder_sent = true WHERE id = $1 AND tenant_id = $2 RETURNING *`,
+            [id, req.tenantId!]
+        );
+        if (upd.rows[0] && socketService) {
+            try { socketService.broadcastReservationUpdated(req.tenantId!, upd.rows[0]); } catch (_) {}
+        }
+        res.json({ ok: true, channel: sendResult.channel });
+    } catch (err: any) {
+        console.error('POST /reservations/:id/send-reminder error:', err);
+        res.status(502).json({ error: 'send_failed', message: err?.message || 'Invio non riuscito' });
     }
 });
 
@@ -12450,6 +12544,41 @@ function buildDeclineMessage(
     return `${greeting} non ci e' stato possibile confermare la tua richiesta di prenotazione per ${guestsNum} ${persone} il ${dateLabel} alle ${timeLabel}. Chiamaci al numero ${businessIdentity().phone} per verificare un'altra data/orario. Grazie e a presto!`;
 }
 
+// Reminder della prenotazione — inviato a mano dal tab Comunicazione del
+// modal ("Invia reminder"). Stesso dispatcher delle conferme: WhatsApp col
+// template approvato quando TWILIO_WA_CONTENT_SID_BOOKING_REMINDER è
+// impostata, SMS finché non lo è.
+function buildReminderMessage(
+    customerName: string | null | undefined,
+    reservationTime: string | Date,
+    guests: number | null | undefined,
+    roomName?: string | null
+): string {
+    const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
+    const fullName = toTitleCase(customerName);
+    const greeting = fullName ? `Ciao ${fullName}!` : 'Ciao!';
+    const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
+    const persone = guestsNum === 1 ? 'persona' : 'persone';
+    const roomPart = roomName ? ` (${roomName})` : '';
+    return `${greeting} Ti aspettiamo ${dateLabel} alle ${timeLabel}: tavolo per ${guestsNum} ${persone}${roomPart} da ${businessIdentity().name}. Per modifiche o imprevisti chiamaci al ${businessIdentity().phone} — sistemiamo tutto noi. A presto!`;
+}
+
+// Avviso di modifica — parte da solo quando ora o coperti di una
+// prenotazione CONFERMATA cambiano (PUT /reservations/:id): il cliente deve
+// saperlo subito, non scoprirlo al tavolo.
+function buildUpdateMessage(
+    customerName: string | null | undefined,
+    reservationTime: string | Date,
+    guests: number | null | undefined
+): string {
+    const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
+    const fullName = toTitleCase(customerName);
+    const greeting = fullName ? `Ciao ${fullName},` : 'Ciao,';
+    const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
+    const persone = guestsNum === 1 ? 'persona' : 'persone';
+    return `${greeting} la tua prenotazione da ${businessIdentity().name} è stata aggiornata: ${guestsNum} ${persone}, ${dateLabel} alle ${timeLabel}. Se qualcosa non torna chiamaci al ${businessIdentity().phone}. A presto!`;
+}
+
 // Template builders for the approved Twilio WA content templates. Each returns
 // undefined when the corresponding TWILIO_WA_CONTENT_SID_* env var is not set —
 // sendBookingConfirmation then falls back to SMS. Room name is intentionally
@@ -12470,6 +12599,46 @@ function buildBookingConfirmedTemplate(
     guests: number | null | undefined
 ): WhatsAppTemplateOpts | undefined {
     const contentSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_CONFIRMED;
+    if (!contentSid) return undefined;
+    const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
+    return {
+        contentSid,
+        contentVariables: {
+            '1': templateName(customerName),
+            '2': templateGuestsLabel(guests),
+            '3': dateLabel,
+            '4': timeLabel,
+        },
+    };
+}
+// Reminder e avviso di modifica: stesse quattro variabili degli altri
+// template ({{1}} nome, {{2}} ospiti, {{3}} data, {{4}} ora). Finché le SID
+// non sono impostate (template in approvazione da Meta) i builder tornano
+// undefined e sendBookingConfirmation scende su SMS da sola.
+function buildBookingReminderTemplate(
+    customerName: string | null | undefined,
+    reservationTime: string | Date,
+    guests: number | null | undefined
+): WhatsAppTemplateOpts | undefined {
+    const contentSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_REMINDER;
+    if (!contentSid) return undefined;
+    const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
+    return {
+        contentSid,
+        contentVariables: {
+            '1': templateName(customerName),
+            '2': templateGuestsLabel(guests),
+            '3': dateLabel,
+            '4': timeLabel,
+        },
+    };
+}
+function buildBookingUpdatedTemplate(
+    customerName: string | null | undefined,
+    reservationTime: string | Date,
+    guests: number | null | undefined
+): WhatsAppTemplateOpts | undefined {
+    const contentSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_UPDATED;
     if (!contentSid) return undefined;
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     return {
@@ -13598,7 +13767,10 @@ async function sendBookingConfirmation(
     // usa dispatchBookingNotification, dove il fallback è governato dalla
     // policy del tenant e non deve avvenire due volte. Senza forceChannel il
     // comportamento resta quello storico per tutti gli altri chiamanti.
-    opts?: { whatsappTemplate?: WhatsAppTemplateOpts; forceChannel?: 'whatsapp' | 'sms' }
+    // recordConfirmation: false per reminder e avvisi di modifica — il loro
+    // esito di consegna NON deve sovrascrivere confirmation_status, che
+    // sulla card racconta la sorte della CONFERMA.
+    opts?: { whatsappTemplate?: WhatsAppTemplateOpts; forceChannel?: 'whatsapp' | 'sms'; recordConfirmation?: boolean }
 ): Promise<OutboundConfirmationResult> {
     const template = opts?.whatsappTemplate;
     const force = opts?.forceChannel;
@@ -13619,7 +13791,7 @@ async function sendBookingConfirmation(
             throw err;
         }
     }
-    if (reservationId != null) {
+    if (reservationId != null && opts?.recordConfirmation !== false) {
         recordConfirmationSent(tenantId, reservationId, result).catch(err =>
             console.warn('[confirmation] recordConfirmationSent failed:', err?.message || err)
         );

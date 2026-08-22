@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Loader2, Mail, Send } from 'lucide-react';
+import { BellRing, Loader2, Mail, Send } from 'lucide-react';
 import type { OutboundMessage } from '../../services/apiService';
 import { EmptyState, StatusPill } from '../ds';
 import type { PillTone } from '../ds';
@@ -52,7 +52,11 @@ export const MessaggiPanel: React.FC<{
   email?: string | null;
   onNewEmail: () => void;
   onSendConfirmation: () => void;
-}> = ({ messages, loading, phone, email, onNewEmail, onSendConfirmation }) => {
+  /** Reminder manuale (WhatsApp col template, SMS finché non è approvato). */
+  onSendReminder: () => void;
+  reminderSending?: boolean;
+  reminderSent?: boolean;
+}> = ({ messages, loading, phone, email, onNewEmail, onSendConfirmation, onSendReminder, reminderSending, reminderSent }) => {
   const [filter, setFilter] = useState<Filter>('all');
 
   const counts = useMemo(() => {
@@ -102,6 +106,22 @@ export const MessaggiPanel: React.FC<{
                 className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 <Mail className="h-3.5 w-3.5" aria-hidden /> Nuova email
+              </button>
+            )}
+            {phone && (
+              <button
+                type="button"
+                onClick={onSendReminder}
+                disabled={reminderSending}
+                title={reminderSent
+                  ? 'Reminder già inviato — un nuovo invio lo ripete'
+                  : 'Ricorda la prenotazione al cliente (WhatsApp, o SMS finché il template non è approvato)'}
+                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              >
+                {reminderSending
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                  : <BellRing className="h-3.5 w-3.5" aria-hidden />}
+                {reminderSent ? 'Reinvia reminder' : 'Invia reminder'}
               </button>
             )}
             <button
