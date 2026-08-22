@@ -16584,7 +16584,7 @@ app.post('/table-assignment-suggestions/:id/confirm', authenticate, requirePermi
         }
 
         const updRes = await client.query(
-            `UPDATE reservations SET table_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND tenant_id = $3 RETURNING *`,
+            `UPDATE reservations SET table_id = $1 WHERE id = $2 AND tenant_id = $3 RETURNING *`,
             [suggestion.table_id, reservation.id, req.tenantId!]
         );
         const updatedReservation = updRes.rows[0];
