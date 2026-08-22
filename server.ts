@@ -22145,7 +22145,11 @@ const printAgentAuth = async (req: any, res: any, next: any) => {
         // Alias tenant 1 finché gli agent non sono riconfigurati col token a DB.
         req.printAgentTenantId = PUBLIC_TENANT_ID;
         printAgentLastSeen = Date.now();
-        return next();
+        // next() DENTRO il contesto tenant: con app.rls_strict acceso una
+        // query fuori contesto vede zero righe — l'agente pollerebbe per
+        // sempre una coda che a DB è piena (successo il 21/08, due giorni
+        // di preconti mai usciti senza un errore da nessuna parte).
+        return runWithTenantContext(req.printAgentTenantId, () => next());
     }
     const tenantId = await resolveTenantByTokenColumn('print_agent_token', provided);
     if (tenantId == null) {
@@ -22153,7 +22157,7 @@ const printAgentAuth = async (req: any, res: any, next: any) => {
     }
     req.printAgentTenantId = tenantId;
     printAgentLastSeen = Date.now();
-    next();
+    return runWithTenantContext(req.printAgentTenantId, () => next());
 };
 
 app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (req, res) => {
