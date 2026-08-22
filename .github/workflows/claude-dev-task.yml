@@ -33,7 +33,9 @@ env:
 jobs:
   claude:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 90 e non 45: la card #26 (feature grande) ha bruciato 80 turni senza
+    # arrivare in fondo; i limiti stretti qui costano run intere, non risparmi.
+    timeout-minutes: 90
     permissions:
       contents: write
       pull-requests: write
@@ -70,17 +72,21 @@ jobs:
             DETTAGLI: ${{ inputs.description }}
 
             Implementa il task. Poi:
-            1. Crea il branch claude/dev-card-${{ inputs.card_id }} e committa lì.
+            1. Crea SUBITO il branch claude/dev-card-${{ inputs.card_id }} e
+               committa e pusha man mano che procedi, non solo alla fine: se la
+               run si interrompe, il lavoro parziale deve sopravvivere sul remoto.
             2. Verifica che `npm run build:server` e `npm run build` passino.
             3. Apri una pull request verso main con titolo in italiano che riprende
                la card, e nel body cita "Card dev board #${{ inputs.card_id }}".
             Non fare push su main. Se il task non è realizzabile, spiega perché
-            nel log e non aprire la PR.
+            nel log e non aprire la PR. Se il task è troppo grande per una run,
+            consegna un primo pezzo coerente e funzionante (con PR) piuttosto
+            che niente.
           # Senza allowlist l'action nega Bash a Claude: al collaudo del 21/08
           # ha chiuso "success" con 8 permessi negati e nessun branch/PR. Il
           # runner è effimero e isolato: Bash pieno qui è il costo d'ingresso
           # perché git/npm/gh funzionino.
-          claude_args: '--max-turns 80 --allowedTools "Bash,Edit,MultiEdit,Write,Read,Glob,Grep,TodoWrite,WebFetch"'
+          claude_args: '--max-turns 200 --allowedTools "Bash,Edit,MultiEdit,Write,Read,Glob,Grep,TodoWrite,WebFetch"'
 
       - name: Trova la PR aperta da Claude
         id: pr
