@@ -2,767 +2,1426 @@
 <html lang="it">
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#78350f" />
-    <title>Prenota un tavolo · Il Vecchio Frantoio</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#17171a" id="themeColorMeta" />
+    <title>Prenota un tavolo</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&family=Cormorant+Garamond:wght@500;600&display=swap" rel="stylesheet">
     <style>
-        body {
-            -webkit-font-smoothing: antialiased;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background-color: #fbf9f4;
-            background-image:
-                radial-gradient(1100px 550px at 100% -10%, rgba(180, 83, 9, 0.07), transparent 60%),
-                radial-gradient(900px 500px at 0% 15%, rgba(120, 53, 15, 0.05), transparent 60%);
-        }
-        .serif { font-family: 'Cormorant Garamond', Georgia, 'Times New Roman', serif; }
-        /* iOS Safari gives native date inputs an intrinsic min-width and a
-           centered value, so the field ignores width:100% and spills past the
-           viewport edge on mobile. Reset the appearance and let it shrink. */
-        input[type="date"] {
-            -webkit-appearance: none;
-            appearance: none;
-            min-width: 0;
-        }
-        input[type="date"]::-webkit-date-and-time-value {
-            text-align: left;
-            min-width: 0;
-        }
-        .hp { position: absolute; left: -9999px; top: -9999px; height: 0; width: 0; opacity: 0; pointer-events: none; }
-        @keyframes pop { 0% { transform: scale(0.95); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
-        .slot-chip { animation: pop 0.15s ease-out; }
-        /* Ornament rule used to frame the hero eyebrow line. */
-        .rule { height: 1px; width: 2rem; background: linear-gradient(to right, transparent, #d6cfc0, transparent); }
+/* ===========================================================================
+   Pagina prenotazioni — design system pubblico
+   ---------------------------------------------------------------------------
+   Questa pagina non carica index.css: è servita dal backend, l'app sta su un
+   altro dominio e su un altro bundle. I token --ds-* qui sotto sono quindi
+   RICOPIATI da index.css, non importati. Se un valore cambia là, cambialo
+   anche qui — sono la stessa scala di colori, tenuta a mano in due posti.
+
+   I token --ds-public-* sono l'estensione consumer: quello che una pagina
+   letta da un cliente sul divano ha in più rispetto a una console letta in
+   sala. Sono ADDITIVI, non sovrascrivono nessun --ds-*.
+
+   La pagina è solo chiara, di proposito: il colore della testata lo sceglie
+   il ristorante e un tema scuro automatico glielo ribalterebbe sotto i piedi.
+   ========================================================================= */
+:root {
+    /* --- Da index.css (design system) --- */
+    --ds-surface: #ffffff;
+    --ds-surface-row: #f4f4f5;
+    --ds-border: #e9e9ec;
+    --ds-border-strong: #d4d4d8;
+    --ds-border-focus: #5250c9;
+
+    --ds-text-primary: #111113;
+    --ds-text-secondary: #52525b;
+    --ds-text-muted: #6f6f78;
+    --ds-text-subtle: #a1a1aa;
+
+    --ds-action-bg: #111827;
+    --ds-action-bg-hover: #000000;
+    --ds-action-fg: #ffffff;
+
+    --ds-seated-tint: #ecf5ef;
+    --ds-seated-text: #275238;
+    --ds-seated-solid: #316648;
+
+    /* L'oro di riferimento del sistema. Prende SEMPRE testo scuro (§3.3). */
+    --ds-pending-tint: #fbf4e6;
+    --ds-pending-text: #7a5807;
+    --ds-pending-solid: #b8860b;
+    --ds-pending-fg: #111113;
+
+    --ds-critical-tint: #fceeeb;
+    --ds-critical-text: #82251b;
+    --ds-critical-solid: #c0392b;
+
+    --ds-shadow-card: 0 1px 2px rgba(16, 17, 25, 0.04), 0 8px 24px rgba(16, 17, 25, 0.05);
+    --ds-shadow-raised: 0 4px 8px rgba(16, 17, 25, 0.06), 0 20px 48px rgba(16, 17, 25, 0.10);
+
+    --radius-md: 0.5rem;
+    --radius-lg: 0.75rem;
+    --radius-xl: 1rem;
+    --radius-2xl: 1.25rem;
+
+    /* --- Estensione pubblica --- */
+    /* Più calda di --ds-canvas: questa è una sala da pranzo, non una console. */
+    --ds-public-canvas: #f7f4ec;
+    --ds-public-canvas-sunk: #efeade;
+
+    /* Testata: il ristorante ne cambia il colore dalle impostazioni. Il primo
+       piano lo calcola il JS sulla luminanza, così una testata chiara non
+       resta bianco-su-crema. */
+    --ds-public-header-bg: #17171a;
+    --ds-public-header-fg: #ffffff;
+    --ds-public-header-fg-muted: rgba(255, 255, 255, 0.64);
+    --ds-public-header-line: rgba(255, 255, 255, 0.16);
+    --ds-public-header-pill: rgba(255, 255, 255, 0.10);
+
+    --ds-public-font: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --ds-public-wordmark: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+    margin: 0;
+    font-family: var(--ds-public-font);
+    font-size: 15px;
+    line-height: 1.5;
+    color: var(--ds-text-primary);
+    background: var(--ds-public-canvas);
+    -webkit-font-smoothing: antialiased;
+}
+
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; border: none; background: none; }
+button:disabled { cursor: not-allowed; }
+
+/* Focus visibile ovunque: la pagina si compila anche da tastiera (§4.4). */
+:focus-visible {
+    outline: 2px solid var(--ds-border-focus);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+.tnum { font-variant-numeric: tabular-nums; }
+.sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+[hidden] { display: none !important; }
+
+/* --- Testata ------------------------------------------------------------ */
+
+.header {
+    background: var(--ds-public-header-bg);
+    color: var(--ds-public-header-fg);
+    padding: 20px 20px 24px;
+    padding-top: max(20px, env(safe-area-inset-top));
+}
+.header__inner { max-width: 960px; margin: 0 auto; }
+.header__top {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap;
+}
+/* Il marchio resta cliccabile ma non è un link di testo: la sottolineatura
+   su un nome proprio lo fa sembrare una nota a piè di pagina. */
+.header__brand {
+    display: flex; align-items: baseline; gap: 12px; min-width: 0;
+    text-decoration: none; color: inherit;
+}
+.header__logo { height: 40px; width: auto; max-width: 220px; display: block; }
+.header__name {
+    font-family: var(--ds-public-wordmark);
+    font-size: 26px; font-weight: 600; letter-spacing: 0.01em;
+    margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.header__tagline {
+    font-size: 13px; font-weight: 400; letter-spacing: 0.06em;
+    color: var(--ds-public-header-fg-muted);
+}
+.header__links { display: flex; gap: 8px; flex-wrap: wrap; }
+.header__pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    min-height: 36px; padding: 0 14px;
+    border-radius: 999px;
+    background: var(--ds-public-header-pill);
+    border: 1px solid var(--ds-public-header-line);
+    color: inherit; text-decoration: none;
+    font-size: 13px; font-weight: 500;
+    transition: background 0.15s ease;
+}
+.header__pill:hover { background: var(--ds-public-header-line); }
+.header__pill svg { width: 15px; height: 15px; flex-shrink: 0; }
+.header__title {
+    margin: 22px 0 0;
+    font-size: clamp(28px, 6vw, 40px);
+    font-weight: 700; letter-spacing: -0.02em; line-height: 1.1;
+}
+
+/* --- Impalcatura -------------------------------------------------------- */
+
+.page { max-width: 640px; margin: 0 auto; padding: 24px 16px 140px; }
+@media (min-width: 900px) { .page { padding-bottom: 64px; } }
+
+/* StepNav — portato da components/ds/StepNav.tsx, con l'oro al posto del
+   near-black: qui l'oro segna l'avanzamento e il near-black resta alle
+   azioni, così i due accenti non dicono mai la stessa cosa.
+   È la rotaia, non il numero, a portare il progresso a colpo d'occhio:
+   piena dietro di te, vuota davanti. */
+.stepnav { display: flex; gap: 12px; margin-bottom: 22px; }
+.stepnav__item {
+    flex: 1; min-width: 0; padding: 0;
+    display: flex; flex-direction: column; gap: 7px; text-align: left;
+}
+.stepnav__item:disabled { cursor: not-allowed; }
+.stepnav__rail { height: 2px; width: 100%; border-radius: 999px; background: var(--ds-border); }
+.stepnav__item--current .stepnav__rail { background: var(--ds-pending-solid); }
+.stepnav__item--done .stepnav__rail { background: var(--ds-action-bg); }
+.stepnav__row { display: flex; align-items: center; gap: 7px; min-width: 0; }
+/* Niente pallini, niente glifi: il segno prende lo stesso colore della sua
+   rotaia, e l'oro finisce per voler dire una cosa sola — "sei qui". Il passo
+   fatto vira all'inchiostro e guadagna la spunta, così una rotaia piena non
+   si può leggere come "passo 1 finito". */
+.stepnav__mark {
+    min-width: 12px; flex-shrink: 0;
+    display: inline-flex; align-items: center;
+    font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums;
+    color: var(--ds-text-subtle);
+}
+.stepnav__mark svg { width: 13px; height: 13px; }
+.stepnav__item--current .stepnav__mark { color: var(--ds-pending-text); }
+.stepnav__item--done .stepnav__mark { color: var(--ds-action-bg); }
+.stepnav__label {
+    font-size: 14px; color: var(--ds-text-muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.stepnav__item--current .stepnav__label,
+.stepnav__item--done .stepnav__label { font-weight: 600; color: var(--ds-text-primary); }
+.stepnav__item:disabled .stepnav__label { color: var(--ds-text-subtle); }
+
+/* StepArrow (§7.1): indietro all'estrema sinistra del piede, senza etichetta.
+   Fondo incassato, non bianco — il piede sta già sulla propria superficie. */
+.steparrow {
+    width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;
+    background: var(--ds-surface); color: var(--ds-text-primary);
+    border: 1px solid var(--ds-border);
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s ease;
+}
+.steparrow:hover { background: var(--ds-surface-row); }
+.steparrow svg { width: 18px; height: 18px; }
+
+.card {
+    background: var(--ds-surface);
+    border: 1px solid var(--ds-border);
+    border-radius: var(--radius-2xl);
+    box-shadow: var(--ds-shadow-card);
+    margin-bottom: 14px;
+}
+.card__body { padding: 18px; }
+.card__title { font-size: 15px; font-weight: 600; margin: 0 0 2px; }
+.card__hint { font-size: 13px; color: var(--ds-text-muted); margin: 0 0 14px; }
+
+
+/* --- Fisarmonica quanti / quando ---------------------------------------- */
+
+.accordion {
+    background: var(--ds-surface);
+    border: 1px solid var(--ds-border);
+    border-radius: var(--radius-2xl);
+    box-shadow: var(--ds-shadow-card);
+    margin-bottom: 14px;
+    overflow: hidden;
+}
+.accordion__tabs { display: grid; grid-template-columns: 1fr 1fr; }
+.accordion__tab {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; text-align: left;
+    padding: 12px 16px; min-height: 64px;
+    border-bottom: 1px solid var(--ds-border);
+    transition: background 0.15s ease;
+}
+.accordion__tab + .accordion__tab { border-left: 1px solid var(--ds-border); }
+.accordion__tab:hover { background: var(--ds-surface-row); }
+.accordion__tab[aria-expanded="true"] { background: var(--ds-surface); }
+.accordion__tab[aria-expanded="true"] + .accordion__tab,
+.accordion__tab[aria-expanded="false"]:not(:has(+ .accordion__tab[aria-expanded="true"])) { }
+.accordion__tab-text { min-width: 0; }
+.accordion__tab-label { display: block; font-size: 12px; color: var(--ds-text-muted); }
+.accordion__tab-value {
+    display: block; font-size: 16px; font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.accordion__chevron {
+    width: 18px; height: 18px; flex-shrink: 0; color: var(--ds-text-subtle);
+    transition: transform 0.2s ease;
+}
+.accordion__tab[aria-expanded="true"] .accordion__chevron { transform: rotate(180deg); }
+.accordion__panel { padding: 18px; }
+
+/* --- Contatore persone -------------------------------------------------- */
+
+.stepper-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 12px 0;
+}
+.stepper-row + .stepper-row { border-top: 1px solid var(--ds-border); }
+.stepper-row__label { font-size: 15px; font-weight: 600; margin: 0; }
+.stepper-row__hint { font-size: 13px; color: var(--ds-text-muted); margin: 2px 0 0; }
+/* Stepper — portato da components/ds/FormPrimitives.tsx. L'incremento porta
+   il pieno solido e il decremento resta quieto: si aggiungono coperti molto
+   più spesso di quanti se ne tolgano. Il valore è un campo scrivibile, non
+   un'etichetta: digitare "14" batte quattordici tocchi sul +. */
+.stepper { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.stepper__btn {
+    width: 44px; height: 44px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; font-weight: 500; line-height: 1;
+    transition: background 0.15s ease;
+}
+.stepper__btn--minus { background: var(--ds-surface-row); color: var(--ds-text-primary); }
+.stepper__btn--minus:hover:not(:disabled) { background: var(--ds-border); }
+.stepper__btn--plus { background: var(--ds-action-bg); color: var(--ds-action-fg); }
+.stepper__btn--plus:hover:not(:disabled) { background: var(--ds-action-bg-hover); }
+.stepper__btn:disabled { opacity: 0.4; }
+.stepper__input {
+    height: 44px; width: 58px; padding: 0 4px; border: none;
+    border-radius: 999px; background: var(--ds-surface-row);
+    text-align: center; font-size: 17px; font-weight: 600;
+    font-variant-numeric: tabular-nums; color: var(--ds-text-primary);
+    -moz-appearance: textfield; appearance: textfield;
+}
+.stepper__input::-webkit-outer-spin-button,
+.stepper__input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.stepper__input:focus { outline: none; box-shadow: 0 0 0 2px var(--ds-border-focus); }
+
+/* --- Avviso caparra ----------------------------------------------------- */
+
+.notice {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 14px; flex-wrap: wrap;
+    margin-top: 14px; padding: 14px 16px;
+    border-radius: var(--radius-lg);
+    background: var(--ds-pending-tint);
+    border: 1px solid rgba(184, 134, 11, 0.24);
+}
+.notice__title { font-size: 15px; font-weight: 600; color: var(--ds-pending-text); margin: 0; }
+.notice__text { font-size: 13px; color: var(--ds-pending-text); margin: 2px 0 0; }
+.notice__link { font-size: 13px; font-weight: 500; color: var(--ds-pending-text); white-space: nowrap; }
+
+/* --- Selettore data ----------------------------------------------------- */
+
+.daystrip { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+.day {
+    flex: 0 0 auto;
+    min-width: 62px; min-height: 68px; padding: 8px 6px;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--ds-border);
+    background: var(--ds-surface);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+.day:hover:not(:disabled) { border-color: var(--ds-border-strong); }
+.day__dow { font-size: 12px; color: var(--ds-text-muted); }
+.day__num { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.day__dot { width: 5px; height: 5px; border-radius: 50%; background: var(--ds-seated-solid); }
+.day--busy .day__dot { background: var(--ds-pending-solid); }
+.day[aria-pressed="true"] {
+    background: var(--ds-action-bg); border-color: var(--ds-action-bg); color: var(--ds-action-fg);
+}
+.day[aria-pressed="true"] .day__dow { color: rgba(255, 255, 255, 0.7); }
+.day:disabled { opacity: 0.4; background: var(--ds-surface-row); }
+.day:disabled .day__num { text-decoration: line-through; }
+.day:disabled .day__dot { visibility: hidden; }
+
+.cal__head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-bottom: 12px;
+}
+.cal__nav { display: flex; align-items: center; gap: 8px; }
+.cal__month { font-size: 16px; font-weight: 600; min-width: 132px; text-align: center; }
+.cal__arrow {
+    width: 36px; height: 36px; border-radius: 50%;
+    border: 1px solid var(--ds-border-strong); background: var(--ds-surface);
+    display: flex; align-items: center; justify-content: center; color: var(--ds-text-secondary);
+}
+.cal__arrow:disabled { opacity: 0.35; }
+.cal__grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal__dow {
+    text-align: center; font-size: 12px; color: var(--ds-text-muted);
+    padding-bottom: 6px;
+}
+.cal__cell {
+    aspect-ratio: 1; min-height: 44px;
+    border-radius: var(--radius-md);
+    border: 1px solid transparent;
+    background: var(--ds-surface-row);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    font-variant-numeric: tabular-nums;
+}
+.cal__cell--open { background: var(--ds-surface); border-color: var(--ds-border); }
+.cal__cell--busy { background: var(--ds-surface); border-color: var(--ds-border); }
+.cal__cell:hover:not(:disabled) { border-color: var(--ds-border-strong); }
+.cal__cell[aria-pressed="true"] {
+    background: var(--ds-action-bg); border-color: var(--ds-action-bg); color: var(--ds-action-fg);
+}
+.cal__cell:disabled { color: var(--ds-text-subtle); }
+.cal__cell--empty { background: none; border: none; }
+.cal__num { font-size: 15px; font-weight: 500; }
+.cal__dot { width: 5px; height: 5px; border-radius: 50%; }
+.cal__cell--open .cal__dot { background: var(--ds-seated-solid); }
+.cal__cell--busy .cal__dot { background: var(--ds-pending-solid); }
+.cal__legend {
+    display: flex; flex-wrap: wrap; gap: 14px;
+    margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--ds-border);
+    font-size: 13px; color: var(--ds-text-muted);
+}
+.cal__legend span { display: inline-flex; align-items: center; gap: 6px; }
+.cal__key { width: 7px; height: 7px; border-radius: 50%; }
+.cal__foot {
+    margin-top: 10px; font-size: 13px; color: var(--ds-text-muted); text-align: right;
+}
+
+.linkbtn {
+    font-size: 13px; font-weight: 500; color: var(--ds-pending-text);
+    text-decoration: underline; text-underline-offset: 2px;
+    min-height: 36px; padding: 0 4px;
+}
+
+/* --- Sala --------------------------------------------------------------- */
+
+.rooms { display: flex; flex-wrap: wrap; gap: 8px; }
+.room {
+    flex: 1 1 auto; min-width: 128px;
+    min-height: 52px; padding: 0 18px;
+    border-radius: var(--radius-xl);
+    border: 1px solid var(--ds-border);
+    background: var(--ds-surface);
+    display: flex; align-items: center; justify-content: center; text-align: center;
+    font-size: 15px; font-weight: 600; color: var(--ds-text-secondary);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+}
+.room:hover:not(:disabled) { border-color: var(--ds-border-strong); }
+.room[aria-pressed="true"] {
+    border-color: var(--ds-action-bg);
+    box-shadow: inset 0 0 0 1px var(--ds-action-bg);
+    color: var(--ds-text-primary);
+}
+.room:disabled { opacity: 0.45; }
+/* Una riga sola sotto il gruppo, e solo quando c'è davvero da dire qualcosa:
+   il segnale "questa la conferma lo staff" deve restare, ma su ogni pillola
+   diventava rumore. */
+.rooms-note { margin: 10px 0 0; font-size: 13px; color: var(--ds-text-muted); }
+
+/* --- Turni e orari ------------------------------------------------------ */
+
+.shifts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+.shift {
+    padding: 12px; min-height: 60px; border-radius: var(--radius-lg);
+    border: 1px solid var(--ds-border); background: var(--ds-surface);
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+.shift:hover:not(:disabled) { background: var(--ds-surface-row); }
+.shift__name { display: block; font-size: 15px; font-weight: 600; }
+.shift__meta { display: block; font-size: 13px; color: var(--ds-text-muted); margin-top: 1px; }
+.shift[aria-pressed="true"] {
+    background: var(--ds-pending-tint); border-color: rgba(184, 134, 11, 0.4);
+}
+.shift[aria-pressed="true"] .shift__name { color: var(--ds-pending-text); }
+.shift[aria-pressed="true"] .shift__meta { color: var(--ds-pending-text); }
+.shift:disabled { background: var(--ds-surface-row); color: var(--ds-text-subtle); }
+.shift:disabled .shift__meta { color: var(--ds-text-subtle); }
+
+.slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 8px; }
+.slot {
+    min-height: 52px; padding: 6px 4px; border-radius: var(--radius-lg);
+    border: 1px solid var(--ds-border); background: var(--ds-surface);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+.slot:hover:not(:disabled) { border-color: var(--ds-border-strong); }
+.slot__time { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.slot__meta { font-size: 11px; color: var(--ds-text-muted); }
+.slot[aria-pressed="true"] {
+    background: var(--ds-action-bg); border-color: var(--ds-action-bg); color: var(--ds-action-fg);
+}
+.slot[aria-pressed="true"] .slot__meta { color: rgba(255, 255, 255, 0.72); }
+.slot:disabled { background: var(--ds-surface-row); color: var(--ds-text-subtle); }
+.slot:disabled .slot__time { text-decoration: line-through; }
+
+.empty { font-size: 14px; color: var(--ds-text-muted); text-align: center; padding: 14px 0; margin: 0; }
+
+/* --- Campi -------------------------------------------------------------- */
+
+.field { margin-bottom: 22px; }
+.field:last-child { margin-bottom: 0; }
+.field__label { display: block; font-size: 13px; font-weight: 500; color: var(--ds-text-secondary); margin-bottom: 6px; }
+.field__opt { color: var(--ds-text-muted); font-weight: 400; }
+.input {
+    width: 100%; min-height: 48px; padding: 12px 14px;
+    /* 16px o iOS ingrandisce la pagina al focus e non la rimpicciolisce più. */
+    font-size: 16px;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--ds-border-strong);
+    background: var(--ds-surface);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.input:focus {
+    outline: none; border-color: var(--ds-action-bg);
+    box-shadow: 0 0 0 3px rgba(17, 24, 39, 0.08);
+}
+.input::placeholder { color: var(--ds-text-subtle); }
+textarea.input { resize: vertical; min-height: 76px; line-height: 1.5; }
+.grid2 { display: grid; gap: 0 16px; }
+@media (min-width: 620px) { .grid2 { grid-template-columns: 1fr 1fr; } }
+
+/* Il passo 2 è l'unico posto dove si scrive davvero: gli si dà più aria che
+   alle schede di scelta, dove il pollice deve arrivare in fondo in fretta. */
+.card__body--roomy { padding: 24px; }
+@media (max-width: 619px) { .card__body--roomy { padding: 20px; } }
+.divider { height: 1px; background: var(--ds-border); margin: 4px 0 22px; }
+
+/* --- Chip allergie / intolleranze --------------------------------------- */
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+    min-height: 44px; padding: 0 16px; border-radius: 999px;
+    border: 1px solid var(--ds-border-strong); background: var(--ds-surface);
+    font-size: 14px; font-weight: 500; color: var(--ds-text-secondary);
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.chip:hover { background: var(--ds-surface-row); }
+/* Selezionato = azione scura piena, come ogni altra scelta della pagina.
+   Un tint rosso "allergia" sarebbe un allarme rivolto al cliente, che non
+   ha niente da allarmarsi: è la cucina a doverlo leggere. */
+.chip[aria-pressed="true"] {
+    background: var(--ds-action-bg); border-color: var(--ds-action-bg); color: var(--ds-action-fg);
+}
+
+/* --- Riepilogo passo 2 -------------------------------------------------- */
+
+.recap {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; flex-wrap: wrap;
+    padding: 14px 18px; margin-bottom: 14px;
+    border-radius: var(--radius-xl);
+    background: var(--ds-surface); border: 1px solid var(--ds-border);
+}
+.recap__main { font-size: 15px; font-weight: 600; }
+.recap__sub { font-size: 13px; color: var(--ds-text-muted); margin-top: 1px; }
+.recap__edit {
+    min-height: 44px; padding: 0 20px; border-radius: 999px;
+    background: none; color: var(--ds-text-secondary);
+    border: 1px solid var(--ds-border-strong);
+    font-size: 15px; font-weight: 600; flex-shrink: 0;
+    transition: background 0.15s ease;
+}
+.recap__edit:hover { background: var(--ds-surface-row); }
+
+/* --- Consenso e azioni -------------------------------------------------- */
+
+.consent { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.consent input { margin-top: 3px; width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--ds-action-bg); }
+.consent span { font-size: 13px; color: var(--ds-text-secondary); }
+a { color: var(--ds-pending-text); }
+
+.actions {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    padding: 14px 16px;
+    padding-bottom: max(14px, env(safe-area-inset-bottom));
+    background: linear-gradient(to top, var(--ds-public-canvas) 62%, rgba(247, 244, 236, 0));
+}
+.actions__inner {
+    max-width: 640px; margin: 0 auto;
+    display: flex; align-items: center; justify-content: space-between; gap: 14px;
+}
+.actions__note { font-size: 13px; color: var(--ds-text-muted); flex: 1; min-width: 0; }
+@media (min-width: 900px) {
+    .actions { position: static; padding: 0; background: none; margin-top: 8px; }
+}
+
+/* rounded.full: il design system riserva la pillola piena all'azione
+   primaria (§7.1). */
+.btn {
+    min-height: 52px; padding: 0 28px; border-radius: 999px;
+    background: var(--ds-action-bg); color: var(--ds-action-fg);
+    font-size: 16px; font-weight: 600;
+    transition: background 0.15s ease, opacity 0.15s ease;
+    flex-shrink: 0;
+}
+.btn:hover:not(:disabled) { background: var(--ds-action-bg-hover); }
+.btn:disabled { opacity: 0.4; }
+
+.error {
+    margin-bottom: 14px; padding: 12px 16px; border-radius: var(--radius-lg);
+    background: var(--ds-critical-tint); border: 1px solid rgba(192, 57, 43, 0.3);
+    color: var(--ds-critical-text); font-size: 14px;
+}
+
+/* --- Condizioni e piè di pagina ----------------------------------------- */
+
+.terms {
+    margin-top: 28px; border-radius: var(--radius-2xl);
+    border: 1px solid var(--ds-border); background: rgba(255, 255, 255, 0.6);
+    padding: 4px 18px;
+}
+.terms > summary {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    list-style: none; cursor: pointer; padding: 14px 0;
+    font-size: 15px; font-weight: 600;
+}
+.terms > summary::-webkit-details-marker { display: none; }
+.terms > summary svg { width: 16px; height: 16px; color: var(--ds-text-subtle); transition: transform 0.2s ease; }
+.terms[open] > summary svg { transform: rotate(180deg); }
+.terms__body { padding-bottom: 16px; font-size: 14px; color: var(--ds-text-secondary); }
+.terms__body h3 { font-size: 13px; font-weight: 600; color: var(--ds-text-muted); margin: 18px 0 6px; }
+.terms__body p { margin: 0 0 10px; line-height: 1.6; }
+.terms__body ul { margin: 0; padding-left: 18px; line-height: 1.6; }
+
+.footer { margin-top: 28px; text-align: center; font-size: 13px; color: var(--ds-text-muted); }
+.footer__links { margin-top: 6px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+
+/* --- Conferma ----------------------------------------------------------- */
+
+.done {
+    position: fixed; inset: 0; z-index: 60;
+    background: var(--ds-public-canvas);
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.done__inner { text-align: center; max-width: 380px; }
+.done__mark {
+    width: 72px; height: 72px; border-radius: 50%; margin: 0 auto 20px;
+    background: var(--ds-seated-tint); color: var(--ds-seated-text);
+    display: flex; align-items: center; justify-content: center;
+}
+.done__mark svg { width: 34px; height: 34px; }
+.done__title { font-size: 26px; font-weight: 700; margin: 0 0 8px; letter-spacing: -0.01em; }
+.done__text { font-size: 15px; color: var(--ds-text-secondary); margin: 0; line-height: 1.6; }
+.done__recap { font-size: 14px; color: var(--ds-text-muted); margin: 18px 0 0; }
+
+/* --- Foglio inferiore (calendario su telefono) -------------------------- */
+
+@media (max-width: 619px) {
+    .sheet {
+        position: fixed; inset: 0; z-index: 50;
+        display: flex; align-items: flex-end;
+        background: rgba(11, 11, 13, 0.4);
+    }
+    .sheet__panel {
+        width: 100%; max-height: 86vh; overflow-y: auto;
+        background: var(--ds-surface);
+        border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
+        padding: 8px 18px 18px;
+        padding-bottom: max(18px, env(safe-area-inset-bottom));
+        animation: sheet-up 0.24s ease-out;
+    }
+    .sheet__grab {
+        width: 36px; height: 4px; border-radius: 999px;
+        background: var(--ds-border-strong); margin: 6px auto 14px;
+    }
+}
+@keyframes sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+/* Su schermi larghi il calendario resta dentro la fisarmonica. */
+@media (min-width: 620px) {
+    .sheet { display: contents; }
+    .sheet__grab { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
     </style>
 </head>
-<body class="min-h-screen">
-    <div class="max-w-md md:max-w-xl mx-auto px-4 sm:px-6 py-6 md:py-10 pb-32">
-        <header class="text-center mb-8 md:mb-10">
-            <a
-                id="brandLink"
-                href="https://www.vecchiofrantoio.com"
-                target="_blank"
-                rel="noopener"
-                class="inline-block"
-                aria-label="Vai al sito Il Vecchio Frantoio"
-            >
-                <img
-                    id="brandLogo"
-                    src="/prenota/logo.png?v=2"
-                    alt="Il Vecchio Frantoio — Cucina Tradizionale"
-                    class="mx-auto h-28 sm:h-36 md:h-44 w-auto select-none"
-                    draggable="false"
-                />
-            </a>
-            <div class="mt-5 flex items-center justify-center gap-3">
-                <span class="rule"></span>
-                <span class="text-[11px] uppercase tracking-[0.28em] text-stone-500">Prenota un tavolo</span>
-                <span class="rule"></span>
-            </div>
-            <h1 class="serif text-3xl sm:text-4xl text-stone-900 mt-3 font-medium">Ti aspettiamo a tavola</h1>
-            <p class="text-sm text-stone-500 mt-2">Compila il modulo, ti contatteremo per confermare.</p>
-        </header>
+<body>
 
-        <!-- Maintenance card. Visible by default — the bootstrap script
-             removes it when /public/contact reports bookingsEnabled: true.
-             Safe default: if the fetch fails, bookings stay paused. -->
-        <div id="maintenanceCard" class="bg-white/90 backdrop-blur rounded-2xl shadow-sm ring-1 ring-stone-200 p-8 text-center">
-            <div class="w-14 h-14 rounded-full bg-amber-50 flex items-center justify-center mx-auto mb-4 ring-1 ring-amber-100">
-                <svg class="w-7 h-7 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/>
-                </svg>
-            </div>
-            <h2 class="serif text-2xl text-stone-900 mb-2">Prenotazioni temporaneamente sospese</h2>
-            <p class="text-sm text-stone-600 leading-relaxed">Le prenotazioni web non sono disponibili al momento.</p>
+<header class="header" id="header">
+    <div class="header__inner">
+        <div class="header__top">
+            <a class="header__brand" id="brandLink" href="#" target="_blank" rel="noopener">
+                <img class="header__logo" id="brandLogo" alt="" hidden />
+                <span id="brandText">
+                    <span class="header__name" id="brandName">Prenota un tavolo</span>
+                    <span class="header__tagline" id="brandTagline" hidden></span>
+                </span>
+            </a>
+            <nav class="header__links" id="headerLinks"></nav>
+        </div>
+        <h1 class="header__title" id="pageTitle">Prenota un tavolo</h1>
+    </div>
+</header>
+
+<main class="page">
+
+    <!-- Manutenzione. Visibile per default: se /public/contact non risponde
+         le prenotazioni restano chiuse invece di aprirsi per errore. -->
+    <section class="card" id="maintenance">
+        <div class="card__body" style="text-align:center; padding: 32px 20px;">
+            <h2 class="card__title" style="font-size:19px;">Prenotazioni non disponibili</h2>
+            <p class="card__hint" style="margin-bottom:0;">In questo momento non raccogliamo prenotazioni dal sito.</p>
+        </div>
+    </section>
+
+    <form id="form" novalidate hidden>
+        <!-- Trappola per i bot: invisibile a chi legge, irresistibile a chi no. -->
+        <div class="sr-only" aria-hidden="true">
+            <label>Sito web (lascia vuoto)<input type="text" name="website" tabindex="-1" autocomplete="off" /></label>
         </div>
 
-        <a id="callCta" href="tel:+447451263812"
-           class="hidden flex items-center justify-between bg-white rounded-2xl shadow-sm ring-1 ring-stone-200 p-4 mb-4 active:bg-stone-50 hover:bg-stone-50 transition">
-            <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-full bg-amber-50 flex items-center justify-center ring-1 ring-amber-100">
-                    <svg class="w-5 h-5 text-amber-800" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h2.28a2 2 0 011.94 1.515l.7 2.8a2 2 0 01-.45 1.84l-1.27 1.27a16 16 0 006.36 6.36l1.27-1.27a2 2 0 011.84-.45l2.8.7A2 2 0 0121 17.72V20a2 2 0 01-2 2h-1C9.716 22 2 14.284 2 5V4a1 1 0 011-1z"/>
-                    </svg>
-                </div>
-                <div>
-                    <div class="text-sm font-semibold text-stone-900">Preferisci chiamare?</div>
-                    <div class="text-xs text-stone-500">Il nostro assistente risponde 24/7</div>
-                </div>
-            </div>
-            <div id="callCtaNumber" class="text-sm font-semibold text-amber-800">+44 7451 263812</div>
-        </a>
+        <nav class="stepnav" id="stepnav" aria-label="Passi">
+            <button type="button" class="stepnav__item stepnav__item--current" data-step="1" aria-current="step">
+                <span class="stepnav__rail"></span>
+                <span class="stepnav__row">
+                    <span class="stepnav__mark">1</span>
+                    <span class="stepnav__label">Tavolo</span>
+                </span>
+            </button>
+            <button type="button" class="stepnav__item" data-step="2" disabled>
+                <span class="stepnav__rail"></span>
+                <span class="stepnav__row">
+                    <span class="stepnav__mark">2</span>
+                    <span class="stepnav__label">Dati</span>
+                </span>
+            </button>
+        </nav>
 
-        <form id="bookingForm" class="hidden" novalidate>
-            <!-- Honeypot — invisible to humans, irresistible to bots -->
-            <div class="hp" aria-hidden="true">
-                <label>Sito web (lascia vuoto)
-                    <input type="text" name="website" tabindex="-1" autocomplete="off" />
-                </label>
-            </div>
+        <div class="error" id="error" hidden></div>
 
-            <!-- Section 1: Date -->
-            <section class="bg-white rounded-2xl shadow-sm ring-1 ring-stone-200 p-5 md:p-6 mb-4">
-                <label for="date" class="block text-sm font-semibold text-stone-900 mb-3">Quando vuoi venire?</label>
-                <input
-                    type="date"
-                    id="date"
-                    name="date"
-                    required
-                    class="w-full text-base px-4 py-3 rounded-xl border border-stone-200 bg-stone-50 focus:bg-white focus:border-amber-700 focus:ring-2 focus:ring-amber-200 outline-none transition"
-                />
-            </section>
-
-            <!-- Section 2: Guests -->
-            <section class="bg-white rounded-2xl shadow-sm ring-1 ring-stone-200 p-5 md:p-6 mb-4">
-                <label class="block text-sm font-semibold text-stone-900 mb-3">Quanti siete?</label>
-                <div class="flex items-center justify-between bg-stone-50 rounded-xl px-2 py-1.5">
-                    <button type="button" id="guestsDec" aria-label="Diminuisci"
-                        class="w-12 h-12 flex items-center justify-center rounded-lg text-2xl font-light text-stone-600 active:bg-stone-200 disabled:opacity-30">−</button>
-                    <div class="text-center">
-                        <div class="serif text-4xl font-semibold text-stone-900 tabular-nums leading-none" id="guestsValue">2</div>
-                        <div class="text-[11px] uppercase tracking-widest text-stone-500 mt-1" id="guestsLabel">persone</div>
-                    </div>
-                    <button type="button" id="guestsInc" aria-label="Aumenta"
-                        class="w-12 h-12 flex items-center justify-center rounded-lg text-2xl font-light text-stone-600 active:bg-stone-200 disabled:opacity-30">+</button>
-                </div>
-                <!-- Compare solo oltre la soglia: chi prenota in due non deve
-                     leggere di caparre che non lo riguardano. -->
-                <p id="caparraNotice" class="hidden mt-3 rounded-xl bg-amber-50 border border-amber-200 px-3.5 py-2.5 text-[13px] leading-relaxed text-amber-900">
-                    Per questa prenotazione è prevista una <strong>caparra di <span id="caparraNoticeTotale">€ 90</span></strong>
-                    (<span id="caparraNoticeQuota">€ 10</span> a persona): riceverai un link per pagarla dopo l'invio.
-                    La scaliamo dal conto della serata.
-                    <a href="#caparra" class="underline font-medium">Condizioni e cancellazioni</a>
-                </p>
-            </section>
-
-            <!-- Section 3: Shift + Slots -->
-            <section class="bg-white rounded-2xl shadow-sm ring-1 ring-stone-200 p-5 md:p-6 mb-4">
-                <label class="block text-sm font-semibold text-stone-900 mb-3">A che ora?</label>
-                <div class="grid grid-cols-2 gap-2 mb-2">
-                    <button type="button" data-shift="LUNCH" class="shift-btn py-3 rounded-xl text-sm font-semibold border-2 border-stone-200 bg-white text-stone-700">
-                        ☀ Pranzo
-                    </button>
-                    <button type="button" data-shift="DINNER" class="shift-btn py-3 rounded-xl text-sm font-semibold border-2 border-stone-200 bg-white text-stone-700">
-                        🌙 Cena
-                    </button>
-                </div>
-                <p id="shiftClosedNotice" class="text-xs text-stone-500 italic text-center mb-3 hidden"></p>
-                <div id="slotsContainer" class="min-h-[44px]">
-                    <p class="text-sm text-stone-400 text-center py-3" id="slotsHint">Seleziona prima data e turno.</p>
-                </div>
-            </section>
-
-            <!-- Section 4: Room preference (revealed after slot pick) -->
-            <section id="roomSection" class="bg-white rounded-2xl shadow-sm ring-1 ring-stone-200 p-5 md:p-6 mb-4 hidden">
-                <label class="block text-sm font-semibold text-stone-900 mb-1">Dove preferisci sederti?</label>
-                <p class="text-xs text-stone-500 mb-3">Indicazione preferenziale, lo staff ti assegnerà un tavolo libero.</p>
-                <div id="roomsContainer" class="min-h-[44px]">
-                    <p class="text-sm text-stone-400 text-center py-3">Caricamento sale…</p>
-                </div>
-            </section>
-
-            <!-- Section 5: Contact (revealed after slot pick).
-                 UX intent: nudge the guest toward email as the primary channel —
-                 email lets us send a richer confirmation, ends up in a searchable
-                 inbox, and doesn't get lost in an SMS thread. Achieved via:
-                 (1) email placed first, phone second;
-                 (2) email wrapped in an amber-tinted card + "Consigliato" badge;
-                 (3) benefit copy under email, "In alternativa" caption on phone. -->
-            <section id="contactSection" class="bg-white rounded-2xl shadow-sm ring-1 ring-stone-200 p-5 md:p-6 mb-4 hidden">
-                <h2 class="text-sm font-semibold text-stone-900 mb-1">I tuoi contatti</h2>
-                <p class="text-xs text-stone-500 mb-4">Serve almeno un contatto per potere confermare la prenotazione.</p>
-                <div class="space-y-3">
-                    <div>
-                        <label for="customer_name" class="block text-xs font-medium text-stone-600 mb-1">Nome e cognome</label>
-                        <input
-                            type="text"
-                            id="customer_name"
-                            name="customer_name"
-                            required
-                            minlength="2"
-                            maxlength="80"
-                            autocomplete="name"
-                            placeholder="Mario Rossi"
-                            class="w-full text-base px-4 py-3 rounded-xl border border-stone-200 bg-stone-50 focus:bg-white focus:border-amber-700 focus:ring-2 focus:ring-amber-200 outline-none transition"
-                        />
-                    </div>
-
-                    <!-- Preferred channel: email. Highlighted card + benefits. -->
-                    <div class="bg-amber-50/70 rounded-xl p-3 ring-1 ring-amber-100">
-                        <div class="flex items-center justify-between mb-1">
-                            <label for="email" class="block text-xs font-semibold text-amber-900">Email</label>
-                            <span class="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-amber-800 bg-amber-100 rounded-full px-2 py-0.5">
-                                ★ Consigliato
-                            </span>
-                        </div>
-                        <input
-                            type="email"
-                            id="email"
-                            name="email"
-                            autocomplete="email"
-                            inputmode="email"
-                            maxlength="120"
-                            placeholder="tu@esempio.it"
-                            class="w-full text-base px-4 py-3 rounded-xl border border-amber-200 bg-white focus:border-amber-700 focus:ring-2 focus:ring-amber-200 outline-none transition"
-                        />
-                        <ul class="mt-2 space-y-0.5 text-[11px] text-amber-900/80">
-                            <li>✓ Ricevi la conferma con tutti i dettagli</li>
-                            <li>✓ La ritrovi facilmente nella tua casella</li>
-                        </ul>
-                    </div>
-
-                    <!-- Fallback channel: phone. Neutral styling, "In alternativa" caption. -->
-                    <div>
-                        <label for="phone" class="block text-xs font-medium text-stone-500 mb-1">
-                            Telefono <span class="text-stone-400 font-normal">— in alternativa</span>
-                        </label>
-                        <input
-                            type="tel"
-                            id="phone"
-                            name="phone"
-                            pattern="[\+0-9 ]{6,20}"
-                            autocomplete="tel"
-                            inputmode="tel"
-                            placeholder="333 1234567"
-                            class="w-full text-base px-4 py-3 rounded-xl border border-stone-200 bg-stone-50 focus:bg-white focus:border-amber-700 focus:ring-2 focus:ring-amber-200 outline-none transition"
-                        />
-                    </div>
-
-                    <!-- Allergie & Intolleranze (collapsible) -->
-                    <div class="rounded-xl border border-stone-200 overflow-hidden">
-                        <button type="button" id="dietToggle" class="w-full flex items-center justify-between gap-3 p-3 bg-stone-50 hover:bg-white transition-colors">
-                            <span class="flex items-center gap-2 text-sm font-medium text-stone-700">
-                                <svg viewBox="0 0 24 24" class="w-4 h-4 text-stone-400" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                                Allergie e intolleranze <span class="text-stone-400 font-normal">(opzionale)</span>
-                            </span>
-                            <span class="flex items-center gap-2 flex-shrink-0">
-                                <span id="dietSummary" class="text-xs text-stone-500"></span>
-                                <svg id="dietChevron" viewBox="0 0 24 24" class="w-4 h-4 text-stone-400 transition-transform" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-                            </span>
-                        </button>
-                        <div id="dietBody" class="hidden p-3 pt-3 border-t border-stone-200">
-                            <div class="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-stone-100 border border-stone-200 mb-3">
-                                <button type="button" data-diet-tab="allergie"
-                                    class="diet-tab py-2 rounded-lg text-sm font-semibold transition-colors">Allergie</button>
-                                <button type="button" data-diet-tab="intolleranze"
-                                    class="diet-tab py-2 rounded-lg text-sm font-semibold transition-colors">Intolleranze</button>
-                            </div>
-                            <div id="dietGrid" class="grid grid-cols-2 gap-2"></div>
-                            <p class="text-[11px] text-stone-400 mt-2">Le allergie sono gravi; le intolleranze più lievi. Tocca un alimento per assegnarlo.</p>
-                        </div>
-                    </div>
-
-                    <div>
-                        <label for="notes" class="block text-xs font-medium text-stone-600 mb-1">Note (opzionale)</label>
-                        <textarea
-                            id="notes"
-                            name="notes"
-                            rows="2"
-                            maxlength="500"
-                            placeholder="Esigenze, occasioni speciali…"
-                            class="w-full text-base px-4 py-3 rounded-xl border border-stone-200 bg-stone-50 focus:bg-white focus:border-amber-700 focus:ring-2 focus:ring-amber-200 outline-none transition resize-none"
-                        ></textarea>
-                    </div>
-
-                    <!-- Consenso privacy -->
-                    <label class="flex items-start gap-2.5 cursor-pointer select-none">
-                        <input type="checkbox" id="privacyConsent" class="mt-1 h-4 w-4 flex-shrink-0 accent-amber-700" />
-                        <span class="text-xs text-stone-600 leading-relaxed">
-                            Ho letto l'<a href="/privacy" target="_blank" rel="noopener" class="text-amber-800 underline">informativa sulla privacy</a>
-                            e acconsento al trattamento dei miei dati per gestire la prenotazione, inclusi gli eventuali
-                            dati su allergie/intolleranze (dati sanitari, art. 9 GDPR) che scelgo di comunicare.
+        <!-- ================= PASSO 1 ================= -->
+        <section id="step1">
+            <div class="accordion">
+                <div class="accordion__tabs">
+                    <button type="button" class="accordion__tab" id="tabQuanti" aria-expanded="false" aria-controls="panelQuanti">
+                        <span class="accordion__tab-text">
+                            <span class="accordion__tab-label">Quanti</span>
+                            <span class="accordion__tab-value tnum" id="quantiValue">2 persone</span>
                         </span>
+                        <svg class="accordion__chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 7.5 10 12.5 15 7.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                    <button type="button" class="accordion__tab" id="tabQuando" aria-expanded="false" aria-controls="panelQuando">
+                        <span class="accordion__tab-text">
+                            <span class="accordion__tab-label">Quando</span>
+                            <span class="accordion__tab-value" id="quandoValue">Scegli una data</span>
+                        </span>
+                        <svg class="accordion__chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 7.5 10 12.5 15 7.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                </div>
+
+                <div class="accordion__panel" id="panelQuanti" hidden>
+                    <div class="stepper-row">
+                        <div>
+                            <p class="stepper-row__label">Persone a tavola</p>
+                            <p class="stepper-row__hint">Bambini compresi.</p>
+                        </div>
+                        <div class="stepper" role="group" aria-label="Persone a tavola">
+                            <button type="button" class="stepper__btn stepper__btn--minus" id="guestsDec" aria-label="Persone a tavola: diminuisci">−</button>
+                            <input class="stepper__input" type="number" inputmode="numeric" id="guestsInput" min="1" max="20" value="2" aria-label="Persone a tavola" />
+                            <button type="button" class="stepper__btn stepper__btn--plus" id="guestsInc" aria-label="Persone a tavola: aumenta">+</button>
+                        </div>
+                    </div>
+                    <div class="stepper-row">
+                        <div>
+                            <p class="stepper-row__label">Di cui bambini</p>
+                            <p class="stepper-row__hint">Prepariamo seggiolone e mezze porzioni.</p>
+                        </div>
+                        <div class="stepper" role="group" aria-label="Di cui bambini">
+                            <button type="button" class="stepper__btn stepper__btn--minus" id="childrenDec" aria-label="Bambini: diminuisci">−</button>
+                            <input class="stepper__input" type="number" inputmode="numeric" id="childrenInput" min="0" max="20" value="0" aria-label="Di cui bambini" />
+                            <button type="button" class="stepper__btn stepper__btn--plus" id="childrenInc" aria-label="Bambini: aumenta">+</button>
+                        </div>
+                    </div>
+                    <div class="notice" id="depositNotice" hidden>
+                        <div>
+                            <p class="notice__title">Caparra <span id="depositTotal" class="tnum">90 €</span></p>
+                            <p class="notice__text" id="depositText"></p>
+                        </div>
+                        <a class="notice__link" href="#terms">Come funziona</a>
+                    </div>
+                </div>
+
+                <div class="accordion__panel" id="panelQuando" hidden>
+                    <div id="weekView">
+                        <div class="daystrip" id="daystrip"></div>
+                        <div style="text-align:right; margin-top:10px;">
+                            <button type="button" class="linkbtn" id="openMonth">Scegli un'altra data</button>
+                        </div>
+                    </div>
+                    <div class="sheet" id="monthView" hidden>
+                        <div class="sheet__panel">
+                            <div class="sheet__grab"></div>
+                            <div class="cal__head">
+                                <div class="cal__nav">
+                                    <button type="button" class="cal__arrow" id="monthPrev" aria-label="Mese precedente">
+                                        <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12.5 5 7.5 10l5 5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                    </button>
+                                    <span class="cal__month" id="monthLabel"></span>
+                                    <button type="button" class="cal__arrow" id="monthNext" aria-label="Mese successivo">
+                                        <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7.5 5l5 5-5 5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                    </button>
+                                </div>
+                                <button type="button" class="linkbtn" id="backToWeek">Torna alla settimana</button>
+                            </div>
+                            <div class="cal__grid" id="calGrid"></div>
+                            <div class="cal__legend">
+                                <span><i class="cal__key" style="background:var(--ds-seated-solid)"></i>libero</span>
+                                <span><i class="cal__key" style="background:var(--ds-pending-solid)"></i>quasi pieno</span>
+                                <span><i class="cal__key" style="background:var(--ds-border-strong)"></i>chiuso</span>
+                            </div>
+                            <p class="cal__foot" id="calFoot"></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card" id="roomCard" hidden>
+                <div class="card__body">
+                    <h2 class="card__title" style="margin-bottom:14px;">Dove preferite sedervi?</h2>
+                    <div class="rooms" id="rooms"></div>
+                    <p class="rooms-note" id="roomsNote" hidden></p>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card__body">
+                    <h2 class="card__title" style="margin-bottom:14px;">Orario</h2>
+                    <div class="shifts">
+                        <button type="button" class="shift" data-shift="LUNCH" aria-pressed="false">
+                            <span class="shift__name">Pranzo</span>
+                            <span class="shift__meta" id="lunchMeta"></span>
+                        </button>
+                        <button type="button" class="shift" data-shift="DINNER" aria-pressed="false">
+                            <span class="shift__name">Cena</span>
+                            <span class="shift__meta" id="dinnerMeta"></span>
+                        </button>
+                    </div>
+                    <div id="slots"><p class="empty">Scegli prima una data.</p></div>
+                </div>
+            </div>
+
+            <div class="actions">
+                <div class="actions__inner">
+                    <span class="actions__note"></span>
+                    <button type="button" class="btn" id="toStep2" disabled>Continua</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= PASSO 2 ================= -->
+        <section id="step2" hidden>
+            <div class="recap">
+                <div>
+                    <div class="recap__main" id="recapMain"></div>
+                    <div class="recap__sub" id="recapSub"></div>
+                </div>
+                <button type="button" class="recap__edit" id="editBooking">Modifica</button>
+            </div>
+
+            <div class="card">
+                <div class="card__body card__body--roomy">
+                    <div class="grid2">
+                        <div class="field">
+                            <label class="field__label" for="customer_name">Nome e cognome</label>
+                            <input class="input" type="text" id="customer_name" name="customer_name" required minlength="2" maxlength="80" autocomplete="name" placeholder="Mario Rossi" />
+                        </div>
+                        <div class="field">
+                            <label class="field__label" for="phone">Telefono</label>
+                            <input class="input" type="tel" id="phone" name="phone" autocomplete="tel" inputmode="tel" placeholder="333 1234567" />
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label class="field__label" for="email">Email</label>
+                        <input class="input" type="email" id="email" name="email" autocomplete="email" inputmode="email" maxlength="120" placeholder="tu@esempio.it" />
+                        <p class="card__hint" style="margin:6px 0 0;">Basta uno dei due: ci serve per confermarvi il tavolo.</p>
+                    </div>
+
+                    <div class="divider"></div>
+
+                    <div class="field">
+                        <!-- Una lista sola. La pagina non distingue più gravità,
+                             quindi tutto esce come "Allergie: …": in cucina
+                             trattare un'intolleranza come allergia è l'errore
+                             che non fa male a nessuno, il contrario sì. -->
+                        <label class="field__label">Allergie e intolleranze <span class="field__opt">(facoltativo)</span></label>
+                        <div class="chips" id="dietChips"></div>
+                    </div>
+
+                    <div class="field">
+                        <label class="field__label" for="notes">Altro che dovremmo sapere <span class="field__opt">(facoltativo)</span></label>
+                        <textarea class="input" id="notes" name="notes" rows="2" maxlength="500" placeholder="Occasione speciale, seggiolone, tavolo tranquillo…"></textarea>
+                    </div>
+
+                    <div class="divider"></div>
+
+                    <label class="consent">
+                        <input type="checkbox" id="privacyConsent" />
+                        <span>Ho letto <a href="/privacy" target="_blank" rel="noopener">l'informativa sulla privacy</a> e acconsento al trattamento dei dati per gestire la prenotazione, comprese le allergie che scelgo di indicare (art. 9 GDPR).</span>
                     </label>
                 </div>
-            </section>
+            </div>
 
-            <!-- Submit (sticky bottom on mobile, inline on desktop) -->
-            <div id="submitWrap" class="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-[#fbf9f4] via-[#fbf9f4]/95 to-transparent pt-6 pb-4 px-4 hidden md:static md:pt-0 md:pb-0 md:px-0 md:bg-none">
-                <div class="max-w-md md:max-w-none mx-auto">
-                    <button
-                        type="submit"
-                        id="submitBtn"
-                        class="w-full bg-amber-800 text-white text-base font-semibold py-4 rounded-2xl shadow-lg shadow-amber-900/20 hover:bg-amber-900 active:bg-amber-900 disabled:opacity-50 disabled:shadow-none transition"
-                    >
-                        Invia richiesta
+            <div class="notice" id="depositStep2" hidden style="margin-bottom:14px;">
+                <div>
+                    <p class="notice__title">Caparra <span id="depositTotal2" class="tnum">90 €</span></p>
+                    <p class="notice__text" id="depositText2"></p>
+                </div>
+                <a class="notice__link" href="#terms">Come funziona</a>
+            </div>
+
+            <div class="actions">
+                <div class="actions__inner">
+                    <button type="button" class="steparrow" id="backToStep1" aria-label="Torna alla scelta del tavolo">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
                     </button>
+                    <span class="actions__note"></span>
+                    <button type="submit" class="btn" id="submitBtn">Conferma prenotazione</button>
                 </div>
             </div>
-        </form>
+        </section>
+    </form>
 
-        <!-- Error toast -->
-        <div id="errorBox" class="hidden mt-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-sm"></div>
-
-        <!-- Condizioni caparra: sempre nel documento (i messaggi linkano #caparra),
-             importo e soglia scritti da /public/contact. -->
-        <details id="caparra" class="group mt-10 scroll-mt-6 rounded-2xl border border-stone-200 bg-white/60 px-5 py-4">
-            <summary class="flex cursor-pointer list-none items-center justify-between gap-3 text-base font-semibold text-stone-800 [&::-webkit-details-marker]:hidden">
-                Caparra e cancellazioni
-                <svg class="h-4 w-4 flex-shrink-0 text-stone-400 transition-transform group-open:rotate-180" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-                    <path d="M5 7.5 10 12.5 15 7.5" stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
-            </summary>
-            <p class="mt-3 text-sm leading-relaxed text-stone-600">
-                Per le prenotazioni di gruppo chiediamo una
-                <strong>caparra di <span id="caparraImporto">€ 10</span> a persona</strong> per confermare il tavolo.
-                Quando è prevista, dopo l'invio della richiesta ricevi un link per pagarla in sicurezza:
-                il tavolo è confermato appena riceviamo il pagamento.
-            </p>
-
-            <h3 class="mt-4 text-[13px] font-semibold uppercase tracking-wide text-stone-500">Cosa succede alla caparra</h3>
-            <ul class="mt-2 space-y-1.5 text-sm leading-relaxed text-stone-600">
-                <li><strong>Se vieni</strong>, la scaliamo dal conto della serata.</li>
-                <li><strong>Se annulli almeno 24 ore prima</strong>, ti rimborsiamo l'intero importo.</li>
-                <li><strong>Se annulli più tardi o non ti presenti</strong>, la caparra non viene restituita.</li>
+    <details class="terms" id="terms">
+        <summary>
+            Caparra e cancellazioni
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 7.5 10 12.5 15 7.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </summary>
+        <div class="terms__body">
+            <p>Per i gruppi chiediamo una caparra di <strong><span id="depositPerPerson">10 €</span> a persona</strong>. Quando serve, dopo l'invio ricevi un link per pagarla: il tavolo è confermato appena arriva il pagamento.</p>
+            <h3>Cosa succede alla caparra</h3>
+            <ul>
+                <li><strong>Se venite</strong>, la scaliamo dal conto.</li>
+                <li><strong>Se annullate almeno 24 ore prima</strong>, la rimborsiamo intera.</li>
+                <li><strong>Se annullate più tardi o non venite</strong>, la tratteniamo.</li>
             </ul>
-
-            <h3 class="mt-4 text-[13px] font-semibold uppercase tracking-wide text-stone-500">Perché la chiediamo</h3>
-            <p class="mt-2 text-sm leading-relaxed text-stone-600">
-                La caparra confirmatoria è un istituto del Codice Civile italiano (art. 1385). Insieme alla
-                garanzia con carta di credito è lo strumento con cui i ristoranti si tutelano dal no-show:
-                un tavolo prenotato e lasciato vuoto significa spesa fatta, personale in servizio e altri
-                clienti a cui abbiamo detto di no. Tenere fede alla prenotazione, o disdirla per tempo,
-                ci permette di accogliere tutti al meglio.
-            </p>
-            <p class="mt-3 text-sm leading-relaxed text-stone-600">
-                Per annullare o spostare la prenotazione scrivici su WhatsApp o chiamaci: bastano due minuti
-                e, entro le 24 ore, non perdi nulla.
-            </p>
-        </details>
-
-        <!-- Footer -->
-        <footer class="mt-10 text-center text-[11px] uppercase tracking-[0.24em] text-stone-400">
-            <span id="brandFooter">Il Vecchio Frantoio · Cucina Tradizionale</span>
-            <div class="mt-2 normal-case tracking-normal">
-                <a href="/privacy" target="_blank" rel="noopener" class="text-stone-500 hover:text-amber-800 underline">Informativa sulla privacy</a>
-                <span class="mx-1.5 text-stone-300">·</span>
-                <a href="#caparra" class="text-stone-500 hover:text-amber-800 underline">Caparra e cancellazioni</a>
-            </div>
-        </footer>
-
-        <!-- Confirmation overlay -->
-        <div id="confirmation" class="hidden fixed inset-0 z-50 flex items-center justify-center px-6" style="background-color: #fbf9f4;">
-            <div class="text-center max-w-sm">
-                <div class="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-5 ring-1 ring-emerald-200">
-                    <svg class="w-10 h-10 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
-                </div>
-                <h2 id="confirmTitle" class="serif text-3xl text-stone-900 mb-2">Richiesta ricevuta</h2>
-                <p id="confirmText" class="text-stone-600 leading-relaxed">
-                    Grazie! Ti contatteremo via telefono, WhatsApp o email per confermare la prenotazione.
-                </p>
-                <p id="confirmRecap" class="text-sm text-stone-500 mt-4"></p>
-                <div class="mt-8 flex items-center justify-center gap-3">
-                    <span class="rule"></span>
-                    <span id="brandConfirmName" class="text-[11px] uppercase tracking-[0.28em] text-stone-500">Il Vecchio Frantoio</span>
-                    <span class="rule"></span>
-                </div>
-            </div>
+            <h3>Perché la chiediamo</h3>
+            <p>Un tavolo prenotato e lasciato vuoto significa spesa fatta, personale in servizio e altri clienti a cui abbiamo detto di no. La caparra confirmatoria (art. 1385 del Codice Civile) è lo strumento con cui i ristoranti si tutelano dal no-show.</p>
+            <p>Per annullare o spostare, scrivici o chiamaci: entro le 24 ore non perdete nulla.</p>
         </div>
+    </details>
+
+    <footer class="footer">
+        <span id="brandFooter"></span>
+        <div class="footer__links">
+            <a href="/privacy" target="_blank" rel="noopener">Informativa sulla privacy</a>
+            <a href="#terms">Caparra e cancellazioni</a>
+        </div>
+    </footer>
+</main>
+
+<div class="done" id="done" hidden>
+    <div class="done__inner">
+        <div class="done__mark">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M5 13l4 4L19 7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <h2 class="done__title" id="doneTitle">Richiesta ricevuta</h2>
+        <p class="done__text" id="doneText">Vi ricontattiamo a breve per confermare.</p>
+        <p class="done__recap tnum" id="doneRecap"></p>
     </div>
+</div>
 
 <script>
 (async function () {
-    // Multi-tenant (Fase C3): la stessa pagina serve tutti i ristoranti.
-    // Su /prenota/<slug> le chiamate /public/* vanno prefissate con lo slug
-    // (è lui a dire al server QUALE ristorante), e i link privacy portano
-    // lo slug per la stessa ragione. Senza slug (path storico /prenota)
-    // tutto resta com'era: il server risolve da dominio o fallback.
+    'use strict';
+
+    // Multi-tenant (Fase C3): la stessa pagina serve tutti i ristoranti. Su
+    // /prenota/<slug> le chiamate /public/* vanno prefissate con lo slug — è
+    // lui a dire al server QUALE ristorante — e i link privacy se lo portano
+    // dietro per la stessa ragione. Senza slug tutto resta com'era: il server
+    // risolve da dominio o fallback.
     const slugMatch = location.pathname.match(/^\/prenota\/([a-z0-9][a-z0-9-]*)\/?$/);
     const publicBase = slugMatch ? '/public/' + slugMatch[1] : '/public';
     if (slugMatch) {
-        document.querySelectorAll('a[href="/privacy"]').forEach(a => {
-            a.setAttribute('href', '/privacy/' + slugMatch[1]);
-        });
+        document.querySelectorAll('a[href="/privacy"]').forEach(a => a.setAttribute('href', '/privacy/' + slugMatch[1]));
     }
 
-    // Bootstrap: ask the server whether bookings are open. If not, leave the
-    // maintenance card visible and skip all form wiring. Otherwise reveal the
-    // form + phone CTA before running the rest of the init. Doing this from
-    // the server keeps "is it on?" in one place — Settings page can flip it
-    // without an HTML edit or redeploy.
-    // La sezione condizioni e' richiudibile: chi ci arriva da un link
-    // (#caparra dal footer, dall'avviso caparra o dall'email) la deve trovare
-    // gia' aperta, altrimenti atterra su un titolo chiuso e deve cliccare di
-    // nuovo. Fuori dal ramo bookingsEnabled: vale anche a prenotazioni sospese.
-    const openCaparraFromHash = () => {
-        if (location.hash !== '#caparra') return;
-        const el = document.getElementById('caparra');
+    const $ = id => document.getElementById(id);
+    const euro = cents => (cents / 100).toFixed(2).replace('.', ',').replace(/,00$/, '') + ' €';
+
+    // Chi arriva da un link #terms (dal piè di pagina, dall'avviso caparra o
+    // da un'email) deve trovare la sezione già aperta, non un titolo chiuso da
+    // cliccare di nuovo. Fuori dal ramo bookingsEnabled: vale anche a
+    // prenotazioni sospese.
+    const openTermsFromHash = () => {
+        if (location.hash !== '#terms') return;
+        const el = $('terms');
         if (!el) return;
         el.open = true;
         el.scrollIntoView({ block: 'start', behavior: 'smooth' });
     };
-    openCaparraFromHash();
-    window.addEventListener('hashchange', openCaparraFromHash);
+    openTermsFromHash();
+    window.addEventListener('hashchange', openTermsFromHash);
 
     let contact = null;
     try {
         const r = await fetch(publicBase + '/contact');
         if (r.ok) contact = await r.json();
-    } catch { /* network issue → stay on maintenance card (safe default) */ }
+    } catch { /* rete giù → resta la scheda di manutenzione (default sicuro) */ }
 
-    // Branding dal server (Impostazioni → Aspetti legali). Va applicato PRIMA
-    // dell'early-return qui sotto: anche la pagina di manutenzione deve
-    // portare il nome giusto. I testi statici nell'HTML restano il fallback
-    // senza JS / senza rete.
-    const branding = contact?.branding;
-    if (branding?.name) {
-        document.title = `Prenota un tavolo · ${branding.name}`;
-        const brandLine = branding.tagline ? `${branding.name} · ${branding.tagline}` : branding.name;
-        const footerEl = document.getElementById('brandFooter');
-        if (footerEl) footerEl.textContent = brandLine;
-        const confirmEl = document.getElementById('brandConfirmName');
-        if (confirmEl) confirmEl.textContent = branding.name;
-        const logoEl = document.getElementById('brandLogo');
-        if (logoEl) logoEl.alt = branding.tagline ? `${branding.name} — ${branding.tagline}` : branding.name;
-        const linkEl = document.getElementById('brandLink');
-        if (linkEl && branding.website_url) {
-            linkEl.href = branding.website_url;
-            linkEl.setAttribute('aria-label', `Vai al sito ${branding.name}`);
+    // ---- Identità del ristorante ------------------------------------------
+    // Applicata PRIMA dell'uscita anticipata qui sotto: anche la pagina di
+    // manutenzione deve portare il nome giusto.
+    const branding = contact?.branding || {};
+    const restaurantName = branding.name || '';
+    if (restaurantName) {
+        document.title = 'Prenota un tavolo · ' + restaurantName;
+        $('brandName').textContent = restaurantName;
+        $('brandFooter').textContent = branding.tagline
+            ? restaurantName + ' · ' + branding.tagline
+            : restaurantName;
+        if (branding.tagline) {
+            const t = $('brandTagline');
+            t.textContent = branding.tagline;
+            t.hidden = false;
         }
+    }
+    if (branding.logo_url) {
+        const logo = $('brandLogo');
+        logo.src = branding.logo_url;
+        logo.alt = restaurantName;
+        logo.hidden = false;
+        // Logo e nome insieme raddoppierebbero il marchio: se c'è l'immagine,
+        // il testo esce (ma resta leggibile agli screen reader via alt).
+        $('brandText').hidden = true;
+    }
+    const brandLink = $('brandLink');
+    if (branding.website_url) {
+        brandLink.href = branding.website_url;
+        brandLink.setAttribute('aria-label', 'Vai al sito ' + (restaurantName || 'del ristorante'));
+    } else {
+        brandLink.removeAttribute('href');
+        brandLink.removeAttribute('target');
+    }
+
+    // Colore testata scelto dal ristorante. Il primo piano NON è configurabile:
+    // si calcola sulla luminanza del fondo, o un colore chiaro finirebbe con
+    // testo bianco su bianco e nessuno se ne accorgerebbe finché non è online.
+    const headerColor = /^#[0-9a-f]{6}$/i.test(branding.header_color || '') ? branding.header_color : null;
+    if (headerColor) {
+        const r8 = parseInt(headerColor.slice(1, 3), 16);
+        const g8 = parseInt(headerColor.slice(3, 5), 16);
+        const b8 = parseInt(headerColor.slice(5, 7), 16);
+        const srgb = [r8, g8, b8].map(v => {
+            const c = v / 255;
+            return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+        });
+        const luminance = 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2];
+        const dark = luminance < 0.42;
+        const root = document.documentElement.style;
+        root.setProperty('--ds-public-header-bg', headerColor);
+        root.setProperty('--ds-public-header-fg', dark ? '#ffffff' : '#111113');
+        root.setProperty('--ds-public-header-fg-muted', dark ? 'rgba(255,255,255,0.64)' : 'rgba(17,17,19,0.62)');
+        root.setProperty('--ds-public-header-line', dark ? 'rgba(255,255,255,0.16)' : 'rgba(17,17,19,0.14)');
+        root.setProperty('--ds-public-header-pill', dark ? 'rgba(255,255,255,0.10)' : 'rgba(17,17,19,0.06)');
+        $('themeColorMeta').setAttribute('content', headerColor);
+    }
+
+    // Pillole di contatto: si costruiscono da quello che il server ha davvero.
+    // Indirizzo e link al menù non esistono ancora in `branding` — quando
+    // arriveranno bastera aggiungerli qui.
+    const linksHost = $('headerLinks');
+    const addPill = (href, label, path, external) => {
+        const a = document.createElement('a');
+        a.className = 'header__pill';
+        a.href = href;
+        if (external) { a.target = '_blank'; a.rel = 'noopener'; }
+        a.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + path + '</svg>';
+        a.appendChild(document.createTextNode(label));
+        linksHost.appendChild(a);
+    };
+    if (contact?.voice?.phone) {
+        addPill('tel:' + contact.voice.phone, contact.voice.display || contact.voice.phone,
+            '<path d="M3 5a2 2 0 012-2h2.3a2 2 0 011.9 1.5l.7 2.8a2 2 0 01-.4 1.8l-1.3 1.3a16 16 0 006.4 6.4l1.3-1.3a2 2 0 011.8-.4l2.8.7a2 2 0 011.5 1.9V20a2 2 0 01-2 2h-1C9.7 22 2 14.3 2 5V4a1 1 0 011-1z"/>', false);
+    }
+    // "Dove siamo" quando l'indirizzo non è ancora scritto in Impostazioni:
+    // il link alla mappa è la cosa che serve davvero, l'etichetta può aspettare.
+    if (branding.maps_url) {
+        addPill(branding.maps_url, branding.address || 'Dove siamo',
+            '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 1116 0z"/><circle cx="12" cy="10" r="3"/>', true);
     }
 
     if (!contact?.bookingsEnabled) return;
 
-    const maint = document.getElementById('maintenanceCard');
-    if (maint) maint.remove();
-    document.getElementById('bookingForm').classList.remove('hidden');
-    const ctaEl = document.getElementById('callCta');
-    const numEl = document.getElementById('callCtaNumber');
-    if (ctaEl && contact?.voice?.phone) {
-        ctaEl.href = `tel:${contact.voice.phone}`;
-        if (numEl) numEl.textContent = contact.voice.display || contact.voice.phone;
-        ctaEl.classList.remove('hidden');
-    }
+    $('maintenance').remove();
+    $('form').hidden = false;
 
-    // Politica caparra dal server: importo e soglia si cambiano da
-    // Impostazioni, la pagina non li conosce a priori.
+    // ---- Politica caparra --------------------------------------------------
     const deposit = contact?.deposit ?? null;
-    const euro = cents => '€ ' + (cents / 100).toFixed(2).replace('.', ',').replace(/,00$/, '');
-    if (deposit) {
-        const importoEl = document.getElementById('caparraImporto');
-        if (importoEl) importoEl.textContent = euro(deposit.perPersonCents);
-    }
-    const renderCaparraNotice = guests => {
-        const el = document.getElementById('caparraNotice');
-        if (!el) return;
-        const due = deposit?.enabled && guests >= deposit.minGuests;
-        el.classList.toggle('hidden', !due);
-        if (!due) return;
-        const tot = document.getElementById('caparraNoticeTotale');
-        const quota = document.getElementById('caparraNoticeQuota');
-        if (tot) tot.textContent = euro(guests * deposit.perPersonCents);
-        if (quota) quota.textContent = euro(deposit.perPersonCents);
-    };
+    if (deposit?.perPersonCents) $('depositPerPerson').textContent = euro(deposit.perPersonCents);
 
+    // ---- Stato -------------------------------------------------------------
     const state = {
-        date: '',
+        step: 1,
         guests: 2,
+        children: 0,
+        date: null,
         shift: null,
         time: null,
-        availability: null,
         roomId: null,
         rooms: null,
+        availability: null,
+        calendar: new Map(),   // 'YYYY-MM-DD' → 'open' | 'busy' | 'closed'
+        monthCursor: null,     // primo giorno del mese mostrato
+        openPanel: null,
     };
 
-    const $ = (id) => document.getElementById(id);
-    const dateInput = $('date');
-    const guestsValue = $('guestsValue');
-    const guestsLabel = $('guestsLabel');
-    const guestsDec = $('guestsDec');
-    const guestsInc = $('guestsInc');
-    const shiftBtns = document.querySelectorAll('.shift-btn');
-    const slotsContainer = $('slotsContainer');
-    const slotsHint = $('slotsHint');
-    const roomSection = $('roomSection');
-    const roomsContainer = $('roomsContainer');
-    const contactSection = $('contactSection');
-    const submitWrap = $('submitWrap');
-    const submitBtn = $('submitBtn');
-    const errorBox = $('errorBox');
-    const form = $('bookingForm');
-    const confirmation = $('confirmation');
-    const confirmRecap = $('confirmRecap');
-
-    // --- Allergie & Intolleranze --------------------------------------------
-    // Two tabs over the same preset list; a food belongs to exactly one list
-    // (exclusive). Saved into `notes` as "Allergie: X | Intolleranze: Y" so the
-    // internal CRM parses/renders them the same way.
-    const DIET_ITEMS = ['Glutine','Crostacei','Uova','Pesce','Arachidi','Soia','Latte','Frutta a guscio','Sedano','Senape','Sesamo','Solfiti','Lupini','Molluschi'];
-    const diet = { allergie: new Set(), intolleranze: new Set() };
-    let dietTab = 'allergie';
-    const dietGrid = $('dietGrid');
-    const dietTabBtns = document.querySelectorAll('.diet-tab');
-    const dietToggle = $('dietToggle');
-    const dietBody = $('dietBody');
-    const dietChevron = $('dietChevron');
-    const dietSummary = $('dietSummary');
-
-    function updateDietSummary() {
-        const parts = [];
-        if (diet.allergie.size) parts.push(`${diet.allergie.size} allergie`);
-        if (diet.intolleranze.size) parts.push(`${diet.intolleranze.size} intoll.`);
-        dietSummary.textContent = parts.join(' · ');
-    }
-
-    dietToggle.addEventListener('click', () => {
-        const open = dietBody.classList.toggle('hidden') === false;
-        dietChevron.style.transform = open ? 'rotate(180deg)' : '';
+    // Roma, non il fuso del telefono: un cliente che prenota dall'estero
+    // vedrebbe altrimenti "oggi" sbagliato e slot già passati come liberi.
+    const romeToday = () => new Date().toLocaleDateString('en-CA', {
+        timeZone: 'Europe/Rome', year: 'numeric', month: '2-digit', day: '2-digit',
     });
+    const romeNowHhMm = () => new Date().toLocaleTimeString('en-GB', {
+        timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hour12: false,
+    });
+    const addDays = (iso, n) => {
+        const d = new Date(iso + 'T00:00:00Z');
+        d.setUTCDate(d.getUTCDate() + n);
+        return d.toISOString().slice(0, 10);
+    };
+    const HORIZON_DAYS = 60;
+    const today = romeToday();
+    const lastBookable = addDays(today, HORIZON_DAYS);
 
-    function renderDietTabs() {
-        dietTabBtns.forEach((btn) => {
-            const key = btn.getAttribute('data-diet-tab');
-            const active = key === dietTab;
-            const activeCls = key === 'allergie' ? 'bg-rose-600 text-white' : 'bg-amber-500 text-white';
-            btn.className = 'diet-tab py-2 rounded-lg text-sm font-semibold transition-colors ' + (active ? activeCls : 'text-stone-500 hover:text-stone-800');
-            const count = diet[key].size;
-            btn.textContent = (key === 'allergie' ? 'Allergie' : 'Intolleranze') + (count ? ` · ${count}` : '');
-        });
-        updateDietSummary();
-    }
+    const fmtDayLong = iso => new Date(iso + 'T00:00:00').toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
+    const fmtDayShort = iso => new Date(iso + 'T00:00:00').toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' });
+    const MONTHS = ['gennaio','febbraio','marzo','aprile','maggio','giugno','luglio','agosto','settembre','ottobre','novembre','dicembre'];
+    const DOW_SHORT = ['lun','mar','mer','gio','ven','sab','dom'];
+    // getDay() conta da domenica, il calendario parte da lunedì.
+    const mondayIndex = iso => (new Date(iso + 'T00:00:00').getDay() + 6) % 7;
 
-    function renderDietGrid() {
-        const activeSet = diet[dietTab];
-        const otherSet = diet[dietTab === 'allergie' ? 'intolleranze' : 'allergie'];
-        const onCls = dietTab === 'allergie' ? 'border-rose-300 bg-rose-50 text-rose-800' : 'border-amber-300 bg-amber-50 text-amber-800';
-        const boxCls = dietTab === 'allergie' ? 'bg-rose-600 border-rose-600' : 'bg-amber-600 border-amber-600';
-        dietGrid.innerHTML = '';
-        DIET_ITEMS.forEach((item) => {
-            const inActive = activeSet.has(item);
-            const inOther = otherSet.has(item);
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'flex items-center gap-2 px-3 py-2 rounded-xl border text-left text-sm font-medium transition-colors ' +
-                (inActive ? onCls : 'border-stone-200 bg-stone-50 text-stone-500 hover:bg-white');
-            const check = inActive ? '<svg viewBox="0 0 24 24" class="w-3 h-3" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>' : '';
-            const tag = (inOther && !inActive) ? `<span class="ml-auto text-[9px] font-semibold uppercase tracking-wide text-stone-400 flex-shrink-0">${dietTab === 'allergie' ? 'intoll.' : 'allergia'}</span>` : '';
-            btn.innerHTML =
-                `<span class="w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${inActive ? boxCls : 'border-stone-300 bg-white'}">${check}</span>` +
-                `<span class="truncate">${item}</span>` + tag;
-            btn.addEventListener('click', () => {
-                otherSet.delete(item);                       // exclusive
-                if (activeSet.has(item)) activeSet.delete(item); else activeSet.add(item);
-                renderDietTabs();
-                renderDietGrid();
-            });
-            dietGrid.appendChild(btn);
-        });
-    }
-
-    dietTabBtns.forEach((btn) => btn.addEventListener('click', () => {
-        dietTab = btn.getAttribute('data-diet-tab');
-        renderDietTabs();
-        renderDietGrid();
-    }));
-    renderDietTabs();
-    renderDietGrid();
-
-    function buildDietaryNote() {
-        const parts = [];
-        if (diet.allergie.size) parts.push('Allergie: ' + [...diet.allergie].join(', '));
-        if (diet.intolleranze.size) parts.push('Intolleranze: ' + [...diet.intolleranze].join(', '));
-        return parts.join(' | ');
-    }
-
-    // Init date = today
-    const today = new Date();
-    const todayIso = today.toISOString().slice(0, 10);
-    dateInput.value = todayIso;
-    dateInput.min = todayIso;
-    state.date = todayIso;
-
-    // Guests counter
+    // ---- Persone -----------------------------------------------------------
+    const personLabel = n => n === 1 ? 'persona' : 'persone';
     function renderGuests() {
-        guestsValue.textContent = state.guests;
-        guestsLabel.textContent = state.guests === 1 ? 'persona' : 'persone';
-        renderCaparraNotice(state.guests);
-        guestsDec.disabled = state.guests <= 1;
-        guestsInc.disabled = state.guests >= 20;
+        // Non riscrivere il campo mentre ci si sta digitando dentro: farebbe
+        // saltare il cursore a ogni tasto.
+        if (document.activeElement !== $('guestsInput')) $('guestsInput').value = state.guests;
+        if (document.activeElement !== $('childrenInput')) $('childrenInput').value = state.children;
+        $('childrenInput').max = state.guests;
+        $('guestsDec').disabled = state.guests <= 1;
+        $('guestsInc').disabled = state.guests >= 20;
+        $('childrenDec').disabled = state.children <= 0;
+        $('childrenInc').disabled = state.children >= state.guests;
+
+        let summary = state.guests + ' ' + personLabel(state.guests);
+        if (state.children > 0) summary += ' · ' + state.children + (state.children === 1 ? ' bimbo' : ' bimbi');
+        $('quantiValue').textContent = summary;
+
+        const due = deposit?.enabled && state.guests >= deposit.minGuests;
+        for (const [box, total, text] of [
+            [$('depositNotice'), $('depositTotal'), $('depositText')],
+            [$('depositStep2'), $('depositTotal2'), $('depositText2')],
+        ]) {
+            box.hidden = !due;
+            if (!due) continue;
+            total.textContent = euro(state.guests * deposit.perPersonCents);
+            text.textContent = 'Da ' + deposit.minGuests + ' persone chiediamo '
+                + euro(deposit.perPersonCents) + ' a persona, scalati dal conto.';
+        }
     }
-    renderGuests();
 
-    function onGuestsChange() {
+    function setCount(key, value) {
+        const min = key === 'guests' ? 1 : 0;
+        const max = key === 'guests' ? 20 : state.guests;
+        state[key] = Math.max(min, Math.min(max, value));
+        // I bambini sono un sottoinsieme: se scendono le persone, scendono loro.
+        if (key === 'guests' && state.children > state.guests) state.children = state.guests;
+        renderGuests();
+        // La sala dipende da quante persone siamo; l'orario no.
         state.roomId = null;
-        if (state.time) loadRooms();
+        if (state.date) loadRooms();
     }
-    guestsDec.addEventListener('click', () => { if (state.guests > 1) { state.guests--; renderGuests(); onGuestsChange(); } });
-    guestsInc.addEventListener('click', () => { if (state.guests < 20) { state.guests++; renderGuests(); onGuestsChange(); } });
+    const step = (key, delta) => () => setCount(key, state[key] + delta);
+    $('guestsInc').addEventListener('click', step('guests', 1));
+    $('guestsDec').addEventListener('click', step('guests', -1));
+    $('childrenInc').addEventListener('click', step('children', 1));
+    $('childrenDec').addEventListener('click', step('children', -1));
 
-    // Date change → refetch availability if a shift is already chosen
-    dateInput.addEventListener('change', async () => {
-        state.date = dateInput.value;
-        state.time = null;
-        state.roomId = null;
-        roomSection.classList.add('hidden');
-        await loadAvailability();
-        renderSlots();
-        updateSubmitVisibility();
-    });
-
-    // Shift selection
-    shiftBtns.forEach(btn => {
-        btn.addEventListener('click', async () => {
-            // A shift button can be disabled server-side (turno bloccato o
-            // sold-out). Ignore clicks — belt-and-braces even though the
-            // `disabled` attribute already blocks pointer events.
-            if (btn.disabled) return;
-            state.shift = btn.dataset.shift;
-            state.time = null;
-            state.roomId = null;
-            roomSection.classList.add('hidden');
-            shiftBtns.forEach(b => {
-                const active = b === btn;
-                b.className = `shift-btn py-3 rounded-xl text-sm font-semibold border-2 transition ${
-                    active ? 'border-amber-800 bg-amber-50 text-amber-900' : 'border-stone-200 bg-white text-stone-700'
-                } ${b.disabled ? 'opacity-50 cursor-not-allowed' : ''}`;
-            });
-            renderSlots();
-            updateSubmitVisibility();
+    // Il valore è scrivibile: si accetta a ogni tasto, ma si normalizza solo
+    // all'uscita — altrimenti cancellare per riscrivere rimetterebbe subito
+    // il minimo sotto le dita.
+    for (const [id, key] of [['guestsInput', 'guests'], ['childrenInput', 'children']]) {
+        $(id).addEventListener('input', e => {
+            const n = parseInt(e.target.value, 10);
+            if (!Number.isNaN(n)) setCount(key, n);
         });
+        $(id).addEventListener('blur', () => renderGuests());
+    }
+
+    // ---- Fisarmonica -------------------------------------------------------
+    function togglePanel(name) {
+        state.openPanel = state.openPanel === name ? null : name;
+        for (const key of ['Quanti', 'Quando']) {
+            const open = state.openPanel === key.toLowerCase();
+            $('tab' + key).setAttribute('aria-expanded', String(open));
+            $('panel' + key).hidden = !open;
+        }
+        if (state.openPanel === 'quando') loadCalendar();
+    }
+    $('tabQuanti').addEventListener('click', () => togglePanel('quanti'));
+    $('tabQuando').addEventListener('click', () => togglePanel('quando'));
+
+    // ---- Calendario --------------------------------------------------------
+    async function fetchCalendar(from, to) {
+        try {
+            const r = await fetch(publicBase + '/availability?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to));
+            if (!r.ok) return;
+            const data = await r.json();
+            (data.days || []).forEach(d => state.calendar.set(d.date, d.status));
+        } catch (err) {
+            // Senza calendario i giorni restano senza pallino: si può ancora
+            // scegliere una data, il server rifiuta comunque quelle chiuse.
+            console.error('calendario non disponibile', err);
+        }
+    }
+
+    async function loadCalendar() {
+        const from = state.monthCursor || today;
+        const to = state.monthCursor
+            ? addDays(monthEnd(state.monthCursor), 0)
+            : addDays(today, 13);
+        await fetchCalendar(from, to > lastBookable ? lastBookable : to);
+        renderWeek();
+        renderMonth();
+    }
+
+    const monthEnd = iso => {
+        const d = new Date(iso + 'T00:00:00Z');
+        return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+    };
+    const monthStart = iso => iso.slice(0, 8) + '01';
+
+    function renderWeek() {
+        const host = $('daystrip');
+        host.innerHTML = '';
+        for (let i = 0; i < 14; i++) {
+            const iso = addDays(today, i);
+            const status = state.calendar.get(iso);
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'day' + (status === 'busy' ? ' day--busy' : '');
+            b.setAttribute('aria-pressed', String(state.date === iso));
+            b.disabled = status === 'closed';
+            b.innerHTML =
+                '<span class="day__dow">' + DOW_SHORT[mondayIndex(iso)] + '</span>' +
+                '<span class="day__num">' + Number(iso.slice(8)) + '</span>' +
+                (status && status !== 'closed' ? '<span class="day__dot"></span>' : '<span class="day__dot" style="visibility:hidden"></span>');
+            b.setAttribute('aria-label', fmtDayLong(iso) + (status === 'closed' ? ', chiuso' : ''));
+            b.addEventListener('click', () => pickDate(iso));
+            host.appendChild(b);
+        }
+    }
+
+    function renderMonth() {
+        const cursor = state.monthCursor || monthStart(today);
+        const start = monthStart(cursor);
+        const end = monthEnd(cursor);
+        $('monthLabel').textContent = MONTHS[Number(start.slice(5, 7)) - 1] + ' ' + start.slice(0, 4);
+        $('monthPrev').disabled = start <= monthStart(today);
+        $('monthNext').disabled = start >= monthStart(lastBookable);
+        $('calFoot').textContent = 'Prenotazioni fino a ' + HORIZON_DAYS + ' giorni.';
+
+        const grid = $('calGrid');
+        grid.innerHTML = '';
+        DOW_SHORT.forEach(d => {
+            const el = document.createElement('div');
+            el.className = 'cal__dow';
+            el.textContent = d;
+            grid.appendChild(el);
+        });
+        for (let i = 0; i < mondayIndex(start); i++) {
+            const pad = document.createElement('div');
+            pad.className = 'cal__cell cal__cell--empty';
+            grid.appendChild(pad);
+        }
+        for (let iso = start; iso <= end; iso = addDays(iso, 1)) {
+            const status = state.calendar.get(iso);
+            const bookable = iso >= today && iso <= lastBookable && status !== 'closed';
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'cal__cell' + (bookable ? (status === 'busy' ? ' cal__cell--busy' : ' cal__cell--open') : '');
+            b.disabled = !bookable;
+            b.setAttribute('aria-pressed', String(state.date === iso));
+            b.setAttribute('aria-label', fmtDayLong(iso) + (bookable ? '' : ', non disponibile'));
+            b.innerHTML = '<span class="cal__num">' + Number(iso.slice(8)) + '</span>'
+                + (bookable ? '<span class="cal__dot"></span>' : '');
+            b.addEventListener('click', () => pickDate(iso));
+            grid.appendChild(b);
+        }
+    }
+
+    $('openMonth').addEventListener('click', () => {
+        state.monthCursor = monthStart(state.date || today);
+        $('monthView').hidden = false;
+        $('weekView').hidden = true;
+        loadCalendar();
+    });
+    const closeMonth = () => {
+        $('monthView').hidden = true;
+        $('weekView').hidden = false;
+        state.monthCursor = null;
+    };
+    $('backToWeek').addEventListener('click', closeMonth);
+    $('monthView').addEventListener('click', e => { if (e.target === $('monthView')) closeMonth(); });
+    $('monthPrev').addEventListener('click', () => {
+        state.monthCursor = monthStart(addDays(monthStart(state.monthCursor), -1));
+        loadCalendar();
+    });
+    $('monthNext').addEventListener('click', () => {
+        state.monthCursor = addDays(monthEnd(state.monthCursor), 1);
+        loadCalendar();
     });
 
+    async function pickDate(iso) {
+        state.date = iso;
+        state.time = null;
+        state.shift = null;
+        state.roomId = null;
+        $('quandoValue').textContent = fmtDayShort(iso);
+        renderWeek();
+        renderMonth();
+        closeMonth();
+        togglePanel('quando');   // scelta la data, il pannello si chiude
+        await loadAvailability();
+        updateContinue();
+    }
+
+    // ---- Disponibilità del giorno ------------------------------------------
     async function loadAvailability() {
         if (!state.date) return;
-        slotsContainer.innerHTML = '<p class="text-sm text-stone-400 text-center py-3">Caricamento orari…</p>';
+        $('slots').innerHTML = '<p class="empty">Carico gli orari…</p>';
         try {
-            const resp = await fetch(`${publicBase}/availability?date=${encodeURIComponent(state.date)}`);
-            if (!resp.ok) throw new Error('availability fetch failed');
-            state.availability = await resp.json();
+            const r = await fetch(publicBase + '/availability?date=' + encodeURIComponent(state.date));
+            if (!r.ok) throw new Error('availability ' + r.status);
+            state.availability = await r.json();
         } catch (err) {
             console.error(err);
             state.availability = { lunch: { slots: [] }, dinner: { slots: [] } };
         }
-        // Reflect the fresh availability on the shift buttons so the operator
-        // can't pick a shift the backend won't accept.
-        updateShiftButtonStates();
-        // Always render the slots block at the end — otherwise the interim
-        // "Caricamento orari…" placeholder set above would stick around when
-        // this function is called fire-and-forget (page init at the bottom).
+        renderShifts();
         renderSlots();
+        // Le sale stanno sopra l'orario e si popolano appena c'è una data:
+        // se il turno non è ancora scelto, loadRooms unisce pranzo e cena.
+        loadRooms();
     }
 
-    // Enable/disable each shift button based on whether the corresponding
-    // slot list is non-empty. Also:
-    // - Resets state.shift if the user had picked a shift that just became
-    //   unavailable (date change, real-time block).
-    // - Auto-selects the only open shift when its sibling is closed and the
-    //   user hasn't picked yet — saves an extra click when the operator has
-    //   blocked half the day.
-    function updateShiftButtonStates() {
-        const lunchOpen = ((state.availability?.lunch?.slots) || []).length > 0;
-        const dinnerOpen = ((state.availability?.dinner?.slots) || []).length > 0;
-        // Resolve state.shift BEFORE styling so the auto-selected button gets
-        // the active outline in the same pass. Otherwise it'd stay unhighlighted
-        // until the next render.
-        if (state.shift === 'LUNCH' && !lunchOpen) state.shift = null;
-        if (state.shift === 'DINNER' && !dinnerOpen) state.shift = null;
+    const slotsFor = shift => (state.availability?.[shift === 'LUNCH' ? 'lunch' : 'dinner']?.slots) || [];
+
+    function renderShifts() {
+        // Senza data i turni non sono "vuoti", sono non ancora richiedibili:
+        // lasciarli accesi invita a un tocco che non fa niente.
+        if (!state.date) {
+            document.querySelectorAll('.shift').forEach(btn => {
+                btn.disabled = true;
+                btn.setAttribute('aria-pressed', 'false');
+                $(btn.dataset.shift === 'LUNCH' ? 'lunchMeta' : 'dinnerMeta').textContent = '';
+            });
+            return;
+        }
+        const counts = { LUNCH: slotsFor('LUNCH').length, DINNER: slotsFor('DINNER').length };
+        // Un solo turno aperto: selezionalo, invece di far battere un tocco
+        // per una scelta che non è una scelta.
         if (!state.shift) {
-            if (lunchOpen && !dinnerOpen) state.shift = 'LUNCH';
-            else if (dinnerOpen && !lunchOpen) state.shift = 'DINNER';
+            if (counts.LUNCH && !counts.DINNER) state.shift = 'LUNCH';
+            else if (counts.DINNER && !counts.LUNCH) state.shift = 'DINNER';
         }
-        shiftBtns.forEach(b => {
-            const isLunch = b.dataset.shift === 'LUNCH';
-            const open = isLunch ? lunchOpen : dinnerOpen;
-            b.disabled = !open;
-            const active = state.shift === b.dataset.shift;
-            b.className = `shift-btn py-3 rounded-xl text-sm font-semibold border-2 transition ${
-                active ? 'border-amber-800 bg-amber-50 text-amber-900' : 'border-stone-200 bg-white text-stone-700'
-            } ${!open ? 'opacity-50 cursor-not-allowed' : ''}`;
-            b.title = open ? '' : 'Non disponibile per questa data';
+        if (state.shift && !counts[state.shift]) state.shift = null;
+
+        document.querySelectorAll('.shift').forEach(btn => {
+            const s = btn.dataset.shift;
+            const n = counts[s];
+            btn.disabled = n === 0;
+            btn.setAttribute('aria-pressed', String(state.shift === s));
+            $(s === 'LUNCH' ? 'lunchMeta' : 'dinnerMeta').textContent =
+                n === 0 ? 'non disponibile' : n + (n === 1 ? ' orario' : ' orari');
         });
-        // Small caption under the buttons calling out the closed shift by
-        // name. Rendered by mutating an existing sibling <p> so we don't
-        // pollute the shift-btn container with extra nodes on each pass.
-        const notice = document.getElementById('shiftClosedNotice');
-        if (notice) {
-            if (lunchOpen && !dinnerOpen) {
-                notice.textContent = 'Cena non disponibile per questa data.';
-                notice.classList.remove('hidden');
-            } else if (dinnerOpen && !lunchOpen) {
-                notice.textContent = 'Pranzo non disponibile per questa data.';
-                notice.classList.remove('hidden');
-            } else {
-                notice.textContent = '';
-                notice.classList.add('hidden');
-            }
-        }
     }
 
     function renderSlots() {
-        const lunchOpen = ((state.availability?.lunch?.slots) || []).length > 0;
-        const dinnerOpen = ((state.availability?.dinner?.slots) || []).length > 0;
-        // Whole day is blocked (or fully booked) → dedicated message,
-        // separate from the "pick a shift" prompt so the customer knows
-        // it's not their action that's missing.
-        if (state.date && !lunchOpen && !dinnerOpen) {
-            slotsContainer.innerHTML = '<p class="text-sm text-stone-400 text-center py-3">Per questa data le prenotazioni web non sono disponibili.</p>';
-            return;
-        }
-        if (!state.shift) {
-            slotsContainer.innerHTML = '<p class="text-sm text-stone-400 text-center py-3">Seleziona Pranzo o Cena per vedere gli orari disponibili.</p>';
-            return;
-        }
-        const slots = (state.availability?.[state.shift === 'LUNCH' ? 'lunch' : 'dinner']?.slots) || [];
-        if (slots.length === 0) {
-            slotsContainer.innerHTML = '<p class="text-sm text-stone-400 text-center py-3">Per questo turno non ci sono orari disponibili.</p>';
-            return;
-        }
-        // Past-slot check (Rome timezone). Client-side as extra safety on top
-        // of the backend filter — copre il caso in cui la pagina resta aperta
-        // e scavalca un orario mentre l'utente stava scegliendo. All-past
-        // fallback message coincide con "backend non ha filtrato ma il canale
-        // orario è comunque tutto scaduto".
-        const romeToday = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Rome' });
-        const romeNow = new Date().toLocaleTimeString('en-GB', { timeZone: 'Europe/Rome', hour: '2-digit', minute: '2-digit', hour12: false });
-        const isToday = state.date === romeToday;
-        const anyFuture = !isToday || slots.some(t => t > romeNow);
-        if (!anyFuture) {
-            slotsContainer.innerHTML = '<p class="text-sm text-stone-400 text-center py-3">Tutti gli orari di questo turno sono già passati.</p>';
-            return;
-        }
-        slotsContainer.innerHTML = '<div class="grid grid-cols-4 gap-2"></div>';
-        const grid = slotsContainer.firstElementChild;
+        const host = $('slots');
+        if (!state.date) { host.innerHTML = '<p class="empty">Scegli prima una data.</p>'; return; }
+        const lunch = slotsFor('LUNCH').length, dinner = slotsFor('DINNER').length;
+        if (!lunch && !dinner) { host.innerHTML = '<p class="empty">Per questa data non prendiamo prenotazioni dal sito.</p>'; return; }
+        if (!state.shift) { host.innerHTML = '<p class="empty">Scegli pranzo o cena.</p>'; return; }
+
+        const slots = slotsFor(state.shift);
+        const isToday = state.date === romeToday();
+        const now = romeNowHhMm();
+        host.innerHTML = '';
+        const grid = document.createElement('div');
+        grid.className = 'slots';
         slots.forEach(time => {
+            // Il server filtra già il passato; questo copre la pagina lasciata
+            // aperta che scavalca un orario mentre il cliente sceglieva.
+            const past = isToday && time <= now;
             const b = document.createElement('button');
             b.type = 'button';
-            b.textContent = time;
-            b.dataset.time = time;
-            const active = state.time === time;
-            const isPast = isToday && time <= romeNow;
-            b.disabled = isPast;
-            b.className = `slot-chip py-2.5 rounded-lg text-sm font-semibold border-2 transition ${
-                isPast
-                    ? 'border-stone-100 bg-stone-50 text-stone-300 cursor-not-allowed line-through'
-                    : active
-                        ? 'border-amber-800 bg-amber-800 text-white'
-                        : 'border-stone-200 bg-white text-stone-700'
-            }`;
-            if (isPast) b.title = 'Orario già passato';
+            b.className = 'slot';
+            b.disabled = past;
+            b.setAttribute('aria-pressed', String(state.time === time));
+            b.innerHTML = '<span class="slot__time">' + time + '</span>'
+                + (past ? '<span class="slot__meta">passato</span>' : '');
             b.addEventListener('click', () => {
-                if (b.disabled) return;
                 state.time = time;
                 renderSlots();
-                roomSection.classList.remove('hidden');
-                loadRooms();
-                contactSection.classList.remove('hidden');
-                updateSubmitVisibility();
+                updateContinue();
             });
             grid.appendChild(b);
         });
+        host.appendChild(grid);
+    }
+
+    document.querySelectorAll('.shift').forEach(btn => btn.addEventListener('click', () => {
+        if (btn.disabled) return;
+        state.shift = btn.dataset.shift;
+        state.time = null;
+        state.roomId = null;
+        renderShifts();
+        renderSlots();
+        loadRooms();
+        updateContinue();
+    }));
+
+    // ---- Sale --------------------------------------------------------------
+    // Le sale stanno SOPRA l'orario, ma /public/rooms vuole un turno. Finché
+    // il turno non c'è si chiedono entrambi e si mostra l'unione: le pillole
+    // sono vive appena scelta la data, e nulla salta in pagina quando poi si
+    // sceglie pranzo o cena. Scelto il turno, la lista si restringe a quello.
+    async function fetchRooms(shift) {
+        const url = publicBase + '/rooms?date=' + encodeURIComponent(state.date)
+            + '&shift=' + encodeURIComponent(shift)
+            + '&guests=' + encodeURIComponent(state.guests);
+        const r = await fetch(url);
+        if (!r.ok) throw new Error('rooms ' + r.status);
+        const data = await r.json();
+        return Array.isArray(data.rooms) ? data.rooms : [];
     }
 
     async function loadRooms() {
-        if (!state.date || !state.shift || !state.guests) return;
-        roomsContainer.innerHTML = '<p class="text-sm text-stone-400 text-center py-3">Caricamento sale…</p>';
+        if (!state.date) return;
+        $('roomCard').hidden = false;
+        if (!Array.isArray(state.rooms)) $('rooms').innerHTML = '<p class="empty">Carico le sale…</p>';
         try {
-            const url = `${publicBase}/rooms?date=${encodeURIComponent(state.date)}&shift=${encodeURIComponent(state.shift)}&guests=${encodeURIComponent(state.guests)}`;
-            const resp = await fetch(url);
-            if (!resp.ok) throw new Error('rooms fetch failed');
-            const data = await resp.json();
-            state.rooms = Array.isArray(data.rooms) ? data.rooms : [];
+            if (state.shift) {
+                state.rooms = await fetchRooms(state.shift);
+            } else {
+                const [lunch, dinner] = await Promise.all([
+                    fetchRooms('LUNCH').catch(() => []),
+                    fetchRooms('DINNER').catch(() => []),
+                ]);
+                // Unione per id. Una sala oltre soglia in un turno e libera
+                // nell'altro conta come libera: il turno non è ancora scelto,
+                // e promettere meno di quello che c'è farebbe cambiare sala
+                // per niente.
+                const byId = new Map();
+                for (const room of [...lunch, ...dinner]) {
+                    const seen = byId.get(room.id);
+                    if (!seen) byId.set(room.id, { ...room });
+                    else if (!room.over_threshold) seen.over_threshold = false;
+                }
+                state.rooms = [...byId.values()];
+            }
         } catch (err) {
             console.error(err);
             state.rooms = [];
@@ -771,155 +1430,214 @@
     }
 
     function renderRooms() {
-        if (!Array.isArray(state.rooms)) {
-            roomsContainer.innerHTML = '<p class="text-sm text-stone-400 text-center py-3">Caricamento sale…</p>';
+        const host = $('rooms');
+        const note = $('roomsNote');
+        if (!Array.isArray(state.rooms) || state.rooms.length === 0) {
+            host.innerHTML = '<p class="empty">Nessuna sala disponibile per questa richiesta.</p>';
+            note.hidden = true;
             return;
         }
-        if (state.rooms.length === 0) {
-            roomsContainer.innerHTML = '<p class="text-sm text-stone-400 text-center py-3">Nessuna sala disponibile per questa richiesta.</p>';
-            return;
-        }
-        roomsContainer.innerHTML = '<div class="grid grid-cols-1 gap-2"></div>';
-        const grid = roomsContainer.firstElementChild;
-
-        // Etichetta sotto il nome sala: "Prenotazione" (si conferma da sola) o
-        // "Richiesta di Prenotazione" (sala oltre il ~70%: la conferma lo staff).
-        // Il flag `over_threshold` arriva da GET /public/rooms ed è lo stesso
-        // che decide l'esito reale del submit, così il cliente sa cosa aspettarsi.
-        const makeChip = (label, isActive, onClick, overThreshold) => {
+        host.innerHTML = '';
+        const make = (label, active, onClick) => {
             const b = document.createElement('button');
             b.type = 'button';
-            b.className = `w-full text-left px-4 py-3 rounded-xl border-2 transition ${
-                isActive
-                    ? 'border-amber-800 bg-amber-50 text-amber-900'
-                    : 'border-stone-200 bg-white text-stone-700 active:bg-stone-50 hover:bg-stone-50'
-            }`;
-            const tag = overThreshold ? 'Richiesta di Prenotazione' : 'Prenotazione';
-            const tagClass = overThreshold ? 'text-amber-700' : 'text-emerald-700';
-            const name = document.createElement('div');
-            name.className = 'text-sm font-semibold';
-            name.textContent = label;
-            const sub = document.createElement('div');
-            sub.className = `text-xs font-medium mt-0.5 ${tagClass}`;
-            sub.textContent = tag;
-            b.appendChild(name);
-            b.appendChild(sub);
+            b.className = 'room';
+            b.setAttribute('aria-pressed', String(active));
+            b.textContent = label;
             b.addEventListener('click', onClick);
-            return b;
+            host.appendChild(b);
         };
-
-        // "Nessuna preferenza": lo staff sceglie una sala libera. Si conferma da
-        // sola se almeno una sala è sotto soglia; se sono tutte oltre, diventa
-        // comunque una richiesta.
-        const anyUnderThreshold = state.rooms.some(r => !r.over_threshold);
-        grid.appendChild(makeChip(
-            'Nessuna preferenza',
-            state.roomId === null,
-            () => { state.roomId = null; renderRooms(); },
-            !anyUnderThreshold
-        ));
-
         state.rooms.forEach(room => {
-            grid.appendChild(makeChip(
-                room.name,
-                state.roomId === room.id,
-                () => { state.roomId = room.id; renderRooms(); },
-                !!room.over_threshold
-            ));
+            make(room.name, state.roomId === room.id, () => { state.roomId = room.id; renderRooms(); });
+        });
+        // "Indifferente" per ultima: è la resa, non la prima cosa da valutare.
+        make('Indifferente', state.roomId === null, () => { state.roomId = null; renderRooms(); });
+
+        // `over_threshold` è lo stesso insieme che decide l'esito reale del
+        // submit (pickSelfServiceTable), quindi quello che si legge qui e la
+        // risposta del server non possono divergere. Una riga sola, e solo
+        // sulla sala scelta: il cliente deve sapere PRIMA se sta prenotando
+        // o chiedendo, ma non gli serve il censimento di tutte le sale.
+        const chosen = state.roomId === null ? null : state.rooms.find(r => r.id === state.roomId);
+        const anyFree = state.rooms.some(r => !r.over_threshold);
+        const willBeRequest = chosen ? !!chosen.over_threshold : !anyFree;
+        note.hidden = !willBeRequest;
+        if (willBeRequest) {
+            note.textContent = chosen
+                ? chosen.name + ' è quasi piena: la prenotazione la conferma lo staff.'
+                : 'Le sale sono quasi piene: la prenotazione la conferma lo staff.';
+        }
+    }
+
+    // ---- Allergie e intolleranze -------------------------------------------
+    // Una lista sola. Esce sempre come "Allergie: …", il formato che il CRM
+    // già legge: senza la distinzione di gravità, trattare un'intolleranza
+    // come allergia è l'errore innocuo, il contrario no.
+    const DIET_ITEMS = ['Glutine','Crostacei','Uova','Pesce','Arachidi','Soia','Latte','Frutta a guscio','Sedano','Senape','Sesamo','Solfiti','Lupini','Molluschi'];
+    const diet = new Set();
+
+    function renderDiet() {
+        const host = $('dietChips');
+        host.innerHTML = '';
+        DIET_ITEMS.forEach(item => {
+            const on = diet.has(item);
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'chip';
+            b.setAttribute('aria-pressed', String(on));
+            b.textContent = item;
+            b.addEventListener('click', () => {
+                if (on) diet.delete(item); else diet.add(item);
+                renderDiet();
+            });
+            host.appendChild(b);
         });
     }
 
-    function updateSubmitVisibility() {
-        if (state.date && state.shift && state.time) {
-            submitWrap.classList.remove('hidden');
-        } else {
-            submitWrap.classList.add('hidden');
+    const buildDietNote = () => diet.size ? 'Allergie: ' + [...diet].join(', ') : '';
+
+    // ---- Passi -------------------------------------------------------------
+    const stepReady = () => !!(state.date && state.shift && state.time);
+
+    function updateContinue() {
+        $('toStep2').disabled = !stepReady();
+        renderStepNav();
+    }
+
+    // I passi non si sbarrano a vicenda (StepNav): si torna indietro quando si
+    // vuole. Il passo 2 resta però spento finché non c'è un orario — senza,
+    // non c'è niente da confermare e il riepilogo sarebbe vuoto.
+    const TICK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>';
+    function renderStepNav() {
+        document.querySelectorAll('.stepnav__item').forEach(item => {
+            const n = Number(item.dataset.step);
+            const current = n === state.step;
+            const done = n < state.step;
+            item.classList.toggle('stepnav__item--current', current);
+            item.classList.toggle('stepnav__item--done', done);
+            if (current) item.setAttribute('aria-current', 'step');
+            else item.removeAttribute('aria-current');
+            item.disabled = n === 2 && !stepReady();
+            const mark = item.querySelector('.stepnav__mark');
+            mark.innerHTML = done ? TICK : mark.dataset.number;
+        });
+    }
+    // Il numero di partenza si conserva: una volta sostituito dalla spunta
+    // non sarebbe più nel markup da cui rileggerlo.
+    document.querySelectorAll('.stepnav__mark').forEach(m => { m.dataset.number = m.textContent.trim(); });
+
+    function goToStep(n) {
+        if (n === 2 && !stepReady()) return;
+        state.step = n;
+        $('step1').hidden = n !== 1;
+        $('step2').hidden = n !== 2;
+
+        // Il riepilogo vive nella scheda con "Modifica", non anche in testata:
+        // ripeterlo due volte nella stessa schermata non aggiunge niente.
+        if (n === 2) {
+            $('recapMain').textContent = fmtDayLong(state.date) + ' · ' + state.time;
+            const bits = [state.guests + ' ' + personLabel(state.guests)];
+            if (state.children) bits.push(state.children + (state.children === 1 ? ' bimbo' : ' bimbi'));
+            const room = state.rooms?.find(r => r.id === state.roomId);
+            bits.push(room ? room.name : 'sala indifferente');
+            $('recapSub').textContent = bits.join(' · ');
         }
-    }
 
+        renderStepNav();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    $('toStep2').addEventListener('click', () => goToStep(2));
+    $('backToStep1').addEventListener('click', () => goToStep(1));
+    $('editBooking').addEventListener('click', () => goToStep(1));
+    document.querySelectorAll('.stepnav__item').forEach(item =>
+        item.addEventListener('click', () => goToStep(Number(item.dataset.step))));
+
+    // ---- Errori ------------------------------------------------------------
+    let errorTimer = null;
     function showError(msg) {
-        errorBox.textContent = msg;
-        errorBox.classList.remove('hidden');
-        setTimeout(() => errorBox.classList.add('hidden'), 5000);
+        const box = $('error');
+        box.textContent = msg;
+        box.hidden = false;
+        box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        clearTimeout(errorTimer);
+        errorTimer = setTimeout(() => { box.hidden = true; }, 6000);
     }
 
-    form.addEventListener('submit', async (e) => {
+    // ---- Invio -------------------------------------------------------------
+    $('form').addEventListener('submit', async e => {
         e.preventDefault();
-        errorBox.classList.add('hidden');
+        $('error').hidden = true;
 
         const customer_name = $('customer_name').value.trim();
         const phone = $('phone').value.trim();
         const email = $('email').value.trim();
-        // Prepend the dietary flags so the CRM parses "Allergie:/Intolleranze:".
         const freeNote = $('notes').value.trim();
-        const notes = [buildDietaryNote(), freeNote].filter(Boolean).join(' | ');
-        const website = form.elements['website'].value;
+        const notes = [buildDietNote(), freeNote].filter(Boolean).join(' | ');
+        const website = $('form').elements['website'].value;
 
-        if (!customer_name) { showError('Inserisci il tuo nome'); return; }
-        if (!phone && !email) { showError('Inserisci almeno un contatto: telefono o email'); return; }
-        if (phone && !/^\+?[0-9 ]{6,20}$/.test(phone)) { showError('Numero di telefono non valido'); return; }
-        // Simple RFC-lite email check — server does authoritative validation.
-        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showError('Indirizzo email non valido'); return; }
-        if (!$('privacyConsent').checked) { showError('Per procedere, accetta l\'informativa sulla privacy'); return; }
+        if (!customer_name) return showError('Inserisci il tuo nome.');
+        if (!phone && !email) return showError('Lasciaci un telefono o un’email.');
+        if (phone && !/^\+?[0-9 ]{6,20}$/.test(phone)) return showError('Numero di telefono non valido.');
+        // Controllo leggero: la validazione che conta la fa il server.
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return showError('Indirizzo email non valido.');
+        if (!$('privacyConsent').checked) return showError('Per procedere, accetta l’informativa sulla privacy.');
 
-        submitBtn.disabled = true;
-        submitBtn.textContent = 'Invio in corso…';
+        const btn = $('submitBtn');
+        btn.disabled = true;
+        btn.textContent = 'Invio…';
 
         try {
-            const resp = await fetch(publicBase + '/reservations', {
+            const r = await fetch(publicBase + '/reservations', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    customer_name,
-                    phone,
-                    email,
+                    customer_name, phone, email,
                     date: state.date,
                     time: state.time,
                     shift: state.shift,
                     guests: state.guests,
+                    children: state.children,
                     room_id: state.roomId,
-                    notes,
-                    website,
+                    notes, website,
                 }),
             });
-            const data = await resp.json().catch(() => ({}));
-            if (!resp.ok) {
-                showError(data.message || 'Si è verificato un errore. Riprova.');
-                submitBtn.disabled = false;
-                submitBtn.textContent = 'Invia richiesta';
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                showError(data.message || 'Qualcosa è andato storto. Riprova.');
+                btn.disabled = false;
+                btn.textContent = 'Conferma prenotazione';
                 return;
             }
-            // Success. Il backend conferma subito quando la sala è ancora
-            // sotto il proprio limite di occupazione e c'è un tavolo libero;
-            // altrimenti la richiesta passa dallo staff.
+            // Il backend conferma subito quando la sala è sotto il proprio
+            // limite e c'è un tavolo libero; altrimenti passa dallo staff.
             if (data.confirmed) {
-                const confirmTitle = $('confirmTitle');
-                const confirmText = $('confirmText');
-                if (confirmTitle) confirmTitle.textContent = 'Prenotazione confermata';
-                if (confirmText) confirmText.textContent = 'Grazie! Ti aspettiamo. Riceverai la conferma anche via WhatsApp, SMS o email.';
+                $('doneTitle').textContent = 'Tavolo confermato';
+                $('doneText').textContent = 'Vi aspettiamo. Ricevete la conferma anche via WhatsApp, SMS o email.';
             }
-            const dateLabel = new Date(state.date + 'T00:00:00').toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
-            const roomLabel = data.room || (state.roomId && Array.isArray(state.rooms)
-                ? (state.rooms.find(r => r.id === state.roomId)?.name || '')
-                : '');
-            const parts = [
-                `${state.guests} ${state.guests === 1 ? 'persona' : 'persone'}`,
-                dateLabel,
+            const bits = [
+                state.guests + ' ' + personLabel(state.guests),
+                fmtDayLong(state.date),
                 state.time,
             ];
-            if (roomLabel) parts.push(roomLabel);
-            confirmRecap.textContent = parts.join(' · ');
-            confirmation.classList.remove('hidden');
+            const roomLabel = data.room || state.rooms?.find(r => r.id === state.roomId)?.name;
+            if (roomLabel) bits.push(roomLabel);
+            $('doneRecap').textContent = bits.join(' · ');
+            $('done').hidden = false;
         } catch (err) {
             console.error(err);
             showError('Connessione non disponibile. Riprova fra qualche istante.');
-            submitBtn.disabled = false;
-            submitBtn.textContent = 'Invia richiesta';
+            btn.disabled = false;
+            btn.textContent = 'Conferma prenotazione';
         }
     });
 
-    // Initial fetch so slots appear as soon as a shift is picked.
-    loadAvailability();
+    // ---- Avvio -------------------------------------------------------------
+    renderGuests();
+    renderDiet();
+    renderShifts();
+    updateContinue();
+    // Nessun pannello aperto all'arrivo: la pagina si presenta chiusa e
+    // leggibile, e la prima mossa la sceglie chi legge.
 })();
 </script>
 </body>
