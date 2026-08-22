@@ -16287,6 +16287,60 @@ app.put('/settings/legal', authenticate, requirePermission('settings:full'), asy
     }
 });
 
+// ---------------------------------------------------------------------------
+// TABLE ASSIGNMENT AI PROMPT (app_settings → key 'table_assignment_ai_prompt')
+// Testo libero, non consumato da alcuna automazione oggi: è la nota che il
+// gestore scrive per sé (o per una futura logica AI) su come assegnare o
+// spostare i tavoli in base alle prenotazioni in arrivo. Nessuna automazione
+// legge ancora questo campo — è solo l'input, salvato per riuso futuro.
+// ---------------------------------------------------------------------------
+const TABLE_ASSIGNMENT_AI_PROMPT_KEY = 'table_assignment_ai_prompt';
+const TABLE_ASSIGNMENT_AI_PROMPT_MAX = 4000;
+
+async function getTableAssignmentAiPrompt(tenantId: number): Promise<string> {
+    try {
+        const result = await queryWithRetry(
+            'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
+            [tenantId, TABLE_ASSIGNMENT_AI_PROMPT_KEY]
+        );
+        const raw = result.rows[0]?.text_value;
+        return typeof raw === 'string' ? raw : '';
+    } catch (err) {
+        console.error(`[table-assignment-ai-prompt] failed to read ${TABLE_ASSIGNMENT_AI_PROMPT_KEY}:`, err);
+        return '';
+    }
+}
+
+app.get('/settings/table-assignment-ai-prompt', authenticate, async (req, res) => {
+    try {
+        res.json({ prompt: await getTableAssignmentAiPrompt(req.tenantId!) });
+    } catch (err) {
+        console.error('GET /settings/table-assignment-ai-prompt error:', err);
+        res.status(500).json({ error: 'Failed to fetch table assignment AI prompt' });
+    }
+});
+
+app.put('/settings/table-assignment-ai-prompt', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const body = req.body ?? {};
+        if (typeof body.prompt !== 'string') {
+            return res.status(400).json({ error: 'invalid_value', message: 'prompt must be a string' });
+        }
+        const raw = body.prompt.slice(0, TABLE_ASSIGNMENT_AI_PROMPT_MAX);
+        await queryWithRetry(
+            `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (tenant_id, key) DO UPDATE
+               SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+            [req.tenantId!, TABLE_ASSIGNMENT_AI_PROMPT_KEY, raw]
+        );
+        res.json({ prompt: raw });
+    } catch (err: any) {
+        console.error('PUT /settings/table-assignment-ai-prompt error:', err);
+        res.status(500).json({ error: 'Failed to update table assignment AI prompt', detail: err?.message });
+    }
+});
+
 app.put('/settings/features', authenticate, requirePermission('settings:full'), async (req, res) => {
     const body = req.body ?? {};
     const updates: Array<{ key: FeatureFlagKey; value: boolean }> = [];
