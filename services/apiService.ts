@@ -1210,6 +1210,27 @@ export const updateAutoDepositSettings = async (
   });
 };
 
+// Card #27 — comportamento della blacklist per fonte di prenotazione.
+export type BlacklistBehavior = 'block' | 'warn';
+export type BlacklistPolicySource = 'MANUAL' | 'GOOGLE' | 'VOICE' | 'WHATSAPP';
+export type BlacklistPolicySettings = Record<BlacklistPolicySource, BlacklistBehavior>;
+
+export const getBlacklistPolicySettings = async (): Promise<BlacklistPolicySettings> => {
+  return apiRequest<BlacklistPolicySettings>(`${API_URL}/settings/blacklist-policy`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const updateBlacklistPolicySettings = async (
+  updates: Partial<BlacklistPolicySettings>
+): Promise<BlacklistPolicySettings> => {
+  return apiRequest<BlacklistPolicySettings>(`${API_URL}/settings/blacklist-policy`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(updates),
+  });
+};
+
 // Card #28 — scadenza automatica dei link di pagamento (per tenant).
 export interface PaymentLinkExpirySettings {
   enabled: boolean;

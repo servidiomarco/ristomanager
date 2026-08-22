@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -43,6 +43,7 @@ import { ReservationNotesManager } from './components/ReservationNotesManager';
 import { ReservationAllergensManager } from './components/ReservationAllergensManager';
 import { AutoDepositManager } from './components/AutoDepositManager';
 import { PaymentLinkExpiryManager } from './components/PaymentLinkExpiryManager';
+import { BlacklistPolicyManager } from './components/BlacklistPolicyManager';
 import { PayAtTableSettingsManager } from './components/PayAtTableSettingsManager';
 import { SalaCucinaSettingsManager } from './components/SalaCucinaSettingsManager';
 import { AiMessagesSettingsManager } from './components/AiMessagesSettingsManager';
@@ -2654,6 +2655,17 @@ const App: React.FC = () => {
                   description="Annulla da solo i link non pagati dopo una soglia di ore e avvisa il cliente che la prenotazione non è confermata."
                 >
                   <PaymentLinkExpiryManager showToast={addToast} />
+                </SettingsDisclosure>
+
+                {/* Card #27: comportamento della blacklist deciso dal tenant,
+                    fonte per fonte — niente più scelta hardcoded. */}
+                <SettingsDisclosure
+                  icon={Ban}
+                  iconTone="pending"
+                  title="Blacklist"
+                  description="Per ogni fonte decidi se un numero in blacklist viene bloccato o entra con l'avviso allo staff."
+                >
+                  <BlacklistPolicyManager showToast={addToast} />
                 </SettingsDisclosure>
               </div>
             </SettingsSection>

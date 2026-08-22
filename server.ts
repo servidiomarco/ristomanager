@@ -157,6 +157,14 @@ import {
     PAYMENT_LINK_EXPIRY_MAX_HOURS,
     type PaymentLinkExpiryPolicy,
 } from './services/paymentLinkExpiryPolicy.js';
+import {
+    getBlacklistPolicy,
+    saveBlacklistPolicy,
+    isBlacklistBehavior,
+    BLACKLIST_SOURCES,
+    type BlacklistPolicyMap,
+    type BlacklistSource,
+} from './services/blacklistPolicy.js';
 import { toTitleCase } from './utils/text.js';
 import { getRomeTimePart } from './utils/reservationTime.js';
 import {
@@ -2132,6 +2140,20 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         const rawDuration = duration_minutes == null || duration_minutes === '' ? null : Number(duration_minutes);
         const durationValue: number | null = Number.isFinite(rawDuration) && rawDuration! > 0 ? Math.min(600, Math.max(15, Math.round(rawDuration!))) : null;
         const effectiveDurationForCheck = durationValue ?? (shift === 'LUNCH' ? 90 : 120);
+
+        // Card #27 — se la policy del tenant blocca ANCHE la fonte manuale,
+        // il salvataggio di un numero in blacklist fa 409. Col default 'warn'
+        // questo ramo non scatta mai: il banner nel modal avvisa e decide lo
+        // staff.
+        if (phone && String(phone).trim()) {
+            const blacklistPolicy = await getBlacklistPolicy(req.tenantId!);
+            if (blacklistPolicy.MANUAL === 'block' && await isPhoneBlacklisted(req.tenantId!, String(phone))) {
+                return res.status(409).json({
+                    error: 'customer_blacklisted',
+                    message: 'Cliente in blacklist: le impostazioni del ristorante bloccano la prenotazione per questo numero.',
+                });
+            }
+        }
 
         // If the client didn't pick a table but the caller is a known rubrica
         // entry with a preferred_table_id, try to honor that preference. The
@@ -17069,6 +17091,60 @@ app.put('/settings/payment-link-expiry', authenticate, requirePermission('settin
 });
 
 // ============================================
+// POLICY BLACKLIST PER FONTE (blacklistPolicy) — card #27
+// ============================================
+
+app.get('/settings/blacklist-policy', authenticate, async (req, res) => {
+    try {
+        res.json(await getBlacklistPolicy(req.tenantId!));
+    } catch (err) {
+        console.error('GET /settings/blacklist-policy error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/settings/blacklist-policy', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const body = req.body ?? {};
+        if (typeof body !== 'object' || Array.isArray(body)) {
+            return res.status(400).json({ error: 'invalid_body', message: 'Il body deve essere un oggetto {fonte: comportamento}' });
+        }
+        // Update parziale come i Canali di risposta: le fonti assenti restano
+        // come sono, ogni fonte presente deve valere block|warn.
+        const current = await getBlacklistPolicy(req.tenantId!);
+        const next: BlacklistPolicyMap = { ...current };
+        let touched = false;
+        for (const [key, value] of Object.entries(body)) {
+            if (!(BLACKLIST_SOURCES as readonly string[]).includes(key)) {
+                return res.status(400).json({ error: 'invalid_source', message: `Fonte non valida: ${String(key).slice(0, 20)}` });
+            }
+            if (!isBlacklistBehavior(value)) {
+                return res.status(400).json({ error: 'invalid_behavior', message: `Comportamento non valido per ${key}: ammessi block|warn` });
+            }
+            next[key as BlacklistSource] = value;
+            touched = true;
+        }
+        if (!touched) {
+            return res.status(400).json({ error: 'empty_body', message: 'Nessuna fonte da aggiornare' });
+        }
+        await saveBlacklistPolicy(req.tenantId!, next);
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!,
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.SETTINGS,
+                0,
+                `Policy blacklist: ${BLACKLIST_SOURCES.map(k => `${k}=${next[k]}`).join(', ')}`
+            );
+        }
+        res.json(next);
+    } catch (err) {
+        console.error('PUT /settings/blacklist-policy error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
 // ONBOARDING — wizard di primo accesso (Fase D1)
 // ============================================
 // L'OWNER di un tenant appena provisionato vede il wizard al posto dell'app
@@ -19008,7 +19084,9 @@ app.put('/settings/reservation-notes', authenticate, requirePermission('settings
 
 const publicBookingLimiter = rateLimit({
     windowMs: 60 * 1000,
-    limit: 5,
+    // Configurabile per i test API: la suite gira in sequenza dallo stesso IP
+    // e coi soli casi blacklist+scoping supera i 5 POST nel minuto.
+    limit: Number(process.env.PUBLIC_BOOKING_RATE_LIMIT) || 5,
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     message: { error: 'rate_limited', message: 'Troppe richieste, riprova tra qualche minuto.' },
@@ -19309,11 +19387,15 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
             : null;
         const emailNormalized = email ? email.toLowerCase() : null;
 
-        // Card #27 — blacklist: un numero segnato in rubrica non prenota dal
-        // form pubblico. Risposta volutamente neutra: nessun riferimento alla
-        // lista, si invita a chiamare — al telefono risponde lo staff, che nel
-        // CRM vede l'avviso e decide.
-        if (phoneE164 && await isPhoneBlacklisted(tenantId, phoneE164)) {
+        // Card #27 — blacklist: se la policy del tenant blocca la fonte web,
+        // un numero segnato in rubrica non prenota dal form pubblico. Risposta
+        // volutamente neutra: nessun riferimento alla lista, si invita a
+        // chiamare — al telefono risponde lo staff, che nel CRM vede l'avviso
+        // e decide. Con la policy su 'warn' la prenotazione entra e lo staff
+        // la trova col badge in lista.
+        if (phoneE164
+            && (await getBlacklistPolicy(tenantId)).GOOGLE === 'block'
+            && await isPhoneBlacklisted(tenantId, phoneE164)) {
             return res.status(503).json({
                 error: 'customer_blacklisted',
                 message: 'Non è possibile completare la prenotazione online per questo numero. La preghiamo di chiamarci al telefono.',
@@ -23156,6 +23238,7 @@ bookingTools.configureBookingTools({
     recordVoiceCall,
     upsertCustomerFromReservation,
     isPhoneBlacklisted,
+    getBlacklistPolicy,
 
     getVoiceDateBlocks,
     findVoiceDateBlock,
