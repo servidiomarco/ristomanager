@@ -1109,6 +1109,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [customerSuggestions, setCustomerSuggestions] = useState<Customer[]>([]);
   const [activeSuggestField, setActiveSuggestField] = useState<'name' | 'phone' | null>(null);
   const [matchedCustomerNoShows, setMatchedCustomerNoShows] = useState<number>(0);
+  // Card #27 — blacklist: null = nessun match, altrimenti il motivo (anche '').
+  const [matchedCustomerBlacklist, setMatchedCustomerBlacklist] = useState<string | null>(null);
   // Tracks which value we last queried for, so the dropdown closes on selection
   // (we set this to the just-selected name/phone to skip re-querying for it).
   const lastSuggestQueryRef = useRef<string>('');
@@ -1169,6 +1171,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     if (exact && (exact.no_show_count || 0) > 0) {
       setMatchedCustomerNoShows(exact.no_show_count || 0);
     }
+    if (exact?.is_blacklisted) {
+      setMatchedCustomerBlacklist(exact.blacklist_reason || '');
+    }
   }, [customerSuggestions, formData.phone]);
 
   // Decide whether the rubrica's preferred table can be auto-assigned to the
@@ -1223,6 +1228,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       email: c.email || prev.email || '',
     }));
     setMatchedCustomerNoShows(c.no_show_count || 0);
+    setMatchedCustomerBlacklist(c.is_blacklisted ? (c.blacklist_reason || '') : null);
     setActiveSuggestField(null);
     setCustomerSuggestions([]);
     applyCustomerPreferences(c);
@@ -2068,6 +2074,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setShowNotesSection(false);
       setModalRoomFilter('ALL');
       setMatchedCustomerNoShows(0);
+      setMatchedCustomerBlacklist(null);
       setIsEditing(false);
       setIsFormOpen(true);
 
@@ -3462,6 +3469,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               {res.customer_is_vip && (
                 <Star className="h-4 w-4 flex-shrink-0 fill-[var(--ds-pending-solid)] text-[var(--ds-pending-solid)]" aria-label="Cliente VIP" />
               )}
+              {res.customer_is_blacklisted && (
+                <span title={res.customer_blacklist_reason || 'Cliente in blacklist'}>
+                  <Ban className="h-4 w-4 flex-shrink-0 text-[var(--ds-critical-text)]" aria-label="Cliente in blacklist" />
+                </span>
+              )}
               <p className={`truncate text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)] ${group.key === 'cancelled' ? 'line-through' : ''}`}>
                 {toTitleCase(res.customer_name)}
               </p>
@@ -3620,6 +3632,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               <h3 className="text-base font-semibold text-[var(--color-fg)] inline-flex items-center gap-1.5">
                 {res.customer_is_vip && (
                   <Star className="h-4 w-4 text-amber-500 fill-amber-400 flex-shrink-0" aria-label="Cliente VIP" />
+                )}
+                {res.customer_is_blacklisted && (
+                  <Ban className="h-4 w-4 flex-shrink-0 text-[var(--ds-critical-text)]" aria-label="Cliente in blacklist" />
                 )}
                 {toTitleCase(res.customer_name)}
                 {(() => {
@@ -4840,6 +4855,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             </div>
                         </div>
                     )}
+                    {(matchedCustomerBlacklist != null || formData.customer_is_blacklisted) && (
+                        <div className="mx-4 sm:mx-5 mt-4 flex items-start gap-3 rounded-[16px] bg-[var(--ds-critical-tint)] p-4">
+                            <Ban className="mt-0.5 h-5 w-5 flex-shrink-0 text-[var(--ds-critical-text)]" />
+                            <div className="flex-1 min-w-0">
+                                <p className="text-[15px] font-semibold text-[var(--ds-critical-text)]">
+                                    Cliente in blacklist
+                                </p>
+                                <p className="mt-0.5 text-[13px] text-[var(--ds-critical-text)]">
+                                    {(matchedCustomerBlacklist || formData.customer_blacklist_reason || '').trim()
+                                        || 'Web e agente vocale rifiutano questo numero; a mano decidi tu se procedere.'}
+                                </p>
+                            </div>
+                        </div>
+                    )}
                     {!isEditing && draftBanner && (
                         <div className="mx-4 sm:mx-5 mt-4 flex items-start gap-3 rounded-[16px] bg-[var(--ds-pending-tint)] p-4">
                             <Info className="mt-0.5 h-5 w-5 flex-shrink-0 text-[var(--ds-pending-text)]" />
@@ -5058,6 +5087,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             onChange={e => {
                                                 lastSuggestQueryRef.current = '';
                                                 setMatchedCustomerNoShows(0);
+                                                setMatchedCustomerBlacklist(null);
                                                 setFormData({...formData, customer_name: e.target.value});
                                             }}
                                             onFocus={() => setActiveSuggestField('name')}
@@ -5081,6 +5111,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                                     <span className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-critical-tint)] px-2 py-0.5 text-[12px] font-semibold text-[var(--ds-critical-text)]">
                                                                         <UserX className="h-2.5 w-2.5" />
                                                                         {c.no_show_count} no-show
+                                                                    </span>
+                                                                )}
+                                                                {c.is_blacklisted && (
+                                                                    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-critical-tint)] px-2 py-0.5 text-[12px] font-semibold text-[var(--ds-critical-text)]">
+                                                                        <Ban className="h-2.5 w-2.5" />
+                                                                        blacklist
                                                                     </span>
                                                                 )}
                                                             </div>
@@ -5141,6 +5177,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             onChange={e => {
                                                 lastSuggestQueryRef.current = '';
                                                 setMatchedCustomerNoShows(0);
+                                                setMatchedCustomerBlacklist(null);
                                                 setFormData({...formData, phone: e.target.value});
                                             }}
                                             onFocus={() => setActiveSuggestField('phone')}
@@ -5175,6 +5212,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                                     <span className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-critical-tint)] px-2 py-0.5 text-[12px] font-semibold text-[var(--ds-critical-text)]">
                                                                         <UserX className="h-2.5 w-2.5" />
                                                                         {c.no_show_count} no-show
+                                                                    </span>
+                                                                )}
+                                                                {c.is_blacklisted && (
+                                                                    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-critical-tint)] px-2 py-0.5 text-[12px] font-semibold text-[var(--ds-critical-text)]">
+                                                                        <Ban className="h-2.5 w-2.5" />
+                                                                        blacklist
                                                                     </span>
                                                                 )}
                                                             </div>

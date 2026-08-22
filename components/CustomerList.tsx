@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Customer, Reservation, BanquetMenu, Shift, Table, Room } from '../types';
 import { getCustomers, createCustomer, updateCustomer, deleteCustomer, getCustomerDuplicates, mergeCustomers, CustomerDuplicateGroup, getLegalSettings, getMarketingAudience } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
-import { Search, Plus, Pencil, Trash2, Phone, Mail, MapPin, BookUser, History, UtensilsCrossed, Calendar, Sun, Moon, Users as UsersIcon, Loader2, Star, Armchair, AlertTriangle, GitMerge, Download, MessageCircle, User as UserIcon, MoreVertical, ArrowLeft } from 'lucide-react';
+import { Search, Plus, Pencil, Trash2, Phone, Mail, MapPin, BookUser, History, UtensilsCrossed, Calendar, Sun, Moon, Users as UsersIcon, Loader2, Star, Armchair, AlertTriangle, Ban, GitMerge, Download, MessageCircle, User as UserIcon, MoreVertical, ArrowLeft } from 'lucide-react';
 import { toTitleCase } from '../utils/text';
 import {
   SplitPane, PanePlaceholder, SearchField, StatusPill, StatStrip, CountBadge,
@@ -36,6 +36,8 @@ interface FormState {
   preferences_notes: string;
   dietary_notes: string;
   is_vip: boolean;
+  is_blacklisted: boolean;
+  blacklist_reason: string;
 }
 
 const emptyForm: FormState = {
@@ -50,6 +52,8 @@ const emptyForm: FormState = {
   preferences_notes: '',
   dietary_notes: '',
   is_vip: false,
+  is_blacklisted: false,
+  blacklist_reason: '',
 };
 
 const customerToForm = (c: Customer): FormState => ({
@@ -65,6 +69,8 @@ const customerToForm = (c: Customer): FormState => ({
   preferences_notes: c.preferences_notes || '',
   dietary_notes: c.dietary_notes || '',
   is_vip: c.is_vip === true,
+  is_blacklisted: c.is_blacklisted === true,
+  blacklist_reason: c.blacklist_reason || '',
 });
 
 // Format an ISO reservation_time without timezone shifts (the backend stores
@@ -479,6 +485,8 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
         preferences_notes: form.preferences_notes.trim() || null,
         dietary_notes: form.dietary_notes.trim() || null,
         is_vip: form.is_vip,
+        is_blacklisted: form.is_blacklisted,
+        blacklist_reason: form.blacklist_reason.trim() || null,
       };
       if (form.id) {
         const updated = await updateCustomer(form.id, payload);
@@ -823,8 +831,11 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
         <div className="pointer-events-none relative flex items-center gap-3 p-3">
           <CustomerAvatar name={c.name} vip={c.is_vip} />
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
-              {toTitleCase(c.name)}
+            <div className="flex min-w-0 items-center gap-1.5">
+              {c.is_blacklisted && <Ban className="h-3.5 w-3.5 flex-shrink-0 text-[var(--ds-critical-text)]" aria-label="Blacklist" />}
+              <span className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                {toTitleCase(c.name)}
+              </span>
             </div>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[13px] text-[var(--ds-text-muted)]">
               {c.phone ? (
@@ -1167,8 +1178,13 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
                     sotto la pastiglia: sono attributi di questa persona, e
                     rientrati come il nome si leggono come una cosa sola invece
                     che come una riga a sé che ricomincia dal bordo. */}
-                {(c.preferred_table_id != null || (c.dietary_notes && c.dietary_notes.trim()) || (marketingEnabled && c.consent_marketing === true)) && (
+                {(c.is_blacklisted || c.preferred_table_id != null || (c.dietary_notes && c.dietary_notes.trim()) || (marketingEnabled && c.consent_marketing === true)) && (
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {c.is_blacklisted && (
+                      <span title={c.blacklist_reason || undefined}>
+                        <StatusPill tone="critical"><Ban className="h-3 w-3" aria-hidden />Blacklist</StatusPill>
+                      </span>
+                    )}
                     {c.preferred_table_id != null && (
                       <StatusPill><Armchair className="h-3 w-3" aria-hidden />{tableLabel(c.preferred_table_id)}</StatusPill>
                     )}
@@ -1399,6 +1415,31 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
             <span className="block text-[13px] text-[var(--ds-text-muted)]">Evidenzia la prenotazione in sala</span>
           </span>
         </label>
+        <label className="flex cursor-pointer select-none items-center gap-3 rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+          <input
+            type="checkbox"
+            checked={form.is_blacklisted}
+            onChange={e => setForm({ ...form, is_blacklisted: e.target.checked })}
+            className="h-5 w-5 flex-shrink-0 rounded-[6px] accent-[var(--ds-critical-solid)]"
+          />
+          <Ban className={`h-4 w-4 flex-shrink-0 ${form.is_blacklisted ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-text-muted)]'}`} aria-hidden />
+          <span className="min-w-0">
+            <span className="block text-[15px] font-medium text-[var(--ds-text-primary)]">Blacklist</span>
+            <span className="block text-[13px] text-[var(--ds-text-muted)]">Blocca web e agente vocale, avvisa in sala</span>
+          </span>
+        </label>
+        {form.is_blacklisted && (
+          <Field label="Motivo blacklist" htmlFor="cust-blacklist-reason">
+            <input
+              id="cust-blacklist-reason"
+              type="text"
+              placeholder="Es. due no-show senza avviso"
+              value={form.blacklist_reason}
+              onChange={e => setForm({ ...form, blacklist_reason: e.target.value })}
+              className={dsInput}
+            />
+          </Field>
+        )}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Tavolo preferito" htmlFor="cust-table">
             <select

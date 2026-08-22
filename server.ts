@@ -1888,6 +1888,8 @@ async function broadcastReservationsUpdatedByIds(ids: number[]): Promise<void> {
         const result = await queryWithRetry(`
             SELECT r.*, u.full_name AS created_by_user_name,
                    c.is_vip AS customer_is_vip,
+                   c.is_blacklisted AS customer_is_blacklisted,
+                   c.blacklist_reason AS customer_blacklist_reason,
                    c.preferred_table_id AS customer_preferred_table_id,
                    pt.name AS customer_preferred_table_name,
                    c.dietary_notes AS customer_dietary_notes,
@@ -1903,7 +1905,7 @@ async function broadcastReservationsUpdatedByIds(ids: number[]): Promise<void> {
             FROM reservations r
             LEFT JOIN users u ON r.created_by_user_id = u.id
             LEFT JOIN LATERAL (
-                SELECT cc.is_vip, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
+                SELECT cc.is_vip, cc.is_blacklisted, cc.blacklist_reason, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
                 FROM customers cc
                 WHERE r.phone IS NOT NULL
                   AND cc.phone IS NOT NULL
@@ -2068,6 +2070,8 @@ app.get('/reservations', authenticate, async (req, res) => {
         const result = await queryWithRetry(`
             SELECT r.*, u.full_name AS created_by_user_name,
                    c.is_vip AS customer_is_vip,
+                   c.is_blacklisted AS customer_is_blacklisted,
+                   c.blacklist_reason AS customer_blacklist_reason,
                    c.preferred_table_id AS customer_preferred_table_id,
                    pt.name AS customer_preferred_table_name,
                    c.dietary_notes AS customer_dietary_notes,
@@ -2083,7 +2087,7 @@ app.get('/reservations', authenticate, async (req, res) => {
             FROM reservations r
             LEFT JOIN users u ON r.created_by_user_id = u.id
             LEFT JOIN LATERAL (
-                SELECT cc.is_vip, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
+                SELECT cc.is_vip, cc.is_blacklisted, cc.blacklist_reason, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
                 FROM customers cc
                 WHERE r.phone IS NOT NULL
                   AND cc.phone IS NOT NULL
@@ -2193,6 +2197,8 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
             )
             SELECT ins.*, u.full_name AS created_by_user_name,
                    c.is_vip AS customer_is_vip,
+                   c.is_blacklisted AS customer_is_blacklisted,
+                   c.blacklist_reason AS customer_blacklist_reason,
                    c.preferred_table_id AS customer_preferred_table_id,
                    pt.name AS customer_preferred_table_name,
                    c.dietary_notes AS customer_dietary_notes,
@@ -2200,7 +2206,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
             FROM ins
             LEFT JOIN users u ON ins.created_by_user_id = u.id
             LEFT JOIN LATERAL (
-                SELECT cc.is_vip, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
+                SELECT cc.is_vip, cc.is_blacklisted, cc.blacklist_reason, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
                 FROM customers cc
                 WHERE ins.phone IS NOT NULL
                   AND cc.phone IS NOT NULL
@@ -2356,6 +2362,8 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                    (SELECT prev_reservation_time FROM old) AS prev_reservation_time,
                    (SELECT prev_guests FROM old) AS prev_guests,
                    c.is_vip AS customer_is_vip,
+                   c.is_blacklisted AS customer_is_blacklisted,
+                   c.blacklist_reason AS customer_blacklist_reason,
                    c.preferred_table_id AS customer_preferred_table_id,
                    pt.name AS customer_preferred_table_name,
                    c.dietary_notes AS customer_dietary_notes,
@@ -2363,7 +2371,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             FROM upd
             LEFT JOIN users u ON upd.created_by_user_id = u.id
             LEFT JOIN LATERAL (
-                SELECT cc.is_vip, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
+                SELECT cc.is_vip, cc.is_blacklisted, cc.blacklist_reason, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
                 FROM customers cc
                 WHERE upd.phone IS NOT NULL
                   AND cc.phone IS NOT NULL
@@ -2716,6 +2724,8 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
         const enriched = await client.query(
             `SELECT r.*, u.full_name AS created_by_user_name,
                     c.is_vip AS customer_is_vip,
+                   c.is_blacklisted AS customer_is_blacklisted,
+                   c.blacklist_reason AS customer_blacklist_reason,
                     c.preferred_table_id AS customer_preferred_table_id,
                     pt.name AS customer_preferred_table_name,
                     c.dietary_notes AS customer_dietary_notes,
@@ -2723,7 +2733,7 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
                FROM reservations r
                LEFT JOIN users u ON r.created_by_user_id = u.id
                LEFT JOIN LATERAL (
-                   SELECT cc.is_vip, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
+                   SELECT cc.is_vip, cc.is_blacklisted, cc.blacklist_reason, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
                    FROM customers cc
                    WHERE r.phone IS NOT NULL
                      AND cc.phone IS NOT NULL
@@ -8557,6 +8567,29 @@ const upsertCustomerFromReservation = async (
     }
 };
 
+// Card #27 — blacklist: true se il numero appartiene a un cliente segnato in
+// rubrica. Match sulle ultime 10 cifre (come findCustomerByPhone) perché la
+// rubrica può avere il numero senza prefisso internazionale. In caso di errore
+// DB torna false: meglio una prenotazione di troppo che un canale morto.
+const isPhoneBlacklisted = async (tenantId: number, phone: string): Promise<boolean> => {
+    try {
+        const digits = String(phone || '').replace(/\D/g, '');
+        if (digits.length < 6) return false;
+        const result = await queryWithRetry(
+            `SELECT 1 FROM customers
+             WHERE tenant_id = $2
+               AND is_blacklisted = true
+               AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = right($1, 10)
+             LIMIT 1`,
+            [digits, tenantId]
+        );
+        return result.rows.length > 0;
+    } catch (err) {
+        console.error('isPhoneBlacklisted failed:', err);
+        return false;
+    }
+};
+
 // Propagate the marketing consent captured at booking to the customer rubrica
 // (matched by phone-digits) so it can be used to filter marketing sends. Only
 // runs when an explicit boolean was provided. Side-effect — never throws.
@@ -8666,6 +8699,7 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
             const result = await queryWithRetry(
                 `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
                         preferred_table_id, preferences_notes, dietary_notes, is_vip,
+                        is_blacklisted, blacklist_reason,
                         consent_marketing, consent_marketing_updated_at,
                         ${noShowSubquery}
                  FROM customers c
@@ -8681,6 +8715,7 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
         const result = await queryWithRetry(
             `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
                     preferred_table_id, preferences_notes, dietary_notes, is_vip,
+                    is_blacklisted, blacklist_reason,
                     consent_marketing, consent_marketing_updated_at,
                     ${noShowSubquery}
              FROM customers c
@@ -8728,7 +8763,7 @@ app.get('/customers/marketing-audience', authenticate, requirePermission('custom
 
 app.post('/customers', authenticate, requirePermission('customers:full'), async (req, res) => {
     try {
-        const { name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip } = req.body;
+        const { name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason } = req.body;
         if (!name || !String(name).trim()) {
             return res.status(400).json({ error: 'name is required' });
         }
@@ -8740,6 +8775,10 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
             ? Number(preferred_table_id)
             : null;
         const normalizedIsVip: boolean = is_vip === true || is_vip === 'true';
+        const normalizedIsBlacklisted: boolean = is_blacklisted === true || is_blacklisted === 'true';
+        const normalizedBlacklistReason: string | null = normalizedIsBlacklisted && blacklist_reason && String(blacklist_reason).trim()
+            ? String(blacklist_reason).trim()
+            : null;
 
         // Dedupe on the digit-only form of the phone — strips spaces, "+",
         // dashes, etc. so "+39 333 1234567" and "3331234567" match. Phone
@@ -8749,7 +8788,7 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
         if (phoneDigits) {
             const existing = await queryWithRetry(
                 `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
-                        preferred_table_id, preferences_notes, dietary_notes, is_vip
+                        preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason
                  FROM customers
                  WHERE tenant_id = $2
                    AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1
@@ -8762,10 +8801,10 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
         }
 
         const result = await queryWithRetry(
-            `INSERT INTO customers (tenant_id, name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip)
-             VALUES ($12, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            `INSERT INTO customers (tenant_id, name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason)
+             VALUES ($12, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $13, $14)
              RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
-                       preferred_table_id, preferences_notes, dietary_notes, is_vip`,
+                       preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason`,
             [
                 normalizeCustomerName(String(name).trim()),
                 trimmedPhone || null,
@@ -8779,6 +8818,8 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
                 dietary_notes ?? null,
                 normalizedIsVip,
                 req.tenantId!,
+                normalizedIsBlacklisted,
+                normalizedBlacklistReason,
             ]
         );
         const newCustomer = result.rows[0];
@@ -8806,7 +8847,7 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
 app.put('/customers/:id', authenticate, requirePermission('customers:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip } = req.body;
+        const { name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason } = req.body;
         if (!name || !String(name).trim()) {
             return res.status(400).json({ error: 'name is required' });
         }
@@ -8817,6 +8858,10 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
             ? Number(preferred_table_id)
             : null;
         const normalizedIsVip: boolean = is_vip === true || is_vip === 'true';
+        const normalizedIsBlacklisted: boolean = is_blacklisted === true || is_blacklisted === 'true';
+        const normalizedBlacklistReason: string | null = normalizedIsBlacklisted && blacklist_reason && String(blacklist_reason).trim()
+            ? String(blacklist_reason).trim()
+            : null;
 
         // Reject if another customer already owns this phone (digits-only match).
         // Without this, the UPDATE would silently create a duplicate that
@@ -8853,7 +8898,7 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
         try {
             await client.query('BEGIN');
             const prev = await client.query(
-                'SELECT name, phone, is_vip, preferred_table_id, dietary_notes, preferences_notes FROM customers WHERE id = $1 AND tenant_id = $2 FOR UPDATE',
+                'SELECT name, phone, is_vip, is_blacklisted, preferred_table_id, dietary_notes, preferences_notes FROM customers WHERE id = $1 AND tenant_id = $2 FOR UPDATE',
                 [id, req.tenantId!]
             );
             if (prev.rowCount === 0) {
@@ -8879,10 +8924,12 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
                     preferences_notes = $9,
                     dietary_notes = $10,
                     is_vip = $11,
+                    is_blacklisted = $12,
+                    blacklist_reason = $13,
                     updated_at = CURRENT_TIMESTAMP
-                 WHERE id = $12 AND tenant_id = $13
+                 WHERE id = $14 AND tenant_id = $15
                  RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
-                           preferred_table_id, preferences_notes, dietary_notes, is_vip`,
+                           preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason`,
                 [
                     newName,
                     newPhone,
@@ -8895,6 +8942,8 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
                     preferences_notes ?? null,
                     dietary_notes ?? null,
                     normalizedIsVip,
+                    normalizedIsBlacklisted,
+                    normalizedBlacklistReason,
                     id,
                     req.tenantId!,
                 ]
@@ -8934,6 +8983,7 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
             // re-render with the fresh join.
             const joinedFieldsChanged =
                 normalizedIsVip !== (prev.rows[0].is_vip === true) ||
+                normalizedIsBlacklisted !== (prev.rows[0].is_blacklisted === true) ||
                 normalizedPreferredTableId !== (prev.rows[0].preferred_table_id ?? null) ||
                 (dietary_notes ?? null) !== (prev.rows[0].dietary_notes ?? null) ||
                 (preferences_notes ?? null) !== (prev.rows[0].preferences_notes ?? null);
@@ -9096,10 +9146,12 @@ app.post('/customers/:sourceId/merge-into/:targetId', authenticate, requirePermi
                  preferences_notes = COALESCE(NULLIF(preferences_notes, ''), $8),
                  dietary_notes = COALESCE(NULLIF(dietary_notes, ''), $9),
                  is_vip = is_vip OR $10,
+                 is_blacklisted = is_blacklisted OR $12,
+                 blacklist_reason = COALESCE(NULLIF(blacklist_reason, ''), $13),
                  updated_at = CURRENT_TIMESTAMP
              WHERE id = $1 AND tenant_id = $11
              RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
-                       preferred_table_id, preferences_notes, dietary_notes, is_vip`,
+                       preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason`,
             [
                 targetId,
                 source.email || null,
@@ -9112,6 +9164,8 @@ app.post('/customers/:sourceId/merge-into/:targetId', authenticate, requirePermi
                 source.dietary_notes || null,
                 source.is_vip === true,
                 req.tenantId!,
+                source.is_blacklisted === true,
+                source.blacklist_reason || null,
             ]
         );
 
@@ -19255,6 +19309,17 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
             : null;
         const emailNormalized = email ? email.toLowerCase() : null;
 
+        // Card #27 — blacklist: un numero segnato in rubrica non prenota dal
+        // form pubblico. Risposta volutamente neutra: nessun riferimento alla
+        // lista, si invita a chiamare — al telefono risponde lo staff, che nel
+        // CRM vede l'avviso e decide.
+        if (phoneE164 && await isPhoneBlacklisted(tenantId, phoneE164)) {
+            return res.status(503).json({
+                error: 'customer_blacklisted',
+                message: 'Non è possibile completare la prenotazione online per questo numero. La preghiamo di chiamarci al telefono.',
+            });
+        }
+
         const reservation_time = `${date}T${time}:00`;
         const userNote = notesRaw ? notesRaw.slice(0, 500) : '';
         const noteParts = ['[Web]'];
@@ -23090,6 +23155,7 @@ bookingTools.configureBookingTools({
     modifyVoiceReservation,
     recordVoiceCall,
     upsertCustomerFromReservation,
+    isPhoneBlacklisted,
 
     getVoiceDateBlocks,
     findVoiceDateBlock,
