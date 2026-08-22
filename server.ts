@@ -18,6 +18,7 @@ import * as bookingTools from './services/bookingTools.js';
 import * as whatsappAgent from './services/whatsappAgent.js';
 import * as tableAssignmentAgent from './services/tableAssignmentAgent.js';
 import * as aiReport from './services/aiReportService.js';
+import { renderPrenota } from './services/prenotaSeo.js';
 import { COST_USD_SQL, UNPRICED_SQL, USD_EUR } from './services/aiPricing.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
 import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
@@ -19834,7 +19835,85 @@ app.get(['/public/rooms', '/public/:slug/rooms'], withPublicTenant(handlePublicR
 app.get(['/public/contact', '/public/:slug/contact'], withPublicTenant(handlePublicContact));
 app.post(['/public/reservations', '/public/:slug/reservations'], publicBookingLimiter, withPublicTenant(handlePublicReservationCreate));
 
-app.get('/prenota', (_req, res) => {
+// Serve la pagina con la testa SEO di QUESTO ristorante. Vedi
+// services/prenotaSeo.ts per il perche': prima ogni cliente aveva una pagina
+// col titolo generico "Prenota un tavolo", cioe' N pagine gemelle in
+// concorrenza fra loro.
+const servePrenota = async (tenantId: number, req: express.Request, res: express.Response) => {
+    res.set('Cache-Control', 'no-store, must-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    // Alla prima richiesta di un tenant appena risolto l'identita' non e'
+    // ancora in cache: senza l'attesa la pagina uscirebbe col nome di un
+    // altro ristorante — nel titolo, dove resta indicizzato.
+    if (!identityCache.has(tenantId)) {
+        await refreshBusinessIdentity(tenantId).catch(() => {});
+    }
+    const id = businessIdentity(tenantId);
+    // businessIdentity ripiega su IDENTITY_FALLBACK, che e' cablato sul primo
+    // ristorante: un locale che non ha ancora compilato l'identita' si
+    // ritroverebbe il NOME DI UN ALTRO nel titolo — e nel titolo resta
+    // indicizzato. Il nome in `tenants` c'e' sempre ed e' suo: si usa quello
+    // quando l'identita' non e' stata configurata.
+    const suo = await queryWithRetry(`SELECT name FROM tenants WHERE id = $1`, [tenantId]);
+    const nomeProprio = String(suo.rows[0]?.name || '').trim();
+    const identitaConfigurata = id.name && id.name !== IDENTITY_FALLBACK.name;
+    const identita = {
+        ...id,
+        name: identitaConfigurata ? id.name : (nomeProprio || id.name),
+    };
+    const slug = typeof req.params.slug === 'string' ? req.params.slug : '';
+    const canonical = `${req.protocol}://${req.get('host')}${slug ? `/prenota/${slug}` : '/prenota'}`;
+    res.type('html').send(await renderPrenota(identita, canonical));
+};
+
+// robots.txt e sitemap: senza, un motore deve indovinare quali pagine
+// esistono. La sitemap elenca UNA pagina per ristorante — sono quelle che si
+// posizionano sul nome del locale, cioe' l'asset vero.
+app.get('/robots.txt', (req, res) => {
+    const base = `${req.protocol}://${req.get('host')}`;
+    res.type('text/plain').send([
+        'User-agent: *',
+        // Superfici che non hanno senso in un indice: API, area riservata,
+        // pagine di esito pagamento.
+        'Disallow: /api/',
+        'Disallow: /auth/',
+        'Disallow: /debug/',
+        'Allow: /prenota',
+        '',
+        `Sitemap: ${base}/sitemap.xml`,
+        '',
+    ].join('\n'));
+});
+
+app.get('/sitemap.xml', async (req, res) => {
+    try {
+        const base = `${req.protocol}://${req.get('host')}`;
+        // Attraversa i tenant per mestiere: e' lavoro di piattaforma, va
+        // dichiarato o con la policy rigida la query non vede nulla.
+        const r = await runAsPlatform(() => queryWithRetry(
+            `SELECT slug FROM tenants
+              WHERE slug IS NOT NULL AND slug <> ''
+                AND status = 'active' 
+              ORDER BY slug`));
+        const urls = [`${base}/prenota`, ...r.rows.map((t: any) => `${base}/prenota/${t.slug}`)];
+        const oggi = new Date().toISOString().slice(0, 10);
+        res.type('application/xml').send(
+            '<?xml version="1.0" encoding="UTF-8"?>\n' +
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
+            urls.map(u => `  <url><loc>${u}</loc><lastmod>${oggi}</lastmod><changefreq>weekly</changefreq></url>`).join('\n') +
+            '\n</urlset>\n'
+        );
+    } catch (err) {
+        console.error('GET /sitemap.xml error:', err);
+        res.status(500).type('text/plain').send('sitemap non disponibile');
+    }
+});
+
+app.get('/prenota', withPublicTenant(servePrenota));
+app.get('/prenota/:slug', withPublicTenant(servePrenota));
+
+app.get('/__prenota_statica', (_req, res) => {
     // Force browsers to fetch a fresh copy on every visit. `no-cache` was
     // theoretically enough (requires revalidation) but in practice Safari
     // and iOS webviews still served stale HTML after a deploy — customer
@@ -19972,15 +20051,7 @@ app.get('/prenota/logo-dark.png', (_req, res) => {
 // chiamate su /public/<slug>/*. Registrata DOPO /prenota/logo*.png:
 // Express dispatcha in ordine di registrazione e :slug catturerebbe anche
 // i loghi. Slug ignoto o tenant sospeso → 404, mai il fallback.
-app.get('/prenota/:slug', async (req, res) => {
-    const tenantId = await resolveTenantBySlug(String(req.params.slug || ''));
-    if (tenantId == null) return res.status(404).send('Not found');
-    // Stessi header anti-cache di /prenota (Safari/iOS webview, vedi sopra).
-    res.set('Cache-Control', 'no-store, must-revalidate');
-    res.set('Pragma', 'no-cache');
-    res.set('Expires', '0');
-    res.sendFile(path.join(process.cwd(), 'public', 'prenota.html'));
-});
+
 
 // WhatsApp diagnostic — sends a real message via the active provider and
 // returns the raw response so we can see exactly what's happening.
