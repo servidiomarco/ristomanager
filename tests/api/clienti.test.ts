@@ -129,6 +129,88 @@ describe('clienti (rubrica)', () => {
             expect(clash.body.existing_customer_id).toBe(a.body.id);
         });
 
+        it('blacklist: il flag fa il giro completo e sopravvive alla fusione', async () => {
+            const created = await api().post('/customers').set(bearer(token)).send({
+                name: 'Bruno Blacklist',
+                phone: '340 555 0090',
+                is_blacklisted: true,
+                blacklist_reason: 'due no-show senza avviso',
+            });
+            expect(created.status).toBe(201);
+            expect(created.body.is_blacklisted).toBe(true);
+            expect(created.body.blacklist_reason).toBe('due no-show senza avviso');
+
+            // Il PUT può toglierlo (e il motivo cade con lui).
+            const cleared = await api().put(`/customers/${created.body.id}`).set(bearer(token)).send({
+                name: 'Bruno Blacklist',
+                phone: '340 555 0090',
+                is_blacklisted: false,
+            });
+            expect(cleared.status).toBe(200);
+            expect(cleared.body.is_blacklisted).toBe(false);
+            expect(cleared.body.blacklist_reason).toBeNull();
+
+            // Fondere una scheda in blacklist dentro una pulita NON la ripulisce:
+            // il flag fa OR come il VIP, il motivo viaggia con lui.
+            const dirty = await api().post('/customers').set(bearer(token)).send({
+                name: 'Bruno Doppione',
+                phone: '340 555 0091',
+                is_blacklisted: true,
+                blacklist_reason: 'assegno scoperto',
+            });
+            expect(dirty.status).toBe(201);
+            const merged = await api()
+                .post(`/customers/${dirty.body.id}/merge-into/${created.body.id}`)
+                .set(bearer(token));
+            expect(merged.status).toBe(200);
+            expect(merged.body.is_blacklisted).toBe(true);
+            expect(merged.body.blacklist_reason).toBe('assegno scoperto');
+        });
+
+        it('blacklist: il form pubblico rifiuta il numero segnato, gli altri passano', async () => {
+            // Il flag del form pubblico è spento di default: si accende solo per
+            // questo test e si rispegne alla fine, così i file successivi
+            // ritrovano lo stato che si aspettano (la suite è sequenziale).
+            const acceso = await api().put('/settings/features').set(bearer(token)).send({
+                public_bookings_enabled: true,
+            });
+            expect(acceso.status).toBe(200);
+            try {
+                const marked = await api().post('/customers').set(bearer(token)).send({
+                    name: 'Web Bandito',
+                    phone: '+39 340 555 0092',
+                    is_blacklisted: true,
+                });
+                expect(marked.status).toBe(201);
+
+                // Stesse ultime 10 cifre, formato diverso: il match è right(10).
+                const blocked = await api().post('/public/reservations').send({
+                    customer_name: 'Web Bandito',
+                    phone: '3405550092',
+                    date: '2027-03-18',
+                    time: '20:00',
+                    shift: 'DINNER',
+                    guests: 2,
+                });
+                expect(blocked.status).toBe(503);
+                expect(blocked.body.error).toBe('customer_blacklisted');
+
+                const ok = await api().post('/public/reservations').send({
+                    customer_name: 'Web Regolare',
+                    phone: '340 555 0093',
+                    date: '2027-03-18',
+                    time: '20:00',
+                    shift: 'DINNER',
+                    guests: 2,
+                });
+                expect(ok.status).toBe(201);
+            } finally {
+                await api().put('/settings/features').set(bearer(token)).send({
+                    public_bookings_enabled: false,
+                });
+            }
+        });
+
         it('cancella un cliente; un id inesistente fa 404', async () => {
             const c = await api().post('/customers').set(bearer(token)).send({
                 name: 'Da Cancellare',

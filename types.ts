@@ -226,6 +226,8 @@ export interface Reservation {
   created_by_user_name?: string | null;
   created_at?: string;
   customer_is_vip?: boolean;
+  customer_is_blacklisted?: boolean;
+  customer_blacklist_reason?: string | null;
   customer_preferred_table_id?: number | null;
   customer_preferred_table_name?: string | null;
   customer_dietary_notes?: string | null;
@@ -570,6 +572,8 @@ export interface Customer {
   preferences_notes?: string | null;
   dietary_notes?: string | null;
   is_vip?: boolean;
+  is_blacklisted?: boolean;
+  blacklist_reason?: string | null;
   consent_marketing?: boolean | null;
   consent_marketing_updated_at?: string | null;
 }
