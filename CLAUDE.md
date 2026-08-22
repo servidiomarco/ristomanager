@@ -92,6 +92,21 @@ The pg `DATE` type parser is overridden to return plain `YYYY-MM-DD` strings, be
 
 The module also owns the mapping from state to colour family, so a state looks identical in list chips, reception badges, table glyphs, and dashboard counters. Never re-derive state colour locally.
 
+### The public booking page is a third application
+
+`public/prenota.html` is one self-contained static file — markup, CSS and vanilla JS — served by the backend and copied into the Docker image with the rest of `public/`. It is **not** part of the SPA: no React, no bundler, no `index.css`, and `npx tsc --noEmit` does not see it. After editing it, syntax-check the inline script directly; a typo there fails silently in a guest's browser and in no build.
+
+It talks to four unauthenticated routes, each registered twice — `/public/*` and `/public/:slug/*` — through `withPublicTenant`, which resolves the tenant from the slug, then the domain, then falls back to tenant 1. Handlers receive the tenant already resolved.
+
+- `GET /public/contact` — the page's bootstrap. `bookingsEnabled` gates everything, and **the safe default is off**: if the fetch fails the maintenance card stays and no form is wired. Also carries `branding` (name, tagline, logo, header colour, address, maps URL) and the deposit policy.
+- `GET /public/availability` — **two shapes on one route.** With `?date=` it returns one day's slots per shift; with `?from=&to=` it returns per-day `open` / `busy` / `closed` for the calendar. The range form deliberately runs a *fixed* five queries regardless of window length — the obvious loop over `getAvailableSlots` per day and shift would be 124 round trips for two months on a public endpoint. Capped at 62 days.
+- `GET /public/rooms` — needs a shift, so before one is chosen the page queries both and merges by id.
+- `POST /public/reservations` — honeypot field, then the same validation the CRM applies.
+
+`getAvailableSlots` returns the **opening-hours grid** minus closures and disabled slots. It does not know about bookings, and it is not guest-aware. So the calendar's "quasi pieno" dot is booked covers against total seats at 70% — an indicative traffic light, explicitly *not* the rule that decides confirmed-vs-request. That rule is per-room (`getCappedRoomIds`) and reaches the page through `/public/rooms`, so what the guest is told and what the submit does cannot drift.
+
+Public identity fields (`business_name`, `public_phone`, `public_address`, `maps_url`, …) live in the `legal_config` blob in `app_settings` and reach the page via `BusinessIdentity`. Adding one means four edits: `LEGAL_STRING_FIELDS`, the `BusinessIdentity` type and its refresh, the `LegalSettings` interface in `services/apiService.ts`, and a `Field` in `LegalSettingsCard.tsx`. Miss the last and the setting exists but nobody can fill it in.
+
 ## Design system
 
 `docs/risto-design-system.md` is the specification; `index.css` is the implementation. The doc deliberately does not track migration progress — do not add status tables to it.
@@ -100,6 +115,8 @@ Two token layers coexist in `index.css`:
 
 - **Legacy** `--color-*` under Tailwind v4 `@theme`, remapping the old palette so unmigrated screens keep working.
 - **New** `--ds-*`, strictly additive — it overrides nothing. Around 46 component files still reference the legacy tokens; screens migrate one at a time.
+
+A third layer lives outside `index.css` entirely: `public/prenota.html` restates the `--ds-*` values in its own `<style>` block and extends them with `--ds-public-*` (§16). It is served by the backend, is not built by Vite, and does **not** load `index.css` — so a token changed there does not reach it. Edit both, or the booking page silently keeps the old value.
 
 Working rules that are easy to violate:
 

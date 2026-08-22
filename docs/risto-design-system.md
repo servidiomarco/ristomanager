@@ -1199,3 +1199,120 @@ Modal, SplitPane, SwipeRow, SectionHeader, StatStrip, StatusPill, SearchField, S
 TableNumberBadge. Where an entry now contradicts the original proposal — the segmented
 control's second variant, the table badge taking the booking's family rather than the
 table's — the shipped behaviour is the specification.
+
+---
+
+## 16. The public surface — pagina di prenotazione
+
+Everything above describes the CRM: a dense, real-time console read by staff mid-service,
+standing, on a phone they are also using to carry plates. `public/prenota.html` is the other
+audience — a guest, on a sofa, who will see this page once and never again, and who is
+choosing a restaurant rather than operating one.
+
+It is served by the backend from `public/`, not built by Vite, and it does **not** load
+`index.css`. Everything in this section exists because of that separation.
+
+### 16.1 The `--ds-public-*` layer
+
+The page defines two groups of tokens in its own `<style>` block:
+
+1. **Copies of `--ds-*` values.** `surface`, `border`, `text-*`, `action-*`, the state
+   families, shadows and radii are restated verbatim. They are not imported — different
+   bundle, different origin, no shared stylesheet.
+2. **`--ds-public-*`**, the consumer extension: `canvas`, `canvas-sunk`, `header-bg`,
+   `header-fg`, `header-fg-muted`, `header-line`, `header-pill`, `font`, `wordmark`.
+
+The extension is **additive and overrides nothing**, the same discipline `--ds-*` follows over
+the legacy `--color-*` layer. A `--ds-public-*` token may consume a `--ds-*` token; the
+reverse never happens.
+
+> **The copies are a hand-maintained duplicate.** Change a `--ds-*` value in `index.css` and
+> the booking page will not follow. This is a real cost, accepted because the alternative —
+> shipping the CRM's stylesheet to every guest, or a build step for one static file — costs
+> more. The block carries a comment saying so; keep it there.
+
+### 16.2 Light only
+
+The page has no dark theme and no `prefers-color-scheme` branch, which is a deliberate
+departure from §11.
+
+The header colour is chosen by the restaurant. A theme that inverted the page underneath that
+choice would either fight it or silently discard it, and the restaurant would have no way to
+see which. §6.3 makes the same argument about density: where two populations do not
+demonstrably need different answers, pick one and commit.
+
+### 16.3 The branding contract
+
+`GET /public/contact` returns a `branding` object; the page degrades cleanly when any field is
+absent, which is the normal state for a restaurant that has filled nothing in.
+
+| Field | Effect | Absent |
+|---|---|---|
+| `name`, `tagline` | Wordmark and footer | Generic title, no tagline |
+| `logo_url` | Replaces the wordmark | Wordmark shown |
+| `header_color` | Header band fill | Near-black `#17171a` |
+| `address`, `maps_url` | "Dove siamo" pill | Pill omitted; label falls back when only the URL exists |
+| `website_url` | Makes the wordmark a link | Wordmark is not a link |
+
+The header carries **two pills at most** — phone and directions. Both answer a question a
+guest asks while deciding: *can I just call?* and *where is this?* A link back to the
+restaurant's own site answers neither, and it is the one control on the page that leads away
+from the booking; the wordmark still carries it for anyone looking.
+
+**The header foreground is derived, never configured.** The page computes the relative
+luminance of `header_color` and picks light or dark text from it. Left to a settings field,
+a restaurant would eventually save white-on-cream and only find out from a guest.
+
+### 16.4 Deliberate departures
+
+Each of these contradicts something above. They are listed so a reader can tell a decision
+from a drift.
+
+**Gold marks progress, near-black marks actions.** In the CRM `pending` gold encodes a
+reservation state (§3.2). Here it carries the StepNav rail and the current step marker, and
+nothing else — the CTA, selected slots, selected chips and the stepper's `+` all stay
+`action-bg`. Two accents, one meaning each.
+
+**The StepNav is a minimal rail: no circles, no glyphs.** A 2px rail per step over a small
+numeral and a label — the same footprint as a line of text. The marker takes its rail's
+colour, so the three states read as one system:
+
+| State | Rail | Marker | Label |
+|---|---|---|---|
+| ahead | `border` | `text-subtle` numeral | `text-muted` |
+| current | `pending.solid` | `pending.text` numeral | `text-primary`, 600 |
+| done | `action-bg` | `action-bg` check | `text-primary`, 600 |
+
+**Done turns ink rather than staying gold**, and that is the point of the arrangement: if
+both the current and the completed step were gold, a filled rail would mean two things at
+once, and step 1 would look finished while you were still standing in it. Gold means *you are
+here*; ink means *behind you*; the check removes any remaining ambiguity.
+
+This replaced a circular marker carried over from the CRM component. `pending.tint`
+(`#FBF4E6`) is built to sit on `surface` white, and the StepNav sits directly on
+`--ds-public-canvas` (`#F7F4EC`) — the tinted circle was invisible against it and left the
+completed step's check floating in space. Dropping the circle removed the problem rather than
+patching it.
+
+**Chips take the action fill, not `critical`.** An allergy chip tinted red is an alarm aimed
+at the guest, who has nothing to be alarmed about — the kitchen is the audience for that
+severity, and it reaches them through the reservation note. Selected chips are `action-bg`
+like every other choice on the page.
+
+**Allergie and intolleranze are one list.** The CRM distinguishes them; this page does not, and
+writes every selection as `Allergie: …` into the reservation note. Without the distinction in
+the interface, treating an intolerance as an allergy is the harmless error and the reverse is
+not. Anything parsing that note must keep reading the existing format.
+
+### 16.5 What is reused unchanged
+
+`Stepper` is ported to plain CSS from `components/ds/FormPrimitives.tsx` with its geometry and
+behaviour intact, including the typeable `<input type="number">` and the quiet minus against
+the solid plus. `StepNav` keeps its *behaviour* — steps never gate each other going backwards,
+and each is a button — while its appearance is the minimal rail in §16.4. `StepArrow` (§7.1)
+places the back control at the far left of the footer.
+
+The floors hold without exception: 44px touch targets, `tabular-nums` on every live numeral,
+`rounded.full` on primary actions, visible focus, and §5.2 — **never uppercase, anywhere.**
+The typeface is Hanken Grotesk as in §5; a serif appears only in the fallback wordmark, where
+it is standing in for a restaurant's logo rather than setting an interface.
