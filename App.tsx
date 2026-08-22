@@ -42,6 +42,7 @@ import { RemindersManager } from './components/RemindersManager';
 import { ReservationNotesManager } from './components/ReservationNotesManager';
 import { ReservationAllergensManager } from './components/ReservationAllergensManager';
 import { AutoDepositManager } from './components/AutoDepositManager';
+import { PaymentLinkExpiryManager } from './components/PaymentLinkExpiryManager';
 import { PayAtTableSettingsManager } from './components/PayAtTableSettingsManager';
 import { SalaCucinaSettingsManager } from './components/SalaCucinaSettingsManager';
 import { AiMessagesSettingsManager } from './components/AiMessagesSettingsManager';
@@ -2643,6 +2644,17 @@ const App: React.FC = () => {
                     <AutoDepositManager showToast={addToast} />
                   </SettingsDisclosure>
                 )}
+
+                {/* Card #28: i link inviati e non pagati scadono da soli dopo
+                    N ore, col messaggio delle prenotazioni non confermate. */}
+                <SettingsDisclosure
+                  icon={CreditCard}
+                  iconTone="pending"
+                  title="Scadenza link di pagamento"
+                  description="Annulla da solo i link non pagati dopo una soglia di ore e avvisa il cliente che la prenotazione non è confermata."
+                >
+                  <PaymentLinkExpiryManager showToast={addToast} />
+                </SettingsDisclosure>
               </div>
             </SettingsSection>
 

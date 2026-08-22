@@ -149,6 +149,14 @@ import {
     type BookingSource,
     type BookingChannelPolicyMap,
 } from './services/bookingChannelPolicy.js';
+import {
+    getPaymentLinkExpiryPolicy,
+    savePaymentLinkExpiryPolicy,
+    normalizePaymentLinkExpiryPolicy,
+    PAYMENT_LINK_EXPIRY_MIN_HOURS,
+    PAYMENT_LINK_EXPIRY_MAX_HOURS,
+    type PaymentLinkExpiryPolicy,
+} from './services/paymentLinkExpiryPolicy.js';
 import { toTitleCase } from './utils/text.js';
 import { getRomeTimePart } from './utils/reservationTime.js';
 import {
@@ -6615,6 +6623,111 @@ app.post('/payments/:id/reconcile', authenticate, requirePermission('payments:fu
     }
 });
 
+// Card #28 — annulla un ordine ancora payabile al provider e registra la
+// transizione. Stesso pattern del riconciliatore delle quote (conto #12):
+// prima si rilegge lo stato vero, e se l'ordine è già terminale si applica
+// QUELLO — un cancel cieco nella finestra di race perderebbe un pagamento
+// riuscito. Torna 'revoked' solo se l'annullo è andato davvero a segno.
+const revokePaymentOrder = async (
+    tenantId: number,
+    provider: PaymentProvider,
+    orderId: string,
+    extraMetadata: Record<string, any>
+): Promise<{ status: 'revoked' | 'already_terminal'; state?: string }> => {
+    const fetched = await fetchPaymentOrder(tenantId, provider, orderId);
+    if (fetched.event) {
+        await applyPaymentOrderTransition(orderId, fetched.event, transitionMetadata(provider, fetched.raw));
+        return { status: 'already_terminal', state: fetched.state };
+    }
+    try {
+        await cancelPaymentOrder(tenantId, provider, orderId);
+        await applyPaymentOrderTransition(orderId, 'ORDER_CANCELLED', extraMetadata);
+        return { status: 'revoked' };
+    } catch (cancelErr: any) {
+        // Cancel rifiutato: forse è stato pagato nella finestra. Si rilegge e
+        // si applica la verità del gateway; se non è raggiungibile si rilancia
+        // e il chiamante decide (l'endpoint fa 502, lo scheduler ritenta).
+        const fresh = await fetchPaymentOrder(tenantId, provider, orderId);
+        if (fresh.event) {
+            await applyPaymentOrderTransition(orderId, fresh.event, transitionMetadata(provider, fresh.raw));
+            return { status: 'already_terminal', state: fresh.state };
+        }
+        throw cancelErr;
+    }
+};
+
+// Card #28 — revoca manuale di un link di pagamento inviato. Solo link
+// standalone: le quote del conto al tavolo hanno il loro riconciliatore.
+// La prenotazione collegata NON si tocca: a revocare a mano è lo staff,
+// che decide lui cosa farne (la scadenza automatica invece la declina).
+app.post('/payments/:id/revoke', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+
+        const paymentRes = await queryWithRetry(
+            `SELECT id, provider, provider_order_id, status, table_bill_split_id
+             FROM payment_requests WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        if (paymentRes.rowCount === 0) return res.status(404).json({ error: 'Payment not found' });
+        const payment = paymentRes.rows[0];
+        if (payment.table_bill_split_id) {
+            return res.status(409).json({ error: 'Le quote del conto al tavolo si gestiscono dal conto, non da qui' });
+        }
+        if (payment.status !== 'PENDING' && payment.status !== 'AUTHORISED') {
+            return res.status(409).json({ error: `Il link risulta già ${payment.status}: non c'è nulla da revocare` });
+        }
+        if (!isPaymentProvider(payment.provider)) {
+            return res.status(400).json({ error: `Revoca non supportata per provider ${payment.provider}` });
+        }
+        const provider: PaymentProvider = payment.provider;
+        if (!payment.provider_order_id) {
+            return res.status(400).json({ error: 'Nessun order ID associato al pagamento' });
+        }
+        if (!(await isProviderConfigured(req.tenantId!, provider))) {
+            return res.status(503).json({ error: `${providerLabel(provider)} non è configurato (credenziali mancanti)` });
+        }
+
+        let outcome;
+        try {
+            outcome = await revokePaymentOrder(req.tenantId!, provider, payment.provider_order_id, {
+                revoked_by: req.user?.email || 'staff',
+            });
+        } catch (err: any) {
+            console.error('[payments] revoke failed:', err?.message || err);
+            return res.status(502).json({ error: `Annullo ${providerLabel(provider)} fallito`, detail: err?.message || String(err) });
+        }
+        if (outcome.status === 'already_terminal') {
+            return res.status(409).json({
+                error: `Troppo tardi: il pagamento risulta "${outcome.state}" al provider. Lo stato è stato aggiornato.`,
+            });
+        }
+
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!,
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.UPDATE,
+                ResourceType.RESERVATION,
+                id,
+                `Link di pagamento #${id} revocato (${providerLabel(provider)})`
+            );
+        }
+
+        const fresh = await queryWithRetry(
+            `SELECT * FROM payment_requests WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        res.json({ ok: true, payment_request: fresh.rows[0] });
+    } catch (err: any) {
+        console.error('POST /payments/:id/revoke error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 // Full refund of a standalone payment request (a deposit / payment link).
 // Split-linked payments deliberately go through /bills/splits/:id/refund
 // instead: that path also reopens the bill when the refund drops it below
@@ -7925,6 +8038,7 @@ async function runDailyBreadReminder(tenantId: number, targetRoles: string[] = [
 const SCHEDULER_LOCK_BILL_SPLIT_RECONCILE = 761001;
 const SCHEDULER_LOCK_PAYMENT_REQUEST_RECONCILE = 761002;
 const SCHEDULER_LOCK_REMINDERS = 761003;
+const SCHEDULER_LOCK_PAYMENT_LINK_EXPIRY = 761004;
 
 // Il lock advisory è di SESSIONE: va preso su un client dedicato tenuto per
 // tutta la durata del tick (sul pool condiviso un'altra query potrebbe
@@ -8138,6 +8252,112 @@ const startPaymentRequestReconcileScheduler = () => {
         .catch(err => console.error('[payment-reconcile] lock wrapper failed:', err?.message || err));
     lockedTick();
     setInterval(lockedTick, 2 * 60 * 1000);
+};
+
+// Card #28 — quando un link di caparra scade da solo, la prenotazione rimasta
+// PENDING diventa DECLINED e (se la policy lo chiede) il cliente riceve il
+// messaggio delle prenotazioni non confermate — stessi testi e template del
+// decline manuale, così il cliente legge sempre le stesse parole. Se nel
+// frattempo lo staff l'ha già confermata o rifiutata, non si tocca nulla.
+const declineReservationForExpiredLink = async (
+    tenantId: number,
+    reservationId: number,
+    message: PaymentLinkExpiryPolicy['message']
+): Promise<void> => {
+    try {
+        const updated = await queryWithRetry(
+            `UPDATE reservations
+             SET reservation_status = 'DECLINED'
+             WHERE id = $1 AND tenant_id = $2 AND reservation_status = 'PENDING'
+             RETURNING id, customer_name, reservation_time, guests, phone, email, source`,
+            [reservationId, tenantId]
+        );
+        if (updated.rowCount === 0) return;
+        const r = updated.rows[0];
+        console.log(`[payment-expiry] prenotazione ${r.id} declinata: caparra non pagata (tenant ${tenantId})`);
+        await broadcastReservationsUpdatedByIds([Number(r.id)]);
+        if (message === 'declined' && (r.phone || r.email)) {
+            dispatchBookingNotification({
+                tenantId,
+                source: r.source,
+                phone: r.phone,
+                email: r.email,
+                reservationId: Number(r.id),
+                smsText: buildDeclineMessage(r.customer_name, r.reservation_time, r.guests),
+                whatsappTemplate: buildBookingDeclinedTemplate(r.customer_name, r.reservation_time, r.guests),
+                buildEmail: () => buildBookingDeclineEmail({
+                    customerName: r.customer_name,
+                    reservationTime: r.reservation_time,
+                    guests: r.guests,
+                }),
+                kind: 'decline',
+            }).catch(err => console.error('[payment-expiry] invio decline fallito:', err?.message || err));
+        }
+    } catch (err: any) {
+        console.error('[payment-expiry] decline prenotazione fallito:', err?.message || err);
+    }
+};
+
+// Card #28 — scadenza automatica dei link di pagamento. Per-tenant e SPENTA
+// di default (si accende da Impostazioni → Opzioni prenotazioni): accenderla
+// d'ufficio al deploy farebbe scadere in blocco i link pendenti esistenti.
+// Guarda solo gli ultimi 7 giorni: oltre, il poller di riconciliazione ha già
+// smesso da tempo e far ripartire messaggi su richieste di settimane fa
+// sarebbe peggio del buco che chiudiamo.
+const startPaymentLinkExpiryScheduler = () => {
+    const tick = async () => {
+        try {
+            const open = await queryWithRetry(
+                `SELECT id, tenant_id, provider, provider_order_id, reservation_id, created_at
+                 FROM payment_requests
+                 WHERE status IN ('PENDING', 'AUTHORISED')
+                   AND provider_order_id IS NOT NULL
+                   AND table_bill_split_id IS NULL
+                   AND created_at > NOW() - INTERVAL '7 days'
+                 ORDER BY created_at ASC
+                 LIMIT 25`
+            );
+            if (open.rowCount === 0) return;
+
+            const policies = new Map<number, PaymentLinkExpiryPolicy>();
+            for (const row of open.rows) {
+                const rowTenantId = Number(row.tenant_id) || PUBLIC_TENANT_ID;
+                let policy = policies.get(rowTenantId);
+                if (!policy) {
+                    policy = await getPaymentLinkExpiryPolicy(rowTenantId);
+                    policies.set(rowTenantId, policy);
+                }
+                if (!policy.enabled) continue;
+                const ageMs = Date.now() - new Date(row.created_at).getTime();
+                if (!Number.isFinite(ageMs) || ageMs < policy.hours * 60 * 60 * 1000) continue;
+                if (!isPaymentProvider(row.provider)) continue;
+                const provider: PaymentProvider = row.provider;
+                try {
+                    if (!(await isProviderConfigured(rowTenantId, provider))) continue;
+                    const outcome = await revokePaymentOrder(rowTenantId, provider, row.provider_order_id, {
+                        expired_by: 'auto_expiry', expiry_hours: policy.hours,
+                    });
+                    if (outcome.status !== 'revoked') {
+                        // Pagato (o già chiuso) nella finestra: la transizione
+                        // vera è appena stata applicata, niente decline.
+                        continue;
+                    }
+                    console.log(`[payment-expiry] link ${row.id} scaduto dopo ${policy.hours}h (tenant ${rowTenantId})`);
+                    if (row.reservation_id) {
+                        await declineReservationForExpiredLink(rowTenantId, Number(row.reservation_id), policy.message);
+                    }
+                } catch (err: any) {
+                    console.warn(`[payment-expiry] link ${row.id} non revocato:`, err?.message || err);
+                }
+            }
+        } catch (err: any) {
+            console.error('[payment-expiry] scheduler tick failed:', err?.message || err);
+        }
+    };
+    const lockedTick = () => runSchedulerTickWithLock(SCHEDULER_LOCK_PAYMENT_LINK_EXPIRY, 'payment-expiry', tick)
+        .catch(err => console.error('[payment-expiry] lock wrapper failed:', err?.message || err));
+    lockedTick();
+    setInterval(lockedTick, 5 * 60 * 1000);
 };
 
 // Registry of hardcoded handlers for reminders that need dynamic content
@@ -16802,6 +17022,53 @@ app.put('/settings/booking-channels', authenticate, requirePermission('settings:
 });
 
 // ============================================
+// SCADENZA LINK DI PAGAMENTO (paymentLinkExpiryPolicy) — card #28
+// ============================================
+
+app.get('/settings/payment-link-expiry', authenticate, async (req, res) => {
+    try {
+        res.json(await getPaymentLinkExpiryPolicy(req.tenantId!));
+    } catch (err) {
+        console.error('GET /settings/payment-link-expiry error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/settings/payment-link-expiry', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        // Update parziale sul modello di auto-deposit: i campi assenti restano
+        // come sono, la policy risultante deve comunque essere valida intera.
+        const current = await getPaymentLinkExpiryPolicy(req.tenantId!);
+        const body = req.body ?? {};
+        const next = normalizePaymentLinkExpiryPolicy({
+            enabled: body.enabled !== undefined ? body.enabled : current.enabled,
+            hours: body.hours !== undefined ? body.hours : current.hours,
+            message: body.message !== undefined ? body.message : current.message,
+        });
+        if (!next) {
+            return res.status(400).json({
+                error: 'invalid_policy',
+                message: `Policy non valida: enabled booleano, hours intero tra ${PAYMENT_LINK_EXPIRY_MIN_HOURS} e ${PAYMENT_LINK_EXPIRY_MAX_HOURS}, message tra declined|none`,
+            });
+        }
+        await savePaymentLinkExpiryPolicy(req.tenantId!, next);
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!,
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.SETTINGS,
+                0,
+                `Scadenza link di pagamento: ${next.enabled ? `attiva dopo ${next.hours}h (messaggio: ${next.message})` : 'disattivata'}`
+            );
+        }
+        res.json(next);
+    } catch (err) {
+        console.error('PUT /settings/payment-link-expiry error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
 // ONBOARDING — wizard di primo accesso (Fase D1)
 // ============================================
 // L'OWNER di un tenant appena provisionato vede il wizard al posto dell'app
@@ -23027,6 +23294,7 @@ const startServer = async () => {
                     }
                     try {
                         startPaymentRequestReconcileScheduler();
+                        startPaymentLinkExpiryScheduler();
                         console.log('✅ Payment reconcile scheduler started (2 min)');
                     } catch (schedErr) {
                         console.error('Payment reconcile scheduler failed to start:', schedErr);
