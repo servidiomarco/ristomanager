@@ -16,6 +16,7 @@ import pool, { createSchema, queryWithRetry, runMigrations, tenantQuery, runWith
 import { SocketService } from './services/socketService.js';
 import * as bookingTools from './services/bookingTools.js';
 import * as whatsappAgent from './services/whatsappAgent.js';
+import * as tableAssignmentAgent from './services/tableAssignmentAgent.js';
 import * as aiReport from './services/aiReportService.js';
 import { COST_USD_SQL, UNPRICED_SQL, USD_EUR } from './services/aiPricing.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
@@ -149,6 +150,7 @@ import {
     type BookingChannelPolicyMap,
 } from './services/bookingChannelPolicy.js';
 import { toTitleCase } from './utils/text.js';
+import { getRomeTimePart } from './utils/reservationTime.js';
 import {
     getAvailableSlots,
     getAllOpeningHours,
@@ -16289,10 +16291,12 @@ app.put('/settings/legal', authenticate, requirePermission('settings:full'), asy
 
 // ---------------------------------------------------------------------------
 // TABLE ASSIGNMENT AI PROMPT (app_settings → key 'table_assignment_ai_prompt')
-// Testo libero, non consumato da alcuna automazione oggi: è la nota che il
-// gestore scrive per sé (o per una futura logica AI) su come assegnare o
-// spostare i tavoli in base alle prenotazioni in arrivo. Nessuna automazione
-// legge ancora questo campo — è solo l'input, salvato per riuso futuro.
+// Testo libero scritto dal ristoratore: descrive le dinamiche MANUALI di
+// sala di oggi (quando unire/dividere tavoli, come gestire gruppi grandi,
+// come ottimizzare l'occupancy nelle serate piene). Non sostituisce la
+// logica di assegnazione esistente, la affianca — vedi
+// maybeSuggestTableAssignment più in basso (card dev board #26). Prompt
+// vuoto = proposta AI spenta.
 // ---------------------------------------------------------------------------
 const TABLE_ASSIGNMENT_AI_PROMPT_KEY = 'table_assignment_ai_prompt';
 const TABLE_ASSIGNMENT_AI_PROMPT_MAX = 4000;
@@ -16338,6 +16342,299 @@ app.put('/settings/table-assignment-ai-prompt', authenticate, requirePermission(
     } catch (err: any) {
         console.error('PUT /settings/table-assignment-ai-prompt error:', err);
         res.status(500).json({ error: 'Failed to update table assignment AI prompt', detail: err?.message });
+    }
+});
+
+// ---------------------------------------------------------------------------
+// TABLE ASSIGNMENT AI — la proposta (card dev board #26)
+// Quando una prenotazione nasce senza tavolo da un canale self-service (sito,
+// WhatsApp, Sofia — vedi le chiamate a suggestTableAssignment/
+// maybeSuggestTableAssignment), si legge il prompt sopra + lo stato reale del
+// servizio (tavoli aperti, unioni attive, altre prenotazioni con tavolo) e si
+// chiede a Claude un'assegnazione. La proposta finisce in
+// table_assignment_suggestions e viaggia via socket: la sala la vede in lista
+// prenotazioni e la conferma in un tap, o la ignora. Mai scrittura silenziosa
+// sulla prenotazione — quella la fa solo la conferma umana qui sotto.
+// ---------------------------------------------------------------------------
+
+function tableAssignmentSuggestionRow(r: any) {
+    return {
+        id: r.id,
+        reservation_id: r.reservation_id,
+        table_id: r.table_id,
+        table_name: r.table_name ?? null,
+        merge_with_table_ids: r.merge_with_table_ids || [],
+        summary: r.summary,
+        status: r.status,
+        created_at: r.created_at,
+    };
+}
+
+async function maybeSuggestTableAssignment(tenantId: number, reservationId: number): Promise<void> {
+    try {
+        const prompt = await getTableAssignmentAiPrompt(tenantId);
+        if (!prompt.trim()) return; // prompt vuoto = feature spenta
+        if (!tableAssignmentAgent.isAgentConfigured()) return;
+
+        const resvRes = await queryWithRetry(
+            `SELECT id, customer_name, reservation_time, shift, guests, children, notes, table_id, reservation_status
+               FROM reservations WHERE id = $1 AND tenant_id = $2`,
+            [reservationId, tenantId]
+        );
+        const reservation = resvRes.rows[0];
+        // Nel frattempo qualcuno potrebbe aver già assegnato un tavolo a mano,
+        // o annullato la prenotazione: la proposta non servirebbe più.
+        if (!reservation || reservation.table_id != null) return;
+        if (['CANCELLED', 'DECLINED'].includes(reservation.reservation_status)) return;
+
+        const eventDate = new Date(reservation.reservation_time).toISOString().substring(0, 10);
+        const timeLabel = getRomeTimePart(reservation.reservation_time);
+
+        const [tablesRes, mergesRes, occupancyRes] = await Promise.all([
+            queryWithRetry(
+                `SELECT t.id, t.name, t.seats, t.room_id, r.name AS room_name
+                   FROM tables t
+                   JOIN rooms r ON r.id = t.room_id AND r.tenant_id = t.tenant_id
+                  WHERE t.tenant_id = $1 AND r.is_closed = false
+                  ORDER BY r.name, t.name`,
+                [tenantId]
+            ),
+            queryWithRetry(
+                `SELECT primary_id, merged_ids FROM table_merges WHERE tenant_id = $1 AND date = $2 AND shift = $3`,
+                [tenantId, eventDate, reservation.shift]
+            ),
+            queryWithRetry(
+                `SELECT table_id, customer_name, guests, reservation_time
+                   FROM reservations
+                  WHERE tenant_id = $1 AND DATE(reservation_time) = $2::date AND shift = $3
+                    AND table_id IS NOT NULL AND id <> $4
+                    AND COALESCE(reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')`,
+                [tenantId, eventDate, reservation.shift, reservationId]
+            ),
+        ]);
+
+        const tables = tablesRes.rows;
+        if (tables.length === 0) return;
+
+        const result = await tableAssignmentAgent.suggestTableAssignment({
+            prompt,
+            reservation: {
+                customer_name: reservation.customer_name,
+                guests: reservation.guests,
+                children: reservation.children || 0,
+                time: timeLabel,
+                shift: reservation.shift,
+                notes: reservation.notes,
+            },
+            tables,
+            merges: mergesRes.rows,
+            occupancy: occupancyRes.rows.map((o: any) => ({
+                table_id: o.table_id,
+                customer_name: o.customer_name,
+                guests: o.guests,
+                time: getRomeTimePart(o.reservation_time),
+            })),
+        });
+
+        // Telemetria per la pagina Consumi AI, come dashboard_report/
+        // suggest_reply/whatsapp_agent. Best-effort.
+        if (result.usage) {
+            const u = result.usage;
+            queryWithRetry(
+                `INSERT INTO ai_token_usage (provider, feature, model, prompt_tokens, output_tokens, total_tokens, tenant_id)
+                 VALUES ('anthropic', 'table_assignment', $1, $2, $3, $4, $5)`,
+                [u.model, u.promptTokens, u.outputTokens, u.totalTokens, tenantId]
+            ).catch(err => console.error('ai_token_usage insert (table_assignment) failed:', err));
+        }
+
+        if (!result.proposal) {
+            if (result.reason) console.log(`[table-assignment-ai] nessuna proposta per prenotazione #${reservationId}: ${result.reason}`);
+            return;
+        }
+
+        // Il tavolo (e l'eventuale unione) proposti devono esistere davvero e
+        // reggere la capienza, senza conflitti con altre prenotazioni: il
+        // modello ragiona sui dati che gli passiamo ma non ci si fida
+        // ciecamente prima di scrivere una proposta che lo staff vedrà.
+        const idsInvolved = [result.proposal.tableId, ...result.proposal.mergeWithTableIds];
+        const involvedTables = tables.filter((t: any) => idsInvolved.includes(t.id));
+        if (involvedTables.length !== idsInvolved.length) {
+            console.warn(`[table-assignment-ai] proposta scartata (tavolo inesistente) per prenotazione #${reservationId}`, result.proposal);
+            return;
+        }
+        const totalSeats = involvedTables.reduce((sum: number, t: any) => sum + (t.seats || 0), 0);
+        if (totalSeats < reservation.guests) {
+            console.warn(`[table-assignment-ai] proposta scartata (capienza insufficiente) per prenotazione #${reservationId}`, result.proposal);
+            return;
+        }
+        const conflicts = await findTableConflicts(tenantId, eventDate, reservation.shift, idsInvolved);
+        if (conflicts.length > 0) {
+            console.warn(`[table-assignment-ai] proposta scartata (conflitto) per prenotazione #${reservationId}`, result.proposal);
+            return;
+        }
+
+        // Una proposta pendente per prenotazione: quella vecchia decade,
+        // altrimenti lo staff si trova due suggerimenti in contrasto.
+        await queryWithRetry(
+            `UPDATE table_assignment_suggestions SET status = 'SUPERSEDED', resolved_at = CURRENT_TIMESTAMP
+              WHERE tenant_id = $1 AND reservation_id = $2 AND status = 'PENDING'`,
+            [tenantId, reservationId]
+        );
+        const ins = await queryWithRetry(
+            `INSERT INTO table_assignment_suggestions (tenant_id, reservation_id, table_id, merge_with_table_ids, summary)
+             VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+            [tenantId, reservationId, result.proposal.tableId, result.proposal.mergeWithTableIds, result.proposal.summary]
+        );
+        const tableName = involvedTables.find((t: any) => t.id === result.proposal!.tableId)?.name ?? null;
+        const suggestion = tableAssignmentSuggestionRow({ ...ins.rows[0], table_name: tableName });
+        if (socketService) socketService.broadcastToAll(tenantId, 'tableAssignmentSuggestion:created', suggestion);
+    } catch (err: any) {
+        console.error('[table-assignment-ai] suggestion failed:', err?.message || err);
+    }
+}
+
+// GET /table-assignment-suggestions?date=YYYY-MM-DD&shift=LUNCH|DINNER
+// Solo le proposte pendenti per il servizio guardato: la lista prenotazioni
+// non ha motivo di sapere di quelle già risolte.
+app.get('/table-assignment-suggestions', authenticate, async (req, res) => {
+    try {
+        const { date, shift } = req.query;
+        if (!date || !shift) {
+            return res.status(400).json({ error: 'date and shift query params are required' });
+        }
+        if (shift !== 'LUNCH' && shift !== 'DINNER') {
+            return res.status(400).json({ error: 'shift must be LUNCH or DINNER' });
+        }
+        const result = await queryWithRetry(
+            `SELECT tas.*, t.name AS table_name
+               FROM table_assignment_suggestions tas
+               JOIN reservations r ON r.id = tas.reservation_id AND r.tenant_id = tas.tenant_id
+               JOIN tables t ON t.id = tas.table_id AND t.tenant_id = tas.tenant_id
+              WHERE tas.tenant_id = $1 AND tas.status = 'PENDING'
+                AND DATE(r.reservation_time) = $2::date AND r.shift = $3
+              ORDER BY tas.created_at DESC`,
+            [req.tenantId!, date, shift]
+        );
+        res.json(result.rows.map(tableAssignmentSuggestionRow));
+    } catch (err) {
+        console.error('GET /table-assignment-suggestions error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Conferma la proposta: SOLO qui si scrive davvero sulla prenotazione (ed
+// eventualmente su table_merges). Fino a questo tap è solo un suggerimento.
+app.post('/table-assignment-suggestions/:id/confirm', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) { client.release(); return res.status(400).json({ error: 'id non valido' }); }
+
+        await client.query('BEGIN');
+        const sugRes = await client.query(
+            `SELECT * FROM table_assignment_suggestions WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+            [id, req.tenantId!]
+        );
+        const suggestion = sugRes.rows[0];
+        if (!suggestion) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Proposta non trovata' }); }
+        if (suggestion.status !== 'PENDING') {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ error: 'already_resolved', status: suggestion.status });
+        }
+
+        const resvRes = await client.query(
+            `SELECT * FROM reservations WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+            [suggestion.reservation_id, req.tenantId!]
+        );
+        const reservation = resvRes.rows[0];
+        if (!reservation) {
+            await client.query(`UPDATE table_assignment_suggestions SET status = 'DISCARDED', resolved_at = CURRENT_TIMESTAMP, resolved_by_user_id = $2 WHERE id = $1`, [id, req.user?.userId ?? null]);
+            await client.query('COMMIT');
+            return res.status(404).json({ error: 'Prenotazione non trovata' });
+        }
+        if (reservation.table_id != null) {
+            await client.query(`UPDATE table_assignment_suggestions SET status = 'DISCARDED', resolved_at = CURRENT_TIMESTAMP, resolved_by_user_id = $2 WHERE id = $1`, [id, req.user?.userId ?? null]);
+            await client.query('COMMIT');
+            return res.status(409).json({ error: 'already_assigned', message: 'La prenotazione ha già un tavolo assegnato.' });
+        }
+
+        // La sala potrebbe essere cambiata da quando la proposta è stata
+        // generata (un altro tavolo occupato, la sala chiusa nel frattempo):
+        // si riverifica prima di scrivere, non ci si fida della proposta.
+        const idsInvolved = [suggestion.table_id, ...(suggestion.merge_with_table_ids || [])];
+        if (await isTableInClosedRoom(req.tenantId!, suggestion.table_id)) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'La sala del tavolo suggerito è chiusa.' });
+        }
+        const eventDate = new Date(reservation.reservation_time).toISOString().substring(0, 10);
+        const conflicts = await findTableConflicts(req.tenantId!, eventDate, reservation.shift, idsInvolved, {
+            excludeReservationId: reservation.id,
+        });
+        if (conflicts.length > 0) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ error: buildConflictMessage(conflicts), conflicts });
+        }
+
+        const updRes = await client.query(
+            `UPDATE reservations SET table_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND tenant_id = $3 RETURNING *`,
+            [suggestion.table_id, reservation.id, req.tenantId!]
+        );
+        const updatedReservation = updRes.rows[0];
+
+        let merge: any = null;
+        if ((suggestion.merge_with_table_ids || []).length > 0) {
+            const mergeRes = await client.query(
+                `INSERT INTO table_merges (tenant_id, date, shift, primary_id, merged_ids)
+                 VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT (date, shift, primary_id) DO UPDATE SET merged_ids = EXCLUDED.merged_ids
+                 RETURNING id, date, shift, primary_id, merged_ids`,
+                [req.tenantId!, eventDate, reservation.shift, suggestion.table_id, suggestion.merge_with_table_ids]
+            );
+            merge = mergeRes.rows[0];
+        }
+
+        await client.query(
+            `UPDATE table_assignment_suggestions SET status = 'CONFIRMED', resolved_at = CURRENT_TIMESTAMP, resolved_by_user_id = $2 WHERE id = $1`,
+            [id, req.user?.userId ?? null]
+        );
+        await client.query('COMMIT');
+
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.RESERVATION, reservation.id, reservation.customer_name,
+                { table_assignment_ai_suggestion_id: id, table_id: suggestion.table_id, merge_with_table_ids: suggestion.merge_with_table_ids }
+            );
+        }
+        if (socketService) {
+            socketService.broadcastReservationUpdated(req.tenantId!, updatedReservation);
+            if (merge) socketService.broadcastTableMergeCreated(req.tenantId!, merge);
+        }
+
+        res.json({ reservation: updatedReservation, merge });
+    } catch (err: any) {
+        try { await client.query('ROLLBACK'); } catch { /* noop */ }
+        console.error('POST /table-assignment-suggestions/:id/confirm error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    } finally {
+        client.release();
+    }
+});
+
+app.post('/table-assignment-suggestions/:id/dismiss', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        const r = await queryWithRetry(
+            `UPDATE table_assignment_suggestions SET status = 'DISMISSED', resolved_at = CURRENT_TIMESTAMP, resolved_by_user_id = $2
+              WHERE id = $1 AND tenant_id = $3 AND status = 'PENDING' RETURNING id`,
+            [id, req.user?.userId ?? null, req.tenantId!]
+        );
+        if (r.rows.length === 0) return res.status(409).json({ error: 'Proposta non più in attesa' });
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('POST /table-assignment-suggestions/:id/dismiss error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
@@ -18773,6 +19070,16 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
             try { socketService.broadcastReservationCreated(tenantId, created); }
             catch (err) { console.warn('[public-booking] socket broadcast failed:', err); }
         }
+
+        // Card #26: nessun tavolo assegnato in automatico (niente fit, o
+        // caparra da pagare) → prova a proporne uno via AI, se il ristoratore
+        // ha scritto un prompt in Impostazioni. Fire-and-forget: non deve
+        // rallentare l'ack al cliente che sta prenotando dal sito.
+        if (created.table_id == null) {
+            maybeSuggestTableAssignment(tenantId, created.id).catch(err =>
+                console.error('[table-assignment-ai] public-booking suggestion failed:', err?.message || err));
+        }
+
         pushSendToRoles(
             tenantId,
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
@@ -22524,6 +22831,10 @@ bookingTools.configureBookingTools({
     broadcastReservationUpdated: (r: any) => socketService?.broadcastReservationUpdated(Number(r.tenant_id) || PUBLIC_TENANT_ID, r),
     broadcastPaymentRequestCreated: (r: any) => socketService?.broadcastToAll(Number(r.tenant_id) || PUBLIC_TENANT_ID, 'paymentRequest:created', r),
     broadcastReservationsUpdatedByIds,
+    suggestTableAssignment: (tenantId: number, reservationId: number) => {
+        maybeSuggestTableAssignment(tenantId, reservationId).catch(err =>
+            console.error('[table-assignment-ai] suggestTableAssignment dep failed:', err?.message || err));
+    },
 });
 
 // La voce aggancia ogni azione alla riga di voice_calls per l'audit della
