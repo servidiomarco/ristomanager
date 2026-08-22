@@ -495,6 +495,17 @@ export const createPaymentRequest = async (
   });
 };
 
+// Card #28 — revoca manuale di un link inviato (solo PENDING/AUTHORISED,
+// mai quote del conto al tavolo). 409 se il pagamento è già chiuso.
+export const revokePaymentRequest = async (
+  paymentRequestId: number
+): Promise<{ ok: true; payment_request: PaymentRequest }> => {
+  return apiRequest<{ ok: true; payment_request: PaymentRequest }>(`${API_URL}/payments/${paymentRequestId}/revoke`, {
+    method: 'POST',
+    headers: getHeaders(),
+  });
+};
+
 // ============================================
 // OUTBOUND MESSAGES (SMS / WhatsApp log)
 // ============================================
@@ -1193,6 +1204,29 @@ export const updateAutoDepositSettings = async (
   updates: Partial<Pick<AutoDepositSettings, 'enabled' | 'min_guests' | 'per_person_cents'>>
 ): Promise<AutoDepositSettings> => {
   return apiRequest<AutoDepositSettings>(`${API_URL}/settings/auto-deposit`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(updates),
+  });
+};
+
+// Card #28 — scadenza automatica dei link di pagamento (per tenant).
+export interface PaymentLinkExpirySettings {
+  enabled: boolean;
+  hours: number;
+  message: 'declined' | 'none';
+}
+
+export const getPaymentLinkExpirySettings = async (): Promise<PaymentLinkExpirySettings> => {
+  return apiRequest<PaymentLinkExpirySettings>(`${API_URL}/settings/payment-link-expiry`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const updatePaymentLinkExpirySettings = async (
+  updates: Partial<PaymentLinkExpirySettings>
+): Promise<PaymentLinkExpirySettings> => {
+  return apiRequest<PaymentLinkExpirySettings>(`${API_URL}/settings/payment-link-expiry`, {
     method: 'PUT',
     headers: getHeaders(),
     body: JSON.stringify(updates),

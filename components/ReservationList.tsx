@@ -12,7 +12,7 @@ import { MessaggiPanel } from './prenotazione/MessaggiPanel';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, RoomClosedOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill, NoteSelection, TableAssignmentSuggestion } from '../types';
 import { Banknote, Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, ListFilter, Map as MapIcon, List, MessageCircle, Mail, Armchair, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, sendReservationReminder, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap, getTableAssignmentSuggestions, confirmTableAssignmentSuggestion, dismissTableAssignmentSuggestion } from '../services/apiService';
+import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, revokePaymentRequest, getReservationMessages, sendReservationReminder, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap, getTableAssignmentSuggestions, confirmTableAssignmentSuggestion, dismissTableAssignmentSuggestion } from '../services/apiService';
 import { billsApiService, printBill } from '../services/billsApiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { CookingPotLoader } from './CookingPotLoader';
@@ -2197,6 +2197,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const fallback = (['whatsapp', 'email', 'sms'] as const).find(c => paymentChannelAvailable[c]);
     if (fallback) setPaymentChannel(fallback);
   }, [paymentChannelAvailable.email, paymentChannelAvailable.whatsapp, paymentChannelAvailable.sms, paymentChannel]);
+
+  // Card #28 — revoca del link dalla lista "Richieste già inviate". La
+  // conferma two-tap sta nella riga; qui solo la chiamata e il refresh.
+  const [revokingPaymentId, setRevokingPaymentId] = useState<number | null>(null);
+  const handleRevokePaymentRequest = async (paymentRequestId: number) => {
+    setRevokingPaymentId(paymentRequestId);
+    try {
+      const result = await revokePaymentRequest(paymentRequestId);
+      setPaymentRequests(prev => prev.map(pr => pr.id === paymentRequestId ? result.payment_request : pr));
+      showToast('Link revocato: non è più pagabile', 'success');
+    } catch (err) {
+      showToast((err as Error).message || 'Revoca fallita', 'error');
+    } finally {
+      setRevokingPaymentId(null);
+    }
+  };
 
   const handleCreatePaymentRequest = async () => {
     if (!formData.id) return;
@@ -6175,6 +6191,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     request={pr}
                                     copied={copiedPaymentId === pr.id}
                                     onCopy={() => copyPaymentLink(pr)}
+                                    onRevoke={hasPermission('payments:full') ? () => handleRevokePaymentRequest(pr.id) : undefined}
+                                    revoking={revokingPaymentId === pr.id}
                                   />
                                 ))}
                               </ul>
