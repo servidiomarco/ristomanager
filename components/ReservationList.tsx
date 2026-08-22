@@ -259,6 +259,19 @@ const renderConfirmationIcon = (res: Reservation): React.ReactNode => {
   );
 };
 
+// Tier 3 attribute: a reminder went out for this booking (manual button in the
+// modal's Comunicazione tab). Boolean only — the per-message delivery outcome
+// lives in the timeline, so the badge stays a quiet "already done" marker that
+// spares the staff a second reminder to the same customer.
+const renderReminderIcon = (res: Reservation): React.ReactNode => {
+  if (!res.reminder_sent) return null;
+  return (
+    <span className={ATTR_BADGE} title="Reminder inviato" aria-label="Reminder inviato">
+      <BellRing className="h-3.5 w-3.5" />
+    </span>
+  );
+};
+
 // Payment badge (icon + tooltip) is now a shared component in
 // PaymentBadge.tsx so the Dashboard's pending-reservations card and the
 // Prenotazioni list can render the exact same chip without drift.
@@ -3286,6 +3299,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       <>
         {renderChannelIcon(res)}
         {renderConfirmationIcon(res)}
+        {renderReminderIcon(res)}
         {matchedNoteIcons.map(m => {
           const Icon = m.Icon!;
           return (
