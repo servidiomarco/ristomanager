@@ -1,4 +1,4 @@
-import { Reservation, Table, Room, Dish, BanquetMenu, BanquetPayment, TableMerge, TableHiddenOverride, RoomClosedOverride, Shift, Customer, InventoryArea, InventoryLocation, InventoryProduct, InventoryStockRow, InventoryMovement, InventoryMovementReason, InventoryCategory, PaymentRequest } from '../types';
+import { Reservation, Table, Room, Dish, BanquetMenu, BanquetPayment, TableMerge, TableHiddenOverride, RoomClosedOverride, Shift, Customer, InventoryArea, InventoryLocation, InventoryProduct, InventoryStockRow, InventoryMovement, InventoryMovementReason, InventoryCategory, PaymentRequest, TableAssignmentSuggestion } from '../types';
 import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
 import { buildApiError } from './apiError';
@@ -190,6 +190,30 @@ export const deleteTableMerge = async (
     method: 'DELETE',
     headers: getHeaders(),
     body: JSON.stringify({ date, shift, primary_id }),
+  }, false);
+};
+
+// ============================================
+// TABLE ASSIGNMENT AI — proposte (card dev board #26)
+// ============================================
+
+export const getTableAssignmentSuggestions = async (): Promise<TableAssignmentSuggestion[]> => {
+  return apiRequest<TableAssignmentSuggestion[]>(`${API_URL}/table-assignment-suggestions`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const confirmTableAssignmentSuggestion = async (id: number): Promise<{ reservation: Reservation; merge: TableMerge | null }> => {
+  return apiRequest(`${API_URL}/table-assignment-suggestions/${id}/confirm`, {
+    method: 'POST',
+    headers: getHeaders(),
+  });
+};
+
+export const dismissTableAssignmentSuggestion = async (id: number): Promise<void> => {
+  return apiRequest<void>(`${API_URL}/table-assignment-suggestions/${id}/dismiss`, {
+    method: 'POST',
+    headers: getHeaders(),
   }, false);
 };
 
@@ -468,6 +492,17 @@ export const createPaymentRequest = async (
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify(input),
+  });
+};
+
+// Card #28 — revoca manuale di un link inviato (solo PENDING/AUTHORISED,
+// mai quote del conto al tavolo). 409 se il pagamento è già chiuso.
+export const revokePaymentRequest = async (
+  paymentRequestId: number
+): Promise<{ ok: true; payment_request: PaymentRequest }> => {
+  return apiRequest<{ ok: true; payment_request: PaymentRequest }>(`${API_URL}/payments/${paymentRequestId}/revoke`, {
+    method: 'POST',
+    headers: getHeaders(),
   });
 };
 
@@ -1169,6 +1204,50 @@ export const updateAutoDepositSettings = async (
   updates: Partial<Pick<AutoDepositSettings, 'enabled' | 'min_guests' | 'per_person_cents'>>
 ): Promise<AutoDepositSettings> => {
   return apiRequest<AutoDepositSettings>(`${API_URL}/settings/auto-deposit`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(updates),
+  });
+};
+
+// Card #27 — comportamento della blacklist per fonte di prenotazione.
+export type BlacklistBehavior = 'block' | 'warn';
+export type BlacklistPolicySource = 'MANUAL' | 'GOOGLE' | 'VOICE' | 'WHATSAPP';
+export type BlacklistPolicySettings = Record<BlacklistPolicySource, BlacklistBehavior>;
+
+export const getBlacklistPolicySettings = async (): Promise<BlacklistPolicySettings> => {
+  return apiRequest<BlacklistPolicySettings>(`${API_URL}/settings/blacklist-policy`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const updateBlacklistPolicySettings = async (
+  updates: Partial<BlacklistPolicySettings>
+): Promise<BlacklistPolicySettings> => {
+  return apiRequest<BlacklistPolicySettings>(`${API_URL}/settings/blacklist-policy`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(updates),
+  });
+};
+
+// Card #28 — scadenza automatica dei link di pagamento (per tenant).
+export interface PaymentLinkExpirySettings {
+  enabled: boolean;
+  hours: number;
+  message: 'declined' | 'none';
+}
+
+export const getPaymentLinkExpirySettings = async (): Promise<PaymentLinkExpirySettings> => {
+  return apiRequest<PaymentLinkExpirySettings>(`${API_URL}/settings/payment-link-expiry`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const updatePaymentLinkExpirySettings = async (
+  updates: Partial<PaymentLinkExpirySettings>
+): Promise<PaymentLinkExpirySettings> => {
+  return apiRequest<PaymentLinkExpirySettings>(`${API_URL}/settings/payment-link-expiry`, {
     method: 'PUT',
     headers: getHeaders(),
     body: JSON.stringify(updates),

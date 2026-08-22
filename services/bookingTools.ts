@@ -111,6 +111,10 @@ export interface BookingToolsDeps {
     modifyVoiceReservation: (tenantId: number, p: any) => Promise<any>;
     recordVoiceCall: (tenantId: number, p: any) => Promise<any>;
     upsertCustomerFromReservation: (tenantId: number, name: string, phone: string, a: any, b: any) => Promise<any>;
+    /** Card #27 — true se il numero appartiene a un cliente in blacklist. */
+    isPhoneBlacklisted: (tenantId: number, phone: string) => Promise<boolean>;
+    /** Comportamento della blacklist per fonte, deciso dal tenant. */
+    getBlacklistPolicy: (tenantId: number) => Promise<Record<'MANUAL' | 'GOOGLE' | 'VOICE' | 'WHATSAPP', 'block' | 'warn'>>;
 
     getVoiceDateBlocks: (tenantId: number) => Promise<any>;
     findVoiceDateBlock: (date: string, shift: 'LUNCH' | 'DINNER', blocks: any) => any;
@@ -134,6 +138,11 @@ export interface BookingToolsDeps {
     broadcastReservationUpdated: (r: any) => void;
     broadcastPaymentRequestCreated: (r: any) => void;
     broadcastReservationsUpdatedByIds: (ids: number[]) => Promise<any>;
+
+    /** Card #26: se la prenotazione è nata senza tavolo, prova a proporne uno
+     *  via AI (prompt di Impostazioni + stato reale della sala). Fire-and-
+     *  forget: non deve rallentare né far fallire la creazione. */
+    suggestTableAssignment: (tenantId: number, reservationId: number) => void;
 }
 
 let D: BookingToolsDeps | null = null;
@@ -305,6 +314,17 @@ export async function createReservation(
     }
     if (!phoneRaw) return fail('invalid_phone', MSG.invalidPhoneCreate);
 
+    // Card #27 — blacklist: il comportamento lo decide il tenant per fonte
+    // (Impostazioni → Opzioni prenotazioni → Blacklist). Su 'block' il canale
+    // rifiuta con una frase neutra che non nomina la lista; su 'warn' la
+    // prenotazione entra e lo staff la trova con gli indicatori nel CRM.
+    const blacklistSource = channel.id === 'voice' ? 'VOICE' : 'WHATSAPP';
+    if ((await d.getBlacklistPolicy(tenantId))[blacklistSource] === 'block'
+        && await d.isPhoneBlacklisted(tenantId, phoneRaw)) {
+        console.log(`${channel.logPrefix} create-reservation blocked (blacklist)`, { conversation_id: conversationId });
+        return fail('customer_blacklisted', 'Mi dispiace, al momento non posso registrare questa prenotazione. Il ristorante resta a disposizione per assisterla direttamente.');
+    }
+
     const normalizedDate = d.parseFlexibleDate(p.date);
     if (!normalizedDate) {
         console.warn(`${channel.logPrefix} create-reservation rejected: unparseable date`, { received: p.date });
@@ -460,6 +480,13 @@ export async function createReservation(
                 shift: created.shift,
             }
         );
+
+        // Card #26: prenotazione nata senza tavolo (nessun fit automatico, o
+        // caparra ancora da pagare) → prova a proporne uno via AI. Copre sia
+        // la voce che WhatsApp: entrambi i canali passano da qui.
+        if (created.table_id == null) {
+            d.suggestTableAssignment(tenantId, created.id);
+        }
 
         try {
             d.broadcastReservationCreated(created);

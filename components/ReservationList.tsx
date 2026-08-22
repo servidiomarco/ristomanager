@@ -9,10 +9,10 @@ import { BillSheet } from './pagamenti/BillSheet';
 import { BillFigures, billStateLabel } from './prenotazione/BillFigures';
 import { PaymentRequestRow } from './prenotazione/PaymentRequestRow';
 import { MessaggiPanel } from './prenotazione/MessaggiPanel';
-import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, RoomClosedOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill, NoteSelection } from '../types';
+import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, RoomClosedOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill, NoteSelection, TableAssignmentSuggestion } from '../types';
 import { Banknote, Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, ListFilter, Map as MapIcon, List, MessageCircle, Mail, Armchair, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, getReservationMessages, sendReservationReminder, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap } from '../services/apiService';
+import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, revokePaymentRequest, getReservationMessages, sendReservationReminder, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap, getTableAssignmentSuggestions, confirmTableAssignmentSuggestion, dismissTableAssignmentSuggestion } from '../services/apiService';
 import { billsApiService, printBill } from '../services/billsApiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { CookingPotLoader } from './CookingPotLoader';
@@ -1109,6 +1109,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [customerSuggestions, setCustomerSuggestions] = useState<Customer[]>([]);
   const [activeSuggestField, setActiveSuggestField] = useState<'name' | 'phone' | null>(null);
   const [matchedCustomerNoShows, setMatchedCustomerNoShows] = useState<number>(0);
+  // Card #27 — blacklist: null = nessun match, altrimenti il motivo (anche '').
+  const [matchedCustomerBlacklist, setMatchedCustomerBlacklist] = useState<string | null>(null);
   // Tracks which value we last queried for, so the dropdown closes on selection
   // (we set this to the just-selected name/phone to skip re-querying for it).
   const lastSuggestQueryRef = useRef<string>('');
@@ -1169,6 +1171,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     if (exact && (exact.no_show_count || 0) > 0) {
       setMatchedCustomerNoShows(exact.no_show_count || 0);
     }
+    if (exact?.is_blacklisted) {
+      setMatchedCustomerBlacklist(exact.blacklist_reason || '');
+    }
   }, [customerSuggestions, formData.phone]);
 
   // Decide whether the rubrica's preferred table can be auto-assigned to the
@@ -1223,6 +1228,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       email: c.email || prev.email || '',
     }));
     setMatchedCustomerNoShows(c.no_show_count || 0);
+    setMatchedCustomerBlacklist(c.is_blacklisted ? (c.blacklist_reason || '') : null);
     setActiveSuggestField(null);
     setCustomerSuggestions([]);
     applyCustomerPreferences(c);
@@ -1234,6 +1240,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [isLoadingMerges, setIsLoadingMerges] = useState(false);
   const [hiddenTableIds, setHiddenTableIds] = useState<Set<number>>(new Set());
   const [showHidden, setShowHidden] = useState(false);
+
+  // Proposte AI di assegnazione tavolo (card dev board #26): poche per
+  // natura (una per prenotazione senza tavolo), quindi si caricano tutte le
+  // pendenti del tenant una volta e si tengono aggiornate via socket, senza
+  // legarle al focalDate/focalShift del form (che con selectedShift='ALL'
+  // coprirebbe solo metà servizio).
+  const [tableAssignmentSuggestions, setTableAssignmentSuggestions] = useState<Map<number, TableAssignmentSuggestion>>(new Map());
 
   const focalDate = isFormOpen && formData.reservation_time
     ? formData.reservation_time.split('T')[0]
@@ -1456,6 +1469,65 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       socket.off('roomClosed:deleted', onDeleted);
     };
   }, [socket, focalDate, focalShift]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getTableAssignmentSuggestions()
+      .then(rows => {
+        if (cancelled) return;
+        setTableAssignmentSuggestions(new Map(rows.map(s => [s.reservation_id, s])));
+      })
+      .catch(err => console.error('Error fetching table assignment suggestions:', err));
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!socket) return;
+    const onCreated = (s: TableAssignmentSuggestion) => {
+      setTableAssignmentSuggestions(prev => new Map(prev).set(s.reservation_id, s));
+    };
+    const onResolved = (s: TableAssignmentSuggestion) => {
+      setTableAssignmentSuggestions(prev => {
+        if (prev.get(s.reservation_id)?.id !== s.id) return prev;
+        const next = new Map(prev);
+        next.delete(s.reservation_id);
+        return next;
+      });
+    };
+    socket.on('tableAssignmentSuggestion:created', onCreated);
+    socket.on('tableAssignmentSuggestion:resolved', onResolved);
+    return () => {
+      socket.off('tableAssignmentSuggestion:created', onCreated);
+      socket.off('tableAssignmentSuggestion:resolved', onResolved);
+    };
+  }, [socket]);
+
+  const handleConfirmTableSuggestion = async (suggestion: TableAssignmentSuggestion) => {
+    try {
+      const { reservation } = await confirmTableAssignmentSuggestion(suggestion.id);
+      setTableAssignmentSuggestions(prev => {
+        const next = new Map(prev);
+        next.delete(suggestion.reservation_id);
+        return next;
+      });
+      showToast(`Tavolo ${suggestion.table_name || ''} assegnato a ${toTitleCase(reservation.customer_name)}`, 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Impossibile confermare il tavolo suggerito', 'error');
+    }
+  };
+
+  const handleDismissTableSuggestion = async (suggestion: TableAssignmentSuggestion) => {
+    setTableAssignmentSuggestions(prev => {
+      const next = new Map(prev);
+      next.delete(suggestion.reservation_id);
+      return next;
+    });
+    try {
+      await dismissTableAssignmentSuggestion(suggestion.id);
+    } catch (err: any) {
+      showToast(err?.message || 'Impossibile ignorare il suggerimento', 'error');
+    }
+  };
 
   const displayTables = useMemo(
     () => applyMerges(tables, tableMerges),
@@ -2002,6 +2074,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setShowNotesSection(false);
       setModalRoomFilter('ALL');
       setMatchedCustomerNoShows(0);
+      setMatchedCustomerBlacklist(null);
       setIsEditing(false);
       setIsFormOpen(true);
 
@@ -2131,6 +2204,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const fallback = (['whatsapp', 'email', 'sms'] as const).find(c => paymentChannelAvailable[c]);
     if (fallback) setPaymentChannel(fallback);
   }, [paymentChannelAvailable.email, paymentChannelAvailable.whatsapp, paymentChannelAvailable.sms, paymentChannel]);
+
+  // Card #28 — revoca del link dalla lista "Richieste già inviate". La
+  // conferma two-tap sta nella riga; qui solo la chiamata e il refresh.
+  const [revokingPaymentId, setRevokingPaymentId] = useState<number | null>(null);
+  const handleRevokePaymentRequest = async (paymentRequestId: number) => {
+    setRevokingPaymentId(paymentRequestId);
+    try {
+      const result = await revokePaymentRequest(paymentRequestId);
+      setPaymentRequests(prev => prev.map(pr => pr.id === paymentRequestId ? result.payment_request : pr));
+      showToast('Link revocato: non è più pagabile', 'success');
+    } catch (err) {
+      showToast((err as Error).message || 'Revoca fallita', 'error');
+    } finally {
+      setRevokingPaymentId(null);
+    }
+  };
 
   const handleCreatePaymentRequest = async () => {
     if (!formData.id) return;
@@ -3288,9 +3377,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     const preferredMatch = res.customer_preferred_table_id != null && res.customer_preferred_table_id === res.table_id;
     const preferredMissed = res.customer_preferred_table_id != null && res.customer_preferred_table_id !== res.table_id;
     const dietary = parseDietary(res.notes, allergenPresets);
+    // Solo se il tavolo è ancora libero: appena qualcuno lo assegna (a mano o
+    // confermando questa stessa proposta) res.table_id smette di essere
+    // null e il chip sparisce da solo, senza bisogno di un evento dedicato.
+    const tableSuggestion = res.table_id == null ? tableAssignmentSuggestions.get(res.id) : undefined;
     // The third line only exists when something needs it — an empty flex row
     // still costs its gap, and most bookings carry none of these.
-    const hasWideAttributes = !!turno || preferredMatch || preferredMissed
+    const hasWideAttributes = !!turno || preferredMatch || preferredMissed || !!tableSuggestion
       || dietary.allergies.length > 0 || dietary.intolerances.length > 0;
 
     // One set of glyphs, rendered in two spots: beside the name on ≥sm, on
@@ -3376,6 +3469,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               {res.customer_is_vip && (
                 <Star className="h-4 w-4 flex-shrink-0 fill-[var(--ds-pending-solid)] text-[var(--ds-pending-solid)]" aria-label="Cliente VIP" />
               )}
+              {res.customer_is_blacklisted && (
+                <span title={res.customer_blacklist_reason || 'Cliente in blacklist'}>
+                  <Ban className="h-4 w-4 flex-shrink-0 text-[var(--ds-critical-text)]" aria-label="Cliente in blacklist" />
+                </span>
+              )}
               <p className={`truncate text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)] ${group.key === 'cancelled' ? 'line-through' : ''}`}>
                 {toTitleCase(res.customer_name)}
               </p>
@@ -3398,6 +3496,30 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 {preferredMissed && (
                   <StatusPill tone="pending" title={`Preferito: ${res.customer_preferred_table_name || ''}`}>
                     <Armchair className="h-3 w-3 flex-shrink-0" aria-hidden /> Preferito non disponibile
+                  </StatusPill>
+                )}
+                {tableSuggestion && (
+                  <StatusPill tone="info" title={tableSuggestion.summary} className="pr-1">
+                    <Wand2 className="h-3 w-3 flex-shrink-0" aria-hidden />
+                    Tavolo {tableSuggestion.table_name || tableSuggestion.table_id}
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); handleConfirmTableSuggestion(tableSuggestion); }}
+                      className="flex h-5 w-5 items-center justify-center rounded-full hover:bg-black/10 dark:hover:bg-white/10"
+                      title="Conferma tavolo suggerito"
+                      aria-label="Conferma tavolo suggerito"
+                    >
+                      <Check className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); handleDismissTableSuggestion(tableSuggestion); }}
+                      className="flex h-5 w-5 items-center justify-center rounded-full hover:bg-black/10 dark:hover:bg-white/10"
+                      title="Ignora suggerimento"
+                      aria-label="Ignora suggerimento"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
                   </StatusPill>
                 )}
               </div>
@@ -3510,6 +3632,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               <h3 className="text-base font-semibold text-[var(--color-fg)] inline-flex items-center gap-1.5">
                 {res.customer_is_vip && (
                   <Star className="h-4 w-4 text-amber-500 fill-amber-400 flex-shrink-0" aria-label="Cliente VIP" />
+                )}
+                {res.customer_is_blacklisted && (
+                  <Ban className="h-4 w-4 flex-shrink-0 text-[var(--ds-critical-text)]" aria-label="Cliente in blacklist" />
                 )}
                 {toTitleCase(res.customer_name)}
                 {(() => {
@@ -4730,6 +4855,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             </div>
                         </div>
                     )}
+                    {(matchedCustomerBlacklist != null || formData.customer_is_blacklisted) && (
+                        <div className="mx-4 sm:mx-5 mt-4 flex items-start gap-3 rounded-[16px] bg-[var(--ds-critical-tint)] p-4">
+                            <Ban className="mt-0.5 h-5 w-5 flex-shrink-0 text-[var(--ds-critical-text)]" />
+                            <div className="flex-1 min-w-0">
+                                <p className="text-[15px] font-semibold text-[var(--ds-critical-text)]">
+                                    Cliente in blacklist
+                                </p>
+                                <p className="mt-0.5 text-[13px] text-[var(--ds-critical-text)]">
+                                    {(matchedCustomerBlacklist || formData.customer_blacklist_reason || '').trim()
+                                        || 'Web e agente vocale rifiutano questo numero; a mano decidi tu se procedere.'}
+                                </p>
+                            </div>
+                        </div>
+                    )}
                     {!isEditing && draftBanner && (
                         <div className="mx-4 sm:mx-5 mt-4 flex items-start gap-3 rounded-[16px] bg-[var(--ds-pending-tint)] p-4">
                             <Info className="mt-0.5 h-5 w-5 flex-shrink-0 text-[var(--ds-pending-text)]" />
@@ -4948,6 +5087,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             onChange={e => {
                                                 lastSuggestQueryRef.current = '';
                                                 setMatchedCustomerNoShows(0);
+                                                setMatchedCustomerBlacklist(null);
                                                 setFormData({...formData, customer_name: e.target.value});
                                             }}
                                             onFocus={() => setActiveSuggestField('name')}
@@ -4971,6 +5111,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                                     <span className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-critical-tint)] px-2 py-0.5 text-[12px] font-semibold text-[var(--ds-critical-text)]">
                                                                         <UserX className="h-2.5 w-2.5" />
                                                                         {c.no_show_count} no-show
+                                                                    </span>
+                                                                )}
+                                                                {c.is_blacklisted && (
+                                                                    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-critical-tint)] px-2 py-0.5 text-[12px] font-semibold text-[var(--ds-critical-text)]">
+                                                                        <Ban className="h-2.5 w-2.5" />
+                                                                        blacklist
                                                                     </span>
                                                                 )}
                                                             </div>
@@ -5031,6 +5177,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             onChange={e => {
                                                 lastSuggestQueryRef.current = '';
                                                 setMatchedCustomerNoShows(0);
+                                                setMatchedCustomerBlacklist(null);
                                                 setFormData({...formData, phone: e.target.value});
                                             }}
                                             onFocus={() => setActiveSuggestField('phone')}
@@ -5065,6 +5212,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                                     <span className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-critical-tint)] px-2 py-0.5 text-[12px] font-semibold text-[var(--ds-critical-text)]">
                                                                         <UserX className="h-2.5 w-2.5" />
                                                                         {c.no_show_count} no-show
+                                                                    </span>
+                                                                )}
+                                                                {c.is_blacklisted && (
+                                                                    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-critical-tint)] px-2 py-0.5 text-[12px] font-semibold text-[var(--ds-critical-text)]">
+                                                                        <Ban className="h-2.5 w-2.5" />
+                                                                        blacklist
                                                                     </span>
                                                                 )}
                                                             </div>
@@ -6081,6 +6234,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     request={pr}
                                     copied={copiedPaymentId === pr.id}
                                     onCopy={() => copyPaymentLink(pr)}
+                                    onRevoke={hasPermission('payments:full') ? () => handleRevokePaymentRequest(pr.id) : undefined}
+                                    revoking={revokingPaymentId === pr.id}
                                   />
                                 ))}
                               </ul>

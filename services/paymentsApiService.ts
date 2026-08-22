@@ -186,6 +186,17 @@ class PaymentsApiService {
     });
   }
 
+  /**
+   * Card #28 — revoca di un link ancora payabile (PENDING/AUTHORISED):
+   * annulla l'ordine al provider così il cliente non può più pagarlo.
+   */
+  async revoke(id: number): Promise<{ ok: true; payment_request: PaymentRequest }> {
+    return apiRequest<{ ok: true; payment_request: PaymentRequest }>(`${API_URL}/payments/${id}/revoke`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+  }
+
   /** Paid payments nobody has looked at yet — feeds the sidebar badge. */
   async unseenCount(): Promise<{ count: number }> {
     return apiRequest<{ count: number }>(`${API_URL}/payments/unseen-count`, {

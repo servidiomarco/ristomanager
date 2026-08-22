@@ -16,6 +16,7 @@ import pool, { createSchema, queryWithRetry, runMigrations, tenantQuery, runWith
 import { SocketService } from './services/socketService.js';
 import * as bookingTools from './services/bookingTools.js';
 import * as whatsappAgent from './services/whatsappAgent.js';
+import * as tableAssignmentAgent from './services/tableAssignmentAgent.js';
 import * as aiReport from './services/aiReportService.js';
 import { COST_USD_SQL, UNPRICED_SQL, USD_EUR } from './services/aiPricing.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
@@ -148,7 +149,24 @@ import {
     type BookingSource,
     type BookingChannelPolicyMap,
 } from './services/bookingChannelPolicy.js';
+import {
+    getPaymentLinkExpiryPolicy,
+    savePaymentLinkExpiryPolicy,
+    normalizePaymentLinkExpiryPolicy,
+    PAYMENT_LINK_EXPIRY_MIN_HOURS,
+    PAYMENT_LINK_EXPIRY_MAX_HOURS,
+    type PaymentLinkExpiryPolicy,
+} from './services/paymentLinkExpiryPolicy.js';
+import {
+    getBlacklistPolicy,
+    saveBlacklistPolicy,
+    isBlacklistBehavior,
+    BLACKLIST_SOURCES,
+    type BlacklistPolicyMap,
+    type BlacklistSource,
+} from './services/blacklistPolicy.js';
 import { toTitleCase } from './utils/text.js';
+import { getRomeTimePart } from './utils/reservationTime.js';
 import {
     getAvailableSlots,
     getAllOpeningHours,
@@ -1878,6 +1896,8 @@ async function broadcastReservationsUpdatedByIds(ids: number[]): Promise<void> {
         const result = await queryWithRetry(`
             SELECT r.*, u.full_name AS created_by_user_name,
                    c.is_vip AS customer_is_vip,
+                   c.is_blacklisted AS customer_is_blacklisted,
+                   c.blacklist_reason AS customer_blacklist_reason,
                    c.preferred_table_id AS customer_preferred_table_id,
                    pt.name AS customer_preferred_table_name,
                    c.dietary_notes AS customer_dietary_notes,
@@ -1893,7 +1913,7 @@ async function broadcastReservationsUpdatedByIds(ids: number[]): Promise<void> {
             FROM reservations r
             LEFT JOIN users u ON r.created_by_user_id = u.id
             LEFT JOIN LATERAL (
-                SELECT cc.is_vip, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
+                SELECT cc.is_vip, cc.is_blacklisted, cc.blacklist_reason, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
                 FROM customers cc
                 WHERE r.phone IS NOT NULL
                   AND cc.phone IS NOT NULL
@@ -2058,6 +2078,8 @@ app.get('/reservations', authenticate, async (req, res) => {
         const result = await queryWithRetry(`
             SELECT r.*, u.full_name AS created_by_user_name,
                    c.is_vip AS customer_is_vip,
+                   c.is_blacklisted AS customer_is_blacklisted,
+                   c.blacklist_reason AS customer_blacklist_reason,
                    c.preferred_table_id AS customer_preferred_table_id,
                    pt.name AS customer_preferred_table_name,
                    c.dietary_notes AS customer_dietary_notes,
@@ -2073,7 +2095,7 @@ app.get('/reservations', authenticate, async (req, res) => {
             FROM reservations r
             LEFT JOIN users u ON r.created_by_user_id = u.id
             LEFT JOIN LATERAL (
-                SELECT cc.is_vip, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
+                SELECT cc.is_vip, cc.is_blacklisted, cc.blacklist_reason, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
                 FROM customers cc
                 WHERE r.phone IS NOT NULL
                   AND cc.phone IS NOT NULL
@@ -2118,6 +2140,20 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         const rawDuration = duration_minutes == null || duration_minutes === '' ? null : Number(duration_minutes);
         const durationValue: number | null = Number.isFinite(rawDuration) && rawDuration! > 0 ? Math.min(600, Math.max(15, Math.round(rawDuration!))) : null;
         const effectiveDurationForCheck = durationValue ?? (shift === 'LUNCH' ? 90 : 120);
+
+        // Card #27 — se la policy del tenant blocca ANCHE la fonte manuale,
+        // il salvataggio di un numero in blacklist fa 409. Col default 'warn'
+        // questo ramo non scatta mai: il banner nel modal avvisa e decide lo
+        // staff.
+        if (phone && String(phone).trim()) {
+            const blacklistPolicy = await getBlacklistPolicy(req.tenantId!);
+            if (blacklistPolicy.MANUAL === 'block' && await isPhoneBlacklisted(req.tenantId!, String(phone))) {
+                return res.status(409).json({
+                    error: 'customer_blacklisted',
+                    message: 'Cliente in blacklist: le impostazioni del ristorante bloccano la prenotazione per questo numero.',
+                });
+            }
+        }
 
         // If the client didn't pick a table but the caller is a known rubrica
         // entry with a preferred_table_id, try to honor that preference. The
@@ -2183,6 +2219,8 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
             )
             SELECT ins.*, u.full_name AS created_by_user_name,
                    c.is_vip AS customer_is_vip,
+                   c.is_blacklisted AS customer_is_blacklisted,
+                   c.blacklist_reason AS customer_blacklist_reason,
                    c.preferred_table_id AS customer_preferred_table_id,
                    pt.name AS customer_preferred_table_name,
                    c.dietary_notes AS customer_dietary_notes,
@@ -2190,7 +2228,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
             FROM ins
             LEFT JOIN users u ON ins.created_by_user_id = u.id
             LEFT JOIN LATERAL (
-                SELECT cc.is_vip, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
+                SELECT cc.is_vip, cc.is_blacklisted, cc.blacklist_reason, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
                 FROM customers cc
                 WHERE ins.phone IS NOT NULL
                   AND cc.phone IS NOT NULL
@@ -2346,6 +2384,8 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                    (SELECT prev_reservation_time FROM old) AS prev_reservation_time,
                    (SELECT prev_guests FROM old) AS prev_guests,
                    c.is_vip AS customer_is_vip,
+                   c.is_blacklisted AS customer_is_blacklisted,
+                   c.blacklist_reason AS customer_blacklist_reason,
                    c.preferred_table_id AS customer_preferred_table_id,
                    pt.name AS customer_preferred_table_name,
                    c.dietary_notes AS customer_dietary_notes,
@@ -2353,7 +2393,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             FROM upd
             LEFT JOIN users u ON upd.created_by_user_id = u.id
             LEFT JOIN LATERAL (
-                SELECT cc.is_vip, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
+                SELECT cc.is_vip, cc.is_blacklisted, cc.blacklist_reason, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
                 FROM customers cc
                 WHERE upd.phone IS NOT NULL
                   AND cc.phone IS NOT NULL
@@ -2706,6 +2746,8 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
         const enriched = await client.query(
             `SELECT r.*, u.full_name AS created_by_user_name,
                     c.is_vip AS customer_is_vip,
+                   c.is_blacklisted AS customer_is_blacklisted,
+                   c.blacklist_reason AS customer_blacklist_reason,
                     c.preferred_table_id AS customer_preferred_table_id,
                     pt.name AS customer_preferred_table_name,
                     c.dietary_notes AS customer_dietary_notes,
@@ -2713,7 +2755,7 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
                FROM reservations r
                LEFT JOIN users u ON r.created_by_user_id = u.id
                LEFT JOIN LATERAL (
-                   SELECT cc.is_vip, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
+                   SELECT cc.is_vip, cc.is_blacklisted, cc.blacklist_reason, cc.preferred_table_id, cc.dietary_notes, cc.preferences_notes
                    FROM customers cc
                    WHERE r.phone IS NOT NULL
                      AND cc.phone IS NOT NULL
@@ -6603,6 +6645,111 @@ app.post('/payments/:id/reconcile', authenticate, requirePermission('payments:fu
     }
 });
 
+// Card #28 — annulla un ordine ancora payabile al provider e registra la
+// transizione. Stesso pattern del riconciliatore delle quote (conto #12):
+// prima si rilegge lo stato vero, e se l'ordine è già terminale si applica
+// QUELLO — un cancel cieco nella finestra di race perderebbe un pagamento
+// riuscito. Torna 'revoked' solo se l'annullo è andato davvero a segno.
+const revokePaymentOrder = async (
+    tenantId: number,
+    provider: PaymentProvider,
+    orderId: string,
+    extraMetadata: Record<string, any>
+): Promise<{ status: 'revoked' | 'already_terminal'; state?: string }> => {
+    const fetched = await fetchPaymentOrder(tenantId, provider, orderId);
+    if (fetched.event) {
+        await applyPaymentOrderTransition(orderId, fetched.event, transitionMetadata(provider, fetched.raw));
+        return { status: 'already_terminal', state: fetched.state };
+    }
+    try {
+        await cancelPaymentOrder(tenantId, provider, orderId);
+        await applyPaymentOrderTransition(orderId, 'ORDER_CANCELLED', extraMetadata);
+        return { status: 'revoked' };
+    } catch (cancelErr: any) {
+        // Cancel rifiutato: forse è stato pagato nella finestra. Si rilegge e
+        // si applica la verità del gateway; se non è raggiungibile si rilancia
+        // e il chiamante decide (l'endpoint fa 502, lo scheduler ritenta).
+        const fresh = await fetchPaymentOrder(tenantId, provider, orderId);
+        if (fresh.event) {
+            await applyPaymentOrderTransition(orderId, fresh.event, transitionMetadata(provider, fresh.raw));
+            return { status: 'already_terminal', state: fresh.state };
+        }
+        throw cancelErr;
+    }
+};
+
+// Card #28 — revoca manuale di un link di pagamento inviato. Solo link
+// standalone: le quote del conto al tavolo hanno il loro riconciliatore.
+// La prenotazione collegata NON si tocca: a revocare a mano è lo staff,
+// che decide lui cosa farne (la scadenza automatica invece la declina).
+app.post('/payments/:id/revoke', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+
+        const paymentRes = await queryWithRetry(
+            `SELECT id, provider, provider_order_id, status, table_bill_split_id
+             FROM payment_requests WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        if (paymentRes.rowCount === 0) return res.status(404).json({ error: 'Payment not found' });
+        const payment = paymentRes.rows[0];
+        if (payment.table_bill_split_id) {
+            return res.status(409).json({ error: 'Le quote del conto al tavolo si gestiscono dal conto, non da qui' });
+        }
+        if (payment.status !== 'PENDING' && payment.status !== 'AUTHORISED') {
+            return res.status(409).json({ error: `Il link risulta già ${payment.status}: non c'è nulla da revocare` });
+        }
+        if (!isPaymentProvider(payment.provider)) {
+            return res.status(400).json({ error: `Revoca non supportata per provider ${payment.provider}` });
+        }
+        const provider: PaymentProvider = payment.provider;
+        if (!payment.provider_order_id) {
+            return res.status(400).json({ error: 'Nessun order ID associato al pagamento' });
+        }
+        if (!(await isProviderConfigured(req.tenantId!, provider))) {
+            return res.status(503).json({ error: `${providerLabel(provider)} non è configurato (credenziali mancanti)` });
+        }
+
+        let outcome;
+        try {
+            outcome = await revokePaymentOrder(req.tenantId!, provider, payment.provider_order_id, {
+                revoked_by: req.user?.email || 'staff',
+            });
+        } catch (err: any) {
+            console.error('[payments] revoke failed:', err?.message || err);
+            return res.status(502).json({ error: `Annullo ${providerLabel(provider)} fallito`, detail: err?.message || String(err) });
+        }
+        if (outcome.status === 'already_terminal') {
+            return res.status(409).json({
+                error: `Troppo tardi: il pagamento risulta "${outcome.state}" al provider. Lo stato è stato aggiornato.`,
+            });
+        }
+
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!,
+                req.user.userId,
+                req.user.email,
+                req.user.email,
+                ActivityAction.UPDATE,
+                ResourceType.RESERVATION,
+                id,
+                `Link di pagamento #${id} revocato (${providerLabel(provider)})`
+            );
+        }
+
+        const fresh = await queryWithRetry(
+            `SELECT * FROM payment_requests WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        res.json({ ok: true, payment_request: fresh.rows[0] });
+    } catch (err: any) {
+        console.error('POST /payments/:id/revoke error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 // Full refund of a standalone payment request (a deposit / payment link).
 // Split-linked payments deliberately go through /bills/splits/:id/refund
 // instead: that path also reopens the bill when the refund drops it below
@@ -7913,6 +8060,7 @@ async function runDailyBreadReminder(tenantId: number, targetRoles: string[] = [
 const SCHEDULER_LOCK_BILL_SPLIT_RECONCILE = 761001;
 const SCHEDULER_LOCK_PAYMENT_REQUEST_RECONCILE = 761002;
 const SCHEDULER_LOCK_REMINDERS = 761003;
+const SCHEDULER_LOCK_PAYMENT_LINK_EXPIRY = 761004;
 
 // Il lock advisory è di SESSIONE: va preso su un client dedicato tenuto per
 // tutta la durata del tick (sul pool condiviso un'altra query potrebbe
@@ -8128,6 +8276,112 @@ const startPaymentRequestReconcileScheduler = () => {
     setInterval(lockedTick, 2 * 60 * 1000);
 };
 
+// Card #28 — quando un link di caparra scade da solo, la prenotazione rimasta
+// PENDING diventa DECLINED e (se la policy lo chiede) il cliente riceve il
+// messaggio delle prenotazioni non confermate — stessi testi e template del
+// decline manuale, così il cliente legge sempre le stesse parole. Se nel
+// frattempo lo staff l'ha già confermata o rifiutata, non si tocca nulla.
+const declineReservationForExpiredLink = async (
+    tenantId: number,
+    reservationId: number,
+    message: PaymentLinkExpiryPolicy['message']
+): Promise<void> => {
+    try {
+        const updated = await queryWithRetry(
+            `UPDATE reservations
+             SET reservation_status = 'DECLINED'
+             WHERE id = $1 AND tenant_id = $2 AND reservation_status = 'PENDING'
+             RETURNING id, customer_name, reservation_time, guests, phone, email, source`,
+            [reservationId, tenantId]
+        );
+        if (updated.rowCount === 0) return;
+        const r = updated.rows[0];
+        console.log(`[payment-expiry] prenotazione ${r.id} declinata: caparra non pagata (tenant ${tenantId})`);
+        await broadcastReservationsUpdatedByIds([Number(r.id)]);
+        if (message === 'declined' && (r.phone || r.email)) {
+            dispatchBookingNotification({
+                tenantId,
+                source: r.source,
+                phone: r.phone,
+                email: r.email,
+                reservationId: Number(r.id),
+                smsText: buildDeclineMessage(r.customer_name, r.reservation_time, r.guests),
+                whatsappTemplate: buildBookingDeclinedTemplate(r.customer_name, r.reservation_time, r.guests),
+                buildEmail: () => buildBookingDeclineEmail({
+                    customerName: r.customer_name,
+                    reservationTime: r.reservation_time,
+                    guests: r.guests,
+                }),
+                kind: 'decline',
+            }).catch(err => console.error('[payment-expiry] invio decline fallito:', err?.message || err));
+        }
+    } catch (err: any) {
+        console.error('[payment-expiry] decline prenotazione fallito:', err?.message || err);
+    }
+};
+
+// Card #28 — scadenza automatica dei link di pagamento. Per-tenant e SPENTA
+// di default (si accende da Impostazioni → Opzioni prenotazioni): accenderla
+// d'ufficio al deploy farebbe scadere in blocco i link pendenti esistenti.
+// Guarda solo gli ultimi 7 giorni: oltre, il poller di riconciliazione ha già
+// smesso da tempo e far ripartire messaggi su richieste di settimane fa
+// sarebbe peggio del buco che chiudiamo.
+const startPaymentLinkExpiryScheduler = () => {
+    const tick = async () => {
+        try {
+            const open = await queryWithRetry(
+                `SELECT id, tenant_id, provider, provider_order_id, reservation_id, created_at
+                 FROM payment_requests
+                 WHERE status IN ('PENDING', 'AUTHORISED')
+                   AND provider_order_id IS NOT NULL
+                   AND table_bill_split_id IS NULL
+                   AND created_at > NOW() - INTERVAL '7 days'
+                 ORDER BY created_at ASC
+                 LIMIT 25`
+            );
+            if (open.rowCount === 0) return;
+
+            const policies = new Map<number, PaymentLinkExpiryPolicy>();
+            for (const row of open.rows) {
+                const rowTenantId = Number(row.tenant_id) || PUBLIC_TENANT_ID;
+                let policy = policies.get(rowTenantId);
+                if (!policy) {
+                    policy = await getPaymentLinkExpiryPolicy(rowTenantId);
+                    policies.set(rowTenantId, policy);
+                }
+                if (!policy.enabled) continue;
+                const ageMs = Date.now() - new Date(row.created_at).getTime();
+                if (!Number.isFinite(ageMs) || ageMs < policy.hours * 60 * 60 * 1000) continue;
+                if (!isPaymentProvider(row.provider)) continue;
+                const provider: PaymentProvider = row.provider;
+                try {
+                    if (!(await isProviderConfigured(rowTenantId, provider))) continue;
+                    const outcome = await revokePaymentOrder(rowTenantId, provider, row.provider_order_id, {
+                        expired_by: 'auto_expiry', expiry_hours: policy.hours,
+                    });
+                    if (outcome.status !== 'revoked') {
+                        // Pagato (o già chiuso) nella finestra: la transizione
+                        // vera è appena stata applicata, niente decline.
+                        continue;
+                    }
+                    console.log(`[payment-expiry] link ${row.id} scaduto dopo ${policy.hours}h (tenant ${rowTenantId})`);
+                    if (row.reservation_id) {
+                        await declineReservationForExpiredLink(rowTenantId, Number(row.reservation_id), policy.message);
+                    }
+                } catch (err: any) {
+                    console.warn(`[payment-expiry] link ${row.id} non revocato:`, err?.message || err);
+                }
+            }
+        } catch (err: any) {
+            console.error('[payment-expiry] scheduler tick failed:', err?.message || err);
+        }
+    };
+    const lockedTick = () => runSchedulerTickWithLock(SCHEDULER_LOCK_PAYMENT_LINK_EXPIRY, 'payment-expiry', tick)
+        .catch(err => console.error('[payment-expiry] lock wrapper failed:', err?.message || err));
+    lockedTick();
+    setInterval(lockedTick, 5 * 60 * 1000);
+};
+
 // Registry of hardcoded handlers for reminders that need dynamic content
 // (e.g. Pane computes kg from tomorrow's coperti at fire time). Keyed by
 // the `system_key` column; a reminder row with a matching key delegates
@@ -8335,6 +8589,29 @@ const upsertCustomerFromReservation = async (
     }
 };
 
+// Card #27 — blacklist: true se il numero appartiene a un cliente segnato in
+// rubrica. Match sulle ultime 10 cifre (come findCustomerByPhone) perché la
+// rubrica può avere il numero senza prefisso internazionale. In caso di errore
+// DB torna false: meglio una prenotazione di troppo che un canale morto.
+const isPhoneBlacklisted = async (tenantId: number, phone: string): Promise<boolean> => {
+    try {
+        const digits = String(phone || '').replace(/\D/g, '');
+        if (digits.length < 6) return false;
+        const result = await queryWithRetry(
+            `SELECT 1 FROM customers
+             WHERE tenant_id = $2
+               AND is_blacklisted = true
+               AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = right($1, 10)
+             LIMIT 1`,
+            [digits, tenantId]
+        );
+        return result.rows.length > 0;
+    } catch (err) {
+        console.error('isPhoneBlacklisted failed:', err);
+        return false;
+    }
+};
+
 // Propagate the marketing consent captured at booking to the customer rubrica
 // (matched by phone-digits) so it can be used to filter marketing sends. Only
 // runs when an explicit boolean was provided. Side-effect — never throws.
@@ -8444,6 +8721,7 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
             const result = await queryWithRetry(
                 `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
                         preferred_table_id, preferences_notes, dietary_notes, is_vip,
+                        is_blacklisted, blacklist_reason,
                         consent_marketing, consent_marketing_updated_at,
                         ${noShowSubquery}
                  FROM customers c
@@ -8459,6 +8737,7 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
         const result = await queryWithRetry(
             `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
                     preferred_table_id, preferences_notes, dietary_notes, is_vip,
+                    is_blacklisted, blacklist_reason,
                     consent_marketing, consent_marketing_updated_at,
                     ${noShowSubquery}
              FROM customers c
@@ -8506,7 +8785,7 @@ app.get('/customers/marketing-audience', authenticate, requirePermission('custom
 
 app.post('/customers', authenticate, requirePermission('customers:full'), async (req, res) => {
     try {
-        const { name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip } = req.body;
+        const { name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason } = req.body;
         if (!name || !String(name).trim()) {
             return res.status(400).json({ error: 'name is required' });
         }
@@ -8518,6 +8797,10 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
             ? Number(preferred_table_id)
             : null;
         const normalizedIsVip: boolean = is_vip === true || is_vip === 'true';
+        const normalizedIsBlacklisted: boolean = is_blacklisted === true || is_blacklisted === 'true';
+        const normalizedBlacklistReason: string | null = normalizedIsBlacklisted && blacklist_reason && String(blacklist_reason).trim()
+            ? String(blacklist_reason).trim()
+            : null;
 
         // Dedupe on the digit-only form of the phone — strips spaces, "+",
         // dashes, etc. so "+39 333 1234567" and "3331234567" match. Phone
@@ -8527,7 +8810,7 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
         if (phoneDigits) {
             const existing = await queryWithRetry(
                 `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
-                        preferred_table_id, preferences_notes, dietary_notes, is_vip
+                        preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason
                  FROM customers
                  WHERE tenant_id = $2
                    AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1
@@ -8540,10 +8823,10 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
         }
 
         const result = await queryWithRetry(
-            `INSERT INTO customers (tenant_id, name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip)
-             VALUES ($12, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            `INSERT INTO customers (tenant_id, name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason)
+             VALUES ($12, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $13, $14)
              RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
-                       preferred_table_id, preferences_notes, dietary_notes, is_vip`,
+                       preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason`,
             [
                 normalizeCustomerName(String(name).trim()),
                 trimmedPhone || null,
@@ -8557,6 +8840,8 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
                 dietary_notes ?? null,
                 normalizedIsVip,
                 req.tenantId!,
+                normalizedIsBlacklisted,
+                normalizedBlacklistReason,
             ]
         );
         const newCustomer = result.rows[0];
@@ -8584,7 +8869,7 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
 app.put('/customers/:id', authenticate, requirePermission('customers:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip } = req.body;
+        const { name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason } = req.body;
         if (!name || !String(name).trim()) {
             return res.status(400).json({ error: 'name is required' });
         }
@@ -8595,6 +8880,10 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
             ? Number(preferred_table_id)
             : null;
         const normalizedIsVip: boolean = is_vip === true || is_vip === 'true';
+        const normalizedIsBlacklisted: boolean = is_blacklisted === true || is_blacklisted === 'true';
+        const normalizedBlacklistReason: string | null = normalizedIsBlacklisted && blacklist_reason && String(blacklist_reason).trim()
+            ? String(blacklist_reason).trim()
+            : null;
 
         // Reject if another customer already owns this phone (digits-only match).
         // Without this, the UPDATE would silently create a duplicate that
@@ -8631,7 +8920,7 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
         try {
             await client.query('BEGIN');
             const prev = await client.query(
-                'SELECT name, phone, is_vip, preferred_table_id, dietary_notes, preferences_notes FROM customers WHERE id = $1 AND tenant_id = $2 FOR UPDATE',
+                'SELECT name, phone, is_vip, is_blacklisted, preferred_table_id, dietary_notes, preferences_notes FROM customers WHERE id = $1 AND tenant_id = $2 FOR UPDATE',
                 [id, req.tenantId!]
             );
             if (prev.rowCount === 0) {
@@ -8657,10 +8946,12 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
                     preferences_notes = $9,
                     dietary_notes = $10,
                     is_vip = $11,
+                    is_blacklisted = $12,
+                    blacklist_reason = $13,
                     updated_at = CURRENT_TIMESTAMP
-                 WHERE id = $12 AND tenant_id = $13
+                 WHERE id = $14 AND tenant_id = $15
                  RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
-                           preferred_table_id, preferences_notes, dietary_notes, is_vip`,
+                           preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason`,
                 [
                     newName,
                     newPhone,
@@ -8673,6 +8964,8 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
                     preferences_notes ?? null,
                     dietary_notes ?? null,
                     normalizedIsVip,
+                    normalizedIsBlacklisted,
+                    normalizedBlacklistReason,
                     id,
                     req.tenantId!,
                 ]
@@ -8712,6 +9005,7 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
             // re-render with the fresh join.
             const joinedFieldsChanged =
                 normalizedIsVip !== (prev.rows[0].is_vip === true) ||
+                normalizedIsBlacklisted !== (prev.rows[0].is_blacklisted === true) ||
                 normalizedPreferredTableId !== (prev.rows[0].preferred_table_id ?? null) ||
                 (dietary_notes ?? null) !== (prev.rows[0].dietary_notes ?? null) ||
                 (preferences_notes ?? null) !== (prev.rows[0].preferences_notes ?? null);
@@ -8874,10 +9168,12 @@ app.post('/customers/:sourceId/merge-into/:targetId', authenticate, requirePermi
                  preferences_notes = COALESCE(NULLIF(preferences_notes, ''), $8),
                  dietary_notes = COALESCE(NULLIF(dietary_notes, ''), $9),
                  is_vip = is_vip OR $10,
+                 is_blacklisted = is_blacklisted OR $12,
+                 blacklist_reason = COALESCE(NULLIF(blacklist_reason, ''), $13),
                  updated_at = CURRENT_TIMESTAMP
              WHERE id = $1 AND tenant_id = $11
              RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
-                       preferred_table_id, preferences_notes, dietary_notes, is_vip`,
+                       preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason`,
             [
                 targetId,
                 source.email || null,
@@ -8890,6 +9186,8 @@ app.post('/customers/:sourceId/merge-into/:targetId', authenticate, requirePermi
                 source.dietary_notes || null,
                 source.is_vip === true,
                 req.tenantId!,
+                source.is_blacklisted === true,
+                source.blacklist_reason || null,
             ]
         );
 
@@ -16295,10 +16593,12 @@ app.put('/settings/legal', authenticate, requirePermission('settings:full'), asy
 
 // ---------------------------------------------------------------------------
 // TABLE ASSIGNMENT AI PROMPT (app_settings → key 'table_assignment_ai_prompt')
-// Testo libero, non consumato da alcuna automazione oggi: è la nota che il
-// gestore scrive per sé (o per una futura logica AI) su come assegnare o
-// spostare i tavoli in base alle prenotazioni in arrivo. Nessuna automazione
-// legge ancora questo campo — è solo l'input, salvato per riuso futuro.
+// Testo libero scritto dal ristoratore: descrive le dinamiche MANUALI di
+// sala di oggi (quando unire/dividere tavoli, come gestire gruppi grandi,
+// come ottimizzare l'occupancy nelle serate piene). Non sostituisce la
+// logica di assegnazione esistente, la affianca — vedi
+// maybeSuggestTableAssignment più in basso (card dev board #26). Prompt
+// vuoto = proposta AI spenta.
 // ---------------------------------------------------------------------------
 const TABLE_ASSIGNMENT_AI_PROMPT_KEY = 'table_assignment_ai_prompt';
 const TABLE_ASSIGNMENT_AI_PROMPT_MAX = 4000;
@@ -16344,6 +16644,313 @@ app.put('/settings/table-assignment-ai-prompt', authenticate, requirePermission(
     } catch (err: any) {
         console.error('PUT /settings/table-assignment-ai-prompt error:', err);
         res.status(500).json({ error: 'Failed to update table assignment AI prompt', detail: err?.message });
+    }
+});
+
+// ---------------------------------------------------------------------------
+// TABLE ASSIGNMENT AI — la proposta (card dev board #26)
+// Quando una prenotazione nasce senza tavolo da un canale self-service (sito,
+// WhatsApp, Sofia — vedi le chiamate a suggestTableAssignment/
+// maybeSuggestTableAssignment), si legge il prompt sopra + lo stato reale del
+// servizio (tavoli aperti, unioni attive, altre prenotazioni con tavolo) e si
+// chiede a Claude un'assegnazione. La proposta finisce in
+// table_assignment_suggestions e viaggia via socket: la sala la vede in lista
+// prenotazioni e la conferma in un tap, o la ignora. Mai scrittura silenziosa
+// sulla prenotazione — quella la fa solo la conferma umana qui sotto.
+// ---------------------------------------------------------------------------
+
+function tableAssignmentSuggestionRow(r: any) {
+    return {
+        id: r.id,
+        reservation_id: r.reservation_id,
+        table_id: r.table_id,
+        table_name: r.table_name ?? null,
+        merge_with_table_ids: r.merge_with_table_ids || [],
+        summary: r.summary,
+        status: r.status,
+        created_at: r.created_at,
+    };
+}
+
+async function maybeSuggestTableAssignment(tenantId: number, reservationId: number): Promise<void> {
+    try {
+        const prompt = await getTableAssignmentAiPrompt(tenantId);
+        if (!prompt.trim()) return; // prompt vuoto = feature spenta
+        if (!tableAssignmentAgent.isAgentConfigured()) return;
+
+        const resvRes = await queryWithRetry(
+            `SELECT id, customer_name, reservation_time, shift, guests, children, notes, table_id, reservation_status
+               FROM reservations WHERE id = $1 AND tenant_id = $2`,
+            [reservationId, tenantId]
+        );
+        const reservation = resvRes.rows[0];
+        // Nel frattempo qualcuno potrebbe aver già assegnato un tavolo a mano,
+        // o annullato la prenotazione: la proposta non servirebbe più.
+        if (!reservation || reservation.table_id != null) return;
+        if (['CANCELLED', 'DECLINED'].includes(reservation.reservation_status)) return;
+
+        const eventDate = new Date(reservation.reservation_time).toISOString().substring(0, 10);
+        const timeLabel = getRomeTimePart(reservation.reservation_time);
+
+        const [tablesRes, mergesRes, occupancyRes] = await Promise.all([
+            queryWithRetry(
+                `SELECT t.id, t.name, t.seats, t.room_id, r.name AS room_name
+                   FROM tables t
+                   JOIN rooms r ON r.id = t.room_id AND r.tenant_id = t.tenant_id
+                  WHERE t.tenant_id = $1 AND r.is_closed = false
+                  ORDER BY r.name, t.name`,
+                [tenantId]
+            ),
+            queryWithRetry(
+                `SELECT primary_id, merged_ids FROM table_merges WHERE tenant_id = $1 AND date = $2 AND shift = $3`,
+                [tenantId, eventDate, reservation.shift]
+            ),
+            queryWithRetry(
+                `SELECT table_id, customer_name, guests, reservation_time
+                   FROM reservations
+                  WHERE tenant_id = $1 AND DATE(reservation_time) = $2::date AND shift = $3
+                    AND table_id IS NOT NULL AND id <> $4
+                    AND COALESCE(reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')`,
+                [tenantId, eventDate, reservation.shift, reservationId]
+            ),
+        ]);
+
+        const tables = tablesRes.rows;
+        if (tables.length === 0) return;
+
+        const result = await tableAssignmentAgent.suggestTableAssignment({
+            prompt,
+            reservation: {
+                customer_name: reservation.customer_name,
+                guests: reservation.guests,
+                children: reservation.children || 0,
+                time: timeLabel,
+                shift: reservation.shift,
+                notes: reservation.notes,
+            },
+            tables,
+            merges: mergesRes.rows,
+            occupancy: occupancyRes.rows.map((o: any) => ({
+                table_id: o.table_id,
+                customer_name: o.customer_name,
+                guests: o.guests,
+                time: getRomeTimePart(o.reservation_time),
+            })),
+        });
+
+        // Telemetria per la pagina Consumi AI, come dashboard_report/
+        // suggest_reply/whatsapp_agent. Best-effort.
+        if (result.usage) {
+            const u = result.usage;
+            queryWithRetry(
+                `INSERT INTO ai_token_usage (provider, feature, model, prompt_tokens, output_tokens, total_tokens, tenant_id)
+                 VALUES ('anthropic', 'table_assignment', $1, $2, $3, $4, $5)`,
+                [u.model, u.promptTokens, u.outputTokens, u.totalTokens, tenantId]
+            ).catch(err => console.error('ai_token_usage insert (table_assignment) failed:', err));
+        }
+
+        if (!result.proposal) {
+            if (result.reason) console.log(`[table-assignment-ai] nessuna proposta per prenotazione #${reservationId}: ${result.reason}`);
+            return;
+        }
+
+        // Il tavolo (e l'eventuale unione) proposti devono esistere davvero e
+        // reggere la capienza, senza conflitti con altre prenotazioni: il
+        // modello ragiona sui dati che gli passiamo ma non ci si fida
+        // ciecamente prima di scrivere una proposta che lo staff vedrà.
+        const idsInvolved = [result.proposal.tableId, ...result.proposal.mergeWithTableIds];
+        const involvedTables = tables.filter((t: any) => idsInvolved.includes(t.id));
+        if (involvedTables.length !== idsInvolved.length) {
+            console.warn(`[table-assignment-ai] proposta scartata (tavolo inesistente) per prenotazione #${reservationId}`, result.proposal);
+            return;
+        }
+        const totalSeats = involvedTables.reduce((sum: number, t: any) => sum + (t.seats || 0), 0);
+        if (totalSeats < reservation.guests) {
+            console.warn(`[table-assignment-ai] proposta scartata (capienza insufficiente) per prenotazione #${reservationId}`, result.proposal);
+            return;
+        }
+        const conflicts = await findTableConflicts(tenantId, eventDate, reservation.shift, idsInvolved);
+        if (conflicts.length > 0) {
+            console.warn(`[table-assignment-ai] proposta scartata (conflitto) per prenotazione #${reservationId}`, result.proposal);
+            return;
+        }
+
+        // Una proposta pendente per prenotazione: quella vecchia decade,
+        // altrimenti lo staff si trova due suggerimenti in contrasto.
+        await queryWithRetry(
+            `UPDATE table_assignment_suggestions SET status = 'SUPERSEDED', resolved_at = CURRENT_TIMESTAMP
+              WHERE tenant_id = $1 AND reservation_id = $2 AND status = 'PENDING'`,
+            [tenantId, reservationId]
+        );
+        const ins = await queryWithRetry(
+            `INSERT INTO table_assignment_suggestions (tenant_id, reservation_id, table_id, merge_with_table_ids, summary)
+             VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+            [tenantId, reservationId, result.proposal.tableId, result.proposal.mergeWithTableIds, result.proposal.summary]
+        );
+        const tableName = involvedTables.find((t: any) => t.id === result.proposal!.tableId)?.name ?? null;
+        const suggestion = tableAssignmentSuggestionRow({ ...ins.rows[0], table_name: tableName });
+        if (socketService) socketService.broadcastToAll(tenantId, 'tableAssignmentSuggestion:created', suggestion);
+    } catch (err: any) {
+        console.error('[table-assignment-ai] suggestion failed:', err?.message || err);
+    }
+}
+
+// GET /table-assignment-suggestions[?date=YYYY-MM-DD&shift=LUNCH|DINNER]
+// Solo le proposte pendenti: la lista prenotazioni non ha motivo di sapere
+// di quelle già risolte. Senza date/shift torna tutte le pendenti del
+// tenant — sono poche per natura (una per prenotazione senza tavolo), la
+// lista le tiene aggiornate via socket una volta caricate.
+app.get('/table-assignment-suggestions', authenticate, async (req, res) => {
+    try {
+        const { date, shift } = req.query;
+        if ((date && !shift) || (shift && !date)) {
+            return res.status(400).json({ error: 'date and shift must be provided together' });
+        }
+        if (shift && shift !== 'LUNCH' && shift !== 'DINNER') {
+            return res.status(400).json({ error: 'shift must be LUNCH or DINNER' });
+        }
+        const params: any[] = [req.tenantId!];
+        let scopeFilter = '';
+        if (date && shift) {
+            params.push(date, shift);
+            scopeFilter = `AND DATE(r.reservation_time) = $2::date AND r.shift = $3`;
+        }
+        const result = await queryWithRetry(
+            `SELECT tas.*, t.name AS table_name
+               FROM table_assignment_suggestions tas
+               JOIN reservations r ON r.id = tas.reservation_id AND r.tenant_id = tas.tenant_id
+               JOIN tables t ON t.id = tas.table_id AND t.tenant_id = tas.tenant_id
+              WHERE tas.tenant_id = $1 AND tas.status = 'PENDING'
+                ${scopeFilter}
+              ORDER BY tas.created_at DESC`,
+            params
+        );
+        res.json(result.rows.map(tableAssignmentSuggestionRow));
+    } catch (err) {
+        console.error('GET /table-assignment-suggestions error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Conferma la proposta: SOLO qui si scrive davvero sulla prenotazione (ed
+// eventualmente su table_merges). Fino a questo tap è solo un suggerimento.
+app.post('/table-assignment-suggestions/:id/confirm', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) { client.release(); return res.status(400).json({ error: 'id non valido' }); }
+
+        await client.query('BEGIN');
+        const sugRes = await client.query(
+            `SELECT * FROM table_assignment_suggestions WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+            [id, req.tenantId!]
+        );
+        const suggestion = sugRes.rows[0];
+        if (!suggestion) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Proposta non trovata' }); }
+        if (suggestion.status !== 'PENDING') {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ error: 'already_resolved', status: suggestion.status });
+        }
+
+        const resvRes = await client.query(
+            `SELECT * FROM reservations WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+            [suggestion.reservation_id, req.tenantId!]
+        );
+        const reservation = resvRes.rows[0];
+        if (!reservation) {
+            await client.query(`UPDATE table_assignment_suggestions SET status = 'DISCARDED', resolved_at = CURRENT_TIMESTAMP, resolved_by_user_id = $2 WHERE id = $1`, [id, req.user?.userId ?? null]);
+            await client.query('COMMIT');
+            return res.status(404).json({ error: 'Prenotazione non trovata' });
+        }
+        if (reservation.table_id != null) {
+            await client.query(`UPDATE table_assignment_suggestions SET status = 'DISCARDED', resolved_at = CURRENT_TIMESTAMP, resolved_by_user_id = $2 WHERE id = $1`, [id, req.user?.userId ?? null]);
+            await client.query('COMMIT');
+            return res.status(409).json({ error: 'already_assigned', message: 'La prenotazione ha già un tavolo assegnato.' });
+        }
+
+        // La sala potrebbe essere cambiata da quando la proposta è stata
+        // generata (un altro tavolo occupato, la sala chiusa nel frattempo):
+        // si riverifica prima di scrivere, non ci si fida della proposta.
+        const idsInvolved = [suggestion.table_id, ...(suggestion.merge_with_table_ids || [])];
+        if (await isTableInClosedRoom(req.tenantId!, suggestion.table_id)) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'La sala del tavolo suggerito è chiusa.' });
+        }
+        const eventDate = new Date(reservation.reservation_time).toISOString().substring(0, 10);
+        const conflicts = await findTableConflicts(req.tenantId!, eventDate, reservation.shift, idsInvolved, {
+            excludeReservationId: reservation.id,
+        });
+        if (conflicts.length > 0) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ error: buildConflictMessage(conflicts), conflicts });
+        }
+
+        const updRes = await client.query(
+            `UPDATE reservations SET table_id = $1 WHERE id = $2 AND tenant_id = $3 RETURNING *`,
+            [suggestion.table_id, reservation.id, req.tenantId!]
+        );
+        const updatedReservation = updRes.rows[0];
+
+        let merge: any = null;
+        if ((suggestion.merge_with_table_ids || []).length > 0) {
+            const mergeRes = await client.query(
+                `INSERT INTO table_merges (tenant_id, date, shift, primary_id, merged_ids)
+                 VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT (date, shift, primary_id) DO UPDATE SET merged_ids = EXCLUDED.merged_ids
+                 RETURNING id, date, shift, primary_id, merged_ids`,
+                [req.tenantId!, eventDate, reservation.shift, suggestion.table_id, suggestion.merge_with_table_ids]
+            );
+            merge = mergeRes.rows[0];
+        }
+
+        await client.query(
+            `UPDATE table_assignment_suggestions SET status = 'CONFIRMED', resolved_at = CURRENT_TIMESTAMP, resolved_by_user_id = $2 WHERE id = $1`,
+            [id, req.user?.userId ?? null]
+        );
+        await client.query('COMMIT');
+
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.RESERVATION, reservation.id, reservation.customer_name,
+                { table_assignment_ai_suggestion_id: id, table_id: suggestion.table_id, merge_with_table_ids: suggestion.merge_with_table_ids }
+            );
+        }
+        if (socketService) {
+            socketService.broadcastReservationUpdated(req.tenantId!, updatedReservation);
+            if (merge) socketService.broadcastTableMergeCreated(req.tenantId!, merge);
+            // Gli altri terminali collegati devono togliere il chip: senza
+            // questo evento resterebbe visibile finché non ricaricano.
+            socketService.broadcastToAll(req.tenantId!, 'tableAssignmentSuggestion:resolved', tableAssignmentSuggestionRow({ ...suggestion, status: 'CONFIRMED' }));
+        }
+
+        res.json({ reservation: updatedReservation, merge });
+    } catch (err: any) {
+        try { await client.query('ROLLBACK'); } catch { /* noop */ }
+        console.error('POST /table-assignment-suggestions/:id/confirm error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    } finally {
+        client.release();
+    }
+});
+
+app.post('/table-assignment-suggestions/:id/dismiss', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        const r = await queryWithRetry(
+            `UPDATE table_assignment_suggestions SET status = 'DISMISSED', resolved_at = CURRENT_TIMESTAMP, resolved_by_user_id = $2
+              WHERE id = $1 AND tenant_id = $3 AND status = 'PENDING' RETURNING *`,
+            [id, req.user?.userId ?? null, req.tenantId!]
+        );
+        if (r.rows.length === 0) return res.status(409).json({ error: 'Proposta non più in attesa' });
+        if (socketService) {
+            socketService.broadcastToAll(req.tenantId!, 'tableAssignmentSuggestion:resolved', tableAssignmentSuggestionRow(r.rows[0]));
+        }
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('POST /table-assignment-suggestions/:id/dismiss error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
@@ -16438,6 +17045,107 @@ app.put('/settings/booking-channels', authenticate, requirePermission('settings:
         res.json(next);
     } catch (err) {
         console.error('PUT /settings/booking-channels error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
+// SCADENZA LINK DI PAGAMENTO (paymentLinkExpiryPolicy) — card #28
+// ============================================
+
+app.get('/settings/payment-link-expiry', authenticate, async (req, res) => {
+    try {
+        res.json(await getPaymentLinkExpiryPolicy(req.tenantId!));
+    } catch (err) {
+        console.error('GET /settings/payment-link-expiry error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/settings/payment-link-expiry', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        // Update parziale sul modello di auto-deposit: i campi assenti restano
+        // come sono, la policy risultante deve comunque essere valida intera.
+        const current = await getPaymentLinkExpiryPolicy(req.tenantId!);
+        const body = req.body ?? {};
+        const next = normalizePaymentLinkExpiryPolicy({
+            enabled: body.enabled !== undefined ? body.enabled : current.enabled,
+            hours: body.hours !== undefined ? body.hours : current.hours,
+            message: body.message !== undefined ? body.message : current.message,
+        });
+        if (!next) {
+            return res.status(400).json({
+                error: 'invalid_policy',
+                message: `Policy non valida: enabled booleano, hours intero tra ${PAYMENT_LINK_EXPIRY_MIN_HOURS} e ${PAYMENT_LINK_EXPIRY_MAX_HOURS}, message tra declined|none`,
+            });
+        }
+        await savePaymentLinkExpiryPolicy(req.tenantId!, next);
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!,
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.SETTINGS,
+                0,
+                `Scadenza link di pagamento: ${next.enabled ? `attiva dopo ${next.hours}h (messaggio: ${next.message})` : 'disattivata'}`
+            );
+        }
+        res.json(next);
+    } catch (err) {
+        console.error('PUT /settings/payment-link-expiry error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
+// POLICY BLACKLIST PER FONTE (blacklistPolicy) — card #27
+// ============================================
+
+app.get('/settings/blacklist-policy', authenticate, async (req, res) => {
+    try {
+        res.json(await getBlacklistPolicy(req.tenantId!));
+    } catch (err) {
+        console.error('GET /settings/blacklist-policy error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/settings/blacklist-policy', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const body = req.body ?? {};
+        if (typeof body !== 'object' || Array.isArray(body)) {
+            return res.status(400).json({ error: 'invalid_body', message: 'Il body deve essere un oggetto {fonte: comportamento}' });
+        }
+        // Update parziale come i Canali di risposta: le fonti assenti restano
+        // come sono, ogni fonte presente deve valere block|warn.
+        const current = await getBlacklistPolicy(req.tenantId!);
+        const next: BlacklistPolicyMap = { ...current };
+        let touched = false;
+        for (const [key, value] of Object.entries(body)) {
+            if (!(BLACKLIST_SOURCES as readonly string[]).includes(key)) {
+                return res.status(400).json({ error: 'invalid_source', message: `Fonte non valida: ${String(key).slice(0, 20)}` });
+            }
+            if (!isBlacklistBehavior(value)) {
+                return res.status(400).json({ error: 'invalid_behavior', message: `Comportamento non valido per ${key}: ammessi block|warn` });
+            }
+            next[key as BlacklistSource] = value;
+            touched = true;
+        }
+        if (!touched) {
+            return res.status(400).json({ error: 'empty_body', message: 'Nessuna fonte da aggiornare' });
+        }
+        await saveBlacklistPolicy(req.tenantId!, next);
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!,
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.SETTINGS,
+                0,
+                `Policy blacklist: ${BLACKLIST_SOURCES.map(k => `${k}=${next[k]}`).join(', ')}`
+            );
+        }
+        res.json(next);
+    } catch (err) {
+        console.error('PUT /settings/blacklist-policy error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -18382,7 +19090,9 @@ app.put('/settings/reservation-notes', authenticate, requirePermission('settings
 
 const publicBookingLimiter = rateLimit({
     windowMs: 60 * 1000,
-    limit: 5,
+    // Configurabile per i test API: la suite gira in sequenza dallo stesso IP
+    // e coi soli casi blacklist+scoping supera i 5 POST nel minuto.
+    limit: Number(process.env.PUBLIC_BOOKING_RATE_LIMIT) || 5,
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     message: { error: 'rate_limited', message: 'Troppe richieste, riprova tra qualche minuto.' },
@@ -18821,6 +19531,21 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
             : null;
         const emailNormalized = email ? email.toLowerCase() : null;
 
+        // Card #27 — blacklist: se la policy del tenant blocca la fonte web,
+        // un numero segnato in rubrica non prenota dal form pubblico. Risposta
+        // volutamente neutra: nessun riferimento alla lista, si invita a
+        // chiamare — al telefono risponde lo staff, che nel CRM vede l'avviso
+        // e decide. Con la policy su 'warn' la prenotazione entra e lo staff
+        // la trova col badge in lista.
+        if (phoneE164
+            && (await getBlacklistPolicy(tenantId)).GOOGLE === 'block'
+            && await isPhoneBlacklisted(tenantId, phoneE164)) {
+            return res.status(503).json({
+                error: 'customer_blacklisted',
+                message: 'Non è possibile completare la prenotazione online per questo numero. La preghiamo di chiamarci al telefono.',
+            });
+        }
+
         const reservation_time = `${date}T${time}:00`;
         const userNote = notesRaw ? notesRaw.slice(0, 500) : '';
         const noteParts = ['[Web]'];
@@ -18918,6 +19643,16 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
             try { socketService.broadcastReservationCreated(tenantId, created); }
             catch (err) { console.warn('[public-booking] socket broadcast failed:', err); }
         }
+
+        // Card #26: nessun tavolo assegnato in automatico (niente fit, o
+        // caparra da pagare) → prova a proporne uno via AI, se il ristoratore
+        // ha scritto un prompt in Impostazioni. Fire-and-forget: non deve
+        // rallentare l'ack al cliente che sta prenotando dal sito.
+        if (created.table_id == null) {
+            maybeSuggestTableAssignment(tenantId, created.id).catch(err =>
+                console.error('[table-assignment-ai] public-booking suggestion failed:', err?.message || err));
+        }
+
         pushSendToRoles(
             tenantId,
             ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
@@ -21969,7 +22704,11 @@ const printAgentAuth = async (req: any, res: any, next: any) => {
         // Alias tenant 1 finché gli agent non sono riconfigurati col token a DB.
         req.printAgentTenantId = PUBLIC_TENANT_ID;
         printAgentLastSeen = Date.now();
-        return next();
+        // next() DENTRO il contesto tenant: con app.rls_strict acceso una
+        // query fuori contesto vede zero righe — l'agente pollerebbe per
+        // sempre una coda che a DB è piena (successo il 21/08, due giorni
+        // di preconti mai usciti senza un errore da nessuna parte).
+        return runWithTenantContext(req.printAgentTenantId, () => next());
     }
     const tenantId = await resolveTenantByTokenColumn('print_agent_token', provided);
     if (tenantId == null) {
@@ -21977,7 +22716,7 @@ const printAgentAuth = async (req: any, res: any, next: any) => {
     }
     req.printAgentTenantId = tenantId;
     printAgentLastSeen = Date.now();
-    next();
+    return runWithTenantContext(req.printAgentTenantId, () => next());
 };
 
 app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (req, res) => {
@@ -22643,6 +23382,8 @@ bookingTools.configureBookingTools({
     modifyVoiceReservation,
     recordVoiceCall,
     upsertCustomerFromReservation,
+    isPhoneBlacklisted,
+    getBlacklistPolicy,
 
     getVoiceDateBlocks,
     findVoiceDateBlock,
@@ -22669,6 +23410,10 @@ bookingTools.configureBookingTools({
     broadcastReservationUpdated: (r: any) => socketService?.broadcastReservationUpdated(Number(r.tenant_id) || PUBLIC_TENANT_ID, r),
     broadcastPaymentRequestCreated: (r: any) => socketService?.broadcastToAll(Number(r.tenant_id) || PUBLIC_TENANT_ID, 'paymentRequest:created', r),
     broadcastReservationsUpdatedByIds,
+    suggestTableAssignment: (tenantId: number, reservationId: number) => {
+        maybeSuggestTableAssignment(tenantId, reservationId).catch(err =>
+            console.error('[table-assignment-ai] suggestTableAssignment dep failed:', err?.message || err));
+    },
 });
 
 // La voce aggancia ogni azione alla riga di voice_calls per l'audit della
@@ -22777,6 +23522,7 @@ const startServer = async () => {
                     }
                     try {
                         startPaymentRequestReconcileScheduler();
+                        startPaymentLinkExpiryScheduler();
                         console.log('✅ Payment reconcile scheduler started (2 min)');
                     } catch (schedErr) {
                         console.error('Payment reconcile scheduler failed to start:', schedErr);

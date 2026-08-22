@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  AlertCircle, Calendar, Check, Copy, ExternalLink, Loader2, RefreshCw, RotateCcw,
+  AlertCircle, Ban, Calendar, Check, Copy, ExternalLink, Loader2, RefreshCw, RotateCcw,
   Users as UsersIcon,
 } from 'lucide-react';
 import { billsApiService } from '../../services/billsApiService';
@@ -42,6 +42,8 @@ export const PaymentDetail: React.FC<{
   const [feedback, setFeedback] = useState<{ kind: 'ok' | 'info' | 'err'; text: string } | null>(null);
   const [refundArmed, setRefundArmed] = useState(false);
   const [refunding, setRefunding] = useState(false);
+  const [revokeArmed, setRevokeArmed] = useState(false);
+  const [revoking, setRevoking] = useState(false);
 
   // The row keeps moving under the pane: a webhook lands, the list refetches
   // and hands down a new object for the same id. As a sheet this component
@@ -94,6 +96,35 @@ export const PaymentDetail: React.FC<{
     ['revolut', 'sumup'].includes(payment.provider) &&
     !!payment.provider_order_id &&
     ['COMPLETED', 'PAID'].includes((payment.status || '').toUpperCase());
+
+  // Card #28 — revoca di un link ancora payabile: annulla l'ordine al
+  // provider così il cliente non può più pagarlo. Solo link standalone;
+  // le quote del conto al tavolo hanno il loro flusso.
+  const canRevoke =
+    hasPermission('payments:full') &&
+    !isSplitPayment &&
+    ['revolut', 'sumup'].includes(payment.provider) &&
+    !!payment.provider_order_id &&
+    ['PENDING', 'AUTHORISED'].includes((payment.status || '').toUpperCase());
+
+  const revoke = async () => {
+    if (!revokeArmed) { setRevokeArmed(true); return; }
+    setRevokeArmed(false);
+    setRevoking(true);
+    setFeedback(null);
+    try {
+      const result = await paymentsApiService.revoke(payment.id);
+      if (result.payment_request) {
+        setPayment(result.payment_request);
+        onUpdated?.(result.payment_request);
+      }
+      setFeedback({ kind: 'ok', text: 'Link revocato: non è più pagabile' });
+    } catch (err) {
+      setFeedback({ kind: 'err', text: (err as Error).message });
+    } finally {
+      setRevoking(false);
+    }
+  };
 
   const refund = async () => {
     if (!refundArmed) { setRefundArmed(true); return; }
@@ -173,7 +204,7 @@ export const PaymentDetail: React.FC<{
           paragraphs, so "Descrizione" and "Prenotazione collegata" read as
           different kinds of thing when they are both just facts about the row. */}
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-5 sm:px-6 lg:px-8">
-        {(canReconcile || canRefund) && (
+        {(canReconcile || canRefund || canRevoke) && (
           <div className="flex flex-wrap items-center gap-2">
             {canReconcile && (
               <button
@@ -185,6 +216,23 @@ export const PaymentDetail: React.FC<{
               >
                 {reconciling ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
                 {reconciling ? 'Riconcilio…' : 'Riconcilia'}
+              </button>
+            )}
+            {canRevoke && (
+              <button
+                type="button"
+                onClick={revoke}
+                onBlur={() => setRevokeArmed(false)}
+                disabled={revoking}
+                title="Annulla il link al provider: il cliente non potrà più pagarlo"
+                className={`${chip} ${
+                  revokeArmed
+                    ? 'bg-[var(--ds-critical-solid)] text-[#ffffff]'
+                    : 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] hover:opacity-80'
+                }`}
+              >
+                {revoking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />}
+                {revoking ? 'Revoca…' : revokeArmed ? 'Confermi la revoca?' : 'Revoca link'}
               </button>
             )}
             {canRefund && (

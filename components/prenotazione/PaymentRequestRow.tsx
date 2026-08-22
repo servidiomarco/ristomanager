@@ -1,5 +1,5 @@
-import React from 'react';
-import { Check, Copy, ExternalLink } from 'lucide-react';
+import React, { useState } from 'react';
+import { Ban, Check, Copy, ExternalLink, Loader2 } from 'lucide-react';
 import type { PaymentRequest } from '../../types';
 import { StatusPill } from '../ds';
 import type { PillTone } from '../ds';
@@ -26,8 +26,16 @@ export const PaymentRequestRow: React.FC<{
   request: PaymentRequest;
   copied: boolean;
   onCopy: () => void;
-}> = ({ request, copied, onCopy }) => {
+  /** Card #28 — revoca del link (solo se ancora payabile); assente = niente bottone. */
+  onRevoke?: () => Promise<void> | void;
+  revoking?: boolean;
+}> = ({ request, copied, onCopy, onRevoke, revoking }) => {
+  // Two-tap come il rimborso: il primo tocco arma, il secondo esegue,
+  // il blur disarma — su un phone mid-servizio i tocchi involontari esistono.
+  const [revokeArmed, setRevokeArmed] = useState(false);
   const state = STATUS[request.status] ?? { label: request.status, tone: 'neutral' as PillTone };
+  const isRevocable = (request.status === 'PENDING' || request.status === 'AUTHORISED')
+    && request.table_bill_split_id == null;
   const isPaid = state.label === 'Pagato';
   const when = (() => {
     try {
@@ -52,6 +60,27 @@ export const PaymentRequestRow: React.FC<{
       )}
       <span className="ml-auto flex items-center gap-1.5">
         {when && <span className="text-[13px] tabular-nums text-[var(--ds-text-muted)]">{when}</span>}
+        {onRevoke && isRevocable && (
+          <button
+            type="button"
+            onClick={() => {
+              if (!revokeArmed) { setRevokeArmed(true); return; }
+              setRevokeArmed(false);
+              void onRevoke();
+            }}
+            onBlur={() => setRevokeArmed(false)}
+            disabled={revoking}
+            title="Annulla il link al provider: il cliente non potrà più pagarlo"
+            className={`inline-flex h-8 items-center gap-1 rounded-full px-2.5 text-[13px] font-medium transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+              revokeArmed
+                ? 'bg-[var(--ds-critical-solid)] text-[#ffffff]'
+                : 'text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)]'
+            }`}
+          >
+            {revoking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />}
+            {revoking ? 'Revoca…' : revokeArmed ? 'Confermi?' : 'Revoca'}
+          </button>
+        )}
         {request.checkout_url && (
           <>
             <button
