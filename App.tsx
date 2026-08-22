@@ -52,6 +52,7 @@ import { SmtpIntegrationCard } from './components/SmtpIntegrationCard';
 import { ImapIntegrationCard } from './components/ImapIntegrationCard';
 import { CardErrorBoundary } from './components/CardErrorBoundary';
 import { LegalSettingsCard } from './components/LegalSettingsCard';
+import { TableAssignmentAiPromptCard } from './components/TableAssignmentAiPromptCard';
 import { VoiceAgentWidget } from './components/VoiceAgentWidget';
 import { PLATFORM_NAME } from './platform';
 import { DateNavigator } from './components/DateNavigator';
@@ -2684,6 +2685,15 @@ const App: React.FC = () => {
             {/* Legale — tenant identity + generated legal documents (SaaS-ready) */}
             <SettingsSection label="Legale">
               <LegalSettingsCard showToast={addToast} />
+            </SettingsSection>
+
+            {/* Logica tavoli AI — istruzioni testuali per una futura logica di
+                assegnazione/spostamento tavoli guidata da AI; oggi il testo è
+                solo salvato, nessuna automazione lo consuma ancora. */}
+            <SettingsSection label="Logica tavoli AI">
+              <CardErrorBoundary label="Prompt logica tavoli per AI">
+                <TableAssignmentAiPromptCard showToast={addToast} />
+              </CardErrorBoundary>
             </SettingsSection>
 
             {/* Integrations */}

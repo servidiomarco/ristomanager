@@ -1213,6 +1213,26 @@ export const updateLegalSettings = async (
   });
 };
 
+export const getTableAssignmentAiPrompt = async (): Promise<string> => {
+  const { prompt } = await apiRequest<{ prompt: string }>(
+    `${API_URL}/settings/table-assignment-ai-prompt`,
+    { headers: getHeaders(false) }
+  );
+  return prompt;
+};
+
+export const updateTableAssignmentAiPrompt = async (prompt: string): Promise<string> => {
+  const result = await apiRequest<{ prompt: string }>(
+    `${API_URL}/settings/table-assignment-ai-prompt`,
+    {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify({ prompt }),
+    }
+  );
+  return result.prompt;
+};
+
 // Canali di risposta prenotazioni (Impostazioni → Canali di prenotazione):
 // per ogni fonte, l'ordine dei canali con cui rispondere all'ospite.
 export type BookingChannel = 'email' | 'whatsapp' | 'sms';
