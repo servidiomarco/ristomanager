@@ -16,6 +16,8 @@
 // girava lato client con la chiave iniettata nel bundle.
 
 import Anthropic from '@anthropic-ai/sdk';
+import { describeDepositPolicy, type DepositPolicy } from './depositPolicy.js';
+
 
 const MODEL = 'claude-opus-5';
 
@@ -44,6 +46,8 @@ export interface AiReplyContext {
     knowledge: Array<{ title: string; content: string }>;
     /** Nome del ristorante per la firma. */
     restaurantName?: string;
+    /** Politica caparra dalle Impostazioni: vedi la nota in whatsappAgent.ts. */
+    depositPolicy?: DepositPolicy;
 }
 
 export class AiReplyError extends Error {
@@ -73,6 +77,7 @@ function buildSystem(ctx: AiReplyContext): string {
         ? ctx.knowledge.map(k => `- ${k.title}: ${k.content}`).join('\n')
         : '(nessuna regola inserita)';
 
+    const caparra = describeDepositPolicy(ctx.depositPolicy);
     const pren = ctx.reservation
         ? [
             `- Cliente: ${ctx.reservation.customer_name || 'n/d'}`,
@@ -91,6 +96,9 @@ function buildSystem(ctx: AiReplyContext): string {
 
 REGOLE DELLA CASA (l'unica fonte di verità: non aggiungere nulla che non sia scritto qui):
 ${regole}
+
+CAPARRA (dalle impostazioni del ristorante — questi numeri battono le regole qui sopra):
+${caparra}
 
 PRENOTAZIONE COLLEGATA A QUESTO NUMERO:
 ${pren}

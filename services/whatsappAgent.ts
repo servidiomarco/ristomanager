@@ -20,6 +20,7 @@
 // qui sotto perché è lì che vengono applicate, non negli strumenti.
 
 import Anthropic from '@anthropic-ai/sdk';
+import { describeDepositPolicy, type DepositPolicy } from './depositPolicy.js';
 import * as bookingTools from './bookingTools.js';
 import { WHATSAPP_CHANNEL } from './bookingTools.js';
 
@@ -61,6 +62,13 @@ export interface AgentContext {
     knowledge: Array<{ title: string; content: string }>;
     largeGroupThreshold: number;
     restaurantName?: string;
+    /**
+     * Politica caparra letta dalle Impostazioni. Arriva qui invece di stare
+     * scritta in una regola della casa perché il gestore la cambia da lì: una
+     * regola col numero a mano resta indietro in silenzio, e l'AI finisce a
+     * dire ai clienti una soglia che il sistema non applica.
+     */
+    depositPolicy?: DepositPolicy;
 }
 
 export interface AgentProposal {
@@ -197,6 +205,9 @@ function buildSystem(ctx: AgentContext): string {
     const regole = ctx.knowledge.length
         ? ctx.knowledge.map(k => `- ${k.title}: ${k.content}`).join('\n')
         : '(nessuna regola inserita)';
+    // I numeri della caparra vengono SEMPRE da qui, mai dalle regole scritte
+    // a mano: sono la stessa fonte che alimenta la pagina di prenotazione.
+    const caparra = describeDepositPolicy(ctx.depositPolicy);
     const pren = ctx.reservation
         ? [
             `- Cliente: ${ctx.reservation.customer_name || 'n/d'}`,
@@ -215,6 +226,9 @@ Il telefono di questo cliente è ${ctx.phone}: usalo come parametro "phone" degl
 
 REGOLE DELLA CASA (unica fonte di verità su cosa è permesso: non aggiungere nulla che non sia scritto qui):
 ${regole}
+
+CAPARRA (dalle impostazioni del ristorante — questi numeri battono qualsiasi cosa dicano le regole qui sopra):
+${caparra}
 
 PRENOTAZIONE COLLEGATA A QUESTO NUMERO:
 ${pren}

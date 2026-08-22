@@ -5218,6 +5218,7 @@ app.post('/messages/suggest-reply', authenticate, requirePermission('reservation
             reservation: resv.rows[0] ?? null,
             knowledge: kb.rows as any,
             restaurantName: businessIdentity().name,
+            depositPolicy: await getAutoDepositPolicy(req.tenantId!),
         }, {
             // Telemetria consumi Gemini dei "messaggi AI": la stessa tabella
             // che alimenta la pagina Consumi AI (feature 'suggest_reply').
@@ -5318,6 +5319,7 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
             knowledge: kb.rows as any,
             largeGroupThreshold: soglia,
             restaurantName: businessIdentity().name,
+            depositPolicy: await getAutoDepositPolicy(req.tenantId!),
         });
 
         // Il giro dell'agente interroga il modello da 1 a 3 volte: qui si
