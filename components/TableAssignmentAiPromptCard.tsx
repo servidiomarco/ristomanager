@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Sparkles, Save, Loader2, ChevronDown } from 'lucide-react';
-import { CookingPotLoader } from './CookingPotLoader';
+import { Loader } from './Loader';
 import { getTableAssignmentAiPrompt, updateTableAssignmentAiPrompt } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -73,7 +73,7 @@ export const TableAssignmentAiPromptCard: React.FC<Props> = ({ showToast }) => {
 
       <div className="px-4 pb-4 pt-1 border-t border-[var(--ds-border)]">
         {loading ? (
-          <div className="py-10 flex justify-center"><CookingPotLoader label="Carico…" size={40} /></div>
+          <div className="py-10 flex justify-center"><Loader label="Carico…" size={40} /></div>
         ) : (
           <>
             {!canEdit && (

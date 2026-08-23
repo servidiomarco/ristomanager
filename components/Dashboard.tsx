@@ -20,7 +20,7 @@ import { generateAiReport } from '../services/aiMessagesApiService';
 import { useAuth } from '../contexts/AuthContext';
 import { useShopping } from '../contexts/ShoppingContext';
 import { useTodos } from '../contexts/TodosContext';
-import { CookingPotLoader } from './CookingPotLoader';
+import { Loader } from './Loader';
 import { ArrivalsTimeline } from './ArrivalsTimeline';
 
 const CATEGORY_DOT_COLORS: Record<TodoCategory, string> = {
@@ -2013,7 +2013,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           <div className="flex-1 min-h-0 flex flex-col gap-1.5 overflow-y-auto scrollbar-hide -mx-1 px-1">
             {lowStockLoading ? (
               <div className="py-8 text-center">
-                <CookingPotLoader label="Caricamento..." size={40} />
+                <Loader label="Caricamento..." size={40} />
               </div>
             ) : lowStockItems.length === 0 ? (
               <div className="rounded-[16px] bg-[var(--ds-surface-row)] px-4 py-8 text-center">
@@ -2148,7 +2148,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
             {staffLoading ? (
               <div className="flex items-center justify-center py-8">
-                <CookingPotLoader label="Caricamento..." size={40} />
+                <Loader label="Caricamento..." size={40} />
               </div>
             ) : (
               <div className={`grid gap-3 ${showLunch && showDinner ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Plus, Trash2, Loader2, Save, GripVertical } from 'lucide-react';
-import { CookingPotLoader } from './CookingPotLoader';
+import { Loader } from './Loader';
 import {
     getReservationAllergenPresets,
     updateReservationAllergenPresets,
@@ -136,7 +136,7 @@ export const ReservationAllergensManager: React.FC<Props> = ({ showToast }) => {
     if (loading) {
         return (
             <div className="flex items-center gap-2 text-[var(--color-fg-muted)] text-[13px] py-2">
-                <CookingPotLoader label="Caricamento…" size={40} />
+                <Loader label="Caricamento…" size={40} />
             </div>
         );
     }

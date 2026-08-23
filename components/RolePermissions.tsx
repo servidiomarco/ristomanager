@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { UserRole } from '../types';
-import { CookingPotLoader } from './CookingPotLoader';
+import { Loader } from './Loader';
 
 interface FeaturePermissions {
   feature: string;
@@ -170,7 +170,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
         <div className="px-5 py-4 overflow-y-auto flex-1">
           {loading ? (
             <div className="flex items-center justify-center py-12">
-              <CookingPotLoader label="Caricamento…" size={40} />
+              <Loader label="Caricamento…" size={40} />
             </div>
           ) : error ? (
             <div className="bg-rose-50 border border-rose-100 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/30 dark:text-rose-300 px-3 py-2 rounded-md text-sm">

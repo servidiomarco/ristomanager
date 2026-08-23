@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowRight, Check, CalendarPlus, Paperclip, X as XIcon, Sparkles, Wand2, FolderOpen } from 'lucide-react';
-import { CookingPotLoader } from './CookingPotLoader';
+import { Loader } from './Loader';
 import { SkeletonInboxList } from './SkeletonCards';
 import {
   messagesApiService,
@@ -715,7 +715,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
             <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--ds-canvas)]">
             <div className="px-4 pb-4 sm:px-6 lg:px-8">
               {msgLoading ? (
-                <div className="flex h-32 items-center justify-center"><CookingPotLoader /></div>
+                <div className="flex h-32 items-center justify-center"><Loader /></div>
               ) : msgError ? (
                 <Callout tone="critical" icon={AlertTriangle}>{msgError}</Callout>
               ) : messages.length === 0 ? (

@@ -5,7 +5,7 @@ import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, C
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { deriveTableDisplayStatus, isSeated, TABLE_STATUS_LABEL } from './reservationState';
 import { useNow } from '../hooks/useNow';
-import { CookingPotLoader } from './CookingPotLoader';
+import { Loader } from './Loader';
 import { computeAutoLayout } from '../utils/tableLayout';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 import { buildFloorLabels } from '../utils/labelPlacement';
@@ -1705,7 +1705,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           {isLoadingMerges && (
               <div className="absolute inset-0 z-30 bg-[var(--ds-canvas)]/70 backdrop-blur-[1px] flex items-center justify-center">
                   <div className="flex items-center gap-2 px-4 py-2 bg-[var(--ds-surface)] rounded-[16px] shadow-[var(--ds-shadow-card)]">
-                      <CookingPotLoader label="Caricamento tavoli…" size={40} />
+                      <Loader label="Caricamento tavoli…" size={40} />
                   </div>
               </div>
           )}

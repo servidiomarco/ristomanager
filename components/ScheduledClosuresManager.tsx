@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Loader2, Plus, Trash2, DoorClosed, EyeOff, Calendar } from 'lucide-react';
-import { CookingPotLoader } from './CookingPotLoader';
+import { Loader } from './Loader';
 import {
     getRoomClosed,
     getTableHidden,
@@ -270,7 +270,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
 
             {loading ? (
                 <div className="flex items-center justify-center py-8 text-[var(--ds-text-muted)]">
-                    <CookingPotLoader label="Caricamento..." />
+                    <Loader label="Caricamento..." />
                 </div>
             ) : rows.length === 0 ? (
                 <div className="text-center py-8 text-sm text-[var(--ds-text-muted)]">

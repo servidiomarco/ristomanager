@@ -3,7 +3,7 @@ import {
   Scale, Save, Loader2, Copy, Check, Download, FileText, Phone, Cookie, ScrollText, ChevronDown,
   ShieldCheck, Megaphone,
 } from 'lucide-react';
-import { CookingPotLoader } from './CookingPotLoader';
+import { Loader } from './Loader';
 import { getLegalSettings, updateLegalSettings, type LegalSettings } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -300,7 +300,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
 
       <div className="px-4 pb-4 pt-1 border-t border-[var(--ds-border)]">
         {loading ? (
-          <div className="py-10 flex justify-center"><CookingPotLoader label="Carico…" size={40} /></div>
+          <div className="py-10 flex justify-center"><Loader label="Carico…" size={40} /></div>
         ) : (
           <>
             {!canEdit && (
