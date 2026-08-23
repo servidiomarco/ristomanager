@@ -313,6 +313,14 @@ const App: React.FC = () => {
   // Sottovoce attiva di Impostazioni + apertura del ramo nella sidebar.
   const [settingsSection, setSettingsSection] = useState<SettingsSectionKey>('profilo');
   const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
+  // Il ramo segue la vista SOLO al cambio di vista: entrando in Impostazioni
+  // (da qualunque strada: palette, chip, sidebar) si apre, uscendo si chiude.
+  // Lo stato resta l'unica fonte del rendering — prima il render sommava
+  // "|| view === SETTINGS" e il toggle non poteva mai chiudere il ramo
+  // restando sulla pagina.
+  useEffect(() => {
+    setSettingsMenuOpen(view === ViewState.SETTINGS);
+  }, [view]);
   // Una schermata che si prende tutto lo schermo sul telefono: la barra di
   // navigazione in basso sparisce, e con lei il suo spazio di rispetto. Per ora
   // la chiede solo la comanda aperta su un tavolo.
@@ -1954,7 +1962,7 @@ const App: React.FC = () => {
                           }
                         }}
                         title={sidebarCollapsed ? item.label : undefined}
-                        aria-expanded={!sidebarCollapsed && (settingsMenuOpen || view === ViewState.SETTINGS)}
+                        aria-expanded={!sidebarCollapsed && settingsMenuOpen}
                         className={`group w-full flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between'} gap-3 px-3 h-10 rounded-[12px] transition-colors ${
                           view === ViewState.SETTINGS
                             ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
@@ -1971,12 +1979,12 @@ const App: React.FC = () => {
                         </span>
                         {!sidebarCollapsed && (
                           <ChevronDown
-                            className={`h-4 w-4 flex-shrink-0 transition-transform ${(settingsMenuOpen || view === ViewState.SETTINGS) ? 'rotate-180' : ''}`}
+                            className={`h-4 w-4 flex-shrink-0 transition-transform ${settingsMenuOpen ? 'rotate-180' : ''}`}
                             aria-hidden
                           />
                         )}
                       </button>
-                      {!sidebarCollapsed && (settingsMenuOpen || view === ViewState.SETTINGS) && (
+                      {!sidebarCollapsed && settingsMenuOpen && (
                         <div className="space-y-0.5 py-0.5">
                           {visibleSettingsSections.map(sec => (
                             <button
