@@ -94,18 +94,26 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          PR_URL=$(gh pr list --repo "${{ github.repository }}" --head "claude/dev-card-${{ inputs.card_id }}" --json url -q '.[0].url' 2>/dev/null || true)
+          BRANCH="claude/dev-card-${{ inputs.card_id }}"
+          PR_URL=$(gh pr list --repo "${{ github.repository }}" --head "$BRANCH" --json url -q '.[0].url' 2>/dev/null || true)
+          # Fallback: il lavoro può arrivare su un branch con nome libero
+          # (successo con le card #27/#28, branch feat/*): la convenzione del
+          # body — "Card dev board #N" — è più affidabile del nome del branch.
+          if [ -z "$PR_URL" ]; then
+            PR_URL=$(gh pr list --repo "${{ github.repository }}" --state open --search "\"Card dev board #${{ inputs.card_id }}\" in:body" --json url,headRefName -q '.[0].url' 2>/dev/null || true)
+            BRANCH=$(gh pr list --repo "${{ github.repository }}" --state open --search "\"Card dev board #${{ inputs.card_id }}\" in:body" --json headRefName -q '.[0].headRefName' 2>/dev/null || echo "$BRANCH")
+          fi
           echo "url=$PR_URL" >> "$GITHUB_OUTPUT"
           # Il push del branch è avvenuto col GITHUB_TOKEN, che per la regola
           # anti-ricorsione non innesca pull_request: la CI va dispatchata
           # esplicitamente (i workflow_dispatch sono esenti dalla regola).
           if [ -n "$PR_URL" ]; then
-            gh workflow run ci.yml --repo "${{ github.repository }}" --ref "claude/dev-card-${{ inputs.card_id }}" || true
+            gh workflow run ci.yml --repo "${{ github.repository }}" --ref "$BRANCH" || true
             # Le PR aperte dal bot lasciano la run pull_request in
             # action_required: senza approvazione la vista check della PR
             # resta gialla anche con la CI dispatchata verde (visto sulla
             # #216). L'approve via API la sblocca.
-            for run_id in $(gh api "repos/${{ github.repository }}/actions/runs?branch=claude/dev-card-${{ inputs.card_id }}&status=action_required" -q '.workflow_runs[].id' 2>/dev/null); do
+            for run_id in $(gh api "repos/${{ github.repository }}/actions/runs?branch=${BRANCH}&status=action_required" -q '.workflow_runs[].id' 2>/dev/null); do
               gh api -X POST "repos/${{ github.repository }}/actions/runs/${run_id}/approve" || true
             done
           fi
