@@ -13401,22 +13401,75 @@ function buildBookingRequestEmail(params: {
     depositAmountCents?: number | null;
     depositCheckoutUrl?: string | null;
     depositPerPersonCents?: number | null;
+    language?: string | null;
 }): { subject: string; text: string; html: string } {
     const identity = businessIdentity();
     const { dateLabel, timeLabel } = formatBookingDateTime(params.reservationTime);
     const name = toTitleCase(params.customerName);
     const guestsNum = Math.max(1, Math.trunc(Number(params.guests) || 1));
-    const persone = guestsNum === 1 ? 'persona' : 'persone';
     const room = (params.roomName || '').trim();
-    const roomPart = room ? ` (${room})` : '';
-    const subject = `Abbiamo ricevuto la tua richiesta — ${dateLabel} ${timeLabel}`;
-    const greetingText = name ? `Ciao ${name},` : 'Ciao,';
+    const english = isEnglishGuest(params.language);
 
     const depositUrl = (params.depositCheckoutUrl || '').trim();
     const depositCents = Number(params.depositAmountCents || 0);
     const hasDeposit = depositUrl.length > 0 && depositCents > 0;
     const depositAmount = hasDeposit ? formatEuroMinor(depositCents) : '';
     const perPersonCents = Number(params.depositPerPersonCents || 0);
+
+    if (english) {
+        const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
+        const roomPart = room ? ` (${room})` : '';
+        const subject = `We've received your request — ${dateLabel} ${timeLabel}`;
+        const greetingText = name ? `Hi ${name},` : 'Hi,';
+        const perPersonPart = hasDeposit && perPersonCents > 0 ? ` (${formatEuroMinor(perPersonCents)} per person)` : '';
+        const depositTextBlock = hasDeposit
+            ? `\n\nTo confirm the table we need a deposit of ${depositAmount}${perPersonPart}.\nPay securely here: ${depositUrl}\n\nAs soon as we receive the payment we'll confirm your reservation.`
+            : "\n\nWe'll get back to you shortly to confirm it by email, phone or WhatsApp.";
+        const text = `${greetingText}
+
+we've received your reservation request:
+
+• Date: ${dateLabel}
+• Time: ${timeLabel}
+• Guests: ${guestsNum} ${guestsLabel}${room ? `\n• Requested room: ${room}` : ''}${depositTextBlock}
+
+For any change you can contact us:
+• Phone: ${identity.phone}
+• WhatsApp: ${identity.whatsapp}
+
+Thank you, see you soon!
+${identity.name}`;
+        const depositHtmlBlock = hasDeposit
+            ? `
+      <p style="margin:0 0 12px;font-size:14px;line-height:1.6;">To confirm the table we need a deposit of <strong>${escapeHtml(depositAmount)}</strong>${escapeHtml(perPersonPart)}.</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 16px;"><tr><td align="center">
+        <a href="${escapeHtml(depositUrl)}" style="display:inline-block;background:#065f46;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 28px;border-radius:10px;">Pay the deposit — ${escapeHtml(depositAmount)}</a>
+      </td></tr></table>
+      <p class="muted" style="margin:0 0 8px;font-size:13px;line-height:1.6;color:#57534e;">As soon as we receive the payment we'll confirm your reservation.</p>
+      <p class="muted" style="margin:0 0 8px;font-size:12px;line-height:1.6;color:#78716c;word-break:break-all;">If the button doesn't work, copy this link: <a href="${escapeHtml(depositUrl)}" style="color:#065f46;">${escapeHtml(depositUrl)}</a></p>
+    `
+            : `
+      <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">We'll get back to you shortly to confirm it by email, phone or WhatsApp.</p>
+    `;
+        const detailsHtml = `
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${greetingText}<br>we've received your reservation request.</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" class="detail-box" style="width:100%;background:#fbf9f4;border-radius:12px;padding:16px;margin:0 0 16px;">
+        <tr><td style="padding:6px 0;font-size:14px;"><strong>Date:</strong> ${escapeHtml(dateLabel)}</td></tr>
+        <tr><td style="padding:6px 0;font-size:14px;"><strong>Time:</strong> ${escapeHtml(timeLabel)}</td></tr>
+        <tr><td style="padding:6px 0;font-size:14px;"><strong>Guests:</strong> ${guestsNum} ${guestsLabel}${roomPart ? ` · ${escapeHtml(room)}` : ''}</td></tr>
+      </table>
+      ${depositHtmlBlock}
+      ${contactBlockHtml(params.language)}
+      <p style="margin:16px 0 0;font-size:14px;">Thank you, see you soon!<br><em>${escapeHtml(identity.name)}</em></p>
+    `;
+        const html = wrapEmailHtml(`Reservation request received for ${dateLabel} at ${timeLabel}`, detailsHtml, params.language);
+        return { subject, text, html };
+    }
+
+    const persone = guestsNum === 1 ? 'persona' : 'persone';
+    const roomPart = room ? ` (${room})` : '';
+    const subject = `Abbiamo ricevuto la tua richiesta — ${dateLabel} ${timeLabel}`;
+    const greetingText = name ? `Ciao ${name},` : 'Ciao,';
     const perPersonPart = hasDeposit && perPersonCents > 0 ? ` (${formatEuroMinor(perPersonCents)} a persona)` : '';
 
     const depositTextBlock = hasDeposit
@@ -13474,18 +13527,40 @@ function buildBookingConfirmationEmail(params: {
     reservationTime: string | Date;
     guests: number;
     roomName?: string | null;
+    language?: string | null;
 }): { subject: string; text: string; html: string } {
     // DB-sourced confirmation time → read a bare naive string as UTC (see
     // asUtcInstant). The request email above keeps the raw web-form input (#85).
     const identity = businessIdentity();
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(params.reservationTime));
     const guestsNum = Math.max(1, Math.trunc(Number(params.guests) || 1));
-    const persone = guestsNum === 1 ? 'persona' : 'persone';
     const room = (params.roomName || '').trim();
-    const roomPart = room ? ` · ${escapeHtml(room)}` : '';
     const name = toTitleCase(params.customerName);
+    const shortConfirm = buildConfirmationMessage(params.customerName, params.reservationTime, params.guests, params.roomName ?? null, params.language);
+
+    if (isEnglishGuest(params.language)) {
+        const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
+        const roomPart = room ? ` · ${escapeHtml(room)}` : '';
+        const subject = `Booking confirmed — ${dateLabel} ${timeLabel}`;
+        const text = `${shortConfirm}\n\nNeed to change or cancel? Reply to this email or contact us:\n• Phone: ${identity.phone}\n• WhatsApp: ${identity.whatsapp}\n• Get directions: ${identity.mapsUrl}`;
+        const detailsHtml = `
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Hi ${escapeHtml(name)},` : 'Hi,'}<br>your reservation is <strong>confirmed</strong>.</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" class="confirm-box" style="width:100%;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:12px;padding:16px;margin:0 0 16px;">
+        <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Date:</strong> ${escapeHtml(dateLabel)}</td></tr>
+        <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Time:</strong> ${escapeHtml(timeLabel)}</td></tr>
+        <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Guests:</strong> ${guestsNum} ${guestsLabel}${roomPart}</td></tr>
+      </table>
+      <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">We look forward to seeing you. If you need to change or cancel, reply to this email or contact us directly.</p>
+      ${contactBlockHtml(params.language)}
+      <p style="margin:16px 0 0;font-size:14px;">See you soon!<br><em>${escapeHtml(identity.name)}</em></p>
+    `;
+        const html = wrapEmailHtml(`Booking confirmed for ${dateLabel} at ${timeLabel}`, detailsHtml, params.language);
+        return { subject, text, html };
+    }
+
+    const persone = guestsNum === 1 ? 'persona' : 'persone';
+    const roomPart = room ? ` · ${escapeHtml(room)}` : '';
     const subject = `Conferma prenotazione — ${dateLabel} ${timeLabel}`;
-    const shortConfirm = buildConfirmationMessage(params.customerName, params.reservationTime, params.guests, params.roomName ?? null);
     const text = `${shortConfirm}\n\nSe hai bisogno di modificare o annullare puoi rispondere a questa email oppure contattarci:\n• Telefono: ${identity.phone}\n• WhatsApp: ${identity.whatsapp}\n• Come raggiungerci: ${identity.mapsUrl}`;
 
     const detailsHtml = `
@@ -13510,15 +13585,35 @@ function buildBookingDeclineEmail(params: {
     customerName: string;
     reservationTime: string | Date;
     guests: number;
+    language?: string | null;
 }): { subject: string; text: string; html: string } {
     const identity = businessIdentity();
     // Orario dal DB → stringa naive letta come UTC (asUtcInstant, vedi #85).
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(params.reservationTime));
     const guestsNum = Math.max(1, Math.trunc(Number(params.guests) || 1));
-    const persone = guestsNum === 1 ? 'persona' : 'persone';
     const name = toTitleCase(params.customerName);
+    const text = buildDeclineMessage(params.customerName, params.reservationTime, params.guests, params.language);
+
+    if (isEnglishGuest(params.language)) {
+        const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
+        const subject = `Booking not available — ${dateLabel} ${timeLabel}`;
+        const detailsHtml = `
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Hi ${escapeHtml(name)},` : 'Hi,'}<br>unfortunately we weren't able to confirm your request.</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" class="detail-box" style="width:100%;background:#fbf9f4;border-radius:12px;padding:16px;margin:0 0 16px;">
+        <tr><td style="padding:6px 0;font-size:14px;"><strong>Date:</strong> ${escapeHtml(dateLabel)}</td></tr>
+        <tr><td style="padding:6px 0;font-size:14px;"><strong>Time:</strong> ${escapeHtml(timeLabel)}</td></tr>
+        <tr><td style="padding:6px 0;font-size:14px;"><strong>Guests:</strong> ${guestsNum} ${guestsLabel}</td></tr>
+      </table>
+      <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">To check another date or time, reply to this email or contact us directly.</p>
+      ${contactBlockHtml(params.language)}
+      <p style="margin:16px 0 0;font-size:14px;">Thank you, see you soon!<br><em>${escapeHtml(identity.name)}</em></p>
+    `;
+        const html = wrapEmailHtml(`Reservation request not available for ${dateLabel} at ${timeLabel}`, detailsHtml, params.language);
+        return { subject, text, html };
+    }
+
+    const persone = guestsNum === 1 ? 'persona' : 'persone';
     const subject = `Prenotazione non disponibile — ${dateLabel} ${timeLabel}`;
-    const text = buildDeclineMessage(params.customerName, params.reservationTime, params.guests);
 
     const detailsHtml = `
       <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Ciao ${escapeHtml(name)},` : 'Ciao,'}<br>purtroppo non ci è stato possibile confermare la tua richiesta.</p>
