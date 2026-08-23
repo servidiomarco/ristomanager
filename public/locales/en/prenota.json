@@ -1,154 +1,133 @@
 {
   "meta": {
+    "title": "Book a table",
     "titleWithName": "Book a table · {{name}}"
   },
-  "header": {
-    "heading": "Book a table",
-    "languageGroupLabel": "Language",
-    "visitWebsite": "Visit {{name}}'s website",
-    "directionsFallback": "Find us"
-  },
   "maintenance": {
-    "title": "Bookings aren't open right now",
-    "text": "We're not taking reservations through the site at the moment."
+    "title": "Bookings unavailable",
+    "hint": "We're not taking bookings through the site right now."
   },
-  "trap": {
-    "label": "Website (leave blank)"
+  "header": {
+    "title": "Book a table",
+    "langGroupAria": "Language",
+    "brandAria": "Visit {{name}}'s website",
+    "brandAriaFallback": "this restaurant"
   },
   "steps": {
-    "ariaLabel": "Steps",
+    "aria": "Steps",
     "table": "Table",
-    "details": "Details",
-    "howMany": "How many",
-    "when": "When",
-    "chooseDate": "Choose a date"
+    "details": "Details"
   },
-  "guests": {
-    "groupLabel": "Guests at the table",
-    "label": "Guests at the table",
-    "hint": "Children included.",
-    "decrease": "Guests: decrease",
-    "increase": "Guests: increase",
-    "childrenGroupLabel": "Of which children",
+  "quanti": {
+    "tabLabel": "Guests",
+    "guestsLabel": "Guests at the table",
+    "guestsHint": "Children included.",
+    "guestsAriaGroup": "Guests at the table",
+    "guestsAriaDec": "Guests: decrease",
+    "guestsAriaInc": "Guests: increase",
     "childrenLabel": "Of which children",
-    "childrenHint": "We'll set up a high chair and half portions.",
-    "childrenDecrease": "Children: decrease",
-    "childrenIncrease": "Children: increase",
-    "person_one": "guest",
-    "person_other": "guests",
+    "childrenHint": "We'll have a high chair and half portions ready.",
+    "childrenAriaGroup": "Of which children",
+    "childrenAriaDec": "Children: decrease",
+    "childrenAriaInc": "Children: increase",
+    "person_one": "person",
+    "person_other": "people",
     "child_one": "child",
     "child_other": "children"
   },
   "deposit": {
-    "label": "Deposit",
-    "linkText": "How it works",
-    "text_one": "From {{minGuests}} guest we ask for a {{amount}} deposit per person, deducted from the bill.",
-    "text_other": "From {{minGuests}} guests we ask for a {{amount}} deposit per person, deducted from the bill."
+    "title": "Deposit",
+    "how": "How it works",
+    "text": "From {{minGuests}} guests we ask for {{amount}} per person, deducted from your bill."
   },
-  "calendar": {
+  "quando": {
+    "tabLabel": "When",
+    "placeholder": "Choose a date",
     "otherDate": "Choose another date",
-    "backToWeek": "Back to the week",
     "prevMonth": "Previous month",
     "nextMonth": "Next month",
+    "backToWeek": "Back to the week view",
     "legendFree": "open",
-    "legendBusy": "almost full",
+    "legendBusy": "filling up",
     "legendClosed": "closed",
     "horizon": "Bookings up to {{days}} days ahead.",
     "closedSuffix": ", closed",
-    "unavailableSuffix": ", not available",
-    "months": ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
-    "dowShort": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    "unavailableSuffix": ", not available"
   },
   "rooms": {
     "title": "Where would you like to sit?",
     "any": "No preference",
-    "anyInRecap": "no particular room",
+    "recapAny": "no room preference",
+    "loading": "Loading rooms…",
     "empty": "No room available for this request.",
-    "requestNoticeChosen": "{{room}} is almost full: our staff will confirm the booking.",
-    "requestNoticeGeneric": "Our rooms are almost full: our staff will confirm the booking."
+    "noteChosen": "{{room}} is almost full — our staff will confirm your booking.",
+    "noteGeneric": "Our rooms are almost full — our staff will confirm your booking.",
+    "whereFallback": "Find us"
   },
-  "schedule": {
+  "shifts": {
     "title": "Time",
     "lunch": "Lunch",
     "dinner": "Dinner",
-    "unavailable": "not available",
-    "slots_one": "{{count}} time",
-    "slots_other": "{{count}} times",
-    "loading": "Loading times…",
+    "unavailable": "unavailable",
+    "slot_one": "{{count}} slot",
+    "slot_other": "{{count}} slots",
     "chooseDateFirst": "Choose a date first.",
-    "noSlotsForDate": "We're not taking online bookings for this date.",
+    "loading": "Loading times…",
+    "noneForDate": "We're not taking online bookings for this date.",
     "chooseShift": "Choose lunch or dinner.",
     "past": "past"
   },
   "actions": {
     "continue": "Continue",
     "edit": "Edit",
-    "backToStep1": "Back to table details"
+    "backAria": "Back to table selection",
+    "submit": "Confirm booking",
+    "submitting": "Sending…"
   },
-  "form": {
-    "nameLabel": "Full name",
+  "fields": {
+    "name": "Full name",
     "namePlaceholder": "Jane Smith",
-    "phoneLabel": "Phone",
-    "phonePlaceholder": "333 1234567",
-    "emailLabel": "Email",
+    "phone": "Phone",
+    "phonePlaceholder": "+1 202 555 0143",
+    "email": "Email",
     "emailPlaceholder": "you@example.com",
-    "emailHint": "Just one of the two — we need it to confirm your table.",
-    "dietLabel": "Allergies and intolerances",
+    "emailHint": "Either one works — we just need a way to confirm your table.",
     "optional": "(optional)",
+    "allergiesLabel": "Allergies & intolerances",
     "notesLabel": "Anything else we should know",
     "notesPlaceholder": "Special occasion, high chair, a quiet table…"
   },
-  "diet": {
-    "glutine": "Gluten",
-    "crostacei": "Shellfish",
-    "uova": "Eggs",
-    "pesce": "Fish",
-    "arachidi": "Peanuts",
-    "soia": "Soy",
-    "latte": "Milk",
-    "fruttaGuscio": "Tree nuts",
-    "sedano": "Celery",
-    "senape": "Mustard",
-    "sesamo": "Sesame",
-    "solfiti": "Sulphites",
-    "lupini": "Lupin",
-    "molluschi": "Molluscs"
-  },
   "consent": {
-    "text": "I've read the <a href=\"{{href}}\" target=\"_blank\" rel=\"noopener\">privacy notice</a> and I consent to the processing of my data to manage the booking, including any allergies I choose to share (Art. 9 GDPR)."
-  },
-  "submit": {
-    "cta": "Confirm booking",
-    "sending": "Sending…"
+    "html": "I've read the <a href=\"/privacy\" target=\"_blank\" rel=\"noopener\">privacy notice</a> and consent to my data being used to manage this booking, including any allergies I choose to share (GDPR art. 9)."
   },
   "terms": {
-    "summary": "Deposits and cancellations",
-    "intro": "For larger groups we ask for a deposit of <strong>{{amount}} per person</strong>. When it applies, you'll get a payment link after you submit the form — the table is confirmed as soon as the payment arrives.",
+    "summary": "Deposits & cancellations",
+    "introHtml": "For larger groups we ask for a deposit of <strong>{{amount}} per person</strong>. When it applies, you'll get a payment link after you submit — the table is confirmed as soon as the payment comes through.",
     "whatHappensTitle": "What happens to the deposit",
-    "ifYouCome": "<strong>If you come</strong>, we deduct it from the bill.",
-    "ifYouCancelEarly": "<strong>If you cancel at least 24 hours ahead</strong>, we refund it in full.",
-    "ifYouCancelLate": "<strong>If you cancel later or don't show up</strong>, we keep it.",
+    "ifYouCome": "If you come, it's deducted from your bill.",
+    "ifYouCancelEarly": "If you cancel at least 24 hours ahead, we refund it in full.",
+    "ifYouCancelLate": "If you cancel later or don't show up, we keep it.",
     "whyTitle": "Why we ask for it",
-    "why1": "A table booked and left empty means food already bought, staff already on shift, and other guests we had to turn away. The confirmatory deposit (Art. 1385 of the Italian Civil Code) is how restaurants protect themselves from no-shows.",
-    "why2": "To cancel or move your booking, message or call us: within 24 hours, you lose nothing."
+    "whyText": "A table booked and left empty means food bought, staff on shift, and other guests we turned away. A deposit (under art. 1385 of the Italian Civil Code) is how restaurants protect themselves against no-shows.",
+    "howToCancel": "To cancel or reschedule, message or call us — within 24 hours you lose nothing."
   },
   "footer": {
-    "privacyLink": "Privacy notice",
-    "termsLink": "Deposits and cancellations"
+    "privacy": "Privacy notice",
+    "depositLink": "Deposits & cancellations"
   },
   "done": {
-    "pendingTitle": "Request received",
-    "pendingText": "We'll be in touch shortly to confirm.",
+    "requestTitle": "Request received",
+    "requestText": "We'll be in touch shortly to confirm.",
     "confirmedTitle": "Table confirmed",
-    "confirmedText": "We'll see you then. You'll also get confirmation by WhatsApp, SMS or email."
+    "confirmedText": "See you then — you'll also get a confirmation by WhatsApp, SMS or email."
   },
   "errors": {
-    "name": "Please enter your name.",
-    "contact": "Leave us a phone number or an email.",
-    "phone": "That phone number doesn't look right.",
-    "email": "That email address doesn't look right.",
-    "privacy": "Please accept the privacy notice to continue.",
+    "nameRequired": "Enter your name.",
+    "contactRequired": "Leave us a phone number or an email.",
+    "phoneInvalid": "That phone number doesn't look right.",
+    "emailInvalid": "That email address doesn't look right.",
+    "privacyRequired": "Please accept the privacy notice to continue.",
     "generic": "Something went wrong. Please try again.",
-    "network": "No connection right now. Try again in a moment."
+    "network": "No connection right now. Please try again in a moment."
   }
 }

@@ -20123,8 +20123,9 @@ app.get('/prenota/logo-dark.png', (_req, res) => {
 // esplicitamente come i loghi qui sopra, per lo stesso motivo: non tutta
 // public/ va esposta. Non passano da withPublicTenant perché non dipendono
 // dal ristorante — è testo di interfaccia, non contenuto configurabile.
-// Quando la SPA migrerà a react-i18next leggerà questi stessi file come
-// asset statici del proprio build, senza toccare questa rotta.
+// Percorso e formato (`/locales/{{lng}}/{{ns}}.json`) sono la convenzione di
+// i18next-http-backend apposta — è la stessa che legge i18n/config.ts: la
+// SPA, quando una schermata migrerà a react-i18next, punta già qui.
 app.get('/locales/:lang/prenota.json', (req, res) => {
     if (req.params.lang !== 'it' && req.params.lang !== 'en') return res.status(404).end();
     res.set('Cache-Control', 'public, max-age=300');

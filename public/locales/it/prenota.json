@@ -1,153 +1,132 @@
 {
   "meta": {
+    "title": "Prenota un tavolo",
     "titleWithName": "Prenota un tavolo · {{name}}"
-  },
-  "header": {
-    "heading": "Prenota un tavolo",
-    "languageGroupLabel": "Lingua",
-    "visitWebsite": "Vai al sito {{name}}",
-    "directionsFallback": "Dove siamo"
   },
   "maintenance": {
     "title": "Prenotazioni non disponibili",
-    "text": "In questo momento non raccogliamo prenotazioni dal sito."
+    "hint": "In questo momento non raccogliamo prenotazioni dal sito."
   },
-  "trap": {
-    "label": "Sito web (lascia vuoto)"
+  "header": {
+    "title": "Prenota un tavolo",
+    "langGroupAria": "Lingua",
+    "brandAria": "Vai al sito di {{name}}",
+    "brandAriaFallback": "questo ristorante"
   },
   "steps": {
-    "ariaLabel": "Passi",
+    "aria": "Passi",
     "table": "Tavolo",
-    "details": "Dati",
-    "howMany": "Quanti",
-    "when": "Quando",
-    "chooseDate": "Scegli una data"
+    "details": "Dati"
   },
-  "guests": {
-    "groupLabel": "Persone a tavola",
-    "label": "Persone a tavola",
-    "hint": "Bambini compresi.",
-    "decrease": "Persone a tavola: diminuisci",
-    "increase": "Persone a tavola: aumenta",
-    "childrenGroupLabel": "Di cui bambini",
+  "quanti": {
+    "tabLabel": "Quanti",
+    "guestsLabel": "Persone a tavola",
+    "guestsHint": "Bambini compresi.",
+    "guestsAriaGroup": "Persone a tavola",
+    "guestsAriaDec": "Persone a tavola: diminuisci",
+    "guestsAriaInc": "Persone a tavola: aumenta",
     "childrenLabel": "Di cui bambini",
     "childrenHint": "Prepariamo seggiolone e mezze porzioni.",
-    "childrenDecrease": "Bambini: diminuisci",
-    "childrenIncrease": "Bambini: aumenta",
+    "childrenAriaGroup": "Di cui bambini",
+    "childrenAriaDec": "Bambini: diminuisci",
+    "childrenAriaInc": "Bambini: aumenta",
     "person_one": "persona",
     "person_other": "persone",
     "child_one": "bimbo",
     "child_other": "bimbi"
   },
   "deposit": {
-    "label": "Caparra",
-    "linkText": "Come funziona",
-    "text_one": "Da {{minGuests}} persona chiediamo {{amount}} a persona, scalati dal conto.",
-    "text_other": "Da {{minGuests}} persone chiediamo {{amount}} a persona, scalati dal conto."
+    "title": "Caparra",
+    "how": "Come funziona",
+    "text": "Da {{minGuests}} persone chiediamo {{amount}} a persona, scalati dal conto."
   },
-  "calendar": {
+  "quando": {
+    "tabLabel": "Quando",
+    "placeholder": "Scegli una data",
     "otherDate": "Scegli un'altra data",
-    "backToWeek": "Torna alla settimana",
     "prevMonth": "Mese precedente",
     "nextMonth": "Mese successivo",
+    "backToWeek": "Torna alla settimana",
     "legendFree": "libero",
     "legendBusy": "quasi pieno",
     "legendClosed": "chiuso",
     "horizon": "Prenotazioni fino a {{days}} giorni.",
     "closedSuffix": ", chiuso",
-    "unavailableSuffix": ", non disponibile",
-    "months": ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"],
-    "dowShort": ["lun", "mar", "mer", "gio", "ven", "sab", "dom"]
+    "unavailableSuffix": ", non disponibile"
   },
   "rooms": {
     "title": "Dove preferite sedervi?",
     "any": "Indifferente",
-    "anyInRecap": "sala indifferente",
+    "recapAny": "sala indifferente",
+    "loading": "Carico le sale…",
     "empty": "Nessuna sala disponibile per questa richiesta.",
-    "requestNoticeChosen": "{{room}} è quasi piena: la prenotazione la conferma lo staff.",
-    "requestNoticeGeneric": "Le sale sono quasi piene: la prenotazione la conferma lo staff."
+    "noteChosen": "{{room}} è quasi piena: la prenotazione la conferma lo staff.",
+    "noteGeneric": "Le sale sono quasi piene: la prenotazione la conferma lo staff.",
+    "whereFallback": "Dove siamo"
   },
-  "schedule": {
+  "shifts": {
     "title": "Orario",
     "lunch": "Pranzo",
     "dinner": "Cena",
     "unavailable": "non disponibile",
-    "slots_one": "{{count}} orario",
-    "slots_other": "{{count}} orari",
-    "loading": "Carico gli orari…",
+    "slot_one": "{{count}} orario",
+    "slot_other": "{{count}} orari",
     "chooseDateFirst": "Scegli prima una data.",
-    "noSlotsForDate": "Per questa data non prendiamo prenotazioni dal sito.",
+    "loading": "Carico gli orari…",
+    "noneForDate": "Per questa data non prendiamo prenotazioni dal sito.",
     "chooseShift": "Scegli pranzo o cena.",
     "past": "passato"
   },
   "actions": {
     "continue": "Continua",
     "edit": "Modifica",
-    "backToStep1": "Torna alla scelta del tavolo"
+    "backAria": "Torna alla scelta del tavolo",
+    "submit": "Conferma prenotazione",
+    "submitting": "Invio…"
   },
-  "form": {
-    "nameLabel": "Nome e cognome",
+  "fields": {
+    "name": "Nome e cognome",
     "namePlaceholder": "Mario Rossi",
-    "phoneLabel": "Telefono",
+    "phone": "Telefono",
     "phonePlaceholder": "333 1234567",
-    "emailLabel": "Email",
+    "email": "Email",
     "emailPlaceholder": "tu@esempio.it",
     "emailHint": "Basta uno dei due: ci serve per confermarvi il tavolo.",
-    "dietLabel": "Allergie e intolleranze",
     "optional": "(facoltativo)",
+    "allergiesLabel": "Allergie e intolleranze",
     "notesLabel": "Altro che dovremmo sapere",
     "notesPlaceholder": "Occasione speciale, seggiolone, tavolo tranquillo…"
   },
-  "diet": {
-    "glutine": "Glutine",
-    "crostacei": "Crostacei",
-    "uova": "Uova",
-    "pesce": "Pesce",
-    "arachidi": "Arachidi",
-    "soia": "Soia",
-    "latte": "Latte",
-    "fruttaGuscio": "Frutta a guscio",
-    "sedano": "Sedano",
-    "senape": "Senape",
-    "sesamo": "Sesamo",
-    "solfiti": "Solfiti",
-    "lupini": "Lupini",
-    "molluschi": "Molluschi"
-  },
   "consent": {
-    "text": "Ho letto <a href=\"{{href}}\" target=\"_blank\" rel=\"noopener\">l'informativa sulla privacy</a> e acconsento al trattamento dei dati per gestire la prenotazione, comprese le allergie che scelgo di indicare (art. 9 GDPR)."
-  },
-  "submit": {
-    "cta": "Conferma prenotazione",
-    "sending": "Invio…"
+    "html": "Ho letto <a href=\"/privacy\" target=\"_blank\" rel=\"noopener\">l'informativa sulla privacy</a> e acconsento al trattamento dei dati per gestire la prenotazione, comprese le allergie che scelgo di indicare (art. 9 GDPR)."
   },
   "terms": {
     "summary": "Caparra e cancellazioni",
-    "intro": "Per i gruppi chiediamo una caparra di <strong>{{amount}} a persona</strong>. Quando serve, dopo l'invio ricevi un link per pagarla: il tavolo è confermato appena arriva il pagamento.",
+    "introHtml": "Per i gruppi chiediamo una caparra di <strong>{{amount}} a persona</strong>. Quando serve, dopo l'invio ricevi un link per pagarla: il tavolo è confermato appena arriva il pagamento.",
     "whatHappensTitle": "Cosa succede alla caparra",
-    "ifYouCome": "<strong>Se venite</strong>, la scaliamo dal conto.",
-    "ifYouCancelEarly": "<strong>Se annullate almeno 24 ore prima</strong>, la rimborsiamo intera.",
-    "ifYouCancelLate": "<strong>Se annullate più tardi o non venite</strong>, la tratteniamo.",
+    "ifYouCome": "Se venite, la scaliamo dal conto.",
+    "ifYouCancelEarly": "Se annullate almeno 24 ore prima, la rimborsiamo intera.",
+    "ifYouCancelLate": "Se annullate più tardi o non venite, la tratteniamo.",
     "whyTitle": "Perché la chiediamo",
-    "why1": "Un tavolo prenotato e lasciato vuoto significa spesa fatta, personale in servizio e altri clienti a cui abbiamo detto di no. La caparra confirmatoria (art. 1385 del Codice Civile) è lo strumento con cui i ristoranti si tutelano dal no-show.",
-    "why2": "Per annullare o spostare, scrivici o chiamaci: entro le 24 ore non perdete nulla."
+    "whyText": "Un tavolo prenotato e lasciato vuoto significa spesa fatta, personale in servizio e altri clienti a cui abbiamo detto di no. La caparra confirmatoria (art. 1385 del Codice Civile) è lo strumento con cui i ristoranti si tutelano dal no-show.",
+    "howToCancel": "Per annullare o spostare, scrivici o chiamaci: entro le 24 ore non perdete nulla."
   },
   "footer": {
-    "privacyLink": "Informativa sulla privacy",
-    "termsLink": "Caparra e cancellazioni"
+    "privacy": "Informativa sulla privacy",
+    "depositLink": "Caparra e cancellazioni"
   },
   "done": {
-    "pendingTitle": "Richiesta ricevuta",
-    "pendingText": "Vi ricontattiamo a breve per confermare.",
+    "requestTitle": "Richiesta ricevuta",
+    "requestText": "Vi ricontattiamo a breve per confermare.",
     "confirmedTitle": "Tavolo confermato",
     "confirmedText": "Vi aspettiamo. Ricevete la conferma anche via WhatsApp, SMS o email."
   },
   "errors": {
-    "name": "Inserisci il tuo nome.",
-    "contact": "Lasciaci un telefono o un’email.",
-    "phone": "Numero di telefono non valido.",
-    "email": "Indirizzo email non valido.",
-    "privacy": "Per procedere, accetta l’informativa sulla privacy.",
+    "nameRequired": "Inserisci il tuo nome.",
+    "contactRequired": "Lasciaci un telefono o un'email.",
+    "phoneInvalid": "Numero di telefono non valido.",
+    "emailInvalid": "Indirizzo email non valido.",
+    "privacyRequired": "Per procedere, accetta l'informativa sulla privacy.",
     "generic": "Qualcosa è andato storto. Riprova.",
     "network": "Connessione non disponibile. Riprova fra qualche istante."
   }
