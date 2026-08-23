@@ -4,6 +4,7 @@ import { getCustomers, createCustomer, updateCustomer, deleteCustomer, getCustom
 import { useAuth } from '../contexts/AuthContext';
 import { Search, Plus, Pencil, Trash2, Phone, Mail, MapPin, BookUser, History, UtensilsCrossed, Calendar, Sun, Moon, Users as UsersIcon, Loader2, Star, Armchair, AlertTriangle, Ban, GitMerge, Download, MessageCircle, User as UserIcon, MoreVertical, ArrowLeft } from 'lucide-react';
 import { toTitleCase } from '../utils/text';
+import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 import {
   SplitPane, PanePlaceholder, SearchField, StatusPill, StatStrip, CountBadge,
   Callout, EmptyState, ModalShell, StepNav, FormCard, Field,
@@ -73,13 +74,15 @@ const customerToForm = (c: Customer): FormState => ({
   blacklist_reason: c.blacklist_reason || '',
 });
 
-// Format an ISO reservation_time without timezone shifts (the backend stores
-// the local wall clock; passing it through Date would interpret it as UTC).
+// Ora italiana via gli helper condivisi, come il resto dell'app. La versione
+// precedente prendeva ora e data dalla stringa ISO grezza assumendo che il
+// backend salvasse l'ora locale: la colonna è timestamptz e l'API risponde in
+// UTC, quindi lo storico mostrava le cene alle 18:30 invece che alle 20:30.
 const formatReservationDateTime = (isoString: string): { date: string; time: string } => {
-  const match = isoString.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
-  if (!match) return { date: '', time: '' };
-  const [, y, m, d, h, min] = match;
-  return { date: `${d}/${m}/${y}`, time: `${h}:${min}` };
+  const dateStr = getRomeDatePart(isoString); // YYYY-MM-DD
+  if (!dateStr) return { date: '', time: '' };
+  const [y, m, d] = dateStr.split('-');
+  return { date: `${d}/${m}/${y}`, time: getRomeTimePart(isoString) };
 };
 
 // Lowercase + strip diacritics so "cafe" matches "Café" and "d'onofrio"
