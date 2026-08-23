@@ -1771,7 +1771,7 @@ async function handleElevenLabsPostCall(tenantId: number, req: express.Request, 
             // Sala sì, tavolo no: i messaggi al cliente non nominano mai il
             // tavolo assegnato (dato operativo, cambia fino all'arrivo).
             `SELECT r.id, r.customer_name, r.phone, r.reservation_time, r.guests,
-                    rm.name AS room_name
+                    r.language, rm.name AS room_name
              FROM voice_calls vc
              JOIN reservations r ON r.id = vc.reservation_id AND r.tenant_id = vc.tenant_id
              LEFT JOIN tables t ON t.id = r.table_id AND t.tenant_id = r.tenant_id
@@ -1782,8 +1782,8 @@ async function handleElevenLabsPostCall(tenantId: number, req: express.Request, 
         );
         const row = linked.rows[0];
         if (row && row.phone) {
-            const message = buildConfirmationMessage(row.customer_name, row.reservation_time, row.guests, row.room_name);
-            const whatsappTemplate = buildBookingConfirmedTemplate(row.customer_name, row.reservation_time, row.guests);
+            const message = buildConfirmationMessage(row.customer_name, row.reservation_time, row.guests, row.room_name, row.language);
+            const whatsappTemplate = buildBookingConfirmedTemplate(row.customer_name, row.reservation_time, row.guests, row.language);
             sendBookingConfirmation(tenantId, row.phone, message, row.id, { whatsappTemplate }).catch(err =>
                 console.warn('[ElevenLabs] post-call confirmation send failed:', err?.message || err)
             );
@@ -2534,18 +2534,21 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                     updatedReservation.customer_name,
                     updatedReservation.reservation_time,
                     updatedReservation.guests,
-                    roomName
+                    roomName,
+                    updatedReservation.language
                 ),
                 whatsappTemplate: buildBookingConfirmedTemplate(
                     updatedReservation.customer_name,
                     updatedReservation.reservation_time,
-                    updatedReservation.guests
+                    updatedReservation.guests,
+                    updatedReservation.language
                 ),
                 buildEmail: () => buildBookingConfirmationEmail({
                     customerName: updatedReservation.customer_name,
                     reservationTime: updatedReservation.reservation_time,
                     guests: updatedReservation.guests,
                     roomName,
+                    language: updatedReservation.language,
                 }),
                 kind: 'confirmation',
             }).catch(err => console.error('Auto-confirmation send failed:', err));
@@ -2569,17 +2572,20 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 smsText: buildDeclineMessage(
                     updatedReservation.customer_name,
                     updatedReservation.reservation_time,
-                    updatedReservation.guests
+                    updatedReservation.guests,
+                    updatedReservation.language
                 ),
                 whatsappTemplate: buildBookingDeclinedTemplate(
                     updatedReservation.customer_name,
                     updatedReservation.reservation_time,
-                    updatedReservation.guests
+                    updatedReservation.guests,
+                    updatedReservation.language
                 ),
                 buildEmail: () => buildBookingDeclineEmail({
                     customerName: updatedReservation.customer_name,
                     reservationTime: updatedReservation.reservation_time,
                     guests: updatedReservation.guests,
+                    language: updatedReservation.language,
                 }),
                 kind: 'decline',
             }).catch(err => console.error('Auto-decline send failed:', err));
@@ -2613,14 +2619,16 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                     buildUpdateMessage(
                         updatedReservation.customer_name,
                         updatedReservation.reservation_time,
-                        updatedReservation.guests
+                        updatedReservation.guests,
+                        updatedReservation.language
                     ),
                     updatedReservation.id,
                     {
                         whatsappTemplate: buildBookingUpdatedTemplate(
                             updatedReservation.customer_name,
                             updatedReservation.reservation_time,
-                            updatedReservation.guests
+                            updatedReservation.guests,
+                            updatedReservation.language
                         ),
                         recordConfirmation: false,
                     }
@@ -2667,10 +2675,10 @@ app.post('/reservations/:id/send-reminder', authenticate, requirePermission('res
         const sendResult = await sendBookingConfirmation(
             req.tenantId!,
             resv.phone,
-            buildReminderMessage(resv.customer_name, resv.reservation_time, resv.guests, resv.room_name),
+            buildReminderMessage(resv.customer_name, resv.reservation_time, resv.guests, resv.room_name, resv.language),
             id,
             {
-                whatsappTemplate: buildBookingReminderTemplate(resv.customer_name, resv.reservation_time, resv.guests),
+                whatsappTemplate: buildBookingReminderTemplate(resv.customer_name, resv.reservation_time, resv.guests, resv.language),
                 recordConfirmation: false,
             }
         );
@@ -2878,7 +2886,7 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requireFeature('wha
             'auto';
 
         const result = await queryWithRetry(
-            'SELECT id, customer_name, reservation_time, guests, phone, table_id, notes FROM reservations WHERE id = $1 AND tenant_id = $2',
+            'SELECT id, customer_name, reservation_time, guests, phone, table_id, notes, language FROM reservations WHERE id = $1 AND tenant_id = $2',
             [id, req.tenantId!]
         );
 
@@ -2897,7 +2905,8 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requireFeature('wha
             reservation.customer_name,
             reservation.reservation_time,
             reservation.guests,
-            roomName
+            roomName,
+            reservation.language
         );
 
         let outcome: OutboundConfirmationResult;
@@ -2922,7 +2931,8 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requireFeature('wha
             const whatsappTemplate = buildBookingConfirmedTemplate(
                 reservation.customer_name,
                 reservation.reservation_time,
-                reservation.guests
+                reservation.guests,
+                reservation.language
             );
             outcome = await sendWhatsAppText(req.tenantId!, reservation.phone, message, reservation.id, whatsappTemplate);
             recordConfirmationSent(req.tenantId!, reservation.id, outcome).catch(err =>
@@ -2933,7 +2943,8 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requireFeature('wha
                 whatsappTemplate: buildBookingConfirmedTemplate(
                     reservation.customer_name,
                     reservation.reservation_time,
-                    reservation.guests
+                    reservation.guests,
+                    reservation.language
                 ),
             });
         }
@@ -2964,7 +2975,7 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
     try {
         const { id } = req.params;
         const result = await queryWithRetry(
-            'SELECT id, customer_name, reservation_time, guests, phone, email, table_id, notes FROM reservations WHERE id = $1 AND tenant_id = $2',
+            'SELECT id, customer_name, reservation_time, guests, phone, email, table_id, notes, language FROM reservations WHERE id = $1 AND tenant_id = $2',
             [id, req.tenantId!]
         );
         if (result.rows.length === 0) {
@@ -2984,6 +2995,7 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
             reservationTime: reservation.reservation_time,
             guests: reservation.guests,
             roomName,
+            language: reservation.language,
         });
 
         const emailStatus = await getSmtpConfigStatus(req.tenantId!).catch(() => null);
@@ -8312,7 +8324,7 @@ const declineReservationForExpiredLink = async (
             `UPDATE reservations
              SET reservation_status = 'DECLINED'
              WHERE id = $1 AND tenant_id = $2 AND reservation_status = 'PENDING'
-             RETURNING id, customer_name, reservation_time, guests, phone, email, source`,
+             RETURNING id, customer_name, reservation_time, guests, phone, email, source, language`,
             [reservationId, tenantId]
         );
         if (updated.rowCount === 0) return;
@@ -8326,12 +8338,13 @@ const declineReservationForExpiredLink = async (
                 phone: r.phone,
                 email: r.email,
                 reservationId: Number(r.id),
-                smsText: buildDeclineMessage(r.customer_name, r.reservation_time, r.guests),
-                whatsappTemplate: buildBookingDeclinedTemplate(r.customer_name, r.reservation_time, r.guests),
+                smsText: buildDeclineMessage(r.customer_name, r.reservation_time, r.guests, r.language),
+                whatsappTemplate: buildBookingDeclinedTemplate(r.customer_name, r.reservation_time, r.guests, r.language),
                 buildEmail: () => buildBookingDeclineEmail({
                     customerName: r.customer_name,
                     reservationTime: r.reservation_time,
                     guests: r.guests,
+                    language: r.language,
                 }),
                 kind: 'decline',
             }).catch(err => console.error('[payment-expiry] invio decline fallito:', err?.message || err));
@@ -19959,8 +19972,10 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                 depositPolicy?.perPersonCents
               )
             : confirmedNow
-                ? buildConfirmationMessage(customer_name, created.reservation_time, guestsNum, ackRoomName)
-                : `Ciao ${toTitleCase(customer_name)}, abbiamo ricevuto la tua richiesta di prenotazione per ${guestsLabel} il ${dateLabel} alle ${time}. Ti ricontatteremo a breve per confermarla. Grazie!`;
+                ? buildConfirmationMessage(customer_name, created.reservation_time, guestsNum, ackRoomName, language)
+                : isEnglishGuest(language)
+                    ? `Hi ${toTitleCase(customer_name)}, we've received your reservation request for ${guestsLabel} on ${dateLabel} at ${time}. We'll get back to you shortly to confirm it. Thank you!`
+                    : `Ciao ${toTitleCase(customer_name)}, abbiamo ricevuto la tua richiesta di prenotazione per ${guestsLabel} il ${dateLabel} alle ${time}. Ti ricontatteremo a breve per confermarla. Grazie!`;
 
         // Pick the right WA template for the branch. When either env var is
         // unset, or the deposit token can't be parsed, waTemplate stays
@@ -19976,15 +19991,15 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                 depositCheckoutUrl
             );
         } else if (confirmedNow) {
-            waTemplate = buildBookingConfirmedTemplate(customer_name, created.reservation_time, guestsNum);
+            waTemplate = buildBookingConfirmedTemplate(customer_name, created.reservation_time, guestsNum, language);
         } else {
-            const bookingReceivedSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_RECEIVED;
-            if (bookingReceivedSid) {
+            const pickedReceived = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_BOOKING_RECEIVED', language);
+            if (pickedReceived) {
                 waTemplate = {
-                    contentSid: bookingReceivedSid,
+                    contentSid: pickedReceived.contentSid,
                     contentVariables: {
                         '1': toTitleCase(customer_name),
-                        '2': guestsLabel,
+                        '2': pickedReceived.english ? `${guestsNum} ${guestsNum === 1 ? 'guest' : 'guests'}` : guestsLabel,
                         '3': dateLabel,
                         '4': time,
                     },
@@ -20015,6 +20030,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                     depositAmountCents: depositAmountCents || null,
                     depositCheckoutUrl,
                     depositPerPersonCents: depositPolicy?.perPersonCents ?? null,
+                    language,
                   })
                 : confirmedNow
                 ? buildBookingConfirmationEmail({
@@ -20022,6 +20038,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                     reservationTime: created.reservation_time,
                     guests: guestsNum,
                     roomName: ackRoomName,
+                    language,
                   })
                 : buildBookingRequestEmail({
                     customerName: toTitleCase(customer_name),
@@ -20029,6 +20046,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                     guests: guestsNum,
                     roomName: requestedRoomName,
                     notes: userNote,
+                    language,
                   }),
             kind: 'ack',
         }).catch(err => console.error('[public-booking] ack dispatch failed:', err?.message || err));
