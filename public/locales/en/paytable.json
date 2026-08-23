@@ -1,0 +1,88 @@
+{
+  "meta": {
+    "title": "The table bill"
+  },
+  "header": {
+    "title": "The table bill",
+    "subtitle": "Pay your share securely",
+    "langGroupAria": "Language"
+  },
+  "loading": {
+    "text": "Loading bill…"
+  },
+  "invalidLink": {
+    "text": "Invalid link."
+  },
+  "notFound": {
+    "title": "Bill not available",
+    "text": "This link is no longer valid: it may have expired, been revoked, or the bill may already be closed. Please ask the restaurant staff."
+  },
+  "bill": {
+    "total": "Total",
+    "cover_one": "{{count}} guest",
+    "cover_other": "{{count}} guests",
+    "depositPaid": "Deposit already paid",
+    "paidLabel": "Paid {{amount}}",
+    "remaining": "Remaining:"
+  },
+  "splits": {
+    "title": "Shares",
+    "anonymous": "Anonymous",
+    "statusPaid": "Paid",
+    "statusPending": "Pending"
+  },
+  "menu": {
+    "myShare": "My share · {{amount}}",
+    "perItem": "I'll pay what I had",
+    "customAmount": "A different amount"
+  },
+  "items": {
+    "back": "← Go back",
+    "question": "What did you have?",
+    "alreadyTaken": "already paid by someone else",
+    "yourShare": "Your share",
+    "nameLabel": "Name (optional)",
+    "namePlaceholder": "E.g. Mark",
+    "continue": "Continue to payment"
+  },
+  "amountForm": {
+    "changeOption": "Change option",
+    "amountLabel": "Amount",
+    "amountPlaceholder": "0.00",
+    "maxAvailable": "Max available: {{amount}}",
+    "nameLabel": "Name (optional)",
+    "namePlaceholder": "E.g. Mark",
+    "visibleNote": "Visible to the other guests at the table.",
+    "continue": "Continue to payment"
+  },
+  "paidInFull": {
+    "title": "Bill settled",
+    "text": "The table has been paid in full."
+  },
+  "claimed": {
+    "yourShare": "Your share",
+    "forName": "for {{name}}",
+    "goToPayment": "Go to payment",
+    "noCheckoutLink": "We couldn't create the payment link. Try cancelling your share and retrying.",
+    "cancelShare": "Cancel share",
+    "cancelling": "Please wait…",
+    "holdNotice": "Your share is held for 5 minutes. If you don't pay within this time it will be released automatically."
+  },
+  "footer": {
+    "text": "Secure payment via Revolut · Powered by Ristomanager"
+  },
+  "confirm": {
+    "release": "Cancel your request? You can redo it afterwards."
+  },
+  "errors": {
+    "pickAtLeastOne": "Choose at least one dish",
+    "invalidAmount": "Enter a valid amount",
+    "amountTooHigh": "Amount too high. Maximum available: {{amount}}",
+    "network": "Network error",
+    "generic": "Something went wrong with your request",
+    "releaseFailed": "Something went wrong while cancelling",
+    "billFullyClaimed": "The bill has already been fully claimed by other guests.",
+    "itemsAlreadyClaimed": "One of the dishes you picked was already claimed by someone else. Refresh the page and try again.",
+    "perItemUnavailable": "Paying per dish isn't available for this bill: choose another option."
+  }
+}

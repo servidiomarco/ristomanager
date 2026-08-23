@@ -175,7 +175,7 @@ import {
     listClosures,
     formatSlotListItalian,
 } from './utils/slots.js';
-import { normalizeLanguageCode, detectLanguageFromPhonePrefix } from './utils/language.js';
+import { normalizeLanguageCode, detectLanguageFromPhonePrefix, isEnglishGuest, resolveGuestLanguage } from './utils/language.js';
 
 const app = express();
 // Railway terminates TLS at a single upstream proxy and forwards via
@@ -1771,7 +1771,7 @@ async function handleElevenLabsPostCall(tenantId: number, req: express.Request, 
             // Sala sì, tavolo no: i messaggi al cliente non nominano mai il
             // tavolo assegnato (dato operativo, cambia fino all'arrivo).
             `SELECT r.id, r.customer_name, r.phone, r.reservation_time, r.guests,
-                    rm.name AS room_name
+                    r.language, rm.name AS room_name
              FROM voice_calls vc
              JOIN reservations r ON r.id = vc.reservation_id AND r.tenant_id = vc.tenant_id
              LEFT JOIN tables t ON t.id = r.table_id AND t.tenant_id = r.tenant_id
@@ -1782,8 +1782,8 @@ async function handleElevenLabsPostCall(tenantId: number, req: express.Request, 
         );
         const row = linked.rows[0];
         if (row && row.phone) {
-            const message = buildConfirmationMessage(row.customer_name, row.reservation_time, row.guests, row.room_name);
-            const whatsappTemplate = buildBookingConfirmedTemplate(row.customer_name, row.reservation_time, row.guests);
+            const message = buildConfirmationMessage(row.customer_name, row.reservation_time, row.guests, row.room_name, resolveGuestLanguage(row));
+            const whatsappTemplate = buildBookingConfirmedTemplate(row.customer_name, row.reservation_time, row.guests, resolveGuestLanguage(row));
             sendBookingConfirmation(tenantId, row.phone, message, row.id, { whatsappTemplate }).catch(err =>
                 console.warn('[ElevenLabs] post-call confirmation send failed:', err?.message || err)
             );
@@ -2534,18 +2534,21 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                     updatedReservation.customer_name,
                     updatedReservation.reservation_time,
                     updatedReservation.guests,
-                    roomName
+                    roomName,
+                    resolveGuestLanguage(updatedReservation)
                 ),
                 whatsappTemplate: buildBookingConfirmedTemplate(
                     updatedReservation.customer_name,
                     updatedReservation.reservation_time,
-                    updatedReservation.guests
+                    updatedReservation.guests,
+                    resolveGuestLanguage(updatedReservation)
                 ),
                 buildEmail: () => buildBookingConfirmationEmail({
                     customerName: updatedReservation.customer_name,
                     reservationTime: updatedReservation.reservation_time,
                     guests: updatedReservation.guests,
                     roomName,
+                    language: resolveGuestLanguage(updatedReservation),
                 }),
                 kind: 'confirmation',
             }).catch(err => console.error('Auto-confirmation send failed:', err));
@@ -2569,17 +2572,20 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                 smsText: buildDeclineMessage(
                     updatedReservation.customer_name,
                     updatedReservation.reservation_time,
-                    updatedReservation.guests
+                    updatedReservation.guests,
+                    resolveGuestLanguage(updatedReservation)
                 ),
                 whatsappTemplate: buildBookingDeclinedTemplate(
                     updatedReservation.customer_name,
                     updatedReservation.reservation_time,
-                    updatedReservation.guests
+                    updatedReservation.guests,
+                    resolveGuestLanguage(updatedReservation)
                 ),
                 buildEmail: () => buildBookingDeclineEmail({
                     customerName: updatedReservation.customer_name,
                     reservationTime: updatedReservation.reservation_time,
                     guests: updatedReservation.guests,
+                    language: resolveGuestLanguage(updatedReservation),
                 }),
                 kind: 'decline',
             }).catch(err => console.error('Auto-decline send failed:', err));
@@ -2613,14 +2619,16 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                     buildUpdateMessage(
                         updatedReservation.customer_name,
                         updatedReservation.reservation_time,
-                        updatedReservation.guests
+                        updatedReservation.guests,
+                        resolveGuestLanguage(updatedReservation)
                     ),
                     updatedReservation.id,
                     {
                         whatsappTemplate: buildBookingUpdatedTemplate(
                             updatedReservation.customer_name,
                             updatedReservation.reservation_time,
-                            updatedReservation.guests
+                            updatedReservation.guests,
+                            resolveGuestLanguage(updatedReservation)
                         ),
                         recordConfirmation: false,
                     }
@@ -2667,10 +2675,10 @@ app.post('/reservations/:id/send-reminder', authenticate, requirePermission('res
         const sendResult = await sendBookingConfirmation(
             req.tenantId!,
             resv.phone,
-            buildReminderMessage(resv.customer_name, resv.reservation_time, resv.guests, resv.room_name),
+            buildReminderMessage(resv.customer_name, resv.reservation_time, resv.guests, resv.room_name, resolveGuestLanguage(resv)),
             id,
             {
-                whatsappTemplate: buildBookingReminderTemplate(resv.customer_name, resv.reservation_time, resv.guests),
+                whatsappTemplate: buildBookingReminderTemplate(resv.customer_name, resv.reservation_time, resv.guests, resolveGuestLanguage(resv)),
                 recordConfirmation: false,
             }
         );
@@ -2878,7 +2886,7 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requireFeature('wha
             'auto';
 
         const result = await queryWithRetry(
-            'SELECT id, customer_name, reservation_time, guests, phone, table_id, notes FROM reservations WHERE id = $1 AND tenant_id = $2',
+            'SELECT id, customer_name, reservation_time, guests, phone, table_id, notes, language FROM reservations WHERE id = $1 AND tenant_id = $2',
             [id, req.tenantId!]
         );
 
@@ -2897,7 +2905,8 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requireFeature('wha
             reservation.customer_name,
             reservation.reservation_time,
             reservation.guests,
-            roomName
+            roomName,
+            reservation.language
         );
 
         let outcome: OutboundConfirmationResult;
@@ -2922,7 +2931,8 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requireFeature('wha
             const whatsappTemplate = buildBookingConfirmedTemplate(
                 reservation.customer_name,
                 reservation.reservation_time,
-                reservation.guests
+                reservation.guests,
+                reservation.language
             );
             outcome = await sendWhatsAppText(req.tenantId!, reservation.phone, message, reservation.id, whatsappTemplate);
             recordConfirmationSent(req.tenantId!, reservation.id, outcome).catch(err =>
@@ -2933,7 +2943,8 @@ app.post('/reservations/:id/confirm-whatsapp', authenticate, requireFeature('wha
                 whatsappTemplate: buildBookingConfirmedTemplate(
                     reservation.customer_name,
                     reservation.reservation_time,
-                    reservation.guests
+                    reservation.guests,
+                    reservation.language
                 ),
             });
         }
@@ -2964,7 +2975,7 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
     try {
         const { id } = req.params;
         const result = await queryWithRetry(
-            'SELECT id, customer_name, reservation_time, guests, phone, email, table_id, notes FROM reservations WHERE id = $1 AND tenant_id = $2',
+            'SELECT id, customer_name, reservation_time, guests, phone, email, table_id, notes, language FROM reservations WHERE id = $1 AND tenant_id = $2',
             [id, req.tenantId!]
         );
         if (result.rows.length === 0) {
@@ -2984,6 +2995,7 @@ app.post('/reservations/:id/confirm-email', authenticate, requirePermission('res
             reservationTime: reservation.reservation_time,
             guests: reservation.guests,
             roomName,
+            language: reservation.language,
         });
 
         const emailStatus = await getSmtpConfigStatus(req.tenantId!).catch(() => null);
@@ -8312,7 +8324,7 @@ const declineReservationForExpiredLink = async (
             `UPDATE reservations
              SET reservation_status = 'DECLINED'
              WHERE id = $1 AND tenant_id = $2 AND reservation_status = 'PENDING'
-             RETURNING id, customer_name, reservation_time, guests, phone, email, source`,
+             RETURNING id, customer_name, reservation_time, guests, phone, email, source, language`,
             [reservationId, tenantId]
         );
         if (updated.rowCount === 0) return;
@@ -8326,12 +8338,13 @@ const declineReservationForExpiredLink = async (
                 phone: r.phone,
                 email: r.email,
                 reservationId: Number(r.id),
-                smsText: buildDeclineMessage(r.customer_name, r.reservation_time, r.guests),
-                whatsappTemplate: buildBookingDeclinedTemplate(r.customer_name, r.reservation_time, r.guests),
+                smsText: buildDeclineMessage(r.customer_name, r.reservation_time, r.guests, resolveGuestLanguage(r)),
+                whatsappTemplate: buildBookingDeclinedTemplate(r.customer_name, r.reservation_time, r.guests, resolveGuestLanguage(r)),
                 buildEmail: () => buildBookingDeclineEmail({
                     customerName: r.customer_name,
                     reservationTime: r.reservation_time,
                     guests: r.guests,
+                    language: resolveGuestLanguage(r),
                 }),
                 kind: 'decline',
             }).catch(err => console.error('[payment-expiry] invio decline fallito:', err?.message || err));
@@ -12828,7 +12841,10 @@ function buildConfirmationMessage(
     customerName: string | null | undefined,
     reservationTime: string | Date,
     guests: number | null | undefined,
-    roomName?: string | null
+    roomName?: string | null,
+    // Card #34 — reservations.language: SMS non ha approvazioni Meta di
+    // mezzo, quindi l'inglese parte subito, senza gating su env var.
+    language?: string | null
 ): string {
     // This builder is always fed a DB `timestamptz` (a UTC instant). If it
     // arrives as a bare naive string (no Z/offset), read it as UTC so the Rome
@@ -12838,15 +12854,21 @@ function buildConfirmationMessage(
     // used by the request email, not for DB-sourced confirmation times.)
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     const fullName = toTitleCase(customerName);
-    const greeting = fullName ? `Ciao ${fullName}, la tua` : 'La';
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
-    const persone = guestsNum === 1 ? 'persona' : 'persone';
     const room = (roomName ?? '').trim();
-    const roomPart = room ? ` in ${room}` : '';
     // Niente link Maps qui: questo testo finisce negli SMS e il link — anche
     // in forma maps.app.goo.gl — porta il messaggio tipico oltre i 160
     // caratteri, cioè a 2 segmenti fatturati. Il link viaggia solo dove non
     // costa: bottone del template WhatsApp e email (contactBlockHtml).
+    if (isEnglishGuest(language)) {
+        const greeting = fullName ? `Hi ${fullName}, your` : 'Your';
+        const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
+        const roomPart = room ? ` in the ${room} room` : '';
+        return `${greeting} reservation for ${guestsNum} ${guestsLabel} on ${dateLabel} at ${timeLabel}${roomPart} is confirmed. See you soon!`;
+    }
+    const greeting = fullName ? `Ciao ${fullName}, la tua` : 'La';
+    const persone = guestsNum === 1 ? 'persona' : 'persone';
+    const roomPart = room ? ` in ${room}` : '';
     return `${greeting} prenotazione per ${guestsNum} ${persone} il ${dateLabel} alle ${timeLabel}${roomPart} e' confermata. A presto!`;
 }
 
@@ -12879,12 +12901,18 @@ async function resolveReservationRoomName(reservation: { table_id?: number | nul
 function buildDeclineMessage(
     customerName: string | null | undefined,
     reservationTime: string | Date,
-    guests: number | null | undefined
+    guests: number | null | undefined,
+    language?: string | null
 ): string {
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     const fullName = toTitleCase(customerName);
-    const greeting = fullName ? `Ciao ${fullName}, purtroppo` : 'Purtroppo';
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
+    if (isEnglishGuest(language)) {
+        const greeting = fullName ? `Hi ${fullName}, unfortunately` : 'Unfortunately';
+        const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
+        return `${greeting} we weren't able to confirm your reservation request for ${guestsNum} ${guestsLabel} on ${dateLabel} at ${timeLabel}. Please call us at ${businessIdentity().phone} to check another date or time. Thank you, and hope to see you soon!`;
+    }
+    const greeting = fullName ? `Ciao ${fullName}, purtroppo` : 'Purtroppo';
     const persone = guestsNum === 1 ? 'persona' : 'persone';
     return `${greeting} non ci e' stato possibile confermare la tua richiesta di prenotazione per ${guestsNum} ${persone} il ${dateLabel} alle ${timeLabel}. Chiamaci al numero ${businessIdentity().phone} per verificare un'altra data/orario. Grazie e a presto!`;
 }
@@ -12897,12 +12925,19 @@ function buildReminderMessage(
     customerName: string | null | undefined,
     reservationTime: string | Date,
     guests: number | null | undefined,
-    roomName?: string | null
+    roomName?: string | null,
+    language?: string | null
 ): string {
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     const fullName = toTitleCase(customerName);
-    const greeting = fullName ? `Ciao ${fullName}!` : 'Ciao!';
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
+    if (isEnglishGuest(language)) {
+        const greeting = fullName ? `Hi ${fullName}!` : 'Hi!';
+        const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
+        const roomPart = roomName ? ` (${roomName})` : '';
+        return `${greeting} We look forward to seeing you on ${dateLabel} at ${timeLabel}: a table for ${guestsNum} ${guestsLabel}${roomPart} at ${businessIdentity().name}. Need to change anything or something came up? Call us at ${businessIdentity().phone} — we'll take care of it. See you soon!`;
+    }
+    const greeting = fullName ? `Ciao ${fullName}!` : 'Ciao!';
     const persone = guestsNum === 1 ? 'persona' : 'persone';
     const roomPart = roomName ? ` (${roomName})` : '';
     return `${greeting} Ti aspettiamo ${dateLabel} alle ${timeLabel}: tavolo per ${guestsNum} ${persone}${roomPart} da ${businessIdentity().name}. Per modifiche o imprevisti chiamaci al ${businessIdentity().phone} — sistemiamo tutto noi. A presto!`;
@@ -12914,12 +12949,18 @@ function buildReminderMessage(
 function buildUpdateMessage(
     customerName: string | null | undefined,
     reservationTime: string | Date,
-    guests: number | null | undefined
+    guests: number | null | undefined,
+    language?: string | null
 ): string {
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     const fullName = toTitleCase(customerName);
-    const greeting = fullName ? `Ciao ${fullName},` : 'Ciao,';
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
+    if (isEnglishGuest(language)) {
+        const greeting = fullName ? `Hi ${fullName},` : 'Hi,';
+        const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
+        return `${greeting} your reservation at ${businessIdentity().name} has been updated: ${guestsNum} ${guestsLabel}, ${dateLabel} at ${timeLabel}. If anything looks off, call us at ${businessIdentity().phone}. See you soon!`;
+    }
+    const greeting = fullName ? `Ciao ${fullName},` : 'Ciao,';
     const persone = guestsNum === 1 ? 'persona' : 'persone';
     return `${greeting} la tua prenotazione da ${businessIdentity().name} è stata aggiornata: ${guestsNum} ${persone}, ${dateLabel} alle ${timeLabel}. Se qualcosa non torna chiamaci al ${businessIdentity().phone}. A presto!`;
 }
@@ -12930,27 +12971,42 @@ function buildUpdateMessage(
 // excluded from all templates (Meta rejects empty variables); the SMS body still
 // includes it when known. Empty-name guard sends '—' so a missing customer_name
 // can't blow up the template with an empty var.
-function templateGuestsLabel(guests: number | null | undefined): string {
+function templateGuestsLabel(guests: number | null | undefined, english: boolean = false): string {
     const n = Math.max(1, Math.trunc(Number(guests) || 1));
-    return `${n} ${n === 1 ? 'persona' : 'persone'}`;
+    return english ? `${n} ${n === 1 ? 'guest' : 'guests'}` : `${n} ${n === 1 ? 'persona' : 'persone'}`;
 }
 function templateName(customerName: string | null | undefined): string {
     const t = toTitleCase(customerName);
     return t || '—';
 }
+// Card #34 — sceglie fra la SID italiana (storica) e quella inglese di uno
+// stesso template. L'inglese si usa SOLO quando l'ospite è 'en' E la SID
+// _EN è configurata (template approvato da Meta): finché non c'è, si
+// ricade sul comportamento di sempre — SID italiana con variabili
+// italiane, mai un ibrido "corpo IT + variabili EN" che sfigurerebbe.
+function pickWhatsAppTemplateSid(
+    baseEnvKey: string,
+    language: string | null | undefined
+): { contentSid: string; english: boolean } | undefined {
+    const englishSid = isEnglishGuest(language) ? process.env[`${baseEnvKey}_EN`] : undefined;
+    if (englishSid) return { contentSid: englishSid, english: true };
+    const italianSid = process.env[baseEnvKey];
+    return italianSid ? { contentSid: italianSid, english: false } : undefined;
+}
 function buildBookingConfirmedTemplate(
     customerName: string | null | undefined,
     reservationTime: string | Date,
-    guests: number | null | undefined
+    guests: number | null | undefined,
+    language?: string | null
 ): WhatsAppTemplateOpts | undefined {
-    const contentSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_CONFIRMED;
-    if (!contentSid) return undefined;
+    const picked = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_BOOKING_CONFIRMED', language);
+    if (!picked) return undefined;
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     return {
-        contentSid,
+        contentSid: picked.contentSid,
         contentVariables: {
             '1': templateName(customerName),
-            '2': templateGuestsLabel(guests),
+            '2': templateGuestsLabel(guests, picked.english),
             '3': dateLabel,
             '4': timeLabel,
         },
@@ -12963,16 +13019,17 @@ function buildBookingConfirmedTemplate(
 function buildBookingReminderTemplate(
     customerName: string | null | undefined,
     reservationTime: string | Date,
-    guests: number | null | undefined
+    guests: number | null | undefined,
+    language?: string | null
 ): WhatsAppTemplateOpts | undefined {
-    const contentSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_REMINDER;
-    if (!contentSid) return undefined;
+    const picked = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_BOOKING_REMINDER', language);
+    if (!picked) return undefined;
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     return {
-        contentSid,
+        contentSid: picked.contentSid,
         contentVariables: {
             '1': templateName(customerName),
-            '2': templateGuestsLabel(guests),
+            '2': templateGuestsLabel(guests, picked.english),
             '3': dateLabel,
             '4': timeLabel,
         },
@@ -12981,16 +13038,17 @@ function buildBookingReminderTemplate(
 function buildBookingUpdatedTemplate(
     customerName: string | null | undefined,
     reservationTime: string | Date,
-    guests: number | null | undefined
+    guests: number | null | undefined,
+    language?: string | null
 ): WhatsAppTemplateOpts | undefined {
-    const contentSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_UPDATED;
-    if (!contentSid) return undefined;
+    const picked = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_BOOKING_UPDATED', language);
+    if (!picked) return undefined;
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     return {
-        contentSid,
+        contentSid: picked.contentSid,
         contentVariables: {
             '1': templateName(customerName),
-            '2': templateGuestsLabel(guests),
+            '2': templateGuestsLabel(guests, picked.english),
             '3': dateLabel,
             '4': timeLabel,
         },
@@ -12999,16 +13057,17 @@ function buildBookingUpdatedTemplate(
 function buildBookingDeclinedTemplate(
     customerName: string | null | undefined,
     reservationTime: string | Date,
-    guests: number | null | undefined
+    guests: number | null | undefined,
+    language?: string | null
 ): WhatsAppTemplateOpts | undefined {
-    const contentSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_DECLINED;
-    if (!contentSid) return undefined;
+    const picked = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_BOOKING_DECLINED', language);
+    if (!picked) return undefined;
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     return {
-        contentSid,
+        contentSid: picked.contentSid,
         contentVariables: {
             '1': templateName(customerName),
-            '2': templateGuestsLabel(guests),
+            '2': templateGuestsLabel(guests, picked.english),
             '3': dateLabel,
             '4': timeLabel,
         },
@@ -13178,10 +13237,11 @@ function publicAppBaseUrl(): string | null {
 // rule. Apple Mail and Gmail (iOS/Android) honour the media query; clients
 // that ignore it (older Outlook) simply see the light version — still legible
 // on their default light chrome.
-function wrapEmailHtml(preheader: string, bodyBlocks: string): string {
+function wrapEmailHtml(preheader: string, bodyBlocks: string, language?: string | null): string {
     const base = publicAppBaseUrl();
     const identity = businessIdentity();
     const brandName = escapeHtml(identity.name);
+    const english = isEnglishGuest(language);
     const logoLight = base
         ? `<img class="logo-light" src="${base}/prenota/logo.png" alt="${brandName}" width="160" style="display:block;margin:0 auto;max-width:160px;height:auto;">`
         : '';
@@ -13193,9 +13253,9 @@ function wrapEmailHtml(preheader: string, bodyBlocks: string): string {
     // absolute base. When no base URL is configured (dev) we omit the link
     // rather than emit a broken href.
     const privacyLink = base
-        ? ` · <a href="${base}/privacy" style="color:#a8a29e;text-decoration:underline;">Informativa privacy</a>`
+        ? ` · <a href="${base}/privacy" style="color:#a8a29e;text-decoration:underline;">${english ? 'Privacy policy' : 'Informativa privacy'}</a>`
         : '';
-    return `<!DOCTYPE html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${brandName}</title>
+    return `<!DOCTYPE html><html lang="${english ? 'en' : 'it'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${brandName}</title>
 <meta name="color-scheme" content="light dark">
 <meta name="supported-color-schemes" content="light dark">
 <style>
@@ -13243,18 +13303,19 @@ function escapeHtml(s: string): string {
 // place so any future number change lives in a single spot. The WhatsApp link
 // uses wa.me (works in Gmail, iOS Mail, most clients); the phone link uses
 // tel: so a tap on mobile opens the dialer.
-function contactBlockHtml(): string {
+function contactBlockHtml(language?: string | null): string {
     const identity = businessIdentity();
+    const english = isEnglishGuest(language);
     return `
       <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 16px;">
         <tr>
           <td style="font-size:13px;line-height:1.6;color:#57534e;padding:8px 12px;border:1px solid #e7e5e4;border-radius:10px;background:#fbf9f4;">
-            <strong style="color:#292524;">Contattaci direttamente:</strong><br>
+            <strong style="color:#292524;">${english ? 'Contact us directly:' : 'Contattaci direttamente:'}</strong><br>
             📞 <a href="${phoneHref(identity.phone)}" style="color:#065f46;text-decoration:none;">${escapeHtml(identity.phone)}</a>
             &nbsp;·&nbsp;
             💬 <a href="${whatsappHref(identity.whatsapp)}" style="color:#065f46;text-decoration:none;">WhatsApp ${escapeHtml(identity.whatsapp)}</a>
             &nbsp;·&nbsp;
-            📍 <a href="${identity.mapsUrl}" style="color:#065f46;text-decoration:none;">Come raggiungerci</a>
+            📍 <a href="${identity.mapsUrl}" style="color:#065f46;text-decoration:none;">${english ? 'Get directions' : 'Come raggiungerci'}</a>
           </td>
         </tr>
       </table>
@@ -13353,22 +13414,75 @@ function buildBookingRequestEmail(params: {
     depositAmountCents?: number | null;
     depositCheckoutUrl?: string | null;
     depositPerPersonCents?: number | null;
+    language?: string | null;
 }): { subject: string; text: string; html: string } {
     const identity = businessIdentity();
     const { dateLabel, timeLabel } = formatBookingDateTime(params.reservationTime);
     const name = toTitleCase(params.customerName);
     const guestsNum = Math.max(1, Math.trunc(Number(params.guests) || 1));
-    const persone = guestsNum === 1 ? 'persona' : 'persone';
     const room = (params.roomName || '').trim();
-    const roomPart = room ? ` (${room})` : '';
-    const subject = `Abbiamo ricevuto la tua richiesta — ${dateLabel} ${timeLabel}`;
-    const greetingText = name ? `Ciao ${name},` : 'Ciao,';
+    const english = isEnglishGuest(params.language);
 
     const depositUrl = (params.depositCheckoutUrl || '').trim();
     const depositCents = Number(params.depositAmountCents || 0);
     const hasDeposit = depositUrl.length > 0 && depositCents > 0;
     const depositAmount = hasDeposit ? formatEuroMinor(depositCents) : '';
     const perPersonCents = Number(params.depositPerPersonCents || 0);
+
+    if (english) {
+        const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
+        const roomPart = room ? ` (${room})` : '';
+        const subject = `We've received your request — ${dateLabel} ${timeLabel}`;
+        const greetingText = name ? `Hi ${name},` : 'Hi,';
+        const perPersonPart = hasDeposit && perPersonCents > 0 ? ` (${formatEuroMinor(perPersonCents)} per person)` : '';
+        const depositTextBlock = hasDeposit
+            ? `\n\nTo confirm the table we need a deposit of ${depositAmount}${perPersonPart}.\nPay securely here: ${depositUrl}\n\nAs soon as we receive the payment we'll confirm your reservation.`
+            : "\n\nWe'll get back to you shortly to confirm it by email, phone or WhatsApp.";
+        const text = `${greetingText}
+
+we've received your reservation request:
+
+• Date: ${dateLabel}
+• Time: ${timeLabel}
+• Guests: ${guestsNum} ${guestsLabel}${room ? `\n• Requested room: ${room}` : ''}${depositTextBlock}
+
+For any change you can contact us:
+• Phone: ${identity.phone}
+• WhatsApp: ${identity.whatsapp}
+
+Thank you, see you soon!
+${identity.name}`;
+        const depositHtmlBlock = hasDeposit
+            ? `
+      <p style="margin:0 0 12px;font-size:14px;line-height:1.6;">To confirm the table we need a deposit of <strong>${escapeHtml(depositAmount)}</strong>${escapeHtml(perPersonPart)}.</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 16px;"><tr><td align="center">
+        <a href="${escapeHtml(depositUrl)}" style="display:inline-block;background:#065f46;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 28px;border-radius:10px;">Pay the deposit — ${escapeHtml(depositAmount)}</a>
+      </td></tr></table>
+      <p class="muted" style="margin:0 0 8px;font-size:13px;line-height:1.6;color:#57534e;">As soon as we receive the payment we'll confirm your reservation.</p>
+      <p class="muted" style="margin:0 0 8px;font-size:12px;line-height:1.6;color:#78716c;word-break:break-all;">If the button doesn't work, copy this link: <a href="${escapeHtml(depositUrl)}" style="color:#065f46;">${escapeHtml(depositUrl)}</a></p>
+    `
+            : `
+      <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">We'll get back to you shortly to confirm it by email, phone or WhatsApp.</p>
+    `;
+        const detailsHtml = `
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${greetingText}<br>we've received your reservation request.</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" class="detail-box" style="width:100%;background:#fbf9f4;border-radius:12px;padding:16px;margin:0 0 16px;">
+        <tr><td style="padding:6px 0;font-size:14px;"><strong>Date:</strong> ${escapeHtml(dateLabel)}</td></tr>
+        <tr><td style="padding:6px 0;font-size:14px;"><strong>Time:</strong> ${escapeHtml(timeLabel)}</td></tr>
+        <tr><td style="padding:6px 0;font-size:14px;"><strong>Guests:</strong> ${guestsNum} ${guestsLabel}${roomPart ? ` · ${escapeHtml(room)}` : ''}</td></tr>
+      </table>
+      ${depositHtmlBlock}
+      ${contactBlockHtml(params.language)}
+      <p style="margin:16px 0 0;font-size:14px;">Thank you, see you soon!<br><em>${escapeHtml(identity.name)}</em></p>
+    `;
+        const html = wrapEmailHtml(`Reservation request received for ${dateLabel} at ${timeLabel}`, detailsHtml, params.language);
+        return { subject, text, html };
+    }
+
+    const persone = guestsNum === 1 ? 'persona' : 'persone';
+    const roomPart = room ? ` (${room})` : '';
+    const subject = `Abbiamo ricevuto la tua richiesta — ${dateLabel} ${timeLabel}`;
+    const greetingText = name ? `Ciao ${name},` : 'Ciao,';
     const perPersonPart = hasDeposit && perPersonCents > 0 ? ` (${formatEuroMinor(perPersonCents)} a persona)` : '';
 
     const depositTextBlock = hasDeposit
@@ -13426,18 +13540,40 @@ function buildBookingConfirmationEmail(params: {
     reservationTime: string | Date;
     guests: number;
     roomName?: string | null;
+    language?: string | null;
 }): { subject: string; text: string; html: string } {
     // DB-sourced confirmation time → read a bare naive string as UTC (see
     // asUtcInstant). The request email above keeps the raw web-form input (#85).
     const identity = businessIdentity();
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(params.reservationTime));
     const guestsNum = Math.max(1, Math.trunc(Number(params.guests) || 1));
-    const persone = guestsNum === 1 ? 'persona' : 'persone';
     const room = (params.roomName || '').trim();
-    const roomPart = room ? ` · ${escapeHtml(room)}` : '';
     const name = toTitleCase(params.customerName);
+    const shortConfirm = buildConfirmationMessage(params.customerName, params.reservationTime, params.guests, params.roomName ?? null, params.language);
+
+    if (isEnglishGuest(params.language)) {
+        const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
+        const roomPart = room ? ` · ${escapeHtml(room)}` : '';
+        const subject = `Booking confirmed — ${dateLabel} ${timeLabel}`;
+        const text = `${shortConfirm}\n\nNeed to change or cancel? Reply to this email or contact us:\n• Phone: ${identity.phone}\n• WhatsApp: ${identity.whatsapp}\n• Get directions: ${identity.mapsUrl}`;
+        const detailsHtml = `
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Hi ${escapeHtml(name)},` : 'Hi,'}<br>your reservation is <strong>confirmed</strong>.</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" class="confirm-box" style="width:100%;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:12px;padding:16px;margin:0 0 16px;">
+        <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Date:</strong> ${escapeHtml(dateLabel)}</td></tr>
+        <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Time:</strong> ${escapeHtml(timeLabel)}</td></tr>
+        <tr><td style="padding:6px 0;font-size:14px;color:#065f46;"><strong>Guests:</strong> ${guestsNum} ${guestsLabel}${roomPart}</td></tr>
+      </table>
+      <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">We look forward to seeing you. If you need to change or cancel, reply to this email or contact us directly.</p>
+      ${contactBlockHtml(params.language)}
+      <p style="margin:16px 0 0;font-size:14px;">See you soon!<br><em>${escapeHtml(identity.name)}</em></p>
+    `;
+        const html = wrapEmailHtml(`Booking confirmed for ${dateLabel} at ${timeLabel}`, detailsHtml, params.language);
+        return { subject, text, html };
+    }
+
+    const persone = guestsNum === 1 ? 'persona' : 'persone';
+    const roomPart = room ? ` · ${escapeHtml(room)}` : '';
     const subject = `Conferma prenotazione — ${dateLabel} ${timeLabel}`;
-    const shortConfirm = buildConfirmationMessage(params.customerName, params.reservationTime, params.guests, params.roomName ?? null);
     const text = `${shortConfirm}\n\nSe hai bisogno di modificare o annullare puoi rispondere a questa email oppure contattarci:\n• Telefono: ${identity.phone}\n• WhatsApp: ${identity.whatsapp}\n• Come raggiungerci: ${identity.mapsUrl}`;
 
     const detailsHtml = `
@@ -13462,15 +13598,35 @@ function buildBookingDeclineEmail(params: {
     customerName: string;
     reservationTime: string | Date;
     guests: number;
+    language?: string | null;
 }): { subject: string; text: string; html: string } {
     const identity = businessIdentity();
     // Orario dal DB → stringa naive letta come UTC (asUtcInstant, vedi #85).
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(params.reservationTime));
     const guestsNum = Math.max(1, Math.trunc(Number(params.guests) || 1));
-    const persone = guestsNum === 1 ? 'persona' : 'persone';
     const name = toTitleCase(params.customerName);
+    const text = buildDeclineMessage(params.customerName, params.reservationTime, params.guests, params.language);
+
+    if (isEnglishGuest(params.language)) {
+        const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
+        const subject = `Booking not available — ${dateLabel} ${timeLabel}`;
+        const detailsHtml = `
+      <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Hi ${escapeHtml(name)},` : 'Hi,'}<br>unfortunately we weren't able to confirm your request.</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" class="detail-box" style="width:100%;background:#fbf9f4;border-radius:12px;padding:16px;margin:0 0 16px;">
+        <tr><td style="padding:6px 0;font-size:14px;"><strong>Date:</strong> ${escapeHtml(dateLabel)}</td></tr>
+        <tr><td style="padding:6px 0;font-size:14px;"><strong>Time:</strong> ${escapeHtml(timeLabel)}</td></tr>
+        <tr><td style="padding:6px 0;font-size:14px;"><strong>Guests:</strong> ${guestsNum} ${guestsLabel}</td></tr>
+      </table>
+      <p class="muted" style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#57534e;">To check another date or time, reply to this email or contact us directly.</p>
+      ${contactBlockHtml(params.language)}
+      <p style="margin:16px 0 0;font-size:14px;">Thank you, see you soon!<br><em>${escapeHtml(identity.name)}</em></p>
+    `;
+        const html = wrapEmailHtml(`Reservation request not available for ${dateLabel} at ${timeLabel}`, detailsHtml, params.language);
+        return { subject, text, html };
+    }
+
+    const persone = guestsNum === 1 ? 'persona' : 'persone';
     const subject = `Prenotazione non disponibile — ${dateLabel} ${timeLabel}`;
-    const text = buildDeclineMessage(params.customerName, params.reservationTime, params.guests);
 
     const detailsHtml = `
       <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Ciao ${escapeHtml(name)},` : 'Ciao,'}<br>purtroppo non ci è stato possibile confermare la tua richiesta.</p>
@@ -19816,8 +19972,10 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                 depositPolicy?.perPersonCents
               )
             : confirmedNow
-                ? buildConfirmationMessage(customer_name, created.reservation_time, guestsNum, ackRoomName)
-                : `Ciao ${toTitleCase(customer_name)}, abbiamo ricevuto la tua richiesta di prenotazione per ${guestsLabel} il ${dateLabel} alle ${time}. Ti ricontatteremo a breve per confermarla. Grazie!`;
+                ? buildConfirmationMessage(customer_name, created.reservation_time, guestsNum, ackRoomName, language)
+                : isEnglishGuest(language)
+                    ? `Hi ${toTitleCase(customer_name)}, we've received your reservation request for ${guestsLabel} on ${dateLabel} at ${time}. We'll get back to you shortly to confirm it. Thank you!`
+                    : `Ciao ${toTitleCase(customer_name)}, abbiamo ricevuto la tua richiesta di prenotazione per ${guestsLabel} il ${dateLabel} alle ${time}. Ti ricontatteremo a breve per confermarla. Grazie!`;
 
         // Pick the right WA template for the branch. When either env var is
         // unset, or the deposit token can't be parsed, waTemplate stays
@@ -19833,15 +19991,15 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                 depositCheckoutUrl
             );
         } else if (confirmedNow) {
-            waTemplate = buildBookingConfirmedTemplate(customer_name, created.reservation_time, guestsNum);
+            waTemplate = buildBookingConfirmedTemplate(customer_name, created.reservation_time, guestsNum, language);
         } else {
-            const bookingReceivedSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_RECEIVED;
-            if (bookingReceivedSid) {
+            const pickedReceived = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_BOOKING_RECEIVED', language);
+            if (pickedReceived) {
                 waTemplate = {
-                    contentSid: bookingReceivedSid,
+                    contentSid: pickedReceived.contentSid,
                     contentVariables: {
                         '1': toTitleCase(customer_name),
-                        '2': guestsLabel,
+                        '2': pickedReceived.english ? `${guestsNum} ${guestsNum === 1 ? 'guest' : 'guests'}` : guestsLabel,
                         '3': dateLabel,
                         '4': time,
                     },
@@ -19872,6 +20030,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                     depositAmountCents: depositAmountCents || null,
                     depositCheckoutUrl,
                     depositPerPersonCents: depositPolicy?.perPersonCents ?? null,
+                    language,
                   })
                 : confirmedNow
                 ? buildBookingConfirmationEmail({
@@ -19879,6 +20038,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                     reservationTime: created.reservation_time,
                     guests: guestsNum,
                     roomName: ackRoomName,
+                    language,
                   })
                 : buildBookingRequestEmail({
                     customerName: toTitleCase(customer_name),
@@ -19886,6 +20046,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                     guests: guestsNum,
                     roomName: requestedRoomName,
                     notes: userNote,
+                    language,
                   }),
             kind: 'ack',
         }).catch(err => console.error('[public-booking] ack dispatch failed:', err?.message || err));
@@ -20117,6 +20278,19 @@ app.get('/prenota/logo.png', (_req, res) => {
 app.get('/prenota/logo-dark.png', (_req, res) => {
     res.set('Cache-Control', 'public, max-age=86400');
     res.sendFile(path.join(process.cwd(), 'public', 'logo-vf-dark.png'));
+});
+
+// Traduzioni del widget /prenota (Card dev board #33, IT/EN). Servite
+// esplicitamente come i loghi qui sopra, per lo stesso motivo: non tutta
+// public/ va esposta. Non passano da withPublicTenant perché non dipendono
+// dal ristorante — è testo di interfaccia, non contenuto configurabile.
+// Percorso e formato (`/locales/{{lng}}/{{ns}}.json`) sono la convenzione di
+// i18next-http-backend apposta — è la stessa che legge i18n/config.ts: la
+// SPA, quando una schermata migrerà a react-i18next, punta già qui.
+app.get('/locales/:lang/prenota.json', (req, res) => {
+    if (req.params.lang !== 'it' && req.params.lang !== 'en') return res.status(404).end();
+    res.set('Cache-Control', 'public, max-age=300');
+    res.sendFile(path.join(process.cwd(), 'public', 'locales', req.params.lang, 'prenota.json'));
 });
 
 // Pagina di prenotazione per slug (Fase C3): stesso HTML di /prenota — è il
