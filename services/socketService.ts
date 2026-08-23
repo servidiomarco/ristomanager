@@ -69,8 +69,17 @@ export class SocketService {
       // broadcast di dominio partono SOLO verso quella stanza — senza questo
       // il ristorante A vedrebbe in tempo reale le prenotazioni di B.
       // tenantId è garantito dal middleware auth qui sopra (fallback 1).
+      //
+      // PLATFORM_ADMIN escluso (D2): sta sopra i tenant ma il suo utente ha
+      // un tenant_id storico, e senza questa guardia il suo socket entrava
+      // nella stanza di quel ristorante — campanella e toast "Nuova
+      // prenotazione" del Frantoio mentre lavorava nel pannello SaaS. I dati
+      // di un tenant li vede solo impersonando, con un token da OWNER che
+      // entra nella stanza per la via normale.
       const tenantId = socket.user!.tenantId;
-      socket.join(`tenant:${tenantId}`);
+      if (String(socket.user!.role) !== 'PLATFORM_ADMIN') {
+        socket.join(`tenant:${tenantId}`);
+      }
 
       socket.emit('connection:acknowledged', socket.id);
 
