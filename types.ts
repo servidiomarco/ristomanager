@@ -253,6 +253,9 @@ export interface Reservation {
   latest_payment_delivery_channel?: ConfirmationChannel | null;
   latest_payment_created_at?: string | null;
   latest_payment_completed_at?: string | null;
+  // Card #32 — lingua dell'ospite (es. 'it', 'en'). Eredita dal cliente in
+  // rubrica quando nota; nessun canale la traduce ancora, è solo il dato.
+  language?: string | null;
 }
 
 export type ConfirmationStatus = 'queued' | 'sent' | 'delivered' | 'failed' | 'undelivered';
@@ -576,6 +579,9 @@ export interface Customer {
   blacklist_reason?: string | null;
   consent_marketing?: boolean | null;
   consent_marketing_updated_at?: string | null;
+  // Card #32 — rilevata dal primo canale che la vede (widget /prenota,
+  // prefisso WhatsApp, ElevenLabs), poi vince su ogni altra euristica.
+  language?: string | null;
 }
 
 // ============================================

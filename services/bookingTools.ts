@@ -25,6 +25,7 @@
 // il messaggio al cliente. Solo i guasti veri restano 5xx.
 
 import { Shift } from '../types.js';
+import { normalizeLanguageCode, detectLanguageFromPhonePrefix } from '../utils/language.js';
 
 // Il tenant arriva come primo parametro di ogni tool (Fase C2): i canali
 // self-service non hanno JWT, quindi è l'adattatore del canale a risolverlo
@@ -110,7 +111,7 @@ export interface BookingToolsDeps {
     cancelVoiceReservation: (tenantId: number, p: any) => Promise<any>;
     modifyVoiceReservation: (tenantId: number, p: any) => Promise<any>;
     recordVoiceCall: (tenantId: number, p: any) => Promise<any>;
-    upsertCustomerFromReservation: (tenantId: number, name: string, phone: string, a: any, b: any) => Promise<any>;
+    upsertCustomerFromReservation: (tenantId: number, name: string, phone: string, a: any, b: any, language?: string | null) => Promise<string | null>;
     /** Card #27 — true se il numero appartiene a un cliente in blacklist. */
     isPhoneBlacklisted: (tenantId: number, phone: string) => Promise<boolean>;
     /** Comportamento della blacklist per fonte, deciso dal tenant. */
@@ -269,6 +270,9 @@ export interface CreateReservationParams {
     notes?: any;
     location_preference?: any;
     conversation_id?: string;
+    /** Card #32 — lingua rilevata dal canale: payload ElevenLabs per la voce
+     *  (se disponibile), nessuna per WhatsApp (si usa il prefisso telefonico). */
+    language?: any;
 }
 
 // Quando il modello salta la raccolta del nome riempie il campo obbligatorio
@@ -304,6 +308,16 @@ export async function createReservation(
     const locationPreference = rawLocation === 'INDOOR' || rawLocation === 'OUTDOOR'
         ? (rawLocation as 'INDOOR' | 'OUTDOOR')
         : undefined;
+
+    // Card #32 — lingua: se il canale ce la passa esplicitamente (voce, dal
+    // payload ElevenLabs) vince quella; il canale WhatsApp non ha un segnale
+    // esplicito, quindi si ripiega sul prefisso del numero. La voce non ha
+    // questo fallback: senza language detection di ElevenLabs resta null e la
+    // eredita dal cliente in rubrica (vedi upsertCustomerFromReservation più
+    // sotto).
+    const explicitLanguage = normalizeLanguageCode(p.language);
+    const detectedLanguage = explicitLanguage
+        ?? (channel.id === 'whatsapp' && phoneRaw ? detectLanguageFromPhonePrefix(phoneRaw) : null);
 
     if (!customerName) {
         return fail('invalid_customer_name', 'Non ho colto il nome per la prenotazione. Può ripetermi il nome del cliente?');
@@ -396,6 +410,7 @@ export async function createReservation(
             conversation_id: conversationId,
             location_preference: locationPreference,
             deposit_required: depositRequired,
+            language: detectedLanguage,
         });
 
         // Caparra: ordine + riga payment_requests + invio del link. Se il
@@ -462,8 +477,17 @@ export async function createReservation(
         }
 
         // Rubrica: il canale self-service è il modo più comune in cui un
-        // cliente nuovo compare la prima volta nel sistema.
-        await d.upsertCustomerFromReservation(tenantId, customerName, phoneRaw, null, null);
+        // cliente nuovo compare la prima volta nel sistema. Card #32: se il
+        // cliente ha già una lingua nota e questa prenotazione non ne aveva
+        // una, la eredita; altrimenti (o se combaciano) non serve altro.
+        const resolvedLanguage = await d.upsertCustomerFromReservation(tenantId, customerName, phoneRaw, null, null, detectedLanguage);
+        if (resolvedLanguage && resolvedLanguage !== detectedLanguage) {
+            d.queryWithRetry(
+                `UPDATE reservations SET language = $1 WHERE id = $2 AND tenant_id = $3`,
+                [resolvedLanguage, created.id, tenantId]
+            ).catch((err: any) => console.warn(`${channel.logPrefix} language backfill failed:`, err?.message || err));
+            created.language = resolvedLanguage;
+        }
 
         d.logActivity(
             tenantId,
