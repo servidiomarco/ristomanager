@@ -1851,10 +1851,18 @@ const App: React.FC = () => {
             aria-expanded e il title. */}
         <div className={`flex ${sidebarCollapsed ? 'flex-col items-center gap-1 pt-4 pb-2' : 'h-16 items-center px-4'}`}>
           <div className="flex items-center min-w-0">
-            <div className="bg-[var(--ds-action-bg)] h-10 w-10 rounded-[14px] inline-flex items-center justify-center flex-shrink-0">
-               <ChefHat className="text-[var(--ds-action-fg)] h-5 w-5" />
-            </div>
-            {!sidebarCollapsed && <span className="ml-3 font-semibold text-[19px] text-[var(--ds-text-primary)] tracking-[-0.015em]">{PLATFORM_NAME}</span>}
+            {/* Wordmark Sympotia a sidebar aperta; chiusa non ci sta, resta il
+                quadrato. Due img nero/bianco: il tema le scambia via CSS. */}
+            {sidebarCollapsed ? (
+              <div className="bg-[var(--ds-action-bg)] h-10 w-10 rounded-[14px] inline-flex items-center justify-center flex-shrink-0">
+                <ChefHat className="text-[var(--ds-action-fg)] h-5 w-5" />
+              </div>
+            ) : (
+              <>
+                <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-7 w-auto dark:hidden" />
+                <img src="/logo-sympotia-white.svg" alt={PLATFORM_NAME} className="hidden h-7 w-auto dark:block" />
+              </>
+            )}
           </div>
           <button
             type="button"
@@ -2098,10 +2106,8 @@ const App: React.FC = () => {
             bottom-sheet backdrop (z-[29]) has to dim the header there. */}
         <header className="flex-shrink-0 h-16 md:h-[72px] m-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] z-10 md:z-30 flex items-center justify-between px-3 md:px-4">
            <div className="flex items-center gap-2.5 lg:hidden">
-              <div className="bg-[var(--ds-action-bg)] h-9 w-9 rounded-[12px] inline-flex items-center justify-center">
-                <ChefHat className="text-[var(--ds-action-fg)] h-[18px] w-[18px]" />
-              </div>
-              <span className="font-semibold text-[17px] tracking-[-0.015em] text-[var(--ds-text-primary)]">{PLATFORM_NAME}</span>
+              <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-6 w-auto dark:hidden" />
+              <img src="/logo-sympotia-white.svg" alt={PLATFORM_NAME} className="hidden h-6 w-auto dark:block" />
            </div>
 
            {/* Desktop date/time/shift control group. Uses flex-1 (not a fixed
