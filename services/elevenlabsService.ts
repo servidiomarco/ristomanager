@@ -682,6 +682,9 @@ export interface VoiceReservationInput {
     // deposit is paid, same rule as the web channel. The payment-completion
     // webhook flips PENDING→CONFIRMED.
     deposit_required?: boolean;
+    // Card #32 — lingua rilevata dal canale (payload ElevenLabs, prefisso
+    // WhatsApp). Null quando nessun segnale è disponibile.
+    language?: string | null;
 }
 
 export interface VoiceReservationOutput {
@@ -697,6 +700,7 @@ export interface VoiceReservationOutput {
     table_name: string | null;
     room_name: string | null;
     room_location: RoomLocation | null;
+    language?: string | null;
 }
 
 /**
@@ -754,9 +758,9 @@ export async function createVoiceReservation(
         INSERT INTO reservations (
             customer_name, reservation_time, shift, guests, children, phone,
             notes, payment_status, arrival_status, source, requires_review, table_id,
-            reservation_status, tenant_id
+            reservation_status, tenant_id, language
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', 'WAITING', $8, true, $9, $10, $11)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', 'WAITING', $8, true, $9, $10, $11, $12)
         RETURNING *
     `, [
         input.customer_name.trim(),
@@ -769,7 +773,8 @@ export async function createVoiceReservation(
         ReservationSource.VOICE,
         assigned?.id ?? null,
         input.deposit_required ? 'PENDING' : 'CONFIRMED',
-        tenantId
+        tenantId,
+        input.language ?? null,
     ]);
 
     const row = result.rows[0];

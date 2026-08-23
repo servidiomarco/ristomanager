@@ -175,6 +175,7 @@ import {
     listClosures,
     formatSlotListItalian,
 } from './utils/slots.js';
+import { normalizeLanguageCode, detectLanguageFromPhonePrefix } from './utils/language.js';
 
 const app = express();
 // Railway terminates TLS at a single upstream proxy and forwards via
@@ -1503,7 +1504,14 @@ app.post('/webhook/t/:tenantToken/elevenlabs/lookup-customer', async (req, res) 
 const elevenLabsParams = (req: express.Request): Record<string, any> => {
     const body: any = req.body || {};
     const p = (body.parameters && typeof body.parameters === 'object') ? body.parameters : body;
-    return { ...p, conversation_id: body.conversation_id || p.conversation_id };
+    return {
+        ...p,
+        conversation_id: body.conversation_id || p.conversation_id,
+        // Card #32 — la lingua rilevata da ElevenLabs può arrivare sotto nomi
+        // diversi a seconda della versione dell'agente; create-reservation la
+        // normalizza e la ignora del tutto se non è nel payload.
+        language: p.language ?? p.detected_language ?? p.language_code ?? body.language_code,
+    };
 };
 
 /** Interruttori del canale telefonico. Restituisce true se si può procedere. */
@@ -2280,13 +2288,23 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
 
         // Auto-save contact to the customer rubrica if a phone was provided
         // and no matching customer exists. Side-effect — never fails the route.
-        await upsertCustomerFromReservation(
+        // Card #32 — lo staff non raccoglie una lingua qui: se il cliente ne ha
+        // già una nota, la prenotazione appena creata la eredita.
+        const resolvedLanguage = await upsertCustomerFromReservation(
             req.tenantId!,
             customer_name,
             phone,
             email,
-            req.user ? { userId: req.user.userId, email: req.user.email } : null
+            req.user ? { userId: req.user.userId, email: req.user.email } : null,
+            null
         );
+        if (resolvedLanguage && !newReservation.language) {
+            queryWithRetry(
+                `UPDATE reservations SET language = $1 WHERE id = $2 AND tenant_id = $3`,
+                [resolvedLanguage, newReservation.id, req.tenantId!]
+            ).catch(err => console.warn('POST /reservations language backfill failed:', err));
+            newReservation.language = resolvedLanguage;
+        }
         // Propagate marketing consent to the (now-existing) customer record.
         await setCustomerMarketingConsent(req.tenantId!, phone, consentMarketing);
 
@@ -8538,37 +8556,58 @@ const normalizeCustomerName = (raw: string): string => {
 // PUBLIC_TENANT_ID dai canali pubblici (booking web, WhatsApp, voce). Senza
 // filtro, il "cerca per telefono" aggancerebbe la scheda di un altro
 // ristorante e il cliente non verrebbe mai creato in rubrica.
+//
+// Card #32 — `reservationLanguage` è la lingua eventualmente rilevata dal
+// canale su QUESTA prenotazione. Ritorna la lingua che il cliente in rubrica
+// ha ORA (dopo l'eventuale aggiornamento), così chi chiama può riportarla
+// sulla prenotazione se questa non ne aveva una — è la metà "la prenotazione
+// eredita dal cliente" del giro; l'altra metà ("il cliente eredita dalla
+// prenotazione") è l'UPDATE qui sotto quando il cliente non aveva ancora una
+// lingua. Un cliente con una lingua già nota vince sempre: non si sovrascrive
+// un dato già buono con l'euristica di un canale.
 const upsertCustomerFromReservation = async (
     tenantId: number,
     customerName: string | null | undefined,
     phone: string | null | undefined,
     email: string | null | undefined,
-    actor: { userId: number; email: string } | null | undefined
-): Promise<void> => {
+    actor: { userId: number; email: string } | null | undefined,
+    reservationLanguage?: string | null
+): Promise<string | null> => {
     try {
-        if (!phone || !String(phone).trim()) return;
-        if (!customerName || !String(customerName).trim()) return;
+        if (!phone || !String(phone).trim()) return null;
+        if (!customerName || !String(customerName).trim()) return null;
         const trimmedPhone = String(phone).trim();
         const phoneDigits = trimmedPhone.replace(/\D/g, '');
-        if (!phoneDigits) return;
+        if (!phoneDigits) return null;
 
         const existing = await queryWithRetry(
-            `SELECT id FROM customers
+            `SELECT id, language FROM customers
              WHERE tenant_id = $2
                AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1
              LIMIT 1`,
             [phoneDigits, tenantId]
         );
-        if (existing.rows.length > 0) return;
+        if (existing.rows.length > 0) {
+            const row = existing.rows[0];
+            if (!row.language && reservationLanguage) {
+                await queryWithRetry(
+                    `UPDATE customers SET language = $1 WHERE id = $2 AND tenant_id = $3`,
+                    [reservationLanguage, row.id, tenantId]
+                );
+                return reservationLanguage;
+            }
+            return row.language ?? null;
+        }
 
         const inserted = await queryWithRetry(
-            `INSERT INTO customers (tenant_id, name, phone, email)
-             VALUES ($4, $1, $2, $3)
+            `INSERT INTO customers (tenant_id, name, phone, email, language)
+             VALUES ($5, $1, $2, $3, $4)
              RETURNING id, name`,
             [
                 normalizeCustomerName(String(customerName).trim()),
                 trimmedPhone,
                 email && String(email).trim() ? String(email).trim() : null,
+                reservationLanguage ?? null,
                 tenantId,
             ]
         );
@@ -8587,8 +8626,10 @@ const upsertCustomerFromReservation = async (
                 { source: 'reservation_autosave' }
             );
         }
+        return reservationLanguage ?? null;
     } catch (err) {
         console.error('upsertCustomerFromReservation failed:', err);
+        return null;
     }
 };
 
@@ -8725,7 +8766,7 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
                 `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
                         preferred_table_id, preferences_notes, dietary_notes, is_vip,
                         is_blacklisted, blacklist_reason,
-                        consent_marketing, consent_marketing_updated_at,
+                        consent_marketing, consent_marketing_updated_at, language,
                         ${noShowSubquery}
                  FROM customers c
                  WHERE c.tenant_id = $3
@@ -8741,7 +8782,7 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
             `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
                     preferred_table_id, preferences_notes, dietary_notes, is_vip,
                     is_blacklisted, blacklist_reason,
-                    consent_marketing, consent_marketing_updated_at,
+                    consent_marketing, consent_marketing_updated_at, language,
                     ${noShowSubquery}
              FROM customers c
              WHERE c.tenant_id = $2
@@ -8813,7 +8854,7 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
         if (phoneDigits) {
             const existing = await queryWithRetry(
                 `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
-                        preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason
+                        preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason, language
                  FROM customers
                  WHERE tenant_id = $2
                    AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1
@@ -8829,7 +8870,7 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
             `INSERT INTO customers (tenant_id, name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason)
              VALUES ($12, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $13, $14)
              RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
-                       preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason`,
+                       preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason, language`,
             [
                 normalizeCustomerName(String(name).trim()),
                 trimmedPhone || null,
@@ -8954,7 +8995,7 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
                     updated_at = CURRENT_TIMESTAMP
                  WHERE id = $14 AND tenant_id = $15
                  RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
-                           preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason`,
+                           preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason, language`,
                 [
                     newName,
                     newPhone,
@@ -13769,6 +13810,22 @@ async function logInboundMessage(params: {
             ]
         );
         const row = result.rows[0] ?? null;
+
+        // Card #32 — un messaggio WhatsApp è il primo segnale di lingua per
+        // molti clienti che non passano mai dal booking web o dalla voce.
+        // Euristica sul prefisso, solo se il cliente esiste già e non ha
+        // ancora una lingua: non deve sovrascrivere un dato più affidabile
+        // (selettore esplicito sul widget, o quanto rilevato da ElevenLabs).
+        if (params.channel === 'whatsapp') {
+            const detectedLanguage = detectLanguageFromPhonePrefix(params.from);
+            queryWithRetry(
+                `UPDATE customers SET language = $1
+                 WHERE tenant_id = $2
+                   AND language IS NULL
+                   AND regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $3`,
+                [detectedLanguage, params.tenantId, fromDigits]
+            ).catch(err => console.warn('[inbound-log] language update failed:', err?.message || err));
+        }
 
         // Wake up the PWA even a app chiusa: senza una push non arriva mai
         // il segnale al service worker, e il badge Inbox non si aggiorna.
@@ -19401,6 +19458,10 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
         const customer_name = typeof body.customer_name === 'string' ? normalizeCustomerName(body.customer_name.trim()) : '';
         const phone = typeof body.phone === 'string' ? body.phone.trim() : '';
         const email = typeof body.email === 'string' ? body.email.trim() : '';
+        // Card #32 — la pagina manda la lingua del browser (navigator.language)
+        // o la scelta esplicita dal selettore IT/EN; nessuna delle due traduce
+        // ancora nulla, è solo il dato che comincia a fluire.
+        const language = normalizeLanguageCode(body.language);
         const date = typeof body.date === 'string' ? body.date : '';
         const time = typeof body.time === 'string' ? body.time : '';
         const shift = body.shift;
@@ -19596,9 +19657,9 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
                 customer_name, reservation_time, shift, guests, children,
                 table_id, notes, email, phone, payment_status, arrival_status,
                 reservation_status, source, requires_review,
-                consent_data_health, consent_updated_at, tenant_id
+                consent_data_health, consent_updated_at, tenant_id, language
             )
-            VALUES ($1, $2, $3, $4, $14, $10, $5, $6, $7, 'PENDING', 'WAITING', $11, 'GOOGLE', $12, $8, $9, $13)
+            VALUES ($1, $2, $3, $4, $14, $10, $5, $6, $7, 'PENDING', 'WAITING', $11, 'GOOGLE', $12, $8, $9, $13, $15)
             RETURNING *`,
             [customer_name, reservation_time, shift, Math.trunc(guestsNum), notes, emailNormalized, phoneE164,
              consentHealth, consentUpdatedAt,
@@ -19606,7 +19667,8 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
              autoConfirmed ? 'CONFIRMED' : 'PENDING',
              !autoConfirmed,
              tenantId,
-             childrenNum]
+             childrenNum,
+             language]
         );
         const created = result.rows[0];
 
@@ -19638,8 +19700,17 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
         // Auto-save the booker into the rubrica so the contact appears even if
         // staff never edit this booking from the internal app. Skipped for
         // email-only bookings — upsertCustomerFromReservation early-returns
-        // without a phone.
-        await upsertCustomerFromReservation(tenantId, customer_name, phoneE164, emailNormalized, null);
+        // without a phone. Card #32: se il cliente ha già una lingua nota e
+        // questa prenotazione non ne aveva una (selettore non toccato, browser
+        // non rilevabile), la eredita.
+        const resolvedLanguage = await upsertCustomerFromReservation(tenantId, customer_name, phoneE164, emailNormalized, null, language);
+        if (resolvedLanguage && !created.language) {
+            queryWithRetry(
+                `UPDATE reservations SET language = $1 WHERE id = $2 AND tenant_id = $3`,
+                [resolvedLanguage, created.id, tenantId]
+            ).catch(err => console.warn('[public-booking] language backfill failed:', err));
+            created.language = resolvedLanguage;
+        }
 
         // Notify staff dashboards in real time.
         if (socketService) {
