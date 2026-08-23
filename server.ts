@@ -20119,6 +20119,18 @@ app.get('/prenota/logo-dark.png', (_req, res) => {
     res.sendFile(path.join(process.cwd(), 'public', 'logo-vf-dark.png'));
 });
 
+// Traduzioni del widget /prenota (Card dev board #33, IT/EN). Servite
+// esplicitamente come i loghi qui sopra, per lo stesso motivo: non tutta
+// public/ va esposta. Non passano da withPublicTenant perché non dipendono
+// dal ristorante — è testo di interfaccia, non contenuto configurabile.
+// Quando la SPA migrerà a react-i18next leggerà questi stessi file come
+// asset statici del proprio build, senza toccare questa rotta.
+app.get('/locales/:lang/prenota.json', (req, res) => {
+    if (req.params.lang !== 'it' && req.params.lang !== 'en') return res.status(404).end();
+    res.set('Cache-Control', 'public, max-age=300');
+    res.sendFile(path.join(process.cwd(), 'public', 'locales', req.params.lang, 'prenota.json'));
+});
+
 // Pagina di prenotazione per slug (Fase C3): stesso HTML di /prenota — è il
 // JS inline della pagina a leggere lo slug dal path e a instradare le sue
 // chiamate su /public/<slug>/*. Registrata DOPO /prenota/logo*.png:
