@@ -155,6 +155,24 @@ button:disabled { cursor: not-allowed; }
 }
 .header__pill:hover { background: var(--ds-public-header-line); }
 .header__pill svg { width: 15px; height: 15px; flex-shrink: 0; }
+/* Card #32 — selettore lingua: solo la scelta, nessuna traduzione. */
+.lang-toggle {
+    display: inline-flex; gap: 2px; padding: 2px;
+    border-radius: 999px;
+    background: var(--ds-public-header-pill);
+    border: 1px solid var(--ds-public-header-line);
+}
+.lang-toggle__btn {
+    min-height: 30px; padding: 0 12px;
+    border: 0; border-radius: 999px;
+    background: transparent; color: inherit;
+    font-size: 12px; font-weight: 600; letter-spacing: 0.02em;
+    opacity: 0.64;
+}
+.lang-toggle__btn[aria-pressed="true"] {
+    background: var(--ds-public-header-line);
+    opacity: 1;
+}
 .header__title {
     margin: 22px 0 0;
     font-size: clamp(28px, 6vw, 40px);
@@ -650,6 +668,12 @@ a { color: var(--ds-pending-text); }
                 </span>
             </a>
             <nav class="header__links" id="headerLinks"></nav>
+            <!-- Card #32 — selettore predisposto per quando arriverà la
+                 traduzione: oggi salva solo la scelta, non cambia una parola. -->
+            <div class="lang-toggle" id="langToggle" role="group" aria-label="Lingua">
+                <button type="button" class="lang-toggle__btn" data-lang="it">IT</button>
+                <button type="button" class="lang-toggle__btn" data-lang="en">EN</button>
+            </div>
         </div>
         <h1 class="header__title" id="pageTitle">Prenota un tavolo</h1>
     </div>
@@ -1065,7 +1089,26 @@ a { color: var(--ds-pending-text); }
         calendar: new Map(),   // 'YYYY-MM-DD' → 'open' | 'busy' | 'closed'
         monthCursor: null,     // primo giorno del mese mostrato
         openPanel: null,
+        // Card #32 — lingua del browser come default, il selettore in header
+        // la può cambiare esplicitamente. Solo il dato: nessuna traduzione
+        // qui, arriva nelle card successive.
+        language: (navigator.language || '').slice(0, 2).toLowerCase() === 'en' ? 'en' : 'it',
     };
+
+    // ---- Selettore lingua (predisposto, non traduce nulla) -----------------
+    const langButtons = Array.from(document.querySelectorAll('.lang-toggle__btn'));
+    const renderLangToggle = () => {
+        langButtons.forEach(btn => {
+            btn.setAttribute('aria-pressed', String(btn.dataset.lang === state.language));
+        });
+    };
+    langButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            state.language = btn.dataset.lang;
+            renderLangToggle();
+        });
+    });
+    renderLangToggle();
 
     // Roma, non il fuso del telefono: un cliente che prenota dall'estero
     // vedrebbe altrimenti "oggi" sbagliato e slot già passati come liberi.
@@ -1599,6 +1642,7 @@ a { color: var(--ds-pending-text); }
                     children: state.children,
                     room_id: state.roomId,
                     notes, website,
+                    language: state.language,
                 }),
             });
             const data = await r.json().catch(() => ({}));
