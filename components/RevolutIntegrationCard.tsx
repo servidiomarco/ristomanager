@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Loader2, CreditCard, Save, Eye, EyeOff } from 'lucide-react';
-import { CookingPotLoader } from './CookingPotLoader';
+import { Loader } from './Loader';
 import {
     getRevolutIntegration,
     updateRevolutIntegration,
@@ -121,7 +121,7 @@ export const RevolutIntegrationCard: React.FC<Props> = ({ showToast }) => {
     if (loading) {
         return (
             <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
-                <CookingPotLoader label="Caricamento…" size={40} />
+                <Loader label="Caricamento…" size={40} />
             </div>
         );
     }

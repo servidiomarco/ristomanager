@@ -10,7 +10,7 @@ import { ProfiloSheet } from './components/ProfiloSheet';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { BookingChannelsManager } from './components/BookingChannelsManager';
 import { PlatformPanel, ImpersonationBanner } from './components/PlatformPanel';
-import { CookingPotLoader } from './components/CookingPotLoader';
+import { Loader } from './components/Loader';
 import { UserManagement } from './components/UserManagement';
 import { RolePermissions } from './components/RolePermissions';
 import { ActivityLogs } from './components/ActivityLogs';
@@ -1665,7 +1665,7 @@ const App: React.FC = () => {
   if (authLoading) {
     return (
       <div className="min-h-screen bg-[var(--color-surface-2)] flex items-center justify-center">
-        <CookingPotLoader label="Caricamento..." />
+        <Loader label="Caricamento..." />
       </div>
     );
   }

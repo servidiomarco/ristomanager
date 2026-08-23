@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { BanquetMenu, BanquetPayment, BanquetPaymentType, BanquetPaymentMethod } from '../types';
 import { X, Plus, Trash2, Wallet, Banknote, CreditCard, Building2, Loader2 } from 'lucide-react';
-import { CookingPotLoader } from './CookingPotLoader';
+import { Loader } from './Loader';
 import { getBanquetPayments, createBanquetPayment, deleteBanquetPayment } from '../services/apiService';
 
 interface Props {
@@ -242,7 +242,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
 
             {loading ? (
               <div className="flex items-center justify-center py-8 text-[var(--ds-text-subtle)]">
-                <CookingPotLoader label="Caricamento…" size={40} />
+                <Loader label="Caricamento…" size={40} />
               </div>
             ) : payments.length === 0 ? (
               <p className="text-sm text-[var(--ds-text-subtle)] italic text-center py-6 bg-[var(--ds-surface-row)] rounded-lg border border-dashed border-[var(--ds-border)]">

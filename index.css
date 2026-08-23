@@ -683,41 +683,6 @@ body {
   animation: flash-row 1.5s ease-out;
 }
 
-/* Cooking-pot loader — the pot gently simmers, the lid rattles, and three
-   steam wisps rise and fade. Used as a friendlier "loading" state. */
-@keyframes pot-simmer {
-  0%, 100% { transform: rotate(0deg); }
-  25% { transform: rotate(-2deg); }
-  75% { transform: rotate(2deg); }
-}
-@keyframes pot-lid-rattle {
-  0%, 100% { transform: translateY(0) rotate(0deg); }
-  40% { transform: translateY(-1.5px) rotate(-3deg); }
-  60% { transform: translateY(-1px) rotate(3deg); }
-}
-@keyframes steam-rise {
-  0% { opacity: 0; transform: translateY(3px) scaleY(0.7); }
-  30% { opacity: 0.8; }
-  70% { opacity: 0.45; }
-  100% { opacity: 0; transform: translateY(-7px) scaleY(1.2); }
-}
-
-.pot-loader-body {
-  transform-box: fill-box;
-  transform-origin: center bottom;
-  animation: pot-simmer 1.6s ease-in-out infinite;
-}
-.pot-loader-lid {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: pot-lid-rattle 1.6s ease-in-out infinite;
-}
-.pot-loader-steam {
-  transform-box: fill-box;
-  transform-origin: center bottom;
-  animation: steam-rise 1.8s ease-in-out infinite;
-}
-
 /* Create-sheet animations */
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slideUpSheet { from { transform: translateY(100%); } to { transform: translateY(0); } }

@@ -15,7 +15,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, revokePaymentRequest, getReservationMessages, sendReservationReminder, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap, getTableAssignmentSuggestions, confirmTableAssignmentSuggestion, dismissTableAssignmentSuggestion } from '../services/apiService';
 import { billsApiService, printBill } from '../services/billsApiService';
 import { CustomerPickerModal } from './CustomerPickerModal';
-import { CookingPotLoader } from './CookingPotLoader';
+import { Loader } from './Loader';
 import { getReservationNoteIcon } from './reservationNoteIcons';
 import { isVoiceSupported, startListening, parseReservationText } from '../services/voiceInputService';
 import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftService';
@@ -4317,7 +4317,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             {isLoadingMerges && (
               <div className="absolute inset-0 z-30 bg-[var(--color-surface)]/70 backdrop-blur-[1px] flex items-center justify-center">
                 <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] rounded-md shadow-[var(--shadow-xs)] border border-[var(--color-line)]">
-                  <CookingPotLoader label="Caricamento tavoli…" size={40} />
+                  <Loader label="Caricamento tavoli…" size={40} />
                 </div>
               </div>
             )}
@@ -4430,7 +4430,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             {isLoadingMerges && (
               <div className="absolute inset-0 z-30 flex items-center justify-center bg-[var(--ds-surface)]/70 backdrop-blur-[1px]">
                 <div className="flex items-center gap-2 rounded-[16px] bg-[var(--ds-surface)] px-4 py-2 shadow-[var(--ds-shadow-card)]">
-                  <CookingPotLoader label="Caricamento tavoli…" size={40} />
+                  <Loader label="Caricamento tavoli…" size={40} />
                 </div>
               </div>
             )}
@@ -5677,7 +5677,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 {isLoadingMerges && (
                                     <div className="absolute inset-0 z-30 bg-[var(--ds-surface-row)]/70 backdrop-blur-[1px] flex items-center justify-center rounded-lg">
                                         <div className="flex items-center gap-2 rounded-full bg-[var(--ds-surface)] px-4 py-2 shadow-[var(--ds-shadow-card)]">
-                                            <CookingPotLoader label="Caricamento tavoli…" size={40} />
+                                            <Loader label="Caricamento tavoli…" size={40} />
                                         </div>
                                     </div>
                                 )}

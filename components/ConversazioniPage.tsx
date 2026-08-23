@@ -4,7 +4,7 @@ import {
   CheckCircle2, AlertCircle, ExternalLink, CalendarPlus,
   BookUser, Check, Users,
 } from 'lucide-react';
-import { CookingPotLoader } from './CookingPotLoader';
+import { Loader } from './Loader';
 import { CallRecordingPlayer } from './CallRecordingPlayer';
 import { SkeletonInboxList } from './SkeletonCards';
 import {
@@ -305,7 +305,7 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
       <div className="space-y-4 px-4 pb-4 sm:px-6 lg:px-8">
       {loading && (
         <div className="flex items-center justify-center py-12">
-          <CookingPotLoader label="Carico dettaglio…" size={40} />
+          <Loader label="Carico dettaglio…" size={40} />
         </div>
       )}
 
