@@ -175,7 +175,7 @@ import {
     listClosures,
     formatSlotListItalian,
 } from './utils/slots.js';
-import { normalizeLanguageCode, detectLanguageFromPhonePrefix, isEnglishGuest } from './utils/language.js';
+import { normalizeLanguageCode, detectLanguageFromPhonePrefix, isEnglishGuest, resolveGuestLanguage } from './utils/language.js';
 
 const app = express();
 // Railway terminates TLS at a single upstream proxy and forwards via
@@ -1782,8 +1782,8 @@ async function handleElevenLabsPostCall(tenantId: number, req: express.Request, 
         );
         const row = linked.rows[0];
         if (row && row.phone) {
-            const message = buildConfirmationMessage(row.customer_name, row.reservation_time, row.guests, row.room_name, row.language);
-            const whatsappTemplate = buildBookingConfirmedTemplate(row.customer_name, row.reservation_time, row.guests, row.language);
+            const message = buildConfirmationMessage(row.customer_name, row.reservation_time, row.guests, row.room_name, resolveGuestLanguage(row));
+            const whatsappTemplate = buildBookingConfirmedTemplate(row.customer_name, row.reservation_time, row.guests, resolveGuestLanguage(row));
             sendBookingConfirmation(tenantId, row.phone, message, row.id, { whatsappTemplate }).catch(err =>
                 console.warn('[ElevenLabs] post-call confirmation send failed:', err?.message || err)
             );
@@ -2535,20 +2535,20 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                     updatedReservation.reservation_time,
                     updatedReservation.guests,
                     roomName,
-                    updatedReservation.language
+                    resolveGuestLanguage(updatedReservation)
                 ),
                 whatsappTemplate: buildBookingConfirmedTemplate(
                     updatedReservation.customer_name,
                     updatedReservation.reservation_time,
                     updatedReservation.guests,
-                    updatedReservation.language
+                    resolveGuestLanguage(updatedReservation)
                 ),
                 buildEmail: () => buildBookingConfirmationEmail({
                     customerName: updatedReservation.customer_name,
                     reservationTime: updatedReservation.reservation_time,
                     guests: updatedReservation.guests,
                     roomName,
-                    language: updatedReservation.language,
+                    language: resolveGuestLanguage(updatedReservation),
                 }),
                 kind: 'confirmation',
             }).catch(err => console.error('Auto-confirmation send failed:', err));
@@ -2573,19 +2573,19 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                     updatedReservation.customer_name,
                     updatedReservation.reservation_time,
                     updatedReservation.guests,
-                    updatedReservation.language
+                    resolveGuestLanguage(updatedReservation)
                 ),
                 whatsappTemplate: buildBookingDeclinedTemplate(
                     updatedReservation.customer_name,
                     updatedReservation.reservation_time,
                     updatedReservation.guests,
-                    updatedReservation.language
+                    resolveGuestLanguage(updatedReservation)
                 ),
                 buildEmail: () => buildBookingDeclineEmail({
                     customerName: updatedReservation.customer_name,
                     reservationTime: updatedReservation.reservation_time,
                     guests: updatedReservation.guests,
-                    language: updatedReservation.language,
+                    language: resolveGuestLanguage(updatedReservation),
                 }),
                 kind: 'decline',
             }).catch(err => console.error('Auto-decline send failed:', err));
@@ -2620,7 +2620,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                         updatedReservation.customer_name,
                         updatedReservation.reservation_time,
                         updatedReservation.guests,
-                        updatedReservation.language
+                        resolveGuestLanguage(updatedReservation)
                     ),
                     updatedReservation.id,
                     {
@@ -2628,7 +2628,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
                             updatedReservation.customer_name,
                             updatedReservation.reservation_time,
                             updatedReservation.guests,
-                            updatedReservation.language
+                            resolveGuestLanguage(updatedReservation)
                         ),
                         recordConfirmation: false,
                     }
@@ -2675,10 +2675,10 @@ app.post('/reservations/:id/send-reminder', authenticate, requirePermission('res
         const sendResult = await sendBookingConfirmation(
             req.tenantId!,
             resv.phone,
-            buildReminderMessage(resv.customer_name, resv.reservation_time, resv.guests, resv.room_name, resv.language),
+            buildReminderMessage(resv.customer_name, resv.reservation_time, resv.guests, resv.room_name, resolveGuestLanguage(resv)),
             id,
             {
-                whatsappTemplate: buildBookingReminderTemplate(resv.customer_name, resv.reservation_time, resv.guests, resv.language),
+                whatsappTemplate: buildBookingReminderTemplate(resv.customer_name, resv.reservation_time, resv.guests, resolveGuestLanguage(resv)),
                 recordConfirmation: false,
             }
         );
@@ -8338,13 +8338,13 @@ const declineReservationForExpiredLink = async (
                 phone: r.phone,
                 email: r.email,
                 reservationId: Number(r.id),
-                smsText: buildDeclineMessage(r.customer_name, r.reservation_time, r.guests, r.language),
-                whatsappTemplate: buildBookingDeclinedTemplate(r.customer_name, r.reservation_time, r.guests, r.language),
+                smsText: buildDeclineMessage(r.customer_name, r.reservation_time, r.guests, resolveGuestLanguage(r)),
+                whatsappTemplate: buildBookingDeclinedTemplate(r.customer_name, r.reservation_time, r.guests, resolveGuestLanguage(r)),
                 buildEmail: () => buildBookingDeclineEmail({
                     customerName: r.customer_name,
                     reservationTime: r.reservation_time,
                     guests: r.guests,
-                    language: r.language,
+                    language: resolveGuestLanguage(r),
                 }),
                 kind: 'decline',
             }).catch(err => console.error('[payment-expiry] invio decline fallito:', err?.message || err));

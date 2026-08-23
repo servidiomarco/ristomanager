@@ -39,3 +39,15 @@ export function detectLanguageFromPhonePrefix(phone: string | null | undefined):
 export function isEnglishGuest(language: string | null | undefined): boolean {
     return language === 'en';
 }
+
+/**
+ * Lingua da usare quando si SCRIVE all'ospite. La colonna language arriva
+ * solo dai canali che la rilevano (widget, WhatsApp inbound, Sofia): una
+ * prenotazione inserita a mano per un numero straniero resta a NULL e il
+ * primo collaudo reale (reminder a un +44) è uscito in italiano. Al momento
+ * dell'invio il prefisso del telefono è l'informazione che abbiamo comunque
+ * in mano: usarlo come fallback copre anche tutto lo storico senza backfill.
+ */
+export function resolveGuestLanguage(reservation: { language?: string | null; phone?: string | null }): string {
+    return normalizeLanguageCode(reservation.language) ?? detectLanguageFromPhonePrefix(reservation.phone);
+}
