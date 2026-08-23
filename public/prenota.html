@@ -668,14 +668,13 @@ a { color: var(--ds-pending-text); }
                 </span>
             </a>
             <nav class="header__links" id="headerLinks"></nav>
-            <!-- Card #32 — selettore predisposto per quando arriverà la
-                 traduzione: oggi salva solo la scelta, non cambia una parola. -->
-            <div class="lang-toggle" id="langToggle" role="group" aria-label="Lingua">
+            <!-- Card #33 — selettore lingua: cambia davvero il testo della pagina. -->
+            <div class="lang-toggle" id="langToggle" role="group" aria-label="Lingua" data-i18n-attr="aria-label:header.langGroupAria">
                 <button type="button" class="lang-toggle__btn" data-lang="it">IT</button>
                 <button type="button" class="lang-toggle__btn" data-lang="en">EN</button>
             </div>
         </div>
-        <h1 class="header__title" id="pageTitle">Prenota un tavolo</h1>
+        <h1 class="header__title" id="pageTitle" data-i18n="header.title">Prenota un tavolo</h1>
     </div>
 </header>
 
@@ -685,8 +684,8 @@ a { color: var(--ds-pending-text); }
          le prenotazioni restano chiuse invece di aprirsi per errore. -->
     <section class="card" id="maintenance">
         <div class="card__body" style="text-align:center; padding: 32px 20px;">
-            <h2 class="card__title" style="font-size:19px;">Prenotazioni non disponibili</h2>
-            <p class="card__hint" style="margin-bottom:0;">In questo momento non raccogliamo prenotazioni dal sito.</p>
+            <h2 class="card__title" style="font-size:19px;" data-i18n="maintenance.title">Prenotazioni non disponibili</h2>
+            <p class="card__hint" style="margin-bottom:0;" data-i18n="maintenance.hint">In questo momento non raccogliamo prenotazioni dal sito.</p>
         </div>
     </section>
 
@@ -696,19 +695,19 @@ a { color: var(--ds-pending-text); }
             <label>Sito web (lascia vuoto)<input type="text" name="website" tabindex="-1" autocomplete="off" /></label>
         </div>
 
-        <nav class="stepnav" id="stepnav" aria-label="Passi">
+        <nav class="stepnav" id="stepnav" aria-label="Passi" data-i18n-attr="aria-label:steps.aria">
             <button type="button" class="stepnav__item stepnav__item--current" data-step="1" aria-current="step">
                 <span class="stepnav__rail"></span>
                 <span class="stepnav__row">
                     <span class="stepnav__mark">1</span>
-                    <span class="stepnav__label">Tavolo</span>
+                    <span class="stepnav__label" data-i18n="steps.table">Tavolo</span>
                 </span>
             </button>
             <button type="button" class="stepnav__item" data-step="2" disabled>
                 <span class="stepnav__rail"></span>
                 <span class="stepnav__row">
                     <span class="stepnav__mark">2</span>
-                    <span class="stepnav__label">Dati</span>
+                    <span class="stepnav__label" data-i18n="steps.details">Dati</span>
                 </span>
             </button>
         </nav>
@@ -721,14 +720,14 @@ a { color: var(--ds-pending-text); }
                 <div class="accordion__tabs">
                     <button type="button" class="accordion__tab" id="tabQuanti" aria-expanded="false" aria-controls="panelQuanti">
                         <span class="accordion__tab-text">
-                            <span class="accordion__tab-label">Quanti</span>
+                            <span class="accordion__tab-label" data-i18n="quanti.tabLabel">Quanti</span>
                             <span class="accordion__tab-value tnum" id="quantiValue">2 persone</span>
                         </span>
                         <svg class="accordion__chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 7.5 10 12.5 15 7.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </button>
                     <button type="button" class="accordion__tab" id="tabQuando" aria-expanded="false" aria-controls="panelQuando">
                         <span class="accordion__tab-text">
-                            <span class="accordion__tab-label">Quando</span>
+                            <span class="accordion__tab-label" data-i18n="quando.tabLabel">Quando</span>
                             <span class="accordion__tab-value" id="quandoValue">Scegli una data</span>
                         </span>
                         <svg class="accordion__chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 7.5 10 12.5 15 7.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -738,32 +737,32 @@ a { color: var(--ds-pending-text); }
                 <div class="accordion__panel" id="panelQuanti" hidden>
                     <div class="stepper-row">
                         <div>
-                            <p class="stepper-row__label">Persone a tavola</p>
-                            <p class="stepper-row__hint">Bambini compresi.</p>
+                            <p class="stepper-row__label" data-i18n="quanti.guestsLabel">Persone a tavola</p>
+                            <p class="stepper-row__hint" data-i18n="quanti.guestsHint">Bambini compresi.</p>
                         </div>
-                        <div class="stepper" role="group" aria-label="Persone a tavola">
-                            <button type="button" class="stepper__btn stepper__btn--minus" id="guestsDec" aria-label="Persone a tavola: diminuisci">−</button>
-                            <input class="stepper__input" type="number" inputmode="numeric" id="guestsInput" min="1" max="20" value="2" aria-label="Persone a tavola" />
-                            <button type="button" class="stepper__btn stepper__btn--plus" id="guestsInc" aria-label="Persone a tavola: aumenta">+</button>
+                        <div class="stepper" role="group" aria-label="Persone a tavola" data-i18n-attr="aria-label:quanti.guestsAriaGroup">
+                            <button type="button" class="stepper__btn stepper__btn--minus" id="guestsDec" aria-label="Persone a tavola: diminuisci" data-i18n-attr="aria-label:quanti.guestsAriaDec">−</button>
+                            <input class="stepper__input" type="number" inputmode="numeric" id="guestsInput" min="1" max="20" value="2" aria-label="Persone a tavola" data-i18n-attr="aria-label:quanti.guestsAriaGroup" />
+                            <button type="button" class="stepper__btn stepper__btn--plus" id="guestsInc" aria-label="Persone a tavola: aumenta" data-i18n-attr="aria-label:quanti.guestsAriaInc">+</button>
                         </div>
                     </div>
                     <div class="stepper-row">
                         <div>
-                            <p class="stepper-row__label">Di cui bambini</p>
-                            <p class="stepper-row__hint">Prepariamo seggiolone e mezze porzioni.</p>
+                            <p class="stepper-row__label" data-i18n="quanti.childrenLabel">Di cui bambini</p>
+                            <p class="stepper-row__hint" data-i18n="quanti.childrenHint">Prepariamo seggiolone e mezze porzioni.</p>
                         </div>
-                        <div class="stepper" role="group" aria-label="Di cui bambini">
-                            <button type="button" class="stepper__btn stepper__btn--minus" id="childrenDec" aria-label="Bambini: diminuisci">−</button>
-                            <input class="stepper__input" type="number" inputmode="numeric" id="childrenInput" min="0" max="20" value="0" aria-label="Di cui bambini" />
-                            <button type="button" class="stepper__btn stepper__btn--plus" id="childrenInc" aria-label="Bambini: aumenta">+</button>
+                        <div class="stepper" role="group" aria-label="Di cui bambini" data-i18n-attr="aria-label:quanti.childrenAriaGroup">
+                            <button type="button" class="stepper__btn stepper__btn--minus" id="childrenDec" aria-label="Bambini: diminuisci" data-i18n-attr="aria-label:quanti.childrenAriaDec">−</button>
+                            <input class="stepper__input" type="number" inputmode="numeric" id="childrenInput" min="0" max="20" value="0" aria-label="Di cui bambini" data-i18n-attr="aria-label:quanti.childrenAriaGroup" />
+                            <button type="button" class="stepper__btn stepper__btn--plus" id="childrenInc" aria-label="Bambini: aumenta" data-i18n-attr="aria-label:quanti.childrenAriaInc">+</button>
                         </div>
                     </div>
                     <div class="notice" id="depositNotice" hidden>
                         <div>
-                            <p class="notice__title">Caparra <span id="depositTotal" class="tnum">90 €</span></p>
+                            <p class="notice__title"><span data-i18n="deposit.title">Caparra</span> <span id="depositTotal" class="tnum">90 €</span></p>
                             <p class="notice__text" id="depositText"></p>
                         </div>
-                        <a class="notice__link" href="#terms">Come funziona</a>
+                        <a class="notice__link" href="#terms" data-i18n="deposit.how">Come funziona</a>
                     </div>
                 </div>
 
@@ -771,7 +770,7 @@ a { color: var(--ds-pending-text); }
                     <div id="weekView">
                         <div class="daystrip" id="daystrip"></div>
                         <div style="text-align:right; margin-top:10px;">
-                            <button type="button" class="linkbtn" id="openMonth">Scegli un'altra data</button>
+                            <button type="button" class="linkbtn" id="openMonth" data-i18n="quando.otherDate">Scegli un'altra data</button>
                         </div>
                     </div>
                     <div class="sheet" id="monthView" hidden>
@@ -779,21 +778,21 @@ a { color: var(--ds-pending-text); }
                             <div class="sheet__grab"></div>
                             <div class="cal__head">
                                 <div class="cal__nav">
-                                    <button type="button" class="cal__arrow" id="monthPrev" aria-label="Mese precedente">
+                                    <button type="button" class="cal__arrow" id="monthPrev" aria-label="Mese precedente" data-i18n-attr="aria-label:quando.prevMonth">
                                         <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12.5 5 7.5 10l5 5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                                     </button>
                                     <span class="cal__month" id="monthLabel"></span>
-                                    <button type="button" class="cal__arrow" id="monthNext" aria-label="Mese successivo">
+                                    <button type="button" class="cal__arrow" id="monthNext" aria-label="Mese successivo" data-i18n-attr="aria-label:quando.nextMonth">
                                         <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7.5 5l5 5-5 5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                                     </button>
                                 </div>
-                                <button type="button" class="linkbtn" id="backToWeek">Torna alla settimana</button>
+                                <button type="button" class="linkbtn" id="backToWeek" data-i18n="quando.backToWeek">Torna alla settimana</button>
                             </div>
                             <div class="cal__grid" id="calGrid"></div>
                             <div class="cal__legend">
-                                <span><i class="cal__key" style="background:var(--ds-seated-solid)"></i>libero</span>
-                                <span><i class="cal__key" style="background:var(--ds-pending-solid)"></i>quasi pieno</span>
-                                <span><i class="cal__key" style="background:var(--ds-border-strong)"></i>chiuso</span>
+                                <span><i class="cal__key" style="background:var(--ds-seated-solid)"></i><span data-i18n="quando.legendFree">libero</span></span>
+                                <span><i class="cal__key" style="background:var(--ds-pending-solid)"></i><span data-i18n="quando.legendBusy">quasi pieno</span></span>
+                                <span><i class="cal__key" style="background:var(--ds-border-strong)"></i><span data-i18n="quando.legendClosed">chiuso</span></span>
                             </div>
                             <p class="cal__foot" id="calFoot"></p>
                         </div>
@@ -803,7 +802,7 @@ a { color: var(--ds-pending-text); }
 
             <div class="card" id="roomCard" hidden>
                 <div class="card__body">
-                    <h2 class="card__title" style="margin-bottom:14px;">Dove preferite sedervi?</h2>
+                    <h2 class="card__title" style="margin-bottom:14px;" data-i18n="rooms.title">Dove preferite sedervi?</h2>
                     <div class="rooms" id="rooms"></div>
                     <p class="rooms-note" id="roomsNote" hidden></p>
                 </div>
@@ -811,25 +810,25 @@ a { color: var(--ds-pending-text); }
 
             <div class="card">
                 <div class="card__body">
-                    <h2 class="card__title" style="margin-bottom:14px;">Orario</h2>
+                    <h2 class="card__title" style="margin-bottom:14px;" data-i18n="shifts.title">Orario</h2>
                     <div class="shifts">
                         <button type="button" class="shift" data-shift="LUNCH" aria-pressed="false">
-                            <span class="shift__name">Pranzo</span>
+                            <span class="shift__name" data-i18n="shifts.lunch">Pranzo</span>
                             <span class="shift__meta" id="lunchMeta"></span>
                         </button>
                         <button type="button" class="shift" data-shift="DINNER" aria-pressed="false">
-                            <span class="shift__name">Cena</span>
+                            <span class="shift__name" data-i18n="shifts.dinner">Cena</span>
                             <span class="shift__meta" id="dinnerMeta"></span>
                         </button>
                     </div>
-                    <div id="slots"><p class="empty">Scegli prima una data.</p></div>
+                    <div id="slots"><p class="empty" data-i18n="shifts.chooseDateFirst">Scegli prima una data.</p></div>
                 </div>
             </div>
 
             <div class="actions">
                 <div class="actions__inner">
                     <span class="actions__note"></span>
-                    <button type="button" class="btn" id="toStep2" disabled>Continua</button>
+                    <button type="button" class="btn" id="toStep2" disabled data-i18n="actions.continue">Continua</button>
                 </div>
             </div>
         </section>
@@ -841,25 +840,25 @@ a { color: var(--ds-pending-text); }
                     <div class="recap__main" id="recapMain"></div>
                     <div class="recap__sub" id="recapSub"></div>
                 </div>
-                <button type="button" class="recap__edit" id="editBooking">Modifica</button>
+                <button type="button" class="recap__edit" id="editBooking" data-i18n="actions.edit">Modifica</button>
             </div>
 
             <div class="card">
                 <div class="card__body card__body--roomy">
                     <div class="grid2">
                         <div class="field">
-                            <label class="field__label" for="customer_name">Nome e cognome</label>
-                            <input class="input" type="text" id="customer_name" name="customer_name" required minlength="2" maxlength="80" autocomplete="name" placeholder="Mario Rossi" />
+                            <label class="field__label" for="customer_name" data-i18n="fields.name">Nome e cognome</label>
+                            <input class="input" type="text" id="customer_name" name="customer_name" required minlength="2" maxlength="80" autocomplete="name" placeholder="Mario Rossi" data-i18n-attr="placeholder:fields.namePlaceholder" />
                         </div>
                         <div class="field">
-                            <label class="field__label" for="phone">Telefono</label>
-                            <input class="input" type="tel" id="phone" name="phone" autocomplete="tel" inputmode="tel" placeholder="333 1234567" />
+                            <label class="field__label" for="phone" data-i18n="fields.phone">Telefono</label>
+                            <input class="input" type="tel" id="phone" name="phone" autocomplete="tel" inputmode="tel" placeholder="333 1234567" data-i18n-attr="placeholder:fields.phonePlaceholder" />
                         </div>
                     </div>
                     <div class="field">
-                        <label class="field__label" for="email">Email</label>
-                        <input class="input" type="email" id="email" name="email" autocomplete="email" inputmode="email" maxlength="120" placeholder="tu@esempio.it" />
-                        <p class="card__hint" style="margin:6px 0 0;">Basta uno dei due: ci serve per confermarvi il tavolo.</p>
+                        <label class="field__label" for="email" data-i18n="fields.email">Email</label>
+                        <input class="input" type="email" id="email" name="email" autocomplete="email" inputmode="email" maxlength="120" placeholder="tu@esempio.it" data-i18n-attr="placeholder:fields.emailPlaceholder" />
+                        <p class="card__hint" style="margin:6px 0 0;" data-i18n="fields.emailHint">Basta uno dei due: ci serve per confermarvi il tavolo.</p>
                     </div>
 
                     <div class="divider"></div>
@@ -868,40 +867,45 @@ a { color: var(--ds-pending-text); }
                         <!-- Una lista sola. La pagina non distingue più gravità,
                              quindi tutto esce come "Allergie: …": in cucina
                              trattare un'intolleranza come allergia è l'errore
-                             che non fa male a nessuno, il contrario sì. -->
-                        <label class="field__label">Allergie e intolleranze <span class="field__opt">(facoltativo)</span></label>
+                             che non fa male a nessuno, il contrario sì.
+                             Card #33 — le voci restano in italiano di proposito:
+                             sono il valore letterale che utils/dietary.ts e le
+                             DietaryChips del CRM confrontano come stringa. Tradurle
+                             qui romperebbe quel confronto senza una tabella di
+                             corrispondenza, fuori dallo scopo di questo widget. -->
+                        <label class="field__label"><span data-i18n="fields.allergiesLabel">Allergie e intolleranze</span> <span class="field__opt" data-i18n="fields.optional">(facoltativo)</span></label>
                         <div class="chips" id="dietChips"></div>
                     </div>
 
                     <div class="field">
-                        <label class="field__label" for="notes">Altro che dovremmo sapere <span class="field__opt">(facoltativo)</span></label>
-                        <textarea class="input" id="notes" name="notes" rows="2" maxlength="500" placeholder="Occasione speciale, seggiolone, tavolo tranquillo…"></textarea>
+                        <label class="field__label" for="notes"><span data-i18n="fields.notesLabel">Altro che dovremmo sapere</span> <span class="field__opt" data-i18n="fields.optional">(facoltativo)</span></label>
+                        <textarea class="input" id="notes" name="notes" rows="2" maxlength="500" placeholder="Occasione speciale, seggiolone, tavolo tranquillo…" data-i18n-attr="placeholder:fields.notesPlaceholder"></textarea>
                     </div>
 
                     <div class="divider"></div>
 
                     <label class="consent">
                         <input type="checkbox" id="privacyConsent" />
-                        <span>Ho letto <a href="/privacy" target="_blank" rel="noopener">l'informativa sulla privacy</a> e acconsento al trattamento dei dati per gestire la prenotazione, comprese le allergie che scelgo di indicare (art. 9 GDPR).</span>
+                        <span id="consentText" data-i18n-html="consent.html">Ho letto <a href="/privacy" target="_blank" rel="noopener">l'informativa sulla privacy</a> e acconsento al trattamento dei dati per gestire la prenotazione, comprese le allergie che scelgo di indicare (art. 9 GDPR).</span>
                     </label>
                 </div>
             </div>
 
             <div class="notice" id="depositStep2" hidden style="margin-bottom:14px;">
                 <div>
-                    <p class="notice__title">Caparra <span id="depositTotal2" class="tnum">90 €</span></p>
+                    <p class="notice__title"><span data-i18n="deposit.title">Caparra</span> <span id="depositTotal2" class="tnum">90 €</span></p>
                     <p class="notice__text" id="depositText2"></p>
                 </div>
-                <a class="notice__link" href="#terms">Come funziona</a>
+                <a class="notice__link" href="#terms" data-i18n="deposit.how">Come funziona</a>
             </div>
 
             <div class="actions">
                 <div class="actions__inner">
-                    <button type="button" class="steparrow" id="backToStep1" aria-label="Torna alla scelta del tavolo">
+                    <button type="button" class="steparrow" id="backToStep1" aria-label="Torna alla scelta del tavolo" data-i18n-attr="aria-label:actions.backAria">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
                     </button>
                     <span class="actions__note"></span>
-                    <button type="submit" class="btn" id="submitBtn">Conferma prenotazione</button>
+                    <button type="submit" class="btn" id="submitBtn" data-i18n="actions.submit">Conferma prenotazione</button>
                 </div>
             </div>
         </section>
@@ -909,28 +913,28 @@ a { color: var(--ds-pending-text); }
 
     <details class="terms" id="terms">
         <summary>
-            Caparra e cancellazioni
+            <span data-i18n="terms.summary">Caparra e cancellazioni</span>
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 7.5 10 12.5 15 7.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </summary>
         <div class="terms__body">
-            <p>Per i gruppi chiediamo una caparra di <strong><span id="depositPerPerson">10 €</span> a persona</strong>. Quando serve, dopo l'invio ricevi un link per pagarla: il tavolo è confermato appena arriva il pagamento.</p>
-            <h3>Cosa succede alla caparra</h3>
+            <p id="termsIntro">Per i gruppi chiediamo una caparra di <strong><span id="depositPerPerson">10 €</span> a persona</strong>. Quando serve, dopo l'invio ricevi un link per pagarla: il tavolo è confermato appena arriva il pagamento.</p>
+            <h3 data-i18n="terms.whatHappensTitle">Cosa succede alla caparra</h3>
             <ul>
-                <li><strong>Se venite</strong>, la scaliamo dal conto.</li>
-                <li><strong>Se annullate almeno 24 ore prima</strong>, la rimborsiamo intera.</li>
-                <li><strong>Se annullate più tardi o non venite</strong>, la tratteniamo.</li>
+                <li data-i18n="terms.ifYouCome">Se venite, la scaliamo dal conto.</li>
+                <li data-i18n="terms.ifYouCancelEarly">Se annullate almeno 24 ore prima, la rimborsiamo intera.</li>
+                <li data-i18n="terms.ifYouCancelLate">Se annullate più tardi o non venite, la tratteniamo.</li>
             </ul>
-            <h3>Perché la chiediamo</h3>
-            <p>Un tavolo prenotato e lasciato vuoto significa spesa fatta, personale in servizio e altri clienti a cui abbiamo detto di no. La caparra confirmatoria (art. 1385 del Codice Civile) è lo strumento con cui i ristoranti si tutelano dal no-show.</p>
-            <p>Per annullare o spostare, scrivici o chiamaci: entro le 24 ore non perdete nulla.</p>
+            <h3 data-i18n="terms.whyTitle">Perché la chiediamo</h3>
+            <p data-i18n="terms.whyText">Un tavolo prenotato e lasciato vuoto significa spesa fatta, personale in servizio e altri clienti a cui abbiamo detto di no. La caparra confirmatoria (art. 1385 del Codice Civile) è lo strumento con cui i ristoranti si tutelano dal no-show.</p>
+            <p data-i18n="terms.howToCancel">Per annullare o spostare, scrivici o chiamaci: entro le 24 ore non perdete nulla.</p>
         </div>
     </details>
 
     <footer class="footer">
         <span id="brandFooter"></span>
         <div class="footer__links">
-            <a href="/privacy" target="_blank" rel="noopener">Informativa sulla privacy</a>
-            <a href="#terms">Caparra e cancellazioni</a>
+            <a href="/privacy" target="_blank" rel="noopener" data-i18n="footer.privacy">Informativa sulla privacy</a>
+            <a href="#terms" data-i18n="footer.depositLink">Caparra e cancellazioni</a>
         </div>
     </footer>
 </main>
@@ -940,8 +944,8 @@ a { color: var(--ds-pending-text); }
         <div class="done__mark">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M5 13l4 4L19 7" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </div>
-        <h2 class="done__title" id="doneTitle">Richiesta ricevuta</h2>
-        <p class="done__text" id="doneText">Vi ricontattiamo a breve per confermare.</p>
+        <h2 class="done__title" id="doneTitle" data-i18n="done.requestTitle">Richiesta ricevuta</h2>
+        <p class="done__text" id="doneText" data-i18n="done.requestText">Vi ricontattiamo a breve per confermare.</p>
         <p class="done__recap tnum" id="doneRecap"></p>
     </div>
 </div>
@@ -957,13 +961,62 @@ a { color: var(--ds-pending-text); }
     // risolve da dominio o fallback.
     const slugMatch = location.pathname.match(/^\/prenota\/([a-z0-9][a-z0-9-]*)\/?$/);
     const publicBase = slugMatch ? '/public/' + slugMatch[1] : '/public';
-    if (slugMatch) {
-        document.querySelectorAll('a[href="/privacy"]').forEach(a => a.setAttribute('href', '/privacy/' + slugMatch[1]));
-    }
 
     const $ = id => document.getElementById(id);
     const euro = cents => (cents / 100).toFixed(2).replace('.', ',').replace(/,00$/, '') + ' €';
 
+    // ---- Lingua e traduzioni -------------------------------------------
+    // Card #33 — internazionalizza SOLO questo widget. Le risorse sono JSON
+    // in /public/locales/{lng}/prenota.json, serviti da /locales/:lang/prenota.json
+    // — stesso percorso e formato di i18next-http-backend, letto anche da
+    // i18n/config.ts. Questa pagina però resta quello che è (vedi CLAUDE.md:
+    // HTML statico, niente React, niente bundler), quindi il motore qui è
+    // vanilla: lookup a chiave puntata, interpolazione {{var}} e plurali
+    // _one/_other via Intl.PluralRules. Quando una schermata della SPA
+    // migrerà a react-i18next questi stessi file JSON si riusano senza
+    // modifiche.
+    const dictionaries = { it: {}, en: {} };
+    const pluralRules = { it: new Intl.PluralRules('it-IT'), en: new Intl.PluralRules('en-GB') };
+    async function loadDictionary(lang) {
+        try {
+            const r = await fetch('/locales/' + lang + '/prenota.json');
+            if (r.ok) dictionaries[lang] = await r.json();
+        } catch { /* resta il dizionario vuoto: t() ripiega sulla chiave grezza */ }
+    }
+    const resolveKey = (dict, key) => key.split('.').reduce((o, k) => (o && typeof o === 'object') ? o[k] : undefined, dict);
+    function t(key, vars) {
+        let lookupKey = key;
+        if (vars && typeof vars.count === 'number') {
+            const form = pluralRules[state.language].select(vars.count);
+            lookupKey = resolveKey(dictionaries[state.language], key + '_' + form) !== undefined
+                ? key + '_' + form : key + '_other';
+        }
+        let str = resolveKey(dictionaries[state.language], lookupKey);
+        if (str === undefined) str = resolveKey(dictionaries.it, lookupKey);
+        if (str === undefined) return key;
+        if (vars) str = str.replace(/\{\{(\w+)\}\}/g, (_, name) => (vars[name] !== undefined ? vars[name] : ''));
+        return str;
+    }
+    // Un solo giro sul DOM per ogni cambio lingua: markup statico via
+    // data-i18n(-html/-attr), il resto (valori calcolati: date, conteggi,
+    // disponibilità…) lo aggiornano le singole render() più sotto.
+    function applyStaticTranslations() {
+        document.documentElement.lang = state.language;
+        document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.getAttribute('data-i18n')); });
+        document.querySelectorAll('[data-i18n-html]').forEach(el => { el.innerHTML = t(el.getAttribute('data-i18n-html')); });
+        document.querySelectorAll('[data-i18n-attr]').forEach(el => {
+            el.getAttribute('data-i18n-attr').split(',').forEach(pair => {
+                const [attr, key] = pair.split(':');
+                el.setAttribute(attr.trim(), t(key.trim()));
+            });
+        });
+        // Il link privacy dentro al consenso viene rigenerato da data-i18n-html
+        // a ogni cambio lingua: la riscrittura per slug va quindi rifatta qui,
+        // non solo all'avvio.
+        if (slugMatch) {
+            document.querySelectorAll('a[href="/privacy"]').forEach(a => a.setAttribute('href', '/privacy/' + slugMatch[1]));
+        }
+    }
     // Chi arriva da un link #terms (dal piè di pagina, dall'avviso caparra o
     // da un'email) deve trovare la sezione già aperta, non un titolo chiuso da
     // cliccare di nuovo. Fuori dal ramo bookingsEnabled: vale anche a
@@ -978,27 +1031,51 @@ a { color: var(--ds-pending-text); }
     openTermsFromHash();
     window.addEventListener('hashchange', openTermsFromHash);
 
+    // ---- Stato -------------------------------------------------------------
+    // Dichiarato qui, prima del fetch: t() e le funzioni sopra chiudono su
+    // `state.language`, valorizzato subito con la lingua del browser (il
+    // selettore in header la può cambiare esplicitamente).
+    const state = {
+        step: 1,
+        guests: 2,
+        children: 0,
+        date: null,
+        shift: null,
+        time: null,
+        roomId: null,
+        rooms: null,
+        availability: null,
+        calendar: new Map(),   // 'YYYY-MM-DD' → 'open' | 'busy' | 'closed'
+        monthCursor: null,     // primo giorno del mese mostrato
+        openPanel: null,
+        language: (navigator.language || '').slice(0, 2).toLowerCase() === 'en' ? 'en' : 'it',
+        bookingConfirmed: false,
+    };
+
     let contact = null;
-    try {
-        const r = await fetch(publicBase + '/contact');
-        if (r.ok) contact = await r.json();
-    } catch { /* rete giù → resta la scheda di manutenzione (default sicuro) */ }
+    [contact] = await Promise.all([
+        fetch(publicBase + '/contact').then(r => r.ok ? r.json() : null).catch(() => null),
+        loadDictionary('it'),
+        loadDictionary('en'),
+    ]);
 
     // ---- Identità del ristorante ------------------------------------------
     // Applicata PRIMA dell'uscita anticipata qui sotto: anche la pagina di
     // manutenzione deve portare il nome giusto.
+    document.title = t('meta.title');
+    applyStaticTranslations();
     const branding = contact?.branding || {};
     const restaurantName = branding.name || '';
     if (restaurantName) {
-        document.title = 'Prenota un tavolo · ' + restaurantName;
+        document.title = t('meta.titleWithName', { name: restaurantName });
         $('brandName').textContent = restaurantName;
         $('brandFooter').textContent = branding.tagline
             ? restaurantName + ' · ' + branding.tagline
             : restaurantName;
         if (branding.tagline) {
-            const t = $('brandTagline');
-            t.textContent = branding.tagline;
-            t.hidden = false;
+            const tagline = $('brandTagline');
+            tagline.textContent = branding.tagline;
+            tagline.hidden = false;
         }
     }
     if (branding.logo_url) {
@@ -1013,7 +1090,7 @@ a { color: var(--ds-pending-text); }
     const brandLink = $('brandLink');
     if (branding.website_url) {
         brandLink.href = branding.website_url;
-        brandLink.setAttribute('aria-label', 'Vai al sito ' + (restaurantName || 'del ristorante'));
+        brandLink.setAttribute('aria-label', t('header.brandAria', { name: restaurantName || t('header.brandAriaFallback') }));
     } else {
         brandLink.removeAttribute('href');
         brandLink.removeAttribute('target');
@@ -1062,40 +1139,27 @@ a { color: var(--ds-pending-text); }
     // "Dove siamo" quando l'indirizzo non è ancora scritto in Impostazioni:
     // il link alla mappa è la cosa che serve davvero, l'etichetta può aspettare.
     if (branding.maps_url) {
-        addPill(branding.maps_url, branding.address || 'Dove siamo',
+        addPill(branding.maps_url, branding.address || t('rooms.whereFallback'),
             '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 1116 0z"/><circle cx="12" cy="10" r="3"/>', true);
     }
 
-    if (!contact?.bookingsEnabled) return;
-
-    $('maintenance').remove();
-    $('form').hidden = false;
-
-    // ---- Politica caparra --------------------------------------------------
+    // ---- Politica caparra ---------------------------------------------------
+    // Dichiarata qui (non solo dentro il ramo prenotabile): la sezione
+    // "Caparra e cancellazioni" in fondo alla pagina vive fuori dal form e
+    // resta leggibile anche in manutenzione.
     const deposit = contact?.deposit ?? null;
-    if (deposit?.perPersonCents) $('depositPerPerson').textContent = euro(deposit.perPersonCents);
+    function renderTermsIntro() {
+        const amount = euro(deposit?.perPersonCents || 1000);
+        $('termsIntro').innerHTML = t('terms.introHtml', { amount });
+    }
+    renderTermsIntro();
 
-    // ---- Stato -------------------------------------------------------------
-    const state = {
-        step: 1,
-        guests: 2,
-        children: 0,
-        date: null,
-        shift: null,
-        time: null,
-        roomId: null,
-        rooms: null,
-        availability: null,
-        calendar: new Map(),   // 'YYYY-MM-DD' → 'open' | 'busy' | 'closed'
-        monthCursor: null,     // primo giorno del mese mostrato
-        openPanel: null,
-        // Card #32 — lingua del browser come default, il selettore in header
-        // la può cambiare esplicitamente. Solo il dato: nessuna traduzione
-        // qui, arriva nelle card successive.
-        language: (navigator.language || '').slice(0, 2).toLowerCase() === 'en' ? 'en' : 'it',
-    };
-
-    // ---- Selettore lingua (predisposto, non traduce nulla) -----------------
+    // ---- Selettore lingua ---------------------------------------------------
+    // Card #33 — cambia davvero il testo della pagina: markup statico via
+    // applyStaticTranslations(), il resto (date, conteggi, disponibilità…)
+    // via le stesse render() già usate per il primo disegno. Wired qui, prima
+    // del return di manutenzione: la lingua deve cambiare anche su quella
+    // pagina.
     const langButtons = Array.from(document.querySelectorAll('.lang-toggle__btn'));
     const renderLangToggle = () => {
         langButtons.forEach(btn => {
@@ -1104,11 +1168,18 @@ a { color: var(--ds-pending-text); }
     };
     langButtons.forEach(btn => {
         btn.addEventListener('click', () => {
+            if (btn.dataset.lang === state.language) return;
             state.language = btn.dataset.lang;
             renderLangToggle();
+            applyLanguage();
         });
     });
     renderLangToggle();
+
+    if (!contact?.bookingsEnabled) return;
+
+    $('maintenance').remove();
+    $('form').hidden = false;
 
     // Roma, non il fuso del telefono: un cliente che prenota dall'estero
     // vedrebbe altrimenti "oggi" sbagliato e slot già passati come liberi.
@@ -1127,15 +1198,26 @@ a { color: var(--ds-pending-text); }
     const today = romeToday();
     const lastBookable = addDays(today, HORIZON_DAYS);
 
-    const fmtDayLong = iso => new Date(iso + 'T00:00:00').toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
-    const fmtDayShort = iso => new Date(iso + 'T00:00:00').toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' });
-    const MONTHS = ['gennaio','febbraio','marzo','aprile','maggio','giugno','luglio','agosto','settembre','ottobre','novembre','dicembre'];
-    const DOW_SHORT = ['lun','mar','mer','gio','ven','sab','dom'];
+    // Card #33 — nomi di mese/giorno dal locale della lingua scelta, non più
+    // due elenchi cablati in italiano: 'it-IT' o 'en-GB' a seconda di
+    // state.language (il formato orario 24h resta invariato in entrambe: è
+    // una scelta del ristorante, non una traduzione).
+    const dateLocale = () => state.language === 'en' ? 'en-GB' : 'it-IT';
+    const fmtDayLong = iso => new Date(iso + 'T00:00:00').toLocaleDateString(dateLocale(), { weekday: 'long', day: 'numeric', month: 'long' });
+    const fmtDayShort = iso => new Date(iso + 'T00:00:00').toLocaleDateString(dateLocale(), { weekday: 'short', day: 'numeric', month: 'short' });
+    const fmtMonthYear = iso => new Date(iso + 'T00:00:00').toLocaleDateString(dateLocale(), { month: 'long', year: 'numeric' });
+    // Nomi brevi lun→dom per l'intestazione del calendario: 2024-01-01 è un
+    // lunedì noto, usato solo come riferimento per farsi dare i 7 nomi da Intl.
+    const weekdayShortNames = () => Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(Date.UTC(2024, 0, 1 + i));
+        return d.toLocaleDateString(dateLocale(), { weekday: 'short', timeZone: 'UTC' });
+    });
     // getDay() conta da domenica, il calendario parte da lunedì.
     const mondayIndex = iso => (new Date(iso + 'T00:00:00').getDay() + 6) % 7;
 
     // ---- Persone -----------------------------------------------------------
-    const personLabel = n => n === 1 ? 'persona' : 'persone';
+    const guestsPhrase = n => n + ' ' + t('quanti.person', { count: n });
+    const childrenPhrase = n => n + ' ' + t('quanti.child', { count: n });
     function renderGuests() {
         // Non riscrivere il campo mentre ci si sta digitando dentro: farebbe
         // saltare il cursore a ogni tasto.
@@ -1147,8 +1229,8 @@ a { color: var(--ds-pending-text); }
         $('childrenDec').disabled = state.children <= 0;
         $('childrenInc').disabled = state.children >= state.guests;
 
-        let summary = state.guests + ' ' + personLabel(state.guests);
-        if (state.children > 0) summary += ' · ' + state.children + (state.children === 1 ? ' bimbo' : ' bimbi');
+        let summary = guestsPhrase(state.guests);
+        if (state.children > 0) summary += ' · ' + childrenPhrase(state.children);
         $('quantiValue').textContent = summary;
 
         const due = deposit?.enabled && state.guests >= deposit.minGuests;
@@ -1159,8 +1241,7 @@ a { color: var(--ds-pending-text); }
             box.hidden = !due;
             if (!due) continue;
             total.textContent = euro(state.guests * deposit.perPersonCents);
-            text.textContent = 'Da ' + deposit.minGuests + ' persone chiediamo '
-                + euro(deposit.perPersonCents) + ' a persona, scalati dal conto.';
+            text.textContent = t('deposit.text', { minGuests: deposit.minGuests, amount: euro(deposit.perPersonCents) });
         }
     }
 
@@ -1237,6 +1318,7 @@ a { color: var(--ds-pending-text); }
 
     function renderWeek() {
         const host = $('daystrip');
+        const dow = weekdayShortNames();
         host.innerHTML = '';
         for (let i = 0; i < 14; i++) {
             const iso = addDays(today, i);
@@ -1247,10 +1329,10 @@ a { color: var(--ds-pending-text); }
             b.setAttribute('aria-pressed', String(state.date === iso));
             b.disabled = status === 'closed';
             b.innerHTML =
-                '<span class="day__dow">' + DOW_SHORT[mondayIndex(iso)] + '</span>' +
+                '<span class="day__dow">' + dow[mondayIndex(iso)] + '</span>' +
                 '<span class="day__num">' + Number(iso.slice(8)) + '</span>' +
                 (status && status !== 'closed' ? '<span class="day__dot"></span>' : '<span class="day__dot" style="visibility:hidden"></span>');
-            b.setAttribute('aria-label', fmtDayLong(iso) + (status === 'closed' ? ', chiuso' : ''));
+            b.setAttribute('aria-label', fmtDayLong(iso) + (status === 'closed' ? t('quando.closedSuffix') : ''));
             b.addEventListener('click', () => pickDate(iso));
             host.appendChild(b);
         }
@@ -1260,14 +1342,14 @@ a { color: var(--ds-pending-text); }
         const cursor = state.monthCursor || monthStart(today);
         const start = monthStart(cursor);
         const end = monthEnd(cursor);
-        $('monthLabel').textContent = MONTHS[Number(start.slice(5, 7)) - 1] + ' ' + start.slice(0, 4);
+        $('monthLabel').textContent = fmtMonthYear(start);
         $('monthPrev').disabled = start <= monthStart(today);
         $('monthNext').disabled = start >= monthStart(lastBookable);
-        $('calFoot').textContent = 'Prenotazioni fino a ' + HORIZON_DAYS + ' giorni.';
+        $('calFoot').textContent = t('quando.horizon', { days: HORIZON_DAYS });
 
         const grid = $('calGrid');
         grid.innerHTML = '';
-        DOW_SHORT.forEach(d => {
+        weekdayShortNames().forEach(d => {
             const el = document.createElement('div');
             el.className = 'cal__dow';
             el.textContent = d;
@@ -1286,7 +1368,7 @@ a { color: var(--ds-pending-text); }
             b.className = 'cal__cell' + (bookable ? (status === 'busy' ? ' cal__cell--busy' : ' cal__cell--open') : '');
             b.disabled = !bookable;
             b.setAttribute('aria-pressed', String(state.date === iso));
-            b.setAttribute('aria-label', fmtDayLong(iso) + (bookable ? '' : ', non disponibile'));
+            b.setAttribute('aria-label', fmtDayLong(iso) + (bookable ? '' : t('quando.unavailableSuffix')));
             b.innerHTML = '<span class="cal__num">' + Number(iso.slice(8)) + '</span>'
                 + (bookable ? '<span class="cal__dot"></span>' : '');
             b.addEventListener('click', () => pickDate(iso));
@@ -1333,7 +1415,7 @@ a { color: var(--ds-pending-text); }
     // ---- Disponibilità del giorno ------------------------------------------
     async function loadAvailability() {
         if (!state.date) return;
-        $('slots').innerHTML = '<p class="empty">Carico gli orari…</p>';
+        $('slots').innerHTML = '<p class="empty">' + t('shifts.loading') + '</p>';
         try {
             const r = await fetch(publicBase + '/availability?date=' + encodeURIComponent(state.date));
             if (!r.ok) throw new Error('availability ' + r.status);
@@ -1377,16 +1459,16 @@ a { color: var(--ds-pending-text); }
             btn.disabled = n === 0;
             btn.setAttribute('aria-pressed', String(state.shift === s));
             $(s === 'LUNCH' ? 'lunchMeta' : 'dinnerMeta').textContent =
-                n === 0 ? 'non disponibile' : n + (n === 1 ? ' orario' : ' orari');
+                n === 0 ? t('shifts.unavailable') : t('shifts.slot', { count: n });
         });
     }
 
     function renderSlots() {
         const host = $('slots');
-        if (!state.date) { host.innerHTML = '<p class="empty">Scegli prima una data.</p>'; return; }
+        if (!state.date) { host.innerHTML = '<p class="empty">' + t('shifts.chooseDateFirst') + '</p>'; return; }
         const lunch = slotsFor('LUNCH').length, dinner = slotsFor('DINNER').length;
-        if (!lunch && !dinner) { host.innerHTML = '<p class="empty">Per questa data non prendiamo prenotazioni dal sito.</p>'; return; }
-        if (!state.shift) { host.innerHTML = '<p class="empty">Scegli pranzo o cena.</p>'; return; }
+        if (!lunch && !dinner) { host.innerHTML = '<p class="empty">' + t('shifts.noneForDate') + '</p>'; return; }
+        if (!state.shift) { host.innerHTML = '<p class="empty">' + t('shifts.chooseShift') + '</p>'; return; }
 
         const slots = slotsFor(state.shift);
         const isToday = state.date === romeToday();
@@ -1404,7 +1486,7 @@ a { color: var(--ds-pending-text); }
             b.disabled = past;
             b.setAttribute('aria-pressed', String(state.time === time));
             b.innerHTML = '<span class="slot__time">' + time + '</span>'
-                + (past ? '<span class="slot__meta">passato</span>' : '');
+                + (past ? '<span class="slot__meta">' + t('shifts.past') + '</span>' : '');
             b.addEventListener('click', () => {
                 state.time = time;
                 renderSlots();
@@ -1444,7 +1526,7 @@ a { color: var(--ds-pending-text); }
     async function loadRooms() {
         if (!state.date) return;
         $('roomCard').hidden = false;
-        if (!Array.isArray(state.rooms)) $('rooms').innerHTML = '<p class="empty">Carico le sale…</p>';
+        if (!Array.isArray(state.rooms)) $('rooms').innerHTML = '<p class="empty">' + t('rooms.loading') + '</p>';
         try {
             if (state.shift) {
                 state.rooms = await fetchRooms(state.shift);
@@ -1476,7 +1558,7 @@ a { color: var(--ds-pending-text); }
         const host = $('rooms');
         const note = $('roomsNote');
         if (!Array.isArray(state.rooms) || state.rooms.length === 0) {
-            host.innerHTML = '<p class="empty">Nessuna sala disponibile per questa richiesta.</p>';
+            host.innerHTML = '<p class="empty">' + t('rooms.empty') + '</p>';
             note.hidden = true;
             return;
         }
@@ -1494,7 +1576,7 @@ a { color: var(--ds-pending-text); }
             make(room.name, state.roomId === room.id, () => { state.roomId = room.id; renderRooms(); });
         });
         // "Indifferente" per ultima: è la resa, non la prima cosa da valutare.
-        make('Indifferente', state.roomId === null, () => { state.roomId = null; renderRooms(); });
+        make(t('rooms.any'), state.roomId === null, () => { state.roomId = null; renderRooms(); });
 
         // `over_threshold` è lo stesso insieme che decide l'esito reale del
         // submit (pickSelfServiceTable), quindi quello che si legge qui e la
@@ -1507,8 +1589,8 @@ a { color: var(--ds-pending-text); }
         note.hidden = !willBeRequest;
         if (willBeRequest) {
             note.textContent = chosen
-                ? chosen.name + ' è quasi piena: la prenotazione la conferma lo staff.'
-                : 'Le sale sono quasi piene: la prenotazione la conferma lo staff.';
+                ? t('rooms.noteChosen', { room: chosen.name })
+                : t('rooms.noteGeneric');
         }
     }
 
@@ -1569,23 +1651,25 @@ a { color: var(--ds-pending-text); }
     // non sarebbe più nel markup da cui rileggerlo.
     document.querySelectorAll('.stepnav__mark').forEach(m => { m.dataset.number = m.textContent.trim(); });
 
+    // Il riepilogo vive nella scheda con "Modifica", non anche in testata:
+    // ripeterlo due volte nella stessa schermata non aggiunge niente. Estratta
+    // dal passo 2 così il cambio lingua può ridisegnarla senza rientrarci.
+    function updateRecap() {
+        if (state.step !== 2) return;
+        $('recapMain').textContent = fmtDayLong(state.date) + ' · ' + state.time;
+        const bits = [guestsPhrase(state.guests)];
+        if (state.children) bits.push(childrenPhrase(state.children));
+        const room = state.rooms?.find(r => r.id === state.roomId);
+        bits.push(room ? room.name : t('rooms.recapAny'));
+        $('recapSub').textContent = bits.join(' · ');
+    }
+
     function goToStep(n) {
         if (n === 2 && !stepReady()) return;
         state.step = n;
         $('step1').hidden = n !== 1;
         $('step2').hidden = n !== 2;
-
-        // Il riepilogo vive nella scheda con "Modifica", non anche in testata:
-        // ripeterlo due volte nella stessa schermata non aggiunge niente.
-        if (n === 2) {
-            $('recapMain').textContent = fmtDayLong(state.date) + ' · ' + state.time;
-            const bits = [state.guests + ' ' + personLabel(state.guests)];
-            if (state.children) bits.push(state.children + (state.children === 1 ? ' bimbo' : ' bimbi'));
-            const room = state.rooms?.find(r => r.id === state.roomId);
-            bits.push(room ? room.name : 'sala indifferente');
-            $('recapSub').textContent = bits.join(' · ');
-        }
-
+        updateRecap();
         renderStepNav();
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -1618,16 +1702,16 @@ a { color: var(--ds-pending-text); }
         const notes = [buildDietNote(), freeNote].filter(Boolean).join(' | ');
         const website = $('form').elements['website'].value;
 
-        if (!customer_name) return showError('Inserisci il tuo nome.');
-        if (!phone && !email) return showError('Lasciaci un telefono o un’email.');
-        if (phone && !/^\+?[0-9 ]{6,20}$/.test(phone)) return showError('Numero di telefono non valido.');
+        if (!customer_name) return showError(t('errors.nameRequired'));
+        if (!phone && !email) return showError(t('errors.contactRequired'));
+        if (phone && !/^\+?[0-9 ]{6,20}$/.test(phone)) return showError(t('errors.phoneInvalid'));
         // Controllo leggero: la validazione che conta la fa il server.
-        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return showError('Indirizzo email non valido.');
-        if (!$('privacyConsent').checked) return showError('Per procedere, accetta l’informativa sulla privacy.');
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return showError(t('errors.emailInvalid'));
+        if (!$('privacyConsent').checked) return showError(t('errors.privacyRequired'));
 
         const btn = $('submitBtn');
         btn.disabled = true;
-        btn.textContent = 'Invio…';
+        btn.textContent = t('actions.submitting');
 
         try {
             const r = await fetch(publicBase + '/reservations', {
@@ -1647,19 +1731,23 @@ a { color: var(--ds-pending-text); }
             });
             const data = await r.json().catch(() => ({}));
             if (!r.ok) {
-                showError(data.message || 'Qualcosa è andato storto. Riprova.');
+                // data.message arriva dal server ed è in italiano: gli errori
+                // di validazione lato server restano fuori dallo scopo di
+                // questo widget (tradurli richiederebbe toccare server.ts).
+                showError(data.message || t('errors.generic'));
                 btn.disabled = false;
-                btn.textContent = 'Conferma prenotazione';
+                btn.textContent = t('actions.submit');
                 return;
             }
             // Il backend conferma subito quando la sala è sotto il proprio
             // limite e c'è un tavolo libero; altrimenti passa dallo staff.
+            state.bookingConfirmed = !!data.confirmed;
             if (data.confirmed) {
-                $('doneTitle').textContent = 'Tavolo confermato';
-                $('doneText').textContent = 'Vi aspettiamo. Ricevete la conferma anche via WhatsApp, SMS o email.';
+                $('doneTitle').textContent = t('done.confirmedTitle');
+                $('doneText').textContent = t('done.confirmedText');
             }
             const bits = [
-                state.guests + ' ' + personLabel(state.guests),
+                guestsPhrase(state.guests),
                 fmtDayLong(state.date),
                 state.time,
             ];
@@ -1669,11 +1757,31 @@ a { color: var(--ds-pending-text); }
             $('done').hidden = false;
         } catch (err) {
             console.error(err);
-            showError('Connessione non disponibile. Riprova fra qualche istante.');
+            showError(t('errors.network'));
             btn.disabled = false;
-            btn.textContent = 'Conferma prenotazione';
+            btn.textContent = t('actions.submit');
         }
     });
+
+    // ---- Cambio lingua -------------------------------------------------------
+    // Card #33 — ridisegna tutto quello che dipende dal testo, senza rifare
+    // le chiamate di rete: i dati (disponibilità, sale, calendario) non
+    // cambiano con la lingua, solo come li leggiamo.
+    function applyLanguage() {
+        applyStaticTranslations();
+        renderTermsIntro();
+        $('quandoValue').textContent = state.date ? fmtDayShort(state.date) : t('quando.placeholder');
+        renderGuests();
+        renderShifts();
+        renderSlots();
+        if (state.openPanel === 'quando' || state.calendar.size) { renderWeek(); renderMonth(); }
+        if (Array.isArray(state.rooms)) renderRooms();
+        updateRecap();
+        if (!$('done').hidden) {
+            $('doneTitle').textContent = state.bookingConfirmed ? t('done.confirmedTitle') : t('done.requestTitle');
+            $('doneText').textContent = state.bookingConfirmed ? t('done.confirmedText') : t('done.requestText');
+        }
+    }
 
     // ---- Avvio -------------------------------------------------------------
     renderGuests();

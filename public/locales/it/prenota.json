@@ -1,0 +1,133 @@
+{
+  "meta": {
+    "title": "Prenota un tavolo",
+    "titleWithName": "Prenota un tavolo · {{name}}"
+  },
+  "maintenance": {
+    "title": "Prenotazioni non disponibili",
+    "hint": "In questo momento non raccogliamo prenotazioni dal sito."
+  },
+  "header": {
+    "title": "Prenota un tavolo",
+    "langGroupAria": "Lingua",
+    "brandAria": "Vai al sito di {{name}}",
+    "brandAriaFallback": "questo ristorante"
+  },
+  "steps": {
+    "aria": "Passi",
+    "table": "Tavolo",
+    "details": "Dati"
+  },
+  "quanti": {
+    "tabLabel": "Quanti",
+    "guestsLabel": "Persone a tavola",
+    "guestsHint": "Bambini compresi.",
+    "guestsAriaGroup": "Persone a tavola",
+    "guestsAriaDec": "Persone a tavola: diminuisci",
+    "guestsAriaInc": "Persone a tavola: aumenta",
+    "childrenLabel": "Di cui bambini",
+    "childrenHint": "Prepariamo seggiolone e mezze porzioni.",
+    "childrenAriaGroup": "Di cui bambini",
+    "childrenAriaDec": "Bambini: diminuisci",
+    "childrenAriaInc": "Bambini: aumenta",
+    "person_one": "persona",
+    "person_other": "persone",
+    "child_one": "bimbo",
+    "child_other": "bimbi"
+  },
+  "deposit": {
+    "title": "Caparra",
+    "how": "Come funziona",
+    "text": "Da {{minGuests}} persone chiediamo {{amount}} a persona, scalati dal conto."
+  },
+  "quando": {
+    "tabLabel": "Quando",
+    "placeholder": "Scegli una data",
+    "otherDate": "Scegli un'altra data",
+    "prevMonth": "Mese precedente",
+    "nextMonth": "Mese successivo",
+    "backToWeek": "Torna alla settimana",
+    "legendFree": "libero",
+    "legendBusy": "quasi pieno",
+    "legendClosed": "chiuso",
+    "horizon": "Prenotazioni fino a {{days}} giorni.",
+    "closedSuffix": ", chiuso",
+    "unavailableSuffix": ", non disponibile"
+  },
+  "rooms": {
+    "title": "Dove preferite sedervi?",
+    "any": "Indifferente",
+    "recapAny": "sala indifferente",
+    "loading": "Carico le sale…",
+    "empty": "Nessuna sala disponibile per questa richiesta.",
+    "noteChosen": "{{room}} è quasi piena: la prenotazione la conferma lo staff.",
+    "noteGeneric": "Le sale sono quasi piene: la prenotazione la conferma lo staff.",
+    "whereFallback": "Dove siamo"
+  },
+  "shifts": {
+    "title": "Orario",
+    "lunch": "Pranzo",
+    "dinner": "Cena",
+    "unavailable": "non disponibile",
+    "slot_one": "{{count}} orario",
+    "slot_other": "{{count}} orari",
+    "chooseDateFirst": "Scegli prima una data.",
+    "loading": "Carico gli orari…",
+    "noneForDate": "Per questa data non prendiamo prenotazioni dal sito.",
+    "chooseShift": "Scegli pranzo o cena.",
+    "past": "passato"
+  },
+  "actions": {
+    "continue": "Continua",
+    "edit": "Modifica",
+    "backAria": "Torna alla scelta del tavolo",
+    "submit": "Conferma prenotazione",
+    "submitting": "Invio…"
+  },
+  "fields": {
+    "name": "Nome e cognome",
+    "namePlaceholder": "Mario Rossi",
+    "phone": "Telefono",
+    "phonePlaceholder": "333 1234567",
+    "email": "Email",
+    "emailPlaceholder": "tu@esempio.it",
+    "emailHint": "Basta uno dei due: ci serve per confermarvi il tavolo.",
+    "optional": "(facoltativo)",
+    "allergiesLabel": "Allergie e intolleranze",
+    "notesLabel": "Altro che dovremmo sapere",
+    "notesPlaceholder": "Occasione speciale, seggiolone, tavolo tranquillo…"
+  },
+  "consent": {
+    "html": "Ho letto <a href=\"/privacy\" target=\"_blank\" rel=\"noopener\">l'informativa sulla privacy</a> e acconsento al trattamento dei dati per gestire la prenotazione, comprese le allergie che scelgo di indicare (art. 9 GDPR)."
+  },
+  "terms": {
+    "summary": "Caparra e cancellazioni",
+    "introHtml": "Per i gruppi chiediamo una caparra di <strong>{{amount}} a persona</strong>. Quando serve, dopo l'invio ricevi un link per pagarla: il tavolo è confermato appena arriva il pagamento.",
+    "whatHappensTitle": "Cosa succede alla caparra",
+    "ifYouCome": "Se venite, la scaliamo dal conto.",
+    "ifYouCancelEarly": "Se annullate almeno 24 ore prima, la rimborsiamo intera.",
+    "ifYouCancelLate": "Se annullate più tardi o non venite, la tratteniamo.",
+    "whyTitle": "Perché la chiediamo",
+    "whyText": "Un tavolo prenotato e lasciato vuoto significa spesa fatta, personale in servizio e altri clienti a cui abbiamo detto di no. La caparra confirmatoria (art. 1385 del Codice Civile) è lo strumento con cui i ristoranti si tutelano dal no-show.",
+    "howToCancel": "Per annullare o spostare, scrivici o chiamaci: entro le 24 ore non perdete nulla."
+  },
+  "footer": {
+    "privacy": "Informativa sulla privacy",
+    "depositLink": "Caparra e cancellazioni"
+  },
+  "done": {
+    "requestTitle": "Richiesta ricevuta",
+    "requestText": "Vi ricontattiamo a breve per confermare.",
+    "confirmedTitle": "Tavolo confermato",
+    "confirmedText": "Vi aspettiamo. Ricevete la conferma anche via WhatsApp, SMS o email."
+  },
+  "errors": {
+    "nameRequired": "Inserisci il tuo nome.",
+    "contactRequired": "Lasciaci un telefono o un'email.",
+    "phoneInvalid": "Numero di telefono non valido.",
+    "emailInvalid": "Indirizzo email non valido.",
+    "privacyRequired": "Per procedere, accetta l'informativa sulla privacy.",
+    "generic": "Qualcosa è andato storto. Riprova.",
+    "network": "Connessione non disponibile. Riprova fra qualche istante."
+  }
+}
