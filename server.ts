@@ -175,7 +175,7 @@ import {
     listClosures,
     formatSlotListItalian,
 } from './utils/slots.js';
-import { normalizeLanguageCode, detectLanguageFromPhonePrefix } from './utils/language.js';
+import { normalizeLanguageCode, detectLanguageFromPhonePrefix, isEnglishGuest } from './utils/language.js';
 
 const app = express();
 // Railway terminates TLS at a single upstream proxy and forwards via

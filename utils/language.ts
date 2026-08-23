@@ -1,6 +1,7 @@
-// Card dev board #32 — lingua ospite: rilevamento condiviso fra i canali.
-// Fondazione: normalizza e rileva SOLO il codice lingua da salvare (es. 'it',
-// 'en'). Nessuna traduzione vive qui — arriva nelle card successive.
+// Card dev board #32/#34 — lingua ospite: rilevamento condiviso fra i canali.
+// #32 normalizza e rileva SOLO il codice lingua da salvare (es. 'it', 'en').
+// #34 aggiunge l'unico helper che serve ai messaggi bilingui: sapere se
+// vanno scritti in inglese.
 
 /**
  * Riduce un codice lingua qualunque (BCP-47 incluso, es. "en-US") al
@@ -27,4 +28,14 @@ export function detectLanguageFromPhonePrefix(phone: string | null | undefined):
     const national = digits.startsWith('00') ? digits.slice(2) : digits;
     if (!national || national.startsWith('39') || national.length <= 10) return 'it';
     return 'en';
+}
+
+/**
+ * Card #34 — solo IT/EN sono scritte a mano oggi (stesso limite di
+ * detectLanguageFromPhonePrefix): qualunque valore diverso da 'en' — inclusi
+ * null/undefined e le altre lingue che normalizeLanguageCode può salvare —
+ * degrada a italiano, il default storico prima che esistesse questa colonna.
+ */
+export function isEnglishGuest(language: string | null | undefined): boolean {
+    return language === 'en';
 }
