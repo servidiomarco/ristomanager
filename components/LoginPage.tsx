@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertCircle, Loader2, Eye, EyeOff, Check, ChefHat, CheckCircle } from 'lucide-react';
+import { AlertCircle, Loader2, Eye, EyeOff, Check, CheckCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { authApiService } from '../services/authApiService';
 import { PLATFORM_NAME } from '../platform';
@@ -139,14 +139,9 @@ export const LoginPage: React.FC = () => {
       <div className="flex-1 min-w-0 relative flex flex-col">
         {/* Top bar: brand */}
         <div className="px-6 py-6 flex items-center justify-center">
-          <div className="flex items-center gap-3">
-            <div className="inline-flex items-center justify-center w-11 h-11 rounded-full bg-[var(--color-fg)]">
-              <ChefHat className="h-6 w-6 text-[var(--color-fg-on-brand)]" />
-            </div>
-            <span className="text-[20px] leading-[28px] font-semibold tracking-tight text-[var(--color-fg)]">
-              {PLATFORM_NAME}
-            </span>
-          </div>
+          {/* Il login non applica mai .dark (il tema si carica dopo l'accesso),
+              quindi basta il wordmark nero. */}
+          <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-8 w-auto" />
         </div>
 
         {/* Centered form */}
