@@ -12828,7 +12828,10 @@ function buildConfirmationMessage(
     customerName: string | null | undefined,
     reservationTime: string | Date,
     guests: number | null | undefined,
-    roomName?: string | null
+    roomName?: string | null,
+    // Card #34 — reservations.language: SMS non ha approvazioni Meta di
+    // mezzo, quindi l'inglese parte subito, senza gating su env var.
+    language?: string | null
 ): string {
     // This builder is always fed a DB `timestamptz` (a UTC instant). If it
     // arrives as a bare naive string (no Z/offset), read it as UTC so the Rome
@@ -12838,15 +12841,21 @@ function buildConfirmationMessage(
     // used by the request email, not for DB-sourced confirmation times.)
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     const fullName = toTitleCase(customerName);
-    const greeting = fullName ? `Ciao ${fullName}, la tua` : 'La';
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
-    const persone = guestsNum === 1 ? 'persona' : 'persone';
     const room = (roomName ?? '').trim();
-    const roomPart = room ? ` in ${room}` : '';
     // Niente link Maps qui: questo testo finisce negli SMS e il link — anche
     // in forma maps.app.goo.gl — porta il messaggio tipico oltre i 160
     // caratteri, cioè a 2 segmenti fatturati. Il link viaggia solo dove non
     // costa: bottone del template WhatsApp e email (contactBlockHtml).
+    if (isEnglishGuest(language)) {
+        const greeting = fullName ? `Hi ${fullName}, your` : 'Your';
+        const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
+        const roomPart = room ? ` in the ${room} room` : '';
+        return `${greeting} reservation for ${guestsNum} ${guestsLabel} on ${dateLabel} at ${timeLabel}${roomPart} is confirmed. See you soon!`;
+    }
+    const greeting = fullName ? `Ciao ${fullName}, la tua` : 'La';
+    const persone = guestsNum === 1 ? 'persona' : 'persone';
+    const roomPart = room ? ` in ${room}` : '';
     return `${greeting} prenotazione per ${guestsNum} ${persone} il ${dateLabel} alle ${timeLabel}${roomPart} e' confermata. A presto!`;
 }
 
@@ -12879,12 +12888,18 @@ async function resolveReservationRoomName(reservation: { table_id?: number | nul
 function buildDeclineMessage(
     customerName: string | null | undefined,
     reservationTime: string | Date,
-    guests: number | null | undefined
+    guests: number | null | undefined,
+    language?: string | null
 ): string {
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     const fullName = toTitleCase(customerName);
-    const greeting = fullName ? `Ciao ${fullName}, purtroppo` : 'Purtroppo';
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
+    if (isEnglishGuest(language)) {
+        const greeting = fullName ? `Hi ${fullName}, unfortunately` : 'Unfortunately';
+        const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
+        return `${greeting} we weren't able to confirm your reservation request for ${guestsNum} ${guestsLabel} on ${dateLabel} at ${timeLabel}. Please call us at ${businessIdentity().phone} to check another date or time. Thank you, and hope to see you soon!`;
+    }
+    const greeting = fullName ? `Ciao ${fullName}, purtroppo` : 'Purtroppo';
     const persone = guestsNum === 1 ? 'persona' : 'persone';
     return `${greeting} non ci e' stato possibile confermare la tua richiesta di prenotazione per ${guestsNum} ${persone} il ${dateLabel} alle ${timeLabel}. Chiamaci al numero ${businessIdentity().phone} per verificare un'altra data/orario. Grazie e a presto!`;
 }
@@ -12897,12 +12912,19 @@ function buildReminderMessage(
     customerName: string | null | undefined,
     reservationTime: string | Date,
     guests: number | null | undefined,
-    roomName?: string | null
+    roomName?: string | null,
+    language?: string | null
 ): string {
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     const fullName = toTitleCase(customerName);
-    const greeting = fullName ? `Ciao ${fullName}!` : 'Ciao!';
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
+    if (isEnglishGuest(language)) {
+        const greeting = fullName ? `Hi ${fullName}!` : 'Hi!';
+        const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
+        const roomPart = roomName ? ` (${roomName})` : '';
+        return `${greeting} We look forward to seeing you on ${dateLabel} at ${timeLabel}: a table for ${guestsNum} ${guestsLabel}${roomPart} at ${businessIdentity().name}. Need to change anything or something came up? Call us at ${businessIdentity().phone} — we'll take care of it. See you soon!`;
+    }
+    const greeting = fullName ? `Ciao ${fullName}!` : 'Ciao!';
     const persone = guestsNum === 1 ? 'persona' : 'persone';
     const roomPart = roomName ? ` (${roomName})` : '';
     return `${greeting} Ti aspettiamo ${dateLabel} alle ${timeLabel}: tavolo per ${guestsNum} ${persone}${roomPart} da ${businessIdentity().name}. Per modifiche o imprevisti chiamaci al ${businessIdentity().phone} — sistemiamo tutto noi. A presto!`;
@@ -12914,12 +12936,18 @@ function buildReminderMessage(
 function buildUpdateMessage(
     customerName: string | null | undefined,
     reservationTime: string | Date,
-    guests: number | null | undefined
+    guests: number | null | undefined,
+    language?: string | null
 ): string {
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     const fullName = toTitleCase(customerName);
-    const greeting = fullName ? `Ciao ${fullName},` : 'Ciao,';
     const guestsNum = Math.max(1, Math.trunc(Number(guests) || 1));
+    if (isEnglishGuest(language)) {
+        const greeting = fullName ? `Hi ${fullName},` : 'Hi,';
+        const guestsLabel = guestsNum === 1 ? 'guest' : 'guests';
+        return `${greeting} your reservation at ${businessIdentity().name} has been updated: ${guestsNum} ${guestsLabel}, ${dateLabel} at ${timeLabel}. If anything looks off, call us at ${businessIdentity().phone}. See you soon!`;
+    }
+    const greeting = fullName ? `Ciao ${fullName},` : 'Ciao,';
     const persone = guestsNum === 1 ? 'persona' : 'persone';
     return `${greeting} la tua prenotazione da ${businessIdentity().name} è stata aggiornata: ${guestsNum} ${persone}, ${dateLabel} alle ${timeLabel}. Se qualcosa non torna chiamaci al ${businessIdentity().phone}. A presto!`;
 }
@@ -12930,27 +12958,42 @@ function buildUpdateMessage(
 // excluded from all templates (Meta rejects empty variables); the SMS body still
 // includes it when known. Empty-name guard sends '—' so a missing customer_name
 // can't blow up the template with an empty var.
-function templateGuestsLabel(guests: number | null | undefined): string {
+function templateGuestsLabel(guests: number | null | undefined, english: boolean = false): string {
     const n = Math.max(1, Math.trunc(Number(guests) || 1));
-    return `${n} ${n === 1 ? 'persona' : 'persone'}`;
+    return english ? `${n} ${n === 1 ? 'guest' : 'guests'}` : `${n} ${n === 1 ? 'persona' : 'persone'}`;
 }
 function templateName(customerName: string | null | undefined): string {
     const t = toTitleCase(customerName);
     return t || '—';
 }
+// Card #34 — sceglie fra la SID italiana (storica) e quella inglese di uno
+// stesso template. L'inglese si usa SOLO quando l'ospite è 'en' E la SID
+// _EN è configurata (template approvato da Meta): finché non c'è, si
+// ricade sul comportamento di sempre — SID italiana con variabili
+// italiane, mai un ibrido "corpo IT + variabili EN" che sfigurerebbe.
+function pickWhatsAppTemplateSid(
+    baseEnvKey: string,
+    language: string | null | undefined
+): { contentSid: string; english: boolean } | undefined {
+    const englishSid = isEnglishGuest(language) ? process.env[`${baseEnvKey}_EN`] : undefined;
+    if (englishSid) return { contentSid: englishSid, english: true };
+    const italianSid = process.env[baseEnvKey];
+    return italianSid ? { contentSid: italianSid, english: false } : undefined;
+}
 function buildBookingConfirmedTemplate(
     customerName: string | null | undefined,
     reservationTime: string | Date,
-    guests: number | null | undefined
+    guests: number | null | undefined,
+    language?: string | null
 ): WhatsAppTemplateOpts | undefined {
-    const contentSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_CONFIRMED;
-    if (!contentSid) return undefined;
+    const picked = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_BOOKING_CONFIRMED', language);
+    if (!picked) return undefined;
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     return {
-        contentSid,
+        contentSid: picked.contentSid,
         contentVariables: {
             '1': templateName(customerName),
-            '2': templateGuestsLabel(guests),
+            '2': templateGuestsLabel(guests, picked.english),
             '3': dateLabel,
             '4': timeLabel,
         },
@@ -12963,16 +13006,17 @@ function buildBookingConfirmedTemplate(
 function buildBookingReminderTemplate(
     customerName: string | null | undefined,
     reservationTime: string | Date,
-    guests: number | null | undefined
+    guests: number | null | undefined,
+    language?: string | null
 ): WhatsAppTemplateOpts | undefined {
-    const contentSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_REMINDER;
-    if (!contentSid) return undefined;
+    const picked = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_BOOKING_REMINDER', language);
+    if (!picked) return undefined;
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     return {
-        contentSid,
+        contentSid: picked.contentSid,
         contentVariables: {
             '1': templateName(customerName),
-            '2': templateGuestsLabel(guests),
+            '2': templateGuestsLabel(guests, picked.english),
             '3': dateLabel,
             '4': timeLabel,
         },
@@ -12981,16 +13025,17 @@ function buildBookingReminderTemplate(
 function buildBookingUpdatedTemplate(
     customerName: string | null | undefined,
     reservationTime: string | Date,
-    guests: number | null | undefined
+    guests: number | null | undefined,
+    language?: string | null
 ): WhatsAppTemplateOpts | undefined {
-    const contentSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_UPDATED;
-    if (!contentSid) return undefined;
+    const picked = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_BOOKING_UPDATED', language);
+    if (!picked) return undefined;
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     return {
-        contentSid,
+        contentSid: picked.contentSid,
         contentVariables: {
             '1': templateName(customerName),
-            '2': templateGuestsLabel(guests),
+            '2': templateGuestsLabel(guests, picked.english),
             '3': dateLabel,
             '4': timeLabel,
         },
@@ -12999,16 +13044,17 @@ function buildBookingUpdatedTemplate(
 function buildBookingDeclinedTemplate(
     customerName: string | null | undefined,
     reservationTime: string | Date,
-    guests: number | null | undefined
+    guests: number | null | undefined,
+    language?: string | null
 ): WhatsAppTemplateOpts | undefined {
-    const contentSid = process.env.TWILIO_WA_CONTENT_SID_BOOKING_DECLINED;
-    if (!contentSid) return undefined;
+    const picked = pickWhatsAppTemplateSid('TWILIO_WA_CONTENT_SID_BOOKING_DECLINED', language);
+    if (!picked) return undefined;
     const { dateLabel, timeLabel } = formatBookingDateTime(asUtcInstant(reservationTime));
     return {
-        contentSid,
+        contentSid: picked.contentSid,
         contentVariables: {
             '1': templateName(customerName),
-            '2': templateGuestsLabel(guests),
+            '2': templateGuestsLabel(guests, picked.english),
             '3': dateLabel,
             '4': timeLabel,
         },
@@ -13178,10 +13224,11 @@ function publicAppBaseUrl(): string | null {
 // rule. Apple Mail and Gmail (iOS/Android) honour the media query; clients
 // that ignore it (older Outlook) simply see the light version — still legible
 // on their default light chrome.
-function wrapEmailHtml(preheader: string, bodyBlocks: string): string {
+function wrapEmailHtml(preheader: string, bodyBlocks: string, language?: string | null): string {
     const base = publicAppBaseUrl();
     const identity = businessIdentity();
     const brandName = escapeHtml(identity.name);
+    const english = isEnglishGuest(language);
     const logoLight = base
         ? `<img class="logo-light" src="${base}/prenota/logo.png" alt="${brandName}" width="160" style="display:block;margin:0 auto;max-width:160px;height:auto;">`
         : '';
@@ -13193,9 +13240,9 @@ function wrapEmailHtml(preheader: string, bodyBlocks: string): string {
     // absolute base. When no base URL is configured (dev) we omit the link
     // rather than emit a broken href.
     const privacyLink = base
-        ? ` · <a href="${base}/privacy" style="color:#a8a29e;text-decoration:underline;">Informativa privacy</a>`
+        ? ` · <a href="${base}/privacy" style="color:#a8a29e;text-decoration:underline;">${english ? 'Privacy policy' : 'Informativa privacy'}</a>`
         : '';
-    return `<!DOCTYPE html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${brandName}</title>
+    return `<!DOCTYPE html><html lang="${english ? 'en' : 'it'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${brandName}</title>
 <meta name="color-scheme" content="light dark">
 <meta name="supported-color-schemes" content="light dark">
 <style>
@@ -13243,18 +13290,19 @@ function escapeHtml(s: string): string {
 // place so any future number change lives in a single spot. The WhatsApp link
 // uses wa.me (works in Gmail, iOS Mail, most clients); the phone link uses
 // tel: so a tap on mobile opens the dialer.
-function contactBlockHtml(): string {
+function contactBlockHtml(language?: string | null): string {
     const identity = businessIdentity();
+    const english = isEnglishGuest(language);
     return `
       <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 16px;">
         <tr>
           <td style="font-size:13px;line-height:1.6;color:#57534e;padding:8px 12px;border:1px solid #e7e5e4;border-radius:10px;background:#fbf9f4;">
-            <strong style="color:#292524;">Contattaci direttamente:</strong><br>
+            <strong style="color:#292524;">${english ? 'Contact us directly:' : 'Contattaci direttamente:'}</strong><br>
             📞 <a href="${phoneHref(identity.phone)}" style="color:#065f46;text-decoration:none;">${escapeHtml(identity.phone)}</a>
             &nbsp;·&nbsp;
             💬 <a href="${whatsappHref(identity.whatsapp)}" style="color:#065f46;text-decoration:none;">WhatsApp ${escapeHtml(identity.whatsapp)}</a>
             &nbsp;·&nbsp;
-            📍 <a href="${identity.mapsUrl}" style="color:#065f46;text-decoration:none;">Come raggiungerci</a>
+            📍 <a href="${identity.mapsUrl}" style="color:#065f46;text-decoration:none;">${english ? 'Get directions' : 'Come raggiungerci'}</a>
           </td>
         </tr>
       </table>
