@@ -139,9 +139,10 @@ export const LoginPage: React.FC = () => {
       <div className="flex-1 min-w-0 relative flex flex-col">
         {/* Top bar: brand */}
         <div className="px-6 py-6 flex items-center justify-center">
-          {/* Il login non applica mai .dark (il tema si carica dopo l'accesso),
-              quindi basta il wordmark nero. */}
-          <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-8 w-auto" />
+          {/* Il tema arriva anche qui: .dark viene applicata da localStorage
+              prima dell'accesso. Stessa coppia nero/bianco della sidebar. */}
+          <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-8 w-auto dark:hidden" />
+          <img src="/logo-sympotia-white.svg" alt={PLATFORM_NAME} className="hidden h-8 w-auto dark:block" />
         </div>
 
         {/* Centered form */}
