@@ -5,6 +5,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import { ShoppingProvider } from './contexts/ShoppingContext';
 import { TodosProvider } from './contexts/TodosContext';
 import { PublicPayPageEntry } from './components/PublicPayPage';
+import I18nProvider from './i18n/I18nProvider';
 import './index.css';
 
 const rootElement = document.getElementById('root');
@@ -22,7 +23,9 @@ const isPublicPayRoute = /^\/pay\//.test(window.location.pathname);
 root.render(
   <React.StrictMode>
     {isPublicPayRoute ? (
-      <PublicPayPageEntry />
+      <I18nProvider>
+        <PublicPayPageEntry />
+      </I18nProvider>
     ) : (
       <AuthProvider>
         <ShoppingProvider>

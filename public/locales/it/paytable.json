@@ -1,0 +1,88 @@
+{
+  "meta": {
+    "title": "Il conto del tavolo"
+  },
+  "header": {
+    "title": "Il conto del tavolo",
+    "subtitle": "Paga la tua parte in sicurezza",
+    "langGroupAria": "Lingua"
+  },
+  "loading": {
+    "text": "Caricamento conto…"
+  },
+  "invalidLink": {
+    "text": "Link non valido."
+  },
+  "notFound": {
+    "title": "Conto non disponibile",
+    "text": "Il link non è più valido: potrebbe essere scaduto, revocato o il conto è già stato chiuso. Chiedi al personale del ristorante."
+  },
+  "bill": {
+    "total": "Totale",
+    "cover_one": "{{count}} coperto",
+    "cover_other": "{{count}} coperti",
+    "depositPaid": "Acconto già versato",
+    "paidLabel": "Pagato {{amount}}",
+    "remaining": "Rimanenti:"
+  },
+  "splits": {
+    "title": "Quote",
+    "anonymous": "Anonimo",
+    "statusPaid": "Pagato",
+    "statusPending": "In attesa"
+  },
+  "menu": {
+    "myShare": "La mia parte · {{amount}}",
+    "perItem": "Pago quello che ho preso",
+    "customAmount": "Un importo diverso"
+  },
+  "items": {
+    "back": "← Torna indietro",
+    "question": "Cosa hai preso?",
+    "alreadyTaken": "già pagato da un altro",
+    "yourShare": "La tua quota",
+    "nameLabel": "Nome (opzionale)",
+    "namePlaceholder": "Es. Marco",
+    "continue": "Continua al pagamento"
+  },
+  "amountForm": {
+    "changeOption": "Cambia opzione",
+    "amountLabel": "Importo",
+    "amountPlaceholder": "0,00",
+    "maxAvailable": "Max disponibile: {{amount}}",
+    "nameLabel": "Nome (opzionale)",
+    "namePlaceholder": "Es. Marco",
+    "visibleNote": "Sarà visibile agli altri ospiti del tavolo.",
+    "continue": "Continua al pagamento"
+  },
+  "paidInFull": {
+    "title": "Conto saldato",
+    "text": "Il tavolo è stato pagato per intero."
+  },
+  "claimed": {
+    "yourShare": "La tua quota",
+    "forName": "per {{name}}",
+    "goToPayment": "Vai al pagamento",
+    "noCheckoutLink": "Non è stato possibile creare il link di pagamento. Prova ad annullare la quota e riprovare.",
+    "cancelShare": "Annulla la quota",
+    "cancelling": "Attendere…",
+    "holdNotice": "La quota è riservata per 5 minuti. Se non paghi entro questo tempo verrà rilasciata automaticamente."
+  },
+  "footer": {
+    "text": "Pagamento sicuro tramite Revolut · Powered by Ristomanager"
+  },
+  "confirm": {
+    "release": "Annullare la richiesta? Potrai rifarla dopo."
+  },
+  "errors": {
+    "pickAtLeastOne": "Scegli almeno un piatto",
+    "invalidAmount": "Inserisci un importo valido",
+    "amountTooHigh": "Importo troppo alto. Massimo disponibile: {{amount}}",
+    "network": "Errore di rete",
+    "generic": "Errore durante la richiesta",
+    "releaseFailed": "Errore durante l'annullamento",
+    "billFullyClaimed": "Il conto è già stato tutto assegnato ad altri ospiti.",
+    "itemsAlreadyClaimed": "Uno dei piatti scelti è già stato preso da un altro ospite. Aggiorna la pagina e riprova.",
+    "perItemUnavailable": "Non è possibile pagare per piatto su questo conto: scegli un'altra opzione."
+  }
+}

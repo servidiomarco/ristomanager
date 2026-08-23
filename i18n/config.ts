@@ -11,6 +11,11 @@ import LanguageDetector from 'i18next-browser-languagedetector';
 export type SupportedLanguage = 'it' | 'en';
 export const SUPPORTED_LANGUAGES: SupportedLanguage[] = ['it', 'en'];
 export const DEFAULT_NAMESPACE = 'prenota';
+// Card dev board #35 — pagina pubblica /pay/:token, stesso schema di risorse
+// del widget /prenota ma con un namespace proprio (una pagina, un file). Non
+// in `ns` qui sotto: caricato on-demand da useTranslation('paytable'), così
+// il conto non tira giù prenota.json e viceversa.
+export const PAY_NAMESPACE = 'paytable';
 
 i18n
     .use(Backend)
