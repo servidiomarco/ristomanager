@@ -826,17 +826,27 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         `);
 
         // Invariante cross-row: la somma dei claim vivi (CLAIMED o PAID)
-        // non può eccedere il totale del bill. PostgreSQL non permette
-        // CHECK subquery, quindi lo enforce con trigger BEFORE INSERT/UPDATE
-        // su table_bill_splits. Lookup a caldo del bill in row-lock così
-        // due insert concorrenti sono serializzati e uno dei due riceve
-        // l'errore invece di sfondare il totale.
+        // PIÙ gli incassi staff del libro cassa non può eccedere il totale
+        // del bill. PostgreSQL non permette CHECK subquery, quindi lo
+        // enforce con trigger BEFORE INSERT/UPDATE su table_bill_splits.
+        // Lookup a caldo del bill in row-lock così due insert concorrenti
+        // sono serializzati e uno dei due riceve l'errore invece di
+        // sfondare il totale.
+        //
+        // Il corpo della funzione vive QUI e non in una migration: questo
+        // CREATE OR REPLACE gira a ogni boot, quindi una versione diversa
+        // applicata via migration verrebbe silenziosamente sovrascritta al
+        // riavvio successivo. Il guard to_regclass copre il primo boot di
+        // un DB nuovo, dove createSchema() gira PRIMA della migration che
+        // crea table_bill_payments (la funzione viene solo definita, non
+        // eseguita, finché non si scrive su table_bill_splits).
         await client.query(`
             CREATE OR REPLACE FUNCTION enforce_table_bill_split_sum()
             RETURNS TRIGGER AS $$
             DECLARE
                 v_total INTEGER;
                 v_live_sum INTEGER;
+                v_staff_paid INTEGER := 0;
             BEGIN
                 -- Solo i claim che pesano sul residuo sono contati.
                 IF NEW.status NOT IN ('CLAIMED', 'PAID') THEN
@@ -858,9 +868,20 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                   AND status IN ('CLAIMED', 'PAID')
                   AND (TG_OP = 'INSERT' OR id <> NEW.id);
 
-                IF v_live_sum + NEW.amount_cents > v_total THEN
-                    RAISE EXCEPTION 'split sum (% + %) exceeds bill total (%) for bill %',
-                        v_live_sum, NEW.amount_cents, v_total, NEW.table_bill_id
+                -- Incassi staff (righe senza specchio quota): le righe
+                -- LINK_ONLINE con table_bill_split_id valorizzato sono lo
+                -- specchio di una quota già in v_live_sum.
+                IF to_regclass('table_bill_payments') IS NOT NULL THEN
+                    SELECT COALESCE(SUM(amount_cents), 0) INTO v_staff_paid
+                    FROM table_bill_payments
+                    WHERE table_bill_id = NEW.table_bill_id
+                      AND table_bill_split_id IS NULL
+                      AND voided_at IS NULL;
+                END IF;
+
+                IF v_live_sum + v_staff_paid + NEW.amount_cents > v_total THEN
+                    RAISE EXCEPTION 'split sum (% + % + %) exceeds bill total (%) for bill %',
+                        v_live_sum, v_staff_paid, NEW.amount_cents, v_total, NEW.table_bill_id
                         USING ERRCODE = '23514';
                 END IF;
 
