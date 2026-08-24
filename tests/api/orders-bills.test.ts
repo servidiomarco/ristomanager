@@ -84,6 +84,77 @@ describe('orders & bills', () => {
         expect(items.body.total_cents).toBe(2500);
     });
 
+    // Il contratto su cui il palmare conta per i retry: stessa chiave di
+    // idempotenza → mai una riga doppia; finché la riga è in bozza il replay
+    // allinea la quantità all'ultimo invio; dopo l'invio in cucina il replay
+    // non tocca più niente.
+    it('il replay di una riga con la stessa chiave non duplica e converge in bozza', async () => {
+        const dish = await api().post('/dishes').set(bearer(token)).send({
+            name: 'Amatriciana Collaudo',
+            description: null,
+            price: 10,
+            category: 'PRIMI',
+            allergens: null,
+        });
+        expect(dish.status).toBe(201);
+
+        const room = await api().post('/rooms').set(bearer(token)).send({
+            name: 'Sala Test Replay', width: 800, height: 600,
+        });
+        expect(room.status).toBe(201);
+        const table = await api().post('/tables').set(bearer(token)).send({
+            name: 'TC3', shape: 'SQUARE', seats: 4, x: 500, y: 100,
+            room_id: room.body.id, status: 'FREE',
+        });
+        expect(table.status).toBe(201);
+
+        const order = await api().post('/orders').set(bearer(token)).send({
+            table_id: table.body.id,
+        });
+        expect(order.status).toBe(201);
+        const orderId = order.body.order.id as number;
+
+        const riga = (body: any) =>
+            body.items.filter((i: any) => i.dish_id === dish.body.id);
+
+        const primo = await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [{ dish_id: dish.body.id, qty: 2, idempotency_key: 'replay-amatriciana' }],
+        });
+        expect(primo.status).toBe(201);
+        expect(riga(primo.body)).toHaveLength(1);
+        expect(riga(primo.body)[0].qty).toBe(2);
+
+        // Retry identico (timeout con risposta persa): nessuna riga in più.
+        const retry = await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [{ dish_id: dish.body.id, qty: 2, idempotency_key: 'replay-amatriciana' }],
+        });
+        expect(retry.status).toBe(201);
+        expect(riga(retry.body)).toHaveLength(1);
+        expect(riga(retry.body)[0].qty).toBe(2);
+
+        // Retry dopo un ritocco della quantità, riga ancora in bozza:
+        // vince l'intento più recente, sempre su una riga sola.
+        const ritocco = await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [{ dish_id: dish.body.id, qty: 3, idempotency_key: 'replay-amatriciana' }],
+        });
+        expect(ritocco.status).toBe(201);
+        expect(riga(ritocco.body)).toHaveLength(1);
+        expect(riga(ritocco.body)[0].qty).toBe(3);
+
+        // Invio in cucina: da qui la riga non è più in bozza.
+        const inviato = await api().post(`/orders/${orderId}/send`).set(bearer(token)).send({});
+        expect(inviato.status).toBe(200);
+
+        // Il replay tardivo con un'altra quantità non tocca ciò che la
+        // cucina ha già visto: né duplica, né aggiorna.
+        const tardivo = await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [{ dish_id: dish.body.id, qty: 5, idempotency_key: 'replay-amatriciana' }],
+        });
+        expect(tardivo.status).toBe(201);
+        expect(riga(tardivo.body)).toHaveLength(1);
+        expect(riga(tardivo.body)[0].qty).toBe(3);
+    });
+
     it('apre e chiude un conto al tavolo in contanti', async () => {
         const bill = await api().post(`/tables/${tavoloConto}/bill`).set(bearer(token)).send({
             total_cents: 5000,

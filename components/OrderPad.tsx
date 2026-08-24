@@ -254,7 +254,10 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
         return next;
       }
       return [...prev, {
-        key, dish, qty, course_no: courseNo,
+        // La chiave di idempotenza nasce CON la riga, non all'invio: così il
+        // retry di un invio andato in timeout ripresenta la stessa chiave e
+        // il server non duplica (vedi ON CONFLICT su order_items).
+        key, idem: newIdempotencyKey(), dish, qty, course_no: courseNo,
         modifier_ids: modifierIds,
         modifier_labels: modifierLabels,
         modifier_delta_cents: modifierDelta,
@@ -333,6 +336,10 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
         course_no: l.course_no,
         modifier_ids: l.modifier_ids,
         note: l.note ?? null,
+        // Chiave per riga, stabile dalla nascita della riga: un retry dopo un
+        // timeout rimanda le stesse chiavi e il server dedup-a invece di
+        // raddoppiare la comanda in cucina.
+        idempotency_key: l.idem,
       }));
       const key = newIdempotencyKey();
       await ordersApiService.addItems(order.order.id, payload, key);
