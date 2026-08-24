@@ -169,6 +169,7 @@ import {
 } from './services/blacklistPolicy.js';
 import { toTitleCase } from './utils/text.js';
 import { getRomeDatePart, getRomeTimePart } from './utils/reservationTime.js';
+import { buildEReceiptPayload, getFiscalDriver } from './services/fiscalService.js';
 import {
     getAvailableSlots,
     getAllOpeningHours,
@@ -3475,6 +3476,15 @@ async function loadBillView(tenantId: number, billId: number): Promise<any | nul
     const staff_paid_cents = paymentsResult.rows.reduce(
         (n: number, p: any) => n + (p.table_bill_split_id == null && p.voided_at == null ? p.amount_cents : 0), 0
     );
+    // Documenti fiscali del conto (senza request/response: pesano e alla UI
+    // servono stato, riferimento ed eventuale errore).
+    const fiscalResult = await queryWithRetry(
+        `SELECT id, table_bill_id, doc_type, provider, status, provider_ref, error,
+                total_cents, attempts, created_at, confirmed_at, voided_at
+         FROM fiscal_documents WHERE table_bill_id = $1
+         ORDER BY created_at ASC`,
+        [billId]
+    );
     const totals = splitsResult.rows.reduce(
         (acc, s) => {
             if (s.status === 'PAID') {
@@ -3505,6 +3515,7 @@ async function loadBillView(tenantId: number, billId: number): Promise<any | nul
         // Vuoto per i conti aperti a mano (niente righe): la UI non mostra
         // la sezione IVA finché non c'è un dettaglio da cui derivarla.
         vat_breakdown: vatBreakdownFromItems(bill.items, bill.total_cents),
+        fiscal_documents: fiscalResult.rows,
     };
 }
 
@@ -3893,6 +3904,14 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
 
         try { socketService?.broadcastToAll(req.tenantId!, 'bill:closed', updatedRow); } catch (_) {}
 
+        // Documento commerciale: parte in automatico sui conti saldati per
+        // intero, fuori dalla risposta — la chiusura non aspetta il fisco.
+        // Esito via socket 'fiscal:updated'; retry da POST /bills/:id/fiscal-docs.
+        if (updatedRow.status === 'CLOSED') {
+            emitFiscalDocForBill(req.tenantId!, id, req.user?.userId ?? null)
+                .catch(err => console.error('[fiscal] emissione post-chiusura fallita per conto', id, err?.message));
+        }
+
         res.json(updatedRow);
     } catch (err: any) {
         console.error('POST /bills/:id/close error:', err);
@@ -4171,6 +4190,273 @@ app.get('/reports/cash-closure', authenticate, requirePermission('payments:view'
     } catch (err: any) {
         console.error('GET /reports/cash-closure error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// ============================================
+// DOCUMENTI FISCALI — documento commerciale (fase 3 fatturazione)
+// ============================================
+// Il driver (Openapi sandbox / mock) e il payload builder stanno in
+// services/fiscalService.ts; qui vivono persistenza, idempotenza e flusso.
+// Regola del piano: la trasmissione non blocca MAI l'operatività — il conto
+// chiude comunque, il documento resta PENDING/FAILED da ritentare.
+
+const FISCAL_PROVIDER_KEY = 'fiscal_provider';
+const FISCAL_VAT_NUMBER_KEY = 'fiscal_vat_number';
+const FISCAL_PROVIDERS = ['none', 'openapi', 'mock'] as const;
+
+async function getFiscalProviderSetting(tenantId: number): Promise<string> {
+    try {
+        const r = await queryWithRetry(
+            'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
+            [tenantId, FISCAL_PROVIDER_KEY]
+        );
+        const raw = r.rows[0]?.text_value;
+        return (FISCAL_PROVIDERS as readonly string[]).includes(raw) ? raw : 'none';
+    } catch (err) {
+        console.error('[fiscal] lettura provider fallita:', (err as any)?.message);
+        return 'none';
+    }
+}
+
+async function getFiscalVatNumber(tenantId: number): Promise<string> {
+    try {
+        const r = await queryWithRetry(
+            'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
+            [tenantId, FISCAL_VAT_NUMBER_KEY]
+        );
+        return typeof r.rows[0]?.text_value === 'string' ? r.rows[0].text_value : '';
+    } catch (_) {
+        return '';
+    }
+}
+
+const FISCAL_DOC_COLUMNS = `id, table_bill_id, doc_type, provider, fiscal_id_snapshot, status,
+    provider_ref, error, total_cents, attempts, created_by_user_id, created_at, confirmed_at, voided_at`;
+
+// Emissione del documento commerciale per un conto CHIUSO. Idempotente:
+// l'indice unico ammette un documento vivo per conto — il replay ritorna il
+// CONFIRMED esistente, il retry riusa il PENDING, un FAILED lascia spazio a
+// un tentativo nuovo. Chiamata fire-and-forget dalla chiusura e in modo
+// esplicito da POST /bills/:id/fiscal-docs.
+async function emitFiscalDocForBill(tenantId: number, billId: number, userId: number | null): Promise<{ doc?: any; skipped?: string }> {
+    const providerName = await getFiscalProviderSetting(tenantId);
+    if (providerName === 'none') return { skipped: 'not_configured' };
+    const fiscalId = await getFiscalVatNumber(tenantId);
+    if (!fiscalId) return { skipped: 'missing_vat_number' };
+
+    const billRs = await queryWithRetry(
+        `SELECT id, total_cents, items, status FROM table_bills WHERE id = $1 AND tenant_id = $2`,
+        [billId, tenantId]
+    );
+    const bill = billRs.rows[0];
+    // Solo conti CLOSED (saldati per intero): un SETTLED_PARTIAL ha un
+    // ammanco che non quadrerebbe col documento.
+    if (!bill || bill.status !== 'CLOSED') return { skipped: 'bill_not_closed' };
+
+    let ins = await queryWithRetry(
+        `INSERT INTO fiscal_documents (tenant_id, table_bill_id, provider, fiscal_id_snapshot, total_cents, created_by_user_id)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') DO NOTHING
+         RETURNING ${FISCAL_DOC_COLUMNS}`,
+        [tenantId, billId, providerName, fiscalId, bill.total_cents, userId]
+    );
+    let doc = ins.rows[0] ?? null;
+    if (!doc) {
+        const existing = await queryWithRetry(
+            `SELECT ${FISCAL_DOC_COLUMNS} FROM fiscal_documents
+             WHERE table_bill_id = $1 AND tenant_id = $2 AND status IN ('PENDING', 'CONFIRMED')
+             LIMIT 1`,
+            [billId, tenantId]
+        );
+        doc = existing.rows[0] ?? null;
+        if (!doc) return { skipped: 'race' };
+        if (doc.status === 'CONFIRMED') return { doc };
+    }
+
+    // Incassi attivi (specchi LINK_ONLINE inclusi) + acconto: sono i numeri
+    // che devono quadrare col totale delle righe nel documento.
+    const paymentsRs = await queryWithRetry(
+        `SELECT method, amount_cents, meta FROM table_bill_payments
+         WHERE table_bill_id = $1 AND voided_at IS NULL`,
+        [billId]
+    );
+    const depositRs = await queryWithRetry(
+        `SELECT COALESCE(SUM(amount_cents), 0)::int AS s FROM table_bill_splits
+         WHERE table_bill_id = $1 AND status = 'PAID' AND kind = 'deposit'`,
+        [billId]
+    );
+
+    const payload = buildEReceiptPayload({
+        fiscalId,
+        totalCents: bill.total_cents,
+        items: Array.isArray(bill.items) ? bill.items : null,
+        payments: paymentsRs.rows,
+        depositCreditCents: depositRs.rows[0].s,
+    });
+
+    await queryWithRetry(
+        `UPDATE fiscal_documents SET attempts = attempts + 1, request = $2::jsonb WHERE id = $1`,
+        [doc.id, JSON.stringify(payload)]
+    );
+
+    let finalRow: any;
+    try {
+        const driver = getFiscalDriver(providerName);
+        const result = await driver.issueEReceipt(payload);
+        const upd = await queryWithRetry(
+            `UPDATE fiscal_documents
+             SET status = 'CONFIRMED', provider_ref = $2, response = $3::jsonb,
+                 confirmed_at = CURRENT_TIMESTAMP, error = NULL
+             WHERE id = $1
+             RETURNING ${FISCAL_DOC_COLUMNS}`,
+            [doc.id, result.provider_ref, JSON.stringify(result.raw ?? null)]
+        );
+        finalRow = upd.rows[0];
+    } catch (err: any) {
+        const upd = await queryWithRetry(
+            `UPDATE fiscal_documents SET status = 'FAILED', error = $2 WHERE id = $1
+             RETURNING ${FISCAL_DOC_COLUMNS}`,
+            [doc.id, String(err?.message ?? err).slice(0, 1000)]
+        );
+        finalRow = upd.rows[0];
+        console.error('[fiscal] emissione fallita per conto', billId, err?.message);
+    }
+
+    try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: billId, doc: finalRow }); } catch (_) {}
+    return { doc: finalRow };
+}
+
+// Configurazione fiscale del tenant. Il token API del provider resta in env
+// (piattaforma); qui vivono la scelta del driver e la P.IVA dell'esercente.
+app.get('/settings/fiscal', authenticate, async (req, res) => {
+    try {
+        res.json({
+            provider: await getFiscalProviderSetting(req.tenantId!),
+            vat_number: await getFiscalVatNumber(req.tenantId!),
+            providers: FISCAL_PROVIDERS,
+            openapi_token_configured: Boolean(process.env.OPENAPI_INVOICE_TOKEN),
+        });
+    } catch (err: any) {
+        console.error('GET /settings/fiscal error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/settings/fiscal', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const provider = req.body?.provider;
+        const vatNumber = req.body?.vat_number;
+        if (provider !== undefined) {
+            if (!(FISCAL_PROVIDERS as readonly string[]).includes(provider)) {
+                return res.status(400).json({ error: 'invalid_provider' });
+            }
+            if (provider === 'mock' && process.env.NODE_ENV === 'production') {
+                return res.status(400).json({ error: 'Il driver mock non è ammesso in produzione' });
+            }
+            await queryWithRetry(
+                `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+                 VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                 ON CONFLICT (tenant_id, key) DO UPDATE
+                   SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+                [req.tenantId!, FISCAL_PROVIDER_KEY, provider]
+            );
+        }
+        if (vatNumber !== undefined) {
+            const v = String(vatNumber).trim();
+            if (v !== '' && !/^\d{11}$/.test(v)) {
+                return res.status(400).json({ error: 'vat_number deve essere una P.IVA di 11 cifre (senza prefisso IT)' });
+            }
+            await queryWithRetry(
+                `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+                 VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                 ON CONFLICT (tenant_id, key) DO UPDATE
+                   SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+                [req.tenantId!, FISCAL_VAT_NUMBER_KEY, v]
+            );
+        }
+        res.json({
+            provider: await getFiscalProviderSetting(req.tenantId!),
+            vat_number: await getFiscalVatNumber(req.tenantId!),
+            providers: FISCAL_PROVIDERS,
+            openapi_token_configured: Boolean(process.env.OPENAPI_INVOICE_TOKEN),
+        });
+    } catch (err: any) {
+        console.error('PUT /settings/fiscal error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Emissione manuale / retry. La chiusura la innesca già da sola; questo
+// endpoint serve al bottone "Emetti scontrino" e a ritentare un FAILED.
+app.post('/bills/:id/fiscal-docs', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid bill id' });
+        const outcome = await emitFiscalDocForBill(req.tenantId!, id, req.user?.userId ?? null);
+        if (outcome.skipped) {
+            const messages: Record<string, string> = {
+                not_configured: 'Nessun provider fiscale configurato (Impostazioni → Fiscale)',
+                missing_vat_number: 'P.IVA mancante nelle impostazioni fiscali',
+                bill_not_closed: 'Il documento si emette solo su un conto chiuso e saldato per intero',
+                race: 'Emissione già in corso, riprova',
+            };
+            return res.status(409).json({ error: messages[outcome.skipped] ?? outcome.skipped, reason: outcome.skipped });
+        }
+        // Il payload trasmesso viaggia nella risposta dell'emissione manuale:
+        // è quello che si guarda quando lo scontrino non torna.
+        const reqRs = await queryWithRetry(`SELECT request FROM fiscal_documents WHERE id = $1`, [outcome.doc.id]);
+        res.status(outcome.doc.status === 'CONFIRMED' ? 200 : 502).json({ doc: outcome.doc, request: reqRs.rows[0]?.request ?? null });
+    } catch (err: any) {
+        console.error('POST /bills/:id/fiscal-docs error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Annullo del documento presso il provider (DELETE /IT-e-receipts/:id lato
+// Openapi). Il conto non si tocca: annullare lo scontrino è un atto fiscale,
+// riaprire il conto è un atto operativo, e non sempre vanno insieme.
+app.post('/bills/:id/fiscal-docs/:fid/void', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        const fid = parseInt(req.params.fid, 10);
+        if (!Number.isFinite(id) || !Number.isFinite(fid)) return res.status(400).json({ error: 'Invalid id' });
+
+        const docRs = await queryWithRetry(
+            `SELECT ${FISCAL_DOC_COLUMNS} FROM fiscal_documents
+             WHERE id = $1 AND table_bill_id = $2 AND tenant_id = $3`,
+            [fid, id, req.tenantId!]
+        );
+        const doc = docRs.rows[0];
+        if (!doc) return res.status(404).json({ error: 'Documento non trovato' });
+        if (doc.status !== 'CONFIRMED' || !doc.provider_ref) {
+            return res.status(409).json({ error: `Solo un documento confermato si può annullare (stato ${doc.status})` });
+        }
+
+        const driver = getFiscalDriver(doc.provider);
+        const raw = await driver.voidEReceipt(doc.provider_ref);
+        const upd = await queryWithRetry(
+            `UPDATE fiscal_documents
+             SET status = 'VOIDED', voided_at = CURRENT_TIMESTAMP, response = $2::jsonb
+             WHERE id = $1
+             RETURNING ${FISCAL_DOC_COLUMNS}`,
+            [fid, JSON.stringify(raw ?? null)]
+        );
+        try { socketService?.broadcastToAll(req.tenantId!, 'fiscal:updated', { bill_id: id, doc: upd.rows[0] }); } catch (_) {}
+
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!,
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.RESERVATION,
+                undefined,
+                `Annullato documento fiscale #${fid} (conto #${id})`
+            );
+        }
+        res.json({ doc: upd.rows[0] });
+    } catch (err: any) {
+        console.error('POST /bills/:id/fiscal-docs/:fid/void error:', err);
+        res.status(502).json({ error: 'Annullo non riuscito', detail: err?.message });
     }
 });
 
