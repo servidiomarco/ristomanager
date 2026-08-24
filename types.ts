@@ -331,6 +331,27 @@ export interface TableBillItem {
   vat_rate?: number;
 }
 
+// Documento commerciale emesso via provider cloud (fase 3 fatturazione).
+// PENDING → CONFIRMED/FAILED; l'annullo porta a VOIDED. Un solo documento
+// vivo (PENDING/CONFIRMED) per conto.
+export type FiscalDocumentStatus = 'PENDING' | 'CONFIRMED' | 'FAILED' | 'VOIDED';
+export type FiscalProviderSetting = 'none' | 'openapi' | 'mock';
+
+export interface FiscalDocument {
+  id: number;
+  table_bill_id: number;
+  doc_type: 'RECEIPT';
+  provider: string;
+  status: FiscalDocumentStatus;
+  provider_ref: string | null;
+  error: string | null;
+  total_cents: number;
+  attempts: number;
+  created_at: string;
+  confirmed_at: string | null;
+  voided_at: string | null;
+}
+
 /** Totali del conto per aliquota, a prezzi IVA inclusa scorporati
  *  (net + vat = gross; Σ gross = totale conto, sconti già ripartiti). */
 export interface VatBreakdownRow {
@@ -447,6 +468,8 @@ export interface TableBillWithSplits {
   residual_cents: number;
   /** Vuoto per i conti aperti a mano, senza dettaglio righe. */
   vat_breakdown?: VatBreakdownRow[];
+  /** Documenti commerciali emessi per questo conto (storia inclusa). */
+  fiscal_documents?: FiscalDocument[];
 }
 
 // ============================================
