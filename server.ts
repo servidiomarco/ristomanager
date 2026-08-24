@@ -20,6 +20,7 @@ import * as tableAssignmentAgent from './services/tableAssignmentAgent.js';
 import * as aiReport from './services/aiReportService.js';
 import { renderPrenota } from './services/prenotaSeo.js';
 import { COST_USD_SQL, UNPRICED_SQL, USD_EUR } from './services/aiPricing.js';
+import { outboxEnqueueInTx, outboxKick, outboxRegister, startOutboxDispatcher } from './services/outboxService.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
 import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
 import { provisionTenant, ProvisioningError } from './services/tenantProvisioning.js';
@@ -9649,28 +9650,75 @@ app.post('/customers/:sourceId/merge-into/:targetId', authenticate, requirePermi
 app.delete('/customers/:id', authenticate, requirePermission('customers:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const existing = await queryWithRetry('SELECT name FROM customers WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
+        const existing = await queryWithRetry('SELECT name, phone FROM customers WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
         if (existing.rowCount === 0) {
             return res.status(404).json({ error: 'Customer not found' });
         }
         const resourceName = existing.rows[0].name;
+        const phone = existing.rows[0].phone as string | null;
+
+        // Le prenotazioni della persona, PRIMA di cancellare la scheda: il
+        // legame cliente↔prenotazione in questo schema è il telefono (stesse
+        // ultime dieci cifre, come il dedupe della rubrica). È il modo esatto
+        // di trovare i log da anonimizzare — per id, non per somiglianza del
+        // nome — e copre anche le prenotazioni registrate con un nome scritto
+        // diversamente.
+        const digits = (phone ?? '').replace(/\D/g, '');
+        let reservationIds: number[] = [];
+        if (digits.length >= 8) {
+            const rs = await queryWithRetry(
+                `SELECT id FROM reservations
+                  WHERE tenant_id = $2
+                    AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10)
+                      = right($1, 10)`,
+                [digits, req.tenantId!]
+            );
+            reservationIds = rs.rows.map((r: any) => Number(r.id));
+        }
 
         await queryWithRetry('DELETE FROM customers WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
 
         // Diritto all'oblio, lato audit: la scheda sparisce e il nome non deve
         // sopravvivere nei log. Senza questo, una richiesta GDPR di
         // cancellazione diventa una caccia al tesoro in activity_logs.
-        // I log del cliente si anonimizzano per resource_id; quelli delle sue
-        // prenotazioni portano il nome come resource_name — da solo o seguito
-        // da « — dettaglio» — e perdono solo il prefisso. Un omonimo può
-        // perdere il prefisso anche lui: per una cancellazione, cancellare
-        // troppo è l'errore giusto.
+        // Tre passate: i log del cliente per resource_id; i log delle SUE
+        // prenotazioni per id (esatto, niente omonimi); e in coda l'euristica
+        // sul prefisso del nome, che resta per le prenotazioni senza telefono
+        // e per le righe storiche. Lì un omonimo esatto può perdere il
+        // prefisso anche lui: per una cancellazione, cancellare troppo è
+        // l'errore giusto.
         await queryWithRetry(
             `UPDATE activity_logs
                 SET resource_name = 'cliente rimosso', details = NULL
               WHERE tenant_id = $2 AND resource_type = 'CUSTOMER' AND resource_id = $1`,
             [id, req.tenantId!]
         );
+        if (reservationIds.length > 0) {
+            await queryWithRetry(
+                `UPDATE activity_logs
+                    SET resource_name = CASE
+                            WHEN left(resource_name, char_length($3)) = $3
+                                THEN 'cliente rimosso' || substr(resource_name, char_length($3) + 1)
+                            ELSE 'cliente rimosso'
+                        END
+                  WHERE tenant_id = $2
+                    AND resource_type = 'RESERVATION'
+                    AND resource_id = ANY($1::int[])`,
+                [reservationIds, req.tenantId!, resourceName]
+            );
+            // L'oblio vero sta qui, non solo nei log: nome e contatti nelle
+            // righe prenotazione della persona. Solo quelle PASSATE — una
+            // prenotazione futura serve al servizio, e anonimizzarla
+            // accecherebbe la reception su chi sta per arrivare.
+            await queryWithRetry(
+                `UPDATE reservations
+                    SET customer_name = 'cliente rimosso', phone = NULL, email = NULL
+                  WHERE tenant_id = $2
+                    AND id = ANY($1::int[])
+                    AND reservation_time < CURRENT_TIMESTAMP`,
+                [reservationIds, req.tenantId!]
+            );
+        }
         await queryWithRetry(
             `UPDATE activity_logs
                 SET resource_name = 'cliente rimosso' || substr(resource_name, char_length($1) + 1)
@@ -21508,6 +21556,10 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
             );
         }
 
+        // L'evento fa parte della transazione: o righe + evento, o niente.
+        // Il broadcast lo fa il dispatcher dell'outbox (kick sotto), così un
+        // processo morto fra COMMIT e notifica non lascia la cucina cieca.
+        await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId });
         await client.query('COMMIT');
         client.release();
 
@@ -21515,7 +21567,7 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
         const view = await loadOrderView(req.tenantId!, orderId);
         // Se la comanda è già agganciata a un conto, il totale lo segue.
         const sync = await resyncBillForOrder(req.tenantId!, orderId);
-        try { socketService?.broadcastToAll(req.tenantId!, 'order:updated', view.order); } catch (_) {}
+        outboxKick();
         res.status(201).json({ ...view, ...(sync?.warning ? { bill_warning: sync.warning } : {}) });
     } catch (err: any) {
         await client.query('ROLLBACK').catch(() => {});
@@ -21670,6 +21722,10 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
             if (rows.length > 0) fired.push(c);
         }
 
+        // L'invio (e l'eventuale lancio automatico) viaggia con la stessa
+        // transazione che cambia gli stati: la cucina non può restare cieca
+        // su un invio committato.
+        await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId });
         await client.query('COMMIT');
         client.release();
 
@@ -21697,8 +21753,8 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
                     });
                 }
             }
-            socketService?.broadcastToAll(req.tenantId!, 'order:updated', view.order);
         } catch (_) {}
+        outboxKick();
 
         res.json({ ...view, fire_mode: mode, fired_courses: fired, queued_courses: stillQueued });
     } catch (err: any) {
@@ -21721,15 +21777,35 @@ app.post('/orders/:id/courses/:n/recall', authenticate, requirePermission('order
             return res.status(400).json({ error: 'Parametri non validi' });
         }
 
-        const upd = await queryWithRetry(
-            `UPDATE order_items
-             SET status = 'DRAFT', queued_at = NULL
-             WHERE order_id = $1 AND course_no = $2 AND status = 'QUEUED' AND fired_at IS NULL
-               AND tenant_id = $3
-             RETURNING id`,
-            [orderId, courseNo, req.tenantId!]
-        );
-        if (upd.rows.length === 0) {
+        // Transazione esplicita per portare l'evento outbox insieme al
+        // cambio di stato: un recall committato ma mai comunicato lascerebbe
+        // il passe convinto che l'uscita sia ancora in attesa.
+        const client = await pool.connect();
+        let recalled = 0;
+        try {
+            await client.query('BEGIN');
+            const upd = await client.query(
+                `UPDATE order_items
+                 SET status = 'DRAFT', queued_at = NULL
+                 WHERE order_id = $1 AND course_no = $2 AND status = 'QUEUED' AND fired_at IS NULL
+                   AND tenant_id = $3
+                 RETURNING id`,
+                [orderId, courseNo, req.tenantId!]
+            );
+            recalled = upd.rows.length;
+            if (recalled === 0) {
+                await client.query('ROLLBACK');
+            } else {
+                await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId });
+                await client.query('COMMIT');
+            }
+        } catch (err) {
+            await client.query('ROLLBACK').catch(() => {});
+            throw err;
+        } finally {
+            client.release();
+        }
+        if (recalled === 0) {
             return res.status(409).json({
                 error: 'Nessuna riga richiamabile: l\'uscita non è in attesa oppure è già stata lanciata',
             });
@@ -21738,8 +21814,8 @@ app.post('/orders/:id/courses/:n/recall', authenticate, requirePermission('order
         const view = await loadOrderView(req.tenantId!, orderId);
         try {
             socketService?.broadcastToAll(req.tenantId!, 'course:recalled', { order_id: orderId, course_no: courseNo });
-            socketService?.broadcastToAll(req.tenantId!, 'order:updated', view.order);
         } catch (_) {}
+        outboxKick();
         res.json(view);
     } catch (err: any) {
         console.error('POST /orders/:id/courses/:n/recall error:', err);
@@ -22583,9 +22659,10 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
                  WHERE id = $1`,
                 [orderId, req.user?.userId ?? null]
             );
+            await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId });
             await client.query('COMMIT');
             client.release();
-            try { socketService?.broadcastToAll(req.tenantId!, 'order:updated', { ...order, status: 'CLOSED' }); } catch (_) {}
+            outboxKick();
             return res.json({
                 order_id: orderId,
                 bill: null,
@@ -22646,13 +22723,16 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
              WHERE id = $1`,
             [orderId, req.user?.userId ?? null]
         );
+        // La chiusura viaggia con la transazione: sala e cassa non possono
+        // restare con una comanda che risulta ancora aperta.
+        await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId });
         await client.query('COMMIT');
         client.release();
 
         try {
             socketService?.broadcastToAll(req.tenantId!, 'bill:updated', synced.bill);
-            socketService?.broadcastToAll(req.tenantId!, 'order:updated', { ...order, status: 'CLOSED', table_bill_id: billId });
         } catch (_) {}
+        outboxKick();
 
         LogService.logActivity(
             req.tenantId!,
@@ -24204,6 +24284,17 @@ const startServer = async () => {
                         // Solo qui: se le migration falliscono /ready resta
                         // 503 e Railway tiene in servizio il container vecchio.
                         databaseReady = true;
+                        // L'outbox parte solo a migration riuscite (la sua
+                        // tabella deve esistere). Il primo giro consegna ciò
+                        // che un eventuale crash aveva lasciato indietro.
+                        outboxRegister('order:updated', async (tenantId, payload) => {
+                            const orderId = Number(payload?.order_id);
+                            if (!Number.isFinite(orderId)) return;
+                            const view = await loadOrderView(tenantId, orderId);
+                            if (!view) return;
+                            socketService?.broadcastToAll(tenantId, 'order:updated', view.order);
+                        });
+                        startOutboxDispatcher();
                     } catch (migErr) {
                         console.error('❌ Database migrations failed:', migErr);
                     }

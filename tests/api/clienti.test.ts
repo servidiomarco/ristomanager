@@ -272,5 +272,62 @@ describe('clienti (rubrica)', () => {
             expect(anonimi.status).toBe(200);
             expect(anonimi.body.total).toBeGreaterThanOrEqual(2);
         });
+
+        it('l\'oblio aggancia le prenotazioni per telefono, anche con il nome scritto diverso', async () => {
+            const { Client } = await import('pg');
+            const db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
+            await db.connect();
+            try {
+                const c = await api().post('/customers').set(bearer(token)).send({
+                    name: 'Ugo Oblio Esatto',
+                    phone: '340 555 0777',
+                });
+                expect(c.status).toBe(201);
+
+                // Prenotazione PASSATA, stesso telefono ma nome scritto in un
+                // altro modo: l'euristica sul prefisso del nome non la
+                // troverebbe mai — il legame esatto è il telefono.
+                const r = await api().post('/reservations').set(bearer(token)).send({
+                    customer_name: 'Ugo Scritto Diverso',
+                    reservation_time: '2026-01-10T20:00:00',
+                    shift: 'DINNER',
+                    guests: 2,
+                    phone: '3405550777',
+                });
+                expect(r.status).toBe(201);
+
+                // I log sono fire-and-forget: si aspetta che il log della
+                // prenotazione esista prima di cancellare.
+                let visti = 0;
+                for (let i = 0; i < 20 && visti < 1; i++) {
+                    const logs = await api().get('/activity-logs')
+                        .query({ search: 'Ugo Scritto Diverso' }).set(bearer(token));
+                    visti = logs.body.total;
+                    if (visti < 1) await new Promise(rs => setTimeout(rs, 100));
+                }
+                expect(visti).toBeGreaterThanOrEqual(1);
+
+                const del = await api().delete(`/customers/${c.body.id}`).set(bearer(token));
+                expect(del.status).toBe(204);
+
+                // Il log della prenotazione è anonimizzato per id, non per
+                // somiglianza del nome.
+                const dopo = await api().get('/activity-logs')
+                    .query({ search: 'Ugo Scritto Diverso' }).set(bearer(token));
+                expect(dopo.body.total).toBe(0);
+
+                // E l'oblio vero: la riga prenotazione passata perde nome e
+                // contatti.
+                const riga = await db.query(
+                    `SELECT customer_name, phone, email FROM reservations WHERE id = $1`,
+                    [r.body.id]
+                );
+                expect(riga.rows[0].customer_name).toBe('cliente rimosso');
+                expect(riga.rows[0].phone).toBeNull();
+                expect(riga.rows[0].email).toBeNull();
+            } finally {
+                await db.end();
+            }
+        });
     });
 });
