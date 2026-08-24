@@ -1289,6 +1289,9 @@ const App: React.FC = () => {
         if (result.failed > 0) {
           addToast(`⚠ ${result.failed} operazioni non riuscite`, 'error');
         }
+        if (result.dropped > 0) {
+          addToast(`${result.dropped} operazioni troppo vecchie non sono state rigiocate`, 'info');
+        }
 
         // Refresh again after the flush so the UI reflects the server state
         // produced by replaying the queue.

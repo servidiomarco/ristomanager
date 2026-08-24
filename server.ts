@@ -9289,6 +9289,31 @@ app.delete('/customers/:id', authenticate, requirePermission('customers:full'), 
 
         await queryWithRetry('DELETE FROM customers WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
 
+        // Diritto all'oblio, lato audit: la scheda sparisce e il nome non deve
+        // sopravvivere nei log. Senza questo, una richiesta GDPR di
+        // cancellazione diventa una caccia al tesoro in activity_logs.
+        // I log del cliente si anonimizzano per resource_id; quelli delle sue
+        // prenotazioni portano il nome come resource_name — da solo o seguito
+        // da « — dettaglio» — e perdono solo il prefisso. Un omonimo può
+        // perdere il prefisso anche lui: per una cancellazione, cancellare
+        // troppo è l'errore giusto.
+        await queryWithRetry(
+            `UPDATE activity_logs
+                SET resource_name = 'cliente rimosso', details = NULL
+              WHERE tenant_id = $2 AND resource_type = 'CUSTOMER' AND resource_id = $1`,
+            [id, req.tenantId!]
+        );
+        await queryWithRetry(
+            `UPDATE activity_logs
+                SET resource_name = 'cliente rimosso' || substr(resource_name, char_length($1) + 1)
+              WHERE tenant_id = $2
+                AND resource_type = 'RESERVATION'
+                AND left(resource_name, char_length($1)) = $1
+                AND (char_length(resource_name) = char_length($1)
+                     OR substr(resource_name, char_length($1) + 1, 3) = ' — ')`,
+            [resourceName, req.tenantId!]
+        );
+
         if (req.user) {
             LogService.logActivity(
                 req.tenantId!,
@@ -9298,7 +9323,9 @@ app.delete('/customers/:id', authenticate, requirePermission('customers:full'), 
                 ActivityAction.DELETE,
                 ResourceType.CUSTOMER,
                 parseInt(id, 10),
-                resourceName
+                // L'id, non il nome: la riga che registra la cancellazione non
+                // deve reintrodurre ciò che si è appena cancellato.
+                `cliente ${id}`
             );
         }
 
@@ -21085,13 +21112,20 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
                 : (batchKey ? `${batchKey}:${i}` : null);
 
             await client.query(
-                // ON CONFLICT sul nuovo vincolo composto (tenant_id, key):
-                // il replay vale dentro il ristorante, non attraverso.
+                // ON CONFLICT sul vincolo composto (tenant_id, key): il replay
+                // vale dentro il ristorante, non attraverso. Sul conflitto NON
+                // si ignora: se la riga è ancora in bozza si allinea a qty/nota
+                // dell'ultimo invio — è il retry del palmare dopo un timeout in
+                // cui il cameriere ha nel frattempo ritoccato la quantità, e
+                // l'intento più recente deve vincere. Oltre DRAFT la cucina
+                // l'ha vista: il replay non tocca più niente.
                 `INSERT INTO order_items
                     (tenant_id, order_id, dish_id, name_snapshot, unit_price_cents, modifiers, qty,
                      course_no, seat_no, station_id, note, created_by_user_id, idempotency_key)
                  VALUES ($13, $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12)
-                 ON CONFLICT (tenant_id, idempotency_key) DO NOTHING`,
+                 ON CONFLICT (tenant_id, idempotency_key) DO UPDATE
+                    SET qty = EXCLUDED.qty, note = EXCLUDED.note
+                    WHERE order_items.status = 'DRAFT' AND order_items.order_id = EXCLUDED.order_id`,
                 [orderId, dishId, dish.rows[0].name, unitPrice,
                  modifiers ? JSON.stringify(modifiers) : null, qty, courseNo, seatNo,
                  Number.isFinite(stationId) ? stationId : null,

@@ -21,6 +21,9 @@ export interface NewOrderItem {
   note?: string | null;
   modifier_ids?: number[];
   station_id?: number | null;
+  /** Chiave di idempotenza per riga: il server la vincola per tenant, quindi
+   *  rimandare la stessa riga (retry, coda offline) non la duplica mai. */
+  idempotency_key?: string;
 }
 
 export interface PatchOrderItemPayload {

@@ -18,7 +18,7 @@ describe('cors', () => {
     let db: Client;
 
     beforeAll(async () => {
-        db = new Client({ connectionString: process.env.DATABASE_URL });
+        db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
         await db.connect();
         await db.query(
             `INSERT INTO tenant_domains (domain, tenant_id, purpose) VALUES ($1, 1, 'crm')
