@@ -9289,6 +9289,31 @@ app.delete('/customers/:id', authenticate, requirePermission('customers:full'), 
 
         await queryWithRetry('DELETE FROM customers WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
 
+        // Diritto all'oblio, lato audit: la scheda sparisce e il nome non deve
+        // sopravvivere nei log. Senza questo, una richiesta GDPR di
+        // cancellazione diventa una caccia al tesoro in activity_logs.
+        // I log del cliente si anonimizzano per resource_id; quelli delle sue
+        // prenotazioni portano il nome come resource_name — da solo o seguito
+        // da « — dettaglio» — e perdono solo il prefisso. Un omonimo può
+        // perdere il prefisso anche lui: per una cancellazione, cancellare
+        // troppo è l'errore giusto.
+        await queryWithRetry(
+            `UPDATE activity_logs
+                SET resource_name = 'cliente rimosso', details = NULL
+              WHERE tenant_id = $2 AND resource_type = 'CUSTOMER' AND resource_id = $1`,
+            [id, req.tenantId!]
+        );
+        await queryWithRetry(
+            `UPDATE activity_logs
+                SET resource_name = 'cliente rimosso' || substr(resource_name, char_length($1) + 1)
+              WHERE tenant_id = $2
+                AND resource_type = 'RESERVATION'
+                AND left(resource_name, char_length($1)) = $1
+                AND (char_length(resource_name) = char_length($1)
+                     OR substr(resource_name, char_length($1) + 1, 3) = ' — ')`,
+            [resourceName, req.tenantId!]
+        );
+
         if (req.user) {
             LogService.logActivity(
                 req.tenantId!,
@@ -9298,7 +9323,9 @@ app.delete('/customers/:id', authenticate, requirePermission('customers:full'), 
                 ActivityAction.DELETE,
                 ResourceType.CUSTOMER,
                 parseInt(id, 10),
-                resourceName
+                // L'id, non il nome: la riga che registra la cancellazione non
+                // deve reintrodurre ciò che si è appena cancellato.
+                `cliente ${id}`
             );
         }
 
