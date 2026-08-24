@@ -2,6 +2,7 @@ import { Reservation, Table, Room, Dish, BanquetMenu, BanquetPayment, TableMerge
 import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
 import { buildApiError } from './apiError';
+import { offlineQueue } from './offlineQueue';
 
 // Use import.meta.env for Vite frontend environment variables
 const API_URL = import.meta.env.VITE_API_URL || "https://ristomanager-production.up.railway.app";
@@ -57,16 +58,44 @@ const fetchWithAuth = async (
   return response;
 };
 
+// Scritture che possono aspettare la rete: chi passa `offline` accetta che,
+// se il server non è mai stato raggiunto, la richiesta finisca in coda e
+// venga rigiocata al riconnettersi. Va passato SOLO su richieste sicure da
+// rigiocare: PUT e DELETE, o POST con chiave di idempotenza nel body.
+type OfflineSpec = { description: string };
+
 // Helper to make authenticated requests with error handling
 const apiRequest = async <T>(
   url: string,
-  options: RequestInit = {},
+  options: RequestInit & { offline?: OfflineSpec } = {},
   expectJson = true
 ): Promise<T> => {
-  // Bypass the browser HTTP cache by default. iOS Safari in PWA mode can
-  // otherwise serve stale GET responses after the app is backgrounded.
-  // Callers can still override by passing an explicit `cache` option.
-  const response = await fetchWithAuth(url, { cache: 'no-store', ...options });
+  const { offline, ...init } = options;
+  let response: Response;
+  try {
+    // Bypass the browser HTTP cache by default. iOS Safari in PWA mode can
+    // otherwise serve stale GET responses after the app is backgrounded.
+    // Callers can still override by passing an explicit `cache` option.
+    response = await fetchWithAuth(url, { cache: 'no-store', ...init });
+  } catch (err) {
+    // fetch rifiuta solo quando il server non è mai stato raggiunto: è
+    // l'unico caso in cui accodare è onesto — su una risposta HTTP il
+    // server ha già deciso e la coda non deve ricontestarla.
+    const method = (init.method ?? 'GET').toUpperCase();
+    if (offline && (method === 'PUT' || method === 'DELETE' || method === 'POST')) {
+      offlineQueue.enqueue({
+        method: method as 'PUT' | 'DELETE' | 'POST',
+        url,
+        body: typeof init.body === 'string' ? init.body : null,
+        description: offline.description,
+      });
+      throw buildApiError(0, {
+        error: `Sei offline: «${offline.description}» è in coda e partirà appena torna la rete`,
+        queued: true,
+      });
+    }
+    throw err;
+  }
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: 'Request failed' }));
@@ -99,6 +128,9 @@ export const updateReservation = async (id: number, reservation: Partial<Reserva
     method: 'PUT',
     headers: getHeaders(),
     body: JSON.stringify(reservation),
+    // Check-in, cambio stato, assegnazione tavolo: il flusso della reception
+    // durante il servizio. PUT idempotente → sicuro da rigiocare.
+    offline: { description: `aggiornamento della prenotazione ${id}` },
   });
 };
 
@@ -106,6 +138,7 @@ export const deleteReservation = async (id: number): Promise<void> => {
   return apiRequest<void>(`${API_URL}/reservations/${id}`, {
     method: 'DELETE',
     headers: getHeaders(false),
+    offline: { description: `cancellazione della prenotazione ${id}` },
   }, false);
 };
 
@@ -144,6 +177,9 @@ export const updateTable = async (id: number, table: Partial<Table>): Promise<Ta
     method: 'PUT',
     headers: getHeaders(),
     body: JSON.stringify(table),
+    // Lo stato del tavolo cambia dal palmare in sala: PUT idempotente,
+    // sicuro da rigiocare al riconnettersi.
+    offline: { description: `aggiornamento del tavolo ${id}` },
   });
 
   console.log('apiService.updateTable - Backend returned:', JSON.stringify(result, null, 2));
