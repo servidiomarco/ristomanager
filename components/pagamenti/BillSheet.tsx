@@ -2,12 +2,25 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { Check, Copy, Loader2, Printer, QrCode, X, Banknote } from 'lucide-react';
-import { printBill, type OpenBillRow } from '../../services/billsApiService';
+import { printBill, type BillPaymentInput, type OpenBillRow } from '../../services/billsApiService';
 import { FormCard, PaneHeader, Sheet, StatusPill } from '../ds';
 import { formatEuro } from './paymentsView';
 
-/** Chiusura conto: quanto incassato in contanti (totale sul conto) e mancia. */
-export type SettleOpts = { cash_settled_cents?: number; tip_cents?: number };
+/** Chiusura conto: i movimenti di incasso (metodo + importo) e la mancia.
+ *  Passa dritto a POST /bills/:id/close come CloseBillPayload. */
+export type SettleOpts = { payments?: BillPaymentInput[]; cash_settled_cents?: number; tip_cents?: number };
+
+/** Metodi registrabili in cassa, nell'ordine in cui si usano davvero. */
+const METHODS: { value: BillPaymentInput['method']; label: string }[] = [
+  { value: 'CONTANTI', label: 'Contanti' },
+  { value: 'POS_FISICO', label: 'POS' },
+  { value: 'SATISPAY', label: 'Satispay' },
+  { value: 'BUONO_PASTO', label: 'Buoni pasto' },
+  { value: 'GIFT_CARD', label: 'Gift card' },
+  { value: 'SOSPESO', label: 'Sospeso' },
+  { value: 'OMAGGIO', label: 'Omaggio' },
+];
+const methodLabel = (m: string) => METHODS.find(x => x.value === m)?.label ?? m;
 
 // Parsing tollerante dell'importo digitato: "12,50" / "12.50" / "12" → cents.
 const eurToCents = (s: string): number => {
@@ -58,10 +71,9 @@ const BillMeta: React.FC<{ bill: BillLike }> = ({ bill }) => (
   </>
 );
 
-/** Dialog di chiusura conto: registra quanto incassato in contanti (il resto
- *  non pagato via QR/carta) e l'eventuale mancia. Sostituisce la vecchia
- *  chiusura a due tap, che scriveva il residuo come ammanco senza chiedere
- *  nulla — l'unico modo di pagare era la carta. */
+/** Dialog di chiusura conto: registra i movimenti di incasso — metodo per
+ *  metodo, il tavolo reale paga misto — e l'eventuale mancia. Il percorso a
+ *  un tap resta: residuo preimpostato, metodo Contanti, "Chiudi conto". */
 export const SettleDialog: React.FC<{
   bill: BillLike;
   busy?: boolean;
@@ -69,16 +81,33 @@ export const SettleDialog: React.FC<{
   onConfirm: (opts: SettleOpts) => void;
 }> = ({ bill, busy, onCancel, onConfirm }) => {
   const residual = bill.residual_cents ?? bill.total_cents;
-  const existingCash = bill.cash_settled_cents ?? 0;
-  // Pagato via QR/carta = tutto il pagato meno i contanti già registrati.
-  const paidCard = Math.max(0, (bill.paid_cents ?? 0) - existingCash);
-  // Default: il residuo tutto in contanti → conto saldato in un tap.
-  const [cash, setCash] = useState(residual > 0 ? (residual / 100).toFixed(2) : '0');
+  const alreadyPaid = Math.max(0, bill.total_cents - residual);
+  const [movements, setMovements] = useState<BillPaymentInput[]>([]);
+  const [method, setMethod] = useState<BillPaymentInput['method']>('CONTANTI');
+  const recorded = movements.reduce((n, m) => n + m.amount_cents, 0);
+  const remaining = Math.max(0, residual - recorded);
+  const [amount, setAmount] = useState(residual > 0 ? (residual / 100).toFixed(2) : '0');
   const [tip, setTip] = useState('');
-  const cashNow = eurToCents(cash);
+  const amountCents = eurToCents(amount);
   const tipCents = eurToCents(tip);
-  const shortfall = Math.max(0, residual - cashNow);
+  // Contanti sopra il dovuto = resto da rendere: a libro va solo il dovuto.
+  const applied = Math.min(amountCents, remaining);
+  const change = method === 'CONTANTI' ? Math.max(0, amountCents - remaining) : 0;
+  const shortfall = Math.max(0, remaining - applied);
   const willSettle = shortfall === 0;
+
+  const addMovement = () => {
+    if (applied <= 0) return;
+    setMovements(prev => [...prev, { method, amount_cents: applied }]);
+    const next = Math.max(0, remaining - applied);
+    setAmount(next > 0 ? (next / 100).toFixed(2) : '0');
+  };
+
+  const confirm = () => {
+    // L'importo ancora nel campo è un movimento non ancora aggiunto: vale.
+    const pending = applied > 0 ? [{ method, amount_cents: applied }] : [];
+    onConfirm({ payments: [...movements, ...pending], tip_cents: tipCents });
+  };
 
   const field =
     'h-11 w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-right text-[15px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
@@ -92,28 +121,80 @@ export const SettleDialog: React.FC<{
         </div>
         <div className="space-y-3 p-5">
           <dl className="space-y-1.5 text-[14px]">
-            {paidCard > 0 && (
+            {alreadyPaid > 0 && (
               <div className="flex justify-between text-[var(--ds-text-muted)]">
-                <dt>Già pagato (QR/carta)</dt><dd className="tabular-nums">{euro(paidCard)}</dd>
-              </div>
-            )}
-            {existingCash > 0 && (
-              <div className="flex justify-between text-[var(--ds-text-muted)]">
-                <dt>Contanti già registrati</dt><dd className="tabular-nums">{euro(existingCash)}</dd>
+                <dt>Già pagato</dt><dd className="tabular-nums">{euro(alreadyPaid)}</dd>
               </div>
             )}
             <div className="flex justify-between font-medium text-[var(--ds-text-primary)]">
-              <dt>Residuo da incassare</dt><dd className="tabular-nums">{euro(residual)}</dd>
+              <dt>Residuo da incassare</dt><dd className="tabular-nums">{euro(remaining)}</dd>
             </div>
           </dl>
 
-          <label className="block">
-            <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Incasso in contanti</span>
-            <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">€</span>
-              <input type="text" inputMode="decimal" value={cash} onChange={e => setCash(e.target.value)} disabled={busy} className={`${field} pl-7`} />
-            </div>
-          </label>
+          {movements.length > 0 && (
+            <ul className="space-y-1">
+              {movements.map((m, i) => (
+                <li key={i} className="flex items-center justify-between rounded-lg bg-[var(--ds-surface-row)] px-3 py-1.5 text-[14px] text-[var(--ds-text-secondary)]">
+                  <span>{methodLabel(m.method)}</span>
+                  <span className="flex items-center gap-2">
+                    <span className="tabular-nums">{euro(m.amount_cents)}</span>
+                    <button
+                      type="button"
+                      aria-label="Togli movimento"
+                      onClick={() => setMovements(prev => prev.filter((_, j) => j !== i))}
+                      disabled={busy}
+                      className="rounded-full p-1 text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)] disabled:opacity-40"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {remaining > 0 && (
+            <>
+              <div className="flex flex-wrap gap-1.5">
+                {METHODS.map(m => (
+                  <button
+                    key={m.value}
+                    type="button"
+                    onClick={() => setMethod(m.value)}
+                    disabled={busy}
+                    className={`rounded-full px-3 py-1.5 text-[13px] font-medium transition-colors disabled:opacity-40 ${
+                      method === m.value
+                        ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                        : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-end gap-2">
+                <label className="block flex-1">
+                  <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Importo</span>
+                  <div className="relative">
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">€</span>
+                    <input type="text" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} disabled={busy} className={`${field} pl-7`} />
+                  </div>
+                </label>
+                <button
+                  type="button"
+                  onClick={addMovement}
+                  disabled={busy || applied <= 0 || applied >= remaining}
+                  className="h-11 rounded-xl bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40"
+                >
+                  Aggiungi
+                </button>
+              </div>
+              {change > 0 && (
+                <p className="text-[13px] text-[var(--ds-text-secondary)]">Resto {euro(change)}</p>
+              )}
+            </>
+          )}
 
           <label className="block">
             <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Mancia <span className="font-normal text-[var(--ds-text-muted)]">(facoltativa)</span></span>
@@ -133,7 +214,7 @@ export const SettleDialog: React.FC<{
           <button type="button" onClick={onCancel} disabled={busy} className="rounded-full px-4 py-2 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-hover)] disabled:opacity-40">Annulla</button>
           <button
             type="button"
-            onClick={() => onConfirm({ cash_settled_cents: existingCash + cashNow, tip_cents: tipCents })}
+            onClick={confirm}
             disabled={busy}
             className="inline-flex items-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-5 py-2 text-[14px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
           >

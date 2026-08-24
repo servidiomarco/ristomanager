@@ -1,6 +1,6 @@
 import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
-import type { TableBill, TableBillWithSplits } from '../types';
+import type { BillPaymentMethod, CashClosureReport, TableBill, TableBillWithSplits } from '../types';
 import { buildApiError } from './apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
@@ -15,7 +15,17 @@ export interface OpenBillPayload {
   pp_tavolo?: string;
 }
 
+/** Movimento di incasso da registrare (metodo + importo, in centesimi). */
+export interface BillPaymentInput {
+  method: Exclude<BillPaymentMethod, 'LINK_ONLINE'>;
+  amount_cents: number;
+  meta?: Record<string, unknown>;
+}
+
 export interface CloseBillPayload {
+  /** Movimenti di incasso registrati contestualmente alla chiusura. */
+  payments?: BillPaymentInput[];
+  /** Legacy: totale contanti cumulativo. Preferire payments. */
   cash_settled_cents?: number;
   tip_cents?: number;
   notes?: string;
@@ -93,6 +103,32 @@ class BillsApiService {
     });
   }
 
+  /** Registra un incasso a conto ancora aperto (contanti/POS a metà servizio). */
+  async recordPayment(billId: number, payload: BillPaymentInput): Promise<TableBillWithSplits> {
+    return apiRequest<TableBillWithSplits>(`${API_URL}/bills/${billId}/payments`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(payload),
+    });
+  }
+
+  /** Storna un movimento (soft-void): il conto riapre se il saldo non regge più. */
+  async voidPayment(billId: number, paymentId: number, reason?: string): Promise<TableBillWithSplits> {
+    return apiRequest<TableBillWithSplits>(`${API_URL}/bills/${billId}/payments/${paymentId}/void`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(reason ? { reason } : {}),
+    });
+  }
+
+  /** Chiusura di cassa: totali del giorno per metodo (default oggi). */
+  async getCashClosure(date?: string): Promise<CashClosureReport> {
+    const suffix = date ? `?date=${encodeURIComponent(date)}` : '';
+    return apiRequest<CashClosureReport>(`${API_URL}/reports/cash-closure${suffix}`, {
+      headers: getHeaders(),
+    });
+  }
+
   /** Refunds a paid split via Revolut; the bill reopens if it was SETTLED. */
   async refundSplit(splitId: number): Promise<{ ok: true; split_id: number; bill_id: number; reopened: boolean }> {
     return apiRequest(`${API_URL}/bills/splits/${splitId}/refund`, {
@@ -141,8 +177,10 @@ export interface OpenBillRow {
   deposit_paid_cents?: number;
   /** Da rimborsare al cliente quando l'acconto supera il totale del conto. */
   refund_due_cents?: number;
-  /** Contanti già registrati sul conto (chiusura in cassa). */
+  /** Contanti già registrati sul conto (proiezione del libro cassa). */
   cash_settled_cents?: number;
+  /** Incassi staff dal libro cassa (contanti, POS, buoni, …). Già in paid_cents. */
+  staff_paid_cents?: number;
   /** Mancia registrata alla chiusura. */
   tip_cents?: number;
   /** Quando il conto è stato chiuso (solo per i conti chiusi). */

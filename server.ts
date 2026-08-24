@@ -167,7 +167,7 @@ import {
     type BlacklistSource,
 } from './services/blacklistPolicy.js';
 import { toTitleCase } from './utils/text.js';
-import { getRomeTimePart } from './utils/reservationTime.js';
+import { getRomeDatePart, getRomeTimePart } from './utils/reservationTime.js';
 import {
     getAvailableSlots,
     getAllOpeningHours,
@@ -3363,7 +3363,10 @@ async function creditPaidDepositsToBill(tenantId: number, billId: number): Promi
                  WHERE table_bill_id = $1 AND status IN ('CLAIMED', 'PAID')`,
                 [billId]
             );
-            const capacity = bill.total_cents - capRs.rows[0].live;
+            // Anche gli incassi staff occupano capienza: un conto già pagato
+            // in contanti non assorbe l'acconto (che resta da rimborsare).
+            const staffPaid = await staffPaidCentsForBill(billId, client);
+            const capacity = bill.total_cents - capRs.rows[0].live - staffPaid;
             const credit = Math.min(Number(dep.amount_cents), Math.max(0, capacity));
             if (credit <= 0) continue; // conto già coperto: l'acconto resta eccedenza da rimborsare
             const ins = await client.query(
@@ -3377,11 +3380,14 @@ async function creditPaidDepositsToBill(tenantId: number, billId: number): Promi
             if (ins.rowCount) created.push(ins.rows[0]);
         }
 
-        // Se gli acconti da soli coprono il totale, il conto è già saldato.
+        // Se acconti + incassi staff coprono il totale, il conto è già saldato.
         const settledRs = await client.query(
             `UPDATE table_bills SET status = 'SETTLED'
              WHERE id = $1 AND status IN ('OPEN', 'LOCKED')
-               AND total_cents = (SELECT COALESCE(SUM(amount_cents), 0) FROM table_bill_splits WHERE table_bill_id = $1 AND status = 'PAID')
+               AND total_cents <= (
+                     (SELECT COALESCE(SUM(amount_cents), 0) FROM table_bill_splits WHERE table_bill_id = $1 AND status = 'PAID')
+                   + (SELECT COALESCE(SUM(amount_cents), 0) FROM table_bill_payments WHERE table_bill_id = $1 AND table_bill_split_id IS NULL AND voided_at IS NULL)
+               )
              RETURNING id`,
             [billId]
         );
@@ -3424,6 +3430,18 @@ async function depositPaidCentsForReservation(tenantId: number, reservationId: n
     return r.rows[0].s;
 }
 
+// Somma degli incassi staff attivi sul conto: le righe del libro cassa senza
+// specchio quota (table_bill_split_id NULL) e non stornate. Pesano sul residuo
+// accanto alle quote CLAIMED/PAID — le righe LINK_ONLINE specchiano quote già
+// contate e qui restano fuori per non raddoppiare l'incasso.
+async function staffPaidCentsForBill(billId: number, client?: any): Promise<number> {
+    const sql = `SELECT COALESCE(SUM(amount_cents), 0)::int AS s
+                 FROM table_bill_payments
+                 WHERE table_bill_id = $1 AND table_bill_split_id IS NULL AND voided_at IS NULL`;
+    const r = client ? await client.query(sql, [billId]) : await queryWithRetry(sql, [billId]);
+    return r.rows[0].s;
+}
+
 async function loadBillView(tenantId: number, billId: number): Promise<any | null> {
     const billResult = await queryWithRetry(
         `SELECT id, reservation_id, table_id, total_cents, covers, currency,
@@ -3443,6 +3461,19 @@ async function loadBillView(tenantId: number, billId: number): Promise<any | nul
          ORDER BY claimed_at ASC`,
         [billId]
     );
+    // Libro cassa completo (specchi e storni inclusi): la UI mostra i
+    // movimenti; nei totali gli specchi e gli storni non contano.
+    const paymentsResult = await queryWithRetry(
+        `SELECT id, table_bill_id, method, amount_cents, table_bill_split_id,
+                meta, recorded_by_user_id, recorded_at,
+                voided_at, voided_by_user_id, void_reason
+         FROM table_bill_payments WHERE table_bill_id = $1
+         ORDER BY recorded_at ASC`,
+        [billId]
+    );
+    const staff_paid_cents = paymentsResult.rows.reduce(
+        (n: number, p: any) => n + (p.table_bill_split_id == null && p.voided_at == null ? p.amount_cents : 0), 0
+    );
     const totals = splitsResult.rows.reduce(
         (acc, s) => {
             if (s.status === 'PAID') {
@@ -3454,7 +3485,7 @@ async function loadBillView(tenantId: number, billId: number): Promise<any | nul
         },
         { paid_cents: 0, claimed_cents: 0, deposit_credit_cents: 0 }
     );
-    const residual_cents = Math.max(0, bill.total_cents - totals.paid_cents - totals.claimed_cents);
+    const residual_cents = Math.max(0, bill.total_cents - totals.paid_cents - totals.claimed_cents - staff_paid_cents);
     // Acconto pieno versato e quota non assorbita dal conto (da rimborsare al
     // cliente quando la caparra supera il totale).
     const deposit_paid_cents = await depositPaidCentsForReservation(tenantId, bill.reservation_id);
@@ -3462,6 +3493,8 @@ async function loadBillView(tenantId: number, billId: number): Promise<any | nul
     return {
         bill,
         splits: splitsResult.rows,
+        payments: paymentsResult.rows,
+        staff_paid_cents,
         paid_cents: totals.paid_cents,
         claimed_cents: totals.claimed_cents,
         deposit_credit_cents: totals.deposit_credit_cents,
@@ -3693,27 +3726,56 @@ app.post('/reservations/:id/bill/notify', authenticate, requirePermission('payme
 // il payload della POST /chiudi-conto verso Passepartout). Il token
 // pubblico viene invalidato subito (SET NULL) così un QR fotografato
 // prima non funziona più.
+// Metodi registrabili a mano dallo staff. LINK_ONLINE è escluso: quelle
+// righe le scrive solo il webhook come specchio di una quota PAID.
+const STAFF_BILL_PAYMENT_METHODS = ['CONTANTI', 'POS_FISICO', 'SATISPAY', 'BUONO_PASTO', 'GIFT_CARD', 'SOSPESO', 'OMAGGIO'] as const;
+
+function parseStaffBillPayment(raw: any): { method: string; amount_cents: number; meta: any } | { error: string } {
+    const method = String(raw?.method || '');
+    if (!STAFF_BILL_PAYMENT_METHODS.includes(method as any)) {
+        return { error: `method must be one of ${STAFF_BILL_PAYMENT_METHODS.join(', ')}` };
+    }
+    const amount = Number(raw?.amount_cents);
+    if (!Number.isFinite(amount) || !Number.isInteger(amount) || amount <= 0) {
+        return { error: 'amount_cents must be a positive integer' };
+    }
+    const meta = raw?.meta && typeof raw.meta === 'object' && !Array.isArray(raw.meta) ? raw.meta : null;
+    return { method, amount_cents: amount, meta };
+}
+
 app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), async (req, res) => {
     try {
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid bill id' });
 
+        // Corpo nuovo: `payments` è la lista dei movimenti di incasso da
+        // registrare contestualmente alla chiusura (metodo + importo).
+        // `cash_settled_cents` resta accettato per i client vecchi, che
+        // mandano il TOTALE contanti desiderato sul conto: la differenza
+        // rispetto ai contanti già a libro diventa una riga CONTANTI.
         const cashRaw = req.body?.cash_settled_cents;
         const tipRaw = req.body?.tip_cents;
-        const cashCents = cashRaw != null ? Number(cashRaw) : 0;
+        const legacyCashCents = cashRaw != null ? Number(cashRaw) : null;
         const tipCents = tipRaw != null ? Number(tipRaw) : 0;
-        if (!Number.isFinite(cashCents) || cashCents < 0) {
+        if (legacyCashCents != null && (!Number.isFinite(legacyCashCents) || legacyCashCents < 0)) {
             return res.status(400).json({ error: 'cash_settled_cents must be >= 0' });
         }
         if (!Number.isFinite(tipCents) || tipCents < 0) {
             return res.status(400).json({ error: 'tip_cents must be >= 0' });
         }
+        const rawPayments = Array.isArray(req.body?.payments) ? req.body.payments : [];
+        const parsedPayments: { method: string; amount_cents: number; meta: any }[] = [];
+        for (const raw of rawPayments) {
+            const p = parseStaffBillPayment(raw);
+            if ('error' in p) return res.status(400).json({ error: p.error });
+            parsedPayments.push(p);
+        }
         const notes = typeof req.body?.notes === 'string' ? req.body.notes.slice(0, 500) : null;
 
-        // Need the current total + sum of PAID splits to decide between
-        // CLOSED and SETTLED_PARTIAL and to sanity-check the caller's
-        // cash/tip values. Fetch under a lock so a webhook-triggered
-        // PAID→SETTLED promotion can't race us and flip status underneath.
+        // Need the current total + sums to decide between CLOSED and
+        // SETTLED_PARTIAL and to sanity-check the caller's values. Fetch
+        // under a lock so a webhook-triggered PAID→SETTLED promotion can't
+        // race us and flip status underneath.
         const client = await pool.connect();
         let updatedRow: any = null;
         try {
@@ -3729,15 +3791,15 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
             }
             const totalCents: number = billRs.rows[0].total_cents;
 
-            // Sanity caps: a tip above the bill total or a cash-settled
-            // above 2x is almost certainly a typo. 2x on cash covers the
-            // waiter who accidentally records the tip inside cash — still
-            // wrong, but not a data-loss-level typo.
+            // Sanity caps: a tip above the bill total or a cash amount above
+            // 2x is almost certainly a typo. 2x on cash covers the waiter who
+            // accidentally records the tip inside cash — still wrong, but not
+            // a data-loss-level typo.
             if (tipCents > totalCents) {
                 await client.query('ROLLBACK');
                 return res.status(400).json({ error: 'tip_cents exceeds total (max 100%)', max_allowed_cents: totalCents });
             }
-            if (cashCents > totalCents * 2) {
+            if (legacyCashCents != null && legacyCashCents > totalCents * 2) {
                 await client.query('ROLLBACK');
                 return res.status(400).json({ error: 'cash_settled_cents implausible (>200% of total)', max_allowed_cents: totalCents * 2 });
             }
@@ -3749,7 +3811,38 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
                 [id]
             );
             const paidViaSplits: number = paidRs.rows[0].paid_cents;
-            const totalSettled = paidViaSplits + Math.round(cashCents);
+
+            // Traduzione del parametro legacy in un movimento: il client
+            // vecchio manda il totale contanti cumulativo, a libro va solo
+            // la differenza rispetto ai CONTANTI già registrati.
+            if (legacyCashCents != null) {
+                const cashRs = await client.query(
+                    `SELECT COALESCE(SUM(amount_cents), 0)::int AS s
+                     FROM table_bill_payments
+                     WHERE table_bill_id = $1 AND method = 'CONTANTI' AND table_bill_split_id IS NULL AND voided_at IS NULL`,
+                    [id]
+                );
+                const cashDelta = Math.round(legacyCashCents) - cashRs.rows[0].s;
+                if (cashDelta > 0) parsedPayments.push({ method: 'CONTANTI', amount_cents: cashDelta, meta: null });
+            }
+
+            // Registra i movimenti della chiusura. Ogni importo è clampato al
+            // residuo corrente: l'eccedenza (resto, arrotondamenti del client)
+            // non entra a libro — il resto si calcola in UI, non qui.
+            let staffPaid = await staffPaidCentsForBill(id, client);
+            for (const p of parsedPayments) {
+                const residual = totalCents - paidViaSplits - staffPaid;
+                const amount = Math.min(p.amount_cents, Math.max(0, residual));
+                if (amount <= 0) continue;
+                await client.query(
+                    `INSERT INTO table_bill_payments (tenant_id, table_bill_id, method, amount_cents, meta, recorded_by_user_id)
+                     VALUES ($1, $2, $3, $4, $5, $6)`,
+                    [req.tenantId!, id, p.method, amount, p.meta ? JSON.stringify(p.meta) : null, req.user?.userId ?? null]
+                );
+                staffPaid += amount;
+            }
+
+            const totalSettled = paidViaSplits + staffPaid;
             const finalStatus = totalSettled >= totalCents ? 'CLOSED' : 'SETTLED_PARTIAL';
 
             // Stamp an audit prefix on notes when closing with a shortfall
@@ -3763,21 +3856,27 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
                 notesForDb = notes ? `${shortfallTag} ${notes}` : shortfallTag;
             }
 
+            // cash_settled_cents resta popolato per i lettori vecchi, ma ora
+            // è una PROIEZIONE del libro cassa: somma delle righe CONTANTI.
             const upd = await client.query(
                 `UPDATE table_bills
                  SET status = $2,
                      closed_at = CURRENT_TIMESTAMP,
                      closed_by_user_id = $3,
-                     cash_settled_cents = $4,
-                     tip_cents = $5,
-                     notes = COALESCE($6, notes),
+                     cash_settled_cents = (
+                         SELECT COALESCE(SUM(amount_cents), 0)::int
+                         FROM table_bill_payments
+                         WHERE table_bill_id = $1 AND method = 'CONTANTI' AND table_bill_split_id IS NULL AND voided_at IS NULL
+                     ),
+                     tip_cents = $4,
+                     notes = COALESCE($5, notes),
                      share_token = NULL
-                 WHERE id = $1 AND tenant_id = $7
+                 WHERE id = $1 AND tenant_id = $6
                  RETURNING id, reservation_id, table_id, total_cents, covers, currency,
                            items, status, share_token, opened_at, closed_at,
                            opened_by_user_id, closed_by_user_id, external_ref,
                            cash_settled_cents, tip_cents, notes`,
-                [id, finalStatus, req.user?.userId ?? null, Math.round(cashCents), Math.round(tipCents), notesForDb, req.tenantId!]
+                [id, finalStatus, req.user?.userId ?? null, Math.round(tipCents), notesForDb, req.tenantId!]
             );
             updatedRow = upd.rows[0];
             await client.query('COMMIT');
@@ -3835,6 +3934,238 @@ app.post('/bills/:id/void', authenticate, requirePermission('payments:full'), as
         res.json(updated.rows[0]);
     } catch (err: any) {
         console.error('POST /bills/:id/void error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Registra un movimento di incasso a conto ancora aperto — l'ospite che va
+// via prima e paga la sua parte in contanti al banco, il POS passato a metà
+// cena. Importo validato sotto lock contro il residuo VERO (quote CLAIMED
+// comprese: una quota impegnata da un QR non si incassa anche in cassa).
+// Se il movimento copre il residuo il conto passa a SETTLED, come per le
+// quote online.
+app.post('/bills/:id/payments', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid bill id' });
+        const parsed = parseStaffBillPayment(req.body);
+        if ('error' in parsed) return res.status(400).json({ error: parsed.error });
+
+        const client = await pool.connect();
+        let payment: any = null;
+        let settledRow: any = null;
+        try {
+            await client.query('BEGIN');
+            const billRs = await client.query(
+                `SELECT id, total_cents, status FROM table_bills WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+                [id, req.tenantId!]
+            );
+            if (billRs.rowCount === 0 || !['OPEN', 'LOCKED'].includes(billRs.rows[0].status)) {
+                await client.query('ROLLBACK');
+                return res.status(409).json({ error: 'Il conto non è aperto: registra gli incassi dalla chiusura.' });
+            }
+            const liveRs = await client.query(
+                `SELECT COALESCE(SUM(amount_cents), 0)::int AS live
+                 FROM table_bill_splits
+                 WHERE table_bill_id = $1 AND status IN ('CLAIMED', 'PAID')`,
+                [id]
+            );
+            const staffPaid = await staffPaidCentsForBill(id, client);
+            const residual = billRs.rows[0].total_cents - liveRs.rows[0].live - staffPaid;
+            if (parsed.amount_cents > residual) {
+                await client.query('ROLLBACK');
+                return res.status(409).json({ error: 'Importo oltre il residuo', max_allowed_cents: Math.max(0, residual) });
+            }
+            const ins = await client.query(
+                `INSERT INTO table_bill_payments (tenant_id, table_bill_id, method, amount_cents, meta, recorded_by_user_id)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 RETURNING id, table_bill_id, method, amount_cents, table_bill_split_id,
+                           meta, recorded_by_user_id, recorded_at, voided_at, voided_by_user_id, void_reason`,
+                [req.tenantId!, id, parsed.method, parsed.amount_cents, parsed.meta ? JSON.stringify(parsed.meta) : null, req.user?.userId ?? null]
+            );
+            payment = ins.rows[0];
+            const settled = await client.query(
+                `UPDATE table_bills b SET status = 'SETTLED'
+                 WHERE b.id = $1 AND b.status IN ('OPEN', 'LOCKED')
+                   AND b.total_cents <= (
+                         (SELECT COALESCE(SUM(amount_cents), 0) FROM table_bill_splits WHERE table_bill_id = $1 AND status = 'PAID')
+                       + (SELECT COALESCE(SUM(amount_cents), 0) FROM table_bill_payments WHERE table_bill_id = $1 AND table_bill_split_id IS NULL AND voided_at IS NULL)
+                   )
+                 RETURNING id, reservation_id, table_id, total_cents, covers, status`,
+                [id]
+            );
+            settledRow = settled.rows[0] ?? null;
+            await client.query('COMMIT');
+        } catch (txErr) {
+            await client.query('ROLLBACK').catch(() => {});
+            throw txErr;
+        } finally {
+            client.release();
+        }
+
+        try {
+            socketService?.broadcastToAll(req.tenantId!, 'bill:payment-recorded', { bill_id: id, payment });
+            if (settledRow) socketService?.broadcastToAll(req.tenantId!, 'bill:settled', settledRow);
+        } catch (_) {}
+
+        const view = await loadBillView(req.tenantId!, id);
+        res.status(201).json(view ?? { payment });
+    } catch (err: any) {
+        console.error('POST /bills/:id/payments error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Storno di un movimento: soft-void, la riga resta a libro con voided_at per
+// l'audit. Solo righe staff — lo specchio di una quota online si storna col
+// rimborso della quota, non da qui. Se il conto era SETTLED (o già chiuso
+// CLOSED) grazie a quel movimento, riapre per la parte stornata.
+app.post('/bills/:id/payments/:paymentId/void', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        const paymentId = parseInt(req.params.paymentId, 10);
+        if (!Number.isFinite(id) || !Number.isFinite(paymentId)) return res.status(400).json({ error: 'Invalid id' });
+        const reason = typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 300) : null;
+
+        const client = await pool.connect();
+        let voided: any = null;
+        let reopenedRow: any = null;
+        try {
+            await client.query('BEGIN');
+            const billRs = await client.query(
+                `SELECT id, total_cents, status FROM table_bills WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+                [id, req.tenantId!]
+            );
+            if (billRs.rowCount === 0 || billRs.rows[0].status === 'VOIDED') {
+                await client.query('ROLLBACK');
+                return res.status(404).json({ error: 'Bill not found' });
+            }
+            const upd = await client.query(
+                `UPDATE table_bill_payments
+                 SET voided_at = CURRENT_TIMESTAMP, voided_by_user_id = $3, void_reason = $4
+                 WHERE id = $1 AND table_bill_id = $2 AND tenant_id = $5
+                   AND table_bill_split_id IS NULL AND voided_at IS NULL
+                 RETURNING id, table_bill_id, method, amount_cents, table_bill_split_id,
+                           meta, recorded_by_user_id, recorded_at, voided_at, voided_by_user_id, void_reason`,
+                [paymentId, id, req.user?.userId ?? null, reason, req.tenantId!]
+            );
+            if (upd.rowCount === 0) {
+                await client.query('ROLLBACK');
+                return res.status(404).json({ error: 'Movimento non trovato, già stornato o non stornabile' });
+            }
+            voided = upd.rows[0];
+
+            // Il saldo non regge più? Il conto torna incassabile. Vale anche
+            // per un CLOSED riaperto per correzione: torna OPEN e si richiude
+            // con i movimenti giusti. cash_settled_cents si riallinea al libro.
+            const reopen = await client.query(
+                `UPDATE table_bills b
+                 SET status = 'OPEN', closed_at = NULL, closed_by_user_id = NULL,
+                     cash_settled_cents = (
+                         SELECT COALESCE(SUM(amount_cents), 0)::int
+                         FROM table_bill_payments
+                         WHERE table_bill_id = $1 AND method = 'CONTANTI' AND table_bill_split_id IS NULL AND voided_at IS NULL
+                     )
+                 WHERE b.id = $1 AND b.status IN ('SETTLED', 'SETTLED_PARTIAL', 'CLOSED')
+                   AND b.total_cents > (
+                         (SELECT COALESCE(SUM(amount_cents), 0) FROM table_bill_splits WHERE table_bill_id = $1 AND status = 'PAID')
+                       + (SELECT COALESCE(SUM(amount_cents), 0) FROM table_bill_payments WHERE table_bill_id = $1 AND table_bill_split_id IS NULL AND voided_at IS NULL)
+                   )
+                 RETURNING id, reservation_id, table_id, total_cents, covers, currency,
+                           items, status, share_token, opened_at, closed_at,
+                           opened_by_user_id, closed_by_user_id, external_ref,
+                           cash_settled_cents, tip_cents, notes`,
+                [id]
+            );
+            reopenedRow = reopen.rows[0] ?? null;
+            await client.query('COMMIT');
+        } catch (txErr) {
+            await client.query('ROLLBACK').catch(() => {});
+            throw txErr;
+        } finally {
+            client.release();
+        }
+
+        try {
+            socketService?.broadcastToAll(req.tenantId!, 'bill:payment-voided', { bill_id: id, payment: voided });
+            if (reopenedRow) socketService?.broadcastToAll(req.tenantId!, 'bill:opened', reopenedRow);
+        } catch (_) {}
+
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!,
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.RESERVATION,
+                undefined,
+                `Stornato incasso ${voided.method} ${formatEuroMinor(voided.amount_cents)} (conto #${id}${reason ? ', motivo: ' + reason : ''})`
+            );
+        }
+
+        const view = await loadBillView(req.tenantId!, id);
+        res.json(view ?? { payment: voided });
+    } catch (err: any) {
+        console.error('POST /bills/:id/payments/:paymentId/void error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Chiusura di cassa giornaliera: quanto è entrato oggi e da dove. Somma i
+// movimenti del giorno (Europe/Rome) per metodo — specchi LINK_ONLINE
+// inclusi, storni esclusi — più i dati dei conti chiusi nel giorno: mance,
+// acconti maturati, ammanchi dei SETTLED_PARTIAL. È il report che si legge
+// a fine serata contando il cassetto.
+app.get('/reports/cash-closure', authenticate, requirePermission('payments:view'), async (req, res) => {
+    try {
+        const raw = typeof req.query.date === 'string' ? req.query.date : '';
+        const date = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : getRomeDatePart(new Date());
+
+        const methodsRs = await queryWithRetry(
+            `SELECT method, SUM(amount_cents)::int AS amount_cents, COUNT(*)::int AS movements
+             FROM table_bill_payments
+             WHERE tenant_id = $1 AND voided_at IS NULL
+               AND (recorded_at AT TIME ZONE 'Europe/Rome')::date = $2::date
+             GROUP BY method
+             ORDER BY amount_cents DESC`,
+            [req.tenantId!, date]
+        );
+
+        const billsRs = await queryWithRetry(
+            `SELECT COUNT(*)::int AS bills_closed,
+                    COALESCE(SUM(b.tip_cents), 0)::int AS tip_cents,
+                    COALESCE(SUM(dep.dep), 0)::int AS deposit_credit_cents,
+                    COALESCE(SUM(CASE WHEN b.status = 'SETTLED_PARTIAL'
+                        THEN GREATEST(0, b.total_cents - paid.paid - staff.staff) ELSE 0 END), 0)::int AS shortfall_cents
+             FROM table_bills b
+             LEFT JOIN LATERAL (
+                 SELECT COALESCE(SUM(amount_cents), 0)::int AS paid
+                 FROM table_bill_splits s WHERE s.table_bill_id = b.id AND s.status = 'PAID'
+             ) paid ON TRUE
+             LEFT JOIN LATERAL (
+                 SELECT COALESCE(SUM(amount_cents), 0)::int AS dep
+                 FROM table_bill_splits s WHERE s.table_bill_id = b.id AND s.status = 'PAID' AND s.kind = 'deposit'
+             ) dep ON TRUE
+             LEFT JOIN LATERAL (
+                 SELECT COALESCE(SUM(amount_cents), 0)::int AS staff
+                 FROM table_bill_payments p WHERE p.table_bill_id = b.id AND p.table_bill_split_id IS NULL AND p.voided_at IS NULL
+             ) staff ON TRUE
+             WHERE b.tenant_id = $1 AND b.status IN ('CLOSED', 'SETTLED_PARTIAL')
+               AND b.closed_at IS NOT NULL
+               AND (b.closed_at AT TIME ZONE 'Europe/Rome')::date = $2::date`,
+            [req.tenantId!, date]
+        );
+
+        const methods = methodsRs.rows;
+        res.json({
+            date,
+            methods,
+            total_cents: methods.reduce((n: number, m: any) => n + m.amount_cents, 0),
+            tip_cents: billsRs.rows[0].tip_cents,
+            deposit_credit_cents: billsRs.rows[0].deposit_credit_cents,
+            bills_closed: billsRs.rows[0].bills_closed,
+            shortfall_cents: billsRs.rows[0].shortfall_cents,
+        });
+    } catch (err: any) {
+        console.error('GET /reports/cash-closure error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });
@@ -3907,6 +4238,14 @@ app.post('/bills/splits/:id/refund', authenticate, requirePermission('payments:f
              WHERE id = $1
              RETURNING id, table_bill_id, amount_cents`,
             [splitId]
+        );
+        // Lo specchio LINK_ONLINE nel libro cassa segue la quota: stornato,
+        // così la chiusura di cassa non conta denaro restituito.
+        await queryWithRetry(
+            `UPDATE table_bill_payments
+             SET voided_at = CURRENT_TIMESTAMP, voided_by_user_id = $2, void_reason = 'Rimborso quota'
+             WHERE table_bill_split_id = $1 AND voided_at IS NULL`,
+            [splitId, req.user?.userId ?? null]
         );
         let updatedPr: any = null;
         if (row.payment_request_id) {
@@ -4052,12 +4391,16 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => runAsPlatform(async
              ORDER BY claimed_at ASC`,
             [bill.id]
         );
+        // Incassi registrati in cassa dallo staff (contanti, POS, …): per
+        // l'ospite sono denaro già versato come le quote PAID — entrano nella
+        // barra e nel residuo, ma non nella lista dei paganti (come l'acconto).
+        const staffPaidCents = await staffPaidCentsForBill(bill.id);
         const paidCents = splitsRows.rows
             .filter((r: any) => r.status === 'PAID')
-            .reduce((sum: number, r: any) => sum + Number(r.amount_cents || 0), 0);
+            .reduce((sum: number, r: any) => sum + Number(r.amount_cents || 0), 0) + staffPaidCents;
         const claimedCents = splitsRows.rows
             .filter((r: any) => r.status === 'CLAIMED' || r.status === 'PAID')
-            .reduce((sum: number, r: any) => sum + Number(r.amount_cents || 0), 0);
+            .reduce((sum: number, r: any) => sum + Number(r.amount_cents || 0), 0) + staffPaidCents;
         const residual = Math.max(0, bill.total_cents - claimedCents);
         // Acconto già versato: quota PAID di kind='deposit'. Già dentro
         // paidCents/claimedCents (quindi già scalato dal residuo e dalla barra);
@@ -4209,14 +4552,17 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         const billLabel = bill.table_name ? `tavolo ${bill.table_name}` : `conto #${bill.id}`;
 
         // Compute claimed_cents under the lock so the residual is
-        // authoritative at insert time.
+        // authoritative at insert time. Gli incassi staff del libro cassa
+        // contano come le quote: quello che il cameriere ha già preso in
+        // contanti non è più reclamabile dal QR.
         const sumRs = await client.query(
             `SELECT COALESCE(SUM(amount_cents), 0)::int AS claimed_cents
              FROM table_bill_splits
              WHERE table_bill_id = $1 AND status IN ('CLAIMED','PAID')`,
             [bill.id]
         );
-        const claimed = Number(sumRs.rows[0].claimed_cents || 0);
+        const staffPaid = await staffPaidCentsForBill(bill.id, client);
+        const claimed = Number(sumRs.rows[0].claimed_cents || 0) + staffPaid;
         const residual = bill.total_cents - claimed;
         if (residual <= 0) {
             await client.query('ROLLBACK');
@@ -6206,26 +6552,48 @@ async function applyBillSplitTransition(
             }
         }
 
+        // Specchio nel libro cassa: la quota pagata online diventa una riga
+        // LINK_ONLINE, così la chiusura di cassa somma per metodo da una
+        // tabella sola. Idempotente sull'indice unico parziale: il replay
+        // del webhook non raddoppia la riga. Il residuo NON la conta (conta
+        // la quota): table_bill_split_id valorizzato la marca come specchio.
+        try {
+            await queryWithRetry(
+                `INSERT INTO table_bill_payments (tenant_id, table_bill_id, method, amount_cents, table_bill_split_id)
+                 VALUES ($1, $2, 'LINK_ONLINE', $3, $4)
+                 ON CONFLICT (table_bill_split_id) WHERE table_bill_split_id IS NOT NULL DO NOTHING`,
+                [tenantId, billId, amount, splitId]
+            );
+        } catch (mirrorErr: any) {
+            // Il libro cassa non deve mai bloccare l'incasso: la quota è già
+            // PAID, al peggio il report perde una riga e lo segnaliamo.
+            console.error('[bill-split] mirror insert failed for split', splitId, mirrorErr?.message);
+        }
+
         try {
             socketService?.broadcastToAll(tenantId, 'bill:split-paid', {
                 bill_id: billId, split_id: splitId, amount_cents: amount,
             });
         } catch (_) {}
 
-        // SETTLED promotion: total_cents == sum of PAID splits. Guard on
-        // status IN OPEN/LOCKED so a manually-closed bill doesn't get
-        // clobbered. Race-safe because it's a single UPDATE ... WHERE
-        // comparing against a sub-select computed atomically by PG.
+        // SETTLED promotion: total_cents covered by PAID splits + staff
+        // payments from the cash book. Guard on status IN OPEN/LOCKED so a
+        // manually-closed bill doesn't get clobbered. Race-safe because it's
+        // a single UPDATE ... WHERE comparing against sub-selects computed
+        // atomically by PG.
         const settled = await queryWithRetry(
             `UPDATE table_bills b
              SET status = 'SETTLED'
              WHERE b.id = $1
                AND b.tenant_id = $2
                AND b.status IN ('OPEN','LOCKED')
-               AND b.total_cents = (
-                   SELECT COALESCE(SUM(amount_cents), 0)
-                   FROM table_bill_splits
-                   WHERE table_bill_id = $1 AND status = 'PAID'
+               AND b.total_cents <= (
+                     (SELECT COALESCE(SUM(amount_cents), 0)
+                      FROM table_bill_splits
+                      WHERE table_bill_id = $1 AND status = 'PAID')
+                   + (SELECT COALESCE(SUM(amount_cents), 0)
+                      FROM table_bill_payments
+                      WHERE table_bill_id = $1 AND table_bill_split_id IS NULL AND voided_at IS NULL)
                )
              RETURNING id, reservation_id, table_id, total_cents, covers, status`,
             [billId, tenantId]
@@ -20908,6 +21276,8 @@ app.get('/tables/bills-status', authenticate, requirePermission('orders:view'), 
                     COALESCE((SELECT SUM(pr.amount_cents)::int FROM payment_requests pr
                               WHERE pr.reservation_id = b.reservation_id AND pr.table_bill_split_id IS NULL
                                 AND UPPER(pr.status) IN ('COMPLETED','PAID') AND pr.completed_at IS NOT NULL), 0) AS deposit_paid_cents,
+                    COALESCE((SELECT SUM(p.amount_cents)::int FROM table_bill_payments p
+                              WHERE p.table_bill_id = b.id AND p.table_bill_split_id IS NULL AND p.voided_at IS NULL), 0) AS staff_paid_cents,
                     (SELECT COUNT(*)::int FROM orders o
                      WHERE o.table_bill_id = b.id AND o.status = 'OPEN') AS open_orders
              FROM table_bills b
@@ -20919,6 +21289,9 @@ app.get('/tables/bills-status', authenticate, requirePermission('orders:view'), 
             [service.service_date, service.shift, req.tenantId!]
         );
         const bills = rows.rows
+            // Il vecchio addendo cash_settled_cents è sostituito dagli incassi
+            // staff del libro cassa: cash_settled ne è ormai una proiezione
+            // (sole righe CONTANTI) e sommarlo qui conterebbe doppio.
             .map((r: any) => ({
                 id: r.id,
                 table_id: r.table_id,
@@ -20928,12 +21301,13 @@ app.get('/tables/bills-status', authenticate, requirePermission('orders:view'), 
                 status: r.status,
                 share_token: r.share_token,
                 items: r.items ?? null,
-                paid_cents: Number(r.paid_cents) + Number(r.cash_settled_cents),
+                paid_cents: Number(r.paid_cents) + Number(r.staff_paid_cents),
                 cash_settled_cents: Number(r.cash_settled_cents),
+                staff_paid_cents: Number(r.staff_paid_cents),
                 deposit_credit_cents: Number(r.deposit_credit_cents),
                 deposit_paid_cents: Number(r.deposit_paid_cents),
                 refund_due_cents: Math.max(0, Number(r.deposit_paid_cents) - Number(r.deposit_credit_cents)),
-                residual_cents: Number(r.total_cents) - Number(r.paid_cents) - Number(r.cash_settled_cents),
+                residual_cents: Number(r.total_cents) - Number(r.paid_cents) - Number(r.staff_paid_cents),
                 open_orders: Number(r.open_orders),
             }))
             // Restano visibili anche i conti già coperti dall'acconto (residuo 0):
@@ -21909,7 +22283,10 @@ async function maintainDepositCredit(client: any, tenantId: number, billId: numb
          WHERE table_bill_id = $1 AND status IN ('CLAIMED', 'PAID') AND kind <> 'deposit'`,
         [billId]
     );
-    let remaining = Math.max(0, newTotal - otherLiveRs.rows[0].s);
+    // Gli incassi staff del libro cassa occupano capienza come le quote dei
+    // clienti: l'acconto si ridimensiona su quel che resta davvero.
+    const staffPaidForDeposit = await staffPaidCentsForBill(billId, client);
+    let remaining = Math.max(0, newTotal - otherLiveRs.rows[0].s - staffPaidForDeposit);
 
     for (const dep of deposits.rows) {
         const want = Math.min(Number(dep.amount_cents), remaining);
@@ -22001,13 +22378,17 @@ async function syncBillTotalInTx(client: any, tenantId: number, billId: number):
         [billId]
     );
     const guestRows = splitsRs.rows.filter((s: any) => s.kind !== 'deposit');
+    // Il già incassato comprende anche i movimenti staff del libro cassa
+    // (contanti, POS, …): pure quelli, se il totale scende sotto, vanno
+    // restituiti a mano — non si cancellano da soli.
+    const staffPaid = await staffPaidCentsForBill(billId, client);
     const paid = guestRows.filter((s: any) => s.status === 'PAID')
-                          .reduce((n: number, s: any) => n + s.amount_cents, 0);
+                          .reduce((n: number, s: any) => n + s.amount_cents, 0) + staffPaid;
     const claimed = guestRows.filter((s: any) => s.status === 'CLAIMED')
                              .reduce((n: number, s: any) => n + s.amount_cents, 0);
 
     // Sotto il già pagato dai clienti non si scende: la strada corretta è il
-    // rimborso Revolut, che esiste già ed è tracciato.
+    // rimborso (gateway per le quote online, storno per gli incassi staff).
     if (newTotal < paid) {
         throw new BillSyncError(
             'Il nuovo totale è inferiore a quanto già incassato: serve un rimborso',
@@ -22293,15 +22674,17 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
             [billId]
         );
         const depositPaid = await depositPaidCentsForReservation(req.tenantId!, synced.bill.reservation_id);
+        const staffPaidAfterClose = await staffPaidCentsForBill(billId!);
         res.json({
             order_id: orderId,
             bill: {
                 ...synced.bill,
                 paid_cents: fig.rows[0].paid_cents,
+                staff_paid_cents: staffPaidAfterClose,
                 deposit_credit_cents: fig.rows[0].deposit_credit_cents,
                 deposit_paid_cents: depositPaid,
                 refund_due_cents: Math.max(0, depositPaid - fig.rows[0].deposit_credit_cents),
-                residual_cents: Math.max(0, synced.bill.total_cents - fig.rows[0].live),
+                residual_cents: Math.max(0, synced.bill.total_cents - fig.rows[0].live - staffPaidAfterClose),
             },
             released_split_ids: synced.released_split_ids,
         });
@@ -22952,6 +23335,8 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                               WHERE pr.reservation_id = b.reservation_id AND pr.table_bill_split_id IS NULL
                                 AND UPPER(pr.status) IN ('COMPLETED','PAID') AND pr.completed_at IS NOT NULL), 0) AS deposit_paid_cents,
                     COUNT(s.id) FILTER (WHERE s.status = 'PAID')::int AS paid_splits,
+                    COALESCE((SELECT SUM(p.amount_cents)::int FROM table_bill_payments p
+                              WHERE p.table_bill_id = b.id AND p.table_bill_split_id IS NULL AND p.voided_at IS NULL), 0) AS staff_paid_cents,
                     (SELECT COUNT(*) FROM orders o WHERE o.table_bill_id = b.id AND o.status = 'OPEN')::int AS open_orders
              FROM table_bills b
              LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
@@ -23015,7 +23400,10 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                         : b.service_date) === service.service_date
                     && b.shift === service.shift,
                 refund_due_cents: Math.max(0, Number(b.deposit_paid_cents) - Number(b.deposit_credit_cents)),
-                residual_cents: Math.max(0, b.total_cents - b.paid_cents - b.claimed_cents),
+                // Gli incassi staff del libro cassa entrano nel pagato e nel
+                // residuo come le quote online.
+                paid_cents: Number(b.paid_cents) + Number(b.staff_paid_cents),
+                residual_cents: Math.max(0, b.total_cents - b.paid_cents - b.claimed_cents - b.staff_paid_cents),
             })),
             stale_orders: stale.rows.map((o: any) => ({
                 ...o,
@@ -23109,7 +23497,10 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
             [bill.id]
         );
         const depositCreditCents = billTotalsRs.rows[0].deposit_credit_cents;
-        const residualCents = Math.max(0, bill.total_cents - billTotalsRs.rows[0].live_cents);
+        // Il preconto mostra il residuo VERO: anche gli incassi staff già
+        // registrati (contanti/POS a metà servizio) lo abbassano.
+        const staffPaidForPrint = await staffPaidCentsForBill(bill.id);
+        const residualCents = Math.max(0, bill.total_cents - billTotalsRs.rows[0].live_cents - staffPaidForPrint);
         const depositPaidCents = await depositPaidCentsForReservation(req.tenantId!, bill.reservation_id);
         const refundDueCents = Math.max(0, depositPaidCents - depositCreditCents);
 

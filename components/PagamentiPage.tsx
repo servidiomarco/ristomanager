@@ -10,6 +10,7 @@ import { getRomeDatePart } from '../utils/reservationTime';
 import {
   Callout, PanePlaceholder, SearchField, SegmentedControl, SplitPane,
 } from './ds';
+import { ChiusuraCassa } from './pagamenti/ChiusuraCassa';
 import { ContiAperti } from './pagamenti/ContiAperti';
 import { LinkDiPagamento, type StatusFilter } from './pagamenti/LinkDiPagamento';
 import { BillDetail } from './pagamenti/BillSheet';
@@ -69,7 +70,7 @@ const PagamentiPage: React.FC<{
   globalDate?: Date;
   globalShiftFilter?: 'ALL' | 'LUNCH' | 'DINNER';
 }> = ({ globalDate, globalShiftFilter }) => {
-  const [tab, setTab] = useState<'BILLS' | 'LINKS'>('BILLS');
+  const [tab, setTab] = useState<'BILLS' | 'LINKS' | 'CASSA'>('BILLS');
 
   // La lista "Conti aperti" segue datepicker + toggle turno della topbar: mostra
   // solo i conti di quel giorno/turno (turno "Tutti" = entrambi). Senza data la
@@ -246,7 +247,8 @@ const PagamentiPage: React.FC<{
   );
 
   const showingBills = tab === 'BILLS' && billsAvailable;
-  const detailOpen = showingBills ? selectedBill !== null : selectedPayment !== null;
+  const showingCassa = tab === 'CASSA' && billsAvailable;
+  const detailOpen = showingCassa ? false : showingBills ? selectedBill !== null : selectedPayment !== null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -300,14 +302,15 @@ const PagamentiPage: React.FC<{
             // search is even searching.
             <div className="space-y-3">
               {billsAvailable && (
-                <SegmentedControl<'BILLS' | 'LINKS'>
+                <SegmentedControl<'BILLS' | 'LINKS' | 'CASSA'>
                   value={tab}
                   onChange={setTab}
                   ariaLabel="Sezione pagamenti"
                   equalWidth
                   options={[
                     { value: 'BILLS', label: 'Conti aperti', badge: openBills.bills.length || undefined },
-                    { value: 'LINKS', label: 'Link di pagamento', badge: total || undefined },
+                    { value: 'LINKS', label: 'Link', badge: total || undefined },
+                    { value: 'CASSA', label: 'Cassa' },
                   ]}
                 />
               )}
@@ -325,16 +328,20 @@ const PagamentiPage: React.FC<{
                   ]}
                 />
               )}
-              <SearchField
-                value={search}
-                onChange={setSearch}
-                placeholder={showingBills ? 'Cerca tavolo o cliente…' : 'Cerca cliente, telefono, ordine…'}
-                ariaLabel="Cerca"
-              />
+              {!showingCassa && (
+                <SearchField
+                  value={search}
+                  onChange={setSearch}
+                  placeholder={showingBills ? 'Cerca tavolo o cliente…' : 'Cerca cliente, telefono, ordine…'}
+                  ariaLabel="Cerca"
+                />
+              )}
             </div>
           }
           list={
-            showingBills ? (
+            showingCassa ? (
+              <ChiusuraCassa date={serviceFilter?.service_date} />
+            ) : showingBills ? (
               <ContiAperti
                 bills={openBills.bills}
                 stale={openBills.stale}
@@ -372,7 +379,9 @@ const PagamentiPage: React.FC<{
             )
           }
           detail={
-            showingBills ? (
+            showingCassa ? (
+              <PanePlaceholder icon={Receipt}>I totali seguono il giorno scelto in alto</PanePlaceholder>
+            ) : showingBills ? (
               selectedBill ? (
                 <BillDetail
                   key={selectedBill.id}

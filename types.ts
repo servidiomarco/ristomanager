@@ -342,6 +342,54 @@ export interface TableBill {
   notes: string | null;
 }
 
+// Libro cassa del conto (Fase 1 fatturazione — vedi
+// docs/fatturazione-chiusura-conto-brainstorm.md). Una riga per movimento di
+// incasso. Le righe con table_bill_split_id valorizzato sono lo SPECCHIO di
+// una quota online PAID (method LINK_ONLINE), scritte dal webhook: servono
+// solo al report per metodo — il residuo le conta già tramite la quota.
+// Le righe senza specchio sono incassi registrati dallo staff e pesano sul
+// residuo. Storno = soft-void (voided_at), mai delete.
+export type BillPaymentMethod =
+  | 'CONTANTI'
+  | 'POS_FISICO'
+  | 'SATISPAY'
+  | 'BUONO_PASTO'   // meta può portare circuito e valore nominale vs incassato
+  | 'GIFT_CARD'
+  | 'SOSPESO'       // conto del cliente abituale, saldato fuori banda
+  | 'OMAGGIO'       // offerto dalla casa: salda il residuo senza incasso
+  | 'LINK_ONLINE';  // specchio quota pay-at-table, mai registrato a mano
+
+export interface BillPayment {
+  id: number;
+  table_bill_id: number;
+  method: BillPaymentMethod;
+  amount_cents: number;
+  table_bill_split_id: number | null;
+  meta: Record<string, unknown> | null;
+  recorded_by_user_id: number | null;
+  recorded_at: string;
+  voided_at: string | null;
+  voided_by_user_id: number | null;
+  void_reason: string | null;
+}
+
+// Riga della chiusura di cassa giornaliera: totale incassato per metodo.
+export interface CashClosureMethodRow {
+  method: BillPaymentMethod;
+  amount_cents: number;
+  movements: number;
+}
+
+export interface CashClosureReport {
+  date: string; // YYYY-MM-DD (giorno Europe/Rome)
+  methods: CashClosureMethodRow[];
+  total_cents: number;
+  tip_cents: number;
+  deposit_credit_cents: number; // acconti maturati sui conti chiusi nel giorno
+  bills_closed: number;
+  shortfall_cents: number; // ammanchi dei SETTLED_PARTIAL chiusi nel giorno
+}
+
 export interface TableBillSplit {
   id: number;
   table_bill_id: number;
@@ -362,6 +410,13 @@ export interface TableBillSplit {
 export interface TableBillWithSplits {
   bill: TableBill;
   splits: TableBillSplit[];
+  // Movimenti del libro cassa (specchi LINK_ONLINE inclusi, storni inclusi
+  // con voided_at valorizzato): la UI li mostra, i totali qui sotto no.
+  payments?: BillPayment[];
+  // Incassi staff attivi (senza specchio, non stornati). NON inclusi in
+  // paid_cents (che resta la somma delle quote PAID): il residuo li scala
+  // a parte.
+  staff_paid_cents?: number;
   paid_cents: number;
   claimed_cents: number;
   // Acconto già versato sulla prenotazione portato nel conto. Già incluso in
