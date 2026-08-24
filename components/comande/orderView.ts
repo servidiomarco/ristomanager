@@ -20,6 +20,12 @@ export const courseLabel = (n: number): string => `${ordinal(n)} uscita`;
 
 export interface CartLine {
   key: string;
+  /** Chiave di idempotenza della riga, assegnata quando la riga nasce nel
+   *  carrello e stabile attraverso merge, ritocchi di quantità e ritentativi.
+   *  Generarla al momento dell'invio vanificherebbe la dedup del server: un
+   *  retry dopo un timeout porterebbe una chiave nuova e duplicherebbe la
+   *  riga in cucina. */
+  idem: string;
   dish: Dish;
   qty: number;
   course_no: number;
