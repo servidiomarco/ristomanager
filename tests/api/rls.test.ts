@@ -10,7 +10,7 @@ describe('row-level security', () => {
     let db: Client;
 
     beforeAll(async () => {
-        db = new Client({ connectionString: process.env.DATABASE_URL });
+        db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
         await db.connect();
         await db.query(`INSERT INTO tenants (id, slug, name) VALUES (2, 'trattoria-rls', 'Trattoria RLS')
                         ON CONFLICT (id) DO NOTHING`);

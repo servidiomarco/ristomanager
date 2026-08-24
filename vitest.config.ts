@@ -7,6 +7,7 @@ export default defineConfig({
     test: {
         include: ['tests/api/**/*.test.ts'],
         globalSetup: ['tests/api/globalSetup.ts'],
+        setupFiles: ['tests/api/setupEnv.ts'],
         pool: 'forks',
         fileParallelism: false,
         testTimeout: 30_000,
