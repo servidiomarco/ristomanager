@@ -415,43 +415,64 @@ const CourseCard: React.FC<{
         </div>
       )}
 
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2.5">
-        {col.items.map(i => (
+      <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-1.5 py-2">
+        {col.items.map(i => {
           // Il fatto viene detto dal segno di spunta e dal testo attenuato, non
           // da un'opacità che porta sotto contrasto anche la quantità.
-          <div key={i.id}>
-            <div className="flex items-start gap-2">
-              <span
-                className={`font-semibold tabular-nums ${
-                  i.status === 'READY' ? 'text-[var(--ds-text-muted)]' : 'text-[var(--ds-text-primary)]'
-                }`}
-              >
-                {i.qty}
-              </span>
-              <span
-                className={`flex-1 text-[15px] leading-tight ${
-                  i.status === 'READY'
-                    ? 'text-[var(--ds-text-muted)] line-through'
-                    : 'text-[var(--ds-text-primary)]'
-                }`}
-              >
-                {i.name_snapshot}
-              </span>
-              {i.status === 'PREPARING' && (
-                <ChevronRight size={15} className="mt-0.5 flex-shrink-0 text-[var(--ds-arriving-text)]" aria-hidden />
-              )}
-              {i.status === 'READY' && (
-                <Check size={15} className="mt-0.5 flex-shrink-0 text-[var(--ds-seated-solid)]" aria-hidden />
-              )}
-            </div>
-            {i.modifiers && i.modifiers.length > 0 && (
-              <div className="ml-6 text-[13px] font-medium text-[var(--ds-pending-text)]">
-                ↳ {i.modifiers.map(m => m.name).join(', ')}
+          const body = (
+            <>
+              <div className="flex items-start gap-2">
+                <span
+                  className={`font-semibold tabular-nums ${
+                    i.status === 'READY' ? 'text-[var(--ds-text-muted)]' : 'text-[var(--ds-text-primary)]'
+                  }`}
+                >
+                  {i.qty}
+                </span>
+                <span
+                  className={`flex-1 text-[15px] leading-tight ${
+                    i.status === 'READY'
+                      ? 'text-[var(--ds-text-muted)] line-through'
+                      : 'text-[var(--ds-text-primary)]'
+                  }`}
+                >
+                  {i.name_snapshot}
+                </span>
+                {i.status === 'PREPARING' && (
+                  <ChevronRight size={15} className="mt-0.5 flex-shrink-0 text-[var(--ds-arriving-text)]" aria-hidden />
+                )}
+                {i.status === 'READY' && (
+                  <Check size={15} className="mt-0.5 flex-shrink-0 text-[var(--ds-seated-solid)]" aria-hidden />
+                )}
               </div>
-            )}
-            {i.note && <div className="ml-6 text-[13px] text-[var(--ds-text-muted)]">↳ {i.note}</div>}
-          </div>
-        ))}
+              {i.modifiers && i.modifiers.length > 0 && (
+                <div className="ml-6 text-[13px] font-medium text-[var(--ds-pending-text)]">
+                  ↳ {i.modifiers.map(m => m.name).join(', ')}
+                </div>
+              )}
+              {i.note && <div className="ml-6 text-[13px] text-[var(--ds-text-muted)]">↳ {i.note}</div>}
+            </>
+          );
+          // Ogni riga si spunta da sola: i piatti veloci escono senza aspettare
+          // il resto dell'uscita. Il server accetta anche SENT→READY diretto, e
+          // avvisa il passe solo quando l'ultima riga dell'uscita è pronta.
+          // La spunta non si annulla (READY→PREPARING è 409 per contratto): se
+          // i tocchi accidentali diventassero un problema in servizio, la
+          // protezione va messa qui, con una breve finestra "annulla" client.
+          return i.status === 'READY' ? (
+            <div key={i.id} className="px-1.5 py-1.5">{body}</div>
+          ) : (
+            <button
+              key={i.id}
+              type="button"
+              onClick={() => onAdvance(i, 'READY')}
+              aria-label={`Segna pronto: ${i.qty} ${i.name_snapshot}`}
+              className="block min-h-11 w-full rounded-[12px] px-1.5 py-1.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] active:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              {body}
+            </button>
+          );
+        })}
       </div>
 
       <div className="p-2">
@@ -462,12 +483,14 @@ const CourseCard: React.FC<{
         ) : (
           // Non "PRONTO": il maiuscolo non aggiunge nulla che il corpo e il
           // peso non dicano già, e a schermo lo si legge peggio (§5.2).
+          // "Tutto": la spunta del singolo piatto sta sulla riga, questo
+          // chiude in un colpo quello che resta.
           <button
             type="button"
             onClick={() => col.items.filter(i => i.status !== 'READY').forEach(i => onAdvance(i, 'READY'))}
             className="w-full rounded-[16px] bg-[var(--ds-action-bg)] py-3.5 text-[17px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
-            Pronto
+            Tutto pronto
           </button>
         )}
       </div>
