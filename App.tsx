@@ -189,38 +189,25 @@ const SIDEBAR_COLLAPSED_KEY = 'ristocrm_sidebar_collapsed';
 // (flag table_orders_enabled) — spento, le voci spariscono dalla sidebar.
 const SALA_VIEWS: ViewState[] = [ViewState.COMANDE, ViewState.CUCINA, ViewState.PASSE];
 
-/* ── Sottovoci di Impostazioni ────────────────────────────────────────────
-   La pagina era una colonna unica con undici sezioni impilate: per arrivare a
-   "Integrazioni" si scorreva tutto. Ora Impostazioni è una voce padre della
-   sidebar e ogni sezione è una figlia: la pagina mostra SOLO la sezione
-   attiva. Non è routing (resta l'enum ViewState): è uno stato in più che
-   sceglie quale fetta della stessa vista renderizzare. Su mobile, dove la
-   sidebar non c'è, la stessa lista diventa la riga di chip in testa alla
-   pagina. `guard` decide la visibilità per chi non ha i permessi della
-   sezione (amministrazione, monitoraggio). */
-type SettingsSectionKey =
-  | 'profilo' | 'orari' | 'chiusure' | 'promemoria' | 'canali'
-  | 'prenotazioni' | 'amministrazione' | 'monitoraggio' | 'notifiche'
-  | 'legale' | 'tavoli-ai' | 'integrazioni';
-
-const SETTINGS_SECTIONS: {
-  key: SettingsSectionKey;
+/* ── Blocchi della pagina Impostazioni ────────────────────────────────────
+   Impostazioni è tornata una voce piatta della sidebar e una pagina unica:
+   il sottomenu costringeva a sapere in anticipo in quale delle dodici voci
+   stava una regolazione. Ora la pagina impila pochi blocchi tematici — le
+   card sono raggruppate per natura — e questa lista alimenta solo la riga
+   di chip-àncora in testa, che salta al blocco senza stato né routing.
+   `guard` nasconde il blocco a chi non ha i permessi delle sue card. */
+const SETTINGS_GROUPS: {
+  id: string;
   label: string;
   Icon: React.ComponentType<{ size?: number; className?: string }>;
-  guard?: 'userManagement' | 'logs';
+  guard?: 'admin';
 }[] = [
-  { key: 'profilo', label: 'Profilo', Icon: UserCheck },
-  { key: 'orari', label: 'Orari di apertura', Icon: Clock },
-  { key: 'chiusure', label: 'Chiusure programmate', Icon: DoorClosed },
-  { key: 'promemoria', label: 'Promemoria', Icon: BellRing },
-  { key: 'canali', label: 'Canali di prenotazione', Icon: MessagesSquare },
-  { key: 'prenotazioni', label: 'Opzioni prenotazioni', Icon: Calendar },
-  { key: 'amministrazione', label: 'Amministrazione', Icon: Users, guard: 'userManagement' },
-  { key: 'monitoraggio', label: 'Monitoraggio', Icon: FileText, guard: 'logs' },
-  { key: 'notifiche', label: 'Notifiche push', Icon: Bell },
-  { key: 'legale', label: 'Legale', Icon: ShieldCheck },
-  { key: 'tavoli-ai', label: 'Logica tavoli AI', Icon: Zap },
-  { key: 'integrazioni', label: 'Integrazioni', Icon: CreditCard },
+  { id: 'imp-profilo', label: 'Profilo', Icon: UserCheck },
+  { id: 'imp-ristorante', label: 'Ristorante', Icon: Clock },
+  { id: 'imp-prenotazioni', label: 'Prenotazioni', Icon: Calendar },
+  { id: 'imp-pagamenti', label: 'Pagamenti', Icon: CreditCard },
+  { id: 'imp-comunicazioni', label: 'Comunicazioni', Icon: MessagesSquare },
+  { id: 'imp-amministrazione', label: 'Amministrazione', Icon: Users, guard: 'admin' },
 ];
 
 /* ── Impostazioni ─────────────────────────────────────────────────────────
@@ -232,8 +219,10 @@ const SETTINGS_SECTIONS: {
    Le etichette restano in tondo: erano in maiuscolo con 0.08em di spaziatura,
    che a 11px cancella la forma della parola senza renderla più leggibile
    (§5.2). Peso e colore portano la gerarchia. */
-const SettingsSection: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-  <section className="mb-6">
+const SettingsSection: React.FC<{ id?: string; label: string; children: React.ReactNode }> = ({ id, label, children }) => (
+  // scroll-mt: quando i chip-àncora saltano qui, l'intestazione non finisce
+  // incollata al bordo superiore della zona che scorre.
+  <section id={id} className="mb-6 scroll-mt-4">
     <h3 className="mb-2 px-1 text-[13px] font-semibold text-[var(--ds-text-muted)]">{label}</h3>
     {children}
   </section>
@@ -310,17 +299,6 @@ const App: React.FC = () => {
   const { user, isAuthenticated, isLoading: authLoading, logout, canAccessView, canManageUsers, hasPermission, hasFeature, getAccessibleViews, canViewLogs, updatePreferences } = useAuth();
 
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
-  // Sottovoce attiva di Impostazioni + apertura del ramo nella sidebar.
-  const [settingsSection, setSettingsSection] = useState<SettingsSectionKey>('profilo');
-  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
-  // Il ramo segue la vista SOLO al cambio di vista: entrando in Impostazioni
-  // (da qualunque strada: palette, chip, sidebar) si apre, uscendo si chiude.
-  // Lo stato resta l'unica fonte del rendering — prima il render sommava
-  // "|| view === SETTINGS" e il toggle non poteva mai chiudere il ramo
-  // restando sulla pagina.
-  useEffect(() => {
-    setSettingsMenuOpen(view === ViewState.SETTINGS);
-  }, [view]);
   // Una schermata che si prende tutto lo schermo sul telefono: la barra di
   // navigazione in basso sparisce, e con lei il suo spazio di rispetto. Per ora
   // la chiede solo la comanda aperta su un tavolo.
@@ -1739,21 +1717,11 @@ const App: React.FC = () => {
   // Drives the bottom-tab "Altro" button's visibility and active state.
   const altroNavItems = NAV_ITEMS.filter(item => item.kind === 'link' && !item.isTab && canSeeNavItem(item));
 
-  // Sottovoci di Impostazioni visibili a questo utente. Se la sezione attiva
-  // diventa invisibile (cambio ruolo, logout/login), si ripiega sulla prima.
-  const visibleSettingsSections = SETTINGS_SECTIONS.filter(sec =>
-    sec.guard === 'userManagement' ? canManageUsers()
-    : sec.guard === 'logs' ? canViewLogs()
-    : true
+  // Blocchi di Impostazioni visibili a questo utente: il blocco
+  // Amministrazione compare solo a chi può usarne almeno una card.
+  const visibleSettingsGroups = SETTINGS_GROUPS.filter(g =>
+    g.guard === 'admin' ? (canManageUsers() || canViewLogs()) : true
   );
-  const activeSettingsSection = visibleSettingsSections.some(sec => sec.key === settingsSection)
-    ? settingsSection
-    : (visibleSettingsSections[0]?.key ?? 'profilo');
-  const selectSettingsSection = (key: SettingsSectionKey) => {
-    setSettingsSection(key);
-    setSettingsMenuOpen(true);
-    setView(ViewState.SETTINGS);
-  };
 
   // ── Comunicazioni, mobile ────────────────────────────────────────────────
   // One bottom tab stands in for three views. The channels the user can't
@@ -1953,66 +1921,6 @@ const App: React.FC = () => {
                         </span>
                       </button>
                     )
-                  ) : item.view === ViewState.SETTINGS ? (
-                    // Impostazioni è una voce padre: il click apre la pagina e
-                    // il ramo; le figlie sono le sezioni della pagina. A
-                    // sidebar chiusa resta la sola icona (le figlie tornano
-                    // riaprendola — e la pagina ha comunque i chip in testa).
-                    <React.Fragment key={item.label}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (view === ViewState.SETTINGS && !sidebarCollapsed) {
-                            setSettingsMenuOpen(open => !open);
-                          } else {
-                            setSettingsMenuOpen(true);
-                            selectNavItem(item);
-                          }
-                        }}
-                        title={sidebarCollapsed ? item.label : undefined}
-                        aria-expanded={!sidebarCollapsed && settingsMenuOpen}
-                        className={`group w-full flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between'} gap-3 px-3 h-10 rounded-[12px] transition-colors ${
-                          view === ViewState.SETTINGS
-                            ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
-                            : 'text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]'
-                        }`}
-                      >
-                        <span className="flex min-w-0 items-center gap-3">
-                          <span className={view === ViewState.SETTINGS ? '' : 'text-[var(--ds-text-secondary)]'}>
-                            <item.Icon size={20} />
-                          </span>
-                          {!sidebarCollapsed && (
-                            <span className="font-medium text-[15px] tracking-[-0.01em] whitespace-nowrap">{item.label}</span>
-                          )}
-                        </span>
-                        {!sidebarCollapsed && (
-                          <ChevronDown
-                            className={`h-4 w-4 flex-shrink-0 transition-transform ${settingsMenuOpen ? 'rotate-180' : ''}`}
-                            aria-hidden
-                          />
-                        )}
-                      </button>
-                      {!sidebarCollapsed && settingsMenuOpen && (
-                        <div className="space-y-0.5 py-0.5">
-                          {visibleSettingsSections.map(sec => (
-                            <button
-                              key={sec.key}
-                              type="button"
-                              onClick={() => selectSettingsSection(sec.key)}
-                              aria-current={view === ViewState.SETTINGS && activeSettingsSection === sec.key ? 'page' : undefined}
-                              className={`group w-full flex items-center gap-2.5 rounded-[10px] py-1.5 pl-[30px] pr-3 text-left text-[14px] transition-colors ${
-                                view === ViewState.SETTINGS && activeSettingsSection === sec.key
-                                  ? 'bg-[var(--ds-surface-row)] font-medium text-[var(--ds-text-primary)]'
-                                  : 'text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]'
-                              }`}
-                            >
-                              <sec.Icon size={16} className="flex-shrink-0 opacity-70" />
-                              <span className="truncate">{sec.label}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </React.Fragment>
                   ) : (
                     <SidebarItem
                       key={item.label}
@@ -2635,31 +2543,27 @@ const App: React.FC = () => {
           <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto max-w-4xl p-4 sm:p-6 lg:p-8">
 
-            {/* Su mobile la sidebar (e quindi le sottovoci) non esiste: la
-                stessa lista diventa una riga di chip scorrevole. Su desktop
-                sparisce — sceglie la sidebar. */}
-            <div className="-mx-4 mb-4 flex gap-2 overflow-x-auto px-4 pb-1 md:hidden">
-              {visibleSettingsSections.map(sec => (
+            {/* Indice della pagina: chip-àncora che saltano al blocco. Nessuno
+                stato — la pagina è unica e i blocchi sono sempre tutti
+                montati, i chip fanno solo scorrere. */}
+            <div className="-mx-4 mb-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
+              {visibleSettingsGroups.map(g => (
                 <button
-                  key={sec.key}
+                  key={g.id}
                   type="button"
-                  onClick={() => setSettingsSection(sec.key)}
-                  aria-pressed={activeSettingsSection === sec.key}
-                  className={`inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
-                    activeSettingsSection === sec.key
-                      ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
-                      : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)]'
-                  }`}
+                  onClick={() => document.getElementById(g.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                  className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
-                  <sec.Icon size={14} className="flex-shrink-0" />
-                  {sec.label}
+                  <g.Icon size={14} className="flex-shrink-0" />
+                  {g.label}
                 </button>
               ))}
             </div>
 
-            {/* Profile / Personal preferences */}
-            {activeSettingsSection === 'profilo' && (
-            <SettingsSection label="Profilo">
+            {/* Preferenze personali: valgono per chi è collegato (e per questo
+                dispositivo, nel caso delle push), non per il ristorante. */}
+            <SettingsSection id="imp-profilo" label="Profilo">
+              <div className="space-y-3">
               <div className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
                 <label htmlFor="preferred-landing" className="mb-1 block text-[15px] font-semibold text-[var(--ds-text-primary)]">
                   Pagina di partenza
@@ -2716,49 +2620,43 @@ const App: React.FC = () => {
                   })}
                 </select>
               </div>
+                <PushNotificationsCard />
+              </div>
             </SettingsSection>
-            )}
 
-            {/* Opening hours & closures — collapsible to keep the page compact */}
-            {activeSettingsSection === 'orari' && (
-            <SettingsSection label="Orari di apertura">
-              <SettingsDisclosure
-                icon={Clock}
-                title="Orari settimanali e chiusure"
-                description="Gestisci servizi (pranzo/cena), giorni di chiusura e date speciali."
-              >
-                <OpeningHoursManager showToast={addToast} />
-              </SettingsDisclosure>
+            {/* Il ristorante in quanto luogo: quando è aperto, cosa è chiuso,
+                le routine di servizio, sala e cucina, l'identità legale. */}
+            <SettingsSection id="imp-ristorante" label="Ristorante">
+              <div className="space-y-3">
+                <SettingsDisclosure
+                  icon={Clock}
+                  title="Orari settimanali e chiusure"
+                  description="Gestisci servizi (pranzo/cena), giorni di chiusura e date speciali."
+                >
+                  <OpeningHoursManager showToast={addToast} />
+                </SettingsDisclosure>
+                <SettingsDisclosure
+                  icon={DoorClosed}
+                  title="Sale chiuse e tavoli nascosti"
+                  description="Programma o rimuovi chiusure per turno di sale e tavoli."
+                >
+                  <ScheduledClosuresManager showToast={addToast} />
+                </SettingsDisclosure>
+                {/* Promemoria automatici (una tantum, giornalieri, settimanali,
+                    mensili), incluso il "Promemoria pane". */}
+                <RemindersManager showToast={addToast} />
+                <CardErrorBoundary label="Sala & Cucina">
+                  <SalaCucinaSettingsManager showToast={addToast} />
+                </CardErrorBoundary>
+                {/* Identità del tenant + documenti legali generati. */}
+                <LegalSettingsCard showToast={addToast} />
+              </div>
             </SettingsSection>
-            )}
 
-            {/* Chiusure programmate — per-shift closures of rooms and tables (future occurrences aggregated) */}
-            {activeSettingsSection === 'chiusure' && (
-            <SettingsSection label="Chiusure programmate">
-              <SettingsDisclosure
-                icon={DoorClosed}
-                title="Sale chiuse e tavoli nascosti"
-                description="Programma o rimuovi chiusure per turno di sale e tavoli."
-              >
-                <ScheduledClosuresManager showToast={addToast} />
-              </SettingsDisclosure>
-            </SettingsSection>
-            )}
-
-            {/* Promemoria — notifiche automatiche configurabili (una tantum,
-                giornaliere, settimanali, mensili). Include per default il
-                "Promemoria pane" che ora è modificabile ed eliminabile
-                come qualsiasi altro. */}
-            {activeSettingsSection === 'promemoria' && (
-            <SettingsSection label="Promemoria">
-              <RemindersManager showToast={addToast} />
-            </SettingsSection>
-            )}
-
-            {/* Canali di prenotazione — collapsible per-channel cards: enable/disable
-                toggle in the header, channel-specific settings inside the body. */}
-            {activeSettingsSection === 'canali' && (
-            <SettingsSection label="Canali di prenotazione">
+            {/* Tutto ciò che governa come nascono e si comportano le
+                prenotazioni: canali di ingresso, risposte all'ospite, opzioni
+                del modal, caparra, blacklist, logica tavoli. */}
+            <SettingsSection id="imp-prenotazioni" label="Prenotazioni">
               <div className="space-y-3">
                 <FeatureTogglesManager showToast={addToast} />
                 <SettingsDisclosure
@@ -2768,14 +2666,6 @@ const App: React.FC = () => {
                 >
                   <BookingChannelsManager showToast={addToast} />
                 </SettingsDisclosure>
-              </div>
-            </SettingsSection>
-            )}
-
-            {/* Opzioni prenotazioni — customizable chip lists (note rapide + intolleranze) surfaced in the reservation modal */}
-            {activeSettingsSection === 'prenotazioni' && (
-            <SettingsSection label="Opzioni prenotazioni">
-              <div className="space-y-3">
                 <SettingsDisclosure
                   icon={StickyNote}
                   title="Note rapide prenotazione"
@@ -2806,17 +2696,6 @@ const App: React.FC = () => {
                   </SettingsDisclosure>
                 )}
 
-                {/* Card #28: i link inviati e non pagati scadono da soli dopo
-                    N ore, col messaggio delle prenotazioni non confermate. */}
-                <SettingsDisclosure
-                  icon={CreditCard}
-                  iconTone="pending"
-                  title="Scadenza link di pagamento"
-                  description="Annulla da solo i link non pagati dopo una soglia di ore e avvisa il cliente che la prenotazione non è confermata."
-                >
-                  <PaymentLinkExpiryManager showToast={addToast} />
-                </SettingsDisclosure>
-
                 {/* Card #27: comportamento della blacklist deciso dal tenant,
                     fonte per fonte — niente più scelta hardcoded. */}
                 <SettingsDisclosure
@@ -2827,71 +2706,16 @@ const App: React.FC = () => {
                 >
                   <BlacklistPolicyManager showToast={addToast} />
                 </SettingsDisclosure>
+                {/* Istruzioni testuali per una futura assegnazione tavoli
+                    guidata da AI; oggi il testo è solo salvato. */}
+                <CardErrorBoundary label="Prompt logica tavoli per AI">
+                  <TableAssignmentAiPromptCard showToast={addToast} />
+                </CardErrorBoundary>
               </div>
             </SettingsSection>
-            )}
 
-            {/* Admin Section */}
-            {activeSettingsSection === 'amministrazione' && canManageUsers() && (
-              <SettingsSection label="Amministrazione">
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <SettingsNavCard
-                    icon={Users}
-                    title="Gestione utenti"
-                    description="Crea, modifica, elimina utenti"
-                    onClick={() => setView(ViewState.USERS)}
-                  />
-                  <SettingsNavCard
-                    icon={ShieldCheck}
-                    title="Permessi ruoli"
-                    description="Configura i permessi per ogni ruolo"
-                    onClick={() => setShowRolePermissions(true)}
-                  />
-                </div>
-              </SettingsSection>
-            )}
-
-            {/* Monitoring Section */}
-            {activeSettingsSection === 'monitoraggio' && canViewLogs() && (
-              <SettingsSection label="Monitoraggio">
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <SettingsNavCard
-                    icon={FileText}
-                    title="Log attività"
-                    description="Operazioni degli utenti"
-                    onClick={() => setShowActivityLogs(true)}
-                  />
-                </div>
-              </SettingsSection>
-            )}
-
-            {activeSettingsSection === 'notifiche' && (
-            <SettingsSection label="Notifiche push">
-              <PushNotificationsCard />
-            </SettingsSection>
-            )}
-
-            {/* Legale — tenant identity + generated legal documents (SaaS-ready) */}
-            {activeSettingsSection === 'legale' && (
-            <SettingsSection label="Legale">
-              <LegalSettingsCard showToast={addToast} />
-            </SettingsSection>
-            )}
-
-            {/* Logica tavoli AI — istruzioni testuali per una futura logica di
-                assegnazione/spostamento tavoli guidata da AI; oggi il testo è
-                solo salvato, nessuna automazione lo consuma ancora. */}
-            {activeSettingsSection === 'tavoli-ai' && (
-            <SettingsSection label="Logica tavoli AI">
-              <CardErrorBoundary label="Prompt logica tavoli per AI">
-                <TableAssignmentAiPromptCard showToast={addToast} />
-              </CardErrorBoundary>
-            </SettingsSection>
-            )}
-
-            {/* Integrations */}
-            {activeSettingsSection === 'integrazioni' && (
-            <SettingsSection label="Integrazioni">
+            {/* Gateway e regole dei pagamenti. */}
+            <SettingsSection id="imp-pagamenti" label="Pagamenti">
               <div className="space-y-3">
                 <div className="rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
                   <div className="flex min-h-[40px] items-center justify-between gap-3">
@@ -2921,14 +2745,25 @@ const App: React.FC = () => {
                     <PayAtTableSettingsManager showToast={addToast} />
                   </CardErrorBoundary>
                 )}
-                <CardErrorBoundary label="Sala & Cucina">
-                  <SalaCucinaSettingsManager showToast={addToast} />
-                </CardErrorBoundary>
+                {/* Card #28: i link inviati e non pagati scadono da soli dopo
+                    N ore, col messaggio delle prenotazioni non confermate. */}
+                <SettingsDisclosure
+                  icon={CreditCard}
+                  iconTone="pending"
+                  title="Scadenza link di pagamento"
+                  description="Annulla da solo i link non pagati dopo una soglia di ore e avvisa il cliente che la prenotazione non è confermata."
+                >
+                  <PaymentLinkExpiryManager showToast={addToast} />
+                </SettingsDisclosure>
+              </div>
+            </SettingsSection>
+
+            {/* I canali con cui il ristorante scrive e riceve: email in
+                uscita e in entrata, agente AI dei messaggi, allegati. */}
+            <SettingsSection id="imp-comunicazioni" label="Comunicazioni">
+              <div className="space-y-3">
                 <CardErrorBoundary label="Messaggi con AI">
                   <AiMessagesSettingsManager showToast={addToast} />
-                </CardErrorBoundary>
-                <CardErrorBoundary label="Media">
-                  <MediaLibraryManager showToast={addToast} />
                 </CardErrorBoundary>
                 <CardErrorBoundary label="Server Email (SMTP)">
                   <SmtpIntegrationCard showToast={addToast} />
@@ -2936,8 +2771,43 @@ const App: React.FC = () => {
                 <CardErrorBoundary label="Ricezione Email (IMAP)">
                   <ImapIntegrationCard showToast={addToast} />
                 </CardErrorBoundary>
+                <CardErrorBoundary label="Media">
+                  <MediaLibraryManager showToast={addToast} />
+                </CardErrorBoundary>
               </div>
             </SettingsSection>
+
+            {/* Utenti, ruoli e log: visibile solo a chi può usarne
+                almeno una card. */}
+            {(canManageUsers() || canViewLogs()) && (
+              <SettingsSection id="imp-amministrazione" label="Amministrazione">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {canManageUsers() && (
+                    <>
+                      <SettingsNavCard
+                        icon={Users}
+                        title="Gestione utenti"
+                        description="Crea, modifica, elimina utenti"
+                        onClick={() => setView(ViewState.USERS)}
+                      />
+                      <SettingsNavCard
+                        icon={ShieldCheck}
+                        title="Permessi ruoli"
+                        description="Configura i permessi per ogni ruolo"
+                        onClick={() => setShowRolePermissions(true)}
+                      />
+                    </>
+                  )}
+                  {canViewLogs() && (
+                    <SettingsNavCard
+                      icon={FileText}
+                      title="Log attività"
+                      description="Operazioni degli utenti"
+                      onClick={() => setShowActivityLogs(true)}
+                    />
+                  )}
+                </div>
+              </SettingsSection>
             )}
           </div>
           </div>
