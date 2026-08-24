@@ -472,6 +472,18 @@ const computePreflightWarnings = (
   return warnings;
 };
 
+/** Prefill applicato all'apertura del form di nuova prenotazione, da chiamata
+ *  vocale, messaggio o email — vedi il campo newReservationPrefill sotto. */
+type NewReservationPrefill = {
+  customer_name?: string;
+  phone?: string;
+  email?: string;
+  date?: string;
+  time?: string;
+  guests?: number;
+  notes?: string;
+};
+
 interface ReservationListProps {
   reservations: Reservation[];
   banquetMenus: BanquetMenu[];
@@ -493,8 +505,10 @@ interface ReservationListProps {
   // 'walkin' opens it with customer="Walk-in", arrival=ARRIVED, time=now.
   autoOpenNewKind?: 'standard' | 'walkin';
   // Optional prefill applied when the form auto-opens (used when converting a
-  // voice call into a booking).
-  newReservationPrefill?: { customer_name?: string; phone?: string };
+  // voice call, a message or an email into a booking). date/time/guests/notes
+  // arrive only from the email AI extraction — the other sources just know
+  // who's asking, not when or for how many.
+  newReservationPrefill?: NewReservationPrefill;
   onAutoOpenNewHandled?: () => void;
   modalOnly?: boolean;
   onModalClose?: () => void;
@@ -2023,18 +2037,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   }
 
 
-  const handleOpenNew = (opts: { walkIn?: boolean; prefill?: { customer_name?: string; phone?: string } } = {}) => {
+  const handleOpenNew = (opts: { walkIn?: boolean; prefill?: NewReservationPrefill } = {}) => {
       const walkIn = !!opts.walkIn;
       const prefill = opts.prefill;
       // For a walk-in we use "now" (and derive the shift from current time), so the
       // operator only has to pick a table and confirm. For standard bookings we keep
-      // the date/shift currently in view.
+      // the date/shift currently in view — unless the AI extraction from an email
+      // proposed its own date/time, which then wins.
       const now = new Date();
       const walkInShift: Shift = now.getHours() < 17 ? Shift.LUNCH : Shift.DINNER;
+      // Stessa soglia usata per il walk-in: sotto le 17 e' pranzo, altrimenti cena.
+      const prefillShift: Shift | null = prefill?.time
+        ? (Number(prefill.time.split(':')[0]) < 17 ? Shift.LUNCH : Shift.DINNER)
+        : null;
       const newShift = walkIn
         ? walkInShift
-        : (selectedShift === 'ALL' ? Shift.DINNER : selectedShift);
-      const dateOnly = selectedDate.split('T')[0];
+        : (prefillShift ?? (selectedShift === 'ALL' ? Shift.DINNER : selectedShift));
+      const dateOnly = (!walkIn && prefill?.date) || selectedDate.split('T')[0];
       // Walk-in = "adesso", ma dentro la finestra del turno: registrato alle
       // 11:18 il tavolo parte all'apertura (13:00), non a metà mattina.
       const clampToShiftWindow = (d: Date, shift: Shift): string => {
@@ -2044,11 +2063,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       };
       const reservationTime = walkIn
         ? `${formatLocalDate(now)}T${clampToShiftWindow(now, walkInShift)}`
-        : `${dateOnly}T${getDefaultTime(newShift)}`;
+        : `${dateOnly}T${prefill?.time || getDefaultTime(newShift)}`;
       setFormData({
         customer_name: prefill?.customer_name || (walkIn ? 'Walk-in' : ''),
         phone: prefill?.phone || undefined,
-        guests: 2,
+        email: prefill?.email || undefined,
+        guests: prefill?.guests || 2,
         children: 0,
         reservation_time: reservationTime,
         shift: newShift,
@@ -2057,7 +2077,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         enable_reminder: walkIn ? false : true,
         reminder_sent: false,
         arrival_status: walkIn ? ArrivalStatus.ARRIVED : ArrivalStatus.WAITING,
-        notes: '',
+        notes: prefill?.notes || '',
         duration_minutes: defaultDurationForShift(newShift),
         // Il consenso allergie compare (e si auto-spunta) solo quando viene
         // inserito un allergene — vedi l'effect dedicato. Una nuova prenotazione

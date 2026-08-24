@@ -40,6 +40,10 @@ import {
     AiReplyError,
 } from './services/aiReplyService.js';
 import {
+    extractBookingFromEmail,
+    EmailBookingExtractionError,
+} from './services/aiEmailBookingService.js';
+import {
     setupPassepartoutBridge,
     isPassepartoutAgentConfigured,
     getPassepartoutAgentStatus,
@@ -4799,6 +4803,68 @@ app.post('/email/threads/:emailKey/read', authenticate, requirePermission('reser
         res.json({ ok: true, marked: updated.rows.length });
     } catch (err) {
         console.error('POST /email/threads/:emailKey/read error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Tasto AI sull'email in Comunicazioni → Email: legge l'ultimo messaggio
+// ricevuto dal thread e, se è una richiesta di prenotazione, ne propone i
+// dettagli. Non crea nulla — vedi services/aiEmailBookingService.ts per il
+// perché — il frontend apre il form di nuova prenotazione già compilato e lo
+// staff lo rivede prima di salvare.
+app.post('/email/threads/:emailKey/suggest-booking', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    try {
+        if (!(await getFeatureFlag(req.tenantId!, 'ai_messages_enabled', false))) {
+            return res.status(403).json({
+                error: 'feature_disabled',
+                message: 'Messaggi con AI disattivato. Attivalo da Impostazioni → Messaggi con AI.',
+            });
+        }
+        if (!isAiConfigured()) {
+            return res.status(503).json({ error: 'not_configured', message: 'ANTHROPIC_API_KEY non configurata sul backend' });
+        }
+        const key = String(req.params.emailKey).trim().toLowerCase();
+        if (!key || !key.includes('@')) return res.status(400).json({ error: 'Invalid email_key' });
+
+        const last = await queryWithRetry(
+            `SELECT from_email, subject, body
+               FROM outbound_messages
+              WHERE tenant_id = $2
+                AND channel = 'email'
+                AND direction = 'inbound'
+                AND lower(from_email) = $1
+              ORDER BY sent_at DESC
+              LIMIT 1`,
+            [key, req.tenantId!]
+        );
+        const email = last.rows[0];
+        if (!email) return res.status(404).json({ error: 'Nessuna email ricevuta da questo indirizzo' });
+
+        const result = await extractBookingFromEmail({
+            fromEmail: email.from_email || key,
+            subject: email.subject,
+            body: email.body || '',
+            restaurantName: businessIdentity().name,
+        });
+
+        // Telemetria consumi, stessa tabella di suggest-reply e agente WhatsApp.
+        // Best-effort: un errore qui non deve rompere il suggerimento.
+        queryWithRetry(
+            `INSERT INTO ai_token_usage (provider, feature, model, prompt_tokens, output_tokens, total_tokens, user_email, tenant_id)
+             VALUES ('anthropic', 'email_booking_extract', $1, $2, $3, $4, $5, $6)`,
+            [result.usage.model, result.usage.promptTokens, result.usage.outputTokens, result.usage.totalTokens, (req.user?.email || null), req.tenantId!]
+        ).catch(err => console.error('ai_token_usage insert (email_booking_extract) failed:', err));
+
+        res.json({
+            booking: result.booking,
+            reason: result.booking ? null : (result.reason || 'Nessuna richiesta di prenotazione trovata in questa email'),
+        });
+    } catch (err: any) {
+        if (err instanceof EmailBookingExtractionError) {
+            const status = err.kind === 'not_configured' ? 503 : 502;
+            return res.status(status).json({ error: err.kind, message: err.message });
+        }
+        console.error('POST /email/threads/:emailKey/suggest-booking error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
