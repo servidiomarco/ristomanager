@@ -47,7 +47,14 @@ export interface Dish {
   category?: string;
   allergens?: string[];
   photo_url?: string;
+  /** Aliquota IVA di anagrafica (intero %, default 10 somministrazione).
+   *  Snapshot sulla riga alla battitura, come il prezzo. */
+  vat_rate?: number;
 }
+
+/** Aliquote proposte dalla UI. Il server accetta 0..100: l'elenco lo cambia
+ *  la legge, non un deploy. */
+export const VAT_RATES = [0, 4, 5, 10, 22] as const;
 
 export const COMMON_ALLERGENS = [
   "Glutine", "Crostacei", "Uova", "Pesce", "Arachidi",
@@ -320,6 +327,17 @@ export interface TableBillItem {
   qty: number;
   unit_price_cents: number;
   category?: string | null;
+  /** Snapshot dell'aliquota IVA (assente sui conti pre-IVA: fallback 10). */
+  vat_rate?: number;
+}
+
+/** Totali del conto per aliquota, a prezzi IVA inclusa scorporati
+ *  (net + vat = gross; Σ gross = totale conto, sconti già ripartiti). */
+export interface VatBreakdownRow {
+  rate: number;
+  gross_cents: number;
+  net_cents: number;
+  vat_cents: number;
 }
 
 export interface TableBill {
@@ -427,6 +445,8 @@ export interface TableBillWithSplits {
   deposit_paid_cents?: number;
   refund_due_cents?: number;
   residual_cents: number;
+  /** Vuoto per i conti aperti a mano, senza dettaglio righe. */
+  vat_breakdown?: VatBreakdownRow[];
 }
 
 // ============================================
@@ -509,6 +529,8 @@ export interface OrderItem {
   seat_no?: number | null;
   station_id: number | null;
   status: OrderItemStatus;
+  /** Snapshot dell'aliquota IVA alla battitura (fallback 10 sui vecchi). */
+  vat_rate?: number;
   note?: string | null;
   queued_at?: string | null;
   fired_at?: string | null;

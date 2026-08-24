@@ -3502,6 +3502,9 @@ async function loadBillView(tenantId: number, billId: number): Promise<any | nul
         deposit_paid_cents,
         refund_due_cents,
         residual_cents,
+        // Vuoto per i conti aperti a mano (niente righe): la UI non mostra
+        // la sezione IVA finché non c'è un dettaglio da cui derivarla.
+        vat_breakdown: vatBreakdownFromItems(bill.items, bill.total_cents),
     };
 }
 
@@ -8065,12 +8068,23 @@ app.get('/dishes', authenticate, async (req, res) => {
     }
 });
 
+// Aliquota IVA di anagrafica: intero 0..100, default 10 (somministrazione).
+// La UI propone {0, 4, 5, 10, 22}; il server non blinda l'elenco perché le
+// aliquote le cambia la legge, non un deploy.
+const parseVatRate = (raw: any): number | null => {
+    if (raw == null) return 10;
+    const n = Number(raw);
+    return Number.isInteger(n) && n >= 0 && n <= 100 ? n : null;
+};
+
 app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { name, description, price, category, allergens, photo_url } = req.body;
+        const vatRate = parseVatRate(req.body?.vat_rate);
+        if (vatRate == null) return res.status(400).json({ error: 'vat_rate deve essere un intero fra 0 e 100' });
         const result = await queryWithRetry(
-            'INSERT INTO dishes (tenant_id, name, description, price, category, allergens, photo_url) VALUES ($7, $1, $2, $3, $4, $5, $6) RETURNING *',
-            [name, description, price, category, allergens, photo_url || null, req.tenantId!]
+            'INSERT INTO dishes (tenant_id, name, description, price, category, allergens, photo_url, vat_rate) VALUES ($7, $1, $2, $3, $4, $5, $6, $8) RETURNING *',
+            [name, description, price, category, allergens, photo_url || null, req.tenantId!, vatRate]
         );
         const newDish = result.rows[0];
 
@@ -8103,9 +8117,14 @@ app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req,
     try {
         const { id } = req.params;
         const { name, description, price, category, allergens, photo_url } = req.body;
+        const vatRate = parseVatRate(req.body?.vat_rate);
+        if (vatRate == null) return res.status(400).json({ error: 'vat_rate deve essere un intero fra 0 e 100' });
         const result = await queryWithRetry(
-            'UPDATE dishes SET name = $1, description = $2, price = $3, category = $4, allergens = $5, photo_url = $6 WHERE id = $7 AND tenant_id = $8 RETURNING *',
-            [name, description, price, category, allergens, photo_url || null, id, req.tenantId!]
+            // COALESCE sul body: un client vecchio che non manda vat_rate non
+            // deve resettare a 10 l'aliquota già impostata.
+            'UPDATE dishes SET name = $1, description = $2, price = $3, category = $4, allergens = $5, photo_url = $6, vat_rate = COALESCE($9, vat_rate) WHERE id = $7 AND tenant_id = $8 RETURNING *',
+            [name, description, price, category, allergens, photo_url || null, id, req.tenantId!,
+             req.body?.vat_rate != null ? vatRate : null]
         );
         const updatedDish = result.rows[0];
         if (!updatedDish) {
@@ -21462,7 +21481,7 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
             // Risolta e congelata qui: cambiare la mappa domani non deve
             // spostare le comande di stasera fra i monitor.
             const dish = await client.query(
-                `SELECT d.id, d.name, d.price,
+                `SELECT d.id, d.name, d.price, d.vat_rate,
                         COALESCE(d.station_id, cs.station_id) AS station_id
                  FROM dishes d
                  LEFT JOIN category_stations cs ON cs.category = d.category AND cs.tenant_id = d.tenant_id
@@ -21541,10 +21560,13 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
                 // cui il cameriere ha nel frattempo ritoccato la quantità, e
                 // l'intento più recente deve vincere. Oltre DRAFT la cucina
                 // l'ha vista: il replay non tocca più niente.
+                // vat_rate: snapshot dall'anagrafica come il prezzo — se
+                // l'aliquota del piatto cambia domani, la riga di stasera
+                // resta com'era al momento della battitura.
                 `INSERT INTO order_items
                     (tenant_id, order_id, dish_id, name_snapshot, unit_price_cents, modifiers, qty,
-                     course_no, seat_no, station_id, note, created_by_user_id, idempotency_key)
-                 VALUES ($13, $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12)
+                     course_no, seat_no, station_id, note, created_by_user_id, idempotency_key, vat_rate)
+                 VALUES ($13, $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $14)
                  ON CONFLICT (tenant_id, idempotency_key) DO UPDATE
                     SET qty = EXCLUDED.qty, note = EXCLUDED.note
                     WHERE order_items.status = 'DRAFT' AND order_items.order_id = EXCLUDED.order_id`,
@@ -21552,7 +21574,8 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
                  modifiers ? JSON.stringify(modifiers) : null, qty, courseNo, seatNo,
                  Number.isFinite(stationId) ? stationId : null,
                  typeof raw?.note === 'string' ? raw.note.slice(0, 300) : null,
-                 req.user?.userId ?? null, itemKey, req.tenantId!]
+                 req.user?.userId ?? null, itemKey, req.tenantId!,
+                 Number.isFinite(Number(dish.rows[0].vat_rate)) ? Number(dish.rows[0].vat_rate) : 10]
             );
         }
 
@@ -22298,7 +22321,7 @@ class BillSyncError extends Error {
 async function billItemsSnapshot(client: any, billId: number): Promise<any[]> {
     const rows = await client.query(
         `SELECT oi.id, oi.name_snapshot, oi.qty, oi.unit_price_cents, oi.modifiers,
-                oi.course_no, d.category
+                oi.course_no, oi.vat_rate, d.category
          FROM order_items oi
          JOIN orders o ON o.id = oi.order_id
          LEFT JOIN dishes d ON d.id = oi.dish_id AND d.tenant_id = oi.tenant_id
@@ -22316,7 +22339,50 @@ async function billItemsSnapshot(client: any, billId: number): Promise<any[]> {
             unit_price_cents: Number(r.unit_price_cents) + delta,
             category: r.category ?? null,
             course_no: r.course_no,
+            // Le varianti seguono l'aliquota della riga madre: sono parte
+            // dello stesso piatto somministrato.
+            vat_rate: Number.isFinite(Number(r.vat_rate)) ? Number(r.vat_rate) : 10,
         };
+    });
+}
+
+// Scomposizione IVA del conto per aliquota, dallo snapshot righe. I prezzi
+// sono IVA inclusa: l'imponibile è lo scorporo (lordo ÷ (1+r)). Con uno
+// sconto il totale del conto scende sotto la somma delle righe: il lordo di
+// ogni aliquota viene riproporzionato al totale prima dello scorporo — lo
+// sconto pesa su tutte le aliquote in proporzione, come su un registratore
+// di cassa — e i centesimi di resto vanno alle frazioni maggiori, così la
+// somma dei lordi torna ESATTAMENTE il totale. È la base dei totali per
+// aliquota del documento commerciale (fase 3 del piano fatturazione).
+function vatBreakdownFromItems(items: any[] | null, totalCents: number): { rate: number; gross_cents: number; net_cents: number; vat_cents: number }[] {
+    if (!Array.isArray(items) || items.length === 0 || totalCents <= 0) return [];
+    const byRate = new Map<number, number>();
+    let itemsSum = 0;
+    for (const i of items) {
+        const gross = Math.round(Number(i.unit_price_cents || 0) * Number(i.qty || 0));
+        if (gross <= 0) continue;
+        // Snapshot vecchi senza aliquota: 10 (somministrazione), come il
+        // default di anagrafica.
+        const rate = Number.isFinite(Number(i.vat_rate)) ? Number(i.vat_rate) : 10;
+        byRate.set(rate, (byRate.get(rate) ?? 0) + gross);
+        itemsSum += gross;
+    }
+    if (itemsSum <= 0) return [];
+    const scaled = [...byRate.entries()].map(([rate, gross]) => {
+        const exact = (gross * totalCents) / itemsSum;
+        return { rate, exact, gross_cents: Math.floor(exact) };
+    });
+    let residue = totalCents - scaled.reduce((n, r) => n + r.gross_cents, 0);
+    scaled.sort((a, b) => (b.exact - Math.floor(b.exact)) - (a.exact - Math.floor(a.exact)));
+    for (const r of scaled) {
+        if (residue <= 0) break;
+        r.gross_cents += 1;
+        residue -= 1;
+    }
+    scaled.sort((a, b) => a.rate - b.rate);
+    return scaled.map(({ rate, gross_cents }) => {
+        const net = Math.round(gross_cents / (1 + rate / 100));
+        return { rate, gross_cents, net_cents: net, vat_cents: gross_cents - net };
     });
 }
 
@@ -22897,9 +22963,10 @@ async function syncSystemLinesInTx(client: any, tenantId: number, orderId: numbe
 
     if (coverCents > 0 && covers > 0) {
         await client.query(
+            // Coperto al 10%: segue la somministrazione di cui fa parte.
             `INSERT INTO order_items
-                (tenant_id, order_id, name_snapshot, unit_price_cents, qty, course_no, status, line_kind)
-             VALUES ($4, $1, 'Coperto', $2, $3, 1, 'SERVED', 'COVER')`,
+                (tenant_id, order_id, name_snapshot, unit_price_cents, qty, course_no, status, line_kind, vat_rate)
+             VALUES ($4, $1, 'Coperto', $2, $3, 1, 'SERVED', 'COVER', 10)`,
             [orderId, coverCents, covers, tenantId]
         );
     }
@@ -22922,9 +22989,11 @@ async function syncSystemLinesInTx(client: any, tenantId: number, orderId: numbe
         const amount = Math.round((Number(sub.rows[0].total) * servicePct) / 100);
         if (amount > 0) {
             await client.query(
+                // Servizio al 10% come il coperto: accessorio della
+                // somministrazione, ne segue l'aliquota.
                 `INSERT INTO order_items
-                    (tenant_id, order_id, name_snapshot, unit_price_cents, qty, course_no, status, line_kind)
-                 VALUES ($4, $1, $2, $3, 1, 1, 'SERVED', 'SERVICE')`,
+                    (tenant_id, order_id, name_snapshot, unit_price_cents, qty, course_no, status, line_kind, vat_rate)
+                 VALUES ($4, $1, $2, $3, 1, 1, 'SERVED', 'SERVICE', 10)`,
                 [orderId, `Servizio ${servicePct}%`, amount, tenantId]
             );
         }
@@ -23611,6 +23680,10 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
                 refund_due_cents: refundDueCents,
                 residual_cents: residualCents,
                 items,
+                // Totali per aliquota per il piede del preconto, dallo
+                // snapshot GREZZO (items qui sopra è già ridotto e non ha i
+                // prezzi unitari). L'agente vecchio ignora il campo.
+                vat_breakdown: vatBreakdownFromItems(Array.isArray(bill.items) ? bill.items : null, bill.total_cents),
                 share_url: shareUrl,
             }), req.user?.userId ?? null, printer, kind, req.tenantId!]
         );

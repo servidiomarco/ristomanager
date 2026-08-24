@@ -1,7 +1,7 @@
 
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, Customer, Table, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
+import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, VAT_RATES, Customer, Table, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
 import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { getRomeDatePart } from '../utils/reservationTime';
@@ -230,7 +230,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     price: 0,
     category: 'Antipasti',
     allergens: [],
-    photo_url: ''
+    photo_url: '',
+    vat_rate: 10
   });
 
   // New Banquet Menu State
@@ -340,7 +341,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           price: Number(newDish.price),
           category: newDish.category || 'Antipasti',
           allergens: newDish.allergens || [],
-          photo_url: newDish.photo_url?.trim() || undefined
+          photo_url: newDish.photo_url?.trim() || undefined,
+          vat_rate: newDish.vat_rate ?? 10
         });
       } else {
         await onAddDish({
@@ -349,14 +351,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           price: Number(newDish.price),
           category: newDish.category || 'Antipasti',
           allergens: newDish.allergens || [],
-          photo_url: newDish.photo_url?.trim() || undefined
+          photo_url: newDish.photo_url?.trim() || undefined,
+          vat_rate: newDish.vat_rate ?? 10
         } as Dish);
       }
 
       setIsDishFormOpen(false);
       setIsEditingDish(false);
       setEditingDishId(null);
-      setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '' });
+      setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '', vat_rate: 10 });
     } finally {
       setIsSavingDish(false);
     }
@@ -370,7 +373,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const handleOpenNewDish = () => {
     setIsEditingDish(false);
     setEditingDishId(null);
-    setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '' });
+    setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '', vat_rate: 10 });
     setPhotoUploadError(null);
     setIsDishFormOpen(true);
   };
@@ -382,7 +385,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       price: dish.price,
       category: dish.category,
       allergens: dish.allergens,
-      photo_url: dish.photo_url || ''
+      photo_url: dish.photo_url || '',
+      vat_rate: dish.vat_rate ?? 10
     });
     setEditingDishId(dish.id);
     setIsEditingDish(true);
@@ -1559,6 +1563,20 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       <option>Contorni</option>
                       <option>Dolci</option>
                       <option>Bevande</option>
+                    </select>
+                  </Field>
+                  {/* Il 10% è la somministrazione in loco: quasi ogni piatto
+                      resta lì. Serve solo per i casi diversi (asporto 22,
+                      pane 4…) e alimenta scontrino e fattura per aliquota. */}
+                  <Field label="Aliquota IVA">
+                    <select
+                      className={dsSelect}
+                      value={newDish.vat_rate ?? 10}
+                      onChange={e => setNewDish({ ...newDish, vat_rate: Number(e.target.value) })}
+                    >
+                      {VAT_RATES.map(r => (
+                        <option key={r} value={r}>{r}%</option>
+                      ))}
                     </select>
                   </Field>
                 </div>
