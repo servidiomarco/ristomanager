@@ -4295,10 +4295,20 @@ async function emitFiscalDocForBill(tenantId: number, billId: number, userId: nu
         depositCreditCents: depositRs.rows[0].s,
     });
 
-    await queryWithRetry(
-        `UPDATE fiscal_documents SET attempts = attempts + 1, request = $2::jsonb WHERE id = $1`,
-        [doc.id, JSON.stringify(payload)]
+    // Claim atomico del tentativo: emissione automatica (post-chiusura) e
+    // POST manuale possono correre sulla stessa riga PENDING, e senza questo
+    // guard ENTRAMBE chiamerebbero il provider — due scontrini reali per lo
+    // stesso conto (successo davvero nella prova sandbox del 24/08). Vince
+    // chi bumpa attempts per primo; l'altro esce con 'in_progress'. Un
+    // PENDING orfano di un processo morto resta reclamabile: il retry vede
+    // gli attempts correnti e passa.
+    const claim = await queryWithRetry(
+        `UPDATE fiscal_documents SET attempts = attempts + 1, request = $2::jsonb
+         WHERE id = $1 AND status = 'PENDING' AND attempts = $3
+         RETURNING id`,
+        [doc.id, JSON.stringify(payload), doc.attempts]
     );
+    if ((claim.rowCount ?? 0) === 0) return { skipped: 'in_progress' };
 
     let finalRow: any;
     try {
@@ -4400,6 +4410,7 @@ app.post('/bills/:id/fiscal-docs', authenticate, requirePermission('payments:ful
                 missing_vat_number: 'P.IVA mancante nelle impostazioni fiscali',
                 bill_not_closed: 'Il documento si emette solo su un conto chiuso e saldato per intero',
                 race: 'Emissione già in corso, riprova',
+                in_progress: 'Emissione già in corso, riprova tra qualche secondo',
             };
             return res.status(409).json({ error: messages[outcome.skipped] ?? outcome.skipped, reason: outcome.skipped });
         }

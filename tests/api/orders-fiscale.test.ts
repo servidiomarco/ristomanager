@@ -67,8 +67,16 @@ describe('documenti fiscali', () => {
         expect(close.body.status).toBe('CLOSED');
 
         // L'emissione automatica è fire-and-forget: l'endpoint manuale è
-        // idempotente e ritorna comunque il documento (nuovo o già emesso).
-        const res = await api().post(`/bills/${billId}/fiscal-docs`).set(bearer(token)).send({});
+        // idempotente e ritorna il documento — o 409 in_progress se l'altra
+        // emissione è ancora in volo (il claim atomico che evita il doppio
+        // scontrino). Si riprova finché non è confermato.
+        let res: any = null;
+        for (let i = 0; i < 20; i++) {
+            res = await api().post(`/bills/${billId}/fiscal-docs`).set(bearer(token)).send({});
+            if (res.status === 200 && res.body?.doc?.status === 'CONFIRMED') break;
+            expect([200, 409]).toContain(res.status);
+            await new Promise(r => setTimeout(r, 150));
+        }
         expect(res.status).toBe(200);
         expect(res.body.doc.status).toBe('CONFIRMED');
         expect(res.body.doc.provider).toBe('mock');
