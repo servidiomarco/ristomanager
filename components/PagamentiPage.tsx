@@ -388,7 +388,13 @@ const PagamentiPage: React.FC<{
                   bill={selectedBill}
                   busy={openBills.closingId === selectedBill.id}
                   onClose={() => setSelectedBillId(null)}
-                  onSettle={(opts) => openBills.closeBill(selectedBill, opts)}
+                  // Un CLOSED/VOIDED non si richiude: il bottone resta solo
+                  // sugli incassabili (il SETTLED_PARTIAL sì — si può
+                  // completare con gli incassi mancanti).
+                  onSettle={selectedBill.status === 'CLOSED' || selectedBill.status === 'VOIDED'
+                    ? undefined
+                    : (opts) => openBills.closeBill(selectedBill, opts)}
+                  onFiscalChanged={openBills.reload}
                 />
               ) : (
                 <PanePlaceholder icon={Receipt}>Seleziona un conto dalla lista</PanePlaceholder>
