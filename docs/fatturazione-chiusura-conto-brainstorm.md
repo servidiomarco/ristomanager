@@ -76,7 +76,7 @@ Manca oggi anche la **riapertura** del conto chiuso per errore: c'è solo `void`
 ## 5. Ordine di lavoro proposto
 
 1. **`bill_payments` multi-metodo + chiusura di cassa giornaliera** — solo codice interno, valore immediato, prerequisito di tutto il resto. ✅ *Implementata (24 ago 2026): tabella `table_bill_payments` (migration `1787650000000_libro-cassa-incassi.js`, con backfill), endpoint `POST /bills/:id/payments`, storno soft-void, chiusura multi-metodo retrocompatibile, `GET /reports/cash-closure`, dialog di chiusura multi-metodo e sezione Cassa nella pagina Pagamenti. Test in `tests/api/orders-cassa-incassi.test.ts`.*
-2. **Conto dalle comande + IVA per riga + preconto** — sblocca il fiscale.
+2. **Conto dalle comande + IVA per riga + preconto** — sblocca il fiscale. ✅ *Completata (24 ago 2026): conto dalle comande e preconto esistevano già; aggiunta l'IVA per riga — `vat_rate` su `dishes` (default 10, selettore nel menù) e snapshot su `order_items` alla battitura (migration `1787700000000_iva-per-riga.js`), coperto/servizio al 10%, scomposizione per aliquota (`vat_breakdown`, scorporo IVA inclusa con sconti ripartiti) sulla bill view e nel payload del preconto. Test in `tests/api/orders-iva-riga.test.ts`.*
 3. **Documento commerciale** dietro l'astrazione `FiscalProvider`, partendo dal driver cloud (nessun hardware richiesto) e aggiungendo il driver RT via print agent subito dopo.
 4. **Fattura elettronica** su bill e su split, dati fiscali in anagrafica cliente.
 5. **Conti azienda / riepilogativa mensile**.
