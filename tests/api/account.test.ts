@@ -30,7 +30,7 @@ describe('account self-service e recupero password', () => {
 
     beforeAll(async () => {
         owner = await ownerToken();
-        db = new Client({ connectionString: process.env.DATABASE_URL });
+        db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
         await db.connect();
     });
 

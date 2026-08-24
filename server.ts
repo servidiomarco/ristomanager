@@ -21112,13 +21112,20 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
                 : (batchKey ? `${batchKey}:${i}` : null);
 
             await client.query(
-                // ON CONFLICT sul nuovo vincolo composto (tenant_id, key):
-                // il replay vale dentro il ristorante, non attraverso.
+                // ON CONFLICT sul vincolo composto (tenant_id, key): il replay
+                // vale dentro il ristorante, non attraverso. Sul conflitto NON
+                // si ignora: se la riga è ancora in bozza si allinea a qty/nota
+                // dell'ultimo invio — è il retry del palmare dopo un timeout in
+                // cui il cameriere ha nel frattempo ritoccato la quantità, e
+                // l'intento più recente deve vincere. Oltre DRAFT la cucina
+                // l'ha vista: il replay non tocca più niente.
                 `INSERT INTO order_items
                     (tenant_id, order_id, dish_id, name_snapshot, unit_price_cents, modifiers, qty,
                      course_no, seat_no, station_id, note, created_by_user_id, idempotency_key)
                  VALUES ($13, $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12)
-                 ON CONFLICT (tenant_id, idempotency_key) DO NOTHING`,
+                 ON CONFLICT (tenant_id, idempotency_key) DO UPDATE
+                    SET qty = EXCLUDED.qty, note = EXCLUDED.note
+                    WHERE order_items.status = 'DRAFT' AND order_items.order_id = EXCLUDED.order_id`,
                 [orderId, dishId, dish.rows[0].name, unitPrice,
                  modifiers ? JSON.stringify(modifiers) : null, qty, courseNo, seatNo,
                  Number.isFinite(stationId) ? stationId : null,
