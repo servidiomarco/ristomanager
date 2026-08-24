@@ -395,9 +395,13 @@ const App: React.FC = () => {
   const [menuInitialTab, setMenuInitialTab] = useState<'DISHES' | 'BANQUETS'>('BANQUETS');
   const [autoOpenNewReservation, setAutoOpenNewReservation] = useState(false);
   const [newReservationKind, setNewReservationKind] = useState<'standard' | 'walkin'>('standard');
-  // Prefill applied when opening the new-reservation modal (currently used
-  // when converting a voice call into a booking).
-  const [newReservationPrefill, setNewReservationPrefill] = useState<{ customer_name?: string; phone?: string } | undefined>(undefined);
+  // Prefill applied when opening the new-reservation modal — used when
+  // converting a voice call, a message or an email into a booking.
+  // date/time/guests/notes arrive only from the email AI extraction.
+  const [newReservationPrefill, setNewReservationPrefill] = useState<{
+    customer_name?: string; phone?: string; email?: string;
+    date?: string; time?: string; guests?: number; notes?: string;
+  } | undefined>(undefined);
   // If set, the next reservation that gets created is linked to this voice
   // call. Cleared once the link finishes (or the modal is dismissed).
   const linkVoiceCallOnCreateRef = useRef<number | null>(null);
@@ -2561,7 +2565,14 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.EMAIL && (
-          <EmailPage />
+          <EmailPage
+            onCreateReservationFromEmail={({ customer_name, phone, email, date, time, guests, notes }) => {
+              setNewReservationPrefill({ customer_name, phone, email, date, time, guests, notes });
+              setNewReservationKind('standard');
+              setAutoOpenNewReservation(true);
+              setView(ViewState.RESERVATIONS);
+            }}
+          />
         )}
 
         {view === ViewState.NOTIFICHE && (

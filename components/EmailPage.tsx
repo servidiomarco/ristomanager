@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Mail, Send, Loader2, RefreshCw, CheckCircle2, Clock, AlertTriangle, ArrowRight, Check, ArrowDownLeft, ArrowUpRight, Reply, Paperclip, X as XIcon, FolderOpen } from 'lucide-react';
+import { Mail, Send, Loader2, RefreshCw, CheckCircle2, Clock, AlertTriangle, ArrowRight, Check, ArrowDownLeft, ArrowUpRight, Reply, Paperclip, X as XIcon, FolderOpen, Sparkles, Wand2, CalendarPlus } from 'lucide-react';
 import { Loader } from './Loader';
 import { SkeletonInboxList, SkeletonEmailThread } from './SkeletonCards';
 import {
@@ -7,9 +7,11 @@ import {
   publicMediaUrl,
   EmailThreadSummary,
   EmailMessage,
+  ExtractedEmailBooking,
 } from '../services/emailApiService';
 import { uploadAttachment, type UploadedAttachment } from '../services/messagesApiService';
 import { listMedia, attachFromLibrary, type MediaFile } from '../services/mediaApiService';
+import { getFeatureFlags } from '../services/apiService';
 import { socketClient } from '../services/socketClient';
 import { toTitleCase } from '../utils/text';
 import {
@@ -63,7 +65,22 @@ const statusIcon = (m: EmailMessage) => {
 const displayName = (t: EmailThreadSummary): string =>
   (t.customer_name && t.customer_name.trim() && toTitleCase(t.customer_name)) || t.email;
 
-const EmailPage: React.FC = () => {
+interface EmailPageProps {
+  // Apre il form di nuova prenotazione già compilato, sia con i soli
+  // customer_name/email (bottone "Crea prenotazione") sia con i campi che
+  // l'AI ha estratto dall'email (date/time/guests/notes).
+  onCreateReservationFromEmail?: (input: {
+    customer_name?: string;
+    phone?: string;
+    email?: string;
+    date?: string;
+    time?: string;
+    guests?: number;
+    notes?: string;
+  }) => void;
+}
+
+const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) => {
   const [threads, setThreads] = useState<EmailThreadSummary[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(true);
   const [threadsError, setThreadsError] = useState<string | null>(null);
@@ -75,6 +92,13 @@ const EmailPage: React.FC = () => {
   const [messages, setMessages] = useState<EmailMessage[]>([]);
   const [msgLoading, setMsgLoading] = useState(false);
   const [msgError, setMsgError] = useState<string | null>(null);
+
+  // Tasto AI: estrae i dettagli di una richiesta di prenotazione dall'ultima
+  // email ricevuta nel thread. Vedi handleSuggestBooking più sotto.
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [suggestingBooking, setSuggestingBooking] = useState(false);
+  const [bookingSuggestion, setBookingSuggestion] = useState<ExtractedEmailBooking | null>(null);
+  const [bookingSuggestError, setBookingSuggestError] = useState<string | null>(null);
 
   // Composer state — both when replying to a thread and when composing a
   // brand-new email via the "Nuova" button.
@@ -135,7 +159,20 @@ const EmailPage: React.FC = () => {
   useEffect(() => {
     if (!selectedKey) { setMessages([]); return; }
     loadThread(selectedKey);
+    // Il suggerimento appartiene al thread aperto: cambiando email non deve
+    // restare appeso quello del cliente precedente.
+    setBookingSuggestion(null);
+    setBookingSuggestError(null);
   }, [selectedKey, loadThread]);
+
+  // Il pulsante compare solo a funzione attiva, come in InboxPage.
+  useEffect(() => {
+    let cancelled = false;
+    getFeatureFlags()
+      .then(f => { if (!cancelled) setAiEnabled(f.ai_messages_enabled === true); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (!messages.length) return;
@@ -228,6 +265,40 @@ const EmailPage: React.FC = () => {
     setSubject(lastSubj ? `Re: ${lastSubj}` : '');
     setBodyText('');
     requestAnimationFrame(() => composerRef.current?.focus());
+  };
+
+  // Legge l'ultima email ricevuta nel thread e propone i dati di una
+  // prenotazione, se ce n'è una. Non crea nulla da sola: il risultato finisce
+  // in un riquadro che lo staff conferma con "Crea prenotazione" — stesso
+  // principio del suggerimento di risposta in Messaggi.
+  const handleSuggestBooking = useCallback(async () => {
+    if (!selected || suggestingBooking) return;
+    setSuggestingBooking(true);
+    setBookingSuggestion(null);
+    setBookingSuggestError(null);
+    try {
+      const r = await emailApiService.suggestBooking(selected.email_key);
+      setBookingSuggestion(r.booking);
+      if (!r.booking) setBookingSuggestError(r.reason || 'Nessuna richiesta di prenotazione trovata in questa email.');
+    } catch (err: any) {
+      setBookingSuggestError(err?.data?.message || err?.message || 'Suggerimento non riuscito');
+    } finally {
+      setSuggestingBooking(false);
+    }
+  }, [selected, suggestingBooking]);
+
+  const handleCreateFromSuggestion = () => {
+    if (!selected || !bookingSuggestion || !onCreateReservationFromEmail) return;
+    onCreateReservationFromEmail({
+      customer_name: bookingSuggestion.customer_name || selected.customer_name || undefined,
+      phone: bookingSuggestion.phone || undefined,
+      email: selected.email,
+      date: bookingSuggestion.date || undefined,
+      time: bookingSuggestion.time || undefined,
+      guests: bookingSuggestion.guests || undefined,
+      notes: bookingSuggestion.notes || undefined,
+    });
+    setBookingSuggestion(null);
   };
 
   // Carica subito il file scelto: al momento dell'invio serve solo il token,
@@ -563,11 +634,86 @@ const EmailPage: React.FC = () => {
                 title={displayName(selected)}
                 subtitle={selected.email}
                 actions={
-                  <button type="button" onClick={openReply} className={dsButton.secondary}>
-                    Rispondi
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {aiEnabled && (
+                      <button
+                        type="button"
+                        onClick={handleSuggestBooking}
+                        disabled={suggestingBooking}
+                        title="Cerca una richiesta di prenotazione nell'ultima email e proponi i dettagli"
+                        className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-violet-600 transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] dark:text-violet-400"
+                        aria-label="Suggerisci prenotazione dall'email"
+                      >
+                        {suggestingBooking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                      </button>
+                    )}
+                    <button type="button" onClick={openReply} className={dsButton.secondary}>
+                      Rispondi
+                    </button>
+                  </div>
                 }
               />
+
+              {/* Proposta AI: legge, non scrive. Compare qui e non in chat
+                  perché riguarda l'ultima email ricevuta nel thread, non la
+                  risposta che si sta scrivendo. */}
+              {(bookingSuggestion || bookingSuggestError) && (
+                <div className="px-4 pt-3 sm:px-6 lg:px-8">
+                  {bookingSuggestion ? (
+                    <div className="rounded-[14px] border border-violet-300 bg-violet-50 px-3.5 py-3 dark:border-violet-800 dark:bg-violet-950/40">
+                      <div className="flex items-start gap-2.5">
+                        <Wand2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-violet-600 dark:text-violet-400" aria-hidden />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[13px] font-semibold text-violet-900 dark:text-violet-200">
+                            Richiesta di prenotazione trovata nell'email
+                          </p>
+                          <dl className="mt-1.5 space-y-0.5 text-[14px] text-[var(--ds-text-primary)]">
+                            {bookingSuggestion.customer_name && (
+                              <div><dt className="inline text-[var(--ds-text-muted)]">Cliente: </dt><dd className="inline">{bookingSuggestion.customer_name}</dd></div>
+                            )}
+                            {(bookingSuggestion.date || bookingSuggestion.time) && (
+                              <div>
+                                <dt className="inline text-[var(--ds-text-muted)]">Quando: </dt>
+                                <dd className="inline">{[bookingSuggestion.date, bookingSuggestion.time].filter(Boolean).join(' · ')}</dd>
+                              </div>
+                            )}
+                            {bookingSuggestion.guests != null && (
+                              <div><dt className="inline text-[var(--ds-text-muted)]">Persone: </dt><dd className="inline">{bookingSuggestion.guests}</dd></div>
+                            )}
+                            {bookingSuggestion.phone && (
+                              <div><dt className="inline text-[var(--ds-text-muted)]">Telefono: </dt><dd className="inline">{bookingSuggestion.phone}</dd></div>
+                            )}
+                            {bookingSuggestion.notes && (
+                              <div><dt className="inline text-[var(--ds-text-muted)]">Note: </dt><dd className="inline">{bookingSuggestion.notes}</dd></div>
+                            )}
+                          </dl>
+                          <p className="mt-1 text-[12px] text-[var(--ds-text-muted)]">
+                            Niente è ancora salvato: il form si apre già compilato, da controllare.
+                          </p>
+                          <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={handleCreateFromSuggestion}
+                              className="inline-flex h-9 items-center gap-1.5 rounded-full bg-violet-600 px-3.5 text-[13px] font-semibold text-white transition-colors hover:bg-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                            >
+                              <CalendarPlus className="h-4 w-4" /> Crea prenotazione
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setBookingSuggestion(null)}
+                              className="inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
+                            >
+                              <XIcon className="h-4 w-4" /> Scarta
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <Callout tone="info" icon={Sparkles}>{bookingSuggestError}</Callout>
+                  )}
+                </div>
+              )}
 
               <div className="min-h-0 flex-1 overflow-y-auto">
               <div className="space-y-4 px-4 pb-4 sm:px-6 lg:px-8">
