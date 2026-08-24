@@ -1,6 +1,6 @@
 import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
-import type { BillPaymentMethod, CashClosureReport, TableBill, TableBillWithSplits } from '../types';
+import type { BillPaymentMethod, CashClosureReport, FiscalDocument, FiscalProviderSetting, TableBill, TableBillWithSplits } from '../types';
 import { buildApiError } from './apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
@@ -129,6 +129,35 @@ class BillsApiService {
     });
   }
 
+  /** Emette (o ritenta) il documento commerciale di un conto chiuso.
+   *  409 con reason 'in_progress' = emissione già in volo: riprovare. */
+  async emitFiscalDoc(billId: number): Promise<{ doc: FiscalDocument; request: unknown }> {
+    return apiRequest(`${API_URL}/bills/${billId}/fiscal-docs`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+  }
+
+  /** Annulla il documento presso il provider (il conto non si tocca). */
+  async voidFiscalDoc(billId: number, docId: number): Promise<{ doc: FiscalDocument }> {
+    return apiRequest(`${API_URL}/bills/${billId}/fiscal-docs/${docId}/void`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+  }
+
+  async getFiscalSettings(): Promise<FiscalSettings> {
+    return apiRequest<FiscalSettings>(`${API_URL}/settings/fiscal`, { headers: getHeaders() });
+  }
+
+  async updateFiscalSettings(patch: { provider?: FiscalProviderSetting; vat_number?: string }): Promise<FiscalSettings> {
+    return apiRequest<FiscalSettings>(`${API_URL}/settings/fiscal`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify(patch),
+    });
+  }
+
   /** Refunds a paid split via Revolut; the bill reopens if it was SETTLED. */
   async refundSplit(splitId: number): Promise<{ ok: true; split_id: number; bill_id: number; reopened: boolean }> {
     return apiRequest(`${API_URL}/bills/splits/${splitId}/refund`, {
@@ -152,6 +181,13 @@ class BillsApiService {
       headers: getHeaders(),
     });
   }
+}
+
+export interface FiscalSettings {
+  provider: FiscalProviderSetting;
+  vat_number: string;
+  providers: readonly FiscalProviderSetting[];
+  openapi_token_configured: boolean;
 }
 
 export const billsApiService = new BillsApiService();
@@ -187,6 +223,10 @@ export interface OpenBillRow {
   closed_at?: string | null;
   residual_cents: number;
   paid_splits: number;
+  /** Ultimo documento fiscale del conto (badge scontrino nella vista Chiusi). */
+  fiscal_status?: 'PENDING' | 'CONFIRMED' | 'FAILED' | 'VOIDED' | null;
+  fiscal_doc_id?: number | null;
+  fiscal_error?: string | null;
   /** Comande ancora aperte su questo conto: il tavolo sta ancora ordinando. */
   open_orders: number;
   service_date: string;

@@ -23783,11 +23783,18 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                     COUNT(s.id) FILTER (WHERE s.status = 'PAID')::int AS paid_splits,
                     COALESCE((SELECT SUM(p.amount_cents)::int FROM table_bill_payments p
                               WHERE p.table_bill_id = b.id AND p.table_bill_split_id IS NULL AND p.voided_at IS NULL), 0) AS staff_paid_cents,
+                    -- Ultimo documento fiscale del conto: alimenta il badge
+                    -- scontrino nella vista Chiusi senza una fetch per riga.
+                    fd.status AS fiscal_status, fd.id AS fiscal_doc_id, fd.error AS fiscal_error,
                     (SELECT COUNT(*) FROM orders o WHERE o.table_bill_id = b.id AND o.status = 'OPEN')::int AS open_orders
              FROM table_bills b
              LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
              LEFT JOIN reservations r ON r.id = b.reservation_id AND r.tenant_id = b.tenant_id
              LEFT JOIN table_bill_splits s ON s.table_bill_id = b.id
+             LEFT JOIN LATERAL (
+                 SELECT id, status, error FROM fiscal_documents
+                 WHERE table_bill_id = b.id ORDER BY created_at DESC LIMIT 1
+             ) fd ON TRUE
              WHERE b.status = ANY($3::varchar[])
                AND b.tenant_id = $4
                AND ($1::date IS NULL OR COALESCE(
@@ -23799,7 +23806,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                         (SELECT o.shift FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
                         CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
                              THEN 'LUNCH' ELSE 'DINNER' END) = $2::varchar)
-             GROUP BY b.id, t.name, r.customer_name
+             GROUP BY b.id, t.name, r.customer_name, fd.id, fd.status, fd.error
              ORDER BY b.closed_at DESC NULLS LAST, b.opened_at DESC`,
             [filterDate, filterShift, statuses, req.tenantId!]
         );

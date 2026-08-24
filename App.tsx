@@ -45,6 +45,7 @@ import { AutoDepositManager } from './components/AutoDepositManager';
 import { PaymentLinkExpiryManager } from './components/PaymentLinkExpiryManager';
 import { BlacklistPolicyManager } from './components/BlacklistPolicyManager';
 import { PayAtTableSettingsManager } from './components/PayAtTableSettingsManager';
+import { FiscalSettingsManager } from './components/FiscalSettingsManager';
 import { SalaCucinaSettingsManager } from './components/SalaCucinaSettingsManager';
 import { AiMessagesSettingsManager } from './components/AiMessagesSettingsManager';
 import { MediaLibraryManager } from './components/MediaLibraryManager';
@@ -2746,6 +2747,13 @@ const App: React.FC = () => {
                 {hasFeature('pay_at_table') && (
                   <CardErrorBoundary label="Conto al tavolo">
                     <PayAtTableSettingsManager showToast={addToast} />
+                  </CardErrorBoundary>
+                )}
+                {/* Scontrino elettronico: ha senso solo dove c'è il conto al
+                    tavolo, perché l'emissione parte dalla sua chiusura. */}
+                {hasFeature('pay_at_table') && (
+                  <CardErrorBoundary label="Scontrino elettronico">
+                    <FiscalSettingsManager showToast={addToast} />
                   </CardErrorBoundary>
                 )}
                 {/* Card #28: i link inviati e non pagati scadono da soli dopo

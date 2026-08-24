@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { Check, Copy, Loader2, Printer, QrCode, X, Banknote } from 'lucide-react';
-import { printBill, type BillPaymentInput, type OpenBillRow } from '../../services/billsApiService';
+import { billsApiService, printBill, type BillPaymentInput, type OpenBillRow } from '../../services/billsApiService';
 import { FormCard, PaneHeader, Sheet, StatusPill } from '../ds';
 import { formatEuro } from './paymentsView';
 
@@ -46,7 +46,7 @@ const euro = (cents: number) => formatEuro(cents);
 
 type BillLike =
   Pick<OpenBillRow, 'id' | 'table_name' | 'total_cents' | 'covers' | 'share_token' | 'items'>
-  & Partial<Pick<OpenBillRow, 'paid_cents' | 'residual_cents' | 'open_orders' | 'deposit_credit_cents' | 'deposit_paid_cents' | 'refund_due_cents' | 'cash_settled_cents'>>;
+  & Partial<Pick<OpenBillRow, 'paid_cents' | 'residual_cents' | 'open_orders' | 'deposit_credit_cents' | 'deposit_paid_cents' | 'refund_due_cents' | 'cash_settled_cents' | 'status' | 'fiscal_status' | 'fiscal_doc_id' | 'fiscal_error'>>;
 
 const isSettled = (bill: BillLike) => bill.residual_cents === 0;
 
@@ -398,6 +398,105 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
   );
 };
 
+/* ── Scontrino elettronico ────────────────────────────────────────────────
+   Sul conto chiuso: lo stato del documento commerciale e le due azioni che
+   servono davvero — emetti/riprova e annulla. L'emissione parte già da sola
+   alla chiusura; questa card copre il resto: il fallito da ritentare, il
+   conto vecchio senza documento, l'annullo. L'annullo è un atto fiscale e
+   chiede un secondo tap di conferma, non un dialog. */
+export const FiscalCard: React.FC<{
+  bill: BillLike;
+  onChanged?: () => void;
+}> = ({ bill, onChanged }) => {
+  const [busy, setBusy] = useState(false);
+  const [armed, setArmed] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Solo un conto CLOSED (saldato per intero) emette; la card compare anche
+  // quando un documento esiste già, qualunque sia lo stato del conto.
+  if (bill.status !== 'CLOSED' && !bill.fiscal_status) return null;
+
+  const st = bill.fiscal_status ?? null;
+  const pill =
+    st === 'CONFIRMED' ? { tone: 'positive' as const, label: 'emesso' }
+    : st === 'PENDING' ? { tone: 'pending' as const, label: 'in emissione' }
+    : st === 'FAILED' ? { tone: 'critical' as const, label: 'errore' }
+    : st === 'VOIDED' ? { tone: 'neutral' as const, label: 'annullato' }
+    : { tone: 'neutral' as const, label: 'non emesso' };
+
+  const run = async (fn: () => Promise<unknown>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+      setArmed(false);
+      onChanged?.();
+    } catch (err: any) {
+      // 409 in_progress: l'altra emissione è in volo — il reload mostrerà
+      // l'esito; non è un errore da urlare.
+      if (err?.data?.reason === 'in_progress') onChanged?.();
+      else setError(err?.data?.error ?? err?.message ?? 'Operazione non riuscita');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const quiet =
+    'inline-flex h-10 items-center justify-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-4 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+
+  return (
+    <FormCard title="Scontrino" aside={<StatusPill tone={pill.tone}>{pill.label}</StatusPill>}>
+      <div className="space-y-2.5">
+        {st === 'FAILED' && bill.fiscal_error && (
+          <p className="text-[13px] text-[var(--ds-critical-text)] break-words">{bill.fiscal_error}</p>
+        )}
+        {error && <p className="text-[13px] text-[var(--ds-critical-text)]">{error}</p>}
+        <div className="flex flex-wrap items-center gap-2">
+          {(st == null || st === 'FAILED' || st === 'VOIDED') && bill.status === 'CLOSED' && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => run(() => billsApiService.emitFiscalDoc(bill.id))}
+              className={quiet}
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+              {st === 'FAILED' ? 'Riprova emissione' : st === 'VOIDED' ? 'Emetti di nuovo' : 'Emetti scontrino'}
+            </button>
+          )}
+          {st === 'CONFIRMED' && bill.fiscal_doc_id != null && (
+            armed ? (
+              <>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => run(() => billsApiService.voidFiscalDoc(bill.id, bill.fiscal_doc_id!))}
+                  className="inline-flex h-10 items-center justify-center gap-1.5 rounded-full bg-[var(--ds-critical-solid)] px-4 text-[13px] font-semibold text-white transition-colors disabled:opacity-40"
+                >
+                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+                  Confermo l'annullo
+                </button>
+                <button type="button" disabled={busy} onClick={() => setArmed(false)} className={quiet}>
+                  Lascia stare
+                </button>
+              </>
+            ) : (
+              <button type="button" disabled={busy} onClick={() => setArmed(true)} className={quiet}>
+                <X className="h-4 w-4" />
+                Annulla scontrino
+              </button>
+            )
+          )}
+        </div>
+        {armed && (
+          <p className="text-[13px] text-[var(--ds-text-muted)]">
+            L'annullo viene trasmesso all'Agenzia delle Entrate.
+          </p>
+        )}
+      </div>
+    </FormCard>
+  );
+};
+
 /** Pane form, for the Pagamenti detail column. The back button PaneHeader
  *  draws is mobile-only — there the pane is a full-screen sheet over the list,
  *  and on desktop the list is right there beside it. */
@@ -406,7 +505,9 @@ export const BillDetail: React.FC<{
   busy?: boolean;
   onClose: () => void;
   onSettle?: (opts?: SettleOpts) => void;
-}> = ({ bill, busy, onClose, onSettle }) => (
+  /** Ricarica la lista dopo emissione/annullo dello scontrino. */
+  onFiscalChanged?: () => void;
+}> = ({ bill, busy, onClose, onSettle, onFiscalChanged }) => (
   <>
     <PaneHeader
       onBack={onClose}
@@ -417,6 +518,7 @@ export const BillDetail: React.FC<{
     />
     <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-5 sm:px-6 lg:px-8">
       <BillBody bill={bill} />
+      <FiscalCard bill={bill} onChanged={onFiscalChanged} />
     </div>
     {onSettle && (
       <div className="flex-shrink-0 px-4 pb-4 pt-1 sm:px-6 lg:px-8">
