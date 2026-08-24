@@ -9282,28 +9282,75 @@ app.post('/customers/:sourceId/merge-into/:targetId', authenticate, requirePermi
 app.delete('/customers/:id', authenticate, requirePermission('customers:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const existing = await queryWithRetry('SELECT name FROM customers WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
+        const existing = await queryWithRetry('SELECT name, phone FROM customers WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
         if (existing.rowCount === 0) {
             return res.status(404).json({ error: 'Customer not found' });
         }
         const resourceName = existing.rows[0].name;
+        const phone = existing.rows[0].phone as string | null;
+
+        // Le prenotazioni della persona, PRIMA di cancellare la scheda: il
+        // legame cliente↔prenotazione in questo schema è il telefono (stesse
+        // ultime dieci cifre, come il dedupe della rubrica). È il modo esatto
+        // di trovare i log da anonimizzare — per id, non per somiglianza del
+        // nome — e copre anche le prenotazioni registrate con un nome scritto
+        // diversamente.
+        const digits = (phone ?? '').replace(/\D/g, '');
+        let reservationIds: number[] = [];
+        if (digits.length >= 8) {
+            const rs = await queryWithRetry(
+                `SELECT id FROM reservations
+                  WHERE tenant_id = $2
+                    AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10)
+                      = right($1, 10)`,
+                [digits, req.tenantId!]
+            );
+            reservationIds = rs.rows.map((r: any) => Number(r.id));
+        }
 
         await queryWithRetry('DELETE FROM customers WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
 
         // Diritto all'oblio, lato audit: la scheda sparisce e il nome non deve
         // sopravvivere nei log. Senza questo, una richiesta GDPR di
         // cancellazione diventa una caccia al tesoro in activity_logs.
-        // I log del cliente si anonimizzano per resource_id; quelli delle sue
-        // prenotazioni portano il nome come resource_name — da solo o seguito
-        // da « — dettaglio» — e perdono solo il prefisso. Un omonimo può
-        // perdere il prefisso anche lui: per una cancellazione, cancellare
-        // troppo è l'errore giusto.
+        // Tre passate: i log del cliente per resource_id; i log delle SUE
+        // prenotazioni per id (esatto, niente omonimi); e in coda l'euristica
+        // sul prefisso del nome, che resta per le prenotazioni senza telefono
+        // e per le righe storiche. Lì un omonimo esatto può perdere il
+        // prefisso anche lui: per una cancellazione, cancellare troppo è
+        // l'errore giusto.
         await queryWithRetry(
             `UPDATE activity_logs
                 SET resource_name = 'cliente rimosso', details = NULL
               WHERE tenant_id = $2 AND resource_type = 'CUSTOMER' AND resource_id = $1`,
             [id, req.tenantId!]
         );
+        if (reservationIds.length > 0) {
+            await queryWithRetry(
+                `UPDATE activity_logs
+                    SET resource_name = CASE
+                            WHEN left(resource_name, char_length($3)) = $3
+                                THEN 'cliente rimosso' || substr(resource_name, char_length($3) + 1)
+                            ELSE 'cliente rimosso'
+                        END
+                  WHERE tenant_id = $2
+                    AND resource_type = 'RESERVATION'
+                    AND resource_id = ANY($1::int[])`,
+                [reservationIds, req.tenantId!, resourceName]
+            );
+            // L'oblio vero sta qui, non solo nei log: nome e contatti nelle
+            // righe prenotazione della persona. Solo quelle PASSATE — una
+            // prenotazione futura serve al servizio, e anonimizzarla
+            // accecherebbe la reception su chi sta per arrivare.
+            await queryWithRetry(
+                `UPDATE reservations
+                    SET customer_name = 'cliente rimosso', phone = NULL, email = NULL
+                  WHERE tenant_id = $2
+                    AND id = ANY($1::int[])
+                    AND reservation_time < CURRENT_TIMESTAMP`,
+                [reservationIds, req.tenantId!]
+            );
+        }
         await queryWithRetry(
             `UPDATE activity_logs
                 SET resource_name = 'cliente rimosso' || substr(resource_name, char_length($1) + 1)
