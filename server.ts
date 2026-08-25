@@ -3332,39 +3332,22 @@ function getPassepartoutChiusuraConfig(): { tipoPagamento: string; tipoDocumento
     };
 }
 
-/**
- * Un conto chiuso senza un euro incassato — tutto a Sospeso nel libro cassa,
- * nessuna quota online, nessun acconto — in cassa non deve produrre uno
- * scontrino: è la chiusura "paga dopo", che sul gestionale è una PROFORMA
- * col conto lasciato a sospeso da regolarizzare (fattura, addebito, …).
- */
-async function billVaChiusoProforma(billId: number): Promise<boolean> {
-    const rs = await queryWithRetry(
-        `SELECT
-            COALESCE(SUM(p.amount_cents) FILTER (WHERE p.method NOT IN ('SOSPESO', 'OMAGGIO')), 0)::int AS reale,
-            COALESCE(SUM(p.amount_cents) FILTER (WHERE p.method = 'SOSPESO'), 0)::int AS sospeso,
-            COALESCE((SELECT SUM(s.amount_cents) FROM table_bill_splits s
-                      WHERE s.table_bill_id = $1 AND s.status = 'PAID'), 0)::int AS online
-         FROM table_bill_payments p
-         WHERE p.table_bill_id = $1 AND p.voided_at IS NULL`,
-        [billId]
-    );
-    const r = rs.rows[0] ?? { reale: 0, sospeso: 0, online: 0 };
-    return Number(r.reale) === 0 && Number(r.online) === 0 && Number(r.sospeso) > 0;
-}
-
 async function chiudiComandaPassepartoutPerBill(
     tenantId: number,
     billId: number,
     idComanda: number,
     config: { tipoPagamento: string; tipoDocumento: string },
+    /** 'Proforma' = la chiusura di routine della cassa senza scontrino: il
+     *  pagamento si registra comunque (ESTERNO), cambia solo il documento.
+     *  Scelta del cameriere nel dialog di chiusura, non un'euristica. */
+    documento?: 'Scontrino' | 'Proforma',
 ): Promise<EsitoChiusuraComanda> {
-    const proforma = await billVaChiusoProforma(billId);
+    const proforma = documento === 'Proforma';
     // Timeout largo: la sequenza sull'agente può includere invio in
     // produzione, attesa e saldo del sospeso (vedi chiudiComandaCompleta).
     const esito = await callPassepartout<EsitoChiusuraComanda>('chiudi', {
         idComanda,
-        tipoPagamento: proforma ? undefined : config.tipoPagamento,
+        tipoPagamento: config.tipoPagamento,
         tipoDocumento: proforma ? 'Proforma' : config.tipoDocumento,
         proforma,
     }, 60_000);
@@ -3389,7 +3372,7 @@ async function chiudiComandaPassepartoutPerBill(
                      VALUES ($1, $2, $6, 'passepartout', 'CONFIRMED', $3, $4::jsonb, $5, CURRENT_TIMESTAMP)
                      ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') DO NOTHING
                      RETURNING ${FISCAL_DOC_COLUMNS}`,
-                    [tenantId, billId, esito.numeroScontrino ?? null, JSON.stringify(esito),
+                    [tenantId, billId, esito.numeroScontrino || null, JSON.stringify(esito),
                      billRs.rows[0].total_cents, proforma ? 'PROFORMA' : 'RECEIPT']
                 );
                 if (ins.rows[0]) {
@@ -3427,7 +3410,8 @@ app.post('/bills/:id/passepartout-close', authenticate, requirePermission('payme
         if (!config) {
             return res.status(409).json({ error: 'passepartout_non_configurato', message: 'PASSEPARTOUT_TIPO_PAGAMENTO non configurato sul server' });
         }
-        const esito = await chiudiComandaPassepartoutPerBill(req.tenantId!, id, idComanda, config);
+        const documento = req.body?.documento === 'Proforma' ? 'Proforma' as const : undefined;
+        const esito = await chiudiComandaPassepartoutPerBill(req.tenantId!, id, idComanda, config, documento);
         res.json({ id_comanda: idComanda, esito });
     } catch (err: any) {
         if (sendPassepartoutError(res, err)) return;
@@ -4045,8 +4029,12 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
             const ppComandaId = passepartoutComandaIdFromRef(updatedRow.external_ref);
             if (ppComandaId != null) {
                 const ppConfig = getPassepartoutChiusuraConfig();
+                // Documento scelto dal cameriere nel dialog di chiusura:
+                // Proforma = la chiusura senza scontrino usata di routine in
+                // cassa. Assente o non valido → Scontrino.
+                const ppDocumento = req.body?.passepartout_documento === 'Proforma' ? 'Proforma' as const : undefined;
                 if (ppConfig) {
-                    chiudiComandaPassepartoutPerBill(req.tenantId!, id, ppComandaId, ppConfig)
+                    chiudiComandaPassepartoutPerBill(req.tenantId!, id, ppComandaId, ppConfig, ppDocumento)
                         .catch(err => console.error('[passepartout] chiusura comanda fallita per conto', id, err?.message));
                 } else {
                     console.warn('[passepartout] conto', id, 'chiuso ma PASSEPARTOUT_TIPO_PAGAMENTO non configurato: comanda', ppComandaId, 'da chiudere in cassa a mano');

@@ -105,9 +105,11 @@ try {
             break;
         }
         case 'proforma': {
-            // Chiusura "paga dopo": proforma in cassa, conto a sospeso, tavolo libero.
-            if (!arg) throw new Error('Uso: proforma <idComanda>');
-            const esito = await chiudiComandaCompleta({ idComanda: Number(arg), proforma: true });
+            // Chiusura proforma: nessuno scontrino, pagamento registrato.
+            // Senza tipoPagamento il gestionale registra Contanti (default):
+            // qui il default è il tipo dedicato ESTERNO.
+            if (!arg) throw new Error('Uso: proforma <idComanda> [tipoPagamento=ESTERNO]');
+            const esito = await chiudiComandaCompleta({ idComanda: Number(arg), proforma: true, tipoPagamento: arg2 || 'ESTERNO' });
             console.log('Esito:', JSON.stringify(esito, null, 2));
             break;
         }

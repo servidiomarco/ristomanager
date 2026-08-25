@@ -485,10 +485,14 @@ export interface EsitoChiusuraComanda {
  * Con `importoPagato` esplicito inferiore al totale il sospeso è voluto
  * (pagamento parziale) e il passo 4 viene saltato.
  *
- * Con `proforma: true` la chiusura è quella "paga dopo" del gestionale:
- * ContoComanda emette una Proforma (nessun documento fiscale, nessun
- * pagamento) e il conto viene chiuso SENZA saldo — resta a sospeso in
- * cassa, da regolarizzare, ma il tavolo si libera.
+ * Con `proforma: true` il documento è la Proforma (non fiscale, nessuno
+ * scontrino dall'RT): il pagamento si registra comunque, come per lo
+ * scontrino. È la chiusura di routine della cassa del ristorante — decine
+ * al giorno, tutte Pagato con pagamento registrato (verificato in archivio
+ * il 25/08). Senza RT di mezzo il passo pagamento di ContoComanda riesce
+ * al primo colpo: niente conflitto di timeStmp, saldaConto non interviene.
+ * ATTENZIONE: senza tipoPagamento il gestionale registra l'incasso in
+ * Contanti (default) — passare sempre il tipo dedicato (ESTERNO).
  */
 export async function chiudiComandaCompleta(params: {
     idComanda: number;
@@ -514,9 +518,8 @@ export async function chiudiComandaCompleta(params: {
         await contoComanda({
             idComanda: params.idComanda,
             tipoDocumento: params.proforma ? 'Proforma' : params.tipoDocumento,
-            // La proforma è per definizione senza incasso: niente pagamento.
-            tipoPagamento: params.proforma ? undefined : params.tipoPagamento,
-            importoPagato: params.proforma ? undefined : params.importoPagato,
+            tipoPagamento: params.tipoPagamento,
+            importoPagato: params.importoPagato,
         });
     } catch (err) {
         if (!(err instanceof PassepartoutError)) throw err;
@@ -532,13 +535,7 @@ export async function chiudiComandaCompleta(params: {
     }
     const sospeso = asNumber(conto.Sospeso) ?? 0;
     const idConto = asNumber(conto.IdGestionale ?? (conto as any).idGestionale);
-    if (params.proforma) {
-        // Chiusura senza saldo: libera il tavolo, il sospeso resta in cassa.
-        if (idConto != null && asString(conto.StatoEnum) === 'Aperto') {
-            const chiuso = await saldaConto({ idConto, idComanda: params.idComanda });
-            if (chiuso) conto = chiuso;
-        }
-    } else if (sospeso > 0 && params.importoPagato == null) {
+    if (sospeso > 0 && params.importoPagato == null) {
         const tipo = params.tipoPagamento
             ? (await getTipiPagamento()).find((t) => t.codice === params.tipoPagamento)
             : undefined;
