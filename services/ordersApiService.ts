@@ -400,6 +400,8 @@ export interface ServiceBill {
   refund_due_cents?: number;
   /** Contanti già registrati sul conto (chiusura in cassa). */
   cash_settled_cents?: number;
+  /** "pp:comanda:<id>" quando il conto nasce da una comanda Passepartout. */
+  external_ref?: string | null;
   residual_cents: number;
   open_orders: number;
 }
