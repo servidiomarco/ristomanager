@@ -1995,10 +1995,28 @@ async function findTableConflicts(
 ): Promise<TableConflict[]> {
     if (!eventDate || !shift || !Array.isArray(tableIds) || tableIds.length === 0) return [];
 
+    // Tavoli uniti: un tavolo occupato occupa l'intera unione. I tavoli
+    // richiesti vengono espansi al loro gruppo di unione per la stessa
+    // data+turno, così il conflitto emerge anche quando la prenotazione
+    // esistente sta su un ALTRO tavolo dell'unione (audit 26/08: dalla
+    // timeline arrivi si poteva sedere un secondo gruppo sul tavolo unito,
+    // perché qui si guardava solo l'id esatto richiesto).
+    let effectiveTableIds = [...new Set(tableIds.map(Number))].filter(Number.isFinite);
+    const mergeRows = await queryWithRetry(
+        `SELECT primary_id, merged_ids FROM table_merges
+         WHERE tenant_id = $1 AND date = $2::date AND shift = $3
+           AND (primary_id = ANY($4::int[]) OR merged_ids && $4::int[])`,
+        [tenantId, eventDate, shift, effectiveTableIds]
+    );
+    for (const row of mergeRows.rows) {
+        effectiveTableIds.push(Number(row.primary_id), ...((row.merged_ids || []).map(Number)));
+    }
+    effectiveTableIds = [...new Set(effectiveTableIds)];
+
     const conflicts: TableConflict[] = [];
 
     const useWindow = options?.reservationStart != null && options?.reservationDurationMin != null;
-    const resParams: any[] = [tableIds, eventDate, tenantId];
+    const resParams: any[] = [effectiveTableIds, eventDate, tenantId];
     let resWhere = `r.table_id = ANY($1::int[])
                     AND r.tenant_id = $3
                     AND DATE(r.reservation_time) = $2::date
@@ -2037,7 +2055,7 @@ async function findTableConflicts(
         });
     }
 
-    const banParams: any[] = [eventDate, shift, tableIds, tenantId];
+    const banParams: any[] = [eventDate, shift, effectiveTableIds, tenantId];
     let banWhere = `b.event_date = $1::date AND b.shift = $2 AND b.table_ids && $3::int[] AND b.tenant_id = $4`;
     if (options?.excludeBanquetId) {
         banParams.push(options.excludeBanquetId);
@@ -2048,7 +2066,7 @@ async function findTableConflicts(
         banParams
     );
     for (const row of banResult.rows) {
-        const overlap: number[] = (row.table_ids || []).filter((tid: number) => tableIds.includes(tid));
+        const overlap: number[] = (row.table_ids || []).filter((tid: number) => effectiveTableIds.includes(tid));
         if (overlap.length === 0) continue;
         const tableNames = await queryWithRetry(
             'SELECT id, name FROM tables WHERE id = ANY($1::int[]) AND tenant_id = $2',
