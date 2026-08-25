@@ -409,22 +409,23 @@ export async function getContiGiorno(data?: string): Promise<Record<string, unkn
 }
 
 /**
- * Salda e chiude un conto già in archivio via PutConto con ComandoEnum
- * "Chiudi" (NON "ChiudiEStampa": il documento fiscale è già stato emesso da
- * ContoComanda e non va ristampato). È il passo che ContoComanda via
- * AdapterWS non completa mai da sé: il suo passo pagamento muore sul lock
- * ottimistico ("modificate le informazioni da un altro utente" — collaudi
- * 10/08 e 25/08) e il conto resta Aperto, sospeso per l'intero importo.
- * PutConto minimale con IdGestionale/IdComanda/Pagamenti registra il
- * pagamento e chiude: verificato sul campo il 25/08 (conto 80899 →
- * StatoEnum Pagato, tavolo liberato, stesso numero scontrino).
- * Restituisce il ContrattoConto aggiornato.
+ * Chiude un conto già in archivio via PutConto con ComandoEnum "Chiudi"
+ * (NON "ChiudiEStampa": il documento è già stato emesso da ContoComanda e
+ * non va ristampato). È il passo che ContoComanda via AdapterWS non
+ * completa mai da sé: il suo passo pagamento muore sul lock ottimistico
+ * ("modificate le informazioni da un altro utente" — collaudi 10/08 e
+ * 25/08) e il conto resta Aperto, sospeso per l'intero importo.
+ *
+ * Con `pagamento` il conto viene saldato e chiude Pagato: verificato sul
+ * campo il 25/08 (conto 80899 → StatoEnum Pagato, tavolo liberato, stesso
+ * numero scontrino). SENZA `pagamento` chiude lasciando il sospeso — è la
+ * chiusura proforma / "paga dopo", il conto resta da regolarizzare in
+ * cassa. Restituisce il ContrattoConto aggiornato.
  */
 export async function saldaConto(params: {
     idConto: number;
     idComanda: number;
-    importo: number;
-    tipoPagamento: PassepartoutTipoPagamento;
+    pagamento?: { importo: number; tipo: PassepartoutTipoPagamento };
 }): Promise<Record<string, unknown> | null> {
     const NS_CONTO = 'http://schemas.datacontract.org/2004/07/PMessageBox.Contract.Conto';
     const NS_COMMON = 'http://schemas.datacontract.org/2004/07/PMessageBox.Contract.Common';
@@ -432,18 +433,21 @@ export async function saldaConto(params: {
     // alfabetico del data contract WCF: ComandoEnum, IdComanda, IdGestionale,
     // Pagamenti. Dentro PMBRigaPagamento: Importo prima di Tipo; dentro
     // PMBTipoPagamento (namespace Common): Categoria prima di Codice.
+    const pagamentiXml = params.pagamento
+        ? `<c:Pagamenti><c:PMBRigaPagamento>` +
+          `<c:Importo>${params.pagamento.importo.toFixed(2)}</c:Importo>` +
+          `<c:Tipo>` +
+          (params.pagamento.tipo.categoria ? `<cm:Categoria>${xmlEscape(params.pagamento.tipo.categoria)}</cm:Categoria>` : '') +
+          `<cm:Codice>${xmlEscape(params.pagamento.tipo.codice)}</cm:Codice>` +
+          `</c:Tipo>` +
+          `</c:PMBRigaPagamento></c:Pagamenti>`
+        : '';
     const contoXml =
         `<conto xmlns:c="${NS_CONTO}" xmlns:cm="${NS_COMMON}">` +
         `<c:ComandoEnum>Chiudi</c:ComandoEnum>` +
         `<c:IdComanda>${params.idComanda}</c:IdComanda>` +
         `<c:IdGestionale>${params.idConto}</c:IdGestionale>` +
-        `<c:Pagamenti><c:PMBRigaPagamento>` +
-        `<c:Importo>${params.importo.toFixed(2)}</c:Importo>` +
-        `<c:Tipo>` +
-        (params.tipoPagamento.categoria ? `<cm:Categoria>${xmlEscape(params.tipoPagamento.categoria)}</cm:Categoria>` : '') +
-        `<cm:Codice>${xmlEscape(params.tipoPagamento.codice)}</cm:Codice>` +
-        `</c:Tipo>` +
-        `</c:PMBRigaPagamento></c:Pagamenti>` +
+        pagamentiXml +
         `</conto>`;
     const result = await soapCall('PutConto', contoXml);
     return result == null || isNil(result) ? null : (result as Record<string, unknown>);
@@ -480,12 +484,18 @@ export interface EsitoChiusuraComanda {
  *
  * Con `importoPagato` esplicito inferiore al totale il sospeso è voluto
  * (pagamento parziale) e il passo 4 viene saltato.
+ *
+ * Con `proforma: true` la chiusura è quella "paga dopo" del gestionale:
+ * ContoComanda emette una Proforma (nessun documento fiscale, nessun
+ * pagamento) e il conto viene chiuso SENZA saldo — resta a sospeso in
+ * cassa, da regolarizzare, ma il tavolo si libera.
  */
 export async function chiudiComandaCompleta(params: {
     idComanda: number;
     tipoDocumento?: TipoDocumentoConto;
     tipoPagamento?: string;
     importoPagato?: number;
+    proforma?: boolean;
 }): Promise<EsitoChiusuraComanda> {
     const comanda = await getComanda(params.idComanda);
     if (!comanda) {
@@ -503,9 +513,10 @@ export async function chiudiComandaCompleta(params: {
     try {
         await contoComanda({
             idComanda: params.idComanda,
-            tipoDocumento: params.tipoDocumento,
-            tipoPagamento: params.tipoPagamento,
-            importoPagato: params.importoPagato,
+            tipoDocumento: params.proforma ? 'Proforma' : params.tipoDocumento,
+            // La proforma è per definizione senza incasso: niente pagamento.
+            tipoPagamento: params.proforma ? undefined : params.tipoPagamento,
+            importoPagato: params.proforma ? undefined : params.importoPagato,
         });
     } catch (err) {
         if (!(err instanceof PassepartoutError)) throw err;
@@ -520,8 +531,14 @@ export async function chiudiComandaCompleta(params: {
         );
     }
     const sospeso = asNumber(conto.Sospeso) ?? 0;
-    if (sospeso > 0 && params.importoPagato == null) {
-        const idConto = asNumber(conto.IdGestionale ?? (conto as any).idGestionale);
+    const idConto = asNumber(conto.IdGestionale ?? (conto as any).idGestionale);
+    if (params.proforma) {
+        // Chiusura senza saldo: libera il tavolo, il sospeso resta in cassa.
+        if (idConto != null && asString(conto.StatoEnum) === 'Aperto') {
+            const chiuso = await saldaConto({ idConto, idComanda: params.idComanda });
+            if (chiuso) conto = chiuso;
+        }
+    } else if (sospeso > 0 && params.importoPagato == null) {
         const tipo = params.tipoPagamento
             ? (await getTipiPagamento()).find((t) => t.codice === params.tipoPagamento)
             : undefined;
@@ -529,8 +546,7 @@ export async function chiudiComandaCompleta(params: {
             const saldato = await saldaConto({
                 idConto,
                 idComanda: params.idComanda,
-                importo: sospeso,
-                tipoPagamento: tipo,
+                pagamento: { importo: sospeso, tipo },
             });
             if (saldato) conto = saldato;
         } else if (!tipo) {

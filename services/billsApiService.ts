@@ -240,6 +240,8 @@ export interface OpenBillRow {
   fiscal_provider?: string | null;
   /** Numero del documento (provider_ref: numero scontrino RT o id Openapi). */
   fiscal_ref?: string | null;
+  /** RECEIPT = scontrino; PROFORMA = chiusura "paga dopo", conto a sospeso in cassa. */
+  fiscal_doc_type?: 'RECEIPT' | 'PROFORMA' | null;
   /** "pp:comanda:<id>" quando il conto nasce da una comanda Passepartout. */
   external_ref?: string | null;
   /** Movimenti vivi del libro cassa: come è stato pagato il conto. */

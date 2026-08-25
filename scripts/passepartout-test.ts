@@ -104,8 +104,15 @@ try {
             }
             break;
         }
+        case 'proforma': {
+            // Chiusura "paga dopo": proforma in cassa, conto a sospeso, tavolo libero.
+            if (!arg) throw new Error('Uso: proforma <idComanda>');
+            const esito = await chiudiComandaCompleta({ idComanda: Number(arg), proforma: true });
+            console.log('Esito:', JSON.stringify(esito, null, 2));
+            break;
+        }
         default:
-            console.log('Comandi: versione | pagamenti | sale | tavolo <nome> | comanda <id> | conto <id> | conti-giorno [data] | invia <id> | chiudi <id> <tipoPag> [tipoDoc] [importo]');
+            console.log('Comandi: versione | pagamenti | sale | tavolo <nome> | comanda <id> | conto <id> | conti-giorno [data] | invia <id> | chiudi <id> <tipoPag> [tipoDoc] [importo] | proforma <id>');
             process.exit(1);
     }
 } catch (err) {
