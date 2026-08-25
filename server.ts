@@ -3675,6 +3675,14 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid reservation id' });
 
+        const resRow = await queryWithRetry(
+            // Scopata sul tenant: un reservation_id altrui cade qui nel 404
+            // prima di poter aprire un conto sul tavolo di un altro ristorante.
+            'SELECT id, guests, table_id, reservation_time, shift FROM reservations WHERE id = $1 AND tenant_id = $2',
+            [id, req.tenantId!]
+        );
+        if (resRow.rows.length === 0) return res.status(404).json({ error: 'Reservation not found' });
+
         // Sorgente Passepartout: righe e totale arrivano dalla comanda del
         // gestionale, non dal cameriere. total_cents nel body viene ignorato.
         const fromPassepartout = req.body?.source === 'passepartout';
@@ -3682,9 +3690,31 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
         if (fromPassepartout) {
             const tavolo = String(req.body?.pp_tavolo || '').trim();
             if (!tavolo) return res.status(400).json({ error: 'pp_tavolo mancante per source=passepartout' });
-            const found = await findComandaTavolo(tavolo);
+            let found = await findComandaTavolo(tavolo);
+            // Tavoli uniti: in sala la comanda può essere stata aperta su uno
+            // qualsiasi dei tavoli dell'unione (25/08: 45+47 uniti, comanda
+            // battuta sul 47, prenotazione sul 45 → import a vuoto). Se il
+            // tavolo della prenotazione non ha comanda, si provano gli altri
+            // tavoli della sua unione per la stessa data e turno.
+            if (!found && resRow.rows[0].table_id != null) {
+                const mergeDate = getRomeDatePart(resRow.rows[0].reservation_time);
+                const siblings = await queryWithRetry(
+                    `SELECT t.name
+                       FROM table_merges m
+                       JOIN tables t ON t.tenant_id = m.tenant_id
+                        AND t.id = ANY(array_append(m.merged_ids, m.primary_id))
+                      WHERE m.tenant_id = $1 AND m.date = $2::date AND m.shift = $3
+                        AND (m.primary_id = $4 OR $4 = ANY(m.merged_ids))
+                        AND t.id <> $4`,
+                    [req.tenantId!, mergeDate, resRow.rows[0].shift, resRow.rows[0].table_id]
+                );
+                for (const s of siblings.rows) {
+                    found = await findComandaTavolo(String(s.name));
+                    if (found) break;
+                }
+            }
             if (!found) {
-                return res.status(404).json({ error: 'no_comanda', message: `Nessuna comanda attiva sul tavolo "${tavolo}" nel gestionale. Il nome deve combaciare con quello di Passepartout (punto e spazi compresi).` });
+                return res.status(404).json({ error: 'no_comanda', message: `Nessuna comanda attiva sul tavolo "${tavolo}" nel gestionale (provati anche gli eventuali tavoli uniti). Il nome deve combaciare con quello di Passepartout (punto e spazi compresi).` });
             }
             ppPayload = comandaToBillPayload(found.comanda);
             if (ppPayload.total_cents <= 0) {
@@ -3697,14 +3727,6 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
             return res.status(400).json({ error: 'total_cents must be a positive integer' });
         }
         const totalRounded = Math.round(totalCents);
-
-        const resRow = await queryWithRetry(
-            // Scopata sul tenant: un reservation_id altrui cade qui nel 404
-            // prima di poter aprire un conto sul tavolo di un altro ristorante.
-            'SELECT id, guests, table_id FROM reservations WHERE id = $1 AND tenant_id = $2',
-            [id, req.tenantId!]
-        );
-        if (resRow.rows.length === 0) return res.status(404).json({ error: 'Reservation not found' });
 
         // covers: usa quello passato dal cameriere se valido, poi i coperti
         // della comanda Passepartout, poi i guests della prenotazione. Serve
