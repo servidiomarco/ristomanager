@@ -224,4 +224,59 @@ describe('reservations', () => {
             await api().delete(`/reservations/${id}`).set(bearer(token));
         }
     });
+
+    // Tavoli uniti: un tavolo occupato occupa l'intera unione. Audit 26/08:
+    // il controllo conflitti guardava solo l'id esatto, quindi con 45+47
+    // uniti e una prenotazione sul 45 l'API accettava un secondo gruppo sul
+    // 47. Il doppio turno sull'unione (finestre orarie disgiunte) resta lecito.
+    it('rifiuta la prenotazione su un tavolo la cui unione è occupata, salvo doppio turno', async () => {
+        const dataUnione = '2027-05-05';
+        const tavoli: number[] = [];
+        for (const nome of ['TP-U1', 'TP-U2']) {
+            const t = await api().post('/tables').set(bearer(token)).send({
+                name: nome, shape: 'SQUARE', seats: 4, x: 500, y: 100, room_id: roomId, status: 'FREE',
+            });
+            expect(t.status).toBe(201);
+            tavoli.push(t.body.id as number);
+        }
+        const [primario, unito] = tavoli;
+
+        const merge = await api().post('/table-merges').set(bearer(token)).send({
+            date: dataUnione, shift: 'DINNER', primary_id: primario, merged_ids: [unito],
+        });
+        expect([200, 201]).toContain(merge.status);
+
+        const sulPrimario = await api().post('/reservations').set(bearer(token)).send({
+            customer_name: 'Unione Occupante',
+            reservation_time: `${dataUnione}T20:00:00`,
+            shift: 'DINNER',
+            guests: 6,
+            table_id: primario,
+        });
+        expect(sulPrimario.status).toBe(201);
+
+        // Stessa finestra oraria sul tavolo UNITO → conflitto.
+        const vietato = await api().post('/reservations').set(bearer(token)).send({
+            customer_name: 'Unione Intruso',
+            reservation_time: `${dataUnione}T20:30:00`,
+            shift: 'DINNER',
+            guests: 2,
+            table_id: unito,
+        });
+        expect(vietato.status).toBe(409);
+        expect(vietato.body.error).toContain('occupato');
+
+        // Finestra disgiunta (dopo le 22:00): doppio turno sull'unione, lecito.
+        const doppioTurno = await api().post('/reservations').set(bearer(token)).send({
+            customer_name: 'Unione Secondo Turno',
+            reservation_time: `${dataUnione}T22:00:00`,
+            shift: 'DINNER',
+            guests: 2,
+            table_id: unito,
+        });
+        expect(doppioTurno.status).toBe(201);
+
+        await api().delete(`/reservations/${sulPrimario.body.id}`).set(bearer(token));
+        await api().delete(`/reservations/${doppioTurno.body.id}`).set(bearer(token));
+    });
 });
