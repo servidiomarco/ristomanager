@@ -29,6 +29,9 @@ export interface CloseBillPayload {
   cash_settled_cents?: number;
   tip_cents?: number;
   notes?: string;
+  /** Solo conti Passepartout: documento della chiusura in cassa.
+   *  'Proforma' = niente scontrino (la routine della cassa); assente = Scontrino. */
+  passepartout_documento?: 'Scontrino' | 'Proforma';
 }
 
 export interface VoidBillPayload {
