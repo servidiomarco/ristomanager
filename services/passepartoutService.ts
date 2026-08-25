@@ -60,13 +60,20 @@ export class PassepartoutError extends Error {
 }
 
 // EnumTipoDocumentoConto del gestionale — via SOAP l'enum viaggia come nome.
+// Elenco preso dall'XSD del WSDL (xsd8, 25/08) — fa fede quello: le etichette
+// del codice di esempio del supporto ("FatturaScontrino", "ResoNCScontrino")
+// sono nomi da form, non valori dell'enum, e non deserializzano.
 export type TipoDocumentoConto =
     | 'Scontrino'
     | 'FatturaRicevutaFiscale'
     | 'Proforma'
     | 'RicevutaFiscale'
+    | 'ProformaHotel'
+    | 'RicevutaHotel'
     | 'NotaCredito'
-    | 'Fattura';
+    | 'Fattura'
+    | 'ScontrinoResoNC'
+    | 'ScontrinoHotel';
 
 export interface PassepartoutRigaComanda {
     idGestionale: number | null;
@@ -307,29 +314,66 @@ export async function getSaleMenu(): Promise<string[]> {
 }
 
 /**
+ * Invia in produzione le righe della comanda (l'equivalente del tasto Invio
+ * in cassa). `inviaTutto` manda tutte le uscite; in alternativa `uscite`
+ * elenca i numeri di uscita da mandare. Per le comande create via WS va
+ * chiamata PRIMA di contoComanda: l'invio non deve mai essere contestuale
+ * alla chiusura (vedi nota su contoComanda).
+ */
+export async function inviaProduzioneComanda(params: {
+    idComanda: number;
+    inviaTutto?: boolean;
+    uscite?: number[];
+}): Promise<void> {
+    const uscite = params.uscite ?? [];
+    // `uscite` è un ArrayOfint del serializzatore WCF; vuoto = nessun filtro.
+    const usciteXml = uscite.length
+        ? `<uscite xmlns:a="http://schemas.microsoft.com/2003/10/Serialization/Arrays">${uscite
+            .map((u) => `<a:int>${u}</a:int>`).join('')}</uscite>`
+        : '<uscite/>';
+    await soapCall(
+        'InviaProduzioneComanda',
+        `<idComanda>${params.idComanda}</idComanda>` +
+        `<inviaTutto>${params.inviaTutto === false ? 'false' : 'true'}</inviaTutto>` +
+        usciteXml,
+    );
+}
+
+/**
  * Chiude la comanda in conto ("conto unico comanda").
  *
- * - `importoPagato` inferiore al totale → il conto va a SOSPESO (pagamento
- *   parziale); omesso → il conto risulta interamente pagato.
+ * `noInvio` è SEMPRE true e non è più un parametro: se ContoComanda esegue
+ * anche l'invio in produzione, l'invio aggiorna il timeStmp della comanda e
+ * il passo pagamento della stessa chiamata muore sul lock ottimistico
+ * ("modificate le informazioni da un altro utente" — i 6 tentativi falliti
+ * del collaudo 10/08). È la ricetta del supporto Passepartout
+ * (contoComanda.php del 25/08, `noInvio` forzato a true "per evitare il
+ * reinvio in produzione che causa il conflitto di timeStmp"): l'invio, se
+ * serve, si fa prima con inviaProduzioneComanda.
+ *
+ * - `importoPagato` OMESSO → il conto risulta interamente pagato: è la
+ *   chiusura normale. Un importo inferiore al totale → conto a SOSPESO, il
+ *   gancio per i pagamenti parziali. Mai passare il totale calcolato dal
+ *   CRM per una chiusura piena: un centesimo di scarto lascia il conto
+ *   sospeso e il tavolo occupato.
  * - `tipoDocumento` omesso → tipo documento di default della sala.
  * - `tipoPagamento` è la DESCRIZIONE del tipo configurato in cassa (vedi
  *   getTipiPagamento) — per il CRM va usato il tipo dedicato "esterno" così
  *   la cassa non conteggia l'incasso due volte.
- * - `noInvio` disabilita l'invio in produzione delle righe non ancora inviate.
  *
  * ATTENZIONE: con tipoDocumento "Scontrino" il gestionale pilota il documento
- * fiscale. Da collaudare su un conto di prova prima di qualsiasi uso reale.
+ * fiscale. La risposta può dire errore anche a scontrino emesso: il verdetto
+ * affidabile è l'archivio (getContiGiorno) — usare chiudiComandaCompleta.
  */
 export async function contoComanda(params: {
     idComanda: number;
-    noInvio?: boolean;
     tipoDocumento?: TipoDocumentoConto;
     tipoPagamento?: string;
     importoPagato?: number;
 }): Promise<void> {
     const parts = [
         `<idComanda>${params.idComanda}</idComanda>`,
-        `<noInvio>${params.noInvio ? 'true' : 'false'}</noInvio>`,
+        `<noInvio>true</noInvio>`,
     ];
     if (params.tipoDocumento) parts.push(`<tipoDoc>${params.tipoDocumento}</tipoDoc>`);
     if (params.tipoPagamento) parts.push(`<tipoPag>${xmlEscape(params.tipoPagamento)}</tipoPag>`);
@@ -362,4 +406,145 @@ export async function getContiGiorno(data?: string): Promise<Record<string, unkn
     if (!result || isNil(result)) return [];
     const entries = result.ContrattoConto ?? [];
     return Array.isArray(entries) ? entries : [entries];
+}
+
+/**
+ * Salda e chiude un conto già in archivio via PutConto con ComandoEnum
+ * "Chiudi" (NON "ChiudiEStampa": il documento fiscale è già stato emesso da
+ * ContoComanda e non va ristampato). È il passo che ContoComanda via
+ * AdapterWS non completa mai da sé: il suo passo pagamento muore sul lock
+ * ottimistico ("modificate le informazioni da un altro utente" — collaudi
+ * 10/08 e 25/08) e il conto resta Aperto, sospeso per l'intero importo.
+ * PutConto minimale con IdGestionale/IdComanda/Pagamenti registra il
+ * pagamento e chiude: verificato sul campo il 25/08 (conto 80899 →
+ * StatoEnum Pagato, tavolo liberato, stesso numero scontrino).
+ * Restituisce il ContrattoConto aggiornato.
+ */
+export async function saldaConto(params: {
+    idConto: number;
+    idComanda: number;
+    importo: number;
+    tipoPagamento: PassepartoutTipoPagamento;
+}): Promise<Record<string, unknown> | null> {
+    const NS_CONTO = 'http://schemas.datacontract.org/2004/07/PMessageBox.Contract.Conto';
+    const NS_COMMON = 'http://schemas.datacontract.org/2004/07/PMessageBox.Contract.Common';
+    // ContrattoConto è tutto minOccurs=0, ma l'ordine dei membri è quello
+    // alfabetico del data contract WCF: ComandoEnum, IdComanda, IdGestionale,
+    // Pagamenti. Dentro PMBRigaPagamento: Importo prima di Tipo; dentro
+    // PMBTipoPagamento (namespace Common): Categoria prima di Codice.
+    const contoXml =
+        `<conto xmlns:c="${NS_CONTO}" xmlns:cm="${NS_COMMON}">` +
+        `<c:ComandoEnum>Chiudi</c:ComandoEnum>` +
+        `<c:IdComanda>${params.idComanda}</c:IdComanda>` +
+        `<c:IdGestionale>${params.idConto}</c:IdGestionale>` +
+        `<c:Pagamenti><c:PMBRigaPagamento>` +
+        `<c:Importo>${params.importo.toFixed(2)}</c:Importo>` +
+        `<c:Tipo>` +
+        (params.tipoPagamento.categoria ? `<cm:Categoria>${xmlEscape(params.tipoPagamento.categoria)}</cm:Categoria>` : '') +
+        `<cm:Codice>${xmlEscape(params.tipoPagamento.codice)}</cm:Codice>` +
+        `</c:Tipo>` +
+        `</c:PMBRigaPagamento></c:Pagamenti>` +
+        `</conto>`;
+    const result = await soapCall('PutConto', contoXml);
+    return result == null || isNil(result) ? null : (result as Record<string, unknown>);
+}
+
+export interface EsitoChiusuraComanda {
+    /** true se il conto è comparso nell'archivio del giorno (fonte di verità). */
+    chiuso: boolean;
+    /** Importo residuo a sospeso (0 = interamente pagato). */
+    importoSospeso: number;
+    /** StatoEnum del conto: "Pagato" a chiusura completa, "Aperto" se sospeso. */
+    stato: string | null;
+    numeroScontrino: string | null;
+    totalePagato: number | null;
+    totaleDaPagare: number | null;
+    /** Anomalie non bloccanti (es. errore di ContoComanda con conto in archivio). */
+    avviso: string | null;
+}
+
+/**
+ * Sequenza di chiusura completa, come emersa dai collaudi del 25/08:
+ *
+ * 1. eventuale invio in produzione (solo se ci sono righe mai inviate, cioè
+ *    comanda creata via WS — quelle battute in cassa sono già in produzione);
+ * 2. ContoComanda con noInvio=true — crea il conto ed emette il documento
+ *    fiscale, ma il suo passo pagamento via AdapterWS fallisce SEMPRE
+ *    ("modificate le informazioni da un altro utente") e il conto resta
+ *    Aperto a sospeso;
+ * 3. verdetto da GetContiGiorno (la risposta di ContoComanda non è
+ *    affidabile: dice errore anche a scontrino emesso — collaudi 04/08);
+ * 4. se il conto è a sospeso e la chiusura è piena (importoPagato omesso),
+ *    saldaConto registra il pagamento e chiude senza ristampare. L'importo
+ *    è il Sospeso letto dal conto stesso, mai un totale calcolato dal CRM.
+ *
+ * Con `importoPagato` esplicito inferiore al totale il sospeso è voluto
+ * (pagamento parziale) e il passo 4 viene saltato.
+ */
+export async function chiudiComandaCompleta(params: {
+    idComanda: number;
+    tipoDocumento?: TipoDocumentoConto;
+    tipoPagamento?: string;
+    importoPagato?: number;
+}): Promise<EsitoChiusuraComanda> {
+    const comanda = await getComanda(params.idComanda);
+    if (!comanda) {
+        throw new PassepartoutError(`Comanda ${params.idComanda} non trovata sul gestionale`, 'ContoComanda');
+    }
+    const daInviare = comanda.stato === '0' || comanda.righe.some((r) => r.stato === '0');
+    if (daInviare) {
+        await inviaProduzioneComanda({ idComanda: params.idComanda, inviaTutto: true });
+        // MenuSrv processa l'invio in asincrono e ritocca la comanda: un
+        // respiro prima della chiusura evita di ricreare il conflitto di
+        // timeStmp appena eliminato spostando l'invio fuori da ContoComanda.
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+    }
+    let avviso: string | null = null;
+    try {
+        await contoComanda({
+            idComanda: params.idComanda,
+            tipoDocumento: params.tipoDocumento,
+            tipoPagamento: params.tipoPagamento,
+            importoPagato: params.importoPagato,
+        });
+    } catch (err) {
+        if (!(err instanceof PassepartoutError)) throw err;
+        avviso = err.message;
+    }
+    const conti = await getContiGiorno();
+    let conto = conti.filter((c) => asNumber(c.IdComanda ?? (c as any).idComanda) === params.idComanda).pop();
+    if (!conto) {
+        throw new PassepartoutError(
+            avviso ?? `Conto della comanda ${params.idComanda} non trovato in archivio dopo la chiusura`,
+            'ContoComanda',
+        );
+    }
+    const sospeso = asNumber(conto.Sospeso) ?? 0;
+    if (sospeso > 0 && params.importoPagato == null) {
+        const idConto = asNumber(conto.IdGestionale ?? (conto as any).idGestionale);
+        const tipo = params.tipoPagamento
+            ? (await getTipiPagamento()).find((t) => t.codice === params.tipoPagamento)
+            : undefined;
+        if (idConto != null && tipo) {
+            const saldato = await saldaConto({
+                idConto,
+                idComanda: params.idComanda,
+                importo: sospeso,
+                tipoPagamento: tipo,
+            });
+            if (saldato) conto = saldato;
+        } else if (!tipo) {
+            avviso = [avviso, `Tipo pagamento "${params.tipoPagamento ?? ''}" non trovato in cassa: conto lasciato a sospeso`]
+                .filter(Boolean).join(' | ');
+        }
+    }
+    return {
+        chiuso: true,
+        importoSospeso: asNumber(conto.Sospeso) ?? 0,
+        stato: asString(conto.StatoEnum),
+        numeroScontrino: asString(conto.NumeroScontrinoFiscale),
+        totalePagato: asNumber(conto.TotalePagato),
+        totaleDaPagare: asNumber(conto.TotaleDaPagare),
+        avviso,
+    };
 }
