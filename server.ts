@@ -2751,7 +2751,7 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
         await client.query('BEGIN');
 
         const rows = await client.query(
-            `SELECT id, table_id, customer_name FROM reservations WHERE id = ANY($1::int[]) AND tenant_id = $2 FOR UPDATE`,
+            `SELECT id, table_id, customer_name, reservation_time, shift, duration_minutes FROM reservations WHERE id = ANY($1::int[]) AND tenant_id = $2 FOR UPDATE`,
             [[aId, bId], req.tenantId!]
         );
         if (rows.rows.length !== 2) {
@@ -2763,6 +2763,27 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
         if (!a?.table_id || !b?.table_id) {
             await client.query('ROLLBACK');
             return res.status(400).json({ error: 'Entrambe le prenotazioni devono avere un tavolo assegnato per essere scambiate' });
+        }
+
+        // Lo scambio in sé non può creare conflitti tra a e b, ma il tavolo di
+        // destinazione può ospitare un TERZO doppio turno: il 25/08 uno swap ha
+        // spostato una prenotazione delle 22:00 su un tavolo dove un altro
+        // ospite aveva già le 22:00 (tavolo 7, indagine doppio booking). Quindi
+        // ogni prenotazione va verificata contro la finestra oraria del suo
+        // nuovo tavolo, ignorando solo i due partecipanti allo scambio.
+        for (const [resv, newTableId] of [[a, b.table_id], [b, a.table_id]] as Array<[any, number]>) {
+            const eventDate = new Date(resv.reservation_time).toISOString().substring(0, 10);
+            const conflicts = (await findTableConflicts(req.tenantId!, eventDate, resv.shift, [Number(newTableId)], {
+                reservationStart: resv.reservation_time,
+                reservationDurationMin: resv.duration_minutes ?? (resv.shift === 'LUNCH' ? 90 : 120),
+            })).filter(c => !(c.source === 'reservation' && (c.source_id === aId || c.source_id === bId)));
+            if (conflicts.length > 0) {
+                await client.query('ROLLBACK');
+                return res.status(409).json({
+                    error: `Scambio non possibile per ${resv.customer_name}: ${buildConflictMessage(conflicts)}`,
+                    conflicts,
+                });
+            }
         }
 
         await client.query(

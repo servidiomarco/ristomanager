@@ -169,4 +169,59 @@ describe('reservations', () => {
         await api().delete(`/reservations/${senzaTel.body.id}`).set(bearer(token));
         await api().delete(`/reservations/${conTel.body.id}`).set(bearer(token));
     });
+
+    // Scenario del doppio booking del 25/08/2026: tavolo A con doppio turno
+    // (20:00 + 22:00), tavolo B con un 22:00. Lo swap tra il 20:00 di A e il
+    // 22:00 di B porterebbe due prenotazioni delle 22:00 sullo stesso tavolo:
+    // deve essere rifiutato. Lo swap tra prenotazioni della stessa finestra
+    // oraria resta lecito.
+    it('rifiuta lo swap che sovrappone un terzo doppio turno, accetta quello a parità di orario', async () => {
+        const tavoloB = await api().post('/tables').set(bearer(token)).send({
+            name: 'TP-SWAP', shape: 'SQUARE', seats: 4, x: 300, y: 100, room_id: roomId, status: 'FREE',
+        });
+        expect(tavoloB.status).toBe(201);
+        const tableB = tavoloB.body.id as number;
+
+        const crea = async (nome: string, ora: string, tavolo: number) => {
+            const r = await api().post('/reservations').set(bearer(token)).send({
+                customer_name: nome,
+                reservation_time: `2027-04-20T${ora}:00`,
+                shift: 'DINNER',
+                guests: 4,
+                table_id: tavolo,
+            });
+            expect(r.status).toBe(201);
+            return r.body.id as number;
+        };
+
+        const primoTurnoA = await crea('Swap Primo Turno', '20:00', tableId);
+        const secondoTurnoA = await crea('Swap Secondo Turno', '22:00', tableId);
+        const ventiDueB = await crea('Swap Tavolo B', '22:00', tableB);
+
+        // Il 20:00 di A finirebbe su B (ok), ma il 22:00 di B atterrerebbe su A
+        // dove le 22:00 sono già del secondo turno → 409.
+        const vietato = await api().post(`/reservations/${primoTurnoA}/swap-table`).set(bearer(token)).send({
+            other_id: ventiDueB,
+        });
+        expect(vietato.status).toBe(409);
+        expect(vietato.body.error).toContain('occupato');
+
+        // Nessuna scrittura parziale: ognuno è rimasto sul suo tavolo.
+        const lista = await api().get('/reservations').set(bearer(token));
+        const byId = new Map(lista.body.map((r: any) => [r.id, r]));
+        expect((byId.get(primoTurnoA) as any).table_id).toBe(tableId);
+        expect((byId.get(ventiDueB) as any).table_id).toBe(tableB);
+
+        // Stessa finestra oraria (22:00 ↔ 22:00): lo scambio resta permesso.
+        const lecito = await api().post(`/reservations/${secondoTurnoA}/swap-table`).set(bearer(token)).send({
+            other_id: ventiDueB,
+        });
+        expect(lecito.status).toBe(200);
+        expect(lecito.body.a.table_id).toBe(tableB);
+        expect(lecito.body.b.table_id).toBe(tableId);
+
+        for (const id of [primoTurnoA, secondoTurnoA, ventiDueB]) {
+            await api().delete(`/reservations/${id}`).set(bearer(token));
+        }
+    });
 });
