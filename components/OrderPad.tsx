@@ -2,9 +2,10 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Check, Loader2, TriangleAlert, Utensils, X,
 } from 'lucide-react';
-import type { Dish, Reservation, Table, OrderWithItems, OrderItem } from '../types';
-import { ArrivalStatus, ReservationStatus } from '../types';
+import type { Dish, Reservation, Table, TableMerge, OrderWithItems, OrderItem } from '../types';
+import { ArrivalStatus, ReservationStatus, Shift } from '../types';
 import { getRomeDatePart } from '../utils/reservationTime';
+import { getTableMerges } from '../services/apiService';
 import {
   ordersApiService, getMenuCatalogue, newIdempotencyKey, closeOrder, updateOrder,
   voidItem, setOrderDiscount, transferOrder,
@@ -145,15 +146,49 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
   // perché con Pranzo selezionato le prenotazioni della cena in griglia
   // leggono come coperti già arrivati.
   const selectedDateRome = getRomeDatePart(globalDate);
-  const reservationForTable = useCallback((id: number): Reservation | null =>
-    reservations.find(r =>
-      r.table_id === id
-      && getRomeDatePart(r.reservation_time) === selectedDateRome
+
+  // Unioni tavoli del giorno in griglia: la prenotazione di un'unione sta su
+  // UN tavolo del gruppo (di norma il primario), ma la comanda può essere
+  // aperta su un altro — senza il gruppo, nome e allergeni del cliente non
+  // comparivano (gemello interno del bug import Passepartout del 25/08).
+  const [tableMerges, setTableMerges] = useState<TableMerge[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const shifts: Shift[] = globalShiftFilter === 'ALL' ? [Shift.LUNCH, Shift.DINNER] : [globalShiftFilter as Shift];
+    Promise.all(shifts.map(s => getTableMerges(selectedDateRome, s)))
+      .then(results => { if (!cancelled) setTableMerges(results.flat()); })
+      .catch(() => { if (!cancelled) setTableMerges([]); });
+    return () => { cancelled = true; };
+  }, [selectedDateRome, globalShiftFilter]);
+
+  // Gruppo di unione per tavolo, per turno: `${shift}:${tableId}` → ids.
+  const mergeGroupByTable = useMemo(() => {
+    const map = new Map<string, number[]>();
+    for (const m of tableMerges) {
+      const group = [m.primary_id, ...m.merged_ids];
+      for (const id of group) map.set(`${m.shift}:${id}`, group);
+    }
+    return map;
+  }, [tableMerges]);
+
+  const reservationForTable = useCallback((id: number): Reservation | null => {
+    const isLive = (r: Reservation): boolean =>
+      getRomeDatePart(r.reservation_time) === selectedDateRome
       && (globalShiftFilter === 'ALL' || r.shift === globalShiftFilter)
       && r.reservation_status !== ReservationStatus.CANCELLED
-      && r.arrival_status !== ArrivalStatus.DEPARTED
-    ) ?? null,
-  [reservations, selectedDateRome, globalShiftFilter]);
+      && r.arrival_status !== ArrivalStatus.DEPARTED;
+    const exact = reservations.find(r => r.table_id === id && isLive(r));
+    if (exact) return exact;
+    // Nessuna prenotazione sul tavolo esatto: si cerca sugli altri tavoli
+    // della sua unione (nel turno della prenotazione stessa).
+    return reservations.find(r =>
+      r.table_id != null
+      && r.table_id !== id
+      && isLive(r)
+      && (mergeGroupByTable.get(`${r.shift}:${id}`)?.includes(r.table_id) ?? false)
+    ) ?? null;
+  },
+  [reservations, selectedDateRome, globalShiftFilter, mergeGroupByTable]);
 
   const reservation = useMemo(
     () => (tableId ? reservationForTable(tableId) : null),
