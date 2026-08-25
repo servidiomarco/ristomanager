@@ -1,8 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Reservation, Table, Room, Shift, BanquetMenu, ArrivalStatus, ReservationStatus } from '../types';
+import { Reservation, Table, Room, Shift, BanquetMenu, TableMerge, ArrivalStatus, ReservationStatus } from '../types';
 import { getRomeTimePart } from '../utils/reservationTime';
 import { toTitleCase } from '../utils/text';
+import { applyMerges } from '../utils/tableMerge';
+import { getTableMerges } from '../services/apiService';
 import { ArrowRight, X } from 'lucide-react';
 
 interface ArrivalsTimelineProps {
@@ -91,6 +93,19 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
   const [busyId, setBusyId] = useState<number | null>(null);
   const [assigning, setAssigning] = useState<Reservation | null>(null);
 
+  // Unioni tavoli del giorno+turno della prenotazione da assegnare: senza,
+  // il tavolo unito compariva come libero nel picker (il server ora lo
+  // rifiuta con 409, ma l'operatore lo scopriva solo al salvataggio).
+  const [assignMerges, setAssignMerges] = useState<TableMerge[]>([]);
+  useEffect(() => {
+    if (!assigning) { setAssignMerges([]); return; }
+    let cancelled = false;
+    getTableMerges(selectedDateStr, assigning.shift)
+      .then(merges => { if (!cancelled) setAssignMerges(merges); })
+      .catch(() => { if (!cancelled) setAssignMerges([]); });
+    return () => { cancelled = true; };
+  }, [assigning, selectedDateStr]);
+
   const tableById = useMemo(() => new Map(tables.map(t => [t.id, t])), [tables]);
   const roomById = useMemo(() => new Map(rooms.map(r => [r.id, r])), [rooms]);
 
@@ -145,21 +160,30 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
       if (b.event_date !== selectedDateStr || b.shift !== assigning.shift) continue;
       for (const id of b.table_ids || []) taken.add(id);
     }
+    // Un tavolo occupato occupa l'intera unione (stessa regola del server).
+    for (const m of assignMerges) {
+      const group = [m.primary_id, ...m.merged_ids];
+      if (group.some(id => taken.has(id))) group.forEach(id => taken.add(id));
+    }
     return taken;
-  }, [assigning, reservations, banquetMenus, selectedDateStr]);
+  }, [assigning, reservations, banquetMenus, selectedDateStr, assignMerges]);
 
   const freeByRoom = useMemo(() => {
     if (!assigning) return [];
+    // I tavoli uniti compaiono come unità ("45+47", posti sommati) sul
+    // primario; i secondari spariscono dai selezionabili, come in FloorPlan.
+    const mergedSecondaryIds = new Set(assignMerges.flatMap(m => m.merged_ids));
+    const displayTables = applyMerges(tables, assignMerges);
     return rooms
       .filter(room => !room.is_closed)
       .map(room => ({
         room,
-        tables: tables
-          .filter(t => t.room_id === room.id && !takenTableIds.has(t.id))
+        tables: displayTables
+          .filter(t => t.room_id === room.id && !mergedSecondaryIds.has(t.id) && !takenTableIds.has(t.id))
           .sort((a, b) => a.name.localeCompare(b.name, 'it', { numeric: true })),
       }))
       .filter(g => g.tables.length > 0);
-  }, [assigning, rooms, tables, takenTableIds]);
+  }, [assigning, rooms, tables, takenTableIds, assignMerges]);
 
   return (
     <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 w-full h-full">

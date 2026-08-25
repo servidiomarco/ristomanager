@@ -1,7 +1,7 @@
 
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, VAT_RATES, Customer, Table, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
+import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, VAT_RATES, Customer, Table, TableMerge, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
 import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { getRomeDatePart } from '../utils/reservationTime';
@@ -11,7 +11,7 @@ import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BanquetPaymentsModal } from './BanquetPaymentsModal';
 import { DishDetailModal } from './DishDetailModal';
 import { CustomerPickerModal } from './CustomerPickerModal';
-import { getCustomers } from '../services/apiService';
+import { getCustomers, getTableMerges } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
 import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftService';
 import {
@@ -687,6 +687,21 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     });
   }, [dishes]);
 
+  // Unioni tavoli attive per la data+turno scelti nel form: un tavolo
+  // occupato occupa l'intera unione (stessa regola del controllo server),
+  // quindi anche i tavoli uniti al suo gruppo vanno disabilitati in griglia.
+  const [banquetMerges, setBanquetMerges] = useState<TableMerge[]>([]);
+  useEffect(() => {
+    const date = newBanquet.event_date;
+    const shift = newBanquet.shift;
+    if (!date || !shift) { setBanquetMerges([]); return; }
+    let cancelled = false;
+    getTableMerges(date, shift)
+      .then(merges => { if (!cancelled) setBanquetMerges(merges); })
+      .catch(() => { if (!cancelled) setBanquetMerges([]); });
+    return () => { cancelled = true; };
+  }, [newBanquet.event_date, newBanquet.shift]);
+
   // Map of tableId -> occupancy info for the currently selected event_date+shift
   // (excluding the banquet being edited). Used by the table picker in the form.
   const tableOccupancyMap = useMemo(() => {
@@ -719,8 +734,16 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       }
     }
 
+    // Estende l'occupazione all'intero gruppo di unione: il tavolo unito a
+    // uno occupato eredita la stessa etichetta di chi occupa il gruppo.
+    for (const m of banquetMerges) {
+      const group = [m.primary_id, ...m.merged_ids];
+      const occ = group.map(id => map.get(id)).find(Boolean);
+      if (occ) for (const id of group) { if (!map.has(id)) map.set(id, occ); }
+    }
+
     return map;
-  }, [newBanquet.event_date, newBanquet.shift, reservations, banquetMenus, editingBanquetId]);
+  }, [newBanquet.event_date, newBanquet.shift, reservations, banquetMenus, editingBanquetId, banquetMerges]);
 
   const groupedBanquets = useMemo(() => {
     const today = formatLocalDate(new Date());
