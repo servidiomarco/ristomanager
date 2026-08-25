@@ -85,6 +85,7 @@ const handlers: Record<string, Handler> = {
                 ? (p.tipoDocumento as TipoDocumentoConto) : undefined,
             importoPagato: p?.importoPagato != null && Number.isFinite(Number(p.importoPagato))
                 ? Number(p.importoPagato) : undefined,
+            proforma: p?.proforma === true,
         });
     },
 };

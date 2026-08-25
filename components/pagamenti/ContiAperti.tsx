@@ -230,6 +230,8 @@ export const ContiAperti: React.FC<{
     const fiscalPill = (b: OpenBillRow) =>
       b.fiscal_status === 'FAILED' ? <StatusPill tone="critical">scontrino in errore</StatusPill>
       : b.fiscal_status === 'PENDING' ? <StatusPill tone="pending">scontrino in emissione</StatusPill>
+      : b.fiscal_status === 'CONFIRMED' && b.fiscal_doc_type === 'PROFORMA'
+        ? <StatusPill tone="pending">proforma</StatusPill>
       : b.status === 'CLOSED' && !b.fiscal_status && /^pp:comanda:/.test(String(b.external_ref ?? ''))
         ? <StatusPill tone="pending">da chiudere in cassa</StatusPill>
       : b.status === 'CLOSED' && !b.fiscal_status ? <StatusPill tone="neutral">senza scontrino</StatusPill>

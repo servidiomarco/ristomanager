@@ -48,7 +48,7 @@ const euro = (cents: number) => formatEuro(cents);
 
 type BillLike =
   Pick<OpenBillRow, 'id' | 'table_name' | 'total_cents' | 'covers' | 'share_token' | 'items'>
-  & Partial<Pick<OpenBillRow, 'paid_cents' | 'residual_cents' | 'open_orders' | 'deposit_credit_cents' | 'deposit_paid_cents' | 'refund_due_cents' | 'cash_settled_cents' | 'status' | 'fiscal_status' | 'fiscal_doc_id' | 'fiscal_error' | 'fiscal_provider' | 'fiscal_ref' | 'external_ref' | 'payments'>>;
+  & Partial<Pick<OpenBillRow, 'paid_cents' | 'residual_cents' | 'open_orders' | 'deposit_credit_cents' | 'deposit_paid_cents' | 'refund_due_cents' | 'cash_settled_cents' | 'status' | 'fiscal_status' | 'fiscal_doc_id' | 'fiscal_error' | 'fiscal_provider' | 'fiscal_ref' | 'fiscal_doc_type' | 'external_ref' | 'payments'>>;
 
 const isSettled = (bill: BillLike) => bill.residual_cents === 0;
 
@@ -194,6 +194,11 @@ export const SettleDialog: React.FC<{
               </div>
               {change > 0 && (
                 <p className="text-[13px] text-[var(--ds-text-secondary)]">Resto {euro(change)}</p>
+              )}
+              {method === 'SOSPESO' && /^pp:comanda:/.test(String(bill.external_ref ?? '')) && (
+                <p className="text-[13px] text-[var(--ds-text-muted)]">
+                  Tutto a sospeso: in cassa esce una proforma e il conto resta da regolarizzare.
+                </p>
               )}
             </>
           )}
@@ -444,8 +449,10 @@ export const FiscalCard: React.FC<{
   // cassa alla chiusura del tavolo sul gestionale, non il provider cloud.
   const isPP = /^pp:comanda:/.test(String(bill.external_ref ?? ''));
   const viaPP = bill.fiscal_provider === 'passepartout';
+  const proforma = viaPP && bill.fiscal_doc_type === 'PROFORMA';
   const pill =
-    st === 'CONFIRMED' ? { tone: 'positive' as const, label: viaPP ? 'emesso in cassa' : 'emesso' }
+    st === 'CONFIRMED' && proforma ? { tone: 'pending' as const, label: 'proforma' }
+    : st === 'CONFIRMED' ? { tone: 'positive' as const, label: viaPP ? 'emesso in cassa' : 'emesso' }
     : st === 'PENDING' ? { tone: 'pending' as const, label: 'in emissione' }
     : st === 'FAILED' ? { tone: 'critical' as const, label: 'errore' }
     : st === 'VOIDED' ? { tone: 'neutral' as const, label: 'annullato' }
@@ -475,7 +482,12 @@ export const FiscalCard: React.FC<{
   return (
     <FormCard title="Scontrino" aside={<StatusPill tone={pill.tone}>{pill.label}</StatusPill>}>
       <div className="space-y-2.5">
-        {st === 'CONFIRMED' && bill.fiscal_ref && (
+        {st === 'CONFIRMED' && proforma && (
+          <p className="text-[13px] text-[var(--ds-text-muted)]">
+            Chiuso in cassa con proforma: il conto resta a sospeso sul gestionale.
+          </p>
+        )}
+        {st === 'CONFIRMED' && !proforma && bill.fiscal_ref && (
           <p className="text-[13px] text-[var(--ds-text-muted)]">
             Scontrino {bill.fiscal_ref}{viaPP ? ' · emesso via Passepartout' : ''}
           </p>

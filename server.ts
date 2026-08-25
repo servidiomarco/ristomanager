@@ -3332,27 +3332,51 @@ function getPassepartoutChiusuraConfig(): { tipoPagamento: string; tipoDocumento
     };
 }
 
+/**
+ * Un conto chiuso senza un euro incassato — tutto a Sospeso nel libro cassa,
+ * nessuna quota online, nessun acconto — in cassa non deve produrre uno
+ * scontrino: è la chiusura "paga dopo", che sul gestionale è una PROFORMA
+ * col conto lasciato a sospeso da regolarizzare (fattura, addebito, …).
+ */
+async function billVaChiusoProforma(billId: number): Promise<boolean> {
+    const rs = await queryWithRetry(
+        `SELECT
+            COALESCE(SUM(p.amount_cents) FILTER (WHERE p.method NOT IN ('SOSPESO', 'OMAGGIO')), 0)::int AS reale,
+            COALESCE(SUM(p.amount_cents) FILTER (WHERE p.method = 'SOSPESO'), 0)::int AS sospeso,
+            COALESCE((SELECT SUM(s.amount_cents) FROM table_bill_splits s
+                      WHERE s.table_bill_id = $1 AND s.status = 'PAID'), 0)::int AS online
+         FROM table_bill_payments p
+         WHERE p.table_bill_id = $1 AND p.voided_at IS NULL`,
+        [billId]
+    );
+    const r = rs.rows[0] ?? { reale: 0, sospeso: 0, online: 0 };
+    return Number(r.reale) === 0 && Number(r.online) === 0 && Number(r.sospeso) > 0;
+}
+
 async function chiudiComandaPassepartoutPerBill(
     tenantId: number,
     billId: number,
     idComanda: number,
     config: { tipoPagamento: string; tipoDocumento: string },
 ): Promise<EsitoChiusuraComanda> {
+    const proforma = await billVaChiusoProforma(billId);
     // Timeout largo: la sequenza sull'agente può includere invio in
     // produzione, attesa e saldo del sospeso (vedi chiudiComandaCompleta).
     const esito = await callPassepartout<EsitoChiusuraComanda>('chiudi', {
         idComanda,
-        tipoPagamento: config.tipoPagamento,
-        tipoDocumento: config.tipoDocumento,
+        tipoPagamento: proforma ? undefined : config.tipoPagamento,
+        tipoDocumento: proforma ? 'Proforma' : config.tipoDocumento,
+        proforma,
     }, 60_000);
     try { socketService?.broadcastToAll(tenantId, 'passepartout:chiusura', { bill_id: billId, id_comanda: idComanda, esito }); } catch (_) {}
     if (esito.avviso) console.warn('[passepartout] chiusura comanda', idComanda, 'con avviso:', esito.avviso);
-    // Lo scontrino l'ha emesso l'RT di cassa: registrarlo in fiscal_documents
-    // dà alla card Scontrino lo stesso ciclo di vita dei documenti Openapi
-    // (badge "emesso", numero, niente bottone Emetti). provider_ref è il
-    // numero scontrino del gestionale; l'indice one-live-per-bill assorbe i
-    // replay del retry. La registrazione non deve mai far fallire la chiusura.
-    if (esito.numeroScontrino) {
+    // Il documento l'ha emesso la cassa: registrarlo in fiscal_documents dà
+    // alla card Scontrino lo stesso ciclo di vita dei documenti Openapi
+    // (badge, numero, niente bottone Emetti). Per lo scontrino provider_ref
+    // è il numero fiscale dell'RT; la proforma non ne ha (doc_type PROFORMA,
+    // provider_ref NULL). L'indice one-live-per-bill assorbe i replay del
+    // retry. La registrazione non deve mai far fallire la chiusura.
+    if (esito.numeroScontrino || proforma) {
         try {
             const billRs = await queryWithRetry(
                 `SELECT total_cents FROM table_bills WHERE id = $1 AND tenant_id = $2`,
@@ -3361,11 +3385,12 @@ async function chiudiComandaPassepartoutPerBill(
             if (billRs.rows[0]) {
                 const ins = await queryWithRetry(
                     `INSERT INTO fiscal_documents
-                        (tenant_id, table_bill_id, provider, status, provider_ref, response, total_cents, confirmed_at)
-                     VALUES ($1, $2, 'passepartout', 'CONFIRMED', $3, $4::jsonb, $5, CURRENT_TIMESTAMP)
+                        (tenant_id, table_bill_id, doc_type, provider, status, provider_ref, response, total_cents, confirmed_at)
+                     VALUES ($1, $2, $6, 'passepartout', 'CONFIRMED', $3, $4::jsonb, $5, CURRENT_TIMESTAMP)
                      ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') DO NOTHING
                      RETURNING ${FISCAL_DOC_COLUMNS}`,
-                    [tenantId, billId, esito.numeroScontrino, JSON.stringify(esito), billRs.rows[0].total_cents]
+                    [tenantId, billId, esito.numeroScontrino ?? null, JSON.stringify(esito),
+                     billRs.rows[0].total_cents, proforma ? 'PROFORMA' : 'RECEIPT']
                 );
                 if (ins.rows[0]) {
                     try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: billId, doc: ins.rows[0] }); } catch (_) {}
@@ -23920,6 +23945,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                     -- provider_ref è il numero del documento.
                     fd.status AS fiscal_status, fd.id AS fiscal_doc_id, fd.error AS fiscal_error,
                     fd.provider AS fiscal_provider, fd.provider_ref AS fiscal_ref,
+                    fd.doc_type AS fiscal_doc_type,
                     -- Come è stato pagato: i movimenti vivi del libro cassa
                     -- (incassi staff + specchi delle quote online), per la
                     -- sezione Pagamenti del conto senza una fetch per riga.
@@ -23935,7 +23961,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
              LEFT JOIN reservations r ON r.id = b.reservation_id AND r.tenant_id = b.tenant_id
              LEFT JOIN table_bill_splits s ON s.table_bill_id = b.id
              LEFT JOIN LATERAL (
-                 SELECT id, status, error, provider, provider_ref FROM fiscal_documents
+                 SELECT id, status, error, provider, provider_ref, doc_type FROM fiscal_documents
                  WHERE table_bill_id = b.id ORDER BY created_at DESC LIMIT 1
              ) fd ON TRUE
              WHERE b.status = ANY($3::varchar[])
@@ -23949,7 +23975,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                         (SELECT o.shift FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
                         CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
                              THEN 'LUNCH' ELSE 'DINNER' END) = $2::varchar)
-             GROUP BY b.id, t.name, r.customer_name, fd.id, fd.status, fd.error, fd.provider, fd.provider_ref
+             GROUP BY b.id, t.name, r.customer_name, fd.id, fd.status, fd.error, fd.provider, fd.provider_ref, fd.doc_type
              ORDER BY b.closed_at DESC NULLS LAST, b.opened_at DESC`,
             [filterDate, filterShift, statuses, req.tenantId!]
         );
