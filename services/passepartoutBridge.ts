@@ -24,7 +24,11 @@ export type PassepartoutOp =
     | 'comanda'
     | 'tipiPagamento'
     | 'sale'
-    | 'conto';
+    | 'conto'
+    /** InviaProduzioneComanda (tutte le uscite) — per comande create via WS. */
+    | 'invia'
+    /** Sequenza di chiusura completa (chiudiComandaCompleta): azione FISCALE. */
+    | 'chiudi';
 
 export class PassepartoutBridgeError extends Error {
     constructor(

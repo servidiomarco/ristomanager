@@ -48,7 +48,7 @@ import {
     comandaToBillPayload,
     PassepartoutBridgeError,
 } from './services/passepartoutBridge.js';
-import type { PassepartoutComanda } from './services/passepartoutService.js';
+import type { PassepartoutComanda, EsitoChiusuraComanda } from './services/passepartoutService.js';
 import { Shift, PaymentStatus, UserRole } from './types.js';
 import authRoutes from './auth/authRoutes.js';
 import logRoutes from './activityLogs/logRoutes.js';
@@ -3306,6 +3306,83 @@ app.get('/passepartout/tavolo/:nome', authenticate, requirePermission('payments:
     }
 });
 
+// --- Chiusura comanda in cassa al saldo del conto CRM ------------------------
+// Quando un conto nato da una comanda Passepartout (external_ref
+// "pp:comanda:<id>") viene CHIUSO saldato per intero, il gestionale chiude il
+// tavolo ed emette LUI il documento fiscale (RT di cassa) — per questi conti
+// l'emissione Openapi del CRM viene saltata, altrimenti due documenti per lo
+// stesso incasso. Config da env come il resto dell'integrazione:
+// - PASSEPARTOUT_TIPO_PAGAMENTO: tipo pagamento di cassa sotto cui registrare
+//   l'incasso (un tipo DEDICATO, es. "ESTERNO" — mai "Contanti", che
+//   conteggerebbe due volte l'incasso nei report di cassa). Vuoto = chiusura
+//   automatica spenta: il tavolo si chiude in cassa a mano come prima.
+// - PASSEPARTOUT_TIPO_DOCUMENTO: default "Scontrino".
+
+function passepartoutComandaIdFromRef(externalRef: unknown): number | null {
+    const m = /^pp:comanda:(\d+)$/.exec(String(externalRef ?? ''));
+    return m ? Number(m[1]) : null;
+}
+
+function getPassepartoutChiusuraConfig(): { tipoPagamento: string; tipoDocumento: string } | null {
+    const tipoPagamento = (process.env.PASSEPARTOUT_TIPO_PAGAMENTO || '').trim();
+    if (!tipoPagamento) return null;
+    return {
+        tipoPagamento,
+        tipoDocumento: (process.env.PASSEPARTOUT_TIPO_DOCUMENTO || 'Scontrino').trim(),
+    };
+}
+
+async function chiudiComandaPassepartoutPerBill(
+    tenantId: number,
+    billId: number,
+    idComanda: number,
+    config: { tipoPagamento: string; tipoDocumento: string },
+): Promise<EsitoChiusuraComanda> {
+    // Timeout largo: la sequenza sull'agente può includere invio in
+    // produzione, attesa e saldo del sospeso (vedi chiudiComandaCompleta).
+    const esito = await callPassepartout<EsitoChiusuraComanda>('chiudi', {
+        idComanda,
+        tipoPagamento: config.tipoPagamento,
+        tipoDocumento: config.tipoDocumento,
+    }, 60_000);
+    try { socketService?.broadcastToAll(tenantId, 'passepartout:chiusura', { bill_id: billId, id_comanda: idComanda, esito }); } catch (_) {}
+    if (esito.avviso) console.warn('[passepartout] chiusura comanda', idComanda, 'con avviso:', esito.avviso);
+    return esito;
+}
+
+// Ritenta la chiusura in cassa di un conto Passepartout già CLOSED (agente
+// offline al momento del saldo, tipo pagamento non ancora configurato, ecc.).
+// Speculare a POST /bills/:id/fiscal-docs per i conti nativi CRM.
+app.post('/bills/:id/passepartout-close', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        const rs = await queryWithRetry(
+            `SELECT id, status, external_ref FROM table_bills WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        const bill = rs.rows[0];
+        if (!bill) return res.status(404).json({ error: 'Bill not found' });
+        const idComanda = passepartoutComandaIdFromRef(bill.external_ref);
+        if (idComanda == null) {
+            return res.status(400).json({ error: 'not_passepartout', message: 'Il conto non nasce da una comanda Passepartout' });
+        }
+        if (bill.status !== 'CLOSED') {
+            return res.status(409).json({ error: 'bill_not_closed', message: 'Il conto va prima chiuso saldato per intero' });
+        }
+        const config = getPassepartoutChiusuraConfig();
+        if (!config) {
+            return res.status(409).json({ error: 'passepartout_non_configurato', message: 'PASSEPARTOUT_TIPO_PAGAMENTO non configurato sul server' });
+        }
+        const esito = await chiudiComandaPassepartoutPerBill(req.tenantId!, id, idComanda, config);
+        res.json({ id_comanda: idComanda, esito });
+    } catch (err: any) {
+        if (sendPassepartoutError(res, err)) return;
+        console.error('POST /bills/:id/passepartout-close error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 // Porta gli acconti/caparre già PAGATI di una prenotazione dentro il suo conto
 // come quote PAID di kind='deposit'. Così l'importo abbassa il residuo (e la
 // barra di avanzamento, il SETTLED, la chiusura, il preconto e il self-pay) SENZA
@@ -3907,9 +3984,24 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
         // Documento commerciale: parte in automatico sui conti saldati per
         // intero, fuori dalla risposta — la chiusura non aspetta il fisco.
         // Esito via socket 'fiscal:updated'; retry da POST /bills/:id/fiscal-docs.
+        // ECCEZIONE: un conto nato da una comanda Passepartout si chiude sul
+        // gestionale, che emette lui il documento fiscale dall'RT di cassa —
+        // l'emissione Openapi qui produrrebbe un secondo documento per lo
+        // stesso incasso. Retry da POST /bills/:id/passepartout-close.
         if (updatedRow.status === 'CLOSED') {
-            emitFiscalDocForBill(req.tenantId!, id, req.user?.userId ?? null)
-                .catch(err => console.error('[fiscal] emissione post-chiusura fallita per conto', id, err?.message));
+            const ppComandaId = passepartoutComandaIdFromRef(updatedRow.external_ref);
+            if (ppComandaId != null) {
+                const ppConfig = getPassepartoutChiusuraConfig();
+                if (ppConfig) {
+                    chiudiComandaPassepartoutPerBill(req.tenantId!, id, ppComandaId, ppConfig)
+                        .catch(err => console.error('[passepartout] chiusura comanda fallita per conto', id, err?.message));
+                } else {
+                    console.warn('[passepartout] conto', id, 'chiuso ma PASSEPARTOUT_TIPO_PAGAMENTO non configurato: comanda', ppComandaId, 'da chiudere in cassa a mano');
+                }
+            } else {
+                emitFiscalDocForBill(req.tenantId!, id, req.user?.userId ?? null)
+                    .catch(err => console.error('[fiscal] emissione post-chiusura fallita per conto', id, err?.message));
+            }
         }
 
         res.json(updatedRow);
@@ -4246,13 +4338,17 @@ async function emitFiscalDocForBill(tenantId: number, billId: number, userId: nu
     if (!fiscalId) return { skipped: 'missing_vat_number' };
 
     const billRs = await queryWithRetry(
-        `SELECT id, total_cents, items, status FROM table_bills WHERE id = $1 AND tenant_id = $2`,
+        `SELECT id, total_cents, items, status, external_ref FROM table_bills WHERE id = $1 AND tenant_id = $2`,
         [billId, tenantId]
     );
     const bill = billRs.rows[0];
     // Solo conti CLOSED (saldati per intero): un SETTLED_PARTIAL ha un
     // ammanco che non quadrerebbe col documento.
     if (!bill || bill.status !== 'CLOSED') return { skipped: 'bill_not_closed' };
+    // Conto nato da una comanda Passepartout: il documento fiscale lo emette
+    // il gestionale (RT di cassa) alla chiusura comanda — emetterlo anche via
+    // Openapi farebbe due documenti per lo stesso incasso.
+    if (passepartoutComandaIdFromRef(bill.external_ref) != null) return { skipped: 'passepartout' };
 
     let ins = await queryWithRetry(
         `INSERT INTO fiscal_documents (tenant_id, table_bill_id, provider, fiscal_id_snapshot, total_cents, created_by_user_id)
@@ -4411,6 +4507,7 @@ app.post('/bills/:id/fiscal-docs', authenticate, requirePermission('payments:ful
                 bill_not_closed: 'Il documento si emette solo su un conto chiuso e saldato per intero',
                 race: 'Emissione già in corso, riprova',
                 in_progress: 'Emissione già in corso, riprova tra qualche secondo',
+                passepartout: 'Conto del gestionale: lo scontrino lo emette la cassa alla chiusura comanda (POST /bills/:id/passepartout-close)',
             };
             return res.status(409).json({ error: messages[outcome.skipped] ?? outcome.skipped, reason: outcome.skipped });
         }
