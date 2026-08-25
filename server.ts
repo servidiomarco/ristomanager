@@ -3347,6 +3347,34 @@ async function chiudiComandaPassepartoutPerBill(
     }, 60_000);
     try { socketService?.broadcastToAll(tenantId, 'passepartout:chiusura', { bill_id: billId, id_comanda: idComanda, esito }); } catch (_) {}
     if (esito.avviso) console.warn('[passepartout] chiusura comanda', idComanda, 'con avviso:', esito.avviso);
+    // Lo scontrino l'ha emesso l'RT di cassa: registrarlo in fiscal_documents
+    // dà alla card Scontrino lo stesso ciclo di vita dei documenti Openapi
+    // (badge "emesso", numero, niente bottone Emetti). provider_ref è il
+    // numero scontrino del gestionale; l'indice one-live-per-bill assorbe i
+    // replay del retry. La registrazione non deve mai far fallire la chiusura.
+    if (esito.numeroScontrino) {
+        try {
+            const billRs = await queryWithRetry(
+                `SELECT total_cents FROM table_bills WHERE id = $1 AND tenant_id = $2`,
+                [billId, tenantId]
+            );
+            if (billRs.rows[0]) {
+                const ins = await queryWithRetry(
+                    `INSERT INTO fiscal_documents
+                        (tenant_id, table_bill_id, provider, status, provider_ref, response, total_cents, confirmed_at)
+                     VALUES ($1, $2, 'passepartout', 'CONFIRMED', $3, $4::jsonb, $5, CURRENT_TIMESTAMP)
+                     ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') DO NOTHING
+                     RETURNING ${FISCAL_DOC_COLUMNS}`,
+                    [tenantId, billId, esito.numeroScontrino, JSON.stringify(esito), billRs.rows[0].total_cents]
+                );
+                if (ins.rows[0]) {
+                    try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: billId, doc: ins.rows[0] }); } catch (_) {}
+                }
+            }
+        } catch (err: any) {
+            console.error('[passepartout] registrazione documento fallita per conto', billId, err?.message);
+        }
+    }
     return esito;
 }
 
@@ -4539,6 +4567,12 @@ app.post('/bills/:id/fiscal-docs/:fid/void', authenticate, requirePermission('pa
         if (!doc) return res.status(404).json({ error: 'Documento non trovato' });
         if (doc.status !== 'CONFIRMED' || !doc.provider_ref) {
             return res.status(409).json({ error: `Solo un documento confermato si può annullare (stato ${doc.status})` });
+        }
+        // Documento emesso dall'RT di cassa alla chiusura Passepartout: il
+        // reso/annullo è un'operazione del registratore, non c'è un provider
+        // cloud da chiamare.
+        if (doc.provider === 'passepartout') {
+            return res.status(409).json({ error: 'Scontrino emesso dalla cassa: si annulla dal registratore, non da qui' });
         }
 
         const driver = getFiscalDriver(doc.provider);
@@ -23854,7 +23888,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
         const rows = await queryWithRetry(
             `SELECT b.id, b.reservation_id, b.table_id, b.total_cents, b.covers,
                     b.currency, b.items, b.status, b.share_token, b.opened_at, b.closed_at,
-                    b.cash_settled_cents, b.tip_cents,
+                    b.cash_settled_cents, b.tip_cents, b.external_ref,
                     t.name AS table_name,
                     r.customer_name,
                     -- Il servizio del conto arriva dalla comanda; per un conto
@@ -23882,14 +23916,26 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                               WHERE p.table_bill_id = b.id AND p.table_bill_split_id IS NULL AND p.voided_at IS NULL), 0) AS staff_paid_cents,
                     -- Ultimo documento fiscale del conto: alimenta il badge
                     -- scontrino nella vista Chiusi senza una fetch per riga.
+                    -- provider distingue Openapi da Passepartout (RT di cassa),
+                    -- provider_ref è il numero del documento.
                     fd.status AS fiscal_status, fd.id AS fiscal_doc_id, fd.error AS fiscal_error,
+                    fd.provider AS fiscal_provider, fd.provider_ref AS fiscal_ref,
+                    -- Come è stato pagato: i movimenti vivi del libro cassa
+                    -- (incassi staff + specchi delle quote online), per la
+                    -- sezione Pagamenti del conto senza una fetch per riga.
+                    COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                                  'id', p.id, 'method', p.method, 'amount_cents', p.amount_cents,
+                                  'recorded_at', p.recorded_at, 'online', p.table_bill_split_id IS NOT NULL
+                              ) ORDER BY p.recorded_at)
+                              FROM table_bill_payments p
+                              WHERE p.table_bill_id = b.id AND p.voided_at IS NULL), '[]'::jsonb) AS payments,
                     (SELECT COUNT(*) FROM orders o WHERE o.table_bill_id = b.id AND o.status = 'OPEN')::int AS open_orders
              FROM table_bills b
              LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
              LEFT JOIN reservations r ON r.id = b.reservation_id AND r.tenant_id = b.tenant_id
              LEFT JOIN table_bill_splits s ON s.table_bill_id = b.id
              LEFT JOIN LATERAL (
-                 SELECT id, status, error FROM fiscal_documents
+                 SELECT id, status, error, provider, provider_ref FROM fiscal_documents
                  WHERE table_bill_id = b.id ORDER BY created_at DESC LIMIT 1
              ) fd ON TRUE
              WHERE b.status = ANY($3::varchar[])
@@ -23903,7 +23949,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                         (SELECT o.shift FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
                         CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
                              THEN 'LUNCH' ELSE 'DINNER' END) = $2::varchar)
-             GROUP BY b.id, t.name, r.customer_name, fd.id, fd.status, fd.error
+             GROUP BY b.id, t.name, r.customer_name, fd.id, fd.status, fd.error, fd.provider, fd.provider_ref
              ORDER BY b.closed_at DESC NULLS LAST, b.opened_at DESC`,
             [filterDate, filterShift, statuses, req.tenantId!]
         );
