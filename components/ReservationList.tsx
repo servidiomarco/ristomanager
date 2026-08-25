@@ -6262,6 +6262,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                           deposit_paid_cents: bill.deposit_paid_cents,
                           refund_due_cents: bill.refund_due_cents,
                           residual_cents: bill.residual_cents,
+                          external_ref: bill.bill.external_ref,
                         }}
                         busy={billActionLoading === 'close'}
                         onClose={() => setBillSheetOpen(false)}

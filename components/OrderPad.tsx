@@ -551,6 +551,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
             refund_due_cents: viewBill.refund_due_cents,
             residual_cents: viewBill.residual_cents,
             open_orders: viewBill.open_orders,
+            external_ref: viewBill.external_ref,
           }}
           busy={busy}
           onClose={() => setViewBill(null)}

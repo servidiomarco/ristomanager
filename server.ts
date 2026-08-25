@@ -21775,7 +21775,7 @@ app.get('/tables/bills-status', authenticate, requirePermission('orders:view'), 
         const service = serviceFromQuery(req.query);
         const rows = await queryWithRetry(
             `SELECT b.id, b.table_id, b.total_cents, b.covers, b.status,
-                    b.share_token, b.items, b.cash_settled_cents,
+                    b.share_token, b.items, b.cash_settled_cents, b.external_ref,
                     t.name AS table_name,
                     COALESCE((SELECT SUM(s.amount_cents)::int FROM table_bill_splits s
                               WHERE s.table_bill_id = b.id AND s.status = 'PAID'), 0) AS paid_cents,
@@ -21809,6 +21809,9 @@ app.get('/tables/bills-status', authenticate, requirePermission('orders:view'), 
                 status: r.status,
                 share_token: r.share_token,
                 items: r.items ?? null,
+                // "pp:comanda:<id>" per i conti nati dal gestionale: il dialog
+                // di chiusura ci appende la scelta Scontrino/Proforma.
+                external_ref: r.external_ref ?? null,
                 paid_cents: Number(r.paid_cents) + Number(r.staff_paid_cents),
                 cash_settled_cents: Number(r.cash_settled_cents),
                 staff_paid_cents: Number(r.staff_paid_cents),
