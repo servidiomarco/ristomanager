@@ -146,6 +146,15 @@ class BillsApiService {
     });
   }
 
+  /** Ritenta la chiusura in cassa di un conto Passepartout già chiuso
+   *  (scontrino dall'RT + tavolo liberato sul gestionale). */
+  async passepartoutClose(billId: number): Promise<{ id_comanda: number; esito: unknown }> {
+    return apiRequest(`${API_URL}/bills/${billId}/passepartout-close`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+  }
+
   async getFiscalSettings(): Promise<FiscalSettings> {
     return apiRequest<FiscalSettings>(`${API_URL}/settings/fiscal`, { headers: getHeaders() });
   }
@@ -227,11 +236,29 @@ export interface OpenBillRow {
   fiscal_status?: 'PENDING' | 'CONFIRMED' | 'FAILED' | 'VOIDED' | null;
   fiscal_doc_id?: number | null;
   fiscal_error?: string | null;
+  /** 'openapi' = documento commerciale cloud; 'passepartout' = scontrino dall'RT di cassa. */
+  fiscal_provider?: string | null;
+  /** Numero del documento (provider_ref: numero scontrino RT o id Openapi). */
+  fiscal_ref?: string | null;
+  /** "pp:comanda:<id>" quando il conto nasce da una comanda Passepartout. */
+  external_ref?: string | null;
+  /** Movimenti vivi del libro cassa: come è stato pagato il conto. */
+  payments?: BillPaymentRow[];
   /** Comande ancora aperte su questo conto: il tavolo sta ancora ordinando. */
   open_orders: number;
   service_date: string;
   shift: 'LUNCH' | 'DINNER';
   is_current_service: boolean;
+}
+
+/** Un movimento del libro cassa sul conto: incasso staff o specchio di una
+ *  quota pagata online (online: true). */
+export interface BillPaymentRow {
+  id: number;
+  method: string;
+  amount_cents: number;
+  recorded_at: string;
+  online: boolean;
 }
 
 /** Comanda rimasta aperta in un servizio precedente. */

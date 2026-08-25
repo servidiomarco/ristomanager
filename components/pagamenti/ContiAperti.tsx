@@ -225,10 +225,13 @@ export const ContiAperti: React.FC<{
     const label = (st: string) => st === 'VOIDED' ? 'Annullato' : st === 'SETTLED_PARTIAL' ? 'Parziale' : 'Chiuso';
     const tone = (st: string) => st === 'VOIDED' ? 'critical' : st === 'SETTLED_PARTIAL' ? 'pending' : 'positive';
     // Badge scontrino: solo gli stati che chiedono un'occhiata — l'emesso è
-    // la normalità e non merita rumore su ogni riga.
+    // la normalità e non merita rumore su ogni riga. Un conto Passepartout
+    // senza documento ha il tavolo ancora aperto in cassa: quello sì che urge.
     const fiscalPill = (b: OpenBillRow) =>
       b.fiscal_status === 'FAILED' ? <StatusPill tone="critical">scontrino in errore</StatusPill>
       : b.fiscal_status === 'PENDING' ? <StatusPill tone="pending">scontrino in emissione</StatusPill>
+      : b.status === 'CLOSED' && !b.fiscal_status && /^pp:comanda:/.test(String(b.external_ref ?? ''))
+        ? <StatusPill tone="pending">da chiudere in cassa</StatusPill>
       : b.status === 'CLOSED' && !b.fiscal_status ? <StatusPill tone="neutral">senza scontrino</StatusPill>
       : null;
     const real = visible.filter(b => b.status !== 'VOIDED');

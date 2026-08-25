@@ -5,6 +5,7 @@ import { Check, Copy, Loader2, Printer, QrCode, X, Banknote } from 'lucide-react
 import { billsApiService, printBill, type BillPaymentInput, type OpenBillRow } from '../../services/billsApiService';
 import { FormCard, PaneHeader, Sheet, StatusPill } from '../ds';
 import { formatEuro } from './paymentsView';
+import { getRomeTimePart } from '../../utils/reservationTime';
 
 /** Chiusura conto: i movimenti di incasso (metodo + importo) e la mancia.
  *  Passa dritto a POST /bills/:id/close come CloseBillPayload. */
@@ -20,7 +21,8 @@ const METHODS: { value: BillPaymentInput['method']; label: string }[] = [
   { value: 'SOSPESO', label: 'Sospeso' },
   { value: 'OMAGGIO', label: 'Omaggio' },
 ];
-const methodLabel = (m: string) => METHODS.find(x => x.value === m)?.label ?? m;
+const methodLabel = (m: string) =>
+  m === 'LINK_ONLINE' ? 'Online' : METHODS.find(x => x.value === m)?.label ?? m;
 
 // Parsing tollerante dell'importo digitato: "12,50" / "12.50" / "12" → cents.
 const eurToCents = (s: string): number => {
@@ -46,7 +48,7 @@ const euro = (cents: number) => formatEuro(cents);
 
 type BillLike =
   Pick<OpenBillRow, 'id' | 'table_name' | 'total_cents' | 'covers' | 'share_token' | 'items'>
-  & Partial<Pick<OpenBillRow, 'paid_cents' | 'residual_cents' | 'open_orders' | 'deposit_credit_cents' | 'deposit_paid_cents' | 'refund_due_cents' | 'cash_settled_cents' | 'status' | 'fiscal_status' | 'fiscal_doc_id' | 'fiscal_error'>>;
+  & Partial<Pick<OpenBillRow, 'paid_cents' | 'residual_cents' | 'open_orders' | 'deposit_credit_cents' | 'deposit_paid_cents' | 'refund_due_cents' | 'cash_settled_cents' | 'status' | 'fiscal_status' | 'fiscal_doc_id' | 'fiscal_error' | 'fiscal_provider' | 'fiscal_ref' | 'external_ref' | 'payments'>>;
 
 const isSettled = (bill: BillLike) => bill.residual_cents === 0;
 
@@ -394,6 +396,27 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
           </p>
         )}
       </FormCard>
+
+      {/* Come è stato pagato: i movimenti del libro cassa, ora e importo.
+          "Online" è lo specchio di una quota pagata dal QR/link. */}
+      {bill.payments && bill.payments.length > 0 && (
+        <FormCard title="Pagamenti">
+          <ul>
+            {bill.payments.map((p) => (
+              <li
+                key={p.id}
+                className="flex items-center justify-between gap-3 py-2.5 text-[14px] [&+li]:border-t [&+li]:border-[var(--ds-border)]"
+              >
+                <span className="min-w-0 truncate text-[var(--ds-text-primary)]">{methodLabel(p.method)}</span>
+                <span className="flex flex-shrink-0 items-baseline gap-3">
+                  <span className="text-[13px] text-[var(--ds-text-muted)]">{getRomeTimePart(p.recorded_at)}</span>
+                  <span className="tabular-nums text-[var(--ds-text-secondary)]">{euro(p.amount_cents)}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </FormCard>
+      )}
     </>
   );
 };
@@ -417,11 +440,16 @@ export const FiscalCard: React.FC<{
   if (bill.status !== 'CLOSED' && !bill.fiscal_status) return null;
 
   const st = bill.fiscal_status ?? null;
+  // Conto nato da una comanda Passepartout: lo scontrino lo emette l'RT di
+  // cassa alla chiusura del tavolo sul gestionale, non il provider cloud.
+  const isPP = /^pp:comanda:/.test(String(bill.external_ref ?? ''));
+  const viaPP = bill.fiscal_provider === 'passepartout';
   const pill =
-    st === 'CONFIRMED' ? { tone: 'positive' as const, label: 'emesso' }
+    st === 'CONFIRMED' ? { tone: 'positive' as const, label: viaPP ? 'emesso in cassa' : 'emesso' }
     : st === 'PENDING' ? { tone: 'pending' as const, label: 'in emissione' }
     : st === 'FAILED' ? { tone: 'critical' as const, label: 'errore' }
     : st === 'VOIDED' ? { tone: 'neutral' as const, label: 'annullato' }
+    : isPP ? { tone: 'pending' as const, label: 'da chiudere in cassa' }
     : { tone: 'neutral' as const, label: 'non emesso' };
 
   const run = async (fn: () => Promise<unknown>) => {
@@ -435,7 +463,7 @@ export const FiscalCard: React.FC<{
       // 409 in_progress: l'altra emissione è in volo — il reload mostrerà
       // l'esito; non è un errore da urlare.
       if (err?.data?.reason === 'in_progress') onChanged?.();
-      else setError(err?.data?.error ?? err?.message ?? 'Operazione non riuscita');
+      else setError(err?.data?.message ?? err?.data?.error ?? err?.message ?? 'Operazione non riuscita');
     } finally {
       setBusy(false);
     }
@@ -447,12 +475,28 @@ export const FiscalCard: React.FC<{
   return (
     <FormCard title="Scontrino" aside={<StatusPill tone={pill.tone}>{pill.label}</StatusPill>}>
       <div className="space-y-2.5">
+        {st === 'CONFIRMED' && bill.fiscal_ref && (
+          <p className="text-[13px] text-[var(--ds-text-muted)]">
+            Scontrino {bill.fiscal_ref}{viaPP ? ' · emesso via Passepartout' : ''}
+          </p>
+        )}
         {st === 'FAILED' && bill.fiscal_error && (
           <p className="text-[13px] text-[var(--ds-critical-text)] break-words">{bill.fiscal_error}</p>
         )}
         {error && <p className="text-[13px] text-[var(--ds-critical-text)]">{error}</p>}
         <div className="flex flex-wrap items-center gap-2">
-          {(st == null || st === 'FAILED' || st === 'VOIDED') && bill.status === 'CLOSED' && (
+          {isPP && st !== 'CONFIRMED' && st !== 'PENDING' && bill.status === 'CLOSED' && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => run(() => billsApiService.passepartoutClose(bill.id))}
+              className={quiet}
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+              Chiudi in cassa
+            </button>
+          )}
+          {!isPP && (st == null || st === 'FAILED' || st === 'VOIDED') && bill.status === 'CLOSED' && (
             <button
               type="button"
               disabled={busy}
@@ -463,7 +507,7 @@ export const FiscalCard: React.FC<{
               {st === 'FAILED' ? 'Riprova emissione' : st === 'VOIDED' ? 'Emetti di nuovo' : 'Emetti scontrino'}
             </button>
           )}
-          {st === 'CONFIRMED' && bill.fiscal_doc_id != null && (
+          {st === 'CONFIRMED' && !viaPP && bill.fiscal_doc_id != null && (
             armed ? (
               <>
                 <button
