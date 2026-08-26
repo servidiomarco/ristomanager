@@ -2517,6 +2517,7 @@ const App: React.FC = () => {
         {view === ViewState.MESSAGGI && (
           <InboxPage
             refreshTick={inboxRefreshTick}
+            reservations={reservations}
             onCreateReservationFromContact={({ phone_digits, ...prefill }) => {
               // Remember which conversation to link the new booking back to,
               // so it becomes reopenable from the chat after creation.
