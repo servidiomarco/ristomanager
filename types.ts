@@ -659,9 +659,23 @@ export enum ViewState {
   PLATFORM = 'PLATFORM'
 }
 
+// Dati di fatturazione del cliente (fase 4 fatturazione): alimentano il
+// cessionario della fattura elettronica. Denominazione a parte perché per
+// un'azienda differisce dal nome in rubrica ("Mario Rossi" vs "Rossi Srl").
+export interface CustomerBilling {
+  name?: string;
+  vat_number?: string;
+  tax_code?: string;
+  sdi_code?: string;
+  pec?: string;
+  address?: { street?: string; zip?: string; city?: string; province?: string };
+}
+
 export interface Customer {
   id: number;
   name: string;
+  /** Dati di fatturazione (null se mai compilati). */
+  billing?: CustomerBilling | null;
   phone?: string | null;
   email?: string | null;
   address?: string | null;

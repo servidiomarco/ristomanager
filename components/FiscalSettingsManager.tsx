@@ -24,6 +24,7 @@ export const FiscalSettingsManager: React.FC<Props> = ({ showToast }) => {
 
     const [settings, setSettings] = useState<FiscalSettings | null>(null);
     const [vat, setVat] = useState('');
+    const [seller, setSeller] = useState({ business_name: '', street: '', zip: '', city: '', province: '' });
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
 
@@ -35,7 +36,17 @@ export const FiscalSettingsManager: React.FC<Props> = ({ showToast }) => {
         (async () => {
             try {
                 const data = await billsApiService.getFiscalSettings();
-                if (!cancelled) { setSettings(data); setVat(data.vat_number); }
+                if (!cancelled) {
+                    setSettings(data);
+                    setVat(data.vat_number);
+                    setSeller({
+                        business_name: data.seller?.business_name ?? '',
+                        street: data.seller?.address?.street ?? '',
+                        zip: data.seller?.address?.zip ?? '',
+                        city: data.seller?.address?.city ?? '',
+                        province: data.seller?.address?.province ?? '',
+                    });
+                }
             } catch (err: any) {
                 if (!cancelled) showToastRef.current(err?.message || 'Impostazioni fiscali non caricate', 'error');
             } finally {
@@ -45,7 +56,7 @@ export const FiscalSettingsManager: React.FC<Props> = ({ showToast }) => {
         return () => { cancelled = true; };
     }, []);
 
-    const save = async (patch: { provider?: FiscalProviderSetting; vat_number?: string }) => {
+    const save = async (patch: { provider?: FiscalProviderSetting; vat_number?: string; seller?: { business_name?: string; address?: { street?: string; zip?: string; city?: string; province?: string } } }) => {
         if (!settings || saving) return;
         setSaving(true);
         try {
@@ -55,7 +66,7 @@ export const FiscalSettingsManager: React.FC<Props> = ({ showToast }) => {
             showToast(
                 patch.provider !== undefined
                     ? `Scontrino elettronico: ${PROVIDER_LABELS[updated.provider]}`
-                    : 'P.IVA aggiornata',
+                    : patch.seller !== undefined ? 'Dati per la fattura aggiornati' : 'P.IVA aggiornata',
                 'success'
             );
         } catch (err: any) {
@@ -75,6 +86,12 @@ export const FiscalSettingsManager: React.FC<Props> = ({ showToast }) => {
 
     const active = settings.provider !== 'none';
     const vatDirty = vat !== settings.vat_number;
+    const sellerDirty =
+        seller.business_name !== (settings.seller?.business_name ?? '')
+        || seller.street !== (settings.seller?.address?.street ?? '')
+        || seller.zip !== (settings.seller?.address?.zip ?? '')
+        || seller.city !== (settings.seller?.address?.city ?? '')
+        || seller.province !== (settings.seller?.address?.province ?? '');
     const vatValid = vat === '' || /^\d{11}$/.test(vat);
 
     return (
@@ -141,6 +158,78 @@ export const FiscalSettingsManager: React.FC<Props> = ({ showToast }) => {
                             <p className="mt-1 text-[12px] text-[var(--ds-critical-text)]">Servono 11 cifre.</p>
                         )}
                     </label>
+                </div>
+
+                {/* Cedente della fattura elettronica: denominazione e sede.
+                    Regime RF01 (ordinario) fisso finché non serve altro. */}
+                <div className="rounded-md bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                        <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)]">Dati per la fattura (cedente)</h5>
+                        {sellerDirty && (
+                            <button
+                                type="button"
+                                onClick={() => save({ seller: { business_name: seller.business_name, address: { street: seller.street, zip: seller.zip, city: seller.city, province: seller.province } } })}
+                                disabled={!canEdit || saving}
+                                className="h-8 flex-shrink-0 rounded-xl bg-[var(--ds-action-bg)] px-3 text-[12px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+                            >
+                                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Salva'}
+                            </button>
+                        )}
+                    </div>
+                    <label className="block">
+                        <span className="mb-1.5 block text-[12px] font-medium text-[var(--ds-text-primary)]">Denominazione</span>
+                        <input
+                            type="text"
+                            value={seller.business_name}
+                            onChange={e => setSeller(prev => ({ ...prev, business_name: e.target.value }))}
+                            disabled={!canEdit || saving}
+                            className="h-10 w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)] disabled:opacity-50"
+                        />
+                    </label>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-6">
+                        <label className="col-span-2 block sm:col-span-3">
+                            <span className="mb-1.5 block text-[12px] font-medium text-[var(--ds-text-primary)]">Indirizzo</span>
+                            <input
+                                type="text"
+                                value={seller.street}
+                                onChange={e => setSeller(prev => ({ ...prev, street: e.target.value }))}
+                                disabled={!canEdit || saving}
+                                className="h-10 w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)] disabled:opacity-50"
+                            />
+                        </label>
+                        <label className="block">
+                            <span className="mb-1.5 block text-[12px] font-medium text-[var(--ds-text-primary)]">CAP</span>
+                            <input
+                                type="text"
+                                inputMode="numeric"
+                                value={seller.zip}
+                                onChange={e => setSeller(prev => ({ ...prev, zip: e.target.value }))}
+                                disabled={!canEdit || saving}
+                                className="h-10 w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-[14px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)] disabled:opacity-50"
+                            />
+                        </label>
+                        <label className="block">
+                            <span className="mb-1.5 block text-[12px] font-medium text-[var(--ds-text-primary)]">Comune</span>
+                            <input
+                                type="text"
+                                value={seller.city}
+                                onChange={e => setSeller(prev => ({ ...prev, city: e.target.value }))}
+                                disabled={!canEdit || saving}
+                                className="h-10 w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)] disabled:opacity-50"
+                            />
+                        </label>
+                        <label className="block">
+                            <span className="mb-1.5 block text-[12px] font-medium text-[var(--ds-text-primary)]">Provincia</span>
+                            <input
+                                type="text"
+                                maxLength={2}
+                                value={seller.province}
+                                onChange={e => setSeller(prev => ({ ...prev, province: e.target.value.toUpperCase() }))}
+                                disabled={!canEdit || saving}
+                                className="h-10 w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)] disabled:opacity-50"
+                            />
+                        </label>
+                    </div>
                 </div>
 
                 {settings.provider === 'openapi' && !settings.openapi_token_configured && (
