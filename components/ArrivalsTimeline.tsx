@@ -93,21 +93,41 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
   const [busyId, setBusyId] = useState<number | null>(null);
   const [assigning, setAssigning] = useState<Reservation | null>(null);
 
-  // Unioni tavoli del giorno+turno della prenotazione da assegnare: senza,
-  // il tavolo unito compariva come libero nel picker (il server ora lo
-  // rifiuta con 409, ma l'operatore lo scopriva solo al salvataggio).
-  const [assignMerges, setAssignMerges] = useState<TableMerge[]>([]);
+  // Unioni tavoli del giorno (entrambi i turni): servono sia al badge di
+  // riga — "26+27" invece del solo tavolo della prenotazione — sia al picker
+  // di assegnazione, dove il tavolo unito compariva come libero (il server
+  // ora lo rifiuta con 409, ma l'operatore lo scopriva solo al salvataggio).
+  // Si ricaricano all'apertura del picker per non assegnare su unioni stantie.
+  const [dayMerges, setDayMerges] = useState<TableMerge[]>([]);
   useEffect(() => {
-    if (!assigning) { setAssignMerges([]); return; }
     let cancelled = false;
-    getTableMerges(selectedDateStr, assigning.shift)
-      .then(merges => { if (!cancelled) setAssignMerges(merges); })
-      .catch(() => { if (!cancelled) setAssignMerges([]); });
+    Promise.all([getTableMerges(selectedDateStr, Shift.LUNCH), getTableMerges(selectedDateStr, Shift.DINNER)])
+      .then(results => { if (!cancelled) setDayMerges(results.flat()); })
+      .catch(() => { if (!cancelled) setDayMerges([]); });
     return () => { cancelled = true; };
-  }, [assigning, selectedDateStr]);
+  }, [selectedDateStr, assigning?.id]);
+
+  const assignMerges = useMemo(
+    () => (assigning ? dayMerges.filter(m => m.shift === assigning.shift) : []),
+    [assigning, dayMerges]
+  );
 
   const tableById = useMemo(() => new Map(tables.map(t => [t.id, t])), [tables]);
   const roomById = useMemo(() => new Map(rooms.map(r => [r.id, r])), [rooms]);
+
+  // Nome dell'unione per tavolo e turno ("26+27"): la prenotazione sta su UN
+  // tavolo del gruppo, ma in sala l'ospite occupa l'intera unione.
+  const mergedNameByTable = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of dayMerges) {
+      const ids = [m.primary_id, ...m.merged_ids];
+      const names = ids.map(id => tableById.get(id)?.name).filter(Boolean);
+      if (names.length < 2) continue;
+      const joined = names.join('+');
+      for (const id of ids) map.set(`${m.shift}:${id}`, joined);
+    }
+    return map;
+  }, [dayMerges, tableById]);
 
   const rows = useMemo(
     () => [...reservations].sort((a, b) => a.reservation_time.localeCompare(b.reservation_time)),
@@ -219,6 +239,9 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
           {rows.map(r => {
             const { tone, action } = rowState(r);
             const table = r.table_id ? tableById.get(r.table_id) : undefined;
+            const tableLabel = r.table_id
+              ? (mergedNameByTable.get(`${r.shift}:${r.table_id}`) ?? table?.name)
+              : undefined;
             const room = table ? roomById.get(table.room_id) : undefined;
             const meta = [room?.name, `${r.guests} coperti`, r.notes?.trim()]
               .filter(Boolean)
@@ -241,9 +264,9 @@ export const ArrivalsTimeline: React.FC<ArrivalsTimelineProps> = ({
 
                 <span
                   className="flex-shrink-0 inline-flex h-9 min-w-[36px] px-1.5 items-center justify-center rounded-[10px] bg-[var(--ds-surface)]/70 text-[14px] font-semibold tabular-nums text-[var(--ds-text-secondary)]"
-                  aria-label={table ? `Tavolo ${table.name}` : 'Senza tavolo'}
+                  aria-label={tableLabel ? `Tavolo ${tableLabel}` : 'Senza tavolo'}
                 >
-                  {table?.name ?? '—'}
+                  {tableLabel ?? '—'}
                 </span>
 
                 <div className="min-w-0 flex-1">
