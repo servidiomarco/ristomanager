@@ -17,7 +17,7 @@ import { runAgent, confirmProposal, discardProposal, type AgentProposal } from '
 import { listMedia, attachFromLibrary, type MediaFile } from '../services/mediaApiService';
 import { getFeatureFlags } from '../services/apiService';
 import { toTitleCase } from '../utils/text';
-import { Shift } from '../types';
+import { Shift, type Reservation } from '../types';
 import {
   SearchField, StatusPill, Callout, SegmentedControl, SplitPane, SectionHeader,
   Avatar, EmptyState, SwipeRow, useFirstRunHint, dsIconButton, PanePlaceholder, CountBadge,
@@ -138,6 +138,30 @@ const statusIcon = (m: InboxMessage) => {
 const displayName = (c: ConversationSummary): string =>
   (c.customer_name && c.customer_name.trim() && toTitleCase(c.customer_name)) || c.phone || `+${c.phone_digits}`;
 
+// Ultime 10 cifre di un telefono: i thread sono già chiavati così e le
+// prenotazioni arrivano con formati misti (+39…, 3…, 0985…).
+const lastTen = (s: string | null | undefined): string => (s || '').replace(/\D/g, '').slice(-10);
+
+const reservationStatusPill = (status: string | null | undefined): { label: string; tone: PillTone } | null => {
+  switch (status) {
+    case 'CONFIRMED': return { label: 'Confermata', tone: 'positive' };
+    case 'PENDING': return { label: 'In attesa', tone: 'pending' };
+    case 'CANCELLED': return { label: 'Annullata', tone: 'critical' };
+    case 'DECLINED': return { label: 'Rifiutata', tone: 'critical' };
+    default: return status ? { label: status, tone: 'neutral' } : null;
+  }
+};
+
+// Stessa resa di ConversazioniPage: l'istante è UTC, si mostra in Europe/Rome.
+const formatReservationWhen = (iso: string): string => {
+  try {
+    return new Date(iso).toLocaleString('it-IT', {
+      timeZone: 'Europe/Rome',
+      day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+    });
+  } catch { return iso; }
+};
+
 interface InboxPageProps {
   /**
    * Apre il modulo nuova prenotazione precompilato dal messaggio. `phone_digits`
@@ -156,13 +180,17 @@ interface InboxPageProps {
     notes?: string;
     location_preference?: 'INDOOR' | 'OUTDOOR';
   }) => void;
-  /** Apre la prenotazione già agganciata al thread, per modificarla. */
+  /** Apre una prenotazione del numero, per modificarla. */
   onOpenReservation?: (reservationId: number) => void;
   /** Bumped da App dopo un aggancio: la lista si ricarica senza reload. */
   refreshTick?: number;
+  /** Prenotazioni note ad App (finestra archivio+futuro): la chat mostra
+   *  quelle che combaciano col numero, così più prenotazioni dello stesso
+   *  cliente sono tutte gestibili senza un aggancio manuale. */
+  reservations?: Reservation[];
 }
 
-const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, onOpenReservation, refreshTick }) => {
+const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, onOpenReservation, refreshTick, reservations }) => {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [convLoading, setConvLoading] = useState(true);
   const [convError, setConvError] = useState<string | null>(null);
@@ -200,6 +228,23 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
     [conversations, selectedKey]
   );
 
+  // Tutte le prenotazioni (non annullate) del numero di questa chat, dalla più
+  // recente. Deriva dal telefono, non da un aggancio singolo: così una chat con
+  // più prenotazioni le mostra tutte e la lista resta in pari da sola quando ne
+  // crei una nuova (App aggiorna `reservations`).
+  const reservationsForPhone = useMemo(() => {
+    const key = selected?.phone_digits;
+    if (!key || key.length < 8 || !reservations) return [];
+    return reservations
+      .filter(r => lastTen(r.phone) === key)
+      .filter(r => r.reservation_status !== 'CANCELLED' && r.reservation_status !== 'DECLINED')
+      .sort((a, b) => new Date(b.reservation_time).getTime() - new Date(a.reservation_time).getTime());
+  }, [reservations, selected]);
+
+  // Popover "Prenotazioni · N" nella testata della chat.
+  const [resMenuOpen, setResMenuOpen] = useState(false);
+  useEffect(() => { setResMenuOpen(false); }, [selectedKey]);
+
   // When a conversation is picked, default the composer channel to whatever
   // the last inbound used (or WA when there's no inbound at all, since WA is
   // still the primary outbound path when the window is open).
@@ -223,8 +268,9 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
   useEffect(() => { loadConversations(); }, [loadConversations]);
 
   // App bumps refreshTick after linking a freshly-created reservation to this
-  // thread — reload so the header flips to "Apri prenotazione". Skip the very
-  // first render (loadConversations already ran above).
+  // thread — reload the conversation list (name/last message may have moved).
+  // The reservations menu itself updates from the `reservations` prop, not from
+  // this. Skip the very first render (loadConversations already ran above).
   const firstRefreshTick = useRef(true);
   useEffect(() => {
     if (firstRefreshTick.current) { firstRefreshTick.current = false; return; }
@@ -763,20 +809,56 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                       <Clock className="h-3 w-3" aria-hidden /> Finestra WA: {windowRemaining}
                     </StatusPill>
                   )}
-                  {/* Due azioni indipendenti, non alternative: se il thread ha
-                      già una prenotazione agganciata la si riapre per modificarla
-                      ("Apri prenotazione"), MA si può sempre aggiungerne una nuova
-                      ("Crea prenotazione") — un cliente con una prenotazione può
-                      chiederne un'altra nella stessa chat. */}
-                  {selected.last_reservation_id && onOpenReservation && (
-                    <button
-                      type="button"
-                      onClick={() => onOpenReservation(selected.last_reservation_id!)}
-                      className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--ds-border)] px-3.5 text-[13px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                    >
-                      <ArrowRight className="h-4 w-4" aria-hidden />
-                      <span className="hidden sm:inline">Apri prenotazione</span>
-                    </button>
+                  {/* Prenotazioni del numero (N) in un menu, ciascuna apribile
+                      per modificarla — supporta più prenotazioni nella stessa
+                      chat. "Crea prenotazione" resta sempre disponibile per
+                      aggiungerne una nuova. */}
+                  {onOpenReservation && reservationsForPhone.length > 0 && (
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setResMenuOpen(o => !o)}
+                        aria-haspopup="menu"
+                        aria-expanded={resMenuOpen}
+                        className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--ds-border)] px-3.5 text-[13px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      >
+                        <ArrowRight className="h-4 w-4" aria-hidden />
+                        <span className="hidden sm:inline">Prenotazioni</span>
+                        <CountBadge count={reservationsForPhone.length} />
+                      </button>
+                      {resMenuOpen && (
+                        <>
+                          {/* Backdrop invisibile: un click fuori chiude il menu. */}
+                          <div className="fixed inset-0 z-40" onClick={() => setResMenuOpen(false)} aria-hidden />
+                          <div
+                            role="menu"
+                            className="absolute right-0 z-50 mt-1.5 max-h-[60vh] w-[19rem] max-w-[85vw] overflow-y-auto rounded-[14px] border border-[var(--ds-border)] bg-[var(--ds-surface)] p-1.5 shadow-lg"
+                          >
+                            {reservationsForPhone.map(res => {
+                              const badge = reservationStatusPill(res.reservation_status ?? null);
+                              return (
+                                <button
+                                  key={res.id}
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => { setResMenuOpen(false); onOpenReservation(res.id); }}
+                                  className="flex w-full flex-col gap-0.5 rounded-[10px] px-2.5 py-2 text-left transition-colors hover:bg-[var(--ds-surface-row)]"
+                                >
+                                  <span className="flex items-center gap-2 text-[14px] text-[var(--ds-text-primary)]">
+                                    <span className="truncate font-medium">{toTitleCase(res.customer_name) || 'Prenotazione'}</span>
+                                    {badge && <StatusPill tone={badge.tone}>{badge.label}</StatusPill>}
+                                  </span>
+                                  <span className="text-[12px] text-[var(--ds-text-muted)]">
+                                    {formatReservationWhen(res.reservation_time)}
+                                    {res.guests != null && ` · ${res.guests} ospiti`}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
+                    </div>
                   )}
                   {onCreateReservationFromContact && (
                     <button
