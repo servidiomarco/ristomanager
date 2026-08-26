@@ -21,6 +21,7 @@ interface Props {
 const FIRE_MODE_LABELS: { value: FireMode; title: string; hint: string }[] = [
   { value: 'AUTO_ALL',   title: 'Tutto subito',       hint: 'Ogni uscita parte in cucina appena il cameriere invia. Senza passe.' },
   { value: 'AUTO_FIRST', title: 'Prima uscita subito', hint: 'La 1ª parte da sola, le successive aspettano il lancio dal Passe.' },
+  { value: 'AUTO_NEXT',  title: 'A consumo',          hint: 'La successiva parte da sola quando segni servita la precedente.' },
   { value: 'MANUAL',     title: 'Tutto dal passe',    hint: 'Nessuna uscita parte da sola: le lancia tutte l\'expediter dal Passe.' },
 ];
 

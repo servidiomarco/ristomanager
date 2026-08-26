@@ -146,13 +146,20 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         const invalido = await api().post(`/kds/items/${riga.id}/status`).set(bearer(token)).send({ status: 'SERVED' });
         expect(invalido.status).toBe(400);
 
-        // Tornare indietro da READY non si può.
+        // Tornare indietro da READY è l'annulla della spunta: torna in
+        // PREPARING e il ready_at si azzera, perché quel pronto non è mai
+        // esistito. Poi si può rispuntare.
         await api().post(`/orders/${orderId}/send`).set(bearer(token)).send({});
         await api().post(`/orders/${orderId}/courses/1/fire`).set(bearer(token)).send({});
         await api().post(`/kds/items/${riga.id}/status`).set(bearer(token)).send({ status: 'READY' });
-        const indietro = await api().post(`/kds/items/${riga.id}/status`).set(bearer(token)).send({ status: 'PREPARING' });
-        expect(indietro.status).toBe(409);
-        expect(indietro.body.status).toBe('READY');
+        const annulla = await api().post(`/kds/items/${riga.id}/status`).set(bearer(token)).send({ status: 'PREPARING' });
+        expect(annulla.status).toBe(200);
+        expect(annulla.body.item.status).toBe('PREPARING');
+        expect(annulla.body.item.ready_at).toBeNull();
+        expect(annulla.body.course_ready).toBe(false);
+        const rispunta = await api().post(`/kds/items/${riga.id}/status`).set(bearer(token)).send({ status: 'READY' });
+        expect(rispunta.status).toBe(200);
+        expect(rispunta.body.item.ready_at).toBeTruthy();
     });
 
     it('recall: un\'uscita proposta ma non lanciata torna in bozza e si può rimandare', async () => {
@@ -247,8 +254,47 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         const uscita = dopo.body.courses.find((c: any) => c.course_no === 1);
         expect(uscita.status).toBe('SERVED');
 
-        // Servire due volte non è ammesso.
+        // Servire due volte non è ammesso, e una riga servita non si
+        // annulla più: il piatto è al tavolo.
         const doppio = await api().post(`/orders/${orderId}/courses/1/serve`).set(bearer(token)).send({});
         expect(doppio.status).toBe(409);
+        const riapri = await api().post(`/kds/items/${rigaA.id}/status`).set(bearer(token)).send({ status: 'PREPARING' });
+        expect(riapri.status).toBe(409);
+    });
+
+    it('in AUTO_NEXT la prima uscita parte all\'invio e la successiva al servito della precedente', async () => {
+        const mode = await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'AUTO_NEXT' });
+        expect(mode.status).toBe(200);
+
+        const orderId = await nuovaComanda();
+        await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [
+                { dish_id: piatto1, qty: 1, course_no: 1 },
+                { dish_id: piatto2, qty: 1, course_no: 2 },
+            ],
+        });
+        // All'invio parte solo la prima (il tavolo non ha niente in cucina).
+        const sent = await api().post(`/orders/${orderId}/send`).set(bearer(token)).send({});
+        expect(sent.status).toBe(200);
+        expect(sent.body.fire_mode).toBe('AUTO_NEXT');
+        expect(sent.body.fired_courses).toEqual([1]);
+        expect(sent.body.queued_courses).toEqual([2]);
+
+        // Servita la prima, la seconda parte da sola nella stessa mossa.
+        const view = await api().get(`/orders/${orderId}`).set(bearer(token));
+        const rigaPrima = righe(view.body).find((i: any) => i.course_no === 1);
+        await api().post(`/kds/items/${rigaPrima.id}/status`).set(bearer(token)).send({ status: 'READY' });
+        const servita = await api().post(`/orders/${orderId}/courses/1/serve`).set(bearer(token)).send({});
+        expect(servita.status).toBe(200);
+        expect(servita.body.next_fired_course).toBe(2);
+
+        const dopo = await api().get(`/orders/${orderId}`).set(bearer(token));
+        const rigaSeconda = righe(dopo.body).find((i: any) => i.course_no === 2);
+        expect(rigaSeconda.status).toBe('SENT');
+        expect(rigaSeconda.fired_at).toBeTruthy();
+
+        // Il default della suite resta AUTO_ALL per i file successivi.
+        const ripristino = await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'AUTO_ALL' });
+        expect(ripristino.status).toBe(200);
     });
 });
