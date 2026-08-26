@@ -990,6 +990,38 @@ const App: React.FC = () => {
     };
   }, [isAuthenticated]);
 
+  // Caricamento in due tempi (26/08): il boot scarica solo la finestra
+  // recente (RESERVATIONS_WINDOW_DAYS indietro + tutto il futuro) e l'app
+  // diventa interattiva subito; lo storico arriva in background e si fonde
+  // nello stato, così schede clienti, ricerca globale e storico telefonate
+  // — che leggono tutto — restano completi. Il tempo di avvio smette di
+  // crescere con lo storico. archiveRef sopravvive alle riconnessioni: la
+  // fetchData di un reconnect ricarica la finestra e rimonta l'archivio già
+  // in memoria senza riscaricarlo.
+  const RESERVATIONS_WINDOW_DAYS = 45;
+  const reservationsArchiveRef = useRef<Reservation[]>([]);
+  const archiveLoadedRef = useRef(false);
+
+  const mergeReservationsById = (primary: Reservation[], secondary: Reservation[]): Reservation[] => {
+    const ids = new Set(primary.map(r => r.id));
+    return [...primary, ...secondary.filter(r => !ids.has(r.id))];
+  };
+
+  const loadReservationsArchive = async (windowFrom: string) => {
+    try {
+      const archive = await getReservations({ to: windowFrom });
+      reservationsArchiveRef.current = archive;
+      archiveLoadedRef.current = true;
+      // prev vince sul duplicato di confine: contiene già gli aggiornamenti
+      // socket arrivati mentre l'archivio era in volo.
+      setReservations(prev => mergeReservationsById(prev, archive));
+    } catch (error) {
+      // Non bloccante: l'app funziona sulla finestra; si ritenta al prossimo
+      // fetchData (reconnect) finché l'archivio non entra.
+      console.warn('Archivio prenotazioni non caricato, si ritenta al prossimo sync:', error);
+    }
+  };
+
   const fetchData = async () => {
     // L'admin piattaforma non opera il CRM del tenant: per scelta (D2) non ha
     // righe nella matrice permessi, quindi questi cinque endpoint gli
@@ -1000,13 +1032,14 @@ const App: React.FC = () => {
       setIsInitialDataLoading(false);
       return;
     }
+    const windowFrom = getRomeDatePart(new Date(Date.now() - RESERVATIONS_WINDOW_DAYS * 86400000));
     try {
       const [roomsData, tablesData, dishesData, banquetMenusData, reservationsData] = await Promise.all([
         getRooms(),
         getTables(),
         getDishes(),
         getBanquetMenus(),
-        getReservations(),
+        getReservations({ from: windowFrom }),
       ]);
 
       // Check for duplicate table IDs and filter them out
@@ -1036,7 +1069,7 @@ const App: React.FC = () => {
       setTables(uniqueTables);
       setDishes(dishesData);
       setBanquetMenus(banquetMenusData);
-      setReservations(reservationsData);
+      setReservations(mergeReservationsById(reservationsData, reservationsArchiveRef.current));
       hydrateBellFromRecentReservations(reservationsData);
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -1044,6 +1077,10 @@ const App: React.FC = () => {
     } finally {
       setIsInitialDataLoading(false);
     }
+    // Secondo tempo, fuori dal percorso critico: parte dopo che l'app è
+    // interattiva. `to` = windowFrom incluso: un giorno di sovrapposizione
+    // col primo tempo, il dedup per id lo assorbe.
+    if (!archiveLoadedRef.current) void loadReservationsArchive(windowFrom);
   };
 
   // Dedup guard: same message+type+title emitted within this window are
