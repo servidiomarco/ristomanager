@@ -17,6 +17,7 @@ import { runAgent, confirmProposal, discardProposal, type AgentProposal } from '
 import { listMedia, attachFromLibrary, type MediaFile } from '../services/mediaApiService';
 import { getFeatureFlags } from '../services/apiService';
 import { toTitleCase } from '../utils/text';
+import { Shift } from '../types';
 import {
   SearchField, StatusPill, Callout, SegmentedControl, SplitPane, SectionHeader,
   Avatar, EmptyState, SwipeRow, useFirstRunHint, dsIconButton, PanePlaceholder, CountBadge,
@@ -138,11 +139,30 @@ const displayName = (c: ConversationSummary): string =>
   (c.customer_name && c.customer_name.trim() && toTitleCase(c.customer_name)) || c.phone || `+${c.phone_digits}`;
 
 interface InboxPageProps {
-  /** Apre il modulo nuova prenotazione col contatto già compilato. */
-  onCreateReservationFromContact?: (contact: { customer_name?: string; phone?: string }) => void;
+  /**
+   * Apre il modulo nuova prenotazione precompilato dal messaggio. `phone_digits`
+   * dice ad App a quale conversazione riagganciare la prenotazione creata; gli
+   * altri campi (data/ora/coperti/zona/note) arrivano dal parsing AT del thread.
+   */
+  onCreateReservationFromContact?: (contact: {
+    phone_digits?: string;
+    customer_name?: string;
+    phone?: string;
+    date?: string;
+    time?: string;
+    shift?: Shift;
+    guests?: number;
+    children?: number;
+    notes?: string;
+    location_preference?: 'INDOOR' | 'OUTDOOR';
+  }) => void;
+  /** Apre la prenotazione già agganciata al thread, per modificarla. */
+  onOpenReservation?: (reservationId: number) => void;
+  /** Bumped da App dopo un aggancio: la lista si ricarica senza reload. */
+  refreshTick?: number;
 }
 
-const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact }) => {
+const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, onOpenReservation, refreshTick }) => {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [convLoading, setConvLoading] = useState(true);
   const [convError, setConvError] = useState<string | null>(null);
@@ -201,6 +221,15 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
   }, []);
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
+
+  // App bumps refreshTick after linking a freshly-created reservation to this
+  // thread — reload so the header flips to "Apri prenotazione". Skip the very
+  // first render (loadConversations already ran above).
+  const firstRefreshTick = useRef(true);
+  useEffect(() => {
+    if (firstRefreshTick.current) { firstRefreshTick.current = false; return; }
+    loadConversations();
+  }, [refreshTick, loadConversations]);
 
   const loadTimeline = useCallback(async (phoneDigits: string) => {
     setMsgLoading(true);
@@ -409,6 +438,48 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
 
   // Cambiando conversazione la proposta non deve seguirti addosso.
   useEffect(() => { setProposal(null); }, [selectedKey]);
+
+  // "Crea prenotazione" dalla chat: precompila il modulo coi campi che
+  // l'agente ha già estratto dal messaggio (anche in inglese). Se non c'è una
+  // proposta di creazione a portata di mano, fa un giro dell'agente al volo per
+  // parsare il thread; se comunque non basta, apre col solo nome+telefono come
+  // prima. `phone_digits` fa sì che App riagganci poi la prenotazione al thread.
+  const handleCreateReservation = useCallback(async () => {
+    if (!selected || !onCreateReservationFromContact) return;
+    let args: Record<string, any> | null =
+      proposal && proposal.tool === 'create_reservation' ? proposal.args : null;
+    if (!args && aiEnabled) {
+      setSuggesting(true);
+      setSendError(null);
+      try {
+        const r = await runAgent(selected.phone_digits);
+        if (r.proposal && r.proposal.tool === 'create_reservation') {
+          args = r.proposal.args;
+          setProposal(r.proposal);
+        }
+      } catch {
+        /* niente parsing: si apre con nome+telefono */
+      } finally {
+        setSuggesting(false);
+      }
+    }
+    const shiftArg = args?.shift === 'LUNCH' || args?.shift === 'DINNER'
+      ? (args.shift as Shift) : undefined;
+    onCreateReservationFromContact({
+      phone_digits: selected.phone_digits,
+      customer_name: (typeof args?.customer_name === 'string' && args.customer_name.trim())
+        ? args.customer_name : (selected.customer_name || undefined),
+      phone: selected.phone || selected.phone_digits,
+      date: typeof args?.date === 'string' ? args.date : undefined,
+      time: typeof args?.time === 'string' ? args.time : undefined,
+      shift: shiftArg,
+      guests: typeof args?.guests === 'number' ? args.guests : undefined,
+      children: typeof args?.children === 'number' ? args.children : undefined,
+      notes: typeof args?.notes === 'string' ? args.notes : undefined,
+      location_preference: args?.location_preference === 'INDOOR' || args?.location_preference === 'OUTDOOR'
+        ? args.location_preference : undefined,
+    });
+  }, [selected, proposal, aiEnabled, onCreateReservationFromContact]);
 
   const handleConfirmProposal = useCallback(async () => {
     if (!proposal || proposalBusy) return;
@@ -692,19 +763,26 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
                       <Clock className="h-3 w-3" aria-hidden /> Finestra WA: {windowRemaining}
                     </StatusPill>
                   )}
-                  {/* Chi scrive senza avere una prenotazione e' un cliente da
-                      acquisire: il numero e' gia' qui, ricopiarlo a mano e'
-                      l'unico attrito fra il messaggio e il tavolo prenotato. */}
-                  {onCreateReservationFromContact && !selected.last_reservation_id && (
+                  {/* Prenotazione già agganciata al thread → si riapre per
+                      modificarla. Altrimenti "Crea prenotazione" precompila il
+                      modulo dal messaggio (parsing AI) e poi la riaggancia qui. */}
+                  {selected.last_reservation_id && onOpenReservation ? (
                     <button
                       type="button"
-                      onClick={() => onCreateReservationFromContact({
-                        customer_name: selected.customer_name || undefined,
-                        phone: selected.phone || selected.phone_digits,
-                      })}
-                      className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      onClick={() => onOpenReservation(selected.last_reservation_id!)}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--ds-border)] px-3.5 text-[13px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
-                      <CalendarPlus className="h-4 w-4" aria-hidden />
+                      <ArrowRight className="h-4 w-4" aria-hidden />
+                      <span className="hidden sm:inline">Apri prenotazione</span>
+                    </button>
+                  ) : onCreateReservationFromContact && !selected.last_reservation_id && (
+                    <button
+                      type="button"
+                      onClick={handleCreateReservation}
+                      disabled={suggesting}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    >
+                      {suggesting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <CalendarPlus className="h-4 w-4" aria-hidden />}
                       <span className="hidden sm:inline">Crea prenotazione</span>
                     </button>
                   )}

@@ -472,6 +472,22 @@ const computePreflightWarnings = (
   return warnings;
 };
 
+// Prefill applied when the new-reservation form auto-opens. Beyond
+// name/phone it can carry a parsed booking (from a voice call or the inbox
+// AI): date/time/guests/zone/notes pre-populate the form so staff only
+// confirm. All fields optional — what's missing falls back to the defaults.
+export interface NewReservationPrefill {
+  customer_name?: string;
+  phone?: string;
+  date?: string;   // YYYY-MM-DD
+  time?: string;   // HH:MM
+  shift?: Shift;
+  guests?: number;
+  children?: number;
+  notes?: string;
+  location_preference?: 'INDOOR' | 'OUTDOOR';
+}
+
 interface ReservationListProps {
   reservations: Reservation[];
   banquetMenus: BanquetMenu[];
@@ -494,7 +510,7 @@ interface ReservationListProps {
   autoOpenNewKind?: 'standard' | 'walkin';
   // Optional prefill applied when the form auto-opens (used when converting a
   // voice call into a booking).
-  newReservationPrefill?: { customer_name?: string; phone?: string };
+  newReservationPrefill?: NewReservationPrefill;
   onAutoOpenNewHandled?: () => void;
   modalOnly?: boolean;
   onModalClose?: () => void;
@@ -2023,18 +2039,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   }
 
 
-  const handleOpenNew = (opts: { walkIn?: boolean; prefill?: { customer_name?: string; phone?: string } } = {}) => {
+  const handleOpenNew = (opts: { walkIn?: boolean; prefill?: NewReservationPrefill } = {}) => {
       const walkIn = !!opts.walkIn;
       const prefill = opts.prefill;
       // For a walk-in we use "now" (and derive the shift from current time), so the
       // operator only has to pick a table and confirm. For standard bookings we keep
-      // the date/shift currently in view.
+      // the date/shift currently in view — unless the prefill carries a parsed
+      // date/time/shift (inbox AI or voice call), which then wins.
       const now = new Date();
       const walkInShift: Shift = now.getHours() < 17 ? Shift.LUNCH : Shift.DINNER;
+      // Shift from prefill: explicit, or derived from the prefilled time
+      // (matches the backend rule hh<17 → LUNCH).
+      const prefillShift: Shift | undefined = prefill?.shift
+        ?? (prefill?.time ? (parseInt(prefill.time.split(':')[0], 10) < 17 ? Shift.LUNCH : Shift.DINNER) : undefined);
       const newShift = walkIn
         ? walkInShift
-        : (selectedShift === 'ALL' ? Shift.DINNER : selectedShift);
-      const dateOnly = selectedDate.split('T')[0];
+        : (prefillShift ?? (selectedShift === 'ALL' ? Shift.DINNER : selectedShift));
+      const dateOnly = (!walkIn && prefill?.date) ? prefill.date : selectedDate.split('T')[0];
       // Walk-in = "adesso", ma dentro la finestra del turno: registrato alle
       // 11:18 il tavolo parte all'apertura (13:00), non a metà mattina.
       const clampToShiftWindow = (d: Date, shift: Shift): string => {
@@ -2044,12 +2065,17 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       };
       const reservationTime = walkIn
         ? `${formatLocalDate(now)}T${clampToShiftWindow(now, walkInShift)}`
-        : `${dateOnly}T${getDefaultTime(newShift)}`;
+        : `${dateOnly}T${prefill?.time || getDefaultTime(newShift)}`;
+      // Zona richiesta → nota leggibile: il form assegna il tavolo a mano, ma
+      // così lo staff vede subito "esterno/interno" accanto alla richiesta.
+      const zoneHint = prefill?.location_preference === 'OUTDOOR' ? 'Zona: esterno'
+        : prefill?.location_preference === 'INDOOR' ? 'Zona: interno' : '';
+      const prefillNotes = walkIn ? '' : [zoneHint, prefill?.notes?.trim()].filter(Boolean).join(' · ');
       setFormData({
         customer_name: prefill?.customer_name || (walkIn ? 'Walk-in' : ''),
         phone: prefill?.phone || undefined,
-        guests: 2,
-        children: 0,
+        guests: (!walkIn && prefill?.guests && prefill.guests > 0) ? Math.trunc(prefill.guests) : 2,
+        children: (!walkIn && prefill?.children && prefill.children > 0) ? Math.trunc(prefill.children) : 0,
         reservation_time: reservationTime,
         shift: newShift,
         payment_status: PaymentStatus.PENDING,
@@ -2057,7 +2083,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         enable_reminder: walkIn ? false : true,
         reminder_sent: false,
         arrival_status: walkIn ? ArrivalStatus.ARRIVED : ArrivalStatus.WAITING,
-        notes: '',
+        notes: prefillNotes,
         duration_minutes: defaultDurationForShift(newShift),
         // Il consenso allergie compare (e si auto-spunta) solo quando viene
         // inserito un allergene — vedi l'effect dedicato. Una nuova prenotazione

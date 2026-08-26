@@ -156,6 +156,16 @@ class MessagesApiService {
     });
   }
 
+  // Aggancia una prenotazione al thread così lo staff può riaprirla dalla
+  // chat. Usato dopo la creazione rapida dalla conversazione.
+  async linkReservation(phoneDigits: string, reservationId: number): Promise<{ ok: true; reservation_id: number }> {
+    return apiRequest(`${API_URL}/messages/conversations/${encodeURIComponent(phoneDigits)}/link`, {
+      method: 'PATCH',
+      headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reservation_id: reservationId }),
+    });
+  }
+
   async send(params: {
     phone: string;
     text: string;
