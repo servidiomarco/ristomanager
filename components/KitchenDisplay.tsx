@@ -223,6 +223,19 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   const todo = columns.filter(c => !isUpcoming(c));
   const upcoming = columns.filter(isUpcoming);
 
+  // Totale vivo per piatto di tutta la coda ("5× tagliata"): il cuoco che
+  // batch-a le cotture lo legge qui invece di sommare a mente fra le card.
+  // Diverso dal banner del servizio, che è previsionale dalle prenotazioni:
+  // questo conta solo ciò che è lanciato e non ancora pronto.
+  const allDay = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const i of items) {
+      if (i.status === 'READY') continue;
+      totals.set(i.name_snapshot, (totals.get(i.name_snapshot) ?? 0) + i.qty);
+    }
+    return [...totals.entries()].sort((a, b) => b[1] - a[1]);
+  }, [items]);
+
   const stationName = stationId == null
     ? 'Senza partita'
     : catalogue?.stations.find(s => s.id === stationId)?.name ?? `Partita ${stationId}`;
@@ -271,6 +284,22 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           open={summaryOpen}
           onToggle={() => setSummaryOpen(o => !o)}
         />
+      )}
+
+      {allDay.length > 0 && (
+        <div className="flex-shrink-0 px-4 pb-3">
+          <div className="flex items-center gap-2 overflow-x-auto rounded-[20px] bg-[var(--ds-surface)] px-3 py-2 shadow-[var(--ds-shadow-card)]">
+            {allDay.map(([name, qty]) => (
+              <span
+                key={name}
+                className="inline-flex flex-shrink-0 items-baseline gap-1 rounded-full bg-[var(--ds-surface-row)] px-2.5 py-1 text-[14px] font-semibold text-[var(--ds-text-primary)]"
+              >
+                <span className="tabular-nums">{qty}×</span>
+                <span>{name}</span>
+              </span>
+            ))}
+          </div>
+        </div>
       )}
 
       <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-4 pb-4">
@@ -460,17 +489,18 @@ const CourseCard: React.FC<{
           // Ogni riga si spunta da sola: i piatti veloci escono senza aspettare
           // il resto dell'uscita. Il server accetta anche SENT→READY diretto, e
           // avvisa il passe solo quando l'ultima riga dell'uscita è pronta.
-          // La spunta non si annulla (READY→PREPARING è 409 per contratto): se
-          // i tocchi accidentali diventassero un problema in servizio, la
-          // protezione va messa qui, con una breve finestra "annulla" client.
-          return i.status === 'READY' ? (
-            <div key={i.id} className="px-1.5 py-1.5">{body}</div>
-          ) : (
+          // Un tocco sulla riga spuntata la annulla (READY→PREPARING, ready_at
+          // azzerato): l'errore di spunta si corregge con lo stesso gesto che
+          // l'ha creato, finché l'uscita non è servita.
+          const ready = i.status === 'READY';
+          return (
             <button
               key={i.id}
               type="button"
-              onClick={() => onAdvance(i, 'READY')}
-              aria-label={`Segna pronto: ${i.qty} ${i.name_snapshot}`}
+              onClick={() => onAdvance(i, ready ? 'PREPARING' : 'READY')}
+              aria-label={ready
+                ? `Annulla pronto: ${i.qty} ${i.name_snapshot}`
+                : `Segna pronto: ${i.qty} ${i.name_snapshot}`}
               className="block min-h-11 w-full rounded-[12px] px-1.5 py-1.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] active:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >
               {body}

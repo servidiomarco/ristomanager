@@ -244,6 +244,8 @@ export const setKdsItemStatus = async (
 export interface ExpediterStationState {
   station_id: number | null;
   ready: boolean;
+  /** Righe già pronte della partita: l'avanzamento parziale (2/3). */
+  ready_items: number;
   items: number;
 }
 

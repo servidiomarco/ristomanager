@@ -561,6 +561,28 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
     };
   }, [serviceQuery]);
 
+  // L'uscita cambia stato in cucina sotto gli occhi del cameriere: il badge
+  // ("in cucina", "pronta", "servita") si aggiorna da solo, senza aspettare
+  // il prossimo invio o una riapertura. Filtrato sulla comanda aperta: gli
+  // eventi delle altre non devono far scaricare niente.
+  const openOrderId = order?.order.id ?? null;
+  useEffect(() => {
+    const socket = socketClient.getSocket();
+    if (!socket || openOrderId == null) return;
+    const onCourse = (payload: any) => {
+      if (payload?.order_id !== openOrderId) return;
+      ordersApiService.getOrder(openOrderId).then(setOrder).catch(() => { /* al prossimo evento */ });
+    };
+    socket.on('course:fired', onCourse);
+    socket.on('course:ready', onCourse);
+    socket.on('course:served', onCourse);
+    return () => {
+      socket.off('course:fired', onCourse);
+      socket.off('course:ready', onCourse);
+      socket.off('course:served', onCourse);
+    };
+  }, [openOrderId]);
+
   const notices = (
     <>
       {error && <ErrorBar message={error} onDismiss={() => setError(null)} />}

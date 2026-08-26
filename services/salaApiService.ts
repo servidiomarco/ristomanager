@@ -4,7 +4,7 @@ import { buildApiError } from './apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
-export type FireMode = 'AUTO_ALL' | 'AUTO_FIRST' | 'MANUAL';
+export type FireMode = 'AUTO_ALL' | 'AUTO_FIRST' | 'AUTO_NEXT' | 'MANUAL';
 
 export interface SalaStation {
   id: number;

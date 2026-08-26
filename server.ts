@@ -21970,16 +21970,18 @@ function serviceFromQuery(query: any): CurrentService {
     return { service_date: d ?? now.service_date, shift: sh ?? now.shift };
 }
 
-type CourseFireModeValue = 'AUTO_ALL' | 'AUTO_FIRST' | 'MANUAL';
+type CourseFireModeValue = 'AUTO_ALL' | 'AUTO_FIRST' | 'AUTO_NEXT' | 'MANUAL';
 
 // Come vengono lanciate le uscite. Default prudente ad AUTO_ALL: finché la
 // vista passe non esiste (PR 5) nessuno può lanciare a mano, e un default
 // diverso lascerebbe le uscite ferme in QUEUED senza che nessuno se ne accorga.
+// AUTO_NEXT è il fuoco a consumo: parte una sola uscita alla volta, la
+// successiva quando la precedente viene segnata servita.
 async function getCourseFireMode(tenantId: number): Promise<CourseFireModeValue> {
     try {
         const r = await queryWithRetry(`SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = 'course_fire_mode'`, [tenantId]);
         const v = r.rows[0]?.text_value;
-        if (v === 'AUTO_FIRST' || v === 'MANUAL' || v === 'AUTO_ALL') return v;
+        if (v === 'AUTO_FIRST' || v === 'AUTO_NEXT' || v === 'MANUAL' || v === 'AUTO_ALL') return v;
         return 'AUTO_ALL';
     } catch (err) {
         console.error('[orders] lettura course_fire_mode fallita, uso AUTO_ALL:', err);
@@ -22742,8 +22744,22 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
         }
 
         const proposedCourses = [...new Set(queued.rows.map((r: any) => r.course_no))].sort((a, b) => a - b);
+        // AUTO_NEXT lancia la prima uscita proposta solo se il tavolo non ha
+        // già qualcosa in cucina: se c'è, la prossima partirà dal servito.
+        // Non "solo la 1" come AUTO_FIRST: un dolce ordinato a fine pasto,
+        // a tavolo ormai vuoto di piatti, deve partire da solo.
+        let autoNextFirst: number[] = [];
+        if (mode === 'AUTO_NEXT' && proposedCourses.length > 0) {
+            const inFlight = await client.query(
+                `SELECT 1 FROM order_items
+                 WHERE order_id = $1 AND status IN ('SENT','PREPARING','READY') LIMIT 1`,
+                [orderId]
+            );
+            if (inFlight.rows.length === 0) autoNextFirst = [proposedCourses[0]];
+        }
         const toFire = mode === 'AUTO_ALL' ? proposedCourses
                      : mode === 'AUTO_FIRST' ? proposedCourses.filter(c => c === 1)
+                     : mode === 'AUTO_NEXT' ? autoNextFirst
                      : [];
         const fired: number[] = [];
         for (const c of toFire) {
@@ -22959,10 +22975,12 @@ app.post('/kds/items/:id/status', authenticate, requirePermission('orders:kds'),
         if (next !== 'PREPARING' && next !== 'READY') {
             return res.status(400).json({ error: "status deve essere PREPARING o READY" });
         }
-        // PREPARING solo da SENT, READY da SENT o PREPARING: il cuoco che
-        // segna pronto senza passare da "in preparazione" è normale sui
-        // piatti veloci e non va ostacolato.
-        const allowedFrom = next === 'PREPARING' ? ['SENT'] : ['SENT', 'PREPARING'];
+        // READY da SENT o PREPARING: il cuoco che segna pronto senza passare
+        // da "in preparazione" è normale sui piatti veloci e non va
+        // ostacolato. PREPARING anche da READY: è l'annulla di una spunta
+        // sbagliata — finché l'uscita non è servita si può tornare indietro,
+        // e ready_at si azzera perché quel "pronto" non è mai esistito.
+        const allowedFrom = next === 'PREPARING' ? ['SENT', 'READY'] : ['SENT', 'PREPARING'];
 
         const upd = await queryWithRetry(
             // $2 va castato esplicitamente: senza, Postgres deve dedurne il
@@ -22971,7 +22989,7 @@ app.post('/kds/items/:id/status', authenticate, requirePermission('orders:kds'),
             `UPDATE order_items
              SET status = $2::varchar,
                  started_at = CASE WHEN started_at IS NULL THEN CURRENT_TIMESTAMP ELSE started_at END,
-                 ready_at   = CASE WHEN $2::text = 'READY' THEN CURRENT_TIMESTAMP ELSE ready_at END
+                 ready_at   = CASE WHEN $2::text = 'READY' THEN CURRENT_TIMESTAMP ELSE NULL END
              WHERE id = $1 AND tenant_id = $4 AND status = ANY($3::varchar[])
              RETURNING *`,
             [id, next, allowedFrom, req.tenantId!]
@@ -23089,11 +23107,15 @@ app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), as
             const status = queuedOnly ? 'QUEUED' : allReady ? 'READY' : 'FIRED';
 
             // Una riga per partita coinvolta: sono i pallini del monitor.
+            // ready_items oltre al booleano: da quando la cucina spunta i
+            // piatti uno a uno, il passe vede l'avanzamento (2/3), non solo
+            // il tutto-o-niente.
             const stations = [...new Set(items.map(i => i.station_id))].map(sid => {
                 const mine = items.filter(i => i.station_id === sid);
                 return {
                     station_id: sid,
                     ready: mine.every(i => i.status === 'READY'),
+                    ready_items: mine.filter(i => i.status === 'READY').length,
                     items: mine.length,
                 };
             });
@@ -23315,53 +23337,104 @@ app.post('/orders/:id/courses/:n/call', authenticate, requirePermission('orders:
 // con served_at diventa anche misurabile il tempo reale sotto la lampada.
 // Permessi in alternativa: la segna il passe (expedite) o la sala (take).
 app.post('/orders/:id/courses/:n/serve', authenticate, requireAnyPermission('orders:expedite', 'orders:take'), async (req, res) => {
+    const client = await pool.connect();
     try {
-        if (!(await ordersEnabledGuard(req, res))) return;
+        if (!(await ordersEnabledGuard(req, res))) { client.release(); return; }
         const orderId = parseInt(req.params.id, 10);
         const courseNo = parseInt(req.params.n, 10);
         if (!Number.isFinite(orderId) || !Number.isFinite(courseNo)) {
+            client.release();
             return res.status(400).json({ error: 'Parametri non validi' });
         }
 
-        const cur = await queryWithRetry(
+        const mode = await getCourseFireMode(req.tenantId!);
+        await client.query('BEGIN');
+
+        const ord = await client.query(
+            `SELECT id, table_id FROM orders WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+            [orderId, req.tenantId!]
+        );
+        if (ord.rows.length === 0) {
+            await client.query('ROLLBACK'); client.release();
+            return res.status(404).json({ error: 'Comanda non trovata' });
+        }
+
+        const cur = await client.query(
             `SELECT id, status FROM order_items
              WHERE order_id = $1 AND course_no = $2 AND tenant_id = $3 AND status <> 'VOIDED'`,
             [orderId, courseNo, req.tenantId!]
         );
-        if (cur.rows.length === 0) return res.status(404).json({ error: 'Uscita non trovata' });
+        if (cur.rows.length === 0) {
+            await client.query('ROLLBACK'); client.release();
+            return res.status(404).json({ error: 'Uscita non trovata' });
+        }
 
         // Si serve solo un'uscita interamente pronta: servirla a metà
         // lascerebbe il resto orfano di un momento di uscita vero, e la
         // metrica della lampada racconterebbe una bugia.
         const pending = cur.rows.filter((r: any) => r.status !== 'READY' && r.status !== 'SERVED');
         if (pending.length > 0) {
+            await client.query('ROLLBACK'); client.release();
             return res.status(409).json({ error: "L'uscita non è ancora tutta pronta" });
         }
         if (!cur.rows.some((r: any) => r.status === 'READY')) {
+            await client.query('ROLLBACK'); client.release();
             return res.status(409).json({ error: 'Uscita già servita' });
         }
 
         // Il filtro su READY rende l'operazione idempotente anche sotto due
         // tocchi concorrenti: il secondo non trova righe e fa 409, non danni.
-        const upd = await queryWithRetry(
+        const upd = await client.query(
             `UPDATE order_items
              SET status = 'SERVED', served_at = CURRENT_TIMESTAMP
              WHERE order_id = $1 AND course_no = $2 AND tenant_id = $3 AND status = 'READY'
              RETURNING *`,
             [orderId, courseNo, req.tenantId!]
         );
-        if (upd.rows.length === 0) {
-            return res.status(409).json({ error: 'Uscita già servita' });
+
+        // Fuoco a consumo: servita un'uscita, parte da sola la più bassa in
+        // coda. Nella stessa transazione del servito — come per l'invio, la
+        // cucina non può restare cieca su un lancio committato.
+        let nextFired: number | null = null;
+        let nextItems: any[] = [];
+        if (mode === 'AUTO_NEXT') {
+            const nq = await client.query(
+                `SELECT MIN(course_no) AS n FROM order_items WHERE order_id = $1 AND status = 'QUEUED'`,
+                [orderId]
+            );
+            if (nq.rows[0]?.n != null) {
+                const n = Number(nq.rows[0].n);
+                nextItems = await fireCourseInTx(client, req.tenantId!, orderId, n);
+                if (nextItems.length > 0) nextFired = n;
+            }
         }
+
+        await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId });
+        await client.query('COMMIT');
+        client.release();
 
         try {
             socketService?.broadcastToAll(req.tenantId!, 'course:served', {
                 order_id: orderId, course_no: courseNo,
             });
+            if (nextFired != null) {
+                socketService?.broadcastToAll(req.tenantId!, 'course:fired', {
+                    order_id: orderId, course_no: nextFired, table_id: ord.rows[0].table_id, items: nextItems,
+                });
+                for (const st of new Set(nextItems.map((i: any) => i.station_id))) {
+                    socketService?.broadcastToStation(req.tenantId!, st as number | null, 'kds:fired', {
+                        order_id: orderId, course_no: nextFired, table_id: ord.rows[0].table_id,
+                        items: nextItems.filter((i: any) => i.station_id === st),
+                    });
+                }
+            }
         } catch (_) {}
+        outboxKick();
 
-        res.json({ order_id: orderId, course_no: courseNo, items: upd.rows });
+        res.json({ order_id: orderId, course_no: courseNo, items: upd.rows, next_fired_course: nextFired });
     } catch (err: any) {
+        await client.query('ROLLBACK').catch(() => {});
+        client.release();
         console.error('POST /orders/:id/courses/:n/serve error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
@@ -24868,7 +24941,7 @@ app.post('/print-agent/jobs/:id/ack', printAgentAuth, async (req: any, res) => {
 // in Impostazioni, scritture solo per chi ha settings:full.
 
 const PRINTER_NAME_RE = /^[a-z0-9_-]{1,30}$/;
-const FIRE_MODES = ['AUTO_ALL', 'AUTO_FIRST', 'MANUAL'];
+const FIRE_MODES = ['AUTO_ALL', 'AUTO_FIRST', 'AUTO_NEXT', 'MANUAL'];
 
 // Instradamento per funzionalità: su quale termica escono il preconto e il
 // foglietto QR del conto. Chiavi app_settings, NULL/assente = default
@@ -25252,7 +25325,7 @@ app.post('/sala/profiles/:id/activate', authenticate, requirePermission('setting
         const { name, payload } = p.rows[0];
 
         await client.query('BEGIN');
-        if (payload?.fire_mode && ['AUTO_ALL', 'AUTO_FIRST', 'MANUAL'].includes(payload.fire_mode)) {
+        if (payload?.fire_mode && FIRE_MODES.includes(payload.fire_mode)) {
             await client.query(
                 `INSERT INTO app_settings (tenant_id, key, text_value) VALUES ($1, 'course_fire_mode', $2)
                  ON CONFLICT (tenant_id, key) DO UPDATE SET text_value = $2, updated_at = CURRENT_TIMESTAMP`,

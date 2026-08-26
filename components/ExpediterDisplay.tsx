@@ -232,25 +232,38 @@ const CourseRow: React.FC<{
       <div className="flex flex-shrink-0 items-center gap-3">
         {stations.map(s => {
           const st = c.stations.find(x => x.station_id === s.id);
+          // Da quando la cucina spunta i piatti uno a uno, fra "niente" e
+          // "tutto" c'è l'avanzamento: il conteggio 2/3 al posto del cerchio
+          // vuoto dice quanto manca senza chiedere niente alla vista.
+          const partial = st && !st.ready && st.ready_items > 0;
           return (
             <div key={s.id} className="flex w-14 flex-col items-center">
-              <span
-                className={`text-[22px] leading-none ${
-                  !st ? 'text-[var(--ds-border-strong)]'
-                  : st.ready ? 'text-[var(--ds-seated-solid)]'
-                  : 'text-[var(--ds-text-subtle)]'
-                }`}
-                aria-hidden
-              >
-                {!st ? '—' : st.ready ? '●' : '○'}
-              </span>
+              {partial ? (
+                <span className="text-[14px] font-semibold leading-[22px] tabular-nums text-[var(--ds-pending-text)]" aria-hidden>
+                  {st.ready_items}/{st.items}
+                </span>
+              ) : (
+                <span
+                  className={`text-[22px] leading-none ${
+                    !st ? 'text-[var(--ds-border-strong)]'
+                    : st.ready ? 'text-[var(--ds-seated-solid)]'
+                    : 'text-[var(--ds-text-subtle)]'
+                  }`}
+                  aria-hidden
+                >
+                  {!st ? '—' : st.ready ? '●' : '○'}
+                </span>
+              )}
               {/* Troncato a tre lettere, non messo in maiuscolo: la troncatura
                   è per lo spazio, il maiuscolo non aggiungeva nulla. */}
               <span className="mt-0.5 text-[11px] font-medium text-[var(--ds-text-muted)]">
                 {s.name.slice(0, 3)}
               </span>
               <span className="sr-only">
-                {s.name}: {!st ? 'non coinvolta' : st.ready ? 'pronta' : 'in corso'}
+                {s.name}: {!st ? 'non coinvolta'
+                  : st.ready ? 'pronta'
+                  : partial ? `${st.ready_items} piatti pronti su ${st.items}`
+                  : 'in corso'}
               </span>
             </div>
           );

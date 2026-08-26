@@ -534,8 +534,9 @@ export type OrderItemStatus =
 export type CourseStatus = 'PENDING' | 'QUEUED' | 'FIRED' | 'READY' | 'SERVED';
 
 // Come vengono lanciate le uscite. AUTO_ALL finché il passe non esiste,
-// AUTO_FIRST a regime, MANUAL per i banchetti.
-export type CourseFireMode = 'AUTO_ALL' | 'AUTO_FIRST' | 'MANUAL';
+// AUTO_FIRST a regime, MANUAL per i banchetti. AUTO_NEXT è il fuoco a
+// consumo: la successiva parte quando la precedente viene segnata servita.
+export type CourseFireMode = 'AUTO_ALL' | 'AUTO_FIRST' | 'AUTO_NEXT' | 'MANUAL';
 
 export interface OrderItem {
   id: number;
