@@ -963,6 +963,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
           tables={tables}
           rooms={rooms}
           reservationByTableId={reservationByTableId}
+          reservationsByTableId={reservationsByTableId}
           activeRoomId={activeRoomId}
           setActiveRoomId={setActiveRoomId}
           onClose={() => setViewMode('list')}
@@ -1826,6 +1827,7 @@ interface RoomMapProps {
   tables: Table[];
   rooms: Room[];
   reservationByTableId: Map<number, Reservation>;
+  reservationsByTableId: Map<number, Reservation[]>;
   activeRoomId: number | null;
   setActiveRoomId: (id: number) => void;
   onClose: () => void;
@@ -1842,6 +1844,7 @@ const RoomMap: React.FC<RoomMapProps> = ({
   tables,
   rooms,
   reservationByTableId,
+  reservationsByTableId,
   activeRoomId,
   setActiveRoomId,
   onClose,
@@ -1980,6 +1983,12 @@ const RoomMap: React.FC<RoomMapProps> = ({
               let haloClass = '';
               let caption: string | null = null;
 
+              // Un tavolo può avere due turni nella stessa serata: la mappa
+              // mostrava solo la prenotazione prioritaria. Contiamo le altre per
+              // segnalarle con un badge "+N" e listarle nel tooltip.
+              const otherAtTable = (reservationsByTableId.get(t.id) ?? []).filter(o => o.id !== res?.id);
+              const extraCount = otherAtTable.length;
+
               if (res) {
                 const firstName = toTitleCase(res.customer_name)?.split(' ')[0] || 'Ospite';
                 switch (status) {
@@ -2003,7 +2012,17 @@ const RoomMap: React.FC<RoomMapProps> = ({
                     caption = `${formatHHMM(res.reservation_time)} · ${firstName}`;
                     break;
                 }
+                // Segnala i turni successivi sullo stesso tavolo.
+                if (caption && extraCount > 0) caption = `${caption} +${extraCount}`;
               }
+
+              // Tooltip: tutte le prenotazioni del tavolo, in ordine di orario.
+              const titleText = res
+                ? `${t.name} · ${[res, ...otherAtTable]
+                    .sort((x, y) => new Date(x.reservation_time).getTime() - new Date(y.reservation_time).getTime())
+                    .map(x => `${formatHHMM(x.reservation_time)} ${toTitleCase(x.customer_name) || 'Senza nome'} (${x.guests}p)`)
+                    .join(' · ')}`
+                : `${t.name} · libero`;
 
               const disabled = !res;
 
@@ -2021,7 +2040,7 @@ const RoomMap: React.FC<RoomMapProps> = ({
                     width: glyphW,
                     height: glyphH,
                   }}
-                  title={res ? `${t.name} · ${toTitleCase(res.customer_name)}` : `${t.name} · libero`}
+                  title={titleText}
                 >
                   <div
                     className={`relative ${haloClass}`}
@@ -2037,6 +2056,14 @@ const RoomMap: React.FC<RoomMapProps> = ({
                         fit
                       />
                     </div>
+                    {extraCount > 0 && (
+                      <span
+                        className="absolute -right-1.5 -top-1.5 z-10 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--ds-arriving-solid)] px-1 text-[10px] font-bold text-white shadow-[var(--ds-shadow-card)]"
+                        aria-label={`${extraCount + 1} prenotazioni su questo tavolo`}
+                      >
+                        +{extraCount}
+                      </span>
+                    )}
                   </div>
                   {caption && (
                     <span className="absolute -bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-[var(--ds-surface)] px-2 py-0.5 text-[10px] font-semibold tabular-nums text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]">
