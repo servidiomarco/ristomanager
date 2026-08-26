@@ -148,6 +148,9 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
     const onChange = () => reload();
     socket.on('kds:fired', onChange);
     socket.on('kds:item', onChange);
+    // Servita al passe: le righe escono dalla coda e la card verde sparisce
+    // anche dal monitor di partita, non solo dal passe.
+    socket.on('course:served', onChange);
     socket.on('orderItem:voided', onChange);
     socket.on('connect', onChange);
 
@@ -155,6 +158,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
     return () => {
       socket.off('kds:fired', onChange);
       socket.off('kds:item', onChange);
+      socket.off('course:served', onChange);
       socket.off('orderItem:voided', onChange);
       socket.off('connect', onChange);
       clearInterval(poll);

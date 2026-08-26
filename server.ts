@@ -53,7 +53,7 @@ import type { PassepartoutComanda, EsitoChiusuraComanda } from './services/passe
 import { Shift, PaymentStatus, UserRole } from './types.js';
 import authRoutes from './auth/authRoutes.js';
 import logRoutes from './activityLogs/logRoutes.js';
-import { authenticate, authorize, requirePermission } from './auth/authMiddleware.js';
+import { authenticate, authorize, requirePermission, requireAnyPermission } from './auth/authMiddleware.js';
 import { AuthService } from './auth/authService.js';
 import { RolePermissionService } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
@@ -23310,6 +23310,63 @@ app.post('/orders/:id/courses/:n/call', authenticate, requirePermission('orders:
     }
 });
 
+// L'uscita lascia il passe: READY → SERVED su tutte le righe. Prima il ciclo
+// moriva a READY e il monitor accumulava uscite verdi già portate al tavolo;
+// con served_at diventa anche misurabile il tempo reale sotto la lampada.
+// Permessi in alternativa: la segna il passe (expedite) o la sala (take).
+app.post('/orders/:id/courses/:n/serve', authenticate, requireAnyPermission('orders:expedite', 'orders:take'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(req, res))) return;
+        const orderId = parseInt(req.params.id, 10);
+        const courseNo = parseInt(req.params.n, 10);
+        if (!Number.isFinite(orderId) || !Number.isFinite(courseNo)) {
+            return res.status(400).json({ error: 'Parametri non validi' });
+        }
+
+        const cur = await queryWithRetry(
+            `SELECT id, status FROM order_items
+             WHERE order_id = $1 AND course_no = $2 AND tenant_id = $3 AND status <> 'VOIDED'`,
+            [orderId, courseNo, req.tenantId!]
+        );
+        if (cur.rows.length === 0) return res.status(404).json({ error: 'Uscita non trovata' });
+
+        // Si serve solo un'uscita interamente pronta: servirla a metà
+        // lascerebbe il resto orfano di un momento di uscita vero, e la
+        // metrica della lampada racconterebbe una bugia.
+        const pending = cur.rows.filter((r: any) => r.status !== 'READY' && r.status !== 'SERVED');
+        if (pending.length > 0) {
+            return res.status(409).json({ error: "L'uscita non è ancora tutta pronta" });
+        }
+        if (!cur.rows.some((r: any) => r.status === 'READY')) {
+            return res.status(409).json({ error: 'Uscita già servita' });
+        }
+
+        // Il filtro su READY rende l'operazione idempotente anche sotto due
+        // tocchi concorrenti: il secondo non trova righe e fa 409, non danni.
+        const upd = await queryWithRetry(
+            `UPDATE order_items
+             SET status = 'SERVED', served_at = CURRENT_TIMESTAMP
+             WHERE order_id = $1 AND course_no = $2 AND tenant_id = $3 AND status = 'READY'
+             RETURNING *`,
+            [orderId, courseNo, req.tenantId!]
+        );
+        if (upd.rows.length === 0) {
+            return res.status(409).json({ error: 'Uscita già servita' });
+        }
+
+        try {
+            socketService?.broadcastToAll(req.tenantId!, 'course:served', {
+                order_id: orderId, course_no: courseNo,
+            });
+        } catch (_) {}
+
+        res.json({ order_id: orderId, course_no: courseNo, items: upd.rows });
+    } catch (err: any) {
+        console.error('POST /orders/:id/courses/:n/serve error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 // --- Ponte comanda → conto (PR 6) -------------------------------------------
 // `table_bills.total_cents` smette di essere un numero digitato dal cameriere
 // e diventa la somma delle righe non stornate. È la parte delicata del piano,
@@ -24403,6 +24460,26 @@ app.get('/reports/kitchen', authenticate, requirePermission('orders:expedite'), 
             [from, to, req.tenantId!]
         );
 
+        // Attesa al ritiro: da quando l'uscita è tutta pronta a quando la
+        // sala la porta via. È il tempo vero sotto la lampada — misurabile
+        // solo da quando esiste il "servita", quindi su dati vecchi è vuoto.
+        const ritiro = await queryWithRetry(
+            `SELECT COUNT(*)::int AS uscite,
+                    ROUND(AVG(GREATEST(0, EXTRACT(epoch FROM (served_at - ready_at))))/60.0, 1) AS attesa_media_min,
+                    ROUND(MAX(GREATEST(0, EXTRACT(epoch FROM (served_at - ready_at))))/60.0, 1) AS attesa_massima_min
+             FROM (
+                 SELECT MAX(ready_at) AS ready_at, MAX(served_at) AS served_at
+                 FROM order_items
+                 WHERE status = 'SERVED' AND line_kind = 'DISH'
+                   AND ready_at IS NOT NULL AND served_at IS NOT NULL
+                   AND tenant_id = $3
+                   AND ($1::date IS NULL OR fired_at >= $1::date)
+                   AND ($2::date IS NULL OR fired_at < ($2::date + INTERVAL '1 day'))
+                 GROUP BY order_id, course_no
+             ) q`,
+            [from, to, req.tenantId!]
+        );
+
         // Scarto: cosa è stato stornato e perché. La motivazione è
         // obbligatoria dalla PR 7, quindi qui c'è sempre qualcosa da leggere.
         const scarti = await queryWithRetry(
@@ -24427,6 +24504,7 @@ app.get('/reports/kitchen', authenticate, requirePermission('orders:expedite'), 
             partite: perStation.rows,
             sincronia: sync.rows[0],
             passe: passe.rows[0],
+            ritiro: ritiro.rows[0],
             scarti: scarti.rows,
         });
     } catch (err: any) {

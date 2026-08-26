@@ -293,6 +293,12 @@ export const callCourse = async (orderId: number, courseNo: number): Promise<{ t
     method: 'POST', headers: getHeaders(),
   });
 
+/** L'uscita lascia il passe: tutte le righe pronte diventano servite. */
+export const serveCourse = async (orderId: number, courseNo: number): Promise<unknown> =>
+  apiRequest(`${API_URL}/orders/${orderId}/courses/${courseNo}/serve`, {
+    method: 'POST', headers: getHeaders(),
+  });
+
 // --- Ponte al conto ----------------------------------------------------------
 
 export interface CloseOrderResult {
@@ -370,6 +376,8 @@ export interface KitchenReport {
     delta_medio_min: string | null; delta_mediano_min: string | null; delta_massimo_min: string | null;
   };
   passe: { uscite: number; attesa_media_min: string | null; attesa_massima_min: string | null };
+  /** Da uscita tutta pronta a servita: il tempo vero sotto la lampada. */
+  ritiro: { uscite: number; attesa_media_min: string | null; attesa_massima_min: string | null };
   scarti: { motivo: string | null; righe: number; valore_cents: number }[];
 }
 
