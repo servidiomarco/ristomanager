@@ -6652,6 +6652,76 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
     }
 });
 
+// Estrae i campi di una prenotazione dal thread per precompilare il modulo
+// "Crea prenotazione" della chat. Diversa da /agent/run: forza la lettura dei
+// campi (data/ora/coperti/zona/note) invece di aspettare che l'agente proponga
+// un'azione, che per una richiesta nuova non avviene. Non crea nulla.
+app.post('/messages/agent/extract-booking', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    try {
+        if (!(await getFeatureFlag(req.tenantId!, 'ai_messages_enabled', false))) {
+            return res.status(403).json({ error: 'feature_disabled', message: 'Messaggi con AI disattivato.' });
+        }
+        if (!whatsappAgent.isAgentConfigured()) {
+            return res.status(503).json({ error: 'not_configured', message: 'ANTHROPIC_API_KEY non configurata sul backend' });
+        }
+        const key = String(req.body?.phone_digits ?? '').replace(/\D/g, '').slice(-10);
+        if (!key) return res.status(400).json({ error: 'phone_digits mancante' });
+
+        const msgs = await queryWithRetry(
+            `SELECT direction, body, from_phone, to_phone
+               FROM outbound_messages
+              WHERE tenant_id = $2
+                AND channel IN ('sms','whatsapp')
+                AND (right(to_phone_digits, 10) = $1::text OR right(from_phone_digits, 10) = $1::text)
+              ORDER BY sent_at DESC LIMIT 15`, [key, req.tenantId!]);
+        const messages = msgs.rows.reverse();
+        if (messages.length === 0) return res.status(404).json({ error: 'Conversazione vuota' });
+
+        const inbound = messages.find((m: any) => m.direction === 'inbound');
+        const phone = inbound?.from_phone || `+${key}`;
+
+        const { args, usage } = await whatsappAgent.extractBooking({
+            phone,
+            todayRome: getRomeDatePart(new Date()),
+            messages: messages as any,
+        });
+
+        if (usage.calls > 0) {
+            queryWithRetry(
+                `INSERT INTO ai_token_usage (provider, feature, model, prompt_tokens, output_tokens, total_tokens, user_email, tenant_id)
+                 VALUES ('anthropic', 'whatsapp_extract', $1, $2, $3, $4, $5, $6)`,
+                [usage.model, usage.promptTokens, usage.outputTokens, usage.totalTokens, (req.user?.email || null), req.tenantId!]
+            ).catch(err => console.error('ai_token_usage insert (whatsapp_extract) failed:', err));
+        }
+
+        if (!args) return res.json({ booking: null });
+
+        // Normalizza data/ora col parser condiviso: robusto anche se il modello
+        // restituisce "sabato 29 agosto" o "7:30" invece del formato canonico.
+        const date = args.date ? parseFlexibleDate(args.date) : null;
+        const time = args.time ? parseFlexibleTime(args.time) : null;
+        res.json({
+            booking: {
+                customer_name: args.customer_name ?? null,
+                date: date ?? null,
+                time: time ?? null,
+                shift: args.shift ?? null,
+                guests: typeof args.guests === 'number' && args.guests > 0 ? Math.trunc(args.guests) : null,
+                children: typeof args.children === 'number' && args.children > 0 ? Math.trunc(args.children) : null,
+                location_preference: args.location_preference ?? null,
+                notes: args.notes ?? null,
+            },
+        });
+    } catch (err: any) {
+        if (err instanceof whatsappAgent.AgentError) {
+            const status = err.kind === 'not_configured' ? 503 : 502;
+            return res.status(status).json({ error: err.kind, message: err.message });
+        }
+        console.error('POST /messages/agent/extract-booking error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // Esegue la proposta: e' QUI che si scrive sulle prenotazioni, e solo dopo un
 // tocco di una persona. Usa gli stessi strumenti di Sofia col canale WhatsApp.
 app.post('/messages/agent/proposals/:id/confirm', authenticate, requirePermission('reservations:full'), async (req, res) => {

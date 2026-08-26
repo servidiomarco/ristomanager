@@ -13,7 +13,7 @@ import {
   type UploadedAttachment,
 } from '../services/messagesApiService';
 import { socketClient } from '../services/socketClient';
-import { runAgent, confirmProposal, discardProposal, type AgentProposal } from '../services/aiMessagesApiService';
+import { runAgent, confirmProposal, discardProposal, extractBooking, type AgentProposal, type ExtractedBooking } from '../services/aiMessagesApiService';
 import { listMedia, attachFromLibrary, type MediaFile } from '../services/mediaApiService';
 import { getFeatureFlags } from '../services/apiService';
 import { toTitleCase } from '../utils/text';
@@ -485,47 +485,39 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
   // Cambiando conversazione la proposta non deve seguirti addosso.
   useEffect(() => { setProposal(null); }, [selectedKey]);
 
-  // "Crea prenotazione" dalla chat: precompila il modulo coi campi che
-  // l'agente ha già estratto dal messaggio (anche in inglese). Se non c'è una
-  // proposta di creazione a portata di mano, fa un giro dell'agente al volo per
-  // parsare il thread; se comunque non basta, apre col solo nome+telefono come
-  // prima. `phone_digits` fa sì che App riagganci poi la prenotazione al thread.
+  // "Crea prenotazione" dalla chat: precompila il modulo coi campi estratti dal
+  // messaggio (data/ora/coperti/zona/note, anche in inglese). Usa l'estrazione
+  // dedicata — che FORZA la lettura dei campi — invece di aspettare una proposta
+  // dell'agente, che per una richiesta nuova non arriva. Se l'AI è spenta o non
+  // estrae nulla, apre col solo nome+telefono. `phone_digits` serve ad App per
+  // riagganciare la prenotazione al thread.
   const handleCreateReservation = useCallback(async () => {
     if (!selected || !onCreateReservationFromContact) return;
-    let args: Record<string, any> | null =
-      proposal && proposal.tool === 'create_reservation' ? proposal.args : null;
-    if (!args && aiEnabled) {
+    let booking: ExtractedBooking | null = null;
+    if (aiEnabled) {
       setSuggesting(true);
       setSendError(null);
       try {
-        const r = await runAgent(selected.phone_digits);
-        if (r.proposal && r.proposal.tool === 'create_reservation') {
-          args = r.proposal.args;
-          setProposal(r.proposal);
-        }
+        booking = (await extractBooking(selected.phone_digits)).booking;
       } catch {
         /* niente parsing: si apre con nome+telefono */
       } finally {
         setSuggesting(false);
       }
     }
-    const shiftArg = args?.shift === 'LUNCH' || args?.shift === 'DINNER'
-      ? (args.shift as Shift) : undefined;
     onCreateReservationFromContact({
       phone_digits: selected.phone_digits,
-      customer_name: (typeof args?.customer_name === 'string' && args.customer_name.trim())
-        ? args.customer_name : (selected.customer_name || undefined),
+      customer_name: booking?.customer_name?.trim() || selected.customer_name || undefined,
       phone: selected.phone || selected.phone_digits,
-      date: typeof args?.date === 'string' ? args.date : undefined,
-      time: typeof args?.time === 'string' ? args.time : undefined,
-      shift: shiftArg,
-      guests: typeof args?.guests === 'number' ? args.guests : undefined,
-      children: typeof args?.children === 'number' ? args.children : undefined,
-      notes: typeof args?.notes === 'string' ? args.notes : undefined,
-      location_preference: args?.location_preference === 'INDOOR' || args?.location_preference === 'OUTDOOR'
-        ? args.location_preference : undefined,
+      date: booking?.date ?? undefined,
+      time: booking?.time ?? undefined,
+      shift: booking?.shift ? (booking.shift as Shift) : undefined,
+      guests: booking?.guests ?? undefined,
+      children: booking?.children ?? undefined,
+      notes: booking?.notes ?? undefined,
+      location_preference: booking?.location_preference ?? undefined,
     });
-  }, [selected, proposal, aiEnabled, onCreateReservationFromContact]);
+  }, [selected, aiEnabled, onCreateReservationFromContact]);
 
   const handleConfirmProposal = useCallback(async () => {
     if (!proposal || proposalBusy) return;
