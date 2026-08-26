@@ -214,4 +214,41 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         const ripristino = await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'AUTO_ALL' });
         expect(ripristino.status).toBe(200);
     });
+
+    it('servita: chiude solo un\'uscita tutta pronta, e una sola volta', async () => {
+        const orderId = await nuovaComanda();
+        await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [
+                { dish_id: piatto1, qty: 1, course_no: 1 },
+                { dish_id: piatto2, qty: 1, course_no: 1 },
+            ],
+        });
+        // AUTO_ALL (ripristinato dal blocco precedente): l'invio lancia da solo.
+        await api().post(`/orders/${orderId}/send`).set(bearer(token)).send({});
+        const view = await api().get(`/orders/${orderId}`).set(bearer(token));
+        const [rigaA, rigaB] = righe(view.body);
+
+        // A metà non si serve: una riga pronta e una no fa 409.
+        await api().post(`/kds/items/${rigaA.id}/status`).set(bearer(token)).send({ status: 'READY' });
+        const meta = await api().post(`/orders/${orderId}/courses/1/serve`).set(bearer(token)).send({});
+        expect(meta.status).toBe(409);
+
+        // Tutta pronta: il servito chiude ogni riga con il suo timestamp.
+        await api().post(`/kds/items/${rigaB.id}/status`).set(bearer(token)).send({ status: 'READY' });
+        const servita = await api().post(`/orders/${orderId}/courses/1/serve`).set(bearer(token)).send({});
+        expect(servita.status).toBe(200);
+        for (const i of servita.body.items) {
+            expect(i.status).toBe('SERVED');
+            expect(i.served_at).toBeTruthy();
+        }
+
+        // Lo stato derivato dell'uscita diventa SERVED anche nella vista comanda.
+        const dopo = await api().get(`/orders/${orderId}`).set(bearer(token));
+        const uscita = dopo.body.courses.find((c: any) => c.course_no === 1);
+        expect(uscita.status).toBe('SERVED');
+
+        // Servire due volte non è ammesso.
+        const doppio = await api().post(`/orders/${orderId}/courses/1/serve`).set(bearer(token)).send({});
+        expect(doppio.status).toBe(409);
+    });
 });

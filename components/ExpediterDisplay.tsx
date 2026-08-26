@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { BarChart3, Bell, Loader2, Play, RotateCcw, TriangleAlert, WifiOff } from 'lucide-react';
+import { BarChart3, Bell, Check, Loader2, Play, RotateCcw, TriangleAlert, WifiOff } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
 import { socketClient } from '../services/socketClient';
 import {
-  getExpediterBoard, fireCourse, refireCourse, callCourse, getKitchenReport,
+  getExpediterBoard, fireCourse, refireCourse, callCourse, serveCourse, getKitchenReport,
   type ExpediterBoard, type ExpediterCourse, type KitchenReport,
 } from '../services/ordersApiService';
 import { SectionHeader, StatusPill, dsButton } from './ds';
@@ -65,6 +65,7 @@ export const ExpediterDisplay: React.FC = () => {
     socket?.on('course:fired', onChange);
     socket?.on('course:recalled', onChange);
     socket?.on('course:ready', onChange);
+    socket?.on('course:served', onChange);
     socket?.on('orderItem:status', onChange);
     socket?.on('connect', onChange);
     const poll = setInterval(reload, 20_000);
@@ -73,6 +74,7 @@ export const ExpediterDisplay: React.FC = () => {
       socket?.off('course:fired', onChange);
       socket?.off('course:recalled', onChange);
       socket?.off('course:ready', onChange);
+      socket?.off('course:served', onChange);
       socket?.off('orderItem:status', onChange);
       socket?.off('connect', onChange);
       clearInterval(poll);
@@ -155,6 +157,7 @@ export const ExpediterDisplay: React.FC = () => {
                     act(key, () => callCourse(c.order_id, c.course_no));
                   }}
                   onRefire={() => act(`${c.order_id}:${c.course_no}`, () => refireCourse(c.order_id, c.course_no))}
+                  onServe={() => act(`${c.order_id}:${c.course_no}`, () => serveCourse(c.order_id, c.course_no))}
                 />
               ))}
             </div>
@@ -197,7 +200,8 @@ const CourseRow: React.FC<{
   onFire?: () => void;
   onRefire?: () => void;
   onCall?: () => void;
-}> = ({ course: c, stations, stationLabel, busyKey, called, onFire, onRefire, onCall }) => {
+  onServe?: () => void;
+}> = ({ course: c, stations, stationLabel, busyKey, called, onFire, onRefire, onCall, onServe }) => {
   const key = `${c.order_id}:${c.course_no}`;
   const busy = busyKey === key;
   const allReady = c.status === 'READY';
@@ -299,6 +303,19 @@ const CourseRow: React.FC<{
             <Bell size={15} aria-hidden /> {called ? 'chiamata' : 'Chiama'}
           </button>
         )}
+        {/* Chiude il giro: l'uscita lascia il passe e la riga sparisce dal
+            monitor. Senza questo tocco le uscite pronte si accumulavano qui
+            anche dopo essere arrivate al tavolo. */}
+        {onServe && allReady && (
+          <button
+            type="button"
+            onClick={onServe}
+            disabled={busy}
+            className={`${passeAction} bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]`}
+          >
+            <Check size={15} aria-hidden /> Servita
+          </button>
+        )}
         {onFire && (
           <button
             type="button"
@@ -335,6 +352,8 @@ const KitchenStats: React.FC<{ report: KitchenReport | null }> = ({ report }) =>
         <Stat label="Delta peggiore" value={s?.delta_massimo_min != null ? `${s.delta_massimo_min}′` : '—'} />
         <Stat label="Attesa media al passe" value={report.passe?.attesa_media_min != null ? `${report.passe.attesa_media_min}′` : '—'}
               hint="fra proposta e lancio" />
+        <Stat label="Attesa al ritiro" value={report.ritiro?.attesa_media_min != null ? `${report.ritiro.attesa_media_min}′` : '—'}
+              hint="fra pronta e servita" />
       </div>
 
       <div className="overflow-x-auto">
