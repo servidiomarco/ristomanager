@@ -2056,10 +2056,13 @@ const RoomMap: React.FC<RoomMapProps> = ({
                         fit
                       />
                     </div>
+                    {/* Badge "+N": turni successivi sullo stesso tavolo (il
+                        conteggio completo è nel tooltip del tavolo). */}
                     {extraCount > 0 && (
                       <span
                         className="absolute -right-1.5 -top-1.5 z-10 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--ds-arriving-solid)] px-1 text-[10px] font-bold text-white shadow-[var(--ds-shadow-card)]"
                         aria-label={`${extraCount + 1} prenotazioni su questo tavolo`}
+                        title={titleText}
                       >
                         +{extraCount}
                       </span>
