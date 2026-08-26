@@ -2104,6 +2104,26 @@ const buildConflictMessage = (conflicts: TableConflict[]): string => {
 // Reservations - require authentication
 app.get('/reservations', authenticate, async (req, res) => {
     try {
+        // Finestra opzionale (?from=YYYY-MM-DD&to=YYYY-MM-DD, estremi inclusi,
+        // giorni Europe/Rome). Il boot dell'app carica prima la finestra
+        // recente e poi lo storico in background (caricamento in due tempi,
+        // 26/08): senza parametri la risposta resta l'intero storico, come
+        // hanno sempre visto client vecchi e test.
+        const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+        const from = DATE_RE.test(String(req.query.from ?? '')) ? String(req.query.from) : null;
+        const to = DATE_RE.test(String(req.query.to ?? '')) ? String(req.query.to) : null;
+        const params: any[] = [req.tenantId!];
+        let windowSql = '';
+        if (from) {
+            params.push(from);
+            // Mezzanotte di Roma convertita a istante UTC: il confronto resta
+            // sargabile sulla colonna, niente AT TIME ZONE sul lato indice.
+            windowSql += ` AND r.reservation_time >= ($${params.length}::date::timestamp AT TIME ZONE 'Europe/Rome')`;
+        }
+        if (to) {
+            params.push(to);
+            windowSql += ` AND r.reservation_time < (($${params.length}::date + 1)::timestamp AT TIME ZONE 'Europe/Rome')`;
+        }
         // Enrich each reservation with the matching rubrica entry, joined on the
         // digit-only phone so "+39 333 1234567" and "3331234567" align. Used by
         // the booking card to render VIP/preferred-table chips without an extra
@@ -2152,9 +2172,9 @@ app.get('/reservations', authenticate, async (req, res) => {
                 ORDER BY pr.created_at DESC
                 LIMIT 1
             ) lp ON true
-            WHERE r.tenant_id = $1
+            WHERE r.tenant_id = $1${windowSql}
             ORDER BY r.reservation_time DESC
-        `, [req.tenantId!]);
+        `, params);
         res.json(result.rows);
     } catch (err) {
         console.error(err);

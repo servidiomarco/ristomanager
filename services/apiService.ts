@@ -109,8 +109,14 @@ const apiRequest = async <T>(
   return undefined as T;
 };
 
-export const getReservations = async (): Promise<Reservation[]> => {
-  return apiRequest<Reservation[]>(`${API_URL}/reservations`, {
+// Finestra opzionale (estremi inclusi, giorni Europe/Rome): il boot carica
+// prima i giorni recenti, lo storico arriva in background subito dopo.
+export const getReservations = async (range?: { from?: string; to?: string }): Promise<Reservation[]> => {
+  const params = new URLSearchParams();
+  if (range?.from) params.set('from', range.from);
+  if (range?.to) params.set('to', range.to);
+  const qs = params.toString();
+  return apiRequest<Reservation[]>(`${API_URL}/reservations${qs ? `?${qs}` : ''}`, {
     headers: getHeaders(false)
   });
 };
