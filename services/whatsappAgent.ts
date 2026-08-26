@@ -317,8 +317,13 @@ export async function runAgent(ctx: AgentContext): Promise<AgentResult> {
             role: (m.direction === 'inbound' ? 'user' : 'assistant') as 'user' | 'assistant',
             content: m.body.trim(),
         }));
-    // La storia deve iniziare da un messaggio del cliente.
+    // La storia deve iniziare E finire con un messaggio del cliente: il modello
+    // rifiuta un prefill dell'assistant come ultimo turno ("The conversation
+    // must end with a user message", 400). Quando lo staff ha già risposto per
+    // ultimo si tolgono le code assistant, così si ragiona sull'ultima richiesta
+    // del cliente.
     while (messages.length && messages[0].role !== 'user') messages.shift();
+    while (messages.length && messages[messages.length - 1].role !== 'user') messages.pop();
     if (messages.length === 0) return { reply: null, proposal: null, checks, usage, reason: 'Nessun messaggio del cliente da interpretare' };
 
     const chiedi = (extra: Partial<Anthropic.MessageCreateParams> = {}) =>
@@ -448,7 +453,11 @@ export async function extractBooking(input: {
             role: (m.direction === 'inbound' ? 'user' : 'assistant') as 'user' | 'assistant',
             content: m.body.trim(),
         }));
+    // Inizia e finisce con un turno del cliente: il modello rifiuta un prefill
+    // dell'assistant come ultimo messaggio (400). Se lo staff ha risposto per
+    // ultimo, si estrae comunque dall'ultima richiesta del cliente.
     while (messages.length && messages[0].role !== 'user') messages.shift();
+    while (messages.length && messages[messages.length - 1].role !== 'user') messages.pop();
     if (messages.length === 0) return { args: null, usage };
 
     const system = `Estrai i dati di UNA prenotazione dai messaggi del cliente e chiama create_reservation con i campi che riesci a ricavare. Oggi è ${input.todayRome} (fuso Europe/Rome). Regole:
