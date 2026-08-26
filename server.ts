@@ -5702,6 +5702,16 @@ app.get('/messages/conversations', authenticate, requirePermission('reservations
                        MAX(sent_at) FILTER (WHERE direction = 'inbound') AS last_inbound_at
                 FROM keyed
                 GROUP BY phone_key
+            ),
+            -- Il link prenotazione del thread è il reservation_id più recente
+            -- NON nullo, non quello dell'ultimo messaggio: così l'aggancio
+            -- sopravvive a un nuovo messaggio in arrivo (che entra con
+            -- reservation_id NULL e altrimenti azzererebbe il link).
+            last_res AS (
+                SELECT DISTINCT ON (phone_key) phone_key, reservation_id
+                FROM keyed
+                WHERE reservation_id IS NOT NULL
+                ORDER BY phone_key, sent_at DESC
             )
             SELECT l.phone_key AS phone_digits,
                    l.phone,
@@ -5709,12 +5719,13 @@ app.get('/messages/conversations', authenticate, requirePermission('reservations
                    l.direction    AS last_direction,
                    l.body         AS last_body,
                    l.sent_at      AS last_sent_at,
-                   l.reservation_id AS last_reservation_id,
+                   lr.reservation_id AS last_reservation_id,
                    COALESCE(c.unread_count, 0)::int AS unread_count,
                    c.last_inbound_at,
                    r.customer_name
             FROM latest l
             LEFT JOIN counts c ON c.phone_key = l.phone_key
+            LEFT JOIN last_res lr ON lr.phone_key = l.phone_key
             LEFT JOIN LATERAL (
                 SELECT customer_name FROM reservations
                 WHERE tenant_id = $1
@@ -5871,6 +5882,46 @@ app.post('/messages/conversations/:phoneDigits/read', authenticate, requirePermi
         res.json({ ok: true, marked: updated.rows.length });
     } catch (err) {
         console.error('POST /messages/conversations/:phoneDigits/read error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Link a reservation to an SMS/WhatsApp conversation so staff can jump back
+// to it from the chat (mirrors the voice-call link). The thread's linked
+// reservation is the most-recent non-null reservation_id across its messages
+// (see /messages/conversations), so we stamp every message of the thread —
+// the link then survives later inbound messages that arrive with a null
+// reservation_id. Requires reservations:full (it's a write on the booking).
+app.patch('/messages/conversations/:phoneDigits/link', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    try {
+        const phoneKey = String(req.params.phoneDigits || '').replace(/\D/g, '').slice(-10);
+        if (phoneKey.length < 8) return res.status(400).json({ error: 'Invalid phone' });
+
+        const rid = typeof req.body?.reservation_id === 'number'
+            ? req.body.reservation_id
+            : parseInt(req.body?.reservation_id, 10);
+        if (!Number.isFinite(rid)) return res.status(400).json({ error: 'Invalid reservation_id' });
+
+        // Cross-tenant FK guard (pattern B3): una prenotazione altrui non si
+        // aggancia — 404, come se non esistesse.
+        const resvOk = await queryWithRetry(
+            'SELECT 1 FROM reservations WHERE id = $1 AND tenant_id = $2',
+            [rid, req.tenantId!]
+        );
+        if (resvOk.rowCount === 0) return res.status(404).json({ error: 'Reservation not found' });
+
+        const result = await queryWithRetry(
+            `UPDATE outbound_messages
+             SET reservation_id = $1
+             WHERE tenant_id = $2
+               AND channel IN ('sms','whatsapp')
+               AND right(COALESCE(from_phone_digits, to_phone_digits), 10) = $3`,
+            [rid, req.tenantId!, phoneKey]
+        );
+        if (result.rowCount === 0) return res.status(404).json({ error: 'Conversation not found' });
+        res.json({ ok: true, reservation_id: rid, updated: result.rowCount });
+    } catch (err) {
+        console.error('PATCH /messages/conversations/:phoneDigits/link error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });

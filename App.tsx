@@ -4,7 +4,7 @@ import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, Ban
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
 import { MenuManager } from './components/MenuManager';
-import { ReservationList } from './components/ReservationList';
+import { ReservationList, type NewReservationPrefill } from './components/ReservationList';
 import { LoginPage } from './components/LoginPage';
 import { ProfiloSheet } from './components/ProfiloSheet';
 import { OnboardingWizard } from './components/OnboardingWizard';
@@ -376,10 +376,16 @@ const App: React.FC = () => {
   const [newReservationKind, setNewReservationKind] = useState<'standard' | 'walkin'>('standard');
   // Prefill applied when opening the new-reservation modal (currently used
   // when converting a voice call into a booking).
-  const [newReservationPrefill, setNewReservationPrefill] = useState<{ customer_name?: string; phone?: string } | undefined>(undefined);
+  const [newReservationPrefill, setNewReservationPrefill] = useState<NewReservationPrefill | undefined>(undefined);
   // If set, the next reservation that gets created is linked to this voice
   // call. Cleared once the link finishes (or the modal is dismissed).
   const linkVoiceCallOnCreateRef = useRef<number | null>(null);
+  // Phone_digits of the inbox conversation a new reservation should link back
+  // to (set when creating from the chat). Cleared once the link finishes.
+  const linkInboxConversationOnCreateRef = useRef<string | null>(null);
+  // Bumped after an inbox conversation gets linked so InboxPage refetches and
+  // shows the "Apri prenotazione" affordance without a manual reload.
+  const [inboxRefreshTick, setInboxRefreshTick] = useState(0);
   const [autoOpenNewBanquet, setAutoOpenNewBanquet] = useState(false);
   const [autoOpenNewDish, setAutoOpenNewDish] = useState(false);
   const [autoOpenNewCustomer, setAutoOpenNewCustomer] = useState(false);
@@ -1644,6 +1650,15 @@ const App: React.FC = () => {
           })
           .catch((err) => console.warn('linkReservation failed:', err));
       }
+      // If created from an inbox conversation, link it back so staff can
+      // reopen/modify the booking from the chat. Best-effort.
+      const linkInboxPhone = linkInboxConversationOnCreateRef.current;
+      if (linkInboxPhone) {
+        linkInboxConversationOnCreateRef.current = null;
+        messagesApiService.linkReservation(linkInboxPhone, returnedRes.id)
+          .then(() => setInboxRefreshTick(t => t + 1))
+          .catch((err) => console.warn('inbox linkReservation failed:', err));
+      }
       // Optimistically include the new row so checks that scan `reservations`
       // (e.g. the duplicate preflight) see it immediately instead of waiting
       // for the socket round-trip. The socket handler dedupes by id.
@@ -2359,6 +2374,7 @@ const App: React.FC = () => {
               setNewReservationKind('standard');
               setNewReservationPrefill(undefined);
               linkVoiceCallOnCreateRef.current = null;
+              linkInboxConversationOnCreateRef.current = null;
             }}
           />
         )}
@@ -2500,10 +2516,18 @@ const App: React.FC = () => {
 
         {view === ViewState.MESSAGGI && (
           <InboxPage
-            onCreateReservationFromContact={({ customer_name, phone }) => {
-              setNewReservationPrefill({ customer_name, phone });
+            refreshTick={inboxRefreshTick}
+            onCreateReservationFromContact={({ phone_digits, ...prefill }) => {
+              // Remember which conversation to link the new booking back to,
+              // so it becomes reopenable from the chat after creation.
+              linkInboxConversationOnCreateRef.current = phone_digits ?? null;
+              setNewReservationPrefill(prefill);
               setNewReservationKind('standard');
               setAutoOpenNewReservation(true);
+              setView(ViewState.RESERVATIONS);
+            }}
+            onOpenReservation={(reservationId) => {
+              setPendingReservationId(reservationId);
               setView(ViewState.RESERVATIONS);
             }}
           />
