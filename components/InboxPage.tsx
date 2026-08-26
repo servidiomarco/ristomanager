@@ -763,10 +763,12 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                       <Clock className="h-3 w-3" aria-hidden /> Finestra WA: {windowRemaining}
                     </StatusPill>
                   )}
-                  {/* Prenotazione già agganciata al thread → si riapre per
-                      modificarla. Altrimenti "Crea prenotazione" precompila il
-                      modulo dal messaggio (parsing AI) e poi la riaggancia qui. */}
-                  {selected.last_reservation_id && onOpenReservation ? (
+                  {/* Due azioni indipendenti, non alternative: se il thread ha
+                      già una prenotazione agganciata la si riapre per modificarla
+                      ("Apri prenotazione"), MA si può sempre aggiungerne una nuova
+                      ("Crea prenotazione") — un cliente con una prenotazione può
+                      chiederne un'altra nella stessa chat. */}
+                  {selected.last_reservation_id && onOpenReservation && (
                     <button
                       type="button"
                       onClick={() => onOpenReservation(selected.last_reservation_id!)}
@@ -775,7 +777,8 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                       <ArrowRight className="h-4 w-4" aria-hidden />
                       <span className="hidden sm:inline">Apri prenotazione</span>
                     </button>
-                  ) : onCreateReservationFromContact && !selected.last_reservation_id && (
+                  )}
+                  {onCreateReservationFromContact && (
                     <button
                       type="button"
                       onClick={handleCreateReservation}
