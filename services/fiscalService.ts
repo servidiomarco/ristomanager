@@ -47,6 +47,8 @@ export interface FiscalProviderDriver {
     readonly name: FiscalDriverName;
     issueEReceipt(payload: EReceiptPayload): Promise<FiscalIssueResult>;
     voidEReceipt(providerRef: string): Promise<any>;
+    /** Invia una fattura elettronica (XML FatturaPA) a SDI via provider. */
+    issueInvoice(xml: string): Promise<FiscalIssueResult>;
 }
 
 // Centesimi → stringa euro a due decimali ("1234" → "12.34"), il formato che
@@ -158,6 +160,149 @@ export function buildEReceiptPayload(input: BuildEReceiptInput): EReceiptPayload
 }
 
 // ---------------------------------------------------------------------------
+// Fattura elettronica (FatturaPA 1.2, formato FPR12). Il provider accetta
+// l'XML grezzo: il builder è nostro, e vive qui perché è una funzione pura
+// di (cedente, cessionario, scorporo IVA) — testabile senza rete.
+
+export interface FiscalSeller {
+    vat_number: string;      // P.IVA senza prefisso IT
+    business_name: string;
+    regime?: string;         // RF01 ordinario di default
+    address: { street: string; zip: string; city: string; province?: string };
+}
+
+export interface InvoiceBuyer {
+    // Denominazione (azienda) o nome/cognome persona fisica in un campo solo.
+    name: string;
+    vat_number?: string | null;
+    tax_code?: string | null;
+    sdi_code?: string | null;  // codice destinatario; '0000000' se via PEC/cassetto
+    pec?: string | null;
+    address: { street: string; zip: string; city: string; province?: string };
+}
+
+export interface InvoiceVatRow {
+    rate: number;
+    net_cents: number;
+    vat_cents: number;
+    gross_cents: number;
+}
+
+export interface BuildInvoiceInput {
+    seller: FiscalSeller;
+    buyer: InvoiceBuyer;
+    doc_number: string;       // numerazione nostra (obbligo di legge, mai del provider)
+    doc_date: string;         // YYYY-MM-DD
+    vat_rows: InvoiceVatRow[];
+    total_gross_cents: number;
+    description: string;      // es. "Somministrazione alimenti e bevande — tavolo 12"
+}
+
+const xmlEscape = (s: string): string =>
+    String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+             .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+
+// FatturaPA vuole gli importi al NETTO (imponibile) con l'IVA nei riepiloghi
+// — l'inverso dello scontrino. Una riga per aliquota, presa pari pari dallo
+// scorporo del conto: così DettaglioLinee e DatiRiepilogo quadrano al
+// centesimo per costruzione, senza arrotondamenti per piatto.
+// Aliquota 0 → Natura N2.2 (operazioni non soggette) su riga e riepilogo:
+// DA VALIDARE COL COMMERCIALISTA come per lo scontrino.
+export function buildFatturaPaXml(input: BuildInvoiceInput): string {
+    const euro = (cents: number) => centsToEuroString(cents);
+    const rate2 = (r: number) => r.toFixed(2);
+    // ProgressivoInvio: identificativo del file per il trasmittente, max 10
+    // alfanumerici. Derivato dal numero fattura, spogliato dei separatori.
+    const progressivo = input.doc_number.replace(/[^0-9A-Za-z]/g, '').slice(-10) || '1';
+
+    const sdi = (input.buyer.sdi_code || '').trim().toUpperCase();
+    const codiceDestinatario = /^[A-Z0-9]{6,7}$/.test(sdi) ? sdi.padStart(7, '0') : '0000000';
+    const pec = (input.buyer.pec || '').trim();
+
+    const buyerIds: string[] = [];
+    if (input.buyer.vat_number) {
+        buyerIds.push(`<IdFiscaleIVA><IdPaese>IT</IdPaese><IdCodice>${xmlEscape(input.buyer.vat_number)}</IdCodice></IdFiscaleIVA>`);
+    }
+    if (input.buyer.tax_code) {
+        buyerIds.push(`<CodiceFiscale>${xmlEscape(input.buyer.tax_code.toUpperCase())}</CodiceFiscale>`);
+    }
+
+    const sede = (a: { street: string; zip: string; city: string; province?: string }) => `
+      <Sede>
+        <Indirizzo>${xmlEscape(a.street)}</Indirizzo>
+        <CAP>${xmlEscape(a.zip)}</CAP>
+        <Comune>${xmlEscape(a.city)}</Comune>
+        ${a.province ? `<Provincia>${xmlEscape(a.province.toUpperCase())}</Provincia>` : ''}
+        <Nazione>IT</Nazione>
+      </Sede>`;
+
+    const linee = input.vat_rows.map((r, i) => `
+        <DettaglioLinee>
+          <NumeroLinea>${i + 1}</NumeroLinea>
+          <Descrizione>${xmlEscape(`${input.description} — IVA ${r.rate}%`)}</Descrizione>
+          <PrezzoUnitario>${euro(r.net_cents)}</PrezzoUnitario>
+          <PrezzoTotale>${euro(r.net_cents)}</PrezzoTotale>
+          <AliquotaIVA>${rate2(r.rate)}</AliquotaIVA>
+          ${r.rate === 0 ? '<Natura>N2.2</Natura>' : ''}
+        </DettaglioLinee>`).join('');
+
+    const riepiloghi = input.vat_rows.map(r => `
+        <DatiRiepilogo>
+          <AliquotaIVA>${rate2(r.rate)}</AliquotaIVA>
+          ${r.rate === 0 ? '<Natura>N2.2</Natura>' : ''}
+          <ImponibileImporto>${euro(r.net_cents)}</ImponibileImporto>
+          <Imposta>${euro(r.vat_cents)}</Imposta>
+          <EsigibilitaIVA>I</EsigibilitaIVA>
+        </DatiRiepilogo>`).join('');
+
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<p:FatturaElettronica versione="FPR12" xmlns:p="http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2">
+  <FatturaElettronicaHeader>
+    <DatiTrasmissione>
+      <IdTrasmittente><IdPaese>IT</IdPaese><IdCodice>${xmlEscape(input.seller.vat_number)}</IdCodice></IdTrasmittente>
+      <ProgressivoInvio>${xmlEscape(progressivo)}</ProgressivoInvio>
+      <FormatoTrasmissione>FPR12</FormatoTrasmissione>
+      <CodiceDestinatario>${codiceDestinatario}</CodiceDestinatario>
+      ${codiceDestinatario === '0000000' && pec ? `<PECDestinatario>${xmlEscape(pec)}</PECDestinatario>` : ''}
+    </DatiTrasmissione>
+    <CedentePrestatore>
+      <DatiAnagrafici>
+        <IdFiscaleIVA><IdPaese>IT</IdPaese><IdCodice>${xmlEscape(input.seller.vat_number)}</IdCodice></IdFiscaleIVA>
+        <Anagrafica><Denominazione>${xmlEscape(input.seller.business_name)}</Denominazione></Anagrafica>
+        <RegimeFiscale>${xmlEscape(input.seller.regime || 'RF01')}</RegimeFiscale>
+      </DatiAnagrafici>${sede(input.seller.address)}
+    </CedentePrestatore>
+    <CessionarioCommittente>
+      <DatiAnagrafici>
+        ${buyerIds.join('')}
+        <Anagrafica><Denominazione>${xmlEscape(input.buyer.name)}</Denominazione></Anagrafica>
+      </DatiAnagrafici>${sede(input.buyer.address)}
+    </CessionarioCommittente>
+  </FatturaElettronicaHeader>
+  <FatturaElettronicaBody>
+    <DatiGenerali>
+      <DatiGeneraliDocumento>
+        <TipoDocumento>TD01</TipoDocumento>
+        <Divisa>EUR</Divisa>
+        <Data>${xmlEscape(input.doc_date)}</Data>
+        <Numero>${xmlEscape(input.doc_number)}</Numero>
+        <ImportoTotaleDocumento>${euro(input.total_gross_cents)}</ImportoTotaleDocumento>
+      </DatiGeneraliDocumento>
+    </DatiGenerali>
+    <DatiBeniServizi>${linee}${riepiloghi}
+    </DatiBeniServizi>
+    <DatiPagamento>
+      <CondizioniPagamento>TP02</CondizioniPagamento>
+      <DettaglioPagamento>
+        <ModalitaPagamento>MP08</ModalitaPagamento>
+        <ImportoPagamento>${euro(input.total_gross_cents)}</ImportoPagamento>
+      </DettaglioPagamento>
+    </DatiPagamento>
+  </FatturaElettronicaBody>
+</p:FatturaElettronica>`;
+}
+
+// ---------------------------------------------------------------------------
 
 class OpenapiDriver implements FiscalProviderDriver {
     readonly name = 'openapi' as const;
@@ -202,6 +347,28 @@ class OpenapiDriver implements FiscalProviderDriver {
     async voidEReceipt(providerRef: string): Promise<any> {
         return this.call('DELETE', `/IT-e-receipts/${encodeURIComponent(providerRef)}`);
     }
+
+    async issueInvoice(xml: string): Promise<FiscalIssueResult> {
+        // Il servizio SDI vuole l'XML grezzo, non un JSON: content-type
+        // dedicato e body passato com'è.
+        const res = await fetch(`${this.baseUrl()}/IT-invoices`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${this.token()}`,
+                'Content-Type': 'application/xml',
+            },
+            body: xml,
+        });
+        const text = await res.text();
+        let json: any = null;
+        try { json = text ? JSON.parse(text) : null; } catch (_) { /* messaggio d'errore grezzo */ }
+        if (!res.ok) {
+            throw new Error(`Openapi POST /IT-invoices → ${res.status}: ${json?.message ?? text.slice(0, 500)}`);
+        }
+        const ref = json?.data?.id ?? json?.data?.uuid;
+        if (!ref) throw new Error(`Openapi: risposta fattura senza id: ${JSON.stringify(json).slice(0, 500)}`);
+        return { provider_ref: String(ref), raw: json };
+    }
 }
 
 // Conferma sempre, nessuna rete: per i test API e le demo. Il provider_ref è
@@ -220,6 +387,14 @@ class MockDriver implements FiscalProviderDriver {
 
     async voidEReceipt(providerRef: string): Promise<any> {
         return { data: { id: providerRef, status: 'voided' } };
+    }
+
+    async issueInvoice(xml: string): Promise<FiscalIssueResult> {
+        this.seq += 1;
+        return {
+            provider_ref: `MOCK-INV-${Date.now()}-${this.seq}`,
+            raw: { data: { id: `MOCK-INV-${this.seq}`, status: 'NEW', xml_length: xml.length } },
+        };
     }
 }
 

@@ -1,6 +1,6 @@
 import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
-import type { BillPaymentMethod, CashClosureReport, FiscalDocument, FiscalProviderSetting, TableBill, TableBillWithSplits } from '../types';
+import type { BillPaymentMethod, CashClosureReport, CustomerBilling, FiscalDocument, FiscalProviderSetting, TableBill, TableBillWithSplits } from '../types';
 import { buildApiError } from './apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
@@ -158,11 +158,30 @@ class BillsApiService {
     });
   }
 
+  /** Emette la fattura elettronica (SDI) sul conto chiuso o su una quota
+   *  pagata. Il cessionario arriva dalla rubrica (customer_id) e/o inline
+   *  (buyer): l'inline vince campo per campo. */
+  async issueInvoice(billId: number, payload: {
+    customer_id?: number;
+    split_id?: number;
+    buyer?: CustomerBilling;
+  }): Promise<{ doc: FiscalDocument }> {
+    return apiRequest(`${API_URL}/bills/${billId}/invoices`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getFiscalSettings(): Promise<FiscalSettings> {
     return apiRequest<FiscalSettings>(`${API_URL}/settings/fiscal`, { headers: getHeaders() });
   }
 
-  async updateFiscalSettings(patch: { provider?: FiscalProviderSetting; vat_number?: string }): Promise<FiscalSettings> {
+  async updateFiscalSettings(patch: {
+    provider?: FiscalProviderSetting;
+    vat_number?: string;
+    seller?: { business_name?: string; regime?: string; address?: { street?: string; zip?: string; city?: string; province?: string } };
+  }): Promise<FiscalSettings> {
     return apiRequest<FiscalSettings>(`${API_URL}/settings/fiscal`, {
       method: 'PUT',
       headers: getHeaders(),
@@ -198,6 +217,8 @@ class BillsApiService {
 export interface FiscalSettings {
   provider: FiscalProviderSetting;
   vat_number: string;
+  /** Cedente della fattura elettronica (denominazione, regime, sede). */
+  seller: { business_name?: string; regime?: string; address?: { street?: string; zip?: string; city?: string; province?: string } };
   providers: readonly FiscalProviderSetting[];
   openapi_token_configured: boolean;
 }
@@ -244,7 +265,9 @@ export interface OpenBillRow {
   /** Numero del documento (provider_ref: numero scontrino RT o id Openapi). */
   fiscal_ref?: string | null;
   /** RECEIPT = scontrino; PROFORMA = chiusura "paga dopo", conto a sospeso in cassa. */
-  fiscal_doc_type?: 'RECEIPT' | 'PROFORMA' | null;
+  fiscal_doc_type?: 'RECEIPT' | 'PROFORMA' | 'INVOICE' | null;
+  /** Numero fattura nostro (numerazione annuale), solo per doc INVOICE. */
+  fiscal_doc_number?: string | null;
   /** "pp:comanda:<id>" quando il conto nasce da una comanda Passepartout. */
   external_ref?: string | null;
   /** Movimenti vivi del libro cassa: come è stato pagato il conto. */

@@ -169,7 +169,7 @@ import {
 } from './services/blacklistPolicy.js';
 import { toTitleCase } from './utils/text.js';
 import { getRomeDatePart, getRomeTimePart } from './utils/reservationTime.js';
-import { buildEReceiptPayload, getFiscalDriver } from './services/fiscalService.js';
+import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
 import {
     getAvailableSlots,
     getAllOpeningHours,
@@ -3406,10 +3406,12 @@ async function chiudiComandaPassepartoutPerBill(
             );
             if (billRs.rows[0]) {
                 const ins = await queryWithRetry(
+                    // Arbitro sull'indice a livello conto (predicato con
+                    // split IS NULL dalla migration fattura-elettronica).
                     `INSERT INTO fiscal_documents
                         (tenant_id, table_bill_id, doc_type, provider, status, provider_ref, response, total_cents, confirmed_at)
                      VALUES ($1, $2, $6, 'passepartout', 'CONFIRMED', $3, $4::jsonb, $5, CURRENT_TIMESTAMP)
-                     ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') DO NOTHING
+                     ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') AND table_bill_split_id IS NULL DO NOTHING
                      RETURNING ${FISCAL_DOC_COLUMNS}`,
                     [tenantId, billId, esito.numeroScontrino || null, JSON.stringify(esito),
                      billRs.rows[0].total_cents, proforma ? 'PROFORMA' : 'RECEIPT']
@@ -4425,7 +4427,68 @@ async function getFiscalVatNumber(tenantId: number): Promise<string> {
     }
 }
 
-const FISCAL_DOC_COLUMNS = `id, table_bill_id, doc_type, provider, fiscal_id_snapshot, status,
+// Dati del cedente per la fattura (denominazione, regime, sede): blob JSON
+// in app_settings. Il regime di default è RF01 (ordinario).
+const FISCAL_SELLER_KEY = 'fiscal_seller';
+type FiscalSellerSetting = { business_name?: string; regime?: string; address?: { street?: string; zip?: string; city?: string; province?: string } };
+
+async function getFiscalSellerSetting(tenantId: number): Promise<FiscalSellerSetting> {
+    try {
+        const r = await queryWithRetry(
+            'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
+            [tenantId, FISCAL_SELLER_KEY]
+        );
+        const raw = r.rows[0]?.text_value;
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : null;
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_) {
+        return {};
+    }
+}
+
+// Cedente completo o l'elenco di cosa manca: la fattura non parte con i
+// dati a metà, e il messaggio d'errore deve dire COSA compilare.
+async function resolveFiscalSeller(tenantId: number): Promise<{ seller: FiscalSeller } | { missing: string[] }> {
+    const vat = await getFiscalVatNumber(tenantId);
+    const s = await getFiscalSellerSetting(tenantId);
+    const missing: string[] = [];
+    if (!vat) missing.push('P.IVA');
+    if (!s.business_name?.trim()) missing.push('denominazione');
+    if (!s.address?.street?.trim()) missing.push('indirizzo');
+    if (!s.address?.zip?.trim()) missing.push('CAP');
+    if (!s.address?.city?.trim()) missing.push('comune');
+    if (missing.length > 0) return { missing };
+    return {
+        seller: {
+            vat_number: vat,
+            business_name: s.business_name!.trim(),
+            regime: s.regime?.trim() || 'RF01',
+            address: {
+                street: s.address!.street!.trim(),
+                zip: s.address!.zip!.trim(),
+                city: s.address!.city!.trim(),
+                province: s.address?.province?.trim() || undefined,
+            },
+        },
+    };
+}
+
+// Prossimo numero fattura del tenant per l'anno: contatore dedicato sotto
+// lock di riga — MAX+1 senza lock produce doppioni, e il numero fattura è
+// un obbligo di legge. Formato "N/ANNO".
+async function nextInvoiceNumber(tenantId: number, year: number): Promise<string> {
+    const r = await queryWithRetry(
+        `INSERT INTO invoice_counters (tenant_id, year, last_number)
+         VALUES ($1, $2, 1)
+         ON CONFLICT (tenant_id, year)
+         DO UPDATE SET last_number = invoice_counters.last_number + 1
+         RETURNING last_number`,
+        [tenantId, year]
+    );
+    return `${r.rows[0].last_number}/${year}`;
+}
+
+const FISCAL_DOC_COLUMNS = `id, table_bill_id, table_bill_split_id, doc_type, doc_number, provider, fiscal_id_snapshot, status,
     provider_ref, error, total_cents, attempts, created_by_user_id, created_at, confirmed_at, voided_at`;
 
 // Emissione del documento commerciale per un conto CHIUSO. Idempotente:
@@ -4452,10 +4515,24 @@ async function emitFiscalDocForBill(tenantId: number, billId: number, userId: nu
     // Openapi farebbe due documenti per lo stesso incasso.
     if (passepartoutComandaIdFromRef(bill.external_ref) != null) return { skipped: 'passepartout' };
 
+    // Un solo binario fiscale: se sul conto vive una fattura (sull'intero o
+    // su una quota), lo scontrino non parte — sarebbe un secondo documento
+    // sullo stesso importo. L'indice unico copre solo il livello conto,
+    // quindi la fattura su quota va controllata qui.
+    const liveInvoices = await queryWithRetry(
+        `SELECT 1 FROM fiscal_documents
+         WHERE table_bill_id = $1 AND doc_type = 'INVOICE' AND status IN ('PENDING', 'CONFIRMED')
+         LIMIT 1`,
+        [billId]
+    );
+    if ((liveInvoices.rowCount ?? 0) > 0) return { skipped: 'invoice_exists' };
+
     let ins = await queryWithRetry(
+        // Arbitro sull'indice a livello conto (predicato con split IS NULL,
+        // vedi migration fattura-elettronica che ha sdoppiato l'indice).
         `INSERT INTO fiscal_documents (tenant_id, table_bill_id, provider, fiscal_id_snapshot, total_cents, created_by_user_id)
          VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') DO NOTHING
+         ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') AND table_bill_split_id IS NULL DO NOTHING
          RETURNING ${FISCAL_DOC_COLUMNS}`,
         [tenantId, billId, providerName, fiscalId, bill.total_cents, userId]
     );
@@ -4542,6 +4619,7 @@ app.get('/settings/fiscal', authenticate, async (req, res) => {
         res.json({
             provider: await getFiscalProviderSetting(req.tenantId!),
             vat_number: await getFiscalVatNumber(req.tenantId!),
+            seller: await getFiscalSellerSetting(req.tenantId!),
             providers: FISCAL_PROVIDERS,
             openapi_token_configured: Boolean(process.env.OPENAPI_INVOICE_TOKEN),
         });
@@ -4583,9 +4661,37 @@ app.put('/settings/fiscal', authenticate, requirePermission('settings:full'), as
                 [req.tenantId!, FISCAL_VAT_NUMBER_KEY, v]
             );
         }
+        // Cedente per la fattura: merge sul salvato, così un PUT parziale
+        // (solo la denominazione) non azzera l'indirizzo.
+        if (req.body?.seller !== undefined) {
+            const raw = req.body.seller;
+            if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) {
+                return res.status(400).json({ error: 'seller deve essere un oggetto' });
+            }
+            const current = await getFiscalSellerSetting(req.tenantId!);
+            const str = (v: any) => typeof v === 'string' ? v.trim().slice(0, 200) : undefined;
+            const next: FiscalSellerSetting = {
+                business_name: str(raw.business_name) ?? current.business_name,
+                regime: str(raw.regime) ?? current.regime,
+                address: {
+                    street: str(raw.address?.street) ?? current.address?.street,
+                    zip: str(raw.address?.zip) ?? current.address?.zip,
+                    city: str(raw.address?.city) ?? current.address?.city,
+                    province: str(raw.address?.province) ?? current.address?.province,
+                },
+            };
+            await queryWithRetry(
+                `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+                 VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                 ON CONFLICT (tenant_id, key) DO UPDATE
+                   SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+                [req.tenantId!, FISCAL_SELLER_KEY, JSON.stringify(next)]
+            );
+        }
         res.json({
             provider: await getFiscalProviderSetting(req.tenantId!),
             vat_number: await getFiscalVatNumber(req.tenantId!),
+            seller: await getFiscalSellerSetting(req.tenantId!),
             providers: FISCAL_PROVIDERS,
             openapi_token_configured: Boolean(process.env.OPENAPI_INVOICE_TOKEN),
         });
@@ -4610,6 +4716,7 @@ app.post('/bills/:id/fiscal-docs', authenticate, requirePermission('payments:ful
                 race: 'Emissione già in corso, riprova',
                 in_progress: 'Emissione già in corso, riprova tra qualche secondo',
                 passepartout: 'Conto del gestionale: lo scontrino lo emette la cassa alla chiusura comanda (POST /bills/:id/passepartout-close)',
+                invoice_exists: 'Il conto ha una fattura: lo scontrino non si emette sullo stesso importo',
             };
             return res.status(409).json({ error: messages[outcome.skipped] ?? outcome.skipped, reason: outcome.skipped });
         }
@@ -4642,6 +4749,12 @@ app.post('/bills/:id/fiscal-docs/:fid/void', authenticate, requirePermission('pa
         if (doc.status !== 'CONFIRMED' || !doc.provider_ref) {
             return res.status(409).json({ error: `Solo un documento confermato si può annullare (stato ${doc.status})` });
         }
+        // Una fattura trasmessa a SDI non si "annulla": si storna con nota
+        // di credito (TD04), che oggi non emettiamo — fase successiva del
+        // piano. Meglio un no chiaro che un DELETE sul binario sbagliato.
+        if (doc.doc_type === 'INVOICE') {
+            return res.status(409).json({ error: 'Una fattura inviata a SDI si storna con nota di credito, non si annulla da qui' });
+        }
         // Documento emesso dall'RT di cassa alla chiusura Passepartout: il
         // reso/annullo è un'operazione del registratore, non c'è un provider
         // cloud da chiamare.
@@ -4673,6 +4786,218 @@ app.post('/bills/:id/fiscal-docs/:fid/void', authenticate, requirePermission('pa
     } catch (err: any) {
         console.error('POST /bills/:id/fiscal-docs/:fid/void error:', err);
         res.status(502).json({ error: 'Annullo non riuscito', detail: err?.message });
+    }
+});
+
+// Emissione fattura elettronica (SDI) su un conto CHIUSO o su una singola
+// quota PAGATA (l'azienda al tavolo misto che paga la sua parte con
+// fattura). Il cessionario arriva dalla rubrica (customers.billing) o
+// inline nel body — l'inline vince campo per campo, così il cameriere può
+// correggere al volo senza toccare l'anagrafica.
+//
+// Regola fiscale MVP: sullo stesso importo non viaggiano due documenti.
+// La fattura (su conto o su quota) esige che NON ci sia uno scontrino vivo
+// sul conto: prima si annulla quello, poi si fattura. Il caso "fattura
+// sulla quota + scontrino sul resto" richiede lo scontrino parziale, che
+// oggi non esiste — segnalato nel piano come domanda per il commercialista.
+app.post('/bills/:id/invoices', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid bill id' });
+
+        const providerName = await getFiscalProviderSetting(req.tenantId!);
+        if (providerName === 'none') {
+            return res.status(409).json({ error: 'Nessun provider fiscale configurato (Impostazioni → Scontrino elettronico)', reason: 'not_configured' });
+        }
+        const sellerRes = await resolveFiscalSeller(req.tenantId!);
+        if ('missing' in sellerRes) {
+            return res.status(409).json({
+                error: `Dati del cedente incompleti nelle impostazioni fiscali: manca ${sellerRes.missing.join(', ')}`,
+                reason: 'missing_seller',
+            });
+        }
+
+        const billRs = await queryWithRetry(
+            `SELECT b.id, b.total_cents, b.items, b.status, b.external_ref, t.name AS table_name
+             FROM table_bills b
+             LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
+             WHERE b.id = $1 AND b.tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        const bill = billRs.rows[0];
+        if (!bill) return res.status(404).json({ error: 'Conto non trovato' });
+        // Conto del gestionale Passepartout: come per lo scontrino, i
+        // documenti fiscali li emette la cassa — non si raddoppia via Openapi.
+        if (passepartoutComandaIdFromRef(bill.external_ref) != null) {
+            return res.status(409).json({ error: 'Conto del gestionale: la fattura si emette dalla cassa Passepartout', reason: 'passepartout' });
+        }
+
+        // Quota (facoltativa): la fattura copre solo quell'importo.
+        const splitIdRaw = req.body?.split_id;
+        const splitId = splitIdRaw != null ? Number(splitIdRaw) : null;
+        let amountCents = bill.total_cents;
+        if (splitId != null) {
+            if (!Number.isFinite(splitId)) return res.status(400).json({ error: 'split_id non valido' });
+            const splitRs = await queryWithRetry(
+                `SELECT id, amount_cents, status, kind FROM table_bill_splits
+                 WHERE id = $1 AND table_bill_id = $2 AND tenant_id = $3`,
+                [splitId, id, req.tenantId!]
+            );
+            const split = splitRs.rows[0];
+            if (!split) return res.status(404).json({ error: 'Quota non trovata' });
+            if (split.status !== 'PAID' || split.kind === 'deposit') {
+                return res.status(409).json({ error: 'Si fattura solo una quota pagata da un cliente' });
+            }
+            amountCents = split.amount_cents;
+        } else if (bill.status !== 'CLOSED') {
+            return res.status(409).json({ error: 'La fattura sull\'intero conto si emette a conto chiuso e saldato', reason: 'bill_not_closed' });
+        }
+
+        // Un solo binario fiscale: niente scontrino vivo sul conto, e mai
+        // fattura-intero sopra fatture-quota (o viceversa: l'indice unico a
+        // livello conto copre già intero-su-intero).
+        const liveDocs = await queryWithRetry(
+            `SELECT id, doc_type, table_bill_split_id FROM fiscal_documents
+             WHERE table_bill_id = $1 AND status IN ('PENDING', 'CONFIRMED')`,
+            [id]
+        );
+        // Tutte le guardie PRIMA della numerazione: un tentativo destinato al
+        // 409 non deve bruciare un numero fattura (buchi = problemi legali).
+        const liveReceipt = liveDocs.rows.find((d: any) => d.doc_type === 'RECEIPT');
+        if (liveReceipt) {
+            return res.status(409).json({
+                error: 'Il conto ha già uno scontrino: annullalo prima di emettere la fattura',
+                reason: 'receipt_exists',
+            });
+        }
+        if (splitId == null && liveDocs.rows.some((d: any) => d.table_bill_split_id == null)) {
+            return res.status(409).json({ error: 'Il conto ha già una fattura', reason: 'invoice_exists' });
+        }
+        if (splitId == null && liveDocs.rows.some((d: any) => d.table_bill_split_id != null)) {
+            return res.status(409).json({ error: 'Esistono fatture su singole quote: non si può fatturare anche l\'intero', reason: 'split_invoices_exist' });
+        }
+        if (splitId != null && liveDocs.rows.some((d: any) => d.table_bill_split_id == null)) {
+            return res.status(409).json({ error: 'Esiste già un documento sull\'intero conto', reason: 'bill_doc_exists' });
+        }
+        if (splitId != null && liveDocs.rows.some((d: any) => d.table_bill_split_id === splitId)) {
+            return res.status(409).json({ error: 'Questa quota ha già una fattura', reason: 'invoice_exists' });
+        }
+
+        // Cessionario: rubrica come base, body come override campo per campo.
+        let base: any = {};
+        const customerId = req.body?.customer_id != null ? Number(req.body.customer_id) : null;
+        let customerName = '';
+        if (customerId != null && Number.isFinite(customerId)) {
+            const c = await queryWithRetry(
+                `SELECT name, billing FROM customers WHERE id = $1 AND tenant_id = $2`,
+                [customerId, req.tenantId!]
+            );
+            if (c.rowCount === 0) return res.status(404).json({ error: 'Cliente non trovato' });
+            base = c.rows[0].billing ?? {};
+            customerName = c.rows[0].name;
+        }
+        const inline = req.body?.buyer && typeof req.body.buyer === 'object' ? req.body.buyer : {};
+        const str = (v: any) => typeof v === 'string' && v.trim() ? v.trim() : undefined;
+        const buyer: InvoiceBuyer = {
+            name: str(inline.name) ?? str(base.name) ?? customerName,
+            vat_number: str(inline.vat_number) ?? str(base.vat_number) ?? null,
+            tax_code: str(inline.tax_code) ?? str(base.tax_code) ?? null,
+            sdi_code: str(inline.sdi_code) ?? str(base.sdi_code) ?? null,
+            pec: str(inline.pec) ?? str(base.pec) ?? null,
+            address: {
+                street: str(inline.address?.street) ?? str(base.address?.street) ?? '',
+                zip: str(inline.address?.zip) ?? str(base.address?.zip) ?? '',
+                city: str(inline.address?.city) ?? str(base.address?.city) ?? '',
+                province: str(inline.address?.province) ?? str(base.address?.province),
+            },
+        };
+        const buyerMissing: string[] = [];
+        if (!buyer.name) buyerMissing.push('denominazione');
+        if (!buyer.vat_number && !buyer.tax_code) buyerMissing.push('P.IVA o codice fiscale');
+        if (buyer.vat_number && !/^\d{11}$/.test(buyer.vat_number)) {
+            return res.status(400).json({ error: 'P.IVA del cliente non valida (11 cifre senza IT)' });
+        }
+        if (!buyer.address.street || !buyer.address.zip || !buyer.address.city) buyerMissing.push('indirizzo completo');
+        if (buyerMissing.length > 0) {
+            return res.status(400).json({ error: `Dati del cliente incompleti: manca ${buyerMissing.join(', ')}`, reason: 'missing_buyer' });
+        }
+
+        // Scomposizione IVA sull'importo fatturato: per la quota lo scorporo
+        // viene riproporzionato dalle stesse righe del conto.
+        const vatRows = vatBreakdownFromItems(Array.isArray(bill.items) ? bill.items : null, amountCents);
+        if (vatRows.length === 0) {
+            // Conto aperto a mano senza righe: riga unica al 10, come lo scontrino.
+            vatRows.push({ rate: 10, gross_cents: amountCents, net_cents: Math.round(amountCents / 1.1), vat_cents: amountCents - Math.round(amountCents / 1.1) });
+        }
+
+        const year = Number(getRomeDatePart(new Date()).slice(0, 4));
+        const docNumber = await nextInvoiceNumber(req.tenantId!, year);
+        const docDate = getRomeDatePart(new Date());
+        const xml = buildFatturaPaXml({
+            seller: sellerRes.seller,
+            buyer,
+            doc_number: docNumber,
+            doc_date: docDate,
+            vat_rows: vatRows,
+            total_gross_cents: amountCents,
+            description: `Somministrazione alimenti e bevande${bill.table_name ? ` — tavolo ${bill.table_name}` : ''}`,
+        });
+
+        // La riga nasce direttamente col payload e viene reclamata come per
+        // lo scontrino (claim su attempts) — qui il chiamante è uno solo, ma
+        // il doppio submit del bottone è lo stesso race.
+        const ins = await queryWithRetry(
+            `INSERT INTO fiscal_documents (tenant_id, table_bill_id, table_bill_split_id, doc_type, doc_number, provider, fiscal_id_snapshot, total_cents, created_by_user_id, request, attempts)
+             VALUES ($1, $2, $3, 'INVOICE', $4, $5, $6, $7, $8, $9::jsonb, 1)
+             ON CONFLICT DO NOTHING
+             RETURNING ${FISCAL_DOC_COLUMNS}`,
+            [req.tenantId!, id, splitId, docNumber, providerName, sellerRes.seller.vat_number, amountCents,
+             req.user?.userId ?? null, JSON.stringify({ xml, buyer })]
+        );
+        if (ins.rowCount === 0) {
+            return res.status(409).json({ error: 'Emissione già in corso o documento già presente', reason: 'in_progress' });
+        }
+        const doc = ins.rows[0];
+
+        let finalRow: any;
+        try {
+            const driver = getFiscalDriver(providerName);
+            const result = await driver.issueInvoice(xml);
+            const upd = await queryWithRetry(
+                `UPDATE fiscal_documents
+                 SET status = 'CONFIRMED', provider_ref = $2, response = $3::jsonb,
+                     confirmed_at = CURRENT_TIMESTAMP, error = NULL
+                 WHERE id = $1
+                 RETURNING ${FISCAL_DOC_COLUMNS}`,
+                [doc.id, result.provider_ref, JSON.stringify(result.raw ?? null)]
+            );
+            finalRow = upd.rows[0];
+        } catch (err: any) {
+            const upd = await queryWithRetry(
+                `UPDATE fiscal_documents SET status = 'FAILED', error = $2 WHERE id = $1
+                 RETURNING ${FISCAL_DOC_COLUMNS}`,
+                [doc.id, String(err?.message ?? err).slice(0, 1000)]
+            );
+            finalRow = upd.rows[0];
+            console.error('[fiscal] fattura fallita per conto', id, err?.message);
+        }
+
+        try { socketService?.broadcastToAll(req.tenantId!, 'fiscal:updated', { bill_id: id, doc: finalRow }); } catch (_) {}
+
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!,
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.CREATE, ResourceType.RESERVATION,
+                undefined,
+                `Fattura ${docNumber} ${finalRow.status === 'CONFIRMED' ? 'emessa' : 'NON emessa'} · ${formatEuroMinor(amountCents)} a ${buyer.name} (conto #${id}${splitId ? `, quota #${splitId}` : ''})`
+            );
+        }
+
+        res.status(finalRow.status === 'CONFIRMED' ? 201 : 502).json({ doc: finalRow });
+    } catch (err: any) {
+        console.error('POST /bills/:id/invoices error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });
 
@@ -9669,7 +9994,7 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
                 `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
                         preferred_table_id, preferences_notes, dietary_notes, is_vip,
                         is_blacklisted, blacklist_reason,
-                        consent_marketing, consent_marketing_updated_at, language,
+                        consent_marketing, consent_marketing_updated_at, language, billing,
                         ${noShowSubquery}
                  FROM customers c
                  WHERE c.tenant_id = $3
@@ -9685,7 +10010,7 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
             `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
                     preferred_table_id, preferences_notes, dietary_notes, is_vip,
                     is_blacklisted, blacklist_reason,
-                    consent_marketing, consent_marketing_updated_at, language,
+                    consent_marketing, consent_marketing_updated_at, language, billing,
                     ${noShowSubquery}
              FROM customers c
              WHERE c.tenant_id = $2
@@ -9730,9 +10055,33 @@ app.get('/customers/marketing-audience', authenticate, requirePermission('custom
     }
 });
 
+// Dati di fatturazione del cliente (fase 4 fatturazione): blob sanificato
+// campo per campo — mai lo JSON del client com'è. undefined = non toccare.
+const normalizeCustomerBilling = (raw: any): string | null | undefined => {
+    if (raw === undefined) return undefined;
+    if (raw === null) return null;
+    if (typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+    const str = (v: any, max = 200) => typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined;
+    const out = {
+        name: str(raw.name),
+        vat_number: str(raw.vat_number, 11),
+        tax_code: str(raw.tax_code, 16)?.toUpperCase(),
+        sdi_code: str(raw.sdi_code, 7)?.toUpperCase(),
+        pec: str(raw.pec),
+        address: {
+            street: str(raw.address?.street),
+            zip: str(raw.address?.zip, 5),
+            city: str(raw.address?.city),
+            province: str(raw.address?.province, 2)?.toUpperCase(),
+        },
+    };
+    return JSON.stringify(out);
+};
+
 app.post('/customers', authenticate, requirePermission('customers:full'), async (req, res) => {
     try {
         const { name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason } = req.body;
+        const billingJson = normalizeCustomerBilling(req.body?.billing);
         if (!name || !String(name).trim()) {
             return res.status(400).json({ error: 'name is required' });
         }
@@ -9770,10 +10119,10 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
         }
 
         const result = await queryWithRetry(
-            `INSERT INTO customers (tenant_id, name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason)
-             VALUES ($12, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $13, $14)
+            `INSERT INTO customers (tenant_id, name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason, billing)
+             VALUES ($12, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $13, $14, $15::jsonb)
              RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
-                       preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason, language`,
+                       preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason, language, billing`,
             [
                 normalizeCustomerName(String(name).trim()),
                 trimmedPhone || null,
@@ -9789,6 +10138,7 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
                 req.tenantId!,
                 normalizedIsBlacklisted,
                 normalizedBlacklistReason,
+                billingJson ?? null,
             ]
         );
         const newCustomer = result.rows[0];
@@ -9817,6 +10167,7 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
     try {
         const { id } = req.params;
         const { name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason } = req.body;
+        const billingJson = normalizeCustomerBilling(req.body?.billing);
         if (!name || !String(name).trim()) {
             return res.status(400).json({ error: 'name is required' });
         }
@@ -9895,10 +10246,11 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
                     is_vip = $11,
                     is_blacklisted = $12,
                     blacklist_reason = $13,
+                    billing = COALESCE($16::jsonb, billing),
                     updated_at = CURRENT_TIMESTAMP
                  WHERE id = $14 AND tenant_id = $15
                  RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
-                           preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason, language`,
+                           preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason, language, billing`,
                 [
                     newName,
                     newPhone,
@@ -9915,6 +10267,7 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
                     normalizedBlacklistReason,
                     id,
                     req.tenantId!,
+                    billingJson ?? null,
                 ]
             );
             updated = result.rows[0];
@@ -23997,7 +24350,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                     -- provider_ref è il numero del documento.
                     fd.status AS fiscal_status, fd.id AS fiscal_doc_id, fd.error AS fiscal_error,
                     fd.provider AS fiscal_provider, fd.provider_ref AS fiscal_ref,
-                    fd.doc_type AS fiscal_doc_type,
+                    fd.doc_type AS fiscal_doc_type, fd.doc_number AS fiscal_doc_number,
                     -- Come è stato pagato: i movimenti vivi del libro cassa
                     -- (incassi staff + specchi delle quote online), per la
                     -- sezione Pagamenti del conto senza una fetch per riga.
@@ -24013,7 +24366,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
              LEFT JOIN reservations r ON r.id = b.reservation_id AND r.tenant_id = b.tenant_id
              LEFT JOIN table_bill_splits s ON s.table_bill_id = b.id
              LEFT JOIN LATERAL (
-                 SELECT id, status, error, provider, provider_ref, doc_type FROM fiscal_documents
+                 SELECT id, status, error, provider, provider_ref, doc_type, doc_number FROM fiscal_documents
                  WHERE table_bill_id = b.id ORDER BY created_at DESC LIMIT 1
              ) fd ON TRUE
              WHERE b.status = ANY($3::varchar[])
@@ -24027,7 +24380,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                         (SELECT o.shift FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
                         CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
                              THEN 'LUNCH' ELSE 'DINNER' END) = $2::varchar)
-             GROUP BY b.id, t.name, r.customer_name, fd.id, fd.status, fd.error, fd.provider, fd.provider_ref, fd.doc_type
+             GROUP BY b.id, t.name, r.customer_name, fd.id, fd.status, fd.error, fd.provider, fd.provider_ref, fd.doc_type, fd.doc_number
              ORDER BY b.closed_at DESC NULLS LAST, b.opened_at DESC`,
             [filterDate, filterShift, statuses, req.tenantId!]
         );
