@@ -273,6 +273,25 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
     return m;
   }, [todayReservations]);
 
+  // Tutte le prenotazioni (non partite, escluse la selezionata) per tavolo:
+  // un tavolo può ospitare due turni nella stessa serata, e lo scambio deve
+  // poter scegliere QUALE prenotazione scambiare, non una a caso. Ordinate per
+  // orario così il chooser le mostra in sequenza.
+  const reservationsByTableId = useMemo(() => {
+    const m = new Map<number, Reservation[]>();
+    for (const r of todayReservations) {
+      if (!r.table_id) continue;
+      if (r.id === selectedReservationId) continue;
+      if (r.arrival_status === ArrivalStatus.DEPARTED) continue;
+      const list = m.get(r.table_id);
+      if (list) list.push(r); else m.set(r.table_id, [r]);
+    }
+    for (const list of m.values()) {
+      list.sort((a, b) => new Date(a.reservation_time).getTime() - new Date(b.reservation_time).getTime());
+    }
+    return m;
+  }, [todayReservations, selectedReservationId]);
+
   // The PUT /reservations/:id endpoint is a *full* replace — it destructures
   // the body into fixed columns, so a partial body would null out NOT NULL
   // columns (customer_name) and trip a 500. We always merge the patch onto
@@ -929,6 +948,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
           setActiveRoomId={setActiveRoomId}
           occupiedTableIds={occupiedTableIds}
           reservationByTableId={reservationByTableId}
+          reservationsByTableId={reservationsByTableId}
           onCancel={() => setShowTablePicker(false)}
           onSelect={handleAssignTable}
           onSwap={handleSwapTable}
@@ -1307,6 +1327,7 @@ interface TablePickerProps {
   setActiveRoomId: (id: number) => void;
   occupiedTableIds: Set<number>;
   reservationByTableId: Map<number, Reservation>;
+  reservationsByTableId: Map<number, Reservation[]>;
   onCancel: () => void;
   onSelect: (tableId: number) => void;
   onSwap: (otherReservationId: number) => void;
@@ -1321,6 +1342,7 @@ const TablePicker: React.FC<TablePickerProps> = ({
   setActiveRoomId,
   occupiedTableIds,
   reservationByTableId,
+  reservationsByTableId,
   onCancel,
   onSelect,
   onSwap,
@@ -1329,6 +1351,9 @@ const TablePicker: React.FC<TablePickerProps> = ({
   // Tapping an occupied tile arms a swap confirmation — the host pairs the
   // current reservation with the booking sitting at that tile.
   const [swapCandidate, setSwapCandidate] = useState<Reservation | null>(null);
+  // Quando il tavolo toccato ha più prenotazioni, prima si sceglie QUALE
+  // scambiare: qui stanno i candidati da mostrare nel chooser.
+  const [swapChoices, setSwapChoices] = useState<Reservation[] | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = useState({ width: 800, height: 600 });
 
@@ -1413,12 +1438,18 @@ const TablePicker: React.FC<TablePickerProps> = ({
     // Without it the swap would be a one-way reassignment, which the
     // server (correctly) refuses.
     const occupantRes = state === 'occupied' ? reservationByTableId.get(t.id) : null;
-    const swappable = state === 'occupied' && !!reservation.table_id && !!occupantRes;
+    // Tutti i candidati allo scambio sul tavolo (un tavolo può avere due turni).
+    const swapTargets = state === 'occupied'
+      ? (reservationsByTableId.get(t.id) ?? []).filter(o => o.id !== reservation.id)
+      : [];
+    const swappable = state === 'occupied' && !!reservation.table_id && swapTargets.length > 0;
     const disabled = state === 'tooSmall' || (state === 'occupied' && !swappable);
     const onTap = () => {
       if (disabled) return;
-      if (swappable && occupantRes) {
-        setSwapCandidate(occupantRes);
+      if (swappable) {
+        // Una sola prenotazione → conferma diretta; più d'una → prima si sceglie.
+        if (swapTargets.length === 1) setSwapCandidate(swapTargets[0]);
+        else setSwapChoices(swapTargets);
       } else {
         onSelect(t.id);
       }
@@ -1651,6 +1682,44 @@ const TablePicker: React.FC<TablePickerProps> = ({
           </div>
         )}
       </div>
+      )}
+
+      {/* Chooser — quando il tavolo ha più prenotazioni, si sceglie con quale
+          scambiare prima della conferma. */}
+      {swapChoices && (
+        <ModalShell
+          open
+          onClose={() => { if (!busy) setSwapChoices(null); }}
+          title="Quale prenotazione scambiare?"
+          subtitle="Questo tavolo ha più prenotazioni: scegli quella con cui invertire"
+          size="sm"
+          className="z-[60]"
+          bodyClassName="p-4 sm:p-6"
+          footer={
+            <button type="button" onClick={() => setSwapChoices(null)} disabled={busy} className={dsButton.quiet}>
+              Annulla
+            </button>
+          }
+        >
+          <div className="flex flex-col gap-2">
+            {swapChoices.map(choice => (
+              <button
+                key={choice.id}
+                type="button"
+                disabled={busy}
+                onClick={() => { setSwapChoices(null); setSwapCandidate(choice); }}
+                className="flex w-full items-center justify-between gap-3 rounded-[16px] bg-[var(--ds-surface)] p-3 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-50"
+              >
+                <span className="min-w-0 truncate font-medium text-[var(--ds-text-primary)]">
+                  {toTitleCase(choice.customer_name) || 'Senza nome'}
+                </span>
+                <span className="flex-shrink-0 text-[13px] text-[var(--ds-text-muted)]">
+                  {formatHHMM(choice.reservation_time)} · {choice.guests} ospiti
+                </span>
+              </button>
+            ))}
+          </div>
+        </ModalShell>
       )}
 
       {/* Swap confirmation — sits over the picker so the host can verify the
