@@ -279,4 +279,45 @@ describe('reservations', () => {
         await api().delete(`/reservations/${sulPrimario.body.id}`).set(bearer(token));
         await api().delete(`/reservations/${doppioTurno.body.id}`).set(bearer(token));
     });
+
+    // Caricamento in due tempi: il boot chiede ?from=<finestra>, lo storico
+    // arriva con ?to=<finestra>. Senza parametri la risposta resta l'intero
+    // storico (client vecchi). Estremi inclusi, giorni Europe/Rome.
+    it('la finestra ?from/?to filtra per giorno, senza parametri torna tutto', async () => {
+        const crea = async (nome: string, giorno: string) => {
+            const r = await api().post('/reservations').set(bearer(token)).send({
+                customer_name: nome,
+                reservation_time: `${giorno}T20:00:00`,
+                shift: 'DINNER',
+                guests: 2,
+            });
+            expect(r.status).toBe(201);
+            return r.body.id as number;
+        };
+        const vecchia = await crea('Finestra Vecchia', '2027-06-01');
+        const nuova = await crea('Finestra Nuova', '2027-06-20');
+
+        const tutte = await api().get('/reservations').set(bearer(token));
+        expect(tutte.status).toBe(200);
+        const idsTutte = tutte.body.map((r: any) => r.id);
+        expect(idsTutte).toContain(vecchia);
+        expect(idsTutte).toContain(nuova);
+
+        const finestra = await api().get('/reservations?from=2027-06-10').set(bearer(token));
+        const idsFinestra = finestra.body.map((r: any) => r.id);
+        expect(idsFinestra).toContain(nuova);
+        expect(idsFinestra).not.toContain(vecchia);
+
+        const archivio = await api().get('/reservations?to=2027-06-10').set(bearer(token));
+        const idsArchivio = archivio.body.map((r: any) => r.id);
+        expect(idsArchivio).toContain(vecchia);
+        expect(idsArchivio).not.toContain(nuova);
+
+        // from incluso: la prenotazione del giorno stesso rientra.
+        const bordo = await api().get('/reservations?from=2027-06-20&to=2027-06-20').set(bearer(token));
+        expect(bordo.body.map((r: any) => r.id)).toContain(nuova);
+
+        await api().delete(`/reservations/${vecchia}`).set(bearer(token));
+        await api().delete(`/reservations/${nuova}`).set(bearer(token));
+    });
 });
