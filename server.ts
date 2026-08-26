@@ -10,6 +10,7 @@ import { createServer } from 'http';
 import crypto from 'crypto';
 import path from 'path';
 import cors from 'cors';
+import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import QRCode from 'qrcode';
 import pool, { createSchema, queryWithRetry, runMigrations, tenantQuery, runWithTenantContext, runAsPlatform } from './db.js';
@@ -217,6 +218,12 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+// Nessuna compressione a monte (il proxy Railway non la fa): la GET
+// /reservations di boot pesava 6.3 MB di JSON nudo su ogni avvio e
+// riconnessione — su mobile era il collo di bottiglia percepito (26/08).
+// Il filtro di default comprime json/testo e lascia stare immagini e
+// stream già compressi (proxy media Twilio incluso).
+app.use(compression());
 // 2 MB body limit accommodates inlined dish photos as base64 data URLs
 // (resized client-side to ~200KB). Default 100KB would reject them.
 // `verify` stashes the raw payload so HMAC-signed webhooks (e.g. ElevenLabs)

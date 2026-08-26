@@ -1014,17 +1014,17 @@ export async function modifyVoiceReservation(
     const current = active[0];
 
     // 2) Compute the new state (merge current with overrides).
-    // reservation_time comes back from pg as a Date object; `String(Date)`
-    // formats it as "Fri Jan 15 2027 ..." (Date.prototype.toString), which
-    // is not ISO. Use toISOString() to get YYYY-MM-DDTHH:MM:SS.SSSZ then
-    // slice — Railway runs in UTC, so wall-clock and UTC coincide for the
-    // way we store reservation_time (see createVoiceReservation).
-    const iso = current.reservation_time instanceof Date
-        ? current.reservation_time.toISOString()
-        : String(current.reservation_time);
-    const curDate = iso.slice(0, 10);
-    const timeMatch = iso.match(/T(\d{2}):(\d{2})/);
-    const curTime = timeMatch ? `${timeMatch[1]}:${timeMatch[2]}` : '00:00';
+    // reservation_time comes back from pg as a Date (a UTC instant). The new
+    // reservation_time we write below is a naive `YYYY-MM-DDTHH:MM:00` string
+    // that the app's pg session (Europe/Rome) reinterprets as Rome wall-clock.
+    // So the current date/time we default to MUST also be read as Rome
+    // wall-clock — reading the UTC parts (toISOString) shifts a guests-only
+    // change back by the Rome offset (22:00 booking silently became 20:00,
+    // Vernoccoli #38950, 2026-08-25). getRomeDatePart/getRomeTimePart format
+    // the instant in Europe/Rome, which is exactly what createVoiceReservation
+    // and the dashboard store.
+    const curDate = getRomeDatePart(current.reservation_time);
+    const curTime = getRomeTimePart(current.reservation_time);
 
     const newDate = input.new_date ?? curDate;
     const newTime = input.new_time ?? curTime;
