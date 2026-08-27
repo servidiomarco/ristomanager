@@ -322,6 +322,12 @@ export interface PassepartoutArticolo {
     tipo: string | null;
     categoria: string | null;
     categoriaPadre: string | null;
+    /** Codici delle varianti attaccate all'ARTICOLO (es. "Ghiaccio"): sono i
+     *  Codice di altri articoli del catalogo di tipo Variante. */
+    varianti: string[];
+    /** Codici delle varianti della CATEGORIA dell'articolo (es. "In 2 piatti"):
+     *  valgono per tutti gli articoli della categoria. */
+    categoriaVarianti: string[];
 }
 
 /**
@@ -339,6 +345,14 @@ export async function getArticoliMenu(ultimaModifica?: string): Promise<Passepar
     )) as Record<string, any> | null;
     if (!result || isNil(result)) return [];
     const entries: Record<string, any>[] = result.ContrattoArticolo ?? [];
+    // Le liste Varianti sono ArrayOfstring del serializzatore WCF: dopo il
+    // parser diventano { string: 'x' } oppure { string: ['x','y'] }.
+    const codici = (v: unknown): string[] => {
+        if (v == null || isNil(v)) return [];
+        const raw = (v as Record<string, unknown>).string;
+        if (raw == null) return [];
+        return (Array.isArray(raw) ? raw : [raw]).map((s) => String(s).trim()).filter((s) => s !== '');
+    };
     return entries
         .map((a) => {
             const id = asNumber(a.IdGestionale);
@@ -362,6 +376,8 @@ export async function getArticoliMenu(ultimaModifica?: string): Promise<Passepar
                 tipo: asString(a.TipoEnum),
                 categoria: cat ? asString(cat.Descrizione) : null,
                 categoriaPadre: padre ? asString(padre.Descrizione) : null,
+                varianti: codici(a.Varianti),
+                categoriaVarianti: codici(cat?.Varianti),
             } satisfies PassepartoutArticolo;
         })
         .filter((a): a is PassepartoutArticolo => a != null);

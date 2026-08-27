@@ -39,6 +39,26 @@ describe('import menu Passepartout (gating)', () => {
         expect(res.body.error).toBe('passepartout_agent_offline');
     });
 
+    it('menu digitale pubblico: 503 da spento, 200 col flag acceso', async () => {
+        const spento = await api().get('/public/menu');
+        expect(spento.status).toBe(503);
+        expect(spento.body.error).toBe('menu_disabled');
+
+        const token = await ownerToken();
+        await api().put('/settings/features').set(bearer(token)).send({ digital_menu_enabled: true });
+        const acceso = await api().get('/public/menu');
+        expect(acceso.status).toBe(200);
+        expect(Array.isArray(acceso.body.piatti)).toBe(true);
+        expect(acceso.body.lingue).toEqual(['it', 'en', 'fr', 'de']);
+
+        // La pagina risponde sia da /menu (dominio) sia da /m/<slug>.
+        const pagina = await api().get('/menu');
+        expect(pagina.status).toBe(200);
+        expect(pagina.text).toContain('Menu digitale');
+
+        await api().put('/settings/features').set(bearer(token)).send({ digital_menu_enabled: false });
+    });
+
     it('la migration porta external_ref e is_active sui piatti', async () => {
         const token = await ownerToken();
         const res = await api().get('/dishes').set(bearer(token));

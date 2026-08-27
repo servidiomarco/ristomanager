@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, VAT_RATES, Customer, Table, TableMerge, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
-import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw } from 'lucide-react';
+import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { getRomeDatePart } from '../utils/reservationTime';
 import { printBanquet } from '../utils/printBanquet';
@@ -11,7 +11,8 @@ import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BanquetPaymentsModal } from './BanquetPaymentsModal';
 import { DishDetailModal } from './DishDetailModal';
 import { CustomerPickerModal } from './CustomerPickerModal';
-import { getCustomers, getTableMerges, importMenuPassepartout, type MenuImportResult } from '../services/apiService';
+import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, type MenuImportResult, type MenuTranslateResult } from '../services/apiService';
+import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '../contexts/AuthContext';
 import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftService';
 import {
@@ -199,6 +200,59 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     } finally {
       setImporting(false);
     }
+  };
+
+  // Menu digitale: QR pubblico, interruttore del flag e traduzioni AI.
+  const [qrOpen, setQrOpen] = useState(false);
+  const [menuAttivo, setMenuAttivo] = useState<boolean | null>(null);
+  const [menuFlagBusy, setMenuFlagBusy] = useState(false);
+  const [translating, setTranslating] = useState(false);
+  const [translateEsito, setTranslateEsito] = useState<MenuTranslateResult | null>(null);
+  const [translateError, setTranslateError] = useState<string | null>(null);
+  const [linkCopiato, setLinkCopiato] = useState(false);
+  const menuUrl = digitalMenuUrl();
+
+  useEffect(() => {
+    if (!qrOpen) return;
+    let cancelled = false;
+    getFeatureFlags()
+      .then(f => { if (!cancelled) setMenuAttivo(f.digital_menu_enabled === true); })
+      .catch(() => { if (!cancelled) setMenuAttivo(null); });
+    return () => { cancelled = true; };
+  }, [qrOpen]);
+
+  const toggleMenuDigitale = async () => {
+    if (menuFlagBusy || menuAttivo == null) return;
+    setMenuFlagBusy(true);
+    try {
+      const updated = await updateFeatureFlags({ digital_menu_enabled: !menuAttivo });
+      setMenuAttivo(updated.digital_menu_enabled === true);
+    } catch (_) {
+      /* lo stato resta quello vero: al prossimo open si ricarica */
+    } finally {
+      setMenuFlagBusy(false);
+    }
+  };
+
+  const handleTranslate = async () => {
+    if (translating) return;
+    setTranslating(true);
+    setTranslateEsito(null);
+    setTranslateError(null);
+    try {
+      setTranslateEsito(await translateMenu());
+    } catch (err: any) {
+      setTranslateError(err?.data?.message ?? err?.data?.error ?? err?.message ?? 'Traduzione non riuscita');
+    } finally {
+      setTranslating(false);
+    }
+  };
+
+  const copiaLinkMenu = () => {
+    navigator.clipboard?.writeText(menuUrl).then(() => {
+      setLinkCopiato(true);
+      setTimeout(() => setLinkCopiato(false), 2000);
+    }).catch(() => {});
   };
 
   const [activeTab, setActiveTab] = useState<'DISHES' | 'BANQUETS'>(initialTab);
@@ -896,6 +950,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         )}
         {activeTab === 'DISHES' && (
           <div className="flex items-center gap-2 sm:flex-1 sm:justify-end">
+            <button
+              type="button"
+              onClick={() => setQrOpen(true)}
+              title="QR e traduzioni del menu per gli ospiti"
+              className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              <QrCode className="h-4 w-4" aria-hidden />
+              Menu digitale
+            </button>
             {canImportCassa && (
               <button
                 type="button"
@@ -949,7 +1012,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               <div className="mb-4">
                 <Callout tone={importError ? 'critical' : 'positive'}>
                   {importError
-                    ?? `Menu allineato alla cassa: ${importEsito!.creati} nuovi, ${importEsito!.aggiornati} aggiornati, ${importEsito!.disattivati} disattivati.`}
+                    ?? `Menu allineato alla cassa: ${importEsito!.creati} nuovi, ${importEsito!.aggiornati} aggiornati, ${importEsito!.disattivati} disattivati${importEsito!.gruppi_varianti ? `, ${importEsito!.gruppi_varianti} gruppi varianti` : ''}.`}
                 </Callout>
               </div>
             )}
@@ -2477,6 +2540,83 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           )}
         </ModalShell>
       )}
+
+      {/* Menu digitale: QR da mettere al tavolo, interruttore di visibilità
+          e traduzioni AI. La pagina pubblica è servita dal backend, come la
+          pagina prenotazioni. */}
+      <ModalShell
+        open={qrOpen}
+        onClose={() => setQrOpen(false)}
+        title="Menu digitale"
+        subtitle="L'ospite inquadra il QR e sfoglia il menu in quattro lingue."
+      >
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3 rounded-2xl bg-[var(--ds-surface-row)] px-4 py-3">
+            <span className="text-[14px] font-medium text-[var(--ds-text-primary)]">
+              {menuAttivo == null ? 'Stato…' : menuAttivo ? 'Menu visibile agli ospiti' : 'Menu non visibile'}
+            </span>
+            <button
+              type="button"
+              onClick={toggleMenuDigitale}
+              disabled={menuFlagBusy || menuAttivo == null}
+              className={`inline-flex h-9 items-center rounded-full px-4 text-[13px] font-semibold transition-colors disabled:opacity-40 ${
+                menuAttivo
+                  ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
+                  : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+              }`}
+            >
+              {menuFlagBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : menuAttivo ? 'Spegni' : 'Pubblica'}
+            </button>
+          </div>
+
+          <div className="flex flex-col items-center gap-3">
+            {/* Piatto bianco fisso: un QR su fondo scuro non si inquadra. */}
+            <div className="rounded-[16px] bg-[#ffffff] p-3 shadow-[var(--ds-shadow-card)]">
+              <QRCodeSVG value={menuUrl} size={168} level="M" />
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={copiaLinkMenu}
+                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]"
+              >
+                {linkCopiato ? <><Check className="h-4 w-4" /> Copiato</> : <><Copy className="h-4 w-4" /> Copia link</>}
+              </button>
+              <a
+                href={menuUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]"
+              >
+                Apri la pagina
+              </a>
+            </div>
+          </div>
+
+          {canEdit && (
+            <div className="space-y-2 border-t border-[var(--ds-border)] pt-4">
+              <button
+                type="button"
+                onClick={handleTranslate}
+                disabled={translating}
+                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40"
+              >
+                {translating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Languages className="h-4 w-4" />}
+                Traduci le voci nuove
+              </button>
+              <p className="text-[13px] text-[var(--ds-text-muted)]">
+                Inglese, francese e tedesco. Traduce solo le voci senza traduzione: si può rilanciare dopo ogni import.
+              </p>
+              {translateEsito && (
+                <p className="text-[13px] text-[var(--ds-seated-text)]">
+                  {translateEsito.tradotte === 0 ? 'Tutto già tradotto.' : `${translateEsito.tradotte} voci tradotte.`}
+                </p>
+              )}
+              {translateError && <p className="text-[13px] text-[var(--ds-critical-text)]">{translateError}</p>}
+            </div>
+          )}
+        </div>
+      </ModalShell>
 
       <ConfirmDeleteModal
         isOpen={!!deleteDishConfirm}
