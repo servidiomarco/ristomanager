@@ -4698,6 +4698,14 @@ app.get('/reports/cash-closure', authenticate, requirePermission('payments:view'
         const billListRs = await queryWithRetry(
             `SELECT b.id, b.total_cents, b.status, b.tip_cents, b.closed_at, b.covers,
                     t.name AS table_name, r.customer_name,
+                    -- Turno del conto (dalla comanda, o dedotto dall'apertura
+                    -- come in /bills/open): lo stesso tavolo serve pranzo e
+                    -- cena, senza turno le righe del giorno si confondono.
+                    COALESCE(
+                        (SELECT o.shift FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
+                        CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
+                             THEN 'LUNCH' ELSE 'DINNER' END
+                    ) AS shift,
                     fd.doc_type AS fiscal_doc_type, fd.status AS fiscal_status, fd.doc_number AS fiscal_doc_number,
                     COALESCE((SELECT jsonb_agg(jsonb_build_object('method', p.method, 'amount_cents', p.amount_cents) ORDER BY p.recorded_at)
                               FROM table_bill_payments p

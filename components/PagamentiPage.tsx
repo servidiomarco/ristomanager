@@ -340,7 +340,7 @@ const PagamentiPage: React.FC<{
           }
           list={
             showingCassa ? (
-              <ChiusuraCassa date={serviceFilter?.service_date} />
+              <ChiusuraCassa date={serviceFilter?.service_date} shift={serviceFilter?.shift} />
             ) : showingBills ? (
               <ContiAperti
                 bills={openBills.bills}

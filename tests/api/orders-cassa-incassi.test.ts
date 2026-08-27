@@ -133,6 +133,7 @@ describe('libro cassa incassi', () => {
         expect(row.table_name).toBe('CASSA1');
         expect(row.status).toBe('CLOSED');
         expect(row.fiscal_doc_type).toBeNull();
+        expect(['LUNCH', 'DINNER']).toContain(row.shift);
         const rowMethods = row.payments.map((p: any) => p.method).sort();
         expect(rowMethods).toEqual(['BUONO_PASTO', 'CONTANTI']);
     });
