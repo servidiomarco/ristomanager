@@ -297,4 +297,36 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         const ripristino = await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'AUTO_ALL' });
         expect(ripristino.status).toBe(200);
     });
+
+    it('riporta: un\'uscita servita per errore torna pronta al passe, e si può riservire', async () => {
+        const orderId = await nuovaComanda();
+        await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [{ dish_id: piatto1, qty: 1, course_no: 1 }],
+        });
+        // AUTO_ALL: l'invio lancia da solo.
+        await api().post(`/orders/${orderId}/send`).set(bearer(token)).send({});
+        const view = await api().get(`/orders/${orderId}`).set(bearer(token));
+        const riga = righe(view.body)[0];
+        await api().post(`/kds/items/${riga.id}/status`).set(bearer(token)).send({ status: 'READY' });
+        await api().post(`/orders/${orderId}/courses/1/serve`).set(bearer(token)).send({});
+
+        // Il passe la vede fra le servite recenti.
+        const board = await api().get('/kds/expediter').set(bearer(token));
+        expect(board.status).toBe(200);
+        expect(board.body.servite.some((s: any) => s.order_id === orderId && s.course_no === 1)).toBe(true);
+
+        // Riportata: le righe tornano READY, il served_at non è mai esistito.
+        const riporta = await api().post(`/orders/${orderId}/courses/1/unserve`).set(bearer(token)).send({});
+        expect(riporta.status).toBe(200);
+        for (const i of riporta.body.items) {
+            expect(i.status).toBe('READY');
+            expect(i.served_at).toBeNull();
+        }
+
+        // Riportare due volte non ha senso; riservire sì.
+        const doppio = await api().post(`/orders/${orderId}/courses/1/unserve`).set(bearer(token)).send({});
+        expect(doppio.status).toBe(409);
+        const di_nuovo = await api().post(`/orders/${orderId}/courses/1/serve`).set(bearer(token)).send({});
+        expect(di_nuovo.status).toBe(200);
+    });
 });

@@ -576,10 +576,12 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
     socket.on('course:fired', onCourse);
     socket.on('course:ready', onCourse);
     socket.on('course:served', onCourse);
+    socket.on('course:unserved', onCourse);
     return () => {
       socket.off('course:fired', onCourse);
       socket.off('course:ready', onCourse);
       socket.off('course:served', onCourse);
+      socket.off('course:unserved', onCourse);
     };
   }, [openOrderId]);
 

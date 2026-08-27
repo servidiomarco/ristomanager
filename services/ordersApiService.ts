@@ -273,6 +273,14 @@ export interface ExpediterCourse {
 export interface ExpediterBoard {
   stations: { id: number; name: string; color: string | null; sort_order: number }[];
   courses: ExpediterCourse[];
+  /** Uscite servite negli ultimi minuti: il cestino da cui si riporta. */
+  servite: {
+    order_id: number;
+    course_no: number;
+    served_at: string;
+    items: number;
+    table_name: string | null;
+  }[];
 }
 
 export const getExpediterBoard = async (): Promise<ExpediterBoard> =>
@@ -298,6 +306,12 @@ export const callCourse = async (orderId: number, courseNo: number): Promise<{ t
 /** L'uscita lascia il passe: tutte le righe pronte diventano servite. */
 export const serveCourse = async (orderId: number, courseNo: number): Promise<unknown> =>
   apiRequest(`${API_URL}/orders/${orderId}/courses/${courseNo}/serve`, {
+    method: 'POST', headers: getHeaders(),
+  });
+
+/** Il ripensamento del servito: l'uscita torna pronta al passe. */
+export const unserveCourse = async (orderId: number, courseNo: number): Promise<unknown> =>
+  apiRequest(`${API_URL}/orders/${orderId}/courses/${courseNo}/unserve`, {
     method: 'POST', headers: getHeaders(),
   });
 

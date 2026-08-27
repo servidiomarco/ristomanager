@@ -1,11 +1,12 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { BarChart3, Bell, Check, Loader2, Play, RotateCcw, TriangleAlert, WifiOff } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { BarChart3, Bell, BellOff, Check, Loader2, Play, RotateCcw, TriangleAlert, WifiOff } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
 import { socketClient } from '../services/socketClient';
 import {
-  getExpediterBoard, fireCourse, refireCourse, callCourse, serveCourse, getKitchenReport,
+  getExpediterBoard, fireCourse, refireCourse, callCourse, serveCourse, unserveCourse, getKitchenReport,
   type ExpediterBoard, type ExpediterCourse, type KitchenReport,
 } from '../services/ordersApiService';
+import { chime } from '../utils/chime';
 import { SectionHeader, StatusPill, dsButton } from './ds';
 
 // ---------------------------------------------------------------------------
@@ -21,6 +22,7 @@ import { SectionHeader, StatusPill, dsButton } from './ds';
 // ---------------------------------------------------------------------------
 
 const ORDINALS = ['', '1ª', '2ª', '3ª', '4ª', '5ª', '6ª'];
+const SOUND_KEY = 'passe.sound';
 
 const mmss = (seconds: number): string => {
   const m = Math.floor(Math.max(0, seconds) / 60);
@@ -41,6 +43,21 @@ export const ExpediterDisplay: React.FC = () => {
   const [called, setCalled] = useState<Set<string>>(new Set());
   const [report, setReport] = useState<KitchenReport | null>(null);
   const [showReport, setShowReport] = useState(false);
+  // Avviso sonoro sull'uscita che diventa pronta. Nel ref oltre che nello
+  // stato: il listener socket legge il valore corrente senza risottoscriversi.
+  const [sound, setSound] = useState(() => localStorage.getItem(SOUND_KEY) !== 'off');
+  const soundRef = useRef(sound);
+  soundRef.current = sound;
+  const toggleSound = () => {
+    setSound(prev => {
+      const next = !prev;
+      localStorage.setItem(SOUND_KEY, next ? 'on' : 'off');
+      // Suona subito all'accensione: conferma la scelta e, essendo dentro un
+      // gesto dell'utente, sblocca l'AudioContext per gli avvisi futuri.
+      if (next) chime();
+      return next;
+    });
+  };
 
   const reload = useCallback(async () => {
     try {
@@ -61,11 +78,15 @@ export const ExpediterDisplay: React.FC = () => {
   useEffect(() => {
     const socket = socketClient.getSocket();
     const onChange = () => reload();
+    // Suona solo l'uscita che diventa pronta: è il momento in cui il passe
+    // deve alzare la testa e chiamare la sala; il resto è rumore.
+    const onReady = () => { if (soundRef.current) chime(); reload(); };
     socket?.on('course:queued', onChange);
     socket?.on('course:fired', onChange);
     socket?.on('course:recalled', onChange);
-    socket?.on('course:ready', onChange);
+    socket?.on('course:ready', onReady);
     socket?.on('course:served', onChange);
+    socket?.on('course:unserved', onChange);
     socket?.on('orderItem:status', onChange);
     socket?.on('connect', onChange);
     const poll = setInterval(reload, 20_000);
@@ -73,8 +94,9 @@ export const ExpediterDisplay: React.FC = () => {
       socket?.off('course:queued', onChange);
       socket?.off('course:fired', onChange);
       socket?.off('course:recalled', onChange);
-      socket?.off('course:ready', onChange);
+      socket?.off('course:ready', onReady);
       socket?.off('course:served', onChange);
+      socket?.off('course:unserved', onChange);
       socket?.off('orderItem:status', onChange);
       socket?.off('connect', onChange);
       clearInterval(poll);
@@ -117,6 +139,17 @@ export const ExpediterDisplay: React.FC = () => {
               <WifiOff size={13} aria-hidden /> riconnessione…
             </StatusPill>
           )}
+          {/* Icona sola, 44px, incassata sulla card come i controlli quiet:
+              il testo qui non aggiungerebbe nulla che la campana non dica. */}
+          <button
+            type="button"
+            onClick={toggleSound}
+            aria-pressed={sound}
+            aria-label={sound ? 'Disattiva l\'avviso sonoro' : 'Attiva l\'avviso sonoro'}
+            className="ml-auto inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            {sound ? <Bell size={17} aria-hidden /> : <BellOff size={17} className="text-[var(--ds-text-muted)]" aria-hidden />}
+          </button>
           <button
             type="button"
             onClick={() => {
@@ -125,7 +158,7 @@ export const ExpediterDisplay: React.FC = () => {
               if (next) getKitchenReport().then(setReport).catch(() => setReport(null));
             }}
             aria-pressed={showReport}
-            className={`ml-auto flex-shrink-0 ${dsButton.quiet}`}
+            className={`flex-shrink-0 ${dsButton.quiet}`}
           >
             <BarChart3 size={15} aria-hidden /> Statistiche
           </button>
@@ -185,6 +218,41 @@ export const ExpediterDisplay: React.FC = () => {
             </div>
           )}
         </section>
+
+        {/* Il cestino del "Servita" toccato per errore: righe smorzate, in
+            fondo, con la sola azione di riporto. Non uno storico — il server
+            tiene una finestra breve apposta. */}
+        {(board?.servite?.length ?? 0) > 0 && (
+          <section className="mt-5">
+            <SectionHeader tone="muted" meta={board!.servite.length === 1 ? '1 uscita' : `${board!.servite.length} uscite`}>
+              Servite da poco
+            </SectionHeader>
+            <div className="space-y-1.5">
+              {board!.servite.map(s => {
+                const key = `${s.order_id}:${s.course_no}`;
+                const agoS = Math.floor((now - new Date(s.served_at).getTime()) / 1000);
+                return (
+                  <div key={key} className="flex items-center gap-3 rounded-[14px] bg-[var(--ds-surface)] px-4 py-1.5 shadow-[var(--ds-shadow-card)]">
+                    <span className="text-[15px] font-semibold text-[var(--ds-text-muted)]">
+                      T{s.table_name ?? '—'}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--ds-text-muted)]">
+                      {ORDINALS[s.course_no] ?? s.course_no} uscita · servita da {mmss(agoS)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => act(key, () => unserveCourse(s.order_id, s.course_no))}
+                      disabled={busyKey === key}
+                      className={`${passeAction} bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]`}
+                    >
+                      <RotateCcw size={14} aria-hidden /> riporta
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
       </div>
     </div>
   );
