@@ -4814,14 +4814,14 @@ const FISCAL_DOC_COLUMNS = `id, table_bill_id, table_bill_split_id, doc_type, do
 // documento fiscale, ma la scelta resta scritta come riga PROFORMA
 // (provider 'crm'). È un segnaposto, non un atto fiscale: chi emette
 // scontrino o fattura dopo la supera automaticamente (VOIDED).
-async function registerNativeProforma(tenantId: number, billId: number, userId: number | null): Promise<void> {
+async function registerNativeProforma(tenantId: number, billId: number, userId: number | null): Promise<{ doc?: any; skipped?: string }> {
     const billRs = await queryWithRetry(
         `SELECT id, total_cents, status, external_ref FROM table_bills WHERE id = $1 AND tenant_id = $2`,
         [billId, tenantId]
     );
     const bill = billRs.rows[0];
-    if (!bill || bill.status !== 'CLOSED') return;
-    if (passepartoutComandaIdFromRef(bill.external_ref) != null) return; // il PP ha la sua proforma di cassa
+    if (!bill || bill.status !== 'CLOSED') return { skipped: 'bill_not_closed' };
+    if (passepartoutComandaIdFromRef(bill.external_ref) != null) return { skipped: 'passepartout' }; // il PP ha la sua proforma di cassa
     const ins = await queryWithRetry(
         `INSERT INTO fiscal_documents (tenant_id, table_bill_id, doc_type, provider, status, total_cents, created_by_user_id, confirmed_at)
          VALUES ($1, $2, 'PROFORMA', 'crm', 'CONFIRMED', $3, $4, CURRENT_TIMESTAMP)
@@ -4829,9 +4829,9 @@ async function registerNativeProforma(tenantId: number, billId: number, userId: 
          RETURNING ${FISCAL_DOC_COLUMNS}`,
         [tenantId, billId, bill.total_cents, userId]
     );
-    if (ins.rows[0]) {
-        try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: billId, doc: ins.rows[0] }); } catch (_) {}
-    }
+    if (!ins.rows[0]) return { skipped: 'doc_exists' };
+    try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: billId, doc: ins.rows[0] }); } catch (_) {}
+    return { doc: ins.rows[0] };
 }
 
 // La proforma nativa cede il posto al documento vero: VOID del segnaposto
@@ -5068,6 +5068,23 @@ app.post('/bills/:id/fiscal-docs', authenticate, requirePermission('payments:ful
     try {
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid bill id' });
+
+        // documento: 'Proforma' → niente emissione: si registra (anche a
+        // posteriori) il segnaposto sul conto chiuso senza documento. Serve
+        // per i conti chiusi prima della scelta in dialog, o dimenticati.
+        if (req.body?.documento === 'Proforma') {
+            const marked = await registerNativeProforma(req.tenantId!, id, req.user?.userId ?? null);
+            if (marked.skipped) {
+                const proformaMessages: Record<string, string> = {
+                    bill_not_closed: 'La proforma si segna su un conto chiuso e saldato per intero',
+                    passepartout: 'Conto del gestionale: la proforma la batte la cassa (chiusura Passepartout)',
+                    doc_exists: 'Il conto ha già un documento: la proforma non serve',
+                };
+                return res.status(409).json({ error: proformaMessages[marked.skipped] ?? marked.skipped, reason: marked.skipped });
+            }
+            return res.status(200).json({ doc: marked.doc, request: null });
+        }
+
         const outcome = await emitFiscalDocForBill(req.tenantId!, id, req.user?.userId ?? null);
         if (outcome.skipped) {
             const messages: Record<string, string> = {

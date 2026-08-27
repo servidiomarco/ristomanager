@@ -100,18 +100,11 @@ export const SettleDialog: React.FC<{
   // oppure la proforma (la routine della cassa, nessun documento fiscale).
   const isPP = /^pp:comanda:/.test(String(bill.external_ref ?? ''));
   const [ppDoc, setPpDoc] = useState<'Scontrino' | 'Proforma'>('Scontrino');
-  // Conti nativi: la stessa scelta compare solo se un provider fiscale è
-  // attivo — senza, nessuno scontrino parte comunque e il toggle mentirebbe.
-  const [fiscalActive, setFiscalActive] = useState(false);
-  useEffect(() => {
-    if (isPP) return;
-    let cancelled = false;
-    billsApiService.getFiscalSettings()
-      .then(s => { if (!cancelled) setFiscalActive(s.provider !== 'none'); })
-      .catch(() => { /* impostazioni non leggibili: il toggle resta nascosto */ });
-    return () => { cancelled = true; };
-  }, [isPP]);
-  const showDocChoice = isPP || fiscalActive;
+  // Conti nativi: la scelta c'è SEMPRE. Con un provider fiscale attivo
+  // "Scontrino" emette davvero; senza, resta la dichiarazione d'intento —
+  // ma "Proforma" marca comunque il conto come chiuso senza documento DI
+  // PROPOSITO, che in lista è tutt'altra cosa di "senza scontrino".
+  const showDocChoice = true;
   const recorded = movements.reduce((n, m) => n + m.amount_cents, 0);
   const remaining = Math.max(0, residual - recorded);
   const [amount, setAmount] = useState(residual > 0 ? (residual / 100).toFixed(2) : '0');
@@ -137,8 +130,7 @@ export const SettleDialog: React.FC<{
     onConfirm({
       payments: [...movements, ...pending],
       tip_cents: tipCents,
-      ...(isPP ? { passepartout_documento: ppDoc } : {}),
-      ...(!isPP && fiscalActive ? { documento: ppDoc } : {}),
+      ...(isPP ? { passepartout_documento: ppDoc } : { documento: ppDoc }),
     });
   };
 
@@ -769,6 +761,18 @@ export const FiscalCard: React.FC<{
             <button type="button" disabled={busy} onClick={() => setInvoiceOpen(true)} className={quiet}>
               <FileText className="h-4 w-4" />
               {st === 'FAILED' && invoice ? 'Riprova fattura' : 'Emetti fattura'}
+            </button>
+          )}
+          {/* Marcatura a posteriori: il conto chiuso "senza scontrino"
+              diventa proforma — scelta deliberata, non dimenticanza. */}
+          {!isPP && (st == null || st === 'VOIDED') && bill.status === 'CLOSED' && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => run(() => billsApiService.markProforma(bill.id))}
+              className={quiet}
+            >
+              Segna proforma
             </button>
           )}
           {st === 'CONFIRMED' && !viaPP && !invoice && !proforma && bill.fiscal_doc_id != null && (
