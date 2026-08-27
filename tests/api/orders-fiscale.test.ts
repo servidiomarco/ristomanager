@@ -163,4 +163,39 @@ describe('documenti fiscali', () => {
         expect(off.status).toBe(200);
         expect(off.body.provider).toBe('none');
     });
+
+    it('la proforma vive anche senza provider: in chiusura e a posteriori', async () => {
+        // Con provider spento la chiusura non emette nulla, ma la scelta
+        // Proforma resta registrabile — e un conto chiuso "senza scontrino"
+        // si può marcare proforma dopo.
+        const inDialog = await openBill('FISC4', 3000);
+        const close1 = await api().post(`/bills/${inDialog}/close`).set(bearer(token)).send({
+            payments: [{ method: 'CONTANTI', amount_cents: 3000 }],
+            documento: 'Proforma',
+        });
+        expect(close1.status).toBe(200);
+        let row: any = null;
+        for (let i = 0; i < 20; i++) {
+            const bills = await api().get('/bills/open?status=closed').set(bearer(token));
+            row = bills.body.bills.find((b: any) => b.id === inDialog);
+            if (row?.fiscal_status) break;
+            await new Promise(r => setTimeout(r, 150));
+        }
+        expect(row?.fiscal_doc_type).toBe('PROFORMA');
+
+        const forgotten = await openBill('FISC5', 2000);
+        const close2 = await api().post(`/bills/${forgotten}/close`).set(bearer(token)).send({
+            payments: [{ method: 'CONTANTI', amount_cents: 2000 }],
+        });
+        expect(close2.status).toBe(200);
+        const marked = await api().post(`/bills/${forgotten}/fiscal-docs`).set(bearer(token)).send({ documento: 'Proforma' });
+        expect(marked.status).toBe(200);
+        expect(marked.body.doc.doc_type).toBe('PROFORMA');
+        expect(marked.body.doc.status).toBe('CONFIRMED');
+
+        // Un secondo "segna proforma" non duplica.
+        const again = await api().post(`/bills/${forgotten}/fiscal-docs`).set(bearer(token)).send({ documento: 'Proforma' });
+        expect(again.status).toBe(409);
+        expect(again.body.reason).toBe('doc_exists');
+    });
 });

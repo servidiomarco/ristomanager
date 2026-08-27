@@ -145,6 +145,16 @@ class BillsApiService {
     });
   }
 
+  /** Segna a posteriori un conto chiuso come proforma: nessuna emissione,
+   *  solo il segnaposto PROFORMA (sostituibile da scontrino o fattura). */
+  async markProforma(billId: number): Promise<{ doc: FiscalDocument }> {
+    return apiRequest(`${API_URL}/bills/${billId}/fiscal-docs`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ documento: 'Proforma' }),
+    });
+  }
+
   /** Annulla il documento presso il provider (il conto non si tocca). */
   async voidFiscalDoc(billId: number, docId: number): Promise<{ doc: FiscalDocument }> {
     return apiRequest(`${API_URL}/bills/${billId}/fiscal-docs/${docId}/void`, {
