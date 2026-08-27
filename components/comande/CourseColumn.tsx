@@ -105,9 +105,9 @@ export const CourseList: React.FC<CourseListProps> = ({
                     }`}
                   >
                     {i.name_snapshot}
-                    {i.modifiers && i.modifiers.length > 0 && (
+                    {((i.modifiers && i.modifiers.length > 0) || i.note) && (
                       <span className="text-[13px] text-[var(--ds-text-muted)]">
-                        {' · '}{i.modifiers.map(m => m.name).join(', ')}
+                        {' · '}{[...(i.modifiers ?? []).map(m => m.name), ...(i.note ? [i.note] : [])].join(', ')}
                       </span>
                     )}
                   </span>
@@ -134,9 +134,9 @@ export const CourseList: React.FC<CourseListProps> = ({
                     <div className="truncate text-[15px] text-[var(--ds-text-primary)]">
                       {l.dish.name}
                     </div>
-                    {l.modifier_labels.length > 0 && (
+                    {(l.modifier_labels.length > 0 || l.note) && (
                       <div className="truncate text-[13px] text-[var(--ds-text-muted)]">
-                        ↳ {l.modifier_labels.join(', ')}
+                        ↳ {[...l.modifier_labels, ...(l.note ? [l.note] : [])].join(', ')}
                       </div>
                     )}
                   </div>
