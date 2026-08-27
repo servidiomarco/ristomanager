@@ -434,6 +434,8 @@ export interface CashClosureBillRow {
   tip_cents: number;
   closed_at: string;
   covers: number;
+  /** Turno del conto: lo stesso tavolo serve pranzo e cena. */
+  shift: 'LUNCH' | 'DINNER';
   table_name: string | null;
   customer_name: string | null;
   fiscal_doc_type: 'RECEIPT' | 'PROFORMA' | 'INVOICE' | null;

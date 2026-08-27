@@ -55,7 +55,12 @@ const docPill = (b: CashClosureBillRow) => {
   return <StatusPill tone="neutral">senza documento</StatusPill>;
 };
 
-export const ChiusuraCassa: React.FC<{ date?: string }> = ({ date }) => {
+export const ChiusuraCassa: React.FC<{
+  date?: string;
+  /** Turno dalla topbar: filtra la lista dei conti (i totali per metodo
+   *  restano dell'intera giornata — è la cassa che si conta a fine serata). */
+  shift?: 'LUNCH' | 'DINNER';
+}> = ({ date, shift }) => {
   const [report, setReport] = useState<CashClosureReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [docFilter, setDocFilter] = useState<DocFilter>('all');
@@ -88,13 +93,27 @@ export const ChiusuraCassa: React.FC<{ date?: string }> = ({ date }) => {
     };
   }, [fetchReport]);
 
-  const bills = report?.bills ?? [];
+  // Prima il turno della topbar, poi il filtro documento: i conteggi sui
+  // chip parlano di quello che la lista sta davvero mostrando.
+  const bills = useMemo(() => {
+    const all = report?.bills ?? [];
+    return shift ? all.filter(b => b.shift === shift) : all;
+  }, [report, shift]);
   const counts = useMemo(() => {
     const c: Record<Exclude<DocFilter, 'all'>, number> = { receipt: 0, invoice: 0, proforma: 0, none: 0 };
     bills.forEach(b => { c[docKind(b)] += 1; });
     return c;
   }, [bills]);
   const visibleBills = docFilter === 'all' ? bills : bills.filter(b => docKind(b) === docFilter);
+  // Con "Tutti" i turni in vista, le righe si raggruppano per turno: lo
+  // stesso numero di tavolo esiste a pranzo E a cena, e senza sezioni la
+  // lista del giorno sembrerebbe piena di doppioni.
+  const sections = useMemo(() => {
+    const lunch = visibleBills.filter(b => b.shift === 'LUNCH');
+    const dinner = visibleBills.filter(b => b.shift === 'DINNER');
+    if (shift || lunch.length === 0 || dinner.length === 0) return [{ label: null as string | null, rows: visibleBills }];
+    return [{ label: 'Pranzo', rows: lunch }, { label: 'Cena', rows: dinner }];
+  }, [visibleBills, shift]);
 
   if (error) {
     return <Callout tone="critical" icon={AlertCircle}>{error}</Callout>;
@@ -128,8 +147,8 @@ export const ChiusuraCassa: React.FC<{ date?: string }> = ({ date }) => {
       </FormCard>
 
       <FormCard
-        title="Conti chiusi"
-        aside={<span className="text-[13px] tabular-nums text-[var(--ds-text-muted)]">{report.bills_closed}</span>}
+        title={shift ? `Conti chiusi · ${shift === 'LUNCH' ? 'pranzo' : 'cena'}` : 'Conti chiusi'}
+        aside={<span className="text-[13px] tabular-nums text-[var(--ds-text-muted)]">{bills.length}</span>}
       >
         <div className="space-y-3">
           {(report.tip_cents > 0 || report.deposit_credit_cents > 0 || report.shortfall_cents > 0) && (
@@ -181,35 +200,44 @@ export const ChiusuraCassa: React.FC<{ date?: string }> = ({ date }) => {
                 })}
               </div>
 
-              <ul>
-                {visibleBills.map(b => (
-                  <li
-                    key={b.id}
-                    className="flex flex-col gap-1 py-2.5 [&+li]:border-t [&+li]:border-[var(--ds-border)]"
-                  >
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="min-w-0 truncate text-[14px] font-medium text-[var(--ds-text-primary)]">
-                        Tav. {b.table_name ?? '—'}
-                        {b.customer_name && <span className="ml-1.5 font-normal text-[var(--ds-text-muted)]">{b.customer_name}</span>}
-                      </span>
-                      <span className={`flex-shrink-0 text-[14px] font-semibold tabular-nums ${b.status === 'SETTLED_PARTIAL' ? 'text-[var(--ds-pending-text)]' : 'text-[var(--ds-text-primary)]'}`}>
-                        {formatEuro(b.total_cents)}
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-[var(--ds-text-muted)] tabular-nums">
-                      {docPill(b)}
-                      {b.status === 'SETTLED_PARTIAL' && <StatusPill tone="pending">parziale</StatusPill>}
-                      {b.payments.map((p, i) => (
-                        <span key={i}>{(METHOD_LABELS[p.method] ?? p.method).toLowerCase()} {formatEuro(p.amount_cents)}</span>
-                      ))}
-                      {b.tip_cents > 0 && <span className="text-[var(--ds-seated-text)]">mancia {formatEuro(b.tip_cents)}</span>}
-                    </div>
-                  </li>
-                ))}
-                {visibleBills.length === 0 && (
-                  <li className="py-2.5 text-[13px] text-[var(--ds-text-muted)]">Nessun conto per questo filtro.</li>
-                )}
-              </ul>
+              {sections.map(section => (
+                <div key={section.label ?? 'tutti'}>
+                  {section.label && (
+                    <p className="mb-1 mt-2 text-[12px] font-medium text-[var(--ds-text-muted)]">
+                      {section.label} <span className="tabular-nums">· {section.rows.length}</span>
+                    </p>
+                  )}
+                  <ul>
+                    {section.rows.map(b => (
+                      <li
+                        key={b.id}
+                        className="flex flex-col gap-1 py-2.5 [&+li]:border-t [&+li]:border-[var(--ds-border)]"
+                      >
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="min-w-0 truncate text-[14px] font-medium text-[var(--ds-text-primary)]">
+                            Tav. {b.table_name ?? '—'}
+                            {b.customer_name && <span className="ml-1.5 font-normal text-[var(--ds-text-muted)]">{b.customer_name}</span>}
+                          </span>
+                          <span className={`flex-shrink-0 text-[14px] font-semibold tabular-nums ${b.status === 'SETTLED_PARTIAL' ? 'text-[var(--ds-pending-text)]' : 'text-[var(--ds-text-primary)]'}`}>
+                            {formatEuro(b.total_cents)}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-[var(--ds-text-muted)] tabular-nums">
+                          {docPill(b)}
+                          {b.status === 'SETTLED_PARTIAL' && <StatusPill tone="pending">parziale</StatusPill>}
+                          {b.payments.map((p, i) => (
+                            <span key={i}>{(METHOD_LABELS[p.method] ?? p.method).toLowerCase()} {formatEuro(p.amount_cents)}</span>
+                          ))}
+                          {b.tip_cents > 0 && <span className="text-[var(--ds-seated-text)]">mancia {formatEuro(b.tip_cents)}</span>}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+              {visibleBills.length === 0 && (
+                <p className="py-2.5 text-[13px] text-[var(--ds-text-muted)]">Nessun conto per questo filtro.</p>
+              )}
             </>
           )}
           {bills.length === 0 && (
