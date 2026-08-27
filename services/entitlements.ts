@@ -65,3 +65,14 @@ export async function isFeatureEnabledForTenant(tenantId: number, feature: Tenan
 export function invalidateTenantFeaturesCache(tenantId: number): void {
     featuresCache.delete(tenantId);
 }
+
+// Da chiamare a migration completate. Il server accetta richieste PRIMA che
+// le migration finiscano (deliberato: il boot non blocca il servizio), quindi
+// un login arrivato in quella finestra mette in cache lo stato
+// pre-migration: un entitlement appena acceso da una migration (com'è
+// successo con 'passepartout') resta invisibile per tutto il TTL — nei test
+// è la finestra in cui girano auth ed entitlements, in produzione il primo
+// minuto dopo il deploy.
+export function clearTenantFeaturesCache(): void {
+    featuresCache.clear();
+}

@@ -23,7 +23,7 @@ import { renderPrenota } from './services/prenotaSeo.js';
 import { COST_USD_SQL, UNPRICED_SQL, USD_EUR } from './services/aiPricing.js';
 import { outboxEnqueueInTx, outboxKick, outboxRegister, startOutboxDispatcher } from './services/outboxService.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
-import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
+import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, clearTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
 import { provisionTenant, ProvisioningError } from './services/tenantProvisioning.js';
 import {
     createCheckoutSession,
@@ -26000,6 +26000,11 @@ const startServer = async () => {
                         // Solo qui: se le migration falliscono /ready resta
                         // 503 e Railway tiene in servizio il container vecchio.
                         databaseReady = true;
+                        // Le richieste servite durante le migration possono
+                        // aver messo in cache entitlement pre-migration
+                        // (60s di TTL): si riparte da zero ora che lo stato
+                        // a DB è quello vero.
+                        clearTenantFeaturesCache();
                         // L'outbox parte solo a migration riuscite (la sua
                         // tabella deve esistere). Il primo giro consegna ciò
                         // che un eventuale crash aveva lasciato indietro.
