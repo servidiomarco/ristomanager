@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, ChevronRight, Loader2, Play, TriangleAlert, WifiOff } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Bell, BellOff, Check, ChevronRight, Loader2, Play, TriangleAlert, WifiOff } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
 import { socketClient } from '../services/socketClient';
 import {
@@ -8,6 +8,7 @@ import {
 } from '../services/ordersApiService';
 import { getKitchenServiceSummary, type KitchenServiceSummary } from '../services/apiService';
 import { getRomeDatePart } from '../utils/reservationTime';
+import { chime } from '../utils/chime';
 import { ModalShell, EmptyState, StatusPill, dsButton } from './ds';
 
 // ---------------------------------------------------------------------------
@@ -23,6 +24,7 @@ import { ModalShell, EmptyState, StatusPill, dsButton } from './ds';
 // ---------------------------------------------------------------------------
 
 const STATION_KEY = 'kds.station_id';
+const SOUND_KEY = 'kds.sound';
 
 // Oltre questa attesa la riga pronta sta morendo sotto la lampada mentre le
 // altre partite finiscono: il bordo lampeggia.
@@ -97,6 +99,21 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   // solo quando nuove prenotazioni entrano nel turno, non serve real-time.
   const [summary, setSummary] = useState<KitchenServiceSummary | null>(null);
   const [summaryOpen, setSummaryOpen] = useState(false);
+  // Avviso sonoro sulla comanda nuova. Nel ref oltre che nello stato: il
+  // listener socket deve leggere il valore corrente senza risottoscriversi.
+  const [sound, setSound] = useState(() => localStorage.getItem(SOUND_KEY) !== 'off');
+  const soundRef = useRef(sound);
+  soundRef.current = sound;
+  const toggleSound = () => {
+    setSound(prev => {
+      const next = !prev;
+      localStorage.setItem(SOUND_KEY, next ? 'on' : 'off');
+      // Suona subito all'accensione: conferma la scelta e, essendo dentro un
+      // gesto dell'utente, sblocca l'AudioContext per gli avvisi futuri.
+      if (next) chime();
+      return next;
+    });
+  };
 
   useEffect(() => { getMenuCatalogue().then(setCatalogue).catch(() => {}); }, []);
 
@@ -146,19 +163,25 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
     if (stationId != null) socketClient.subscribeToStation(stationId);
 
     const onChange = () => reload();
-    socket.on('kds:fired', onChange);
+    // La comanda nuova suona, il resto no: in cucina l'unico evento che
+    // richiede di alzare la testa è un lancio che arriva.
+    const onFired = () => { if (soundRef.current) chime(); reload(); };
+    socket.on('kds:fired', onFired);
     socket.on('kds:item', onChange);
     // Servita al passe: le righe escono dalla coda e la card verde sparisce
-    // anche dal monitor di partita, non solo dal passe.
+    // anche dal monitor di partita, non solo dal passe. Il riporta le fa
+    // ricomparire.
     socket.on('course:served', onChange);
+    socket.on('course:unserved', onChange);
     socket.on('orderItem:voided', onChange);
     socket.on('connect', onChange);
 
     const poll = setInterval(reload, 60_000);
     return () => {
-      socket.off('kds:fired', onChange);
+      socket.off('kds:fired', onFired);
       socket.off('kds:item', onChange);
       socket.off('course:served', onChange);
+      socket.off('course:unserved', onChange);
       socket.off('orderItem:voided', onChange);
       socket.off('connect', onChange);
       clearInterval(poll);
@@ -268,10 +291,21 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
               <WifiOff size={13} aria-hidden /> riconnessione…
             </StatusPill>
           )}
+          {/* Icona sola, 44px, incassata sulla card come i controlli quiet:
+              il testo qui non aggiungerebbe nulla che la campana non dica. */}
+          <button
+            type="button"
+            onClick={toggleSound}
+            aria-pressed={sound}
+            aria-label={sound ? 'Disattiva l\'avviso sonoro' : 'Attiva l\'avviso sonoro'}
+            className="ml-auto inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            {sound ? <Bell size={17} aria-hidden /> : <BellOff size={17} className="text-[var(--ds-text-muted)]" aria-hidden />}
+          </button>
           <button
             type="button"
             onClick={() => setPicking(true)}
-            className={`ml-auto flex-shrink-0 ${dsButton.quiet}`}
+            className={`flex-shrink-0 ${dsButton.quiet}`}
           >
             Cambia partita
           </button>

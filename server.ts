@@ -23158,9 +23158,30 @@ app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), as
             [req.tenantId!]
         );
 
+        // Le uscite servite da poco, per il ripensamento: un "Servita" toccato
+        // per errore si corregge da qui. Finestra breve e lista corta — è un
+        // cestino della carta, non uno storico. ready_at IS NOT NULL esclude
+        // le righe di sistema nate SERVED (coperto, servizio).
+        const servite = await queryWithRetry(
+            `SELECT oi.order_id, oi.course_no, MAX(oi.served_at) AS served_at,
+                    COUNT(*)::int AS items, t.name AS table_name
+             FROM order_items oi
+             JOIN orders o ON o.id = oi.order_id
+             LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
+             WHERE o.status = 'OPEN' AND o.tenant_id = $3
+               AND o.service_date = $1 AND o.shift = $2
+               AND oi.status = 'SERVED' AND oi.ready_at IS NOT NULL
+               AND oi.served_at >= NOW() - INTERVAL '30 minutes'
+             GROUP BY oi.order_id, oi.course_no, t.name
+             ORDER BY MAX(oi.served_at) DESC
+             LIMIT 10`,
+            [service.service_date, service.shift, req.tenantId!]
+        );
+
         res.json({
             ...service,
             stations: stations.rows,
+            servite: servite.rows,
             // In corso prima, poi le proposte in attesa: sono le due domande
             // diverse che si fa il passe — cosa sta uscendo, cosa far partire.
             courses: courses.sort((a, b) => {
@@ -23436,6 +23457,54 @@ app.post('/orders/:id/courses/:n/serve', authenticate, requireAnyPermission('ord
         await client.query('ROLLBACK').catch(() => {});
         client.release();
         console.error('POST /orders/:id/courses/:n/serve error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Riporta al passe un'uscita servita per errore: SERVED → READY, served_at
+// azzerato. Il filtro su ready_at esclude le righe di sistema (coperto,
+// servizio), che nascono SERVED senza essere mai passate dalla cucina.
+// Se il servito aveva lanciato l'uscita successiva (AUTO_NEXT), quella non
+// si richiama: le stampe sono già in partita, e un lancio non si disfa.
+app.post('/orders/:id/courses/:n/unserve', authenticate, requireAnyPermission('orders:expedite', 'orders:take'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(req, res))) return;
+        const orderId = parseInt(req.params.id, 10);
+        const courseNo = parseInt(req.params.n, 10);
+        if (!Number.isFinite(orderId) || !Number.isFinite(courseNo)) {
+            return res.status(400).json({ error: 'Parametri non validi' });
+        }
+
+        const ord = await queryWithRetry(
+            `SELECT status FROM orders WHERE id = $1 AND tenant_id = $2`,
+            [orderId, req.tenantId!]
+        );
+        if (ord.rows.length === 0) return res.status(404).json({ error: 'Comanda non trovata' });
+        if (ord.rows[0].status !== 'OPEN') {
+            return res.status(409).json({ error: 'La comanda non è aperta', status: ord.rows[0].status });
+        }
+
+        const upd = await queryWithRetry(
+            `UPDATE order_items
+             SET status = 'READY', served_at = NULL
+             WHERE order_id = $1 AND course_no = $2 AND tenant_id = $3
+               AND status = 'SERVED' AND ready_at IS NOT NULL
+             RETURNING *`,
+            [orderId, courseNo, req.tenantId!]
+        );
+        if (upd.rows.length === 0) {
+            return res.status(409).json({ error: 'Niente da riportare: l\'uscita non risulta servita' });
+        }
+
+        try {
+            socketService?.broadcastToAll(req.tenantId!, 'course:unserved', {
+                order_id: orderId, course_no: courseNo,
+            });
+        } catch (_) {}
+
+        res.json({ order_id: orderId, course_no: courseNo, items: upd.rows });
+    } catch (err: any) {
+        console.error('POST /orders/:id/courses/:n/unserve error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });
