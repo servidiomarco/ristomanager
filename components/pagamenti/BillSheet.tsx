@@ -16,6 +16,9 @@ export type SettleOpts = {
   cash_settled_cents?: number;
   tip_cents?: number;
   passepartout_documento?: 'Scontrino' | 'Proforma';
+  /** Conti nativi: 'Proforma' = chiusura deliberata senza documento fiscale
+   *  (scontrino o fattura emettibili dopo, dal conto). */
+  documento?: 'Scontrino' | 'Proforma';
 };
 
 /** Metodi registrabili in cassa, nell'ordine in cui si usano davvero. */
@@ -97,6 +100,18 @@ export const SettleDialog: React.FC<{
   // oppure la proforma (la routine della cassa, nessun documento fiscale).
   const isPP = /^pp:comanda:/.test(String(bill.external_ref ?? ''));
   const [ppDoc, setPpDoc] = useState<'Scontrino' | 'Proforma'>('Scontrino');
+  // Conti nativi: la stessa scelta compare solo se un provider fiscale è
+  // attivo — senza, nessuno scontrino parte comunque e il toggle mentirebbe.
+  const [fiscalActive, setFiscalActive] = useState(false);
+  useEffect(() => {
+    if (isPP) return;
+    let cancelled = false;
+    billsApiService.getFiscalSettings()
+      .then(s => { if (!cancelled) setFiscalActive(s.provider !== 'none'); })
+      .catch(() => { /* impostazioni non leggibili: il toggle resta nascosto */ });
+    return () => { cancelled = true; };
+  }, [isPP]);
+  const showDocChoice = isPP || fiscalActive;
   const recorded = movements.reduce((n, m) => n + m.amount_cents, 0);
   const remaining = Math.max(0, residual - recorded);
   const [amount, setAmount] = useState(residual > 0 ? (residual / 100).toFixed(2) : '0');
@@ -123,6 +138,7 @@ export const SettleDialog: React.FC<{
       payments: [...movements, ...pending],
       tip_cents: tipCents,
       ...(isPP ? { passepartout_documento: ppDoc } : {}),
+      ...(!isPP && fiscalActive ? { documento: ppDoc } : {}),
     });
   };
 
@@ -213,9 +229,9 @@ export const SettleDialog: React.FC<{
             </>
           )}
 
-          {isPP && (
+          {showDocChoice && (
             <div>
-              <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Documento in cassa</span>
+              <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{isPP ? 'Documento in cassa' : 'Documento fiscale'}</span>
               <div className="flex gap-1.5">
                 {(['Scontrino', 'Proforma'] as const).map(d => (
                   <button
@@ -234,7 +250,11 @@ export const SettleDialog: React.FC<{
                 ))}
               </div>
               {ppDoc === 'Proforma' && (
-                <p className="mt-1.5 text-[13px] text-[var(--ds-text-muted)]">Niente scontrino: in cassa esce la proforma.</p>
+                <p className="mt-1.5 text-[13px] text-[var(--ds-text-muted)]">
+                  {isPP
+                    ? 'Niente scontrino: in cassa esce la proforma.'
+                    : 'Nessun documento adesso: scontrino o fattura si emettono dopo, dal conto.'}
+                </p>
               )}
             </div>
           )}
@@ -660,8 +680,11 @@ export const FiscalCard: React.FC<{
   // cassa alla chiusura del tavolo sul gestionale, non il provider cloud.
   const isPP = /^pp:comanda:/.test(String(bill.external_ref ?? ''));
   const viaPP = bill.fiscal_provider === 'passepartout';
-  const proforma = viaPP && bill.fiscal_doc_type === 'PROFORMA';
+  const proforma = bill.fiscal_doc_type === 'PROFORMA';
   const invoice = bill.fiscal_doc_type === 'INVOICE';
+  // La proforma nativa è un segnaposto sostituibile: scontrino e fattura
+  // restano emettibili e la superano da soli lato server.
+  const nativeProforma = proforma && !viaPP && st === 'CONFIRMED';
   const pill =
     st === 'CONFIRMED' && proforma ? { tone: 'neutral' as const, label: 'proforma' }
     : st === 'CONFIRMED' && invoice ? { tone: 'positive' as const, label: 'fattura emessa' }
@@ -697,7 +720,9 @@ export const FiscalCard: React.FC<{
       <div className="space-y-2.5">
         {st === 'CONFIRMED' && proforma && (
           <p className="text-[13px] text-[var(--ds-text-muted)]">
-            Chiuso in cassa con proforma, senza scontrino.
+            {viaPP
+              ? 'Chiuso in cassa con proforma, senza scontrino.'
+              : 'Chiuso con proforma, senza documento fiscale. Scontrino o fattura lo sostituiscono.'}
           </p>
         )}
         {st === 'CONFIRMED' && invoice && (
@@ -726,7 +751,7 @@ export const FiscalCard: React.FC<{
               Chiudi in cassa
             </button>
           )}
-          {!isPP && (st == null || st === 'FAILED' || st === 'VOIDED') && bill.status === 'CLOSED' && (
+          {!isPP && (st == null || st === 'FAILED' || st === 'VOIDED' || nativeProforma) && bill.status === 'CLOSED' && (
             <button
               type="button"
               disabled={busy}
@@ -738,14 +763,15 @@ export const FiscalCard: React.FC<{
             </button>
           )}
           {/* Fattura al posto dello scontrino: stesso prerequisito (nessun
-              documento vivo). Il cameriere sceglie il cliente nel dialog. */}
-          {!isPP && (st == null || st === 'FAILED' || st === 'VOIDED') && bill.status === 'CLOSED' && (
+              documento fiscale vivo — la proforma nativa non conta e viene
+              superata dal server). Il cameriere sceglie il cliente nel dialog. */}
+          {!isPP && (st == null || st === 'FAILED' || st === 'VOIDED' || nativeProforma) && bill.status === 'CLOSED' && (
             <button type="button" disabled={busy} onClick={() => setInvoiceOpen(true)} className={quiet}>
               <FileText className="h-4 w-4" />
               {st === 'FAILED' && invoice ? 'Riprova fattura' : 'Emetti fattura'}
             </button>
           )}
-          {st === 'CONFIRMED' && !viaPP && !invoice && bill.fiscal_doc_id != null && (
+          {st === 'CONFIRMED' && !viaPP && !invoice && !proforma && bill.fiscal_doc_id != null && (
             armed ? (
               <>
                 <button

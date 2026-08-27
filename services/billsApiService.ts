@@ -29,6 +29,10 @@ export interface CloseBillPayload {
   cash_settled_cents?: number;
   tip_cents?: number;
   notes?: string;
+  /** Conti nativi: 'Proforma' = chiusura deliberata senza documento fiscale
+   *  (registrata come segnaposto PROFORMA, sostituibile da scontrino o
+   *  fattura emessi dopo). Assente o 'Scontrino' → emissione automatica. */
+  documento?: 'Scontrino' | 'Proforma';
   /** Solo conti Passepartout: documento della chiusura in cassa.
    *  'Proforma' = niente scontrino (la routine della cassa); assente = Scontrino. */
   passepartout_documento?: 'Scontrino' | 'Proforma';

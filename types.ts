@@ -346,7 +346,7 @@ export type FiscalProviderSetting = 'none' | 'openapi' | 'mock';
 export interface FiscalDocument {
   id: number;
   table_bill_id: number;
-  doc_type: 'RECEIPT';
+  doc_type: 'RECEIPT' | 'PROFORMA' | 'INVOICE';
   provider: string;
   status: FiscalDocumentStatus;
   provider_ref: string | null;

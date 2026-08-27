@@ -194,4 +194,31 @@ describe('fatture elettroniche', () => {
         expect(wholeBlocked.status).toBe(409);
         expect(wholeBlocked.body.reason).toBe('split_invoices_exist');
     });
+
+    it('la chiusura proforma cede il posto alla fattura senza annulli', async () => {
+        const proformaBill = await openBill('FATT4', 6000);
+        const close = await api().post(`/bills/${proformaBill}/close`).set(bearer(token)).send({
+            payments: [{ method: 'POS_FISICO', amount_cents: 6000 }],
+            documento: 'Proforma',
+        });
+        expect(close.status).toBe(200);
+        expect(close.body.status).toBe('CLOSED');
+
+        let row: any = null;
+        for (let i = 0; i < 20; i++) {
+            const bills = await api().get('/bills/open?status=closed').set(bearer(token));
+            row = bills.body.bills.find((b: any) => b.id === proformaBill);
+            if (row?.fiscal_status) break;
+            await new Promise(r => setTimeout(r, 150));
+        }
+        expect(row?.fiscal_doc_type).toBe('PROFORMA');
+
+        // Niente scontrino da annullare: la fattura parte diretta.
+        const invoiced = await api().post(`/bills/${proformaBill}/invoices`).set(bearer(token)).send({
+            customer_id: customerId,
+        });
+        expect(invoiced.status).toBe(201);
+        expect(invoiced.body.doc.doc_type).toBe('INVOICE');
+        expect(invoiced.body.doc.doc_number).toMatch(/^3\/\d{4}$/);
+    });
 });

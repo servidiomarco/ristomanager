@@ -4413,6 +4413,14 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
                 } else {
                     console.warn('[passepartout] conto', id, 'chiuso ma PASSEPARTOUT_TIPO_PAGAMENTO non configurato: comanda', ppComandaId, 'da chiudere in cassa a mano');
                 }
+            } else if (req.body?.documento === 'Proforma') {
+                // Proforma anche per i conti nativi: chiusura DELIBERATA
+                // senza documento fiscale. La riga PROFORMA registra la
+                // scelta (in lista è "proforma", non "senza scontrino" =
+                // dimenticato) e resta sostituibile: scontrino o fattura
+                // emessi dopo la superano da soli.
+                registerNativeProforma(req.tenantId!, id, req.user?.userId ?? null)
+                    .catch(err => console.error('[fiscal] registrazione proforma fallita per conto', id, err?.message));
             } else {
                 emitFiscalDocForBill(req.tenantId!, id, req.user?.userId ?? null)
                     .catch(err => console.error('[fiscal] emissione post-chiusura fallita per conto', id, err?.message));
@@ -4802,6 +4810,45 @@ async function nextInvoiceNumber(tenantId: number, year: number): Promise<string
 const FISCAL_DOC_COLUMNS = `id, table_bill_id, table_bill_split_id, doc_type, doc_number, provider, fiscal_id_snapshot, status,
     provider_ref, error, total_cents, attempts, created_by_user_id, created_at, confirmed_at, voided_at`;
 
+// Chiusura proforma di un conto NATIVO (fuori Passepartout): nessun
+// documento fiscale, ma la scelta resta scritta come riga PROFORMA
+// (provider 'crm'). È un segnaposto, non un atto fiscale: chi emette
+// scontrino o fattura dopo la supera automaticamente (VOIDED).
+async function registerNativeProforma(tenantId: number, billId: number, userId: number | null): Promise<void> {
+    const billRs = await queryWithRetry(
+        `SELECT id, total_cents, status, external_ref FROM table_bills WHERE id = $1 AND tenant_id = $2`,
+        [billId, tenantId]
+    );
+    const bill = billRs.rows[0];
+    if (!bill || bill.status !== 'CLOSED') return;
+    if (passepartoutComandaIdFromRef(bill.external_ref) != null) return; // il PP ha la sua proforma di cassa
+    const ins = await queryWithRetry(
+        `INSERT INTO fiscal_documents (tenant_id, table_bill_id, doc_type, provider, status, total_cents, created_by_user_id, confirmed_at)
+         VALUES ($1, $2, 'PROFORMA', 'crm', 'CONFIRMED', $3, $4, CURRENT_TIMESTAMP)
+         ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') AND table_bill_split_id IS NULL DO NOTHING
+         RETURNING ${FISCAL_DOC_COLUMNS}`,
+        [tenantId, billId, bill.total_cents, userId]
+    );
+    if (ins.rows[0]) {
+        try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: billId, doc: ins.rows[0] }); } catch (_) {}
+    }
+}
+
+// La proforma nativa cede il posto al documento vero: VOID del segnaposto
+// vivo (se c'è) prima di emettere scontrino o fattura. Ritorna true se
+// qualcosa è stato superato — chi chiama può ricalcolare le guardie.
+async function supersedeNativeProforma(tenantId: number, billId: number): Promise<boolean> {
+    const upd = await queryWithRetry(
+        `UPDATE fiscal_documents
+         SET status = 'VOIDED', voided_at = CURRENT_TIMESTAMP
+         WHERE table_bill_id = $1 AND tenant_id = $2 AND doc_type = 'PROFORMA' AND provider = 'crm'
+           AND table_bill_split_id IS NULL AND status IN ('PENDING', 'CONFIRMED')
+         RETURNING id`,
+        [billId, tenantId]
+    );
+    return (upd.rowCount ?? 0) > 0;
+}
+
 // Emissione del documento commerciale per un conto CHIUSO. Idempotente:
 // l'indice unico ammette un documento vivo per conto — il replay ritorna il
 // CONFIRMED esistente, il retry riusa il PENDING, un FAILED lascia spazio a
@@ -4837,6 +4884,9 @@ async function emitFiscalDocForBill(tenantId: number, billId: number, userId: nu
         [billId]
     );
     if ((liveInvoices.rowCount ?? 0) > 0) return { skipped: 'invoice_exists' };
+
+    // La proforma nativa è un segnaposto: lo scontrino vero la supera.
+    await supersedeNativeProforma(tenantId, billId);
 
     let ins = await queryWithRetry(
         // Arbitro sull'indice a livello conto (predicato con split IS NULL,
@@ -5174,6 +5224,10 @@ app.post('/bills/:id/invoices', authenticate, requirePermission('payments:full')
         );
         // Tutte le guardie PRIMA della numerazione: un tentativo destinato al
         // 409 non deve bruciare un numero fattura (buchi = problemi legali).
+        // La proforma nativa non è un documento fiscale e non blocca: esce
+        // dalle guardie qui e viene superata (VOID) prima dell'inserimento.
+        const proformaLive = liveDocs.rows.some((d: any) => d.doc_type === 'PROFORMA');
+        liveDocs.rows = liveDocs.rows.filter((d: any) => d.doc_type !== 'PROFORMA');
         const liveReceipt = liveDocs.rows.find((d: any) => d.doc_type === 'RECEIPT');
         if (liveReceipt) {
             return res.status(409).json({
@@ -5240,6 +5294,12 @@ app.post('/bills/:id/invoices', authenticate, requirePermission('payments:full')
             // Conto aperto a mano senza righe: riga unica al 10, come lo scontrino.
             vatRows.push({ rate: 10, gross_cents: amountCents, net_cents: Math.round(amountCents / 1.1), vat_cents: amountCents - Math.round(amountCents / 1.1) });
         }
+
+        // Validazioni passate: il segnaposto proforma cede il posto alla
+        // fattura sull'INTERO (VOID prima di consumare il numero). Sulla
+        // quota invece resta: continua a marcare il resto del conto come
+        // "chiuso senza documento, di proposito".
+        if (proformaLive && splitId == null) await supersedeNativeProforma(req.tenantId!, id);
 
         const year = Number(getRomeDatePart(new Date()).slice(0, 4));
         const docNumber = await nextInvoiceNumber(req.tenantId!, year);
