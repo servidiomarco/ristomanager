@@ -282,8 +282,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
   const pushLine = useCallback((
     dish: Dish, courseNo: number, qty: number,
     modifierIds: number[], modifierLabels: string[], modifierDelta: number,
+    note?: string,
   ) => {
-    const key = cartKey(dish.id, courseNo, modifierIds);
+    const key = cartKey(dish.id, courseNo, modifierIds, note);
     setCart(prev => {
       const at = prev.findIndex(l => l.key === key);
       if (at >= 0) {
@@ -299,17 +300,19 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
         modifier_ids: modifierIds,
         modifier_labels: modifierLabels,
         modifier_delta_cents: modifierDelta,
+        ...(note ? { note } : {}),
       }];
     });
   }, []);
 
-  const addToCart = (dish: Dish, modifierIds: number[] = []) => {
+  const addToCart = (dish: Dish, modifierIds: number[] = [], note?: string) => {
     const all = groupsForDish(dish.id).flatMap(g => g.modifiers);
     const chosen = all.filter(m => modifierIds.includes(m.id));
     pushLine(
       dish, course, 1, modifierIds,
       chosen.map(m => m.name),
       chosen.reduce((s, m) => s + m.price_delta_cents, 0),
+      note,
     );
   };
 
@@ -831,7 +834,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
           dish={variantFor}
           groups={groupsForDish(variantFor.id)}
           onCancel={() => setVariantFor(null)}
-          onConfirm={ids => { addToCart(variantFor, ids); setVariantFor(null); }}
+          onConfirm={(ids, note) => { addToCart(variantFor, ids, note); setVariantFor(null); }}
         />
       )}
 
@@ -955,9 +958,13 @@ const VariantSheet: React.FC<{
   dish: Dish;
   groups: MenuCatalogue['modifier_groups'];
   onCancel: () => void;
-  onConfirm: (ids: number[]) => void;
+  onConfirm: (ids: number[], note?: string) => void;
 }> = ({ dish, groups, onCancel, onConfirm }) => {
   const [selected, setSelected] = useState<number[]>([]);
+  // Variante libera: quello che in cassa il cameriere scrive a mano («senza
+  // sale», «metà porzione»). Viaggia come nota di riga — KDS e comanda in
+  // cucina la stampano già sotto il piatto.
+  const [custom, setCustom] = useState('');
 
   const toggle = (groupId: number, modId: number, single: boolean) => {
     setSelected(prev => {
@@ -987,7 +994,7 @@ const VariantSheet: React.FC<{
       footer={
         <button
           type="button"
-          onClick={() => onConfirm(selected)}
+          onClick={() => onConfirm(selected, custom.trim() || undefined)}
           disabled={missing.length > 0}
           className={`w-full ${dsButton.primary}`}
         >
@@ -1033,6 +1040,18 @@ const VariantSheet: React.FC<{
           </div>
         );
       })}
+
+      <label className="block">
+        <span className="mb-2 block text-[13px] font-semibold text-[var(--ds-text-muted)]">Variante libera</span>
+        <input
+          type="text"
+          value={custom}
+          onChange={e => setCustom(e.target.value)}
+          maxLength={300}
+          placeholder="Es. senza sale, metà porzione…"
+          className={dsInput}
+        />
+      </label>
     </Sheet>
   );
 };
