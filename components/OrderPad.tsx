@@ -707,6 +707,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
       hasVariants={hasVariants}
       onAdd={onDishTap}
       onRemove={removeFromCart}
+      onLongPress={setVariantFor}
       layout={isWide ? 'grid' : 'list'}
     />
   );
@@ -1050,6 +1051,9 @@ const VariantSheet: React.FC<{
           maxLength={300}
           placeholder="Es. senza sale, metà porzione…"
           className={dsInput}
+          // Aperta dal tocco lungo su un piatto senza varianti, la sheet ha
+          // solo questo campo: il cameriere è qui per scrivere.
+          autoFocus={groups.length === 0}
         />
       </label>
     </Sheet>
