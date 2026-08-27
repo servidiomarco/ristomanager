@@ -13,7 +13,7 @@ import cors from 'cors';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import QRCode from 'qrcode';
-import pool, { createSchema, queryWithRetry, runMigrations, tenantQuery, runWithTenantContext, runAsPlatform } from './db.js';
+import pool, { createSchema, queryWithRetry, runMigrations, tenantQuery, runWithTenantContext, runAsPlatform, withTenant } from './db.js';
 import { SocketService } from './services/socketService.js';
 import * as bookingTools from './services/bookingTools.js';
 import * as whatsappAgent from './services/whatsappAgent.js';
@@ -49,7 +49,7 @@ import {
     comandaToBillPayload,
     PassepartoutBridgeError,
 } from './services/passepartoutBridge.js';
-import type { PassepartoutComanda, EsitoChiusuraComanda } from './services/passepartoutService.js';
+import type { PassepartoutComanda, EsitoChiusuraComanda, PassepartoutArticolo } from './services/passepartoutService.js';
 import { Shift, PaymentStatus, UserRole } from './types.js';
 import authRoutes from './auth/authRoutes.js';
 import logRoutes from './activityLogs/logRoutes.js';
@@ -3484,6 +3484,77 @@ app.post('/bills/:id/passepartout-close', authenticate, requirePermission('payme
     } catch (err: any) {
         if (sendPassepartoutError(res, err)) return;
         console.error('POST /bills/:id/passepartout-close error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// --- Import del menu dalla cassa ---------------------------------------------
+// Sincronizza l'anagrafica `dishes` col catalogo articoli del gestionale:
+// upsert per external_ref "pp:articolo:<id>", spegnimento di ciò che non è
+// più in cassa. Il sync è SEMPRE completo (non delta): solo la lista intera
+// rivela gli articoli spariti. La cassa possiede identità e prezzo (nome,
+// categoria, prezzo, IVA, attivo); i campi che la cassa non ha — descrizione,
+// allergeni, foto, stazione, tempi — restano del CRM e l'update non li tocca.
+// Gated dall'entitlement 'passepartout' (oggi solo Vecchio Frantoio): gli
+// altri tenant gestiscono il menu a mano e questa route per loro è un 403.
+app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        // Timeout largo: il gestionale serializza ~14MB di catalogo (immagini
+        // incluse) prima che l'agente lo riduca agli ~85KB che viaggiano qui.
+        const articoli = await callPassepartout<PassepartoutArticolo[]>('articoli', {}, 150_000);
+        // Solo le voci di menu vere: le varianti di battitura, il coperto e
+        // gli acconti non sono piatti.
+        const IMPORTABILI = new Set(['Semplice', 'Generico']);
+        const validi = articoli.filter(a => a && Number.isFinite(Number(a.idGestionale))
+            && IMPORTABILI.has(String(a.tipo)) && String(a.descrizione ?? '').trim() !== '');
+
+        const esito = await withTenant(req.tenantId!, async (client) => {
+            let creati = 0, aggiornati = 0;
+            const refs: string[] = [];
+            for (const a of validi) {
+                const ref = `pp:articolo:${Number(a.idGestionale)}`;
+                refs.push(ref);
+                const iva = a.ivaPercento != null && Number.isInteger(a.ivaPercento)
+                    && a.ivaPercento >= 0 && a.ivaPercento <= 100 ? a.ivaPercento : null;
+                const up = await client.query(
+                    `INSERT INTO dishes (tenant_id, name, price, category, allergens, vat_rate, external_ref, is_active)
+                     VALUES ($1, $2, $3, $4, '{}', COALESCE($5, 10), $6, $7)
+                     ON CONFLICT (tenant_id, external_ref) WHERE external_ref IS NOT NULL
+                     DO UPDATE SET name = EXCLUDED.name, price = EXCLUDED.price,
+                                   category = EXCLUDED.category,
+                                   vat_rate = COALESCE($5, dishes.vat_rate),
+                                   is_active = EXCLUDED.is_active
+                     RETURNING (xmax = 0) AS inserted`,
+                    [req.tenantId!, String(a.descrizione).trim(),
+                     Number.isFinite(Number(a.prezzo)) ? Number(a.prezzo) : 0,
+                     String(a.categoria ?? 'Senza categoria').trim() || 'Senza categoria',
+                     iva, ref, a.attivo === true]
+                );
+                if (up.rows[0]?.inserted) creati++; else aggiornati++;
+            }
+            const off = await client.query(
+                `UPDATE dishes SET is_active = false
+                 WHERE tenant_id = $1 AND external_ref LIKE 'pp:articolo:%'
+                   AND is_active AND NOT (external_ref = ANY($2::text[]))`,
+                [req.tenantId!, refs]
+            );
+            return { creati, aggiornati, disattivati: off.rowCount ?? 0 };
+        });
+
+        // Un evento solo, non centinaia di dish:updated: i client ricaricano
+        // l'anagrafica intera.
+        try { socketService?.broadcastToAll(req.tenantId!, 'dish:synced', esito); } catch (_) {}
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.DISH, undefined,
+                `Menu importato dalla cassa: ${esito.creati} nuovi, ${esito.aggiornati} aggiornati, ${esito.disattivati} disattivati`
+            ).catch(() => {});
+        }
+        res.json({ totale_cassa: articoli.length, importabili: validi.length, ...esito });
+    } catch (err: any) {
+        if (sendPassepartoutError(res, err)) return;
+        console.error('POST /menu/import/passepartout error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });

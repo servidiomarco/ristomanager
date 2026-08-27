@@ -60,6 +60,8 @@ function priceToFeature(): Map<string, TenantFeature> {
         whatsapp: process.env.STRIPE_PRICE_WHATSAPP,
         web_booking: process.env.STRIPE_PRICE_WEB_BOOKING,
         pay_at_table: process.env.STRIPE_PRICE_PAY_AT_TABLE,
+        // Integrazione cassa: per ora non è a listino Stripe (accesa a mano).
+        passepartout: process.env.STRIPE_PRICE_PASSEPARTOUT,
     };
     const map = new Map<string, TenantFeature>();
     for (const feature of TENANT_FEATURES) {

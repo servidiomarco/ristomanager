@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, VAT_RATES, Customer, Table, TableMerge, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
-import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info } from 'lucide-react';
+import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { getRomeDatePart } from '../utils/reservationTime';
 import { printBanquet } from '../utils/printBanquet';
@@ -11,7 +11,7 @@ import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BanquetPaymentsModal } from './BanquetPaymentsModal';
 import { DishDetailModal } from './DishDetailModal';
 import { CustomerPickerModal } from './CustomerPickerModal';
-import { getCustomers, getTableMerges } from '../services/apiService';
+import { getCustomers, getTableMerges, importMenuPassepartout, type MenuImportResult } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
 import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftService';
 import {
@@ -176,9 +176,31 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     onAutoOpenNewDishHandled,
     onActiveTabChange
 }) => {
-  const { hasPermission } = useAuth();
+  const { hasPermission, hasFeature } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
   const canManageBanquetPayments = hasPermission('banquet:manage_payments');
+  // Import dalla cassa Passepartout: entitlement del solo ristorante col
+  // gestionale (oggi Vecchio Frantoio). Gli altri tenant non vedono il bottone.
+  const canImportCassa = canEdit && hasFeature('passepartout');
+  const [importing, setImporting] = useState(false);
+  const [importEsito, setImportEsito] = useState<MenuImportResult | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+
+  const handleImportCassa = async () => {
+    if (importing) return;
+    setImporting(true);
+    setImportEsito(null);
+    setImportError(null);
+    try {
+      // La lista si aggiorna da sola via socket 'dish:synced'.
+      setImportEsito(await importMenuPassepartout());
+    } catch (err: any) {
+      setImportError(err?.data?.message ?? err?.data?.error ?? err?.message ?? 'Import non riuscito');
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const [activeTab, setActiveTab] = useState<'DISHES' | 'BANQUETS'>(initialTab);
   const [banquetView, setBanquetView] = useState<'LIST' | 'CALENDAR'>('LIST');
   type BanquetSortBy = 'date-asc' | 'date-desc' | 'name-asc' | 'name-desc' | 'guests-asc' | 'guests-desc';
@@ -874,6 +896,18 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         )}
         {activeTab === 'DISHES' && (
           <div className="flex items-center gap-2 sm:flex-1 sm:justify-end">
+            {canImportCassa && (
+              <button
+                type="button"
+                onClick={handleImportCassa}
+                disabled={importing}
+                title="Allinea i piatti al catalogo della cassa Passepartout"
+                className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              >
+                {importing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
+                Importa da cassa
+              </button>
+            )}
             <SearchField
               value={searchTerm}
               onChange={setSearchTerm}
@@ -911,6 +945,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
       {activeTab === 'DISHES' && (
           <>
+            {(importEsito || importError) && (
+              <div className="mb-4">
+                <Callout tone={importError ? 'critical' : 'positive'}>
+                  {importError
+                    ?? `Menu allineato alla cassa: ${importEsito!.creati} nuovi, ${importEsito!.aggiornati} aggiornati, ${importEsito!.disattivati} disattivati.`}
+                </Callout>
+              </div>
+            )}
             <div className="flex flex-col gap-3 md:flex-row md:items-center mb-5">
               {dishCategories.length > 0 && (
                 <div className="flex flex-1 flex-wrap gap-2">
@@ -962,9 +1004,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             onClick={() => setViewDish(isSelected ? null : dish)}
                             className={`flex flex-col overflow-hidden rounded-[20px] bg-[var(--ds-surface)] text-left shadow-[var(--ds-shadow-card)] transition-shadow hover:shadow-[var(--ds-shadow-raised)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                               isSelected ? 'ring-2 ring-[var(--ds-text-primary)]' : ''
-                            }`}
+                            } ${dish.is_active === false ? 'opacity-60' : ''}`}
                           >
                             <div className="relative">
+                              {dish.is_active === false && (
+                                <span className="absolute bottom-2 left-2 z-10 rounded-full bg-[var(--ds-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--ds-critical-text)]">
+                                  spento in cassa
+                                </span>
+                              )}
                               {dish.photo_url ? (
                                 <img
                                   src={dish.photo_url}
@@ -1054,8 +1101,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                 <ImageIcon className="h-4 w-4 text-[var(--ds-text-subtle)]" aria-hidden />
                               </div>
                             )}
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">{dish.name}</div>
+                            <div className={`min-w-0 flex-1 ${dish.is_active === false ? 'opacity-60' : ''}`}>
+                              <div className="flex items-center gap-2">
+                                <span className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">{dish.name}</span>
+                                {dish.is_active === false && <StatusPill tone="critical">spento in cassa</StatusPill>}
+                              </div>
                               <div className="truncate text-[13px] text-[var(--ds-text-muted)]">
                                 {[dish.category, dish.description].filter(Boolean).join(' · ')}
                               </div>

@@ -122,7 +122,7 @@ describe('billing Stripe (Fase D3)', () => {
         expect(row.billing_status).toBe('active');
         expect(row.stripe_subscription_id).toBe(SUBSCRIPTION_ID);
 
-        expect(await featuresOf(tenantId)).toEqual({ voice: true, whatsapp: false, web_booking: false, pay_at_table: false });
+        expect(await featuresOf(tenantId)).toEqual({ voice: true, whatsapp: false, web_booking: false, pay_at_table: false, passepartout: false });
     });
 
     it("past_due → billing_status registrato ma il ristorante resta acceso", async () => {
@@ -162,7 +162,7 @@ describe('billing Stripe (Fase D3)', () => {
         expect(row.status).toBe('suspended');
         expect(row.billing_status).toBe('canceled');
 
-        expect(await featuresOf(tenantId)).toEqual({ voice: false, whatsapp: false, web_booking: false, pay_at_table: false });
+        expect(await featuresOf(tenantId)).toEqual({ voice: false, whatsapp: false, web_booking: false, pay_at_table: false, passepartout: false });
     });
 
     it('riattivazione: di nuovo active → tenant riacceso', async () => {
@@ -171,7 +171,7 @@ describe('billing Stripe (Fase D3)', () => {
 
         const row = await tenantRow(tenantId);
         expect(row.status).toBe('active');
-        expect(await featuresOf(tenantId)).toEqual({ voice: true, whatsapp: false, web_booking: false, pay_at_table: false });
+        expect(await featuresOf(tenantId)).toEqual({ voice: true, whatsapp: false, web_booking: false, pay_at_table: false, passepartout: false });
     });
 
     it('guardia grandfathered: il tenant 1 (billing_status NULL) non è toccato dalla sync', async () => {
@@ -181,7 +181,7 @@ describe('billing Stripe (Fase D3)', () => {
         const row = await tenantRow(1);
         expect(row.billing_status).toBeNull();
         expect(row.status).toBe('active');
-        expect(await featuresOf(1)).toEqual({ voice: true, whatsapp: true, web_booking: true, pay_at_table: true });
+        expect(await featuresOf(1)).toEqual({ voice: true, whatsapp: true, web_booking: true, pay_at_table: true, passepartout: true });
     });
 
     it('customer sconosciuto → null, nessun errore (Stripe non deve ritentare)', async () => {

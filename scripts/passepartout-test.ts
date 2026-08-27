@@ -16,6 +16,7 @@ import {
     getComanda,
     getConto,
     getContiGiorno,
+    getArticoliMenu,
     inviaProduzioneComanda,
     chiudiComandaCompleta,
     isPassepartoutConfigured,
@@ -102,6 +103,13 @@ try {
             if (esito.importoSospeso > 0 && params.importoPagato == null) {
                 console.log('⚠ Il conto è rimasto a sospeso: saldaConto non è riuscito, controllare in cassa.');
             }
+            break;
+        }
+        case 'articoli': {
+            // Catalogo menu mappato per l'import (arg opzionale: ISO ultimaModifica).
+            const articoli = await getArticoliMenu(arg || undefined);
+            for (const a of articoli) console.log(JSON.stringify(a));
+            console.log(`${articoli.length} articoli`);
             break;
         }
         case 'proforma': {

@@ -64,7 +64,10 @@ interface OrderPadProps {
   onImmersive?: (on: boolean) => void;
 }
 
-export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations, globalDate, globalShiftFilter, onImmersive }) => {
+export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, reservations, globalDate, globalShiftFilter, onImmersive }) => {
+  // I piatti spenti (es. articolo disattivato in cassa Passepartout) restano
+  // in anagrafica per lo storico ma non si battono più.
+  const dishes = useMemo(() => allDishes.filter(d => d.is_active !== false), [allDishes]);
   const [tableId, setTableId] = useState<number | null>(null);
   const [order, setOrder] = useState<OrderWithItems | null>(null);
   const [catalogue, setCatalogue] = useState<MenuCatalogue | null>(null);

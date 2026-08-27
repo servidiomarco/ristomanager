@@ -26,6 +26,7 @@ import {
     getTipiPagamento,
     getSaleMenu,
     getConto,
+    getArticoliMenu,
     inviaProduzioneComanda,
     chiudiComandaCompleta,
     isPassepartoutConfigured,
@@ -70,6 +71,9 @@ const handlers: Record<string, Handler> = {
         if (!Number.isFinite(id)) throw new Error('Parametro "idComanda" non valido');
         return inviaProduzioneComanda({ idComanda: id, inviaTutto: true });
     },
+    // Catalogo articoli per l'import menu del CRM (senza immagini: il payload
+    // deve stare nel buffer del socket).
+    articoli: (p) => getArticoliMenu(typeof p?.ultimaModifica === 'string' ? p.ultimaModifica : undefined),
     // Chiusura del conto secondo la ricetta del supporto (25/08): invio
     // separato solo se servono righe mai inviate, ContoComanda sempre con
     // noInvio=true, verdetto finale da GetContiGiorno. Il vecchio blocco

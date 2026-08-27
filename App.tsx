@@ -1275,6 +1275,12 @@ const App: React.FC = () => {
       setDishes(prev => prev.filter(d => d.id !== id));
     });
 
+    // Sync di massa dalla cassa (import Passepartout): un evento solo al
+    // posto di centinaia di dish:updated — si ricarica l'anagrafica intera.
+    socket.on('dish:synced', () => {
+      getDishes().then(setDishes).catch(() => {});
+    });
+
     // Banquet Menu events
     socket.on('banquet:created', (menu: BanquetMenu) => {
       setBanquetMenus(prev => [...prev, menu]);
@@ -1373,6 +1379,7 @@ const App: React.FC = () => {
       socket.off('dish:created');
       socket.off('dish:updated');
       socket.off('dish:deleted');
+      socket.off('dish:synced');
       socket.off('banquet:created');
       socket.off('banquet:updated');
       socket.off('banquet:deleted');
