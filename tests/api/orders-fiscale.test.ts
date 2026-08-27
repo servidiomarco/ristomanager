@@ -129,6 +129,34 @@ describe('documenti fiscali', () => {
         expect(res.body.reason).toBe('bill_not_closed');
     });
 
+    it('la chiusura proforma non emette e lo scontrino dopo la supera', async () => {
+        const proformaBill = await openBill('FISC3', 7000);
+        const close = await api().post(`/bills/${proformaBill}/close`).set(bearer(token)).send({
+            payments: [{ method: 'CONTANTI', amount_cents: 7000 }],
+            documento: 'Proforma',
+        });
+        expect(close.status).toBe(200);
+        expect(close.body.status).toBe('CLOSED');
+
+        // La registrazione della proforma è fire-and-forget: si aspetta la
+        // riga PROFORMA (e NON uno scontrino) sulla lista dei chiusi.
+        let row: any = null;
+        for (let i = 0; i < 20; i++) {
+            const bills = await api().get('/bills/open?status=closed').set(bearer(token));
+            row = bills.body.bills.find((b: any) => b.id === proformaBill);
+            if (row?.fiscal_status) break;
+            await new Promise(r => setTimeout(r, 150));
+        }
+        expect(row?.fiscal_status).toBe('CONFIRMED');
+        expect(row?.fiscal_doc_type).toBe('PROFORMA');
+
+        // Lo scontrino emesso dopo supera il segnaposto da solo.
+        const res = await api().post(`/bills/${proformaBill}/fiscal-docs`).set(bearer(token)).send({});
+        expect(res.status).toBe(200);
+        expect(res.body.doc.status).toBe('CONFIRMED');
+        expect(res.body.doc.doc_type).toBe('RECEIPT');
+    });
+
     it('il provider fiscale torna spento per i file successivi', async () => {
         // Stato condiviso fra i file di test: si rimette com'era.
         const off = await api().put('/settings/fiscal').set(bearer(token)).send({ provider: 'none' });
