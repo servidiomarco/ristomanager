@@ -4692,6 +4692,30 @@ app.get('/reports/cash-closure', authenticate, requirePermission('payments:view'
             [req.tenantId!, date]
         );
 
+        // Dettaglio per tavolo: un conto per riga con documento fiscale e
+        // incassi, così la chiusura serale si riscontra tavolo per tavolo e
+        // si filtra per tipo di chiusura (scontrino/fattura/proforma/senza).
+        const billListRs = await queryWithRetry(
+            `SELECT b.id, b.total_cents, b.status, b.tip_cents, b.closed_at, b.covers,
+                    t.name AS table_name, r.customer_name,
+                    fd.doc_type AS fiscal_doc_type, fd.status AS fiscal_status, fd.doc_number AS fiscal_doc_number,
+                    COALESCE((SELECT jsonb_agg(jsonb_build_object('method', p.method, 'amount_cents', p.amount_cents) ORDER BY p.recorded_at)
+                              FROM table_bill_payments p
+                              WHERE p.table_bill_id = b.id AND p.voided_at IS NULL), '[]'::jsonb) AS payments
+             FROM table_bills b
+             LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
+             LEFT JOIN reservations r ON r.id = b.reservation_id AND r.tenant_id = b.tenant_id
+             LEFT JOIN LATERAL (
+                 SELECT doc_type, status, doc_number FROM fiscal_documents
+                 WHERE table_bill_id = b.id ORDER BY created_at DESC LIMIT 1
+             ) fd ON TRUE
+             WHERE b.tenant_id = $1 AND b.status IN ('CLOSED', 'SETTLED_PARTIAL')
+               AND b.closed_at IS NOT NULL
+               AND (b.closed_at AT TIME ZONE 'Europe/Rome')::date = $2::date
+             ORDER BY b.closed_at DESC`,
+            [req.tenantId!, date]
+        );
+
         const methods = methodsRs.rows;
         res.json({
             date,
@@ -4701,6 +4725,7 @@ app.get('/reports/cash-closure', authenticate, requirePermission('payments:view'
             deposit_credit_cents: billsRs.rows[0].deposit_credit_cents,
             bills_closed: billsRs.rows[0].bills_closed,
             shortfall_cents: billsRs.rows[0].shortfall_cents,
+            bills: billListRs.rows,
         });
     } catch (err: any) {
         console.error('GET /reports/cash-closure error:', err);
