@@ -413,6 +413,8 @@ export interface MenuImportResult {
   creati: number;
   aggiornati: number;
   disattivati: number;
+  /** Gruppi varianti sincronizzati (set distinti di varianti della cassa). */
+  gruppi_varianti?: number;
 }
 
 /** Sincronizza l'anagrafica piatti col catalogo della cassa. Il server
@@ -420,6 +422,24 @@ export interface MenuImportResult {
  *  serve solo a raccontare l'esito. */
 export const importMenuPassepartout = async (): Promise<MenuImportResult> => {
   return apiRequest<MenuImportResult>(`${API_URL}/menu/import/passepartout`, {
+    method: 'POST',
+    headers: getHeaders(false),
+  });
+};
+
+/** URL pubblico del menu digitale (pagina servita dal backend, come /prenota). */
+export const digitalMenuUrl = (): string => `${API_URL}/menu`;
+
+export interface MenuTranslateResult {
+  tradotte: number;
+  lingue: string[];
+  tokens: number;
+}
+
+/** Traduce con l'AI le voci del menu che non hanno ancora una traduzione
+ *  (piatti attivi + categorie, en/fr/de). Idempotente. */
+export const translateMenu = async (): Promise<MenuTranslateResult> => {
+  return apiRequest<MenuTranslateResult>(`${API_URL}/menu/translate`, {
     method: 'POST',
     headers: getHeaders(false),
   });
@@ -865,6 +885,8 @@ export interface FeatureFlags {
   table_orders_enabled: boolean;
   /** Risposte suggerite ai messaggi dei clienti. */
   ai_messages_enabled: boolean;
+  /** Menu digitale pubblico (QR al tavolo). Gestito dal QR modal della pagina Menu. */
+  digital_menu_enabled: boolean;
 }
 
 export const getFeatureFlags = async (): Promise<FeatureFlags> => {

@@ -50,6 +50,7 @@ import {
     PassepartoutBridgeError,
 } from './services/passepartoutBridge.js';
 import type { PassepartoutComanda, EsitoChiusuraComanda, PassepartoutArticolo } from './services/passepartoutService.js';
+import { MENU_LANGS, isMenuTranslationConfigured, translateMenuEntries } from './services/menuTranslationService.js';
 import { Shift, PaymentStatus, UserRole } from './types.js';
 import authRoutes from './auth/authRoutes.js';
 import logRoutes from './activityLogs/logRoutes.js';
@@ -3508,9 +3509,28 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
         const validi = articoli.filter(a => a && Number.isFinite(Number(a.idGestionale))
             && IMPORTABILI.has(String(a.tipo)) && String(a.descrizione ?? '').trim() !== '');
 
+        // Varianti: nel gestionale sono articoli (tipo Variante) referenziati
+        // per Codice dagli articoli veri e dalle categorie. Qui diventano
+        // modifier_groups sincronizzati: un gruppo per SET distinto di
+        // varianti (external_ref pp:varianti:<codici ordinati>), così
+        // "Ghiaccio" da solo è UN gruppo condiviso da tutti gli amari, non
+        // cinquanta copie. I gruppi creati a mano (external_ref NULL) non
+        // vengono mai toccati.
+        const varByCode = new Map<string, { nome: string; delta: number }>();
+        for (const a of articoli) {
+            if ((a.tipo === 'Variante' || a.tipo === 'VarianteModificatore') && a.attivo
+                && a.codice && String(a.descrizione ?? '').trim() !== '') {
+                varByCode.set(String(a.codice).trim().toLowerCase(), {
+                    nome: String(a.descrizione).trim(),
+                    delta: Number.isFinite(Number(a.prezzo)) ? Math.round(Number(a.prezzo) * 100) : 0,
+                });
+            }
+        }
+
         const esito = await withTenant(req.tenantId!, async (client) => {
             let creati = 0, aggiornati = 0;
             const refs: string[] = [];
+            const groupCache = new Map<string, number>();
             for (const a of validi) {
                 const ref = `pp:articolo:${Number(a.idGestionale)}`;
                 refs.push(ref);
@@ -3524,13 +3544,68 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
                                    category = EXCLUDED.category,
                                    vat_rate = COALESCE($5, dishes.vat_rate),
                                    is_active = EXCLUDED.is_active
-                     RETURNING (xmax = 0) AS inserted`,
+                     RETURNING id, (xmax = 0) AS inserted`,
                     [req.tenantId!, String(a.descrizione).trim(),
                      Number.isFinite(Number(a.prezzo)) ? Number(a.prezzo) : 0,
                      String(a.categoria ?? 'Senza categoria').trim() || 'Senza categoria',
                      iva, ref, a.attivo === true]
                 );
                 if (up.rows[0]?.inserted) creati++; else aggiornati++;
+                const dishId: number = up.rows[0].id;
+
+                // Set effettivo: varianti dell'articolo + della sua categoria.
+                const codes = [...new Set(
+                    [...(a.varianti ?? []), ...(a.categoriaVarianti ?? [])]
+                        .map((c: unknown) => String(c).trim().toLowerCase())
+                )].filter((c) => varByCode.has(c)).sort();
+
+                let groupId: number | null = null;
+                if (codes.length > 0) {
+                    const setRef = `pp:varianti:${codes.join('|')}`;
+                    let cached = groupCache.get(setRef);
+                    if (cached == null) {
+                        const nomi = codes.map((c) => varByCode.get(c)!.nome);
+                        const label = `Varianti (${nomi.slice(0, 3).join(', ')}${nomi.length > 3 ? ', …' : ''})`.slice(0, 100);
+                        const gr = await client.query(
+                            `INSERT INTO modifier_groups (tenant_id, name, min_select, max_select, external_ref)
+                             VALUES ($1, $2, 0, $3, $4)
+                             ON CONFLICT (tenant_id, external_ref) WHERE external_ref IS NOT NULL
+                             DO UPDATE SET name = EXCLUDED.name, max_select = EXCLUDED.max_select
+                             RETURNING id`,
+                            [req.tenantId!, label, codes.length, setRef]
+                        );
+                        cached = gr.rows[0].id as number;
+                        for (const [i, c] of codes.entries()) {
+                            const v = varByCode.get(c)!;
+                            await client.query(
+                                `INSERT INTO modifiers (tenant_id, group_id, name, price_delta_cents, is_active, sort_order)
+                                 SELECT $1, $2, $3, $4, true, $5
+                                 WHERE NOT EXISTS (SELECT 1 FROM modifiers WHERE group_id = $2 AND LOWER(name) = LOWER($3))`,
+                                [req.tenantId!, cached, v.nome, v.delta, i]
+                            );
+                            await client.query(
+                                `UPDATE modifiers SET price_delta_cents = $3, is_active = true
+                                 WHERE group_id = $2 AND LOWER(name) = LOWER($1)`,
+                                [v.nome, cached, v.delta]
+                            );
+                        }
+                        groupCache.set(setRef, cached);
+                    }
+                    groupId = cached;
+                    await client.query(
+                        `INSERT INTO dish_modifier_groups (tenant_id, dish_id, group_id)
+                         VALUES ($1, $2, $3) ON CONFLICT (dish_id, group_id) DO NOTHING`,
+                        [req.tenantId!, dishId, groupId]
+                    );
+                }
+                // Via i legami pp che non corrispondono più al set corrente
+                // (tutti, se l'articolo non ha più varianti).
+                await client.query(
+                    `DELETE FROM dish_modifier_groups l USING modifier_groups g
+                     WHERE l.dish_id = $1 AND l.group_id = g.id
+                       AND g.external_ref LIKE 'pp:varianti:%' AND g.id IS DISTINCT FROM $2`,
+                    [dishId, groupId]
+                );
             }
             const off = await client.query(
                 `UPDATE dishes SET is_active = false
@@ -3538,7 +3613,14 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
                    AND is_active AND NOT (external_ref = ANY($2::text[]))`,
                 [req.tenantId!, refs]
             );
-            return { creati, aggiornati, disattivati: off.rowCount ?? 0 };
+            // Gruppi pp rimasti senza piatti: si eliminano (CASCADE sui membri).
+            await client.query(
+                `DELETE FROM modifier_groups g
+                 WHERE g.tenant_id = $1 AND g.external_ref LIKE 'pp:varianti:%'
+                   AND NOT EXISTS (SELECT 1 FROM dish_modifier_groups l WHERE l.group_id = g.id)`,
+                [req.tenantId!]
+            );
+            return { creati, aggiornati, disattivati: off.rowCount ?? 0, gruppi_varianti: groupCache.size };
         });
 
         // Un evento solo, non centinaia di dish:updated: i client ricaricano
@@ -3558,6 +3640,134 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });
+
+// --- Menu digitale per gli ospiti --------------------------------------------
+// Pagina pubblica multilingua servita dal backend (come /prenota): QR al
+// tavolo → /menu → fetch di /public/menu. Il testo tradotto vive nel CRM:
+// dishes.translations per i piatti, un blob in app_settings per le categorie
+// (che sono stringhe libere, non righe). Acceso dal flag operativo
+// digital_menu_enabled (default off), gestito dal QR modal della pagina Menu.
+
+const MENU_CAT_TRANSLATIONS_KEY = 'menu_category_translations';
+
+async function getMenuCategoryTranslations(tenantId: number): Promise<Record<string, Record<string, string>>> {
+    const rs = await queryWithRetry(
+        `SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2`,
+        [tenantId, MENU_CAT_TRANSLATIONS_KEY]
+    );
+    try {
+        return rs.rows[0]?.text_value ? JSON.parse(rs.rows[0].text_value) : {};
+    } catch {
+        return {};
+    }
+}
+
+async function saveMenuCategoryTranslations(tenantId: number, map: Record<string, Record<string, string>>): Promise<void> {
+    await queryWithRetry(
+        `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+         VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+         ON CONFLICT (tenant_id, key) DO UPDATE
+           SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+        [tenantId, MENU_CAT_TRANSLATIONS_KEY, JSON.stringify(map)]
+    );
+}
+
+// Traduce in batch le voci mancanti (piatti attivi + categorie) nelle lingue
+// del menu. Idempotente: ritradurre non tocca ciò che è già tradotto — per
+// rifare una traduzione si svuota translations dal DB (caso raro, niente UI).
+app.post('/menu/translate', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        if (!isMenuTranslationConfigured()) {
+            return res.status(503).json({ error: 'not_configured', message: 'ANTHROPIC_API_KEY non configurata sul backend' });
+        }
+        const richieste = Array.isArray(req.body?.langs)
+            ? MENU_LANGS.filter((l) => req.body.langs.includes(l))
+            : [...MENU_LANGS];
+        const dishesRs = await queryWithRetry(
+            `SELECT id, name, description, translations FROM dishes
+             WHERE tenant_id = $1 AND is_active ORDER BY id`,
+            [req.tenantId!]
+        );
+        const catRs = await queryWithRetry(
+            `SELECT DISTINCT category FROM dishes
+             WHERE tenant_id = $1 AND is_active AND COALESCE(category, '') <> ''`,
+            [req.tenantId!]
+        );
+        const catTrad = await getMenuCategoryTranslations(req.tenantId!);
+        let tradotte = 0;
+        let tokens = 0;
+        for (const lang of richieste) {
+            const daFare = dishesRs.rows
+                .filter((d: any) => !d.translations?.[lang]?.name)
+                .map((d: any) => ({ id: `d${d.id}`, name: d.name as string, description: d.description as string | null }));
+            for (const c of catRs.rows) {
+                if (!catTrad[c.category]?.[lang]) daFare.push({ id: `c:${c.category}`, name: c.category, description: null });
+            }
+            if (daFare.length === 0) continue;
+            const mappa = await translateMenuEntries(daFare, lang, (t) => { tokens += t; });
+            for (const [id, t] of mappa) {
+                if (id.startsWith('d')) {
+                    const dishId = Number(id.slice(1));
+                    if (!Number.isFinite(dishId)) continue;
+                    await queryWithRetry(
+                        `UPDATE dishes
+                         SET translations = COALESCE(translations, '{}'::jsonb) || jsonb_build_object($3::text, $4::jsonb)
+                         WHERE id = $1 AND tenant_id = $2`,
+                        [dishId, req.tenantId!, lang, JSON.stringify(t)]
+                    );
+                    tradotte++;
+                } else if (id.startsWith('c:')) {
+                    const cat = id.slice(2);
+                    catTrad[cat] = { ...(catTrad[cat] ?? {}), [lang]: t.name };
+                    tradotte++;
+                }
+            }
+        }
+        await saveMenuCategoryTranslations(req.tenantId!, catTrad);
+        try { socketService?.broadcastToAll(req.tenantId!, 'dish:synced', { tradotte }); } catch (_) {}
+        res.json({ tradotte, lingue: richieste, tokens });
+    } catch (err: any) {
+        console.error('POST /menu/translate error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Dati del menu per la pagina pubblica: piatti attivi con traduzioni e
+// categorie tradotte. Niente id interni, niente campi gestionali.
+const handlePublicMenu = async (tenantId: number, _req: express.Request, res: express.Response) => {
+    if (!(await getFeatureFlag(tenantId, 'digital_menu_enabled', false))) {
+        return res.status(503).json({ error: 'menu_disabled' });
+    }
+    const dishesRs = await queryWithRetry(
+        `SELECT name, description, price, category, allergens, photo_url, translations
+         FROM dishes WHERE tenant_id = $1 AND is_active
+         ORDER BY category, name`,
+        [tenantId]
+    );
+    res.json({
+        restaurant: businessIdentity(tenantId).name,
+        lingue: ['it', ...MENU_LANGS],
+        categorie: await getMenuCategoryTranslations(tenantId),
+        piatti: dishesRs.rows.map((d: any) => ({
+            name: d.name,
+            description: d.description || null,
+            price: Number(d.price),
+            category: d.category || 'Altro',
+            allergens: Array.isArray(d.allergens) ? d.allergens : [],
+            photo_url: d.photo_url || null,
+            translations: d.translations || null,
+        })),
+    });
+};
+app.get(['/public/menu', '/public/:slug/menu'], withPublicTenant(handlePublicMenu));
+
+const serveMenuDigitale = async (_tenantId: number, _req: express.Request, res: express.Response) => {
+    res.sendFile(path.join(process.cwd(), 'public', 'menu.html'));
+};
+// La variante con slug NON è /menu/:slug: oscurerebbe GET /menu/catalogue
+// (il catalogo dell'orderpad). /m/<slug> è anche più corto dentro un QR.
+app.get('/menu', withPublicTenant(serveMenuDigitale));
+app.get('/m/:slug', withPublicTenant(serveMenuDigitale));
 
 // Porta gli acconti/caparre già PAGATI di una prenotazione dentro il suo conto
 // come quote PAID di kind='deposit'. Così l'importo abbassa il residuo (e la
@@ -17595,8 +17805,8 @@ app.post('/voice-calls/sync', authenticate, requireFeature('voice'), voiceCallsA
 // directly — the endpoints they gate are low-volume (a handful per minute
 // at most), so caching isn't worth the complexity.
 
-type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled';
-const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled'];
+type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'digital_menu_enabled';
+const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'digital_menu_enabled'];
 
 async function getFeatureFlag(tenantId: number, key: FeatureFlagKey, fallback: boolean): Promise<boolean> {
     try {
@@ -17620,6 +17830,9 @@ const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, boolean> = {
     // Off by default: il modulo comande resta spento finché non c'è una UI
     // che lo usi (PR 3). Gli endpoint esistono ma rispondono 403.
     table_orders_enabled: false,
+    // Off by default: il menu digitale pubblico si accende dal QR modal
+    // della pagina Menu quando il ristoratore è pronto a esporlo.
+    digital_menu_enabled: false,
     // Spento finché il gestore non scrive le regole della casa: senza base di
     // conoscenza il modello non avrebbe da cosa rispondere.
     ai_messages_enabled: false,
