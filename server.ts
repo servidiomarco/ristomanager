@@ -3577,10 +3577,13 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
                         cached = gr.rows[0].id as number;
                         for (const [i, c] of codes.entries()) {
                             const v = varByCode.get(c)!;
+                            // Cast espliciti: $3 compare sia nella SELECT sia
+                            // dentro LOWER() e Postgres altrimenti non deduce
+                            // il tipo ("inconsistent types deduced").
                             await client.query(
                                 `INSERT INTO modifiers (tenant_id, group_id, name, price_delta_cents, is_active, sort_order)
-                                 SELECT $1, $2, $3, $4, true, $5
-                                 WHERE NOT EXISTS (SELECT 1 FROM modifiers WHERE group_id = $2 AND LOWER(name) = LOWER($3))`,
+                                 SELECT $1::bigint, $2::int, $3::varchar, $4::int, true, $5::int
+                                 WHERE NOT EXISTS (SELECT 1 FROM modifiers WHERE group_id = $2::int AND LOWER(name) = LOWER($3::varchar))`,
                                 [req.tenantId!, cached, v.nome, v.delta, i]
                             );
                             await client.query(
