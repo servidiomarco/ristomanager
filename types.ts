@@ -425,6 +425,23 @@ export interface CashClosureMethodRow {
   movements: number;
 }
 
+// Riga per tavolo della chiusura di cassa: il conto chiuso col suo
+// documento fiscale (ultimo emesso) e gli incassi non stornati.
+export interface CashClosureBillRow {
+  id: number;
+  total_cents: number;
+  status: 'CLOSED' | 'SETTLED_PARTIAL';
+  tip_cents: number;
+  closed_at: string;
+  covers: number;
+  table_name: string | null;
+  customer_name: string | null;
+  fiscal_doc_type: 'RECEIPT' | 'PROFORMA' | 'INVOICE' | null;
+  fiscal_status: FiscalDocumentStatus | null;
+  fiscal_doc_number: string | null;
+  payments: { method: BillPaymentMethod; amount_cents: number }[];
+}
+
 export interface CashClosureReport {
   date: string; // YYYY-MM-DD (giorno Europe/Rome)
   methods: CashClosureMethodRow[];
@@ -433,6 +450,7 @@ export interface CashClosureReport {
   deposit_credit_cents: number; // acconti maturati sui conti chiusi nel giorno
   bills_closed: number;
   shortfall_cents: number; // ammanchi dei SETTLED_PARTIAL chiusi nel giorno
+  bills: CashClosureBillRow[];
 }
 
 export interface TableBillSplit {

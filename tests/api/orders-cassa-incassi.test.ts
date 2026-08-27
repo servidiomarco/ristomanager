@@ -125,5 +125,15 @@ describe('libro cassa incassi', () => {
         expect(delta('POS_FISICO')).toBe(0);
         expect(report.body.bills_closed - baselineClosed).toBe(2);
         expect(report.body.tip_cents).toBeGreaterThanOrEqual(500);
+
+        // Dettaglio per tavolo: il conto multi-metodo compare con i suoi
+        // incassi attivi (lo storno POS è fuori) e senza documento fiscale.
+        const row = report.body.bills.find((b: any) => b.id === billId);
+        expect(row).toBeTruthy();
+        expect(row.table_name).toBe('CASSA1');
+        expect(row.status).toBe('CLOSED');
+        expect(row.fiscal_doc_type).toBeNull();
+        const rowMethods = row.payments.map((p: any) => p.method).sort();
+        expect(rowMethods).toEqual(['BUONO_PASTO', 'CONTANTI']);
     });
 });
