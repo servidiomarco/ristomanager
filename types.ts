@@ -50,6 +50,12 @@ export interface Dish {
   /** Aliquota IVA di anagrafica (intero %, default 10 somministrazione).
    *  Snapshot sulla riga alla battitura, come il prezzo. */
   vat_rate?: number;
+  /** "pp:articolo:<id>" per i piatti sincronizzati dalla cassa Passepartout:
+   *  nome, categoria, prezzo e IVA li possiede la cassa, il sync li riallinea. */
+  external_ref?: string | null;
+  /** false = spento (es. articolo disattivato in cassa): resta in anagrafica
+   *  per lo storico, sparisce dai picker. */
+  is_active?: boolean;
 }
 
 /** Aliquote proposte dalla UI. Il server accetta 0..100: l'elenco lo cambia
@@ -738,7 +744,7 @@ export interface User {
     id: number;
     slug: string;
     name: string;
-    features?: { voice: boolean; whatsapp: boolean; web_booking: boolean; pay_at_table: boolean };
+    features?: { voice: boolean; whatsapp: boolean; web_booking: boolean; pay_at_table: boolean; passepartout?: boolean };
     // true finché l'OWNER non completa il wizard di primo accesso (D1):
     // la SPA lo mostra al posto dell'app, solo all'OWNER.
     needs_onboarding?: boolean;

@@ -45,7 +45,10 @@ const DEV_BOARD_ADMIN_EMAIL = 'admin@ristomanager.com';
 // canale non compreso nel piano non compare proprio — niente bottone che
 // risponde 403. L'enforcement vero resta il server; qui si toglie solo la
 // porta dalla parete. EMAIL non c'è: l'email è canale base, non un add-on.
-export type TenantFeatureKey = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table';
+// 'passepartout' fa eccezione al fail-open di hasFeature: è un'integrazione
+// venduta a UN ristorante (chi ha la cassa Passepartout), non un canale
+// storico — un payload vecchio senza la chiave non deve accenderla per tutti.
+export type TenantFeatureKey = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table' | 'passepartout';
 const VIEW_FEATURES: Partial<Record<ViewState, TenantFeatureKey>> = {
   [ViewState.CONVERSAZIONI]: 'voice',
   [ViewState.MESSAGGI]: 'whatsapp',
@@ -164,7 +167,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [permissions]);
 
   const hasFeature = useCallback((feature: TenantFeatureKey): boolean => {
-    const features = user?.tenant?.features;
+    const features = user?.tenant?.features as Record<string, boolean | undefined> | undefined;
+    // Add-on venduto a un solo ristorante: acceso solo se il payload lo dice
+    // — il fail-open qui sotto vale per i canali storici, non per questo.
+    if (feature === 'passepartout') return features?.passepartout === true;
     if (!features) return true;
     return features[feature] !== false;
   }, [user]);

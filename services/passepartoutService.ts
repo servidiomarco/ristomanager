@@ -142,7 +142,8 @@ const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: '@_',
     parseTagValue: false, // i numeri li convertiamo noi, campo per campo
-    isArray: (name) => name === 'PMBRigaComanda' || name === 'PMBRigaConto' || name === 'PMBTipoPagamento',
+    isArray: (name) => name === 'PMBRigaComanda' || name === 'PMBRigaConto' || name === 'PMBTipoPagamento'
+        || name === 'ContrattoArticolo',
 });
 
 /**
@@ -303,6 +304,67 @@ export async function getTipiPagamento(): Promise<PassepartoutTipoPagamento[]> {
     return entries
         .map((e) => ({ codice: asString(e.Codice) ?? '', categoria: asString(e.Categoria) }))
         .filter((e) => e.codice !== '');
+}
+
+/** Articolo del menu di cassa, già ridotto ai campi che servono al CRM.
+ *  NIENTE immagini: ImmagineBin/FotoBin pesano ~14MB sull'intero catalogo e
+ *  sfonderebbero il buffer del socket verso il bridge — se un giorno servono,
+ *  si aggiunge una op per-articolo. */
+export interface PassepartoutArticolo {
+    idGestionale: number;
+    codice: string | null;
+    descrizione: string | null;
+    prezzo: number | null;
+    /** Aliquota IVA in percento intero (es. 10), se determinabile. */
+    ivaPercento: number | null;
+    attivo: boolean;
+    /** EnumTipoArticolo: "Semplice" | "Generico" | "Variante" | ... */
+    tipo: string | null;
+    categoria: string | null;
+    categoriaPadre: string | null;
+}
+
+/**
+ * Catalogo articoli del gestionale (GetArticoli). `ultimaModifica` è il
+ * filtro delta del WSDL; omesso = tutto il catalogo, che è anche il default
+ * giusto per il sync del menu: solo la lista completa rivela gli articoli
+ * spariti dalla cassa, da spegnere lato CRM.
+ */
+export async function getArticoliMenu(ultimaModifica?: string): Promise<PassepartoutArticolo[]> {
+    const dal = ultimaModifica ?? '2000-01-01T00:00:00';
+    const result = (await soapCall(
+        'GetArticoli',
+        `<ultimaModifica>${xmlEscape(dal)}</ultimaModifica>`,
+        120_000, // 441 articoli con immagini incorporate = ~14MB di XML
+    )) as Record<string, any> | null;
+    if (!result || isNil(result)) return [];
+    const entries: Record<string, any>[] = result.ContrattoArticolo ?? [];
+    return entries
+        .map((a) => {
+            const id = asNumber(a.IdGestionale);
+            if (id == null) return null;
+            const cat = a.Categoria && !isNil(a.Categoria) ? a.Categoria : null;
+            const padre = cat?.Padre && !isNil(cat.Padre) ? cat.Padre : null;
+            // AliquotaIVA è un contratto ("10%" nel Codice, "10.00" in
+            // Percentuale) ma su qualche installazione arriva come stringa:
+            // si prova Percentuale, poi il numero dentro la stringa.
+            const ivaRaw = a.AliquotaIVA && !isNil(a.AliquotaIVA)
+                ? (typeof a.AliquotaIVA === 'object' ? a.AliquotaIVA.Percentuale ?? a.AliquotaIVA.Codice : a.AliquotaIVA)
+                : null;
+            const ivaNum = ivaRaw != null ? Number(String(ivaRaw).replace('%', '').replace(',', '.')) : NaN;
+            return {
+                idGestionale: id,
+                codice: asString(a.Codice),
+                descrizione: asString(a.Descrizione),
+                prezzo: asNumber(a.Prezzo),
+                ivaPercento: Number.isFinite(ivaNum) ? Math.round(ivaNum) : null,
+                attivo: asBoolean(a.IsAttivo),
+                tipo: asString(a.TipoEnum),
+                categoria: cat ? asString(cat.Descrizione) : null,
+                categoriaPadre: padre ? asString(padre.Descrizione) : null,
+            } satisfies PassepartoutArticolo;
+        })
+        .filter((a): a is PassepartoutArticolo => a != null);
 }
 
 /** Sale ristorante configurate e attive (es. "TETTOIA", "FIUME", "DENTRO"). */

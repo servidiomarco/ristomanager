@@ -406,6 +406,25 @@ export const deleteDish = async (id: number): Promise<void> => {
   }, false);
 };
 
+/** Esito del sync menu dalla cassa Passepartout (feature 'passepartout'). */
+export interface MenuImportResult {
+  totale_cassa: number;
+  importabili: number;
+  creati: number;
+  aggiornati: number;
+  disattivati: number;
+}
+
+/** Sincronizza l'anagrafica piatti col catalogo della cassa. Il server
+ *  broadcasta 'dish:synced': la lista si aggiorna via socket, la risposta
+ *  serve solo a raccontare l'esito. */
+export const importMenuPassepartout = async (): Promise<MenuImportResult> => {
+  return apiRequest<MenuImportResult>(`${API_URL}/menu/import/passepartout`, {
+    method: 'POST',
+    headers: getHeaders(false),
+  });
+};
+
 export const getBanquetMenus = async (): Promise<BanquetMenu[]> => {
   return apiRequest<BanquetMenu[]>(`${API_URL}/banquet-menus`, {
     headers: getHeaders(false)
@@ -1408,8 +1427,8 @@ export const completeOnboarding = async (): Promise<void> => {
 // Autenticate col JWT PLATFORM_ADMIN via il normale bearer di getHeaders():
 // il server prova prima il JWT, l'env token resta per gli script.
 
-export type AdminTenantFeature = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table';
-export const ADMIN_TENANT_FEATURES: AdminTenantFeature[] = ['voice', 'whatsapp', 'web_booking', 'pay_at_table'];
+export type AdminTenantFeature = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table' | 'passepartout';
+export const ADMIN_TENANT_FEATURES: AdminTenantFeature[] = ['voice', 'whatsapp', 'web_booking', 'pay_at_table', 'passepartout'];
 
 export interface AdminTenant {
   id: number;
