@@ -9,6 +9,7 @@ import { CallRecordingPlayer } from './CallRecordingPlayer';
 import { SkeletonInboxList } from './SkeletonCards';
 import {
   voiceCallsApiService,
+  voiceCallsCache,
   VoiceCallSummary,
   VoiceCallDetail,
   VoiceCallsListParams,
@@ -131,18 +132,35 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [messagesError, setMessagesError] = useState<string | null>(null);
 
+  // Il draft note viaggia in un ref oltre che nello stato: il refresh in
+  // background del dettaglio (cache) non deve clobberare una nota che
+  // l'utente sta scrivendo, e dentro la .then la closure sarebbe stantia.
+  const notesDirtyRef = useRef(false);
+  useEffect(() => { notesDirtyRef.current = notesDirty; }, [notesDirty]);
+
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    // Dettaglio già visto: si mostra subito dalla cache e il fetch rinfresca
+    // in background — stesso schema stale-while-revalidate dell'inbox.
+    const cached = voiceCallsCache.details.get(callId);
+    if (cached) {
+      setDetail(cached);
+      setNotesDraft(cached.notes ?? '');
+      setNotesDirty(false);
+    }
+    setLoading(!cached);
     setError(null);
     voiceCallsApiService.getById(callId)
       .then(d => {
+        voiceCallsCache.setDetail(callId, d);
         if (cancelled) return;
         setDetail(d);
-        setNotesDraft(d.notes ?? '');
-        setNotesDirty(false);
+        if (!notesDirtyRef.current) {
+          setNotesDraft(d.notes ?? '');
+          setNotesDirty(false);
+        }
       })
-      .catch((err: Error) => { if (!cancelled) setError(err.message); })
+      .catch((err: Error) => { if (!cancelled && !cached) setError(err.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [callId]);
@@ -155,7 +173,10 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
     if (firstTickRef.current) { firstTickRef.current = false; return; }
     let cancelled = false;
     voiceCallsApiService.getById(callId)
-      .then(d => { if (!cancelled) setDetail(d); })
+      .then(d => {
+        voiceCallsCache.setDetail(callId, d);
+        if (!cancelled) setDetail(d);
+      })
       .catch(() => {});
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -163,11 +184,18 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
 
   useEffect(() => {
     let cancelled = false;
-    setMessagesLoading(true);
+    const cached = voiceCallsCache.messages.get(callId);
+    // Anche a cache vuota si azzera subito: mai mostrare i messaggi della
+    // chiamata precedente sotto la nuova mentre il fetch è in volo.
+    setMessages(cached ?? []);
+    setMessagesLoading(!cached);
     setMessagesError(null);
     voiceCallsApiService.listMessages(callId)
-      .then(r => { if (!cancelled) setMessages(r.items); })
-      .catch((err: Error) => { if (!cancelled) setMessagesError(err.message); })
+      .then(r => {
+        voiceCallsCache.setMessages(callId, r.items);
+        if (!cancelled) setMessages(r.items);
+      })
+      .catch((err: Error) => { if (!cancelled && !cached) setMessagesError(err.message); })
       .finally(() => { if (!cancelled) setMessagesLoading(false); });
     return () => { cancelled = true; };
   }, [callId, refreshTick]);
@@ -177,6 +205,8 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
     setSaveError(null);
     try {
       const updated = await voiceCallsApiService.markPhantomRecovered(callId);
+      const cached = voiceCallsCache.details.get(callId);
+      if (cached) voiceCallsCache.setDetail(callId, { ...cached, phantom_recovered: updated.phantom_recovered });
       setDetail(prev => prev ? {
         ...prev,
         phantom_recovered: updated.phantom_recovered,
@@ -198,6 +228,15 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
         await Promise.all(siblingPendingIds.map(id =>
           voiceCallsApiService.updateFollowUp(id, { status: 'CONTACTED' })
         ));
+      }
+      const cached = voiceCallsCache.details.get(callId);
+      if (cached) {
+        voiceCallsCache.setDetail(callId, {
+          ...cached,
+          follow_up_status: updated.follow_up_status,
+          notes: updated.notes,
+          follow_up_updated_at: updated.follow_up_updated_at,
+        });
       }
       setDetail(prev => prev ? {
         ...prev,
@@ -648,9 +687,13 @@ interface ConversazioniPageProps {
 }
 
 const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onFollowUpChanged, onCreateReservationFromCall, onOpenCustomerProfile, refreshTick }) => {
-  const [items, setItems] = useState<VoiceCallSummary[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
+  // Riparte dall'ultimo stato noto della vista di partenza (cache
+  // modulo-level, pre-riempita al login): la pagina viene smontata a ogni
+  // cambio vista e senza questo ogni rientro mostrava lo spinner. Il fetch
+  // parte comunque e rimpiazza in silenzio.
+  const [items, setItems] = useState<VoiceCallSummary[]>(() => voiceCallsCache.defaultList?.items ?? []);
+  const [total, setTotal] = useState(() => voiceCallsCache.defaultList?.total ?? 0);
+  const [loading, setLoading] = useState(voiceCallsCache.defaultList === null);
   const [error, setError] = useState<string | null>(null);
 
   const [search, setSearch] = useState('');
@@ -676,7 +719,16 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
   }, [search]);
 
   const fetchItems = useCallback(async () => {
-    setLoading(true);
+    // Solo la vista di partenza (nessun filtro) passa dalla cache: si mostra
+    // subito e il fetch rinfresca in background. Le viste filtrate restano
+    // fetch normali con spinner.
+    const isDefaultView = !searchDebounced.trim() && statusFilter === 'all' && !from && !to;
+    const cached = isDefaultView ? voiceCallsCache.defaultList : null;
+    if (cached) {
+      setItems(cached.items);
+      setTotal(cached.total);
+    }
+    setLoading(!cached);
     setError(null);
     try {
       const params: VoiceCallsListParams = { limit: 100 };
@@ -695,10 +747,11 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
       if (from) params.from = from;
       if (to) params.to = to;
       const result = await voiceCallsApiService.list(params);
+      if (isDefaultView) voiceCallsCache.defaultList = result;
       setItems(result.items);
       setTotal(result.total);
     } catch (err) {
-      setError((err as Error).message);
+      if (!cached) setError((err as Error).message);
     } finally {
       setLoading(false);
     }

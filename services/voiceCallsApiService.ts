@@ -90,6 +90,38 @@ export interface OutboundMessage {
   error_message: string | null;
 }
 
+// Cache a livello modulo, stesso schema di inboxCache (messagesApiService):
+// ConversazioniPage viene smontata a ogni cambio vista, quindi senza cache
+// ogni rientro rifaceva lista e dettaglio da zero — spinner e mezzo secondo
+// di rete verso Railway per dati appena visti. Si mostra subito l'ultimo
+// stato noto e si rinfresca in background (stale-while-revalidate); App
+// pre-riempie la lista al login e svuota tutto al logout, perché la cache
+// non sopravviva a un cambio utente sullo stesso browser. Si cachea solo la
+// vista di partenza (nessun filtro): le combinazioni di filtri sono tante e
+// ognuna resta un fetch normale. L'audio non si cachea: pesante e a domanda.
+const DETAIL_CACHE_MAX = 30;
+const boundedSet = <V>(map: Map<number, V>, key: number, value: V): void => {
+  // Ri-inserire la chiave la sposta in coda: la prima è sempre la meno recente.
+  map.delete(key);
+  map.set(key, value);
+  if (map.size > DETAIL_CACHE_MAX) {
+    const oldest = map.keys().next().value;
+    if (oldest !== undefined) map.delete(oldest);
+  }
+};
+export const voiceCallsCache = {
+  defaultList: null as VoiceCallsListResponse | null,
+  details: new Map<number, VoiceCallDetail>(),
+  messages: new Map<number, OutboundMessage[]>(),
+  setDetail(id: number, detail: VoiceCallDetail) { boundedSet(this.details, id, detail); },
+  setMessages(id: number, items: OutboundMessage[]) { boundedSet(this.messages, id, items); },
+  clear() {
+    this.defaultList = null;
+    this.details.clear();
+    this.messages.clear();
+  },
+};
+
 const getHeaders = (): HeadersInit => {
   const headers: Record<string, string> = {};
   const socketId = socketClient.getSocket()?.id;
@@ -146,6 +178,17 @@ class VoiceCallsApiService {
     return apiRequest<VoiceCallsListResponse>(`${API_URL}/voice-calls${qs}`, {
       headers: getHeaders(),
     });
+  }
+
+  /** Pre-scalda la vista di partenza al login, così il primo ingresso in
+   *  Chiamate trova la lista pronta invece dello spinner. Silenzioso: se
+   *  fallisce, la pagina farà comunque il suo fetch. Il limit 100 combacia
+   *  con quello della pagina, o i conteggi non tornerebbero. */
+  async prefetchList(): Promise<void> {
+    if (voiceCallsCache.defaultList) return;
+    try {
+      voiceCallsCache.defaultList = await this.list({ limit: 100 });
+    } catch { /* niente: il caricamento normale copre */ }
   }
 
   async getById(id: number): Promise<VoiceCallDetail> {

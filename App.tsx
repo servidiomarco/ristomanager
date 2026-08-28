@@ -69,7 +69,7 @@ import { useAppBadge } from './hooks/useAppBadge';
 import { useScrollFade } from './hooks/useScrollFade';
 import { offlineQueue } from './services/offlineQueue';
 import { socketClient } from './services/socketClient';
-import { voiceCallsApiService } from './services/voiceCallsApiService';
+import { voiceCallsApiService, voiceCallsCache } from './services/voiceCallsApiService';
 import { messagesApiService, inboxCache } from './services/messagesApiService';
 import { staffChatApiService } from './services/staffChatApiService';
 import { paymentsApiService } from './services/paymentsApiService';
@@ -494,6 +494,14 @@ const App: React.FC = () => {
     if (!canSeeMessages) return;
     messagesApiService.prefetchConversations();
   }, [isAuthenticated, canSeeMessages]);
+
+  // Stesso pre-riscaldamento per Chiamate: la lista di partenza è pronta al
+  // primo ingresso e la cache muore col logout.
+  useEffect(() => {
+    if (!isAuthenticated) { voiceCallsCache.clear(); return; }
+    if (!canSeeVoiceCalls) return;
+    voiceCallsApiService.prefetchList();
+  }, [isAuthenticated, canSeeVoiceCalls]);
 
   useEffect(() => {
     if (!isAuthenticated || !canSeeMessages) return;
