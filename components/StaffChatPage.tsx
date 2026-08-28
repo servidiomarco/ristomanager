@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MessagesSquare, Hash, Send, Loader2, AlertTriangle, Plus, ChevronUp, X as XIcon } from 'lucide-react';
+import { MessagesSquare, Hash, Send, Loader2, AlertTriangle, Plus, ChevronUp, X as XIcon, Paperclip } from 'lucide-react';
 import { Loader } from './Loader';
-import { staffChatApiService, type StaffThreadSummary, type StaffColleague, type StaffPreset } from '../services/staffChatApiService';
+import { staffChatApiService, staffMediaUrl, type StaffThreadSummary, type StaffColleague, type StaffPreset, type StaffUploadedAttachment } from '../services/staffChatApiService';
 import {
-  STAFF_MESSAGE_PRESETS, STAFF_MESSAGE_MAX_LENGTH, STAFF_MAX_MENTIONS,
+  STAFF_MESSAGE_PRESETS, STAFF_MESSAGE_MAX_LENGTH, STAFF_MAX_MENTIONS, STAFF_MAX_ATTACHMENTS, staffMessagePreview,
   threadKeyFor, dmThreadKey, parseThreadKey, rolesForChannel,
   type StaffChannel, type StaffMessage,
 } from '../services/staffChat';
@@ -120,6 +120,11 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
   // Preset dal server (personalizzabili in Impostazioni); i default sono
   // il fallback finché la fetch non risponde o se fallisce.
   const [presets, setPresets] = useState<StaffPreset[]>(STAFF_MESSAGE_PRESETS);
+  // Foto pronte per l'invio: caricate subito alla scelta (al momento
+  // dell'invio serve solo il token, come nell'inbox).
+  const [attachments, setAttachments] = useState<StaffUploadedAttachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -191,6 +196,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
 
   useEffect(() => {
     setMentionDraft(new Map());
+    setAttachments([]);
     if (!selectedKey) { setMessages([]); return; }
     loadMessages(selectedKey);
   }, [selectedKey, loadMessages]);
@@ -268,7 +274,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
   const doSend = useCallback(async (text: string, presetKey?: string | null) => {
     const key = selectedKey;
     const body = text.trim();
-    if (!key || !body || sending) return;
+    if (!key || (!body && attachments.length === 0) || sending) return;
     setSending(true);
     setSendError(null);
     try {
@@ -276,9 +282,10 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
         .filter(([, name]) => body.includes(`@${name}`))
         .map(([id]) => id)
         .slice(0, STAFF_MAX_MENTIONS);
-      const msg = await staffChatApiService.send(key, body, presetKey, mentionedIds);
+      const msg = await staffChatApiService.send(key, body, presetKey, mentionedIds, attachments.map(a => a.token));
       setComposerText('');
       setMentionDraft(new Map());
+      setAttachments([]);
       setMessages(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
       setThreads(prev => prev.map(t => t.threadKey === key ? { ...t, lastMessage: msg } : t));
       // Il proprio messaggio è per definizione letto.
@@ -289,7 +296,25 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
     } finally {
       setSending(false);
     }
-  }, [selectedKey, sending, mentionDraft]);
+  }, [selectedKey, sending, mentionDraft, attachments]);
+
+  const handlePickFiles = useCallback(async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    setSendError(null);
+    try {
+      const uploaded: StaffUploadedAttachment[] = [];
+      for (const file of Array.from(files).slice(0, STAFF_MAX_ATTACHMENTS)) {
+        uploaded.push(await staffChatApiService.uploadAttachment(file));
+      }
+      setAttachments(prev => [...prev, ...uploaded].slice(0, STAFF_MAX_ATTACHMENTS));
+    } catch (err: any) {
+      setSendError(err?.message || 'Caricamento foto non riuscito');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }, []);
 
   const handleComposerKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -396,8 +421,8 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
         <p className={`mt-0.5 truncate text-[14px] ${t.unreadCount > 0 ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)]'}`}>
           {t.lastMessage
             ? (t.kind === 'channel' && t.lastMessage.sender_user_id !== currentUserId
-              ? `${t.lastMessage.sender_name}: ${t.lastMessage.body}`
-              : t.lastMessage.body)
+              ? `${t.lastMessage.sender_name}: ${staffMessagePreview(t.lastMessage)}`
+              : staffMessagePreview(t.lastMessage))
             : 'Nessun messaggio'}
         </p>
       </div>
@@ -524,11 +549,22 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                                 {!mine && selected.kind === 'channel' && (
                                   <p className="text-[12px] font-semibold text-[var(--ds-text-secondary)]">{m.sender_name}</p>
                                 )}
-                                <p className="whitespace-pre-wrap break-words text-[15px] leading-snug">
-                                  {(m.mentioned_user_ids ?? []).length > 0
-                                    ? renderBodyWithMentions(m.body, knownNames, mine)
-                                    : m.body}
-                                </p>
+                                {(m.media ?? []).length > 0 && (
+                                  <div className="mb-1.5 space-y-1.5">
+                                    {(m.media ?? []).map(att => (
+                                      <a key={att.token} href={staffMediaUrl(att.token)} target="_blank" rel="noopener noreferrer">
+                                        <img src={staffMediaUrl(att.token)} alt={att.filename || 'Foto'} className="max-h-64 w-auto rounded-[12px] object-cover" loading="lazy" />
+                                      </a>
+                                    ))}
+                                  </div>
+                                )}
+                                {m.body && (
+                                  <p className="whitespace-pre-wrap break-words text-[15px] leading-snug">
+                                    {(m.mentioned_user_ids ?? []).length > 0
+                                      ? renderBodyWithMentions(m.body, knownNames, mine)
+                                      : m.body}
+                                  </p>
+                                )}
                                 <div className={`mt-1 flex justify-end text-[12px] ${mine ? 'text-white/75' : 'text-[var(--ds-text-muted)]'}`}>
                                   <span className="tabular-nums">{formatTime(m.created_at)}</span>
                                 </div>
@@ -583,7 +619,47 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                   </div>
                 )}
 
+                {attachments.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {attachments.map(a => (
+                      <span
+                        key={a.token}
+                        className="inline-flex max-w-[220px] items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] py-1 pl-3 pr-1.5 text-[13px] text-[var(--ds-text-primary)]"
+                      >
+                        <Paperclip className="h-3.5 w-3.5 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
+                        <span className="truncate">{a.filename || 'foto'}</span>
+                        <button
+                          type="button"
+                          onClick={() => setAttachments(prev => prev.filter(x => x.token !== a.token))}
+                          aria-label={`Togli ${a.filename || 'foto'}`}
+                          className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
+                        >
+                          <XIcon className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
                 <div className="flex items-end gap-2 rounded-[24px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    multiple
+                    hidden
+                    onChange={e => handlePickFiles(e.target.files)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading || sending || attachments.length >= STAFF_MAX_ATTACHMENTS}
+                    aria-label="Allega una foto"
+                    title="Allega una foto"
+                    className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                  </button>
                   <textarea
                     ref={composerRef}
                     value={composerText}
@@ -595,7 +671,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                   />
                   <button
                     onClick={() => doSend(composerText)}
-                    disabled={!composerText.trim() || sending}
+                    disabled={(!composerText.trim() && attachments.length === 0) || sending || uploading}
                     aria-label="Invia messaggio"
                     className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-all hover:bg-[var(--ds-action-bg-hover)] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:cursor-not-allowed disabled:bg-[var(--ds-surface-row)] disabled:text-[var(--ds-text-subtle)]"
                   >

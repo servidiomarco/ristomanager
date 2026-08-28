@@ -4,7 +4,7 @@ import { useNow } from '../hooks/useNow';
 import { useAuth } from '../contexts/AuthContext';
 import { socketClient } from '../services/socketClient';
 import { staffChatApiService } from '../services/staffChatApiService';
-import { channelThreadKey, type StaffMessage } from '../services/staffChat';
+import { channelThreadKey, staffMessagePreview, type StaffMessage } from '../services/staffChat';
 import {
   getKdsQueue, setKdsItemStatus, getMenuCatalogue,
   type KdsItem, type KdsCourseState, type MenuCatalogue,
@@ -385,7 +385,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             <MessagesSquare size={18} className="flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
             <p className="min-w-0 flex-1 text-[16px] text-[var(--ds-text-primary)]">
               <span className="font-semibold">{chatStrip.message.sender_name}</span>
-              {' '}<span className="break-words">{chatStrip.message.body}</span>
+              {' '}<span className="break-words">{staffMessagePreview(chatStrip.message)}</span>
               {chatStrip.unread > 1 && (
                 <span className="ml-2 text-[14px] text-[var(--ds-text-muted)]">
                   +{chatStrip.unread - 1} non lett{chatStrip.unread - 1 === 1 ? 'o' : 'i'}
