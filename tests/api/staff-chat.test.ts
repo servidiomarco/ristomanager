@@ -175,6 +175,38 @@ describe('chat staff', () => {
         expect(dm.body.mentioned_user_ids).toBeNull();
     });
 
+    it('preset: default, personalizzazione, invio con key db:, ripristino', async () => {
+        // Senza righe a DB rispondono i default hardcoded.
+        const def = await api().get('/staff-chat/presets').set(bearer(owner));
+        expect(def.status).toBe(200);
+        expect(def.body.custom).toBe(false);
+        expect(def.body.presets.length).toBeGreaterThan(0);
+
+        // La modifica richiede settings:full: il WAITER non passa.
+        const denied = await api().put('/staff-chat/presets').set(bearer(waiterToken))
+            .send({ labels: ['ciao'] });
+        expect(denied.status).toBe(403);
+
+        const saved = await api().put('/staff-chat/presets').set(bearer(owner))
+            .send({ labels: ['manca il pane', 'arrivo tra due minuti'] });
+        expect(saved.status).toBe(200);
+        expect(saved.body.custom).toBe(true);
+        expect(saved.body.presets.map((p: any) => p.label)).toEqual(['manca il pane', 'arrivo tra due minuti']);
+        const key = saved.body.presets[0].key;
+        expect(key).toMatch(/^db:\d+$/);
+
+        // La key db: viene accettata e salvata sul messaggio.
+        const sent = await api().post('/staff-chat/messages').set(bearer(owner))
+            .send({ threadKey: 'channel:generale', body: 'manca il pane', presetKey: key });
+        expect(sent.status).toBe(201);
+        expect(sent.body.preset_key).toBe(key);
+
+        // Lista vuota = tornano i default.
+        const reset = await api().put('/staff-chat/presets').set(bearer(owner)).send({ labels: [] });
+        expect(reset.status).toBe(200);
+        expect(reset.body.custom).toBe(false);
+    });
+
     it('la lista colleghi contiene gli utenti attivi del tenant, senza chi guarda', async () => {
         const threads = await api().get('/staff-chat/threads').set(bearer(owner));
         const ids = threads.body.colleagues.map((c: any) => c.id);

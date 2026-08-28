@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MessagesSquare, Hash, Send, Loader2, AlertTriangle, Plus, ChevronUp, X as XIcon } from 'lucide-react';
 import { Loader } from './Loader';
-import { staffChatApiService, type StaffThreadSummary, type StaffColleague } from '../services/staffChatApiService';
+import { staffChatApiService, type StaffThreadSummary, type StaffColleague, type StaffPreset } from '../services/staffChatApiService';
 import {
   STAFF_MESSAGE_PRESETS, STAFF_MESSAGE_MAX_LENGTH, STAFF_MAX_MENTIONS,
   threadKeyFor, dmThreadKey, parseThreadKey, rolesForChannel,
@@ -117,6 +117,9 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
   // Menzioni in bozza: id → nome inserito. All'invio si mandano solo quelle
   // il cui "@Nome" è ancora nel testo (l'utente può averlo cancellato).
   const [mentionDraft, setMentionDraft] = useState<Map<number, string>>(new Map());
+  // Preset dal server (personalizzabili in Impostazioni); i default sono
+  // il fallback finché la fetch non risponde o se fallisce.
+  const [presets, setPresets] = useState<StaffPreset[]>(STAFF_MESSAGE_PRESETS);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -149,6 +152,14 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
   }, []);
 
   useEffect(() => { loadThreads(); }, [loadThreads]);
+
+  useEffect(() => {
+    let cancelled = false;
+    staffChatApiService.getPresets()
+      .then(({ presets }) => { if (!cancelled && presets.length > 0) setPresets(presets); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   // Deep-link dalla push: si apre appena la lista è pronta.
   useEffect(() => {
@@ -229,6 +240,10 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
     // Lettura da un altro device dello stesso utente: i contatori locali
     // sono stantii, si riparte dal server.
     const onRead = () => { loadThreads(); };
+    // Preset cambiati da Impostazioni: le chip si aggiornano da sole.
+    const onPresets = (data: { presets?: StaffPreset[] }) => {
+      if (Array.isArray(data?.presets) && data.presets.length > 0) setPresets(data.presets);
+    };
 
     let attached: ReturnType<typeof socketClient.getSocket> = null;
     const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
@@ -236,11 +251,13 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
       if (attached) {
         attached.off('staffchat:message', onMessage);
         attached.off('staffchat:read', onRead);
+        attached.off('staffchat:presets', onPresets);
       }
       attached = s;
       if (attached) {
         attached.on('staffchat:message', onMessage);
         attached.on('staffchat:read', onRead);
+        attached.on('staffchat:presets', onPresets);
       }
     };
     attach(socketClient.getSocket());
@@ -534,7 +551,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                 {/* Messaggi rapidi: un tap e parte — è il gesto pensato per il
                     servizio, quando scrivere è un lusso. */}
                 <div className="flex flex-wrap gap-1.5">
-                  {STAFF_MESSAGE_PRESETS.map(p => (
+                  {presets.map(p => (
                     <button
                       key={p.key}
                       type="button"
