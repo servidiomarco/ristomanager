@@ -1,9 +1,22 @@
 import { authApiService } from './authApiService';
+import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { socketClient } from './socketClient';
 import { buildApiError } from './apiError';
 import type { StaffChannel, StaffMessage } from './staffChat';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
+
+export interface StaffUploadedAttachment {
+  token: string;
+  content_type: string;
+  filename: string | null;
+  size_bytes: number;
+}
+
+// Le foto stanno in outbound_media dietro token non indovinabile: l'URL
+// pubblico basta a <img>, niente fetch autenticato.
+export const staffMediaUrl = (token: string): string =>
+  `${API_URL}/public/media/${encodeURIComponent(token)}`;
 
 export interface StaffThreadSummary {
   threadKey: string;
@@ -68,7 +81,7 @@ class StaffChatApiService {
     });
   }
 
-  async send(threadKey: string, body: string, presetKey?: string | null, mentionedUserIds?: number[]): Promise<StaffMessage> {
+  async send(threadKey: string, body: string, presetKey?: string | null, mentionedUserIds?: number[], attachments?: string[]): Promise<StaffMessage> {
     return apiRequest(`${API_URL}/staff-chat/messages`, {
       method: 'POST',
       headers: { ...getHeaders(), 'Content-Type': 'application/json' },
@@ -76,6 +89,7 @@ class StaffChatApiService {
         threadKey, body,
         presetKey: presetKey ?? undefined,
         mentionedUserIds: mentionedUserIds && mentionedUserIds.length > 0 ? mentionedUserIds : undefined,
+        attachments: attachments && attachments.length > 0 ? attachments : undefined,
       }),
     });
   }
@@ -90,6 +104,19 @@ class StaffChatApiService {
 
   async unreadCount(): Promise<{ count: number }> {
     return apiRequest(`${API_URL}/staff-chat/unread-count`, { headers: getHeaders() });
+  }
+
+  // Ridimensiona come l'inbox: le foto dal telefono pesano 3-5 MB e in chat
+  // non servono a quella risoluzione.
+  async uploadAttachment(file: File): Promise<StaffUploadedAttachment> {
+    const dataUrl = await resizeImageToDataUrl(file, 1600, 0.82);
+    const data = dataUrl.split(',')[1] || '';
+    const filename = file.name.replace(/\.[^.]+$/, '') + '.jpg';
+    return apiRequest(`${API_URL}/staff-chat/attachments`, {
+      method: 'POST',
+      headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content_type: 'image/jpeg', filename, data }),
+    });
   }
 
   async getPresets(): Promise<{ presets: StaffPreset[]; custom: boolean }> {
