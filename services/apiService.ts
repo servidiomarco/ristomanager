@@ -1652,7 +1652,14 @@ export interface KitchenServiceSummary {
   service_date: string;
   shift: 'LUNCH' | 'DINNER';
   reservations: number;
-  dietary: Array<{ label: string; variant: string | null; quantity: number }>;
+  dietary: Array<{
+    label: string;
+    variant: string | null;
+    quantity: number;
+    // Ripartizione per tavolo; `table` è null quando il tavolo non è ancora
+    // assegnato e resta solo il nome del cliente.
+    tables: Array<{ table: string | null; customer: string; quantity: number }>;
+  }>;
   dietary_lines: Array<{ reservation_id: number; customer_name: string; text: string }>;
 }
 

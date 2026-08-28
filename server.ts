@@ -24909,7 +24909,9 @@ app.post('/orders/:id/transfer', authenticate, requirePermission('orders:take'),
 // Aggrega le scelte strutturate (note_selections) e le note dietetiche del
 // turno per dare alla cucina un colpo d'occhio "stasera 8 stinchi di maiale,
 // 3 di vitello". Le note dei preset senza varianti si contano per etichetta;
-// quelle con varianti si aggregano per coppia (label, variant). Le allergie
+// quelle con varianti si aggregano per coppia (label, variant); ogni voce
+// porta anche la ripartizione per tavolo (o per cliente, se il tavolo non è
+// ancora assegnato), così la cucina sa a chi vanno i 7 stinchi. Le allergie
 // restano nelle dietary_notes del cliente (testo libero) e le restituiamo
 // per prenotazione, così l'UI può elencarle senza aprire la scheda cliente.
 app.get('/kitchen/service-summary', authenticate, requirePermission('orders:kds'), async (req, res) => {
@@ -24922,8 +24924,10 @@ app.get('/kitchen/service-summary', authenticate, requirePermission('orders:kds'
                     r.reservation_time,
                     r.guests,
                     r.note_selections,
+                    t.name AS table_name,
                     c.dietary_notes AS customer_dietary_notes
              FROM reservations r
+             LEFT JOIN tables t ON t.id = r.table_id AND t.tenant_id = r.tenant_id
              LEFT JOIN LATERAL (
                  SELECT cc.dietary_notes
                  FROM customers cc
@@ -24945,11 +24949,21 @@ app.get('/kitchen/service-summary', authenticate, requirePermission('orders:kds'
         // Aggregazione per (label, variant): raggruppiamo lato Node per non
         // stressare il planner con array_agg + jsonb_each dentro la stessa query.
         // Il volume è al massimo qualche decina di prenotazioni per turno.
-        const byLabel = new Map<string, { label: string; variant: string | null; quantity: number }>();
+        // Ogni voce porta anche le sue fonti: aggregate per tavolo quando c'è
+        // (due prenotazioni sullo stesso tavolo a turni sfalsati si sommano),
+        // per prenotazione col nome cliente quando il tavolo non è assegnato.
+        type SummarySource = { table: string | null; customer: string; quantity: number };
+        const byLabel = new Map<string, {
+            label: string; variant: string | null; quantity: number;
+            sources: Map<string, SummarySource>;
+        }>();
         const dietary_lines: { reservation_id: number; customer_name: string; text: string }[] = [];
 
         for (const row of rows.rows) {
             const selections = Array.isArray(row.note_selections) ? row.note_selections : [];
+            const tableName = typeof row.table_name === 'string' && row.table_name.trim()
+                ? row.table_name.trim() : null;
+            const sourceKey = tableName ?? `res-${row.id}`;
             for (const sel of selections) {
                 if (!sel || typeof sel.label !== 'string') continue;
                 const label = sel.label.trim();
@@ -24958,9 +24972,15 @@ app.get('/kitchen/service-summary', authenticate, requirePermission('orders:kds'
                 const qty = Number(sel.quantity);
                 if (!Number.isFinite(qty) || qty <= 0) continue;
                 const key = `${label} ${variant ?? ''}`;
-                const cur = byLabel.get(key);
-                if (cur) cur.quantity += qty;
-                else byLabel.set(key, { label, variant, quantity: qty });
+                let cur = byLabel.get(key);
+                if (!cur) {
+                    cur = { label, variant, quantity: 0, sources: new Map() };
+                    byLabel.set(key, cur);
+                }
+                cur.quantity += qty;
+                const src = cur.sources.get(sourceKey);
+                if (src) src.quantity += qty;
+                else cur.sources.set(sourceKey, { table: tableName, customer: row.customer_name ?? '', quantity: qty });
             }
             const diet = typeof row.customer_dietary_notes === 'string'
                 ? row.customer_dietary_notes.trim() : '';
@@ -24973,11 +24993,22 @@ app.get('/kitchen/service-summary', authenticate, requirePermission('orders:kds'
             }
         }
 
-        const dietary = [...byLabel.values()].sort((a, b) =>
-            b.quantity - a.quantity
-            || a.label.localeCompare(b.label)
-            || (a.variant ?? '').localeCompare(b.variant ?? '')
-        );
+        // I tavoli assegnati prima, poi per quantità: in cucina si cerca il
+        // numero del tavolo, i "senza tavolo" chiudono la riga.
+        const dietary = [...byLabel.values()]
+            .sort((a, b) =>
+                b.quantity - a.quantity
+                || a.label.localeCompare(b.label)
+                || (a.variant ?? '').localeCompare(b.variant ?? '')
+            )
+            .map(({ sources, ...entry }) => ({
+                ...entry,
+                tables: [...sources.values()].sort((a, b) =>
+                    Number(b.table !== null) - Number(a.table !== null)
+                    || b.quantity - a.quantity
+                    || (a.table ?? a.customer).localeCompare(b.table ?? b.customer)
+                ),
+            }));
 
         res.json({
             service_date: service.service_date,
