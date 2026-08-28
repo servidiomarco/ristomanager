@@ -60,7 +60,7 @@ import { RolePermissionService } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
 import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles, sendToPlatformAdmins as pushSendToPlatformAdmins } from './services/pushService.js';
-import { channelsForRole, rolesForChannel, parseThreadKey, channelThreadKey, dmThreadKey, isStaffPresetKey, STAFF_MESSAGE_MAX_LENGTH } from './services/staffChat.js';
+import { channelsForRole, rolesForChannel, parseThreadKey, channelThreadKey, dmThreadKey, isStaffPresetKey, STAFF_MESSAGE_MAX_LENGTH, STAFF_MAX_MENTIONS } from './services/staffChat.js';
 import {
     isRevolutConfigured,
     verifyWebhookSignature as verifyRevolutWebhook,
@@ -9935,6 +9935,7 @@ const SCHEDULER_LOCK_BILL_SPLIT_RECONCILE = 761001;
 const SCHEDULER_LOCK_PAYMENT_REQUEST_RECONCILE = 761002;
 const SCHEDULER_LOCK_REMINDERS = 761003;
 const SCHEDULER_LOCK_PAYMENT_LINK_EXPIRY = 761004;
+const SCHEDULER_LOCK_STAFF_CHAT_RETENTION = 761005;
 
 // Il lock advisory è di SESSIONE: va preso su un client dedicato tenuto per
 // tutta la durata del tick (sul pool condiviso un'altra query potrebbe
@@ -10388,6 +10389,42 @@ const startRemindersScheduler = () => {
         .catch((err: any) => console.error('[reminders] lock wrapper failed:', err?.message || err));
     lockedTick();
     setInterval(lockedTick, 5 * 60 * 1000);
+};
+
+// Retention della chat staff (piano §9): i messaggi sono traffico di
+// servizio, non un archivio — oltre i 90 giorni si cancellano, insieme ai
+// cursori di lettura rimasti orfani di ogni messaggio. Cross-tenant di
+// proposito (il lock wrapper dichiara runAsPlatform); un giro ogni 6 ore
+// basta, la finestra è di mesi.
+const startStaffChatRetentionScheduler = () => {
+    const tick = async () => {
+        try {
+            const purged = await queryWithRetry(
+                `DELETE FROM staff_messages
+                 WHERE created_at < NOW() - INTERVAL '90 days'
+                 RETURNING id`
+            );
+            const orphans = await queryWithRetry(
+                `DELETE FROM staff_message_reads r
+                 WHERE NOT EXISTS (
+                     SELECT 1 FROM staff_messages m
+                     WHERE m.tenant_id = r.tenant_id
+                       AND (r.thread_key = 'channel:' || m.channel
+                         OR r.thread_key IN ('dm:' || m.sender_user_id, 'dm:' || m.recipient_user_id))
+                 )
+                 RETURNING user_id`
+            );
+            if (purged.rows.length > 0 || orphans.rows.length > 0) {
+                console.log(`🧹 Chat staff: ${purged.rows.length} messaggi oltre i 90 giorni, ${orphans.rows.length} cursori orfani`);
+            }
+        } catch (err) {
+            console.error('Staff chat retention error:', err);
+        }
+    };
+    const lockedTick = () => runSchedulerTickWithLock(SCHEDULER_LOCK_STAFF_CHAT_RETENTION, 'staffchat-retention', tick)
+        .catch((err: any) => console.error('[staffchat-retention] lock wrapper failed:', err?.message || err));
+    lockedTick();
+    setInterval(lockedTick, 6 * 60 * 60 * 1000);
 };
 
 // ============================================
@@ -14556,7 +14593,7 @@ app.post('/notifications/:id/dismiss', authenticate, async (req: any, res) => {
 
 const STAFF_MSG_FIELDS = `id, kind, channel, sender_user_id, sender_name, sender_role,
     recipient_user_id, recipient_name, body, preset_key,
-    linked_reservation_id, linked_table_id, created_at`;
+    linked_reservation_id, linked_table_id, mentioned_user_ids, created_at`;
 
 app.get('/staff-chat/threads', authenticate, requirePermission('staffchat:use'), async (req: any, res) => {
     try {
@@ -14717,7 +14754,7 @@ app.post('/staff-chat/messages', authenticate, requirePermission('staffchat:use'
     try {
         const userId = req.user.userId;
         const socketId = req.headers['x-socket-id'] as string;
-        const { threadKey, body, presetKey, linkedReservationId, linkedTableId } = req.body || {};
+        const { threadKey, body, presetKey, linkedReservationId, linkedTableId, mentionedUserIds } = req.body || {};
 
         const ref = parseThreadKey(String(threadKey ?? ''));
         if (!ref) return res.status(400).json({ error: 'Thread non valido' });
@@ -14742,6 +14779,33 @@ app.post('/staff-chat/messages', authenticate, requirePermission('staffchat:use'
         const me = await queryWithRetry(`SELECT full_name FROM users WHERE tenant_id = $1 AND id = $2`, [req.tenantId!, userId]);
         const senderName = me.rows[0]?.full_name || req.user.email;
 
+        // Menzioni: solo nei canali, id espliciti dal client (mai riestratti
+        // dal testo), utenti attivi del tenant che il canale possono aprirlo
+        // — menzionare chi non è membro produrrebbe una push su un thread
+        // che per lui non esiste.
+        let mentions: number[] | null = null;
+        if (ref.kind === 'channel' && Array.isArray(mentionedUserIds) && mentionedUserIds.length > 0) {
+            const ids = [...new Set(mentionedUserIds.filter((n: any) => Number.isInteger(n) && n > 0 && n !== userId))];
+            if (ids.length > STAFF_MAX_MENTIONS) {
+                return res.status(400).json({ error: 'Troppe menzioni' });
+            }
+            if (ids.length > 0) {
+                const found = await queryWithRetry(
+                    `SELECT id, role FROM users
+                     WHERE tenant_id = $1 AND id = ANY($2) AND is_active = TRUE`,
+                    [req.tenantId!, ids]
+                );
+                const memberRoles = rolesForChannel(ref.channel).map(String);
+                const valid = found.rows
+                    .filter((u: any) => memberRoles.includes(String(u.role)))
+                    .map((u: any) => Number(u.id));
+                if (valid.length !== ids.length) {
+                    return res.status(400).json({ error: 'Menzione non valida' });
+                }
+                mentions = valid;
+            }
+        }
+
         let recipient: { id: number; name: string } | null = null;
         if (ref.kind === 'channel') {
             if (!channelsForRole(req.user.role).includes(ref.channel)) {
@@ -14762,13 +14826,13 @@ app.post('/staff-chat/messages', authenticate, requirePermission('staffchat:use'
             `INSERT INTO staff_messages
                 (tenant_id, kind, channel, sender_user_id, sender_name, sender_role,
                  recipient_user_id, recipient_name, body, preset_key,
-                 linked_reservation_id, linked_table_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                 linked_reservation_id, linked_table_id, mentioned_user_ids)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
              RETURNING ${STAFF_MSG_FIELDS}`,
             [req.tenantId!, ref.kind, ref.kind === 'channel' ? ref.channel : null,
              userId, senderName, String(req.user.role),
              recipient?.id ?? null, recipient?.name ?? null, text, preset,
-             linkedReservation, linkedTable]
+             linkedReservation, linkedTable, mentions]
         );
         const message = ins.rows[0];
 
@@ -14785,14 +14849,29 @@ app.post('/staff-chat/messages', authenticate, requirePermission('staffchat:use'
         // l'invio. tag per thread: i messaggi dello stesso thread collassano.
         const preview = text.slice(0, 120);
         if (ref.kind === 'channel') {
-            pushSendToRoles(req.tenantId!, rolesForChannel(ref.channel).map(String), {
-                title: `${senderName} · ${ref.channel}`,
-                body: preview,
-                url: `/?staffchat=${encodeURIComponent(channelThreadKey(ref.channel))}`,
-                tag: `staffchat:${channelThreadKey(ref.channel)}`,
+            const channelKey = channelThreadKey(ref.channel);
+            const channelPayload = {
+                url: `/?staffchat=${encodeURIComponent(channelKey)}`,
+                tag: `staffchat:${channelKey}`,
                 category: 'staff',
                 persist: false,
-            }, { excludeUserId: userId }).catch(err => console.error('Push (chat staff canale) failed:', err));
+            };
+            // La push di menzione parte DOPO quella di canale e condivide il
+            // tag: sul device del menzionato la seconda sostituisce la prima,
+            // quindi resta una sola notifica, con la dicitura giusta.
+            pushSendToRoles(req.tenantId!, rolesForChannel(ref.channel).map(String), {
+                ...channelPayload,
+                title: `${senderName} · ${ref.channel}`,
+                body: preview,
+            }, { excludeUserId: userId })
+                .then(() => Promise.all((mentions ?? []).map(uid =>
+                    pushSendToUser(uid, {
+                        ...channelPayload,
+                        title: `${senderName} ti ha menzionato · ${ref.channel}`,
+                        body: preview,
+                    })
+                )))
+                .catch(err => console.error('Push (chat staff canale) failed:', err));
         } else {
             pushSendToUser(recipient!.id, {
                 title: senderName,
@@ -26527,6 +26606,12 @@ const startServer = async () => {
                         console.log('✅ Bill split reconcile scheduler started (60s)');
                     } catch (schedErr) {
                         console.error('Bill split reconcile scheduler failed to start:', schedErr);
+                    }
+                    try {
+                        startStaffChatRetentionScheduler();
+                        console.log('✅ Staff chat retention scheduler started (6h, 90 giorni)');
+                    } catch (schedErr) {
+                        console.error('Staff chat retention scheduler failed to start:', schedErr);
                     }
                     try {
                         startPaymentRequestReconcileScheduler();
