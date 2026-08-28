@@ -73,7 +73,7 @@ import { voiceCallsApiService, voiceCallsCache } from './services/voiceCallsApiS
 import { messagesApiService, inboxCache } from './services/messagesApiService';
 import { staffChatApiService } from './services/staffChatApiService';
 import { paymentsApiService } from './services/paymentsApiService';
-import { emailApiService } from './services/emailApiService';
+import { emailApiService, emailCache } from './services/emailApiService';
 import { notificationsApiService } from './services/notificationsApiService';
 import { useAuth } from './contexts/AuthContext';
 import { sortRooms } from './utils/roomOrder';
@@ -608,6 +608,13 @@ const App: React.FC = () => {
   // socket wiring for now (both endpoints are cheap).
   const [emailUnreadCount, setEmailUnreadCount] = useState(0);
   const canSeeEmail = canAccessView(ViewState.EMAIL);
+  // Stesso pre-riscaldamento di Messaggi e Chiamate: la lista thread è pronta
+  // al primo ingresso e la cache muore col logout.
+  useEffect(() => {
+    if (!isAuthenticated) { emailCache.clear(); return; }
+    if (!canSeeEmail) return;
+    emailApiService.prefetchThreads();
+  }, [isAuthenticated, canSeeEmail]);
   useEffect(() => {
     if (!isAuthenticated || !canSeeEmail) return;
     let cancelled = false;
