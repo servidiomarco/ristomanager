@@ -14,6 +14,7 @@ import { Banknote, Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Tra
 import { QRCodeSVG } from 'qrcode.react';
 import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, revokePaymentRequest, getReservationMessages, sendReservationReminder, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap, getTableAssignmentSuggestions, confirmTableAssignmentSuggestion, dismissTableAssignmentSuggestion } from '../services/apiService';
 import { billsApiService, printBill } from '../services/billsApiService';
+import { swrConfig } from '../services/configCache';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { Loader } from './Loader';
 import { getReservationNoteIcon } from './reservationNoteIcons';
@@ -763,17 +764,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   //    (Impostazioni → Legale). Both default ON until the fetch resolves.
   const [marketingEnabled, setMarketingEnabled] = useState(true);
   const [askHealthConsent, setAskHealthConsent] = useState(true);
-  useEffect(() => {
-    let cancelled = false;
-    getLegalSettings()
-      .then(l => {
-        if (cancelled) return;
-        setMarketingEnabled(l.legal_mode !== 'simple');
-        setAskHealthConsent(l.ask_health_consent !== false); // undefined (old config) → true
-      })
-      .catch(() => { /* keep defaults */ });
-    return () => { cancelled = true; };
-  }, []);
+  // Le sei config qui sotto passano da swrConfig: valore in cache applicato
+  // subito, fetch di rinfresco in background — al rientro nella pagina niente
+  // più sei round-trip che gocciolano re-render.
+  useEffect(() => swrConfig('legalSettings', getLegalSettings, l => {
+    setMarketingEnabled(l.legal_mode !== 'simple');
+    setAskHealthConsent(l.ask_health_consent !== false); // undefined (old config) → true
+  }), []);
   const [modalRoomFilter, setModalRoomFilter] = useState<string | number>('ALL');
   const [selectedTablesForMerge, setSelectedTablesForMerge] = useState<number[]>([]);
   const [mergeMode, setMergeMode] = useState(false);
@@ -816,38 +813,24 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Whole pay-at-table UI is gated behind this flag; fetched once on mount.
   // Default false so we don't briefly flash the section before flags load.
   const [payAtTableEnabled, setPayAtTableEnabled] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    getFeatureFlags()
-      .then(f => { if (!cancelled) setPayAtTableEnabled(PAY_AT_TABLE_UI_VISIBLE && !!f.pay_at_table_enabled); })
-      .catch(() => { /* keep default false on error */ });
-    return () => { cancelled = true; };
-  }, []);
+  useEffect(() => swrConfig('featureFlags', getFeatureFlags, f => {
+    setPayAtTableEnabled(PAY_AT_TABLE_UI_VISIBLE && !!f.pay_at_table_enabled);
+  }), []);
 
   // Limiti di occupazione per sala: servono solo a disegnare la tacca sulla
   // barra di riempimento di ogni sala, così lo staff vede a colpo d'occhio
   // quali sale hanno superato la soglia oltre la quale le prenotazioni web
   // arrivano da confermare a mano. Nessun limite = nessuna tacca.
   const [roomCaps, setRoomCaps] = useState<RoomOccupancyCap[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    getChannelSettings()
-      .then(s => { if (!cancelled) setRoomCaps(s.room_occupancy_caps ?? []); })
-      .catch(() => { /* nessuna tacca se le impostazioni non arrivano */ });
-    return () => { cancelled = true; };
-  }, []);
+  useEffect(() => swrConfig('channelSettings', getChannelSettings, s => {
+    setRoomCaps(s.room_occupancy_caps ?? []);
+  }), []);
 
   // Opening hours drive the reservation-modal time dropdown and the arrival
   // heatmap. Fetched once on mount — the SettingsPage save flow invalidates
   // by full page reload today, so no live refresh needed here.
   const [openingHours, setOpeningHours] = useState<OpeningHoursRow[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    getOpeningHours()
-      .then(rows => { if (!cancelled) setOpeningHours(rows); })
-      .catch(() => { /* empty list = fallback to legacy hardcoded slots */ });
-    return () => { cancelled = true; };
-  }, []);
+  useEffect(() => swrConfig('openingHours', getOpeningHours, setOpeningHours), []);
 
   // Outbound SMS/WhatsApp log for the reservation currently open in the modal.
   // Loaded on open (edit mode only). Same lifecycle as paymentRequests above.
@@ -889,37 +872,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Opzioni prenotazioni). One-shot fetch on mount; failure keeps the list
   // empty rather than falling back to hardcoded defaults, since the backend
   // seeds the default set on first migration.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const rows = await getReservationNotePresets();
-        if (!cancelled) setQuickNotes(rows.map(r => ({
-          id: r.id,
-          label: r.label,
-          icon: r.icon || null,
-          has_quantity: !!r.has_quantity,
-          variants: (r.variants || []).map(v => v.label),
-        })));
-      } catch {
-        // Silent: an empty chip list is a clear "not configured yet" signal.
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+  useEffect(() => swrConfig('reservationNotePresets', getReservationNotePresets, rows => {
+    setQuickNotes(rows.map(r => ({
+      id: r.id,
+      label: r.label,
+      icon: r.icon || null,
+      has_quantity: !!r.has_quantity,
+      variants: (r.variants || []).map(v => v.label),
+    })));
+  }), []);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const rows = await getReservationAllergenPresets();
-        if (!cancelled) setAllergenPresets(rows.map(r => r.label));
-      } catch {
-        // Silent — same fallback story as quickNotes.
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+  useEffect(() => swrConfig('reservationAllergenPresets', getReservationAllergenPresets, rows => {
+    setAllergenPresets(rows.map(r => r.label));
+  }), []);
 
   // Split-view state
   const [selectedReservationId, setSelectedReservationId] = useState<number | null>(null);
