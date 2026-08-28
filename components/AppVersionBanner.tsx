@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { RefreshCw, X } from 'lucide-react';
 import { useAppVersion } from '../hooks/useAppVersion';
 
@@ -12,8 +12,24 @@ import { useAppVersion } from '../hooks/useAppVersion';
 // stealing screen real-estate from the working area.
 export const AppVersionBanner: React.FC = () => {
     const { isOutdated, remoteVersion, dismiss, reload } = useAppVersion();
+    // Feedback state for the "Ricarica" button: without it the click looks
+    // unresponsive for the ~1s SW skipWaiting → location.reload() window.
+    // Flipping to true spins the icon and disables the button; we then let
+    // the browser paint once (rAF) before invoking reload, otherwise the
+    // page navigates before the spinner has a chance to render.
+    const [isReloading, setIsReloading] = useState(false);
 
     if (!isOutdated) return null;
+
+    const handleReload = () => {
+        if (isReloading) return;
+        setIsReloading(true);
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                reload();
+            });
+        });
+    };
 
     return (
         <div
@@ -34,17 +50,20 @@ export const AppVersionBanner: React.FC = () => {
                 </div>
                 <button
                     type="button"
-                    onClick={reload}
-                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-white text-indigo-700 text-[12px] font-semibold hover:bg-indigo-50 transition-colors whitespace-nowrap"
+                    onClick={handleReload}
+                    disabled={isReloading}
+                    aria-live="polite"
+                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-white text-indigo-700 text-[12px] font-semibold hover:bg-indigo-50 disabled:opacity-80 disabled:cursor-progress transition-colors whitespace-nowrap"
                 >
-                    <RefreshCw className="h-3.5 w-3.5" />
-                    Ricarica
+                    <RefreshCw className={`h-3.5 w-3.5 ${isReloading ? 'animate-spin' : ''}`} />
+                    {isReloading ? 'Ricarico…' : 'Ricarica'}
                 </button>
                 <button
                     type="button"
                     onClick={dismiss}
+                    disabled={isReloading}
                     aria-label="Chiudi banner"
-                    className="p-1 rounded-full text-white/80 hover:text-white hover:bg-white/10 transition-colors flex-shrink-0"
+                    className="p-1 rounded-full text-white/80 hover:text-white hover:bg-white/10 disabled:opacity-50 transition-colors flex-shrink-0"
                 >
                     <X className="h-4 w-4" />
                 </button>
