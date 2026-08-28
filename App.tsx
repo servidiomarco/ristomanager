@@ -36,6 +36,7 @@ import { MonitoringPage } from './components/MonitoringPage';
 import ReceptionPage from './components/ReceptionPage';
 import { AttivitaPage } from './components/AttivitaPage';
 import { PushNotificationsCard } from './components/PushNotificationsCard';
+import { StaffChatPresetsCard } from './components/StaffChatPresetsCard';
 import { OpeningHoursManager } from './components/OpeningHoursManager';
 import { FeatureTogglesManager } from './components/FeatureTogglesManager';
 import { ScheduledClosuresManager } from './components/ScheduledClosuresManager';
@@ -2973,6 +2974,9 @@ const App: React.FC = () => {
                 </CardErrorBoundary>
                 <CardErrorBoundary label="Media">
                   <MediaLibraryManager showToast={addToast} />
+                </CardErrorBoundary>
+                <CardErrorBoundary label="Chat staff">
+                  <StaffChatPresetsCard showToast={addToast} />
                 </CardErrorBoundary>
               </div>
             </SettingsSection>

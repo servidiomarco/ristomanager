@@ -14,6 +14,11 @@ export interface StaffThreadSummary {
   unreadCount: number;
 }
 
+export interface StaffPreset {
+  key: string;
+  label: string;
+}
+
 export interface StaffColleague {
   id: number;
   fullName: string;
@@ -85,6 +90,19 @@ class StaffChatApiService {
 
   async unreadCount(): Promise<{ count: number }> {
     return apiRequest(`${API_URL}/staff-chat/unread-count`, { headers: getHeaders() });
+  }
+
+  async getPresets(): Promise<{ presets: StaffPreset[]; custom: boolean }> {
+    return apiRequest(`${API_URL}/staff-chat/presets`, { headers: getHeaders() });
+  }
+
+  // Sostituzione integrale della lista; vuota = torna ai default.
+  async savePresets(labels: string[]): Promise<{ presets: StaffPreset[]; custom: boolean }> {
+    return apiRequest(`${API_URL}/staff-chat/presets`, {
+      method: 'PUT',
+      headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ labels }),
+    });
   }
 }
 
