@@ -60,7 +60,7 @@ import { RolePermissionService } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
 import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles, sendToPlatformAdmins as pushSendToPlatformAdmins } from './services/pushService.js';
-import { channelsForRole, rolesForChannel, parseThreadKey, channelThreadKey, dmThreadKey, isStaffPresetKey, STAFF_MESSAGE_MAX_LENGTH, STAFF_MAX_MENTIONS, STAFF_MESSAGE_PRESETS } from './services/staffChat.js';
+import { channelsForRole, rolesForChannel, parseThreadKey, channelThreadKey, dmThreadKey, isStaffPresetKey, STAFF_MESSAGE_MAX_LENGTH, STAFF_MAX_MENTIONS, STAFF_MESSAGE_PRESETS, STAFF_MAX_ATTACHMENTS, staffMessagePreview } from './services/staffChat.js';
 import {
     isRevolutConfigured,
     verifyWebhookSignature as verifyRevolutWebhook,
@@ -240,7 +240,7 @@ const jsonVerify = (req: any, _res: any, buf: Buffer) => { req.rawBody = buf; };
 const standardJson = express.json({ limit: '2mb', verify: jsonVerify });
 const largeJson = express.json({ limit: '8mb', verify: jsonVerify });
 app.use((req, res, next) => (
-    req.path === '/messages/attachments' || req.path === '/media' ? largeJson(req, res, next) : standardJson(req, res, next)
+    req.path === '/messages/attachments' || req.path === '/media' || req.path === '/staff-chat/attachments' ? largeJson(req, res, next) : standardJson(req, res, next)
 ));
 
 // Un body oltre il limite fa fallire il parser PRIMA della rotta: senza
@@ -10399,6 +10399,17 @@ const startRemindersScheduler = () => {
 const startStaffChatRetentionScheduler = () => {
     const tick = async () => {
         try {
+            // Le foto dei messaggi in scadenza si cancellano PRIMA delle
+            // righe: dopo, i token sarebbero persi e i bytea orfani per sempre.
+            await queryWithRetry(
+                `DELETE FROM outbound_media
+                 WHERE token IN (
+                     SELECT jsonb_array_elements(m.media)->>'token'
+                     FROM staff_messages m
+                     WHERE m.created_at < NOW() - INTERVAL '90 days'
+                       AND m.media IS NOT NULL
+                 )`
+            );
             const purged = await queryWithRetry(
                 `DELETE FROM staff_messages
                  WHERE created_at < NOW() - INTERVAL '90 days'
@@ -14593,7 +14604,7 @@ app.post('/notifications/:id/dismiss', authenticate, async (req: any, res) => {
 
 const STAFF_MSG_FIELDS = `id, kind, channel, sender_user_id, sender_name, sender_role,
     recipient_user_id, recipient_name, body, preset_key,
-    linked_reservation_id, linked_table_id, mentioned_user_ids, created_at`;
+    linked_reservation_id, linked_table_id, mentioned_user_ids, media, created_at`;
 
 app.get('/staff-chat/threads', authenticate, requirePermission('staffchat:use'), async (req: any, res) => {
     try {
@@ -14754,13 +14765,38 @@ app.post('/staff-chat/messages', authenticate, requirePermission('staffchat:use'
     try {
         const userId = req.user.userId;
         const socketId = req.headers['x-socket-id'] as string;
-        const { threadKey, body, presetKey, linkedReservationId, linkedTableId, mentionedUserIds } = req.body || {};
+        const { threadKey, body, presetKey, linkedReservationId, linkedTableId, mentionedUserIds, attachments } = req.body || {};
 
         const ref = parseThreadKey(String(threadKey ?? ''));
         if (!ref) return res.status(400).json({ error: 'Thread non valido' });
         const text = typeof body === 'string' ? body.trim() : '';
-        if (!text || text.length > STAFF_MESSAGE_MAX_LENGTH) {
-            return res.status(400).json({ error: 'Messaggio vuoto o troppo lungo' });
+        if (text.length > STAFF_MESSAGE_MAX_LENGTH) {
+            return res.status(400).json({ error: 'Messaggio troppo lungo' });
+        }
+
+        // Allegati: token di outbound_media caricati via /staff-chat/attachments.
+        // Il messaggio porta solo i riferimenti; con una foto il testo puo'
+        // mancare (vincolo body-o-media a DB).
+        let media: { token: string; content_type: string; filename: string | null }[] | null = null;
+        if (Array.isArray(attachments) && attachments.length > 0) {
+            const tokens = attachments.filter((t: any) => typeof t === 'string' && /^[A-Za-z0-9_-]{20,64}$/.test(t));
+            if (tokens.length !== attachments.length || tokens.length > STAFF_MAX_ATTACHMENTS) {
+                return res.status(400).json({ error: 'Allegati non validi' });
+            }
+            const rows = await queryWithRetry(
+                `SELECT token, content_type, filename FROM outbound_media WHERE tenant_id = $1 AND token = ANY($2)`,
+                [req.tenantId!, tokens]
+            );
+            if (rows.rows.length !== tokens.length) {
+                return res.status(400).json({ error: 'Allegato non trovato' });
+            }
+            media = tokens.map((t: string) => {
+                const r = rows.rows.find((x: any) => x.token === t);
+                return { token: t, content_type: r.content_type, filename: r.filename ?? null };
+            });
+        }
+        if (!text && !media) {
+            return res.status(400).json({ error: 'Messaggio vuoto' });
         }
         // db:<id> = preset del tenant (tabella); slug fissa = builtin. Le key
         // sconosciute si scartano senza errore: il messaggio vale comunque.
@@ -14842,13 +14878,13 @@ app.post('/staff-chat/messages', authenticate, requirePermission('staffchat:use'
             `INSERT INTO staff_messages
                 (tenant_id, kind, channel, sender_user_id, sender_name, sender_role,
                  recipient_user_id, recipient_name, body, preset_key,
-                 linked_reservation_id, linked_table_id, mentioned_user_ids)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                 linked_reservation_id, linked_table_id, mentioned_user_ids, media)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
              RETURNING ${STAFF_MSG_FIELDS}`,
             [req.tenantId!, ref.kind, ref.kind === 'channel' ? ref.channel : null,
              userId, senderName, String(req.user.role),
-             recipient?.id ?? null, recipient?.name ?? null, text, preset,
-             linkedReservation, linkedTable, mentions]
+             recipient?.id ?? null, recipient?.name ?? null, text || null, preset,
+             linkedReservation, linkedTable, mentions, media ? JSON.stringify(media) : null]
         );
         const message = ins.rows[0];
 
@@ -14863,7 +14899,7 @@ app.post('/staff-chat/messages', authenticate, requirePermission('staffchat:use'
 
         // Push fire-and-forget: un fallimento web-push non deve far fallire
         // l'invio. tag per thread: i messaggi dello stesso thread collassano.
-        const preview = text.slice(0, 120);
+        const preview = staffMessagePreview({ body: text || null, media }).slice(0, 120);
         if (ref.kind === 'channel') {
             const channelKey = channelThreadKey(ref.channel);
             const channelPayload = {
@@ -15023,6 +15059,38 @@ app.put('/staff-chat/presets', authenticate, requirePermission('settings:full'),
         res.json({ presets, custom: rows.length > 0 });
     } catch (err) {
         console.error('PUT /staff-chat/presets error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Upload foto per la chat staff: stesso storage degli allegati WhatsApp
+// (outbound_media, token pubblico non indovinabile) ma permesso della chat
+// e solo immagini — la cucina non ha reservations:full.
+app.post('/staff-chat/attachments', authenticate, requirePermission('staffchat:use'), async (req: any, res) => {
+    try {
+        const contentType = String(req.body?.content_type || '').toLowerCase().split(';')[0].trim();
+        const dataB64 = String(req.body?.data || '');
+        const filename = req.body?.filename ? String(req.body.filename).slice(0, 200) : null;
+        if (!contentType || !dataB64) {
+            return res.status(400).json({ error: 'content_type e data sono obbligatori' });
+        }
+        if (!/^image\/(jpeg|png|webp|gif)$/.test(contentType)) {
+            return res.status(415).json({ error: `Solo foto: ${contentType} non supportato` });
+        }
+        const buf = Buffer.from(dataB64.replace(/^data:[^,]+,/, ''), 'base64');
+        if (buf.length === 0) return res.status(400).json({ error: 'File vuoto' });
+        if (buf.length > OUTBOUND_MEDIA_MAX_BYTES) {
+            return res.status(413).json({ error: 'File troppo grande: massimo 5 MB' });
+        }
+        const token = crypto.randomBytes(32).toString('base64url');
+        const ins = await queryWithRetry(
+            `INSERT INTO outbound_media (tenant_id, token, content_type, filename, bytes, size_bytes, created_by_user_id)
+             VALUES ($7, $1, $2, $3, $4, $5, $6) RETURNING token, content_type, filename, size_bytes`,
+            [token, contentType, filename, buf, buf.length, req.user?.userId ?? null, req.tenantId!]
+        );
+        res.status(201).json(ins.rows[0]);
+    } catch (err: any) {
+        console.error('POST /staff-chat/attachments error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });

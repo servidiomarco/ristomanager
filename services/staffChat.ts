@@ -28,6 +28,12 @@ export const channelsForRole = (role: UserRole): StaffChannel[] =>
 export const rolesForChannel = (channel: StaffChannel): UserRole[] =>
     [...CHANNEL_ROLES[channel]];
 
+export interface StaffMedia {
+    token: string;
+    content_type: string;
+    filename: string | null;
+}
+
 // Il messaggio come viaggia su API e socket. Nel DB il DM porta mittente e
 // destinatario espliciti; il threadKey è sempre derivato, mai persistito.
 export interface StaffMessage {
@@ -39,12 +45,14 @@ export interface StaffMessage {
     sender_role: string;
     recipient_user_id: number | null;
     recipient_name: string | null;
-    body: string;
+    body: string | null;
     preset_key: string | null;
     linked_reservation_id: number | null;
     linked_table_id: number | null;
     // Menzioni: id espliciti mandati dal client, mai riestratti dal testo.
     mentioned_user_ids: number[] | null;
+    // Allegati foto: riferimenti a outbound_media (token pubblico).
+    media: StaffMedia[] | null;
     created_at: string;
 }
 
@@ -98,3 +106,8 @@ export const isStaffPresetKey = (key: string): boolean =>
     STAFF_MESSAGE_PRESETS.some(p => p.key === key);
 
 export const STAFF_MESSAGE_MAX_LENGTH = 1000;
+export const STAFF_MAX_ATTACHMENTS = 3;
+
+// Anteprima nelle liste/push quando il messaggio è solo foto.
+export const staffMessagePreview = (m: Pick<StaffMessage, 'body' | 'media'>): string =>
+    m.body ?? ((m.media?.length ?? 0) > 1 ? 'foto' : 'una foto');

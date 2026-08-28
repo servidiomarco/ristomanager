@@ -207,6 +207,38 @@ describe('chat staff', () => {
         expect(reset.body.custom).toBe(false);
     });
 
+    it('allegati: upload foto, messaggio solo-foto, vuoto senza nulla -> 400', async () => {
+        // PNG 1x1 valido, base64.
+        const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+        const up = await api().post('/staff-chat/attachments').set(bearer(kitchenToken))
+            .send({ content_type: 'image/png', filename: 'passe.png', data: PNG });
+        expect(up.status).toBe(201);
+        expect(up.body.token).toMatch(/^[A-Za-z0-9_-]{20,64}$/);
+
+        // Solo foto, senza testo: valido, e la riga porta i riferimenti.
+        const sent = await api().post('/staff-chat/messages').set(bearer(kitchenToken))
+            .send({ threadKey: 'channel:cucina', body: '', attachments: [up.body.token] });
+        expect(sent.status).toBe(201);
+        expect(sent.body.body).toBeNull();
+        expect(sent.body.media).toHaveLength(1);
+        expect(sent.body.media[0].token).toBe(up.body.token);
+
+        // Il pdf non passa: la chat accetta solo foto.
+        const pdf = await api().post('/staff-chat/attachments').set(bearer(kitchenToken))
+            .send({ content_type: 'application/pdf', filename: 'x.pdf', data: PNG });
+        expect(pdf.status).toBe(415);
+
+        // Né testo né foto: 400.
+        const empty = await api().post('/staff-chat/messages').set(bearer(kitchenToken))
+            .send({ threadKey: 'channel:cucina', body: '' });
+        expect(empty.status).toBe(400);
+
+        // Token inventato: 400.
+        const fake = await api().post('/staff-chat/messages').set(bearer(kitchenToken))
+            .send({ threadKey: 'channel:cucina', body: 'foto', attachments: ['a'.repeat(32)] });
+        expect(fake.status).toBe(400);
+    });
+
     it('la lista colleghi contiene gli utenti attivi del tenant, senza chi guarda', async () => {
         const threads = await api().get('/staff-chat/threads').set(bearer(owner));
         const ids = threads.body.colleagues.map((c: any) => c.id);
