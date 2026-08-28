@@ -31,3 +31,7 @@ dist-ssr
 *.pptx
 
 backups/
+
+# Artefatti locali
+.vercel/
+mk.mjs
