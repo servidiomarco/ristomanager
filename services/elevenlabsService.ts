@@ -508,7 +508,91 @@ export interface AvailabilityResult {
     free_indoor: number;
     free_outdoor: number;
     alternative_shift?: Shift;
+    // Doppio turno: primo slot del turno in cui un tavolo adatto si libera
+    // (HH:MM). Presente solo a turno pieno con voice_double_seating_enabled.
+    second_seating_from?: string;
     message: string;    // Italian phrase the agent can read aloud
+}
+
+/**
+ * Interruttore doppio turno del canale voce (default spento). Stessa riga
+ * app_settings dei feature flag del server: booleano in `value`, scritto da
+ * PUT /settings/features. Solo i percorsi voce lo leggono: /prenota resta
+ * all'occupazione per intero turno.
+ */
+export async function isVoiceDoubleSeatingEnabled(tenantId: number): Promise<boolean> {
+    try {
+        const result = await queryWithRetry(
+            "SELECT value FROM app_settings WHERE tenant_id = $1 AND key = 'voice_double_seating_enabled'",
+            [tenantId]
+        );
+        if (result.rowCount === 0) return false;
+        return Boolean(result.rows[0].value);
+    } catch (err) {
+        console.error('[voice] failed to read voice_double_seating_enabled:', err);
+        return false;
+    }
+}
+
+/**
+ * Primo slot del turno in cui si libera un tavolo adatto, quando il turno è
+ * pieno e il doppio turno è attivo. Un tavolo "si libera" alla fine della sua
+ * ultima prenotazione (duration_minutes, fallback 90' pranzo / 120' cena);
+ * l'orario proposto è il primo slot della griglia di apertura ≥ quel momento,
+ * così il valore è sempre prenotabile da create_reservation. Null se nessun
+ * tavolo si libera entro l'ultimo slot.
+ */
+async function findSecondSeatingSlot(
+    tenantId: number,
+    date: string,
+    shift: Shift,
+    guests: number,
+    locationPreference?: RoomLocation
+): Promise<string | null> {
+    const cappedRooms = await getCappedRoomIds(tenantId, date, shift);
+    const params: any[] = [guests, date, shift, cappedRooms, tenantId];
+    let locationFilter = '';
+    if (locationPreference) {
+        params.push(locationPreference);
+        locationFilter = ` AND r.location = $${params.length}`;
+    }
+    // to_char su timestamptz rende l'orario nella sessione pg Europe/Rome.
+    const result = await queryWithRetry(`
+        SELECT to_char(MIN(x.free_at), 'HH24:MI') AS free_from
+        FROM (
+            SELECT MAX(res.reservation_time + make_interval(mins =>
+                       COALESCE(NULLIF(res.duration_minutes, 0),
+                                CASE WHEN res.shift = 'LUNCH' THEN 90 ELSE 120 END))) AS free_at
+            FROM tables t
+            JOIN rooms r ON t.room_id = r.id AND r.tenant_id = t.tenant_id
+            JOIN reservations res ON res.table_id = t.id
+                AND res.tenant_id = t.tenant_id
+                AND DATE(res.reservation_time) = $2
+                AND res.shift = $3
+                AND COALESCE(res.reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')
+            WHERE t.tenant_id = $5
+              AND r.is_closed = false
+              AND NOT (r.id = ANY($4::int[]))
+              AND r.id NOT IN (
+                  SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3 AND tenant_id = $5
+              )
+              AND t.id NOT IN (
+                  SELECT table_id FROM table_hidden_overrides WHERE date = $2 AND shift = $3 AND tenant_id = $5
+              )
+              AND t.seats >= $1
+              AND NOT EXISTS (
+                  SELECT 1 FROM table_merges tm
+                  WHERE tm.date = $2 AND tm.shift = $3 AND tm.tenant_id = $5
+                    AND (tm.primary_id = t.id OR t.id = ANY(tm.merged_ids))
+              )
+              ${locationFilter}
+            GROUP BY t.id
+        ) x
+    `, params);
+    const freeFrom = result.rows[0]?.free_from;
+    if (!freeFrom) return null;
+    const slots = await getAvailableSlots(tenantId, date, shift);
+    return slots.find(s => s >= freeFrom) ?? null;
 }
 
 /**
@@ -604,6 +688,23 @@ export async function findAvailability(tenantId: number, input: AvailabilityInpu
             free_outdoor: freeOutdoor,
             message: `Mi dispiace, ${requestedWhere} è tutto prenotato, ma ${altWhere} abbiamo posto. Le va bene?`
         };
+    }
+
+    // Turno pieno. Col doppio turno attivo, prima di ripiegare sull'altro
+    // turno proponiamo la seconda battuta nello stesso: l'orario viene dal
+    // server, mai inventato dall'agente (chiamata Ciccolini 2026-08-27).
+    if (await isVoiceDoubleSeatingEnabled(tenantId)) {
+        const secondSeating = await findSecondSeatingSlot(tenantId, date, shift, guests, location_preference);
+        if (secondSeating) {
+            return {
+                available: false,
+                free_tables_count: 0,
+                free_indoor: 0,
+                free_outdoor: 0,
+                second_seating_from: secondSeating,
+                message: `Mi dispiace, per quella fascia siamo al completo, ma dalle ${secondSeating} si libera un tavolo per ${guests}. Può andare bene?`
+            };
+        }
     }
 
     const otherShift = shift === Shift.LUNCH ? Shift.DINNER : Shift.LUNCH;
@@ -716,9 +817,10 @@ async function pickAutoAssignTable(
     date: string,
     shift: Shift,
     guests: number,
-    locationPreference: RoomLocation | undefined
+    locationPreference: RoomLocation | undefined,
+    overlapTime?: string
 ): Promise<{ id: number; name: string; room_name: string; location: RoomLocation | null } | null> {
-    const picked = await pickSelfServiceTable(tenantId, date, shift, guests, { location: locationPreference });
+    const picked = await pickSelfServiceTable(tenantId, date, shift, guests, { location: locationPreference, overlapTime });
     if (!picked) return null;
     return { id: picked.id, name: picked.name, room_name: picked.room_name, location: picked.location };
 }
@@ -746,12 +848,18 @@ export async function createVoiceReservation(
 
     // No table while a deposit is pending: assigning one would guarantee the
     // very thing the deposit exists to secure.
+    // Col doppio turno attivo l'occupazione si valuta sull'orario richiesto
+    // (reservation_time è 'YYYY-MM-DDTHH:MM:00', wall-clock Roma).
+    const overlapTime = !input.deposit_required && (await isVoiceDoubleSeatingEnabled(tenantId))
+        ? input.reservation_time.slice(11, 16)
+        : undefined;
     const assigned = input.deposit_required ? null : await pickAutoAssignTable(
         tenantId,
         reservationDate,
         input.shift,
         input.guests,
-        input.location_preference
+        input.location_preference,
+        overlapTime
     );
 
     const result = await queryWithRetry(`
@@ -1053,16 +1161,27 @@ export async function modifyVoiceReservation(
     // 2026-08-04) and the floor plan lied until someone noticed.
     let assigned: { id: number; name: string; room_name: string | null; location: 'INDOOR' | 'OUTDOOR' | null } | null | undefined;
     if (scheduleChanged) {
+        // Se i coperti non aumentano, la capienza del tavolo attuale non va
+        // rifatta: lo staff può averci messo più persone dei posti nominali
+        // (sedia aggiunta). Il check seats >= guests la bocciava e il fallback
+        // di riassegnazione, a sala piena, negava una modifica di solo orario
+        // (Ciccolini 2026-08-27: 7 su tavolo da 6, posticipo rifiutato due
+        // volte). Con guests=1 restano attivi tutti gli altri controlli
+        // (sala aperta, occupazione, accorpamenti, banchetti).
+        const capacityGuests = newGuests <= current.guests ? 1 : newGuests;
+        // Col doppio turno attivo l'occupazione si valuta sul nuovo orario.
+        const overlapTime = (await isVoiceDoubleSeatingEnabled(tenantId)) ? newTime : undefined;
         const keepCurrentTable = current.table_id != null
             && !newLocation
-            && await isTableStillAssignable(tenantId, current.table_id, newDate, newShift, newGuests, current.id);
+            && await isTableStillAssignable(tenantId, current.table_id, newDate, newShift, capacityGuests, current.id, overlapTime);
         if (!keepCurrentTable) {
             assigned = await pickAutoAssignTable(
                 tenantId,
                 newDate,
                 newShift,
                 newGuests,
-                newLocation
+                newLocation,
+                overlapTime
             );
             if (!assigned) {
                 return { status: 'unavailable' };

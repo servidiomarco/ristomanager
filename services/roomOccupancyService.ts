@@ -259,13 +259,27 @@ export interface SelfServiceTablePick {
  * `alias` è l'alias del tavolo nella query chiamante; `dateParam`/`shiftParam`/
  * `tenantParam` sono le posizioni dei placeholder di data, turno e tenant.
  */
-function assignableTableSql(alias: string, dateParam: number, shiftParam: number, tenantParam: number, excludeReservationParam?: number): string {
+function assignableTableSql(alias: string, dateParam: number, shiftParam: number, tenantParam: number, excludeReservationParam?: number, overlapStartParam?: number): string {
     const d = `$${dateParam}`;
     const s = `$${shiftParam}`;
     const tn = `$${tenantParam}`;
     // Chi MODIFICA una prenotazione deve poter tenere il proprio tavolo: senza
     // l'esclusione, la prenotazione stessa lo farebbe risultare occupato.
     const excl = excludeReservationParam ? `AND res.id <> $${excludeReservationParam}` : '';
+    // Doppio turno (interruttore voice_double_seating_enabled): quando il
+    // chiamante passa l'orario richiesto, una prenotazione esistente blocca il
+    // tavolo solo se le due finestre di servizio si sovrappongono, non per
+    // l'intero turno. Finestra = [inizio, inizio + durata): la durata viene da
+    // duration_minutes della prenotazione, fallback 90' pranzo / 120' cena —
+    // stessa regola di getEffectiveDurationMin (components/reservationState.tsx),
+    // che il server non può importare. Il confronto timestamptz/timestamp
+    // passa dalla sessione pg Europe/Rome (db.ts), quindi è wall-clock Roma.
+    const overlap = overlapStartParam ? `
+                    AND res.reservation_time < ($${overlapStartParam}::timestamp + make_interval(mins =>
+                        CASE WHEN ${s} = 'LUNCH' THEN 90 ELSE 120 END))
+                    AND res.reservation_time + make_interval(mins =>
+                        COALESCE(NULLIF(res.duration_minutes, 0),
+                                 CASE WHEN res.shift = 'LUNCH' THEN 90 ELSE 120 END)) > $${overlapStartParam}::timestamp` : '';
     return `
               ${alias}.id NOT IN (
                   SELECT table_id FROM table_hidden_overrides WHERE date = ${d} AND shift = ${s} AND tenant_id = ${tn}
@@ -276,7 +290,7 @@ function assignableTableSql(alias: string, dateParam: number, shiftParam: number
                     AND res.tenant_id = ${tn}
                     AND DATE(res.reservation_time) = ${d}
                     AND res.shift = ${s}
-                    ${excl}
+                    ${excl}${overlap}
                     AND COALESCE(res.reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')
               )
               AND NOT EXISTS (
@@ -341,7 +355,7 @@ export async function pickSelfServiceTable(
     date: string,
     shift: Shift,
     guests: number,
-    opts: { roomId?: number | null; location?: 'INDOOR' | 'OUTDOOR' | null } = {}
+    opts: { roomId?: number | null; location?: 'INDOOR' | 'OUTDOOR' | null; overlapTime?: string | null } = {}
 ): Promise<SelfServiceTablePick | null> {
     const params: any[] = [guests, date, shift, tenantId];
     let extraFilters = '';
@@ -355,6 +369,14 @@ export async function pickSelfServiceTable(
     }
     params.push(await getCappedRoomIds(tenantId, date, shift));
     extraFilters += ` AND NOT (r.id = ANY($${params.length}::int[]))`;
+    // overlapTime ('HH:MM'): occupazione per sovrapposizione di finestre
+    // invece che per intero turno — vedi assignableTableSql. Lo passano solo
+    // i canali col doppio turno attivo.
+    let overlapStartParam: number | undefined;
+    if (opts.overlapTime) {
+        params.push(`${date} ${opts.overlapTime}`);
+        overlapStartParam = params.length;
+    }
 
     const result = await queryWithRetry(`
         SELECT t.id, t.name, r.id AS room_id, r.name AS room_name, r.location
@@ -367,7 +389,7 @@ export async function pickSelfServiceTable(
               SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3 AND tenant_id = $4
           )
           AND t.seats >= $1
-          AND ${assignableTableSql('t', 2, 3, 4)}
+          AND ${assignableTableSql('t', 2, 3, 4, undefined, overlapStartParam)}
         ORDER BY t.seats ASC, t.id ASC
         LIMIT 1
     `, params);
@@ -389,8 +411,16 @@ export async function isTableStillAssignable(
     date: string,
     shift: Shift,
     guests: number,
-    excludeReservationId: number
+    excludeReservationId: number,
+    overlapTime?: string | null
 ): Promise<boolean> {
+    const params: any[] = [Math.trunc(guests), date, shift, Math.trunc(tableId), Math.trunc(excludeReservationId), tenantId];
+    // overlapTime: come in pickSelfServiceTable, occupazione per finestre.
+    let overlapStartParam: number | undefined;
+    if (overlapTime) {
+        params.push(`${date} ${overlapTime}`);
+        overlapStartParam = params.length;
+    }
     const result = await queryWithRetry(`
         SELECT 1
         FROM tables t
@@ -402,9 +432,9 @@ export async function isTableStillAssignable(
               SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3 AND tenant_id = $6
           )
           AND t.seats >= $1
-          AND ${assignableTableSql('t', 2, 3, 6, 5)}
+          AND ${assignableTableSql('t', 2, 3, 6, 5, overlapStartParam)}
         LIMIT 1
-    `, [Math.trunc(guests), date, shift, Math.trunc(tableId), Math.trunc(excludeReservationId), tenantId]);
+    `, params);
     return (result.rowCount ?? 0) > 0;
 }
 

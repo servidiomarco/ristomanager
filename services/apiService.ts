@@ -881,6 +881,8 @@ export interface FeatureFlags {
   public_bookings_enabled: boolean;
   voice_agent_enabled: boolean;
   voice_bookings_suspended: boolean;
+  /** Doppio turno voce: secondo giro sullo stesso tavolo nello stesso shift. */
+  voice_double_seating_enabled: boolean;
   pay_at_table_enabled: boolean;
   table_orders_enabled: boolean;
   /** Risposte suggerite ai messaggi dei clienti. */
