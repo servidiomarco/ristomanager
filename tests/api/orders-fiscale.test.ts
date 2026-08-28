@@ -49,6 +49,36 @@ describe('documenti fiscali', () => {
         expect(ok.body.vat_number).toBe('11122211133');
     });
 
+    it('la mappatura IVA parte a 10, valida i campi e fa merge sui PUT parziali', async () => {
+        const before = await api().get('/settings/fiscal').set(bearer(token));
+        expect(before.body.vat_map).toEqual({ dish_default: 10, cover: 10, service: 10, fallback: 10 });
+
+        const bad = await api().put('/settings/fiscal').set(bearer(token)).send({ vat_map: { cover: 7.5 } });
+        expect(bad.status).toBe(400);
+        const badShape = await api().put('/settings/fiscal').set(bearer(token)).send({ vat_map: [22] });
+        expect(badShape.status).toBe(400);
+
+        const partial = await api().put('/settings/fiscal').set(bearer(token)).send({ vat_map: { cover: 22 } });
+        expect(partial.status).toBe(200);
+        // Merge: il PUT del solo coperto non tocca gli altri campi.
+        expect(partial.body.vat_map).toEqual({ dish_default: 10, cover: 22, service: 10, fallback: 10 });
+
+        // Il default dei nuovi piatti segue dish_default quando il client
+        // non manda vat_rate.
+        await api().put('/settings/fiscal').set(bearer(token)).send({ vat_map: { dish_default: 4 } });
+        const dish = await api().post('/dishes').set(bearer(token)).send({
+            name: 'Pane fiscale', price: 2, category: 'Antipasti', allergens: [],
+        });
+        expect(dish.status).toBe(201);
+        expect(Number(dish.body.vat_rate)).toBe(4);
+
+        // Ripristino: i file di test girano in sequenza sullo stesso DB.
+        const reset = await api().put('/settings/fiscal').set(bearer(token)).send({
+            vat_map: { dish_default: 10, cover: 10, service: 10, fallback: 10 },
+        });
+        expect(reset.body.vat_map).toEqual({ dish_default: 10, cover: 10, service: 10, fallback: 10 });
+    });
+
     it('senza conto chiuso non si emette', async () => {
         billId = await openBill('FISC1', 5000);
         const res = await api().post(`/bills/${billId}/fiscal-docs`).set(bearer(token)).send({});
