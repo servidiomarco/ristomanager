@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plus, X, Trash2, Loader2, RefreshCw, Bot, Check, Undo2, Sparkles } from 'lucide-react';
+import { Plus, X, Trash2, Loader2, RefreshCw, Bot, Check, Undo2, Wand2 } from 'lucide-react';
 import {
   RoadmapTask, RoadmapPhaseKey, RoadmapTaskStatus,
   getRoadmapTasks, createRoadmapTask, updateRoadmapTask, deleteRoadmapTask,
@@ -323,7 +323,7 @@ export const RoadmapPage: React.FC = () => {
                           )}
                           {task.result_note && (
                             <p className="mt-1 line-clamp-2 whitespace-pre-line text-[13px] leading-snug text-[var(--ds-seated-text)]">
-                              <Sparkles className="mr-1 inline h-3 w-3" aria-hidden />
+                              <Wand2 className="mr-1 inline h-3 w-3" aria-hidden />
                               {task.result_note}
                             </p>
                           )}

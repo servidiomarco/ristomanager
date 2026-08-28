@@ -70,7 +70,7 @@ export const PaymentProviderPicker: React.FC<Props> = ({ flow, showToast, canEdi
 
     if (loading) {
         return (
-            <div className="flex items-center gap-2 text-[var(--color-fg-muted)] text-[12px] py-1">
+            <div className="flex items-center gap-2 text-[var(--ds-text-muted)] text-[12px] py-1">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" /> Provider…
             </div>
         );
@@ -79,8 +79,8 @@ export const PaymentProviderPicker: React.FC<Props> = ({ flow, showToast, canEdi
 
     return (
         <div>
-            <label className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--color-fg)] mb-1.5">
-                <CreditCard className="w-3.5 h-3.5 text-[var(--color-fg-muted)]" />
+            <label className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--ds-text-primary)] mb-1.5">
+                <CreditCard className="w-3.5 h-3.5 text-[var(--ds-text-muted)]" aria-hidden />
                 Provider di pagamento
             </label>
             <div className="flex items-center gap-2">
@@ -88,7 +88,7 @@ export const PaymentProviderPicker: React.FC<Props> = ({ flow, showToast, canEdi
                     value={flowState.override ?? ''}
                     onChange={(e) => onChange(e.target.value)}
                     disabled={!canEdit || saving}
-                    className="px-3 py-2 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] text-[13px] text-[var(--color-fg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-fg)] disabled:opacity-60"
+                    className="rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 py-2 text-[13px] text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                 >
                     <option value="">Predefinito ({state.label})</option>
                     {state.providers.map(p => (
@@ -97,9 +97,9 @@ export const PaymentProviderPicker: React.FC<Props> = ({ flow, showToast, canEdi
                         </option>
                     ))}
                 </select>
-                {saving && <Loader2 className="w-4 h-4 animate-spin text-[var(--color-fg-muted)]" />}
+                {saving && <Loader2 className="w-4 h-4 animate-spin text-[var(--ds-text-muted)]" aria-hidden />}
             </div>
-            <p className="text-[11px] text-[var(--color-fg-subtle)] mt-1">
+            <p className="mt-1 text-[11px] text-[var(--ds-text-muted)]">
                 I prossimi link {flow === 'deposit' ? 'di caparra' : 'dei conti al tavolo'} verranno creati con <strong>{flowState.label}</strong>.
                 I pagamenti già in corso restano sul gateway che li ha creati.
             </p>

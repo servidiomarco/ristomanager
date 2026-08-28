@@ -104,36 +104,33 @@ export const getTimedReservationState = (res: Reservation, now: number): Reserva
 
 export interface ReservationStateMeta {
   label: string;
-  dotClass: string;
-  chipClass: string;
   /** The dot pings — reserved for 'arriving', the only animated state. */
   pulse?: boolean;
 }
 
 export const RESERVATION_STATE_META: Record<ReservationStateKey, ReservationStateMeta> = {
-  pending:   { label: 'Da confermare', dotClass: 'bg-amber-500', chipClass: 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30 dark:hover:bg-amber-500/25' },
-  waiting:   { label: 'Confermata', dotClass: 'bg-booked-600', chipClass: 'bg-booked-50 text-booked-600 border-booked-200 hover:bg-booked-100 dark:bg-booked-600/25 dark:text-booked-300 dark:border-booked-600/40 dark:hover:bg-booked-600/35' },
-  arriving:  { label: 'In arrivo', pulse: true, dotClass: 'bg-white', chipClass: 'bg-booked-600 text-white border-booked-600 hover:bg-booked-700 dark:bg-booked-500 dark:border-booked-500 dark:hover:bg-booked-600' },
-  arrived:   { label: 'Arrivato', dotClass: 'bg-emerald-500', chipClass: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30 dark:hover:bg-emerald-500/25' },
-  departing: { label: 'In uscita', dotClass: 'bg-cyan-600', chipClass: 'bg-cyan-50 text-cyan-700 border-cyan-200 hover:bg-cyan-100 dark:bg-cyan-500/15 dark:text-cyan-300 dark:border-cyan-500/30 dark:hover:bg-cyan-500/25' },
-  freed:     { label: 'Libera',   dotClass: 'bg-slate-400', chipClass: 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200 dark:bg-slate-500/15 dark:text-slate-300 dark:border-slate-500/30 dark:hover:bg-slate-500/25' },
-  noshow:    { label: 'No show',  dotClass: 'bg-rose-500',  chipClass: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25' },
-  cancelled: { label: 'Annullata',dotClass: 'bg-rose-500',  chipClass: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25' },
-  declined:  { label: 'Non confermata', dotClass: 'bg-rose-500',  chipClass: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30 dark:hover:bg-rose-500/25' },
+  pending:   { label: 'Da confermare' },
+  waiting:   { label: 'Confermata' },
+  arriving:  { label: 'In arrivo', pulse: true },
+  arrived:   { label: 'Arrivato' },
+  departing: { label: 'In uscita' },
+  freed:     { label: 'Libera' },
+  noshow:    { label: 'No show' },
+  cancelled: { label: 'Annullata' },
+  declined:  { label: 'Non confermata' },
 };
 
 /* ---------------------------------------------------------------------------
-   Design-system projection of the same states.
+   Stato -> famiglia del design system.
 
-   The palette above predates the design system and carries a shade per state
-   (amber, booked, emerald, cyan, rose, slate). The design system has four
-   families plus neutral, so each state maps onto one instead of owning a
-   colour. Where two states share a family the label carries the difference:
-   "In uscita" is still a seated party, so it stays green rather than drifting
-   toward the neutral that means "free".
+   La mappa che c'era prima portava una tinta per stato (ambra, booked,
+   emerald, cyan, rose, slate). Il design system ha quattro famiglie piu'
+   neutral, quindi ogni stato ne sceglie una invece di possedere un colore.
+   Dove due stati finiscono nella stessa famiglia e' l'etichetta a portare la
+   differenza: "In uscita" e' pur sempre un tavolo occupato, quindi resta
+   verde invece di scivolare sul neutro che vuol dire "libero".
 
-   Kept alongside the legacy map, not instead of it — ReceptionPage still reads
-   `chipClass`, and repainting it from here would be a change nobody asked for.
+   Unica eccezione al riempimento tinta: 'arriving' — vedi DsStatusChip.
    ------------------------------------------------------------------------- */
 
 export type ReservationStateFamily = 'pending' | 'arriving' | 'seated' | 'critical' | 'neutral';
@@ -183,16 +180,23 @@ export const DsStatusChip: React.FC<{
   const meta = RESERVATION_STATE_META[state];
   const ds = reservationStateDs(state);
   const Tag = onClick ? 'button' : 'span';
+  // 'arriving' e' l'unico stato disegnato pieno invece che a tinta: e' la
+  // comitiva che sta entrando adesso, e a colpo d'occhio deve pesare piu'
+  // delle altre. Bianco su arriving-solid misura 6.27:1 (§4.1); il pallino
+  // passa al bianco perche' indaco su indaco non si vedrebbe.
+  const solid = state === 'arriving';
   return (
     <Tag
       type={onClick ? 'button' : undefined}
       onClick={onClick}
       title={title}
-      className={`inline-flex h-8 items-center gap-2 whitespace-nowrap rounded-full px-3 text-[13px] font-medium ${ds.tint} ${ds.text} ${
+      className={`inline-flex h-8 items-center gap-2 whitespace-nowrap rounded-full px-3 text-[13px] font-medium ${
+        solid ? 'bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)]' : `${ds.tint} ${ds.text}`
+      } ${
         onClick ? 'transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]' : ''
       } ${className}`}
     >
-      <PulseDot dotClass={ds.solid} pulse={meta.pulse} />
+      <PulseDot dotClass={solid ? 'bg-[var(--ds-arriving-fg)]' : ds.solid} pulse={meta.pulse} />
       {meta.label}
       {trailing}
     </Tag>
@@ -230,36 +234,6 @@ export const PulseDot: React.FC<{ dotClass: string; pulse?: boolean; sizeClass?:
     <span className={`relative inline-flex rounded-full ${sizeClass} ${dotClass}`} />
   </span>
 );
-
-interface StatusChipProps {
-  state: ReservationStateKey;
-  size?: 'sm' | 'md';
-  onClick?: (e: React.MouseEvent) => void;
-  className?: string;
-  title?: string;
-  /** Rendered after the label — e.g. a ChevronDown on chips that open the state picker. */
-  trailing?: React.ReactNode;
-}
-
-export const StatusChip: React.FC<StatusChipProps> = ({ state, size = 'md', onClick, className = '', title, trailing }) => {
-  const meta = RESERVATION_STATE_META[state];
-  const sizing = size === 'sm'
-    ? 'text-[10px] px-2 py-0.5 gap-1.5'
-    : 'text-xs px-2.5 py-1 gap-2';
-  const Tag = onClick ? 'button' : 'span';
-  return (
-    <Tag
-      type={onClick ? 'button' : undefined}
-      onClick={onClick}
-      title={title}
-      className={`inline-flex items-center rounded-full border font-semibold tracking-wide whitespace-nowrap ${onClick ? 'pressable' : 'transition-colors'} ${sizing} ${meta.chipClass} ${className}`}
-    >
-      <PulseDot dotClass={meta.dotClass} pulse={meta.pulse} />
-      {meta.label}
-      {trailing}
-    </Tag>
-  );
-};
 
 /* ---------------------------------------------------------------------------
    Table glyph state — the floor-map projection of the same truth.

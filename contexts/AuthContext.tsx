@@ -268,7 +268,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       {/* Session Expired Modal */}
       {showSessionExpiredModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
+ <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden duration-200">
             <div className="p-6 text-center">
               <div className="mx-auto w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mb-4">
                 <AlertTriangle className="h-8 w-8 text-amber-600" />

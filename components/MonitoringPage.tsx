@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Loader2, RefreshCw, Phone, Clock, Sparkles, Coins, AlertTriangle, Mic, Bot } from 'lucide-react';
+import { Loader2, RefreshCw, Phone, Clock, Wand2, Coins, AlertTriangle, Mic, Bot } from 'lucide-react';
 import {
   getGeminiUsage, getElevenLabsUsage,
   GeminiUsage, ElevenLabsUsage,
@@ -69,14 +69,14 @@ const shortDay = (iso: string): string => {
 };
 
 const chartTooltip = {
-  cursor: { fill: 'var(--color-surface-hover)' },
+  cursor: { fill: 'var(--ds-surface-row)' },
   contentStyle: { background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: '12px', fontSize: '13px' },
-  labelStyle: { color: 'var(--color-fg-muted)' },
+  labelStyle: { color: 'var(--ds-text-muted)' },
 } as const;
 
-// Le barre usano un solido del design system (theme-aware): --color-chart-1 in
-// tema scuro cade su un blu quasi nero e sparirebbe sul canvas. Il tetto di
-// larghezza evita le barre-lastra quando i punti dati sono pochissimi.
+// Le barre usano un solido del design system, che si inverte da solo fra i
+// temi. Il tetto di larghezza evita le barre-lastra quando i punti dati sono
+// pochissimi.
 const BAR_FILL = 'var(--ds-arriving-solid)';
 const BAR_MAX = 56;
 
@@ -291,9 +291,9 @@ export const MonitoringPage: React.FC = () => {
                   <div className="h-[200px] w-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={callDaily} margin={{ top: 5, right: 5, left: -10, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" horizontal vertical={false} stroke="var(--color-chart-grid)" />
-                        <XAxis dataKey="label" axisLine={false} tickLine={false} stroke="var(--color-chart-axis)" tick={{ fill: 'var(--color-chart-axis)', fontSize: 11 }} interval="preserveStartEnd" />
-                        <YAxis domain={[0, 'auto']} allowDecimals={false} axisLine={false} tickLine={false} stroke="var(--color-chart-axis)" tick={{ fill: 'var(--color-chart-axis)', fontSize: 11 }} width={30} />
+                        <CartesianGrid strokeDasharray="3 3" horizontal vertical={false} stroke="var(--ds-border)" />
+                        <XAxis dataKey="label" axisLine={false} tickLine={false} stroke="var(--ds-border-strong)" tick={{ fill: 'var(--ds-text-muted)', fontSize: 11 }} interval="preserveStartEnd" />
+                        <YAxis domain={[0, 'auto']} allowDecimals={false} axisLine={false} tickLine={false} stroke="var(--ds-border-strong)" tick={{ fill: 'var(--ds-text-muted)', fontSize: 11 }} width={30} />
                         <Tooltip {...chartTooltip} formatter={(v: number) => [`${v} chiamate`, 'Chiamate']} />
                         <Bar dataKey="calls" fill={BAR_FILL} radius={[4, 4, 0, 0]} maxBarSize={BAR_MAX} />
                       </BarChart>
@@ -325,7 +325,7 @@ export const MonitoringPage: React.FC = () => {
                       : `in + out: ${formatInt(gemini?.totals.prompt_tokens)} + ${formatInt(gemini?.totals.output_tokens)}`}
                   />
                   <StatTile
-                    icon={<Sparkles className="h-3.5 w-3.5" />}
+                    icon={<Wand2 className="h-3.5 w-3.5" />}
                     label="Costo medio"
                     value={gemini && gemini.totals.calls > 0
                       ? formatEuro(gemini.totals.cost_usd / gemini.totals.calls, gemini.usdEur)
@@ -344,9 +344,9 @@ export const MonitoringPage: React.FC = () => {
                   <div className="mb-4 h-[200px] w-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={geminiDaily} margin={{ top: 5, right: 5, left: -10, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" horizontal vertical={false} stroke="var(--color-chart-grid)" />
-                        <XAxis dataKey="label" axisLine={false} tickLine={false} stroke="var(--color-chart-axis)" tick={{ fill: 'var(--color-chart-axis)', fontSize: 11 }} interval="preserveStartEnd" />
-                        <YAxis domain={[0, 'auto']} axisLine={false} tickLine={false} stroke="var(--color-chart-axis)" tick={{ fill: 'var(--color-chart-axis)', fontSize: 11 }} width={40} tickFormatter={compactTick} />
+                        <CartesianGrid strokeDasharray="3 3" horizontal vertical={false} stroke="var(--ds-border)" />
+                        <XAxis dataKey="label" axisLine={false} tickLine={false} stroke="var(--ds-border-strong)" tick={{ fill: 'var(--ds-text-muted)', fontSize: 11 }} interval="preserveStartEnd" />
+                        <YAxis domain={[0, 'auto']} axisLine={false} tickLine={false} stroke="var(--ds-border-strong)" tick={{ fill: 'var(--ds-text-muted)', fontSize: 11 }} width={40} tickFormatter={compactTick} />
                         <Tooltip {...chartTooltip} formatter={(v: number) => [`${formatInt(v)} token`, 'Token']} />
                         <Bar dataKey="total_tokens" fill={BAR_FILL} radius={[4, 4, 0, 0]} maxBarSize={BAR_MAX} />
                       </BarChart>

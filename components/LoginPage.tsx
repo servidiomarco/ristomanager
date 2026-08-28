@@ -3,6 +3,7 @@ import { AlertCircle, Loader2, Eye, EyeOff, Check, CheckCircle } from 'lucide-re
 import { useAuth } from '../contexts/AuthContext';
 import { authApiService } from '../services/authApiService';
 import { PLATFORM_NAME } from '../platform';
+import { dsInput, dsButton, Callout } from './ds';
 
 const SAVED_CREDENTIALS_KEY = 'ristocrm_saved_credentials';
 
@@ -10,14 +11,16 @@ const SAVED_CREDENTIALS_KEY = 'ristocrm_saved_credentials';
 // (arrivando dal link `?reset=<token>` dell'email).
 type LoginMode = 'login' | 'forgot' | 'reset';
 
-const inputClass =
-  'w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-full px-5 py-3 text-[14px] leading-[20px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:border-[var(--color-fg)] transition-colors duration-150';
-
-const submitClass =
-  'mt-3 w-full inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-[var(--color-fg)] hover:opacity-90 text-[var(--color-fg-on-brand)] text-[14px] leading-[20px] font-medium tracking-[0.01em] rounded-full transition-opacity duration-150 disabled:opacity-50 disabled:cursor-not-allowed';
+// Il submit è l'unica azione piena della pagina: primary a tutta larghezza.
+const submitClass = `${dsButton.primary} mt-3 w-full`;
 
 const linkClass =
-  'text-[13px] leading-[18px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] underline underline-offset-2 transition-colors duration-150';
+  'rounded-full text-[13px] leading-[18px] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] underline underline-offset-2 transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-40';
+
+// Occhio mostra/nascondi, parcheggiato dentro il campo: `inset-y-0` gli dà
+// tutta l'altezza dell'input, quindi il bersaglio è già di 44px.
+const revealClass =
+  'absolute inset-y-0 right-0 pr-4 flex items-center rounded-full text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] transition-colors duration-150 disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 export const LoginPage: React.FC = () => {
   const { login } = useAuth();
@@ -133,27 +136,35 @@ export const LoginPage: React.FC = () => {
     }
   };
 
+  // Errore e nota di esito hanno la stessa forma — Callout, tono opposto. Il
+  // `role` sta sul contenitore perché Callout non inoltra attributi arbitrari.
+  const errorCallout = error && (
+    <div role="alert">
+      <Callout tone="critical" icon={AlertCircle}>{error}</Callout>
+    </div>
+  );
+
   return (
-    <div className="min-h-screen w-full flex font-sans text-[var(--color-fg)] bg-[var(--color-surface)]">
+    <div className="min-h-screen w-full flex font-sans text-[var(--ds-text-primary)] bg-[var(--ds-surface)]">
       {/* Left: form column */}
       <div className="flex-1 min-w-0 relative flex flex-col">
-        {/* Top bar: brand */}
-        <div className="px-6 py-6 flex items-center justify-center">
-          {/* Il tema arriva anche qui: .dark viene applicata da localStorage
-              prima dell'accesso. Stessa coppia nero/bianco della sidebar. */}
-          <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-8 w-auto dark:hidden" />
-          <img src="/logo-sympotia-white.svg" alt={PLATFORM_NAME} className="hidden h-8 w-auto dark:block" />
-        </div>
-
-        {/* Centered form */}
-        <main className="flex-1 flex items-center justify-center px-6">
+        {/* Centered form — il logo viaggia dentro il blocco centrato, non in
+            una barra in cima: appoggiato al titolo fa una testata sola invece
+            di due elementi separati da tutta l'altezza della colonna. */}
+        <main className="flex-1 flex items-center justify-center px-6 py-6">
           <div className="w-full max-w-[400px]">
-            <h1 className="text-[26px] leading-[32px] font-semibold tracking-tight text-[var(--color-fg)] text-center mb-1.5">
+            {/* Il tema arriva anche qui: .dark viene applicata da localStorage
+                prima dell'accesso. Stessa coppia nero/bianco della sidebar. */}
+            <div className="flex items-center justify-center mb-18">
+              <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-8 w-auto dark:hidden" />
+              <img src="/logo-sympotia-white.svg" alt={PLATFORM_NAME} className="hidden h-8 w-auto dark:block" />
+            </div>
+            <h1 className="text-[26px] leading-[32px] font-semibold tracking-tight text-[var(--ds-text-primary)] text-center mb-1.5">
               {mode === 'forgot' ? 'Recupera la password'
                 : mode === 'reset' ? 'Scegli una nuova password'
                 : 'Accedi al tuo ristorante'}
             </h1>
-            <p className="text-sm text-[var(--color-fg-muted)] text-center mb-8">
+            <p className="text-[15px] leading-[22px] text-[var(--ds-text-secondary)] text-center mb-8">
               {mode === 'forgot' ? 'Ti mandiamo un link per sceglierne una nuova.'
                 : mode === 'reset' ? 'Minimo 8 caratteri.'
                 : 'Inserisci le tue credenziali per continuare.'}
@@ -164,9 +175,10 @@ export const LoginPage: React.FC = () => {
                 <div className="flex flex-col gap-4">
                   {/* Sempre lo stesso messaggio, che l'email esista o no:
                       la UI non conferma mai quali indirizzi hanno un account. */}
-                  <div role="status" className="flex items-start gap-2 px-4 py-3 bg-[var(--color-surface)] border border-emerald-200 rounded-2xl text-[13px] leading-[18px] text-emerald-700">
-                    <CheckCircle className="h-4 w-4 flex-shrink-0 mt-0.5 text-emerald-600" />
-                    <span>Se l'indirizzo esiste, riceverai un'email con il link per reimpostare la password. Il link vale 1 ora.</span>
+                  <div role="status">
+                    <Callout tone="positive" icon={CheckCircle}>
+                      Se l'indirizzo esiste, riceverai un'email con il link per reimpostare la password. Il link vale 1 ora.
+                    </Callout>
                   </div>
                   <div className="text-center">
                     <button type="button" onClick={goToLogin} className={linkClass}>
@@ -185,19 +197,14 @@ export const LoginPage: React.FC = () => {
                       value={forgotEmail}
                       onChange={(e) => setForgotEmail(e.target.value)}
                       placeholder="Email"
-                      className={inputClass}
+                      className={dsInput}
                       required
                       disabled={isLoading}
                       autoFocus
                     />
                   </div>
 
-                  {error && (
-                    <div role="alert" className="flex items-center gap-2 px-4 py-2.5 bg-[var(--color-surface)] border border-rose-200 rounded-full text-[13px] leading-[18px] text-rose-700">
-                      <AlertCircle className="h-4 w-4 flex-shrink-0 text-rose-600" />
-                      <span>{error}</span>
-                    </div>
-                  )}
+                  {errorCallout}
 
                   <button type="submit" disabled={isLoading} className={submitClass}>
                     {isLoading ? (
@@ -231,7 +238,7 @@ export const LoginPage: React.FC = () => {
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                       placeholder="Nuova password"
-                      className={`${inputClass} pr-12`}
+                      className={`${dsInput} pr-12`}
                       required
                       minLength={8}
                       disabled={isLoading}
@@ -241,7 +248,7 @@ export const LoginPage: React.FC = () => {
                       type="button"
                       onClick={() => setShowNewPassword((p) => !p)}
                       disabled={isLoading}
-                      className="absolute inset-y-0 right-0 pr-4 flex items-center text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors duration-150 disabled:opacity-50"
+                      className={revealClass}
                       aria-label={showNewPassword ? 'Nascondi password' : 'Mostra password'}
                       tabIndex={-1}
                     >
@@ -259,19 +266,14 @@ export const LoginPage: React.FC = () => {
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="Conferma password"
-                    className={inputClass}
+                    className={dsInput}
                     required
                     minLength={8}
                     disabled={isLoading}
                   />
                 </div>
 
-                {error && (
-                  <div role="alert" className="flex items-center gap-2 px-4 py-2.5 bg-[var(--color-surface)] border border-rose-200 rounded-full text-[13px] leading-[18px] text-rose-700">
-                    <AlertCircle className="h-4 w-4 flex-shrink-0 text-rose-600" />
-                    <span>{error}</span>
-                  </div>
-                )}
+                {errorCallout}
 
                 <button type="submit" disabled={isLoading} className={submitClass}>
                   {isLoading ? (
@@ -304,9 +306,8 @@ export const LoginPage: React.FC = () => {
             <form onSubmit={handleSubmit} className="flex flex-col gap-3">
               {/* Esito del reset appena completato */}
               {info && (
-                <div role="status" className="flex items-center gap-2 px-4 py-2.5 bg-[var(--color-surface)] border border-emerald-200 rounded-full text-[13px] leading-[18px] text-emerald-700">
-                  <CheckCircle className="h-4 w-4 flex-shrink-0 text-emerald-600" />
-                  <span>{info}</span>
+                <div role="status">
+                  <Callout tone="positive" icon={CheckCircle}>{info}</Callout>
                 </div>
               )}
               {/* Email */}
@@ -319,7 +320,7 @@ export const LoginPage: React.FC = () => {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="Email"
-                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-full px-5 py-3 text-[14px] leading-[20px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:border-[var(--color-fg)] transition-colors duration-150"
+                  className={dsInput}
                   required
                   disabled={isLoading}
                 />
@@ -336,7 +337,7 @@ export const LoginPage: React.FC = () => {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Password"
-                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-full px-5 py-3 pr-12 text-[14px] leading-[20px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:border-[var(--color-fg)] transition-colors duration-150"
+                    className={`${dsInput} pr-12`}
                     required
                     disabled={isLoading}
                   />
@@ -344,7 +345,7 @@ export const LoginPage: React.FC = () => {
                     type="button"
                     onClick={() => setShowPassword((p) => !p)}
                     disabled={isLoading}
-                    className="absolute inset-y-0 right-0 pr-4 flex items-center text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors duration-150 disabled:opacity-50"
+                    className={revealClass}
                     aria-label={showPassword ? 'Nascondi password' : 'Mostra password'}
                     tabIndex={-1}
                   >
@@ -353,10 +354,11 @@ export const LoginPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Remember me */}
+              {/* Remember me — checkbox 20px del design system, riga a 44px
+                  perché il bersaglio è tutta la label, non il quadratino. */}
               <label
                 htmlFor="remember-me"
-                className="flex items-center gap-2 px-1 mt-1 cursor-pointer select-none"
+                className="flex min-h-11 items-center gap-2.5 px-1 cursor-pointer select-none"
               >
                 <span className="relative inline-flex items-center justify-center">
                   <input
@@ -368,32 +370,23 @@ export const LoginPage: React.FC = () => {
                     className="peer sr-only"
                   />
                   <span
-                    className="h-4 w-4 rounded-[4px] border border-[var(--color-line-strong)] bg-[var(--color-surface)] peer-checked:bg-[var(--color-fg)] peer-checked:border-[var(--color-fg)] peer-disabled:opacity-50 transition-colors duration-150"
+                    className="h-5 w-5 rounded-[6px] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] peer-checked:bg-[var(--ds-action-bg)] peer-checked:border-[var(--ds-action-bg)] peer-disabled:opacity-40 peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--ds-border-focus)] peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[var(--ds-surface)] transition-colors duration-150"
                   />
                   <Check
-                    className="absolute h-3 w-3 text-[var(--color-fg-on-brand)] opacity-0 peer-checked:opacity-100 transition-opacity duration-150 pointer-events-none"
+                    className="absolute h-3.5 w-3.5 text-[var(--ds-action-fg)] opacity-0 peer-checked:opacity-100 transition-opacity duration-150 pointer-events-none"
                     strokeWidth={3}
                   />
                 </span>
-                <span className="text-[13px] leading-[18px] text-[var(--color-fg-muted)]">
+                <span className="text-[13px] leading-[18px] text-[var(--ds-text-secondary)]">
                   Ricorda le mie credenziali
                 </span>
               </label>
 
               {/* Error */}
-              {error && (
-                <div role="alert" className="flex items-center gap-2 px-4 py-2.5 bg-[var(--color-surface)] border border-rose-200 rounded-full text-[13px] leading-[18px] text-rose-700">
-                  <AlertCircle className="h-4 w-4 flex-shrink-0 text-rose-600" />
-                  <span>{error}</span>
-                </div>
-              )}
+              {errorCallout}
 
               {/* Submit (pill) */}
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="mt-3 w-full inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-[var(--color-fg)] hover:opacity-90 text-[var(--color-fg-on-brand)] text-[14px] leading-[20px] font-medium tracking-[0.01em] rounded-full transition-opacity duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
+              <button type="submit" disabled={isLoading} className={submitClass}>
                 {isLoading ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -430,14 +423,14 @@ export const LoginPage: React.FC = () => {
 
         {/* Footer */}
         <div className="px-6 py-6 text-center">
-          <p className="text-[12px] leading-[16px] text-[var(--color-fg-subtle)]">
+          <p className="text-[12px] leading-[16px] text-[var(--ds-text-subtle)]">
             {PLATFORM_NAME} · Italia
           </p>
         </div>
       </div>
 
       {/* Right: framed image */}
-      <div className="hidden lg:flex flex-1 min-w-0 bg-[var(--color-surface-3)] p-6">
+      <div className="hidden lg:flex flex-1 min-w-0 bg-[var(--ds-canvas)] p-6">
         <div className="w-full h-full rounded-2xl overflow-hidden">
           <img
             src="https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=1400&q=80"

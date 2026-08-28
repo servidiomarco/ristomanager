@@ -1707,7 +1707,7 @@ const App: React.FC = () => {
   // Show loading spinner while checking auth
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-[var(--color-surface-2)] flex items-center justify-center">
+      <div className="min-h-screen bg-[var(--ds-canvas)] flex items-center justify-center">
         <Loader label="Caricamento..." />
       </div>
     );
@@ -1838,7 +1838,7 @@ const App: React.FC = () => {
     .filter(cluster => cluster.length > 0);
 
   return (
-    <div className="flex h-[100dvh] overflow-hidden bg-[var(--ds-canvas)] font-sans text-[var(--color-fg)]">
+    <div className="flex h-[100dvh] overflow-hidden bg-[var(--ds-canvas)] font-sans text-[var(--ds-text-primary)]">
       {/* Version banner — shows when the running bundle is older than the
           server. Fixed at the top, above every view. */}
       <AppVersionBanner />
@@ -2263,20 +2263,20 @@ const App: React.FC = () => {
                     <div
                       role="menu"
                       aria-label="Crea nuovo"
-                      className="absolute right-0 top-full mt-2 w-60 p-1.5 rounded-[18px] border border-[var(--color-line)] bg-[var(--color-surface)] shadow-[var(--shadow-lg)] z-30 animate-in fade-in slide-in-from-top-2"
+ className="absolute right-0 top-full mt-2 w-60 p-1.5 rounded-[18px] border border-[var(--ds-border)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] z-30"
                     >
                       {visibleCreateClusters.map((cluster, ci) => (
                         <React.Fragment key={ci}>
-                          {ci > 0 && <div className="my-1.5 border-t border-[var(--color-line)]" />}
+                          {ci > 0 && <div className="my-1.5 border-t border-[var(--ds-border)]" />}
                           {cluster.map(item => (
                             <button
                               key={item.label}
                               type="button"
                               role="menuitem"
                               onClick={() => runCreateAction(item.run)}
-                              className="w-full flex items-center gap-3 px-3 h-11 rounded-xl text-sm font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors text-left"
+                              className="w-full flex items-center gap-3 px-3 h-11 rounded-xl text-sm font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] transition-colors text-left"
                             >
-                              <item.Icon className="h-[18px] w-[18px] text-[var(--color-fg-muted)]" />
+                              <item.Icon className="h-[18px] w-[18px] text-[var(--ds-text-muted)]" />
                               <span>{item.label}</span>
                             </button>
                           ))}
@@ -3053,7 +3053,7 @@ const App: React.FC = () => {
               className="absolute inset-0 bg-[var(--ds-backdrop)]"
               onClick={() => setShowMoreMenu(false)}
             />
-            <div className="absolute bottom-0 left-0 right-0 max-h-[calc(100dvh-env(safe-area-inset-top)-1rem)] flex flex-col bg-[var(--ds-surface)] rounded-t-[28px] shadow-[var(--ds-shadow-raised)] animate-in slide-in-from-bottom duration-200">
+ <div className="absolute bottom-0 left-0 right-0 max-h-[calc(100dvh-env(safe-area-inset-top)-1rem)] flex flex-col bg-[var(--ds-surface)] rounded-t-[28px] shadow-[var(--ds-shadow-raised)] duration-200">
               <div className="flex-shrink-0 bg-[var(--ds-surface)] rounded-t-[28px]">
                 <div className="flex justify-center pt-3 pb-1">
                   <div className="w-10 h-1 rounded-full bg-[var(--ds-border-strong)]" />
@@ -3206,33 +3206,33 @@ const App: React.FC = () => {
             {toasts.map(toast => {
                 const hasDetails = toast.details && toast.details.length > 0;
                 const accent = toast.type === 'success'
-                    ? { iconText: 'text-emerald-600' }
+                    ? { iconText: 'text-[var(--ds-seated-text)]' }
                     : toast.type === 'error'
-                    ? { iconText: 'text-rose-600' }
-                    : { iconText: 'text-[var(--color-fg)]' };
+                    ? { iconText: 'text-[var(--ds-critical-text)]' }
+                    : { iconText: 'text-[var(--ds-text-primary)]' };
                 return (
                     <div
                         key={toast.id}
                         role={toast.type === 'error' ? 'alert' : undefined}
-                        className={`bg-[var(--color-surface)] shadow-[var(--shadow-lg)] border border-[var(--color-line)] rounded-lg animate-in slide-in-from-right duration-300 ${
+ className={`bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] border border-[var(--ds-border)] rounded-lg duration-300 ${
                             hasDetails ? 'p-3.5 min-w-[300px] sm:min-w-[360px]' : 'flex items-center gap-2.5 px-3.5 py-2.5'
                         }`}
                     >
                         {hasDetails ? (
                             <div className="flex items-start gap-3">
-                                <div className={`p-1.5 rounded-md bg-[var(--color-surface-3)] ${accent.iconText} flex-shrink-0`}>
+                                <div className={`p-1.5 rounded-md bg-[var(--ds-surface-row)] ${accent.iconText} flex-shrink-0`}>
                                     {toast.type === 'success' && <CheckCircle className="h-4 w-4" />}
                                     {toast.type === 'error' && <AlertTriangle className="h-4 w-4" />}
                                     {toast.type === 'info' && <Info className="h-4 w-4" />}
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     {toast.title && (
-                                        <p className="text-[13px] font-semibold text-[var(--color-fg)] mb-0.5">{toast.title}</p>
+                                        <p className="text-[13px] font-semibold text-[var(--ds-text-primary)] mb-0.5">{toast.title}</p>
                                     )}
-                                    <p className="text-sm font-medium text-[var(--color-fg)] mb-1">{toast.message}</p>
+                                    <p className="text-sm font-medium text-[var(--ds-text-primary)] mb-1">{toast.message}</p>
                                     <ul className="space-y-0.5">
                                         {toast.details!.map((d, i) => (
-                                            <li key={i} className="text-[13px] text-[var(--color-fg-muted)] leading-snug">{d}</li>
+                                            <li key={i} className="text-[13px] text-[var(--ds-text-muted)] leading-snug">{d}</li>
                                         ))}
                                     </ul>
                                     {toast.action && (
@@ -3242,7 +3242,7 @@ const App: React.FC = () => {
                                                 toast.action!.onClick();
                                                 setToasts(prev => prev.filter(t => t.id !== toast.id));
                                             }}
-                                            className={`mt-2 px-3 py-1.5 text-xs font-semibold rounded-md bg-[var(--color-surface-3)] ${accent.iconText} hover:opacity-80`}
+                                            className={`mt-2 px-3 py-1.5 text-xs font-semibold rounded-md bg-[var(--ds-surface-row)] ${accent.iconText} hover:opacity-80`}
                                         >
                                             {toast.action.label}
                                         </button>
@@ -3254,7 +3254,7 @@ const App: React.FC = () => {
                                 {toast.type === 'success' && <CheckCircle className={`h-4 w-4 ${accent.iconText} shrink-0`} />}
                                 {toast.type === 'error' && <AlertTriangle className={`h-4 w-4 ${accent.iconText} shrink-0`} />}
                                 {toast.type === 'info' && <Info className={`h-4 w-4 ${accent.iconText} shrink-0`} />}
-                                <span className="text-[13px] font-medium text-[var(--color-fg)] flex-1">{toast.message}</span>
+                                <span className="text-[13px] font-medium text-[var(--ds-text-primary)] flex-1">{toast.message}</span>
                                 {toast.action && (
                                     <button
                                         type="button"
@@ -3262,7 +3262,7 @@ const App: React.FC = () => {
                                             toast.action!.onClick();
                                             setToasts(prev => prev.filter(t => t.id !== toast.id));
                                         }}
-                                        className={`px-3 py-1 text-xs font-semibold rounded-md bg-[var(--color-surface-3)] ${accent.iconText} hover:opacity-80 flex-shrink-0`}
+                                        className={`px-3 py-1 text-xs font-semibold rounded-md bg-[var(--ds-surface-row)] ${accent.iconText} hover:opacity-80 flex-shrink-0`}
                                     >
                                         {toast.action.label}
                                     </button>

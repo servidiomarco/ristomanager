@@ -285,8 +285,8 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                     onClick={() => setIconPickerFor(isOpen ? null : pickerKey)}
                     className={`w-9 h-9 rounded-md border flex items-center justify-center transition-colors ${
                         currentIcon
-                            ? 'border-indigo-300 bg-indigo-50 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300 dark:border-indigo-500/40'
-                            : 'border-[var(--color-line)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+                            ? 'border-[var(--ds-arriving-solid)] bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]'
+                            : 'border-[var(--ds-border)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
                     } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                     title={currentIcon ? RESERVATION_NOTE_ICON_LABELS[currentIcon] || currentIcon : 'Scegli icona'}
                     aria-label="Scegli icona"
@@ -296,13 +296,13 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                 {isOpen && (
                     <>
                         <div className="fixed inset-0 z-[70]" onClick={() => setIconPickerFor(null)} />
-                        <div className="absolute right-0 top-full mt-1 z-[71] w-64 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-lg shadow-[var(--shadow-overlay)] p-2">
-                            <div className="flex items-center justify-between px-1 pb-1.5 mb-1 border-b border-[var(--color-line)]">
-                                <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-fg-muted)]">Icona</span>
+                        <div className="absolute right-0 top-full mt-1 z-[71] w-64 bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-lg shadow-[var(--ds-shadow-raised)] p-2">
+                            <div className="flex items-center justify-between px-1 pb-1.5 mb-1 border-b border-[var(--ds-border)]">
+                                <span className="text-[11px] font-semibold text-[var(--ds-text-muted)]">Icona</span>
                                 <button
                                     type="button"
                                     onClick={() => { onPick(null); setIconPickerFor(null); }}
-                                    className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-500 hover:text-rose-600"
+                                    className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--ds-critical-solid)] hover:text-[var(--ds-critical-text)]"
                                 >
                                     <X className="w-3 h-3" /> Nessuna
                                 </button>
@@ -318,8 +318,8 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                                             onClick={() => { onPick(key); setIconPickerFor(null); }}
                                             className={`w-9 h-9 rounded-md flex items-center justify-center transition-colors ${
                                                 selected
-                                                    ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/25 dark:text-indigo-200'
-                                                    : 'text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]'
+                                                    ? 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]'
+                                                    : 'text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]'
                                             }`}
                                             title={RESERVATION_NOTE_ICON_LABELS[key] || key}
                                         >
@@ -337,7 +337,7 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
 
     if (loading) {
         return (
-            <div className="flex items-center gap-2 text-[var(--color-fg-muted)] text-[13px] py-2">
+            <div className="flex items-center gap-2 text-[var(--ds-text-muted)] text-[13px] py-2">
                 <Loader label="Caricamento…" size={40} />
             </div>
         );
@@ -346,7 +346,7 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
     return (
         <div className="space-y-4">
             {drafts.length === 0 ? (
-                <p className="text-[13px] text-[var(--color-fg-subtle)] italic px-1">Nessuna nota configurata.</p>
+                <p className="text-[13px] text-[var(--ds-text-subtle)] italic px-1">Nessuna nota configurata.</p>
             ) : (
                 <ul className="space-y-1.5">
                     {drafts.map((d, i) => {
@@ -355,8 +355,8 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                         return (
                             <li
                                 key={d.key}
-                                className={`rounded-md border bg-[var(--color-surface)] transition-colors ${
-                                    dragOverIndex === i ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-500/10' : 'border-[var(--color-line)]'
+                                className={`rounded-md border bg-[var(--ds-surface)] transition-colors ${
+                                    dragOverIndex === i ? 'border-[var(--ds-arriving-solid)] bg-[var(--ds-arriving-tint)]' : 'border-[var(--ds-border)]'
                                 }`}
                             >
                                 <div
@@ -367,7 +367,7 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                                     onDragEnd={handleDragEnd}
                                     className="flex items-center gap-2 px-2 py-1.5"
                                 >
-                                    <GripVertical className={`w-4 h-4 flex-shrink-0 ${canEdit ? 'text-[var(--color-fg-muted)] cursor-grab active:cursor-grabbing' : 'text-[var(--color-fg-subtle)]'}`} />
+                                    <GripVertical className={`w-4 h-4 flex-shrink-0 ${canEdit ? 'text-[var(--ds-text-muted)] cursor-grab active:cursor-grabbing' : 'text-[var(--ds-text-subtle)]'}`} />
                                     {renderIconButton(d.icon, d.key, (icon) => updateIconAt(i, icon), !canEdit)}
                                     <input
                                         type="text"
@@ -375,7 +375,7 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                                         disabled={!canEdit}
                                         maxLength={MAX_LABEL_LENGTH}
                                         onChange={(e) => updateLabelAt(i, e.target.value)}
-                                        className="flex-1 bg-transparent text-[14px] text-[var(--color-fg)] focus:outline-none disabled:opacity-70"
+                                        className="flex-1 bg-transparent text-[14px] text-[var(--ds-text-primary)] focus:outline-none disabled:opacity-70"
                                     />
                                     {/* Toggle "Quantità": una nota può chiedere un numero al click.
                                         Se ci sono varianti, il toggle resta on: la variante senza
@@ -383,17 +383,17 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                                     <label className={`inline-flex items-center gap-1.5 text-[12px] select-none ${canEdit ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
                                         <input
                                             type="checkbox"
-                                            className="w-3.5 h-3.5 rounded border-[var(--color-line)] accent-indigo-600"
+                                            className="w-3.5 h-3.5 rounded border-[var(--ds-border-strong)] accent-[var(--ds-action-bg)]"
                                             checked={d.has_quantity || d.variants.length > 0}
                                             disabled={!canEdit || d.variants.length > 0}
                                             onChange={() => toggleQuantityAt(i)}
                                         />
-                                        <span className="text-[var(--color-fg-muted)]">Quantità</span>
+                                        <span className="text-[var(--ds-text-muted)]">Quantità</span>
                                     </label>
                                     <button
                                         type="button"
                                         onClick={() => toggleExpanded(d.key)}
-                                        className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors"
+                                        className="p-1.5 rounded-md text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)] transition-colors"
                                         title={isExpanded ? 'Nascondi varianti' : 'Mostra varianti'}
                                         aria-label={isExpanded ? 'Nascondi varianti' : 'Mostra varianti'}
                                         aria-expanded={isExpanded}
@@ -407,7 +407,7 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                                         <button
                                             type="button"
                                             onClick={() => removeAt(i)}
-                                            className="p-1.5 rounded-md text-rose-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-900/50 transition-colors"
+                                            className="p-1.5 rounded-md text-[var(--ds-critical-solid)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                                             title="Rimuovi"
                                             aria-label={`Rimuovi ${d.label}`}
                                         >
@@ -444,13 +444,13 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                         maxLength={MAX_LABEL_LENGTH}
                         onChange={(e) => setNewLabel(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addLabel(); } }}
-                        className="flex-1 rounded-md border border-[var(--color-line)] px-3 py-1.5 text-[14px] bg-[var(--color-surface)] focus:outline-none focus:border-[var(--color-fg)]"
+                        className="flex-1 rounded-md border border-[var(--ds-border)] px-3 py-1.5 text-[14px] bg-[var(--ds-surface)] focus:outline-none focus:border-[var(--ds-action-bg)]"
                     />
                     <button
                         type="button"
                         onClick={addLabel}
                         disabled={!newLabel.trim() || drafts.length >= MAX_LABELS}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[13px] font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         <Plus className="w-4 h-4" /> Aggiungi
                     </button>
@@ -458,15 +458,15 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
             )}
 
             {canEdit && (
-                <div className="flex items-center justify-between gap-3 pt-2 border-t border-[var(--color-line)]">
-                    <span className="text-[12px] text-[var(--color-fg-subtle)]">
+                <div className="flex items-center justify-between gap-3 pt-2 border-t border-[var(--ds-border)]">
+                    <span className="text-[12px] text-[var(--ds-text-subtle)]">
                         {drafts.length}/{MAX_LABELS} note
                     </span>
                     <button
                         type="button"
                         onClick={save}
                         disabled={!isDirty || saving}
-                        className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[13px] font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                         Salva modifiche
@@ -475,7 +475,7 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
             )}
 
             {!canEdit && (
-                <p className="text-[12px] text-[var(--color-fg-subtle)]">
+                <p className="text-[12px] text-[var(--ds-text-subtle)]">
                     Solo gli amministratori possono modificare la lista.
                 </p>
             )}
@@ -501,26 +501,26 @@ const VariantEditor: React.FC<VariantEditorProps> = ({ variants, canEdit, hint, 
         setPending('');
     };
     return (
-        <div className="border-t border-[var(--color-line)] px-3 py-2 space-y-2 bg-[var(--color-surface-alt,transparent)]">
-            <p className="text-[11px] text-[var(--color-fg-subtle)]">{hint}</p>
+        <div className="border-t border-[var(--ds-border)] px-3 py-2 space-y-2">
+            <p className="text-[11px] text-[var(--ds-text-subtle)]">{hint}</p>
             {variants.length > 0 && (
                 <ul className="space-y-1">
                     {variants.map((v, i) => (
                         <li key={v.key} className="flex items-center gap-2">
-                            <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-fg-muted)] flex-shrink-0" />
+                            <span className="w-1.5 h-1.5 rounded-full bg-[var(--ds-text-muted)] flex-shrink-0" />
                             <input
                                 type="text"
                                 value={v.label}
                                 disabled={!canEdit}
                                 maxLength={MAX_LABEL_LENGTH}
                                 onChange={(e) => onUpdate(i, e.target.value)}
-                                className="flex-1 bg-transparent text-[13px] text-[var(--color-fg)] focus:outline-none disabled:opacity-70"
+                                className="flex-1 bg-transparent text-[13px] text-[var(--ds-text-primary)] focus:outline-none disabled:opacity-70"
                             />
                             {canEdit && (
                                 <button
                                     type="button"
                                     onClick={() => onRemove(i)}
-                                    className="p-1 rounded-md text-rose-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-900/50 transition-colors"
+                                    className="p-1 rounded-md text-[var(--ds-critical-solid)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                                     title="Rimuovi variante"
                                     aria-label={`Rimuovi variante ${v.label}`}
                                 >
@@ -540,13 +540,13 @@ const VariantEditor: React.FC<VariantEditorProps> = ({ variants, canEdit, hint, 
                         maxLength={MAX_LABEL_LENGTH}
                         onChange={(e) => setPending(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }}
-                        className="flex-1 rounded-md border border-[var(--color-line)] px-2.5 py-1 text-[13px] bg-[var(--color-surface)] focus:outline-none focus:border-[var(--color-fg)]"
+                        className="flex-1 rounded-md border border-[var(--ds-border)] px-2.5 py-1 text-[13px] bg-[var(--ds-surface)] focus:outline-none focus:border-[var(--ds-action-bg)]"
                     />
                     <button
                         type="button"
                         onClick={commit}
                         disabled={!pending.trim() || variants.length >= MAX_VARIANTS}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[12px] font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[12px] font-medium hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         <Plus className="w-3.5 h-3.5" /> Aggiungi
                     </button>

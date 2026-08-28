@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowRight, Check, CalendarPlus, Paperclip, X as XIcon, Sparkles, Wand2, FolderOpen } from 'lucide-react';
+import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowRight, Check, CalendarPlus, Paperclip, X as XIcon, Wand2, FolderOpen } from 'lucide-react';
 import { Loader } from './Loader';
 import { SkeletonInboxList } from './SkeletonCards';
 import {
@@ -991,11 +991,11 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                     non parte da sola: l'agente ha capito cosa fare, la
                     decisione resta di chi legge. */}
                 {proposal && (
-                  <div className="rounded-[14px] border border-violet-300 bg-violet-50 px-3.5 py-3 dark:border-violet-800 dark:bg-violet-950/40">
-                    <div className="flex items-start gap-2.5">
-                      <Wand2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-violet-600 dark:text-violet-400" aria-hidden />
+                  <div className="ds-ai-frame">
+                    <div className="ds-ai-card flex items-start gap-2.5 px-3.5 py-3">
+                      <Wand2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
                       <div className="min-w-0 flex-1">
-                        <p className="text-[13px] font-semibold text-violet-900 dark:text-violet-200">
+                        <p className="text-[13px] font-semibold text-[var(--ds-text-primary)]">
                           L'agente propone un'azione sulla prenotazione
                         </p>
                         <p className="mt-0.5 text-[14px] text-[var(--ds-text-primary)]">{proposal.summary}</p>
@@ -1007,7 +1007,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                             type="button"
                             onClick={handleConfirmProposal}
                             disabled={proposalBusy}
-                            className="inline-flex h-9 items-center gap-1.5 rounded-full bg-violet-600 px-3.5 text-[13px] font-semibold text-white transition-colors hover:bg-violet-700 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                            className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                           >
                             {proposalBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                             Conferma ed esegui
@@ -1092,9 +1092,9 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                       disabled={suggesting || sending}
                       aria-label="Suggerisci una risposta"
                       title="Proponi una risposta in base alla conversazione e alle regole della casa"
-                      className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-violet-600 transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] dark:text-violet-400"
+                      className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
-                      {suggesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                      {suggesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
                     </button>
                   )}
                   <button

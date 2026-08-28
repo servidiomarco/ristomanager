@@ -1,5 +1,6 @@
 import React from 'react';
 import { Trash2 } from 'lucide-react';
+import { ModalShell, dsButton } from './ds';
 
 interface ConfirmDeleteModalProps {
   isOpen: boolean;
@@ -28,43 +29,47 @@ export const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
   onConfirm,
   onCancel,
   icon,
-  iconWrapperClassName = 'mx-auto w-12 h-12 bg-rose-50 border border-rose-100 dark:bg-rose-500/15 dark:border-rose-500/30 rounded-full flex items-center justify-center mb-4',
-  confirmClassName = 'rounded-full px-4 py-2 bg-rose-600 text-[#ffffff] text-sm font-medium hover:bg-rose-700 transition',
+  iconWrapperClassName = 'mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--ds-critical-tint)]',
+  // §7.5: la conferma distruttiva e' l'unico posto dove `critical` porta
+  // peso pieno — l'intenzione e' gia' stata presa.
+  confirmClassName = dsButton.critical,
   showIrreversibleWarning = true,
 }) => {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={onCancel}>
-      <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-sm p-5 animate-in fade-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
-        <div className="text-center">
-          <div className={iconWrapperClassName}>
-            {icon ?? <Trash2 className="h-5 w-5 text-rose-600" />}
-          </div>
-          <h3 className="text-[15px] font-semibold text-[var(--color-fg)] mb-2">{title}</h3>
-          <p className="text-sm text-[var(--color-fg-muted)] mb-1">{message}</p>
-          {itemName && (
-            <p className="text-base font-medium text-[var(--color-fg)] mb-3">{itemName}</p>
-          )}
-          {showIrreversibleWarning && (
-            <p className="text-xs text-[var(--color-fg-subtle)]">Questa azione non può essere annullata.</p>
-          )}
-        </div>
-        <div className="flex gap-2 justify-end mt-4">
-          <button
-            onClick={onCancel}
-            className="px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
-          >
+    <ModalShell
+      open={isOpen}
+      onClose={onCancel}
+      title={title}
+      size="sm"
+      // Si apre spesso sopra un altro modal: teniamo lo z-index esplicito
+      // invece di affidarci all'ordine di pittura.
+      className="!z-[60]"
+      bodyClassName="px-5 py-5 sm:px-6"
+      footer={
+        <>
+          <button type="button" onClick={onCancel} className={dsButton.secondary}>
             {cancelLabel}
           </button>
-          <button
-            onClick={onConfirm}
-            className={confirmClassName}
-          >
+          <button type="button" onClick={onConfirm} className={confirmClassName}>
             {confirmLabel}
           </button>
+        </>
+      }
+    >
+      <div className="text-center">
+        <div className={iconWrapperClassName}>
+          {icon ?? <Trash2 className="h-5 w-5 text-[var(--ds-critical-text)]" aria-hidden />}
         </div>
+        <p className="mb-1 text-[15px] text-[var(--ds-text-secondary)]">{message}</p>
+        {itemName && (
+          <p className="mb-3 text-[15px] font-semibold text-[var(--ds-text-primary)]">{itemName}</p>
+        )}
+        {showIrreversibleWarning && (
+          <p className="text-[13px] text-[var(--ds-text-muted)]">Questa azione non può essere annullata.</p>
+        )}
       </div>
-    </div>
+    </ModalShell>
   );
 };

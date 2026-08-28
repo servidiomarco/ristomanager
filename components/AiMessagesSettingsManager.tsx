@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Sparkles, Loader2, Plus, Trash2, ChevronDown, Pencil, Check, X } from 'lucide-react';
+import { Wand2, Loader2, Plus, Trash2, ChevronDown, Pencil, Check, X } from 'lucide-react';
 import { getFeatureFlags, updateFeatureFlags, FeatureFlags } from '../services/apiService';
 import {
     listKnowledge, createKnowledge, updateKnowledge, deleteKnowledge,
@@ -96,7 +96,7 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
 
     if (loading) {
         return (
-            <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-line)] px-4 py-3 flex items-center gap-2 text-[13px] text-[var(--color-fg-muted)]">
+            <div className="bg-[var(--ds-surface)] rounded-lg border border-[var(--ds-border)] px-4 py-3 flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
                 <Loader2 className="h-4 w-4 animate-spin" /> Caricamento…
             </div>
         );
@@ -107,7 +107,7 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
             <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
                 <div className="flex items-center gap-3 min-w-0">
                     <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-arriving-text)] flex-shrink-0">
-                        <Sparkles className="w-5 h-5" />
+                        <Wand2 className="w-5 h-5" />
                     </div>
                     <div className="min-w-0">
                         <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Messaggi con AI</h4>
@@ -136,31 +136,31 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
                 </div>
             </summary>
 
-            <div className="border-t border-[var(--color-line)] px-4 py-4 space-y-5">
-                <div className="rounded-md bg-[var(--color-surface-2)] border border-[var(--color-line)] px-3 py-2.5 text-[13px] leading-relaxed text-[var(--color-fg-muted)]">
-                    Nella pagina Messaggi comparirà <strong className="text-[var(--color-fg)]">Suggerisci risposta</strong>:
+            <div className="border-t border-[var(--ds-border)] px-4 py-4 space-y-5">
+                <div className="rounded-md bg-[var(--ds-surface-row)] border border-[var(--ds-border)] px-3 py-2.5 text-[13px] leading-relaxed text-[var(--ds-text-muted)]">
+                    Nella pagina Messaggi comparirà <strong className="text-[var(--ds-text-primary)]">Suggerisci risposta</strong>:
                     l'AI legge la conversazione e la prenotazione collegata e propone una frase.
-                    <strong className="text-[var(--color-fg)]"> Nessun messaggio parte da solo</strong> — leggi, correggi se serve, invii tu.
+                    <strong className="text-[var(--ds-text-primary)]"> Nessun messaggio parte da solo</strong> — leggi, correggi se serve, invii tu.
                     Su disponibilità dei tavoli e allergie non risponde mai: quelle restano a una persona.
                 </div>
 
                 <section>
                     <div className="flex items-center justify-between mb-2">
-                        <h5 className="text-[11px] uppercase tracking-[0.08em] font-semibold text-[var(--color-fg-subtle)]">
+                        <h5 className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">
                             Regole della casa
                         </h5>
-                        <span className="text-[12px] text-[var(--color-fg-muted)]">
+                        <span className="text-[12px] text-[var(--ds-text-muted)]">
                             {activeCount} attiv{activeCount === 1 ? 'a' : 'e'}
                         </span>
                     </div>
 
                     {enabled && activeCount === 0 && (
-                        <p className="mb-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-[13px] text-amber-900 dark:bg-amber-950/40 dark:border-amber-900 dark:text-amber-200">
+                        <p className="mb-2 rounded-md bg-[var(--ds-pending-tint)] px-3 py-2 text-[13px] text-[var(--ds-pending-text)]">
                             La funzione è attiva ma non c'è nessuna regola: senza, l'AI non ha da cosa rispondere e non proporrà nulla.
                         </p>
                     )}
 
-                    <div className="rounded-md border border-[var(--color-line)] divide-y divide-[var(--color-line)]">
+                    <div className="rounded-md border border-[var(--ds-border)] divide-y divide-[var(--ds-border)]">
                         {entries.map(e => (
                             <div key={e.id} className={`px-3 py-2.5 ${e.is_active ? '' : 'opacity-50'}`}>
                                 {editingId === e.id ? (
@@ -168,22 +168,22 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
                                         <input
                                             value={editTitle}
                                             onChange={ev => setEditTitle(ev.target.value)}
-                                            className="w-full text-[13px] font-medium rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5"
+                                            className="w-full text-[13px] font-medium rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5"
                                         />
                                         <textarea
                                             value={editContent}
                                             onChange={ev => setEditContent(ev.target.value)}
                                             rows={3}
-                                            className="w-full text-[13px] rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 resize-y"
+                                            className="w-full text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 resize-y"
                                         />
                                         <div className="flex items-center gap-2">
                                             <button type="button" disabled={!editTitle.trim() || !editContent.trim() || saving}
                                                 onClick={() => saveEdit(e.id)}
-                                                className="inline-flex items-center gap-1 text-[13px] px-2.5 py-1.5 rounded-md border border-[var(--color-line)] disabled:opacity-50">
+                                                className="inline-flex items-center gap-1 text-[13px] px-2.5 py-1.5 rounded-md border border-[var(--ds-border)] disabled:opacity-50">
                                                 <Check size={13} /> Salva
                                             </button>
                                             <button type="button" onClick={() => setEditingId(null)}
-                                                className="inline-flex items-center gap-1 text-[13px] px-2.5 py-1.5 rounded-md text-[var(--color-fg-muted)]">
+                                                className="inline-flex items-center gap-1 text-[13px] px-2.5 py-1.5 rounded-md text-[var(--ds-text-muted)]">
                                                 <X size={13} /> Annulla
                                             </button>
                                         </div>
@@ -191,14 +191,14 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
                                 ) : (
                                     <div className="flex items-start gap-3">
                                         <div className="flex-1 min-w-0">
-                                            <p className="text-[13px] font-medium text-[var(--color-fg)]">{e.title}</p>
-                                            <p className="text-[13px] text-[var(--color-fg-muted)] whitespace-pre-wrap">{e.content}</p>
+                                            <p className="text-[13px] font-medium text-[var(--ds-text-primary)]">{e.title}</p>
+                                            <p className="text-[13px] text-[var(--ds-text-muted)] whitespace-pre-wrap">{e.content}</p>
                                         </div>
                                         {canEdit && (
                                             <div className="flex items-center gap-1 flex-shrink-0">
                                                 <button type="button" aria-label={`Modifica ${e.title}`} disabled={saving}
                                                     onClick={() => { setEditingId(e.id); setEditTitle(e.title); setEditContent(e.content); }}
-                                                    className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] disabled:opacity-50">
+                                                    className="p-1.5 rounded-md text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] disabled:opacity-50">
                                                     <Pencil size={13} />
                                                 </button>
                                                 <button type="button" disabled={saving}
@@ -206,7 +206,7 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
                                                         const u = await updateKnowledge(e.id, { is_active: !e.is_active });
                                                         setEntries(prev => prev.map(x => (x.id === e.id ? u : x)));
                                                     })}
-                                                    className="text-[12px] px-1.5 text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] disabled:opacity-50">
+                                                    className="text-[12px] px-1.5 text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] disabled:opacity-50">
                                                     {e.is_active ? 'disattiva' : 'riattiva'}
                                                 </button>
                                                 <button type="button" aria-label={`Elimina ${e.title}`} disabled={saving}
@@ -214,7 +214,7 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
                                                         await deleteKnowledge(e.id);
                                                         setEntries(prev => prev.filter(x => x.id !== e.id));
                                                     }, 'Regola eliminata')}
-                                                    className="p-1.5 rounded-md text-rose-600 disabled:opacity-50">
+                                                    className="p-1.5 rounded-md text-[var(--ds-critical-solid)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50">
                                                     <Trash2 size={13} />
                                                 </button>
                                             </div>
@@ -226,7 +226,7 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
 
                         {entries.length === 0 && (
                             <div className="px-3 py-3 space-y-2">
-                                <p className="text-[13px] text-[var(--color-fg-muted)]">
+                                <p className="text-[13px] text-[var(--ds-text-muted)]">
                                     Nessuna regola. Parti da questi esempi, poi aggiungi le tue:
                                 </p>
                                 {canEdit && (
@@ -234,7 +234,7 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
                                         {ESEMPI.map(ex => (
                                             <button key={ex.title} type="button" disabled={saving}
                                                 onClick={() => add(ex.title, ex.content)}
-                                                className="text-[12px] px-2 py-1 rounded-full border border-[var(--color-line)] hover:bg-[var(--color-surface-2)] disabled:opacity-50">
+                                                className="text-[12px] px-2 py-1 rounded-full border border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50">
                                                 <Plus size={11} className="inline mr-0.5" />{ex.title}
                                             </button>
                                         ))}
@@ -249,24 +249,24 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
                                     value={newTitle}
                                     onChange={e => setNewTitle(e.target.value)}
                                     placeholder="Argomento (es. Torte da fuori)"
-                                    className="w-full text-[13px] rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5"
+                                    className="w-full text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5"
                                 />
                                 <textarea
                                     value={newContent}
                                     onChange={e => setNewContent(e.target.value)}
                                     placeholder="La regola, come la diresti a un cliente: “Sì, si può portare la torta purché porti anche lo scontrino del pasticcere.”"
                                     rows={2}
-                                    className="w-full text-[13px] rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 resize-y"
+                                    className="w-full text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 resize-y"
                                 />
                                 <button type="button" disabled={!newTitle.trim() || !newContent.trim() || saving}
                                     onClick={() => add(newTitle.trim(), newContent.trim())}
-                                    className="text-[13px] px-2.5 py-1.5 rounded-md border border-[var(--color-line)] flex items-center gap-1 disabled:opacity-50">
+                                    className="text-[13px] px-2.5 py-1.5 rounded-md border border-[var(--ds-border)] flex items-center gap-1 disabled:opacity-50">
                                     <Plus size={13} /> Aggiungi regola
                                 </button>
                             </div>
                         )}
                     </div>
-                    <p className="text-[12px] text-[var(--color-fg-muted)] mt-1.5">
+                    <p className="text-[12px] text-[var(--ds-text-muted)] mt-1.5">
                         Scrivi frasi brevi e concrete. Quello che non è scritto qui, l'AI non lo dirà: quando non sa, non propone nulla e rispondi tu.
                     </p>
                 </section>

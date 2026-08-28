@@ -108,14 +108,6 @@
   --color-booked-700: #3a4670;
 
   /* Chart palette — accessible, color-blind friendly, sequential-ish */
-  --color-chart-1: #111827;
-  --color-chart-2: #6b7280;
-  --color-chart-3: #d97706;
-  --color-chart-4: #047857;
-  --color-chart-5: #b91c1c;
-  --color-chart-6: #2563eb;
-  --color-chart-grid: #e5e7eb;
-  --color-chart-axis: #9ca3af;
 
   /* ---------- Radius ---------- */
   --radius-sm: 0.25rem;   /*  4px */
@@ -207,8 +199,6 @@
   --color-rose-50:     rgba(244, 63, 94, 0.12);
   --color-rose-100:    rgba(244, 63, 94, 0.18);
 
-  --color-chart-grid:  #1f2937;
-  --color-chart-axis:  #64748b;
 
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.3);
@@ -266,11 +256,11 @@
   /* Banquet / event — default tint (amber, matches banquet-color-0). Each
      view applies a .banquet-color-N class to scope a distinct color per
      event; this default is used by the legend swatch and any unscoped use. */
-  --color-banquet-bg: #fef3c7;
-  --color-banquet-border: #fcd34d;
-  --color-banquet-fg: #b45309;
-  --color-banquet-fg-strong: #78350f;
-  --color-banquet-accent: #d97706;
+  --ds-banquet-bg: var(--ds-cat-1-tint);
+  --ds-banquet-border: var(--ds-cat-1-line);
+  --ds-banquet-fg: var(--ds-cat-1-solid);
+  --ds-banquet-fg-strong: var(--ds-cat-1-text);
+  --ds-banquet-accent: var(--ds-cat-1-solid);
 }
 
 .dark {
@@ -309,98 +299,61 @@
   --tg-noshow-accent: #FB7185;
   --tg-noshow-pill-bg: #9F1239;
   --tg-covers: #A09E95;
-
-  /* Banquet / event — default tint (amber, dark mode) */
-  --color-banquet-bg: rgba(217, 119, 6, 0.18);
-  --color-banquet-border: rgba(217, 119, 6, 0.45);
-  --color-banquet-fg: #fcd34d;
-  --color-banquet-fg-strong: #fde68a;
-  --color-banquet-accent: #fbbf24;
 }
 
 /* ===========================================================================
    Per-banquet color variants — applied on hull / label / modal container
    wrappers so two banquets in the same room read as distinct events. The
-   class redefines --color-banquet-* on its subtree; existing utility classes
-   like bg-[var(--color-banquet-bg)] inside pick up the override automatically.
+   class redefines --ds-banquet-* on its subtree; existing utility classes
+   like bg-[var(--ds-banquet-bg)] inside pick up the override automatically.
    Palette: only warm hues (amber → fuchsia). Anything cool (violet, teal,
    green, blue) would confuse with --tg-attesa-bg (pale blue-violet) and
    --tg-arrivato-bg (pale green) used on reservation cards.
    ========================================================================= */
 /* 0 — amber */
+/* Niente controparte `.dark`: i --ds-cat-* si ridefiniscono gia' sotto
+   .dark, quindi queste var() risolvono al valore giusto nei due temi.
+   Prima ogni variante portava un blocco scuro con fondi rgba translucidi,
+   che §2.2 vieta — il sistema e' opaco. */
+/* 0 — teal */
 .banquet-color-0 {
-  --color-banquet-bg: #fef3c7;
-  --color-banquet-border: #fcd34d;
-  --color-banquet-fg: #b45309;
-  --color-banquet-fg-strong: #78350f;
-  --color-banquet-accent: #d97706;
+  --ds-banquet-bg: var(--ds-cat-1-tint);
+  --ds-banquet-border: var(--ds-cat-1-line);
+  --ds-banquet-fg: var(--ds-cat-1-solid);
+  --ds-banquet-fg-strong: var(--ds-cat-1-text);
+  --ds-banquet-accent: var(--ds-cat-1-solid);
 }
-.dark .banquet-color-0 {
-  --color-banquet-bg: rgba(217, 119, 6, 0.18);
-  --color-banquet-border: rgba(217, 119, 6, 0.45);
-  --color-banquet-fg: #fcd34d;
-  --color-banquet-fg-strong: #fde68a;
-  --color-banquet-accent: #fbbf24;
-}
-/* 1 — orange */
+/* 1 — azure */
 .banquet-color-1 {
-  --color-banquet-bg: #fed7aa;
-  --color-banquet-border: #fdba74;
-  --color-banquet-fg: #c2410c;
-  --color-banquet-fg-strong: #7c2d12;
-  --color-banquet-accent: #ea580c;
+  --ds-banquet-bg: var(--ds-cat-2-tint);
+  --ds-banquet-border: var(--ds-cat-2-line);
+  --ds-banquet-fg: var(--ds-cat-2-solid);
+  --ds-banquet-fg-strong: var(--ds-cat-2-text);
+  --ds-banquet-accent: var(--ds-cat-2-solid);
 }
-.dark .banquet-color-1 {
-  --color-banquet-bg: rgba(234, 88, 12, 0.18);
-  --color-banquet-border: rgba(234, 88, 12, 0.45);
-  --color-banquet-fg: #fdba74;
-  --color-banquet-fg-strong: #fed7aa;
-  --color-banquet-accent: #fb923c;
-}
-/* 2 — rose */
+/* 2 — violet */
 .banquet-color-2 {
-  --color-banquet-bg: #ffe4e6;
-  --color-banquet-border: #fda4af;
-  --color-banquet-fg: #be123c;
-  --color-banquet-fg-strong: #881337;
-  --color-banquet-accent: #e11d48;
+  --ds-banquet-bg: var(--ds-cat-3-tint);
+  --ds-banquet-border: var(--ds-cat-3-line);
+  --ds-banquet-fg: var(--ds-cat-3-solid);
+  --ds-banquet-fg-strong: var(--ds-cat-3-text);
+  --ds-banquet-accent: var(--ds-cat-3-solid);
 }
-.dark .banquet-color-2 {
-  --color-banquet-bg: rgba(225, 29, 72, 0.16);
-  --color-banquet-border: rgba(225, 29, 72, 0.42);
-  --color-banquet-fg: #fda4af;
-  --color-banquet-fg-strong: #fecdd3;
-  --color-banquet-accent: #fb7185;
-}
-/* 3 — fuchsia */
+/* 3 — magenta */
 .banquet-color-3 {
-  --color-banquet-bg: #fae8ff;
-  --color-banquet-border: #f0abfc;
-  --color-banquet-fg: #a21caf;
-  --color-banquet-fg-strong: #701a75;
-  --color-banquet-accent: #c026d3;
+  --ds-banquet-bg: var(--ds-cat-4-tint);
+  --ds-banquet-border: var(--ds-cat-4-line);
+  --ds-banquet-fg: var(--ds-cat-4-solid);
+  --ds-banquet-fg-strong: var(--ds-cat-4-text);
+  --ds-banquet-accent: var(--ds-cat-4-solid);
 }
-.dark .banquet-color-3 {
-  --color-banquet-bg: rgba(192, 38, 211, 0.16);
-  --color-banquet-border: rgba(192, 38, 211, 0.42);
-  --color-banquet-fg: #f0abfc;
-  --color-banquet-fg-strong: #f5d0fe;
-  --color-banquet-accent: #e879f9;
-}
-/* 4 — yellow (golden) */
+/* 4 — moss */
 .banquet-color-4 {
-  --color-banquet-bg: #fef9c3;
-  --color-banquet-border: #fde047;
-  --color-banquet-fg: #a16207;
-  --color-banquet-fg-strong: #713f12;
-  --color-banquet-accent: #ca8a04;
-}
-.dark .banquet-color-4 {
-  --color-banquet-bg: rgba(202, 138, 4, 0.18);
-  --color-banquet-border: rgba(202, 138, 4, 0.45);
-  --color-banquet-fg: #fde047;
-  --color-banquet-fg-strong: #fef08a;
-  --color-banquet-accent: #facc15;
+  --ds-banquet-bg: var(--ds-cat-5-tint);
+  --ds-banquet-border: var(--ds-cat-5-line);
+  --ds-banquet-fg: var(--ds-cat-5-solid);
+  --ds-banquet-fg-strong: var(--ds-cat-5-text);
+  --ds-banquet-accent: var(--ds-cat-5-solid);
 }
 
 /* ===========================================================================
@@ -734,7 +687,7 @@ body {
     width: 100%;
     margin: 0;
     padding: 0;
-    color: #0f172a;
+    color: var(--ds-print-ink);
     background: white;
   }
   #print-area > *:first-child { margin-top: 0 !important; }
@@ -788,6 +741,7 @@ body {
   --ds-seated-tint: #ecf5ef;
   --ds-seated-text: #275238;
   --ds-seated-solid: #316648;
+  --ds-seated-fg: #ffffff;       /* 6.72:1 su seated-solid — §4.1 */
   --ds-pending-tint: #fbf4e6;
   --ds-pending-text: #7a5807;
   --ds-pending-solid: #b8860b;   /* the reference gold — paired with DARK text (5.80:1).
@@ -806,6 +760,34 @@ body {
   --ds-critical-fg: #ffffff;
 
   /* Elevation — light mode lifts with soft, wide shadows */
+
+  /* ---------------------------------------------------------------------
+     Categoriale — sei tinte che non vogliono dire niente
+
+     Le quattro famiglie di stato SIGNIFICANO qualcosa: pending e' "da fare",
+     critical e' "fallito". Servono anche colori che non significhino nulla,
+     solo "diverso da quell'altro": eventi su una mappa, categorie di
+     un'attivita'. Usare una famiglia di stato per quello fa mentire il
+     colore — un pallino Inventario in ambra si legge "in ritardo".
+
+     Le sei tinte stanno nei buchi lasciati dalle famiglie (verde 150,
+     ambra 43, indaco 245, rosso 7), a 25-328 gradi l'una dall'altra. Stessa
+     anatomia delle famiglie piu' `line`, che serve al bordo dei banchetti.
+
+     text su tint passa AA ovunque (6.85-8.18 chiaro, 7.95-9.59 scuro).
+     `solid` NON regge testo piccolo: e' per pallini, barre e bordi, e per
+     il testo grande (>=18.66px semibold, soglia 3:1) delle etichette
+     banchetto. Sei tinte non si distinguono in scala di grigi — nessuna
+     tavolozza categoriale ci riesce — quindi ogni uso porta anche
+     un'etichetta (§4.3).
+     ------------------------------------------------------------------- */
+  --ds-cat-1-tint: #E4F1F1;   --ds-cat-1-line: #93BFC0;   --ds-cat-1-text: #10514F;   --ds-cat-1-solid: #0F6E70;   /* teal */
+  --ds-cat-2-tint: #E6EEF7;   --ds-cat-2-line: #9FBCD9;   --ds-cat-2-text: #1F4F7D;   --ds-cat-2-solid: #2A6BA8;   /* azure */
+  --ds-cat-3-tint: #EFE9F7;   --ds-cat-3-line: #BFABD9;   --ds-cat-3-text: #55337E;   --ds-cat-3-solid: #7145A8;   /* violet */
+  --ds-cat-4-tint: #F8E8F0;   --ds-cat-4-line: #DAA6BF;   --ds-cat-4-text: #7E2A53;   --ds-cat-4-solid: #A83A70;   /* magenta */
+  --ds-cat-5-tint: #EDF2E1;   --ds-cat-5-line: #B5C499;   --ds-cat-5-text: #43591B;   --ds-cat-5-solid: #5A7A24;   /* moss */
+  --ds-cat-6-tint: #F7EBE3;   --ds-cat-6-line: #D6B4A0;   --ds-cat-6-text: #774226;   --ds-cat-6-solid: #A05A34;   /* clay */
+
   --ds-backdrop: rgba(11, 11, 13, 0.40);
 
   --ds-shadow-card: 0 1px 2px rgba(16, 17, 25, 0.04), 0 8px 24px rgba(16, 17, 25, 0.05);
@@ -836,6 +818,7 @@ body {
   --ds-seated-tint: #16271d;
   --ds-seated-text: #7fb795;
   --ds-seated-solid: #3e7d5a;
+  --ds-seated-fg: #ffffff;
   --ds-pending-tint: #2a2109;
   --ds-pending-text: #dfbb6e;
   --ds-pending-solid: #b8860b;
@@ -851,10 +834,46 @@ body {
   --ds-critical-solid: #c0392b;
   --ds-critical-fg: #ffffff;
 
+  /* Categoriale — scuro. Vedi il commento nel blocco chiaro. */
+  --ds-cat-1-tint: #102626;   --ds-cat-1-line: #1D5758;   --ds-cat-1-text: #7FC8C9;   --ds-cat-1-solid: #2E9A9C;   /* teal */
+  --ds-cat-2-tint: #131F2B;   --ds-cat-2-line: #2B4E71;   --ds-cat-2-text: #8FBBE4;   --ds-cat-2-solid: #4B8FD1;   /* azure */
+  --ds-cat-3-tint: #1D1729;   --ds-cat-3-line: #523C70;   --ds-cat-3-text: #BFA3E6;   --ds-cat-3-solid: #9A6FD1;   /* violet */
+  --ds-cat-4-tint: #26141D;   --ds-cat-4-line: #6D3651;   --ds-cat-4-text: #E8A3C2;   --ds-cat-4-solid: #D06498;   /* magenta */
+  --ds-cat-5-tint: #1A2010;   --ds-cat-5-line: #475926;   --ds-cat-5-text: #B4CE7E;   --ds-cat-5-solid: #85A845;   /* moss */
+  --ds-cat-6-tint: #261A12;   --ds-cat-6-line: #6A472F;   --ds-cat-6-text: #E0AE8A;   --ds-cat-6-solid: #C98457;   /* clay */
+
   --ds-backdrop: rgba(0, 0, 0, 0.60);
 
   --ds-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.40);
   --ds-shadow-raised: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+
+/* ---------------------------------------------------------------------------
+   --ds-print-*  —  il livello per la carta
+
+   Additivo e non sovrascrive nulla, la stessa disciplina che --ds-public-*
+   segue sulla pagina di prenotazione (§16.1). Esiste perche' la stampa ha
+   vincoli diversi dallo schermo: inchiostro su carta bianca, nessun tema.
+
+   DEFINITO SOLO SU :root, MAI DENTRO .dark — ed e' il punto. Il foglio di
+   stampa vive nello stesso documento dell'app (portale .print-portal, tutto
+   il resto nascosto da @media print), quindi con --ds-surface e compagnia un
+   utente in tema scuro si stamperebbe una pagina nera. Questi token non si
+   invertono, quindi la stampa esce uguale nei due temi.
+
+   I valori sono quelli che i due modali di stampa avevano gia' scritti a mano,
+   ripetuti identici in entrambi: qui vengono nominati, non cambiati. Il foglio
+   che esce dalla stampante e' lo stesso di prima.
+   ------------------------------------------------------------------------- */
+:root {
+  --ds-print-ink: #0f172a;            /* titoli, filetti forti */
+  --ds-print-ink-secondary: #475569;  /* testo di supporto */
+  --ds-print-ink-muted: #64748b;      /* note, unita', vuoti */
+  --ds-print-ink-subtle: #94a3b8;     /* piede pagina */
+  --ds-print-rule-strong: #cbd5e1;    /* separatore di sezione */
+  --ds-print-rule: #e2e8f0;           /* filetto di riga */
+  --ds-print-fill: #f1f5f9;           /* fondo intestazione tabella */
+  --ds-print-positive: #059669;       /* "✓ arrivato" */
 }
 
 /* Clearance for the floating mobile bottom bar: bar height (68px) + its 16px
@@ -908,6 +927,42 @@ body {
 
 @keyframes ds-live-sweep {
   to { --ds-live-angle: 360deg; }
+}
+
+/* Il telaio della proposta dell'agente. Stesso meccanismo di .ds-live-frame —
+   stessa proprieta' registrata, stessa animazione — ma con UN solo accento
+   invece della coppia indaco+ambra. La differenza e' voluta: sulla Dashboard
+   quel telaio vuol dire "questo si aggiorna mentre guardi", qui vuol dire
+   "l'ha scritto la macchina, aspetta te". Due parenti, non due gemelli.
+
+   L'accento e' `arriving`, che e' gia' il colore dell'AI nelle altre quattro
+   superfici (chip suggerimento tavolo, Messaggi AI, Consumi AI, Roadmap): qui
+   la stessa idea passa dal movimento invece che dal riempimento, cosi' la card
+   resta neutra e non spende una tinta.
+
+   Il movimento ha una fine: la card esiste solo finche' c'e' una proposta da
+   decidere, quindi il giro si ferma quando confermi o scarti. */
+.ds-ai-frame {
+  padding: 1.5px;
+  border-radius: 14px;
+  background: conic-gradient(
+    from var(--ds-live-angle),
+    var(--ds-border) 0deg,
+    var(--ds-border) 60deg,
+    var(--ds-arriving-solid) 120deg,
+    var(--ds-border) 190deg,
+    var(--ds-border) 360deg
+  );
+  animation: ds-live-sweep 7s linear infinite;
+}
+
+.ds-ai-card {
+  border-radius: 12.5px; /* 14px frame − 1.5px pad */
+  background: var(--ds-surface-row);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-ai-frame { animation: none; }
 }
 
 /* Motion here is decorative — the deck reads identically without it. */

@@ -1483,7 +1483,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                           </button>
                                           {cardMenuOpenId === menu.id && (
                                               <div
-                                                  className="absolute right-0 top-full z-30 mt-1 w-48 overflow-hidden rounded-[16px] bg-[var(--ds-surface)] py-1 shadow-[var(--ds-shadow-raised)] animate-in fade-in slide-in-from-top-1 duration-100"
+ className="absolute right-0 top-full z-30 mt-1 w-48 overflow-hidden rounded-[16px] bg-[var(--ds-surface)] py-1 shadow-[var(--ds-shadow-raised)] duration-100"
                                               >
                                                   <button
                                                       type="button"
@@ -2692,7 +2692,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       {showBanquetSortModal && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center" onClick={() => setShowBanquetSortModal(false)}>
           <div className="absolute inset-0 bg-black/30" />
-          <div className="relative w-full sm:max-w-sm bg-[var(--ds-surface)] rounded-t-2xl sm:rounded-2xl shadow-[var(--ds-shadow-raised)] pb-6 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
+ <div className="relative w-full sm:max-w-sm bg-[var(--ds-surface)] rounded-t-2xl sm:rounded-2xl shadow-[var(--ds-shadow-raised)] pb-6 duration-200"onClick={e => e.stopPropagation()}>
             <div className="flex justify-center pt-3 pb-2 sm:hidden">
               <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
             </div>
