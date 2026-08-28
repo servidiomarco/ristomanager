@@ -60,7 +60,7 @@ import { RolePermissionService } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
 import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles, sendToPlatformAdmins as pushSendToPlatformAdmins } from './services/pushService.js';
-import { channelsForRole, rolesForChannel, parseThreadKey, channelThreadKey, dmThreadKey, isStaffPresetKey, STAFF_MESSAGE_MAX_LENGTH, STAFF_MAX_MENTIONS } from './services/staffChat.js';
+import { channelsForRole, rolesForChannel, parseThreadKey, channelThreadKey, dmThreadKey, isStaffPresetKey, STAFF_MESSAGE_MAX_LENGTH, STAFF_MAX_MENTIONS, STAFF_MESSAGE_PRESETS } from './services/staffChat.js';
 import {
     isRevolutConfigured,
     verifyWebhookSignature as verifyRevolutWebhook,
@@ -14715,7 +14715,23 @@ app.post('/staff-chat/messages', authenticate, requirePermission('staffchat:use'
         if (!text || text.length > STAFF_MESSAGE_MAX_LENGTH) {
             return res.status(400).json({ error: 'Messaggio vuoto o troppo lungo' });
         }
-        const preset = typeof presetKey === 'string' && isStaffPresetKey(presetKey) ? presetKey : null;
+        // db:<id> = preset del tenant (tabella); slug fissa = builtin. Le key
+        // sconosciute si scartano senza errore: il messaggio vale comunque.
+        let preset: string | null = null;
+        if (typeof presetKey === 'string') {
+            if (isStaffPresetKey(presetKey)) {
+                preset = presetKey;
+            } else {
+                const dbMatch = presetKey.match(/^db:(\d+)$/);
+                if (dbMatch) {
+                    const p = await queryWithRetry(
+                        `SELECT id FROM staff_chat_presets WHERE tenant_id = $1 AND id = $2`,
+                        [req.tenantId!, Number(dbMatch[1])]
+                    );
+                    if (p.rows.length > 0) preset = presetKey;
+                }
+            }
+        }
 
         const linkedReservation = Number.isInteger(linkedReservationId) ? Number(linkedReservationId) : null;
         const linkedTable = Number.isInteger(linkedTableId) ? Number(linkedTableId) : null;
@@ -14900,6 +14916,66 @@ app.get('/staff-chat/unread-count', authenticate, requirePermission('staffchat:u
         res.json({ count: r.rows[0]?.count ?? 0 });
     } catch (err) {
         console.error('GET /staff-chat/unread-count error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Preset dei messaggi rapidi. Tabella vuota = valgono i default hardcoded
+// (services/staffChat.ts); un tenant li personalizza da Impostazioni. La key
+// dei preset da tabella è db:<id>, quelle builtin restano le slug fisse.
+app.get('/staff-chat/presets', authenticate, requirePermission('staffchat:use'), async (req: any, res) => {
+    try {
+        const r = await queryWithRetry(
+            `SELECT id, label FROM staff_chat_presets WHERE tenant_id = $1 ORDER BY sort_order, id`,
+            [req.tenantId!]
+        );
+        if (r.rows.length > 0) {
+            return res.json({
+                presets: r.rows.map((p: any) => ({ key: `db:${p.id}`, label: p.label })),
+                custom: true,
+            });
+        }
+        res.json({ presets: STAFF_MESSAGE_PRESETS, custom: false });
+    } catch (err) {
+        console.error('GET /staff-chat/presets error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Sostituzione integrale della lista (pattern setPermissionsForRole): la
+// card di Impostazioni manda l'elenco intero; lista vuota = ripristina i
+// default. Broadcast così i composer aperti aggiornano le chip.
+app.put('/staff-chat/presets', authenticate, requirePermission('settings:full'), async (req: any, res) => {
+    try {
+        const socketId = req.headers['x-socket-id'] as string;
+        const raw = req.body?.labels;
+        if (!Array.isArray(raw) || raw.length > 12) {
+            return res.status(400).json({ error: 'Lista preset non valida' });
+        }
+        const labels = raw.map((l: any) => (typeof l === 'string' ? l.trim() : '')).filter(Boolean);
+        if (labels.length !== raw.length || labels.some((l: string) => l.length > 60)) {
+            return res.status(400).json({ error: 'Etichetta vuota o troppo lunga' });
+        }
+        const rows = await withTenant(req.tenantId!, async (client) => {
+            await client.query(`DELETE FROM staff_chat_presets WHERE tenant_id = $1`, [req.tenantId!]);
+            const inserted: any[] = [];
+            for (let i = 0; i < labels.length; i++) {
+                const ins = await client.query(
+                    `INSERT INTO staff_chat_presets (tenant_id, label, sort_order)
+                     VALUES ($1, $2, $3) RETURNING id, label`,
+                    [req.tenantId!, labels[i], i]
+                );
+                inserted.push(ins.rows[0]);
+            }
+            return inserted;
+        });
+        const presets = rows.length > 0
+            ? rows.map((p: any) => ({ key: `db:${p.id}`, label: p.label }))
+            : STAFF_MESSAGE_PRESETS;
+        socketService?.broadcastToAll(req.tenantId!, 'staffchat:presets', { presets }, socketId);
+        res.json({ presets, custom: rows.length > 0 });
+    } catch (err) {
+        console.error('PUT /staff-chat/presets error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
