@@ -156,8 +156,8 @@ const NAV_ITEMS: NavItem[] = [
   // ignores isTab, so desktop still lists them individually.
   { kind: 'link', label: 'Chiamate', Icon: Phone, group: 'comunicazioni', isTab: true, view: ViewState.CONVERSAZIONI, sidebarCollapse: false },
   { kind: 'link', label: 'Messaggi', Icon: MessageCircle, group: 'comunicazioni', isTab: true, view: ViewState.MESSAGGI, sidebarCollapse: false },
-  { kind: 'link', label: 'Chat staff', Icon: MessagesSquare, group: 'comunicazioni', isTab: true, view: ViewState.CHAT_STAFF, sidebarCollapse: false },
   { kind: 'link', label: 'Email', Icon: Mail, group: 'comunicazioni', isTab: true, view: ViewState.EMAIL, sidebarCollapse: false },
+  { kind: 'link', label: 'Chat staff', Icon: MessagesSquare, group: 'comunicazioni', isTab: true, view: ViewState.CHAT_STAFF, sidebarCollapse: false },
   { kind: 'link', label: 'Notifiche', Icon: Bell, group: 'comunicazioni', isTab: true, view: ViewState.NOTIFICHE, sidebarCollapse: false },
 
   // Operazioni
@@ -186,7 +186,7 @@ const NAV_ITEMS: NavItem[] = [
 // The Comunicazioni channels, in the order the mobile switcher shows them.
 // Presentation only — each one is still its own ViewState, so deep links from
 // the command palette, notifications and the sidebar are untouched.
-const COMMS_VIEWS: ViewState[] = [ViewState.CONVERSAZIONI, ViewState.MESSAGGI, ViewState.CHAT_STAFF, ViewState.EMAIL];
+const COMMS_VIEWS: ViewState[] = [ViewState.CONVERSAZIONI, ViewState.MESSAGGI, ViewState.EMAIL, ViewState.CHAT_STAFF];
 
 // Stato aperto/chiuso della sidebar desktop. Scritto solo dalla linguetta.
 const SIDEBAR_COLLAPSED_KEY = 'ristocrm_sidebar_collapsed';
@@ -1899,10 +1899,10 @@ const App: React.FC = () => {
   // One bottom tab stands in for three views. The channels the user can't
   // reach drop out, so a single-channel user gets a plain tab with no switcher.
   const commsChannels = [
-    { view: ViewState.CONVERSAZIONI, label: 'Chiamate', badge: voiceCallsPendingCount },
-    { view: ViewState.MESSAGGI, label: 'Messaggi', badge: messagesUnreadCount },
-    { view: ViewState.CHAT_STAFF, label: 'Chat staff', badge: staffChatUnreadCount },
-    { view: ViewState.EMAIL, label: 'Email', badge: emailUnreadCount },
+    { view: ViewState.CONVERSAZIONI, label: 'Chiamate', Icon: Phone, badge: voiceCallsPendingCount },
+    { view: ViewState.MESSAGGI, label: 'Messaggi', Icon: MessageCircle, badge: messagesUnreadCount },
+    { view: ViewState.EMAIL, label: 'Email', Icon: Mail, badge: emailUnreadCount },
+    { view: ViewState.CHAT_STAFF, label: 'Chat staff', Icon: MessagesSquare, badge: staffChatUnreadCount },
   ].filter(c => canAccessView(c.view));
   const commsBadgeTotal = commsChannels.reduce((n, c) => n + (c.badge || 0), 0);
   const isCommsView = COMMS_VIEWS.includes(view);
@@ -2417,12 +2417,19 @@ const App: React.FC = () => {
           // no gap the shadow gets sliced by a hard horizontal edge.
           <div className="flex-shrink-0 px-4 pb-4 pt-4 lg:hidden">
             <div className="rounded-full bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)]">
+              {/* Con quattro canali le etichette si troncano a "Chiam…": qui
+                  parlano le icone, le label restano per gli screen reader. */}
               <SegmentedControl
                 value={view}
                 onChange={next => setView(next)}
                 ariaLabel="Tipo di comunicazione"
-                equalWidth={false}
-                options={commsChannels.map(c => ({ value: c.view, label: c.label, badge: c.badge }))}
+                iconOnly
+                options={commsChannels.map(c => ({
+                  value: c.view,
+                  label: c.label,
+                  icon: <c.Icon className="h-[18px] w-[18px]" aria-hidden />,
+                  badge: c.badge,
+                }))}
               />
             </div>
           </div>

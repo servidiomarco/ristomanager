@@ -180,11 +180,16 @@ export function SegmentedControl<T extends string>({
   equalWidth = true,
   overflow = 'fit',
   size = 'md',
+  iconOnly = false,
 }: {
   value: T;
   onChange: (next: T) => void;
   options: { value: T; label: string; icon?: React.ReactNode; badge?: number; badgeTone?: 'neutral' | 'alert' }[];
   ariaLabel: string;
+  /** L'icona porta il significato e la label va agli screen reader (più il
+   *  title). Solo quando OGNI opzione ha un'icona: su uno schermo stretto
+   *  quattro etichette troncate a "Chiam…" dicono meno di quattro glifi. */
+  iconOnly?: boolean;
   /** Equal-width segments (the default) read as a filter. Set false when the
    *  labels differ a lot in length — segments then start from their own text
    *  width and share the leftover space, so a long one isn't clipped to fit a
@@ -256,6 +261,7 @@ export function SegmentedControl<T extends string>({
             type="button"
             onClick={(e) => { onChange(opt.value); revealOnSelect(e); }}
             aria-pressed={active}
+            title={iconOnly ? opt.label : undefined}
             className={`inline-flex ${size === 'sm' ? 'h-8 text-[13px]' : 'h-9 text-[15px]'} min-w-0 ${
               scroll ? 'flex-none whitespace-nowrap' : equalWidth ? 'flex-1' : 'flex-auto'
             } items-center justify-center gap-1.5 rounded-full px-3 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
@@ -265,7 +271,9 @@ export function SegmentedControl<T extends string>({
             }`}
           >
             {opt.icon}
-            <span className="truncate">{opt.label}</span>
+            {iconOnly
+              ? <span className="sr-only">{opt.label}</span>
+              : <span className="truncate">{opt.label}</span>}
             {/* Counts ride inside the segment rather than as a corner dot: at
                 this size a dot can't say "3" vs "99+", and the number is the
                 reason to switch channel. */}
