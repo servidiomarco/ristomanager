@@ -2669,6 +2669,7 @@ const App: React.FC = () => {
                       [ViewState.DASHBOARD]: 'Dashboard',
                       [ViewState.RESERVATIONS]: 'Prenotazioni',
                       [ViewState.RECEPTION]: 'Reception',
+                      [ViewState.CHAT_STAFF]: 'Chat staff',
                       [ViewState.FLOOR_PLAN]: 'Sale & Tavoli',
                       [ViewState.MENU]: 'Menu & Banchetti',
                       [ViewState.COMANDE]: 'Comande',

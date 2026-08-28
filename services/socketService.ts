@@ -79,6 +79,14 @@ export class SocketService {
       const tenantId = socket.user!.tenantId;
       if (String(socket.user!.role) !== 'PLATFORM_ADMIN') {
         socket.join(`tenant:${tenantId}`);
+        // Chat staff: room per utente e per ruolo, join automatico — la
+        // membership discende dal JWT, non è una scelta della UI (a
+        // differenza di subscribe:station). Un DM non può passare da
+        // broadcastToAll o lo leggerebbe tutto il tenant. Un cambio ruolo
+        // diventa effettivo alla riconnessione, coerente con come il ruolo
+        // vive nel token.
+        socket.join(`tenant:${tenantId}:user:${socket.user!.userId}`);
+        socket.join(`tenant:${tenantId}:role:${socket.user!.role}`);
       }
 
       socket.emit('connection:acknowledged', socket.id);
@@ -276,6 +284,30 @@ export class SocketService {
       ? `tenant:${tenantId}:station:none`
       : `tenant:${tenantId}:station:${stationId}`;
     this.io.to(room).emit(event, data);
+  }
+
+  // Chat staff — emissione mirata sulle room per utente / per ruolo (vedi
+  // join in setupEventHandlers). io.to([...]) deduplica i socket presenti in
+  // più room, quindi passare mittente e destinatario insieme è sicuro.
+  broadcastToUsers(tenantId: number, userIds: number[], event: string, data: any, excludeSocketId?: string) {
+    const rooms = userIds.map(id => `tenant:${tenantId}:user:${id}`);
+    if (rooms.length === 0) return;
+    if (excludeSocketId) {
+      this.io.to(rooms).except(excludeSocketId).emit(event, data);
+    } else {
+      this.io.to(rooms).emit(event, data);
+    }
+  }
+
+  // Il nome evita la collisione con pushService.sendToRoles.
+  broadcastToRolesRoom(tenantId: number, roles: string[], event: string, data: any, excludeSocketId?: string) {
+    const rooms = roles.map(role => `tenant:${tenantId}:role:${role}`);
+    if (rooms.length === 0) return;
+    if (excludeSocketId) {
+      this.io.to(rooms).except(excludeSocketId).emit(event, data);
+    } else {
+      this.io.to(rooms).emit(event, data);
+    }
   }
 
   broadcastToAll(tenantId: number, event: string, data: any, excludeSocketId?: string) {
