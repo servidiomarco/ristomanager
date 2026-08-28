@@ -31,7 +31,7 @@ import {
   Shuffle,
   X as XIcon
 } from 'lucide-react';
-import { getReservations, getTables, getRooms, updateReservation, createReservation, swapReservationTables } from '../services/apiService';
+import { updateReservation, createReservation, swapReservationTables } from '../services/apiService';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { PulseDot, getReservationState, getTimedReservationState, isSeated, deriveTableDisplayStatus, TABLE_STATUS_LABEL } from './reservationState';
@@ -66,16 +66,28 @@ const formatPhone = (phone?: string): string => {
 interface ReceptionPageProps {
   globalDate: Date;
   globalShiftFilter: 'ALL' | 'LUNCH' | 'DINNER';
+  // Stato condiviso di App: finestra recente + archivio, tenuto fresco dai
+  // socket. Prima la pagina rifaceva da sola getReservations() SENZA
+  // parametri — l'intero storico con i join rubrica/pagamenti riscaricato a
+  // ogni ingresso — e non aveva alcun aggancio socket: un arrivo segnato da
+  // un collega restava invisibile fino a un refresh manuale.
+  reservations: Reservation[];
+  tables: Table[];
+  rooms: Room[];
+  /** Echo locale di una riga definitiva restituita dal server (upsert in
+   *  App): la card riflette subito la modifica anche se il broadcast socket
+   *  si perde, senza un secondo PUT. */
+  onReservationChangedLocal: (r: Reservation) => void;
+  /** True finché il fetchData iniziale di App è in volo: pilota gli skeleton
+   *  del primo avvio (dopo, i dati sono sempre già in memoria). */
+  isInitialLoading?: boolean;
   onBack?: () => void;
   /** When true, open the walk-in modal (e.g. triggered from the global "+" create menu). */
   autoOpenWalkIn?: boolean;
   onAutoOpenWalkInHandled?: () => void;
 }
 
-const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFilter, onBack, autoOpenWalkIn, onAutoOpenWalkInHandled }) => {
-  const [reservations, setReservations] = useState<Reservation[]>([]);
-  const [tables, setTables] = useState<Table[]>([]);
-  const [rooms, setRooms] = useState<Room[]>([]);
+const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFilter, reservations, tables, rooms, onReservationChangedLocal, isInitialLoading = false, onBack, autoOpenWalkIn, onAutoOpenWalkInHandled }) => {
   const [selectedReservationId, setSelectedReservationId] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'waiting' | 'arrived' | 'noTable'>('all');
@@ -83,12 +95,6 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
   const [activeRoomId, setActiveRoomId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Flips to false the first time loadAll() completes. Used to swap the empty
-  // "no matches" copy for skeleton cards during the initial fetch — otherwise
-  // Reception opens blank for ~800ms and then pops in the list. Stays false
-  // on background refetches (visibilitychange, socket reconnect) so the
-  // existing list doesn't flicker into skeleton state each time.
-  const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [showWalkIn, setShowWalkIn] = useState(false);
   // Open the walk-in modal when triggered from the global "+" create menu, then clear the flag.
   useEffect(() => {
@@ -112,27 +118,14 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
     return () => clearInterval(id);
   }, []);
 
-  const loadAll = useCallback(async () => {
-    setError(null);
-    try {
-      const [r, t, ro] = await Promise.all([getReservations(), getTables(), getRooms()]);
-      setReservations(r);
-      setTables(t);
-      setRooms(ro);
-      if (ro.length > 0 && activeRoomId === null) {
-        setActiveRoomId(ro[0].id);
-      }
-    } catch (err) {
-      setError((err as Error)?.message || 'Errore di caricamento');
-    } finally {
-      setIsInitialLoading(false);
-    }
-  }, [activeRoomId]);
-
+  // Le sale arrivano come prop (possono essere già pronte al mount o
+  // comparire col fetch iniziale di App): la prima disponibile diventa
+  // quella attiva della mappa.
   useEffect(() => {
-    loadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (rooms.length > 0 && activeRoomId === null) {
+      setActiveRoomId(rooms[0].id);
+    }
+  }, [rooms, activeRoomId]);
 
   // Ticking clock (1/min) — drives the time-derived states (In arrivo /
   // In uscita) on cards and the room map.
@@ -304,7 +297,9 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
       if (!current) throw new Error('Prenotazione non trovata');
       const body = { ...current, ...patch };
       const updated = await updateReservation(id, body);
-      setReservations(prev => prev.map(r => r.id === id ? { ...r, ...updated } : r));
+      // Merge sulla riga corrente: la risposta del PUT non porta i campi di
+      // arricchimento (customer_is_vip, latest_payment_*) che la GET aggiunge.
+      onReservationChangedLocal({ ...current, ...updated });
     } catch (err) {
       setError((err as Error)?.message || 'Errore aggiornamento');
     } finally {
@@ -342,11 +337,10 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
     setError(null);
     try {
       const { a, b } = await swapReservationTables(selectedReservation.id, otherReservationId);
-      setReservations(prev => prev.map(r => {
-        if (r.id === a.id) return { ...r, ...a };
-        if (r.id === b.id) return { ...r, ...b };
-        return r;
-      }));
+      for (const row of [a, b]) {
+        const current = reservations.find(r => r.id === row.id);
+        onReservationChangedLocal(current ? { ...current, ...row } : row);
+      }
       setShowTablePicker(false);
     } catch (err) {
       setError((err as Error)?.message || 'Errore scambio tavoli');
@@ -378,7 +372,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
         reservation_status: ReservationStatus.CONFIRMED,
         source: ReservationSource.MANUAL,
       } as Omit<Reservation, 'id'>);
-      setReservations(prev => [...prev, created]);
+      onReservationChangedLocal(created);
       setSelectedReservationId(created.id);
       setShowWalkIn(false);
       setShowTablePicker(true);
@@ -674,15 +668,6 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
         >
           {arrivingNow.length === 1 ? '1 atteso ora' : `${arrivingNow.length} attesi ora`}
         </span>
-        <button
-          type="button"
-          onClick={loadAll}
-          className="ml-auto inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)]"
-          aria-label="Aggiorna"
-          title="Aggiorna"
-        >
-          <RefreshCw className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} />
-        </button>
       </div>
 
       <div className="-mr-2 min-h-0 flex-1 overflow-y-auto pr-2">
@@ -763,15 +748,6 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
             {dateLabel} · {shiftLabel}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={loadAll}
-          className={dsIconButton}
-          aria-label="Aggiorna"
-          title="Aggiorna"
-        >
-          <RefreshCw className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} />
-        </button>
         <button
           type="button"
           onClick={() => setShowWalkIn(true)}

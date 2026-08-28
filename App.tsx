@@ -72,6 +72,7 @@ import { offlineQueue } from './services/offlineQueue';
 import { socketClient } from './services/socketClient';
 import { voiceCallsApiService, voiceCallsCache } from './services/voiceCallsApiService';
 import { messagesApiService, inboxCache } from './services/messagesApiService';
+import { clearConfigCache } from './services/configCache';
 import { staffChatApiService } from './services/staffChatApiService';
 import { paymentsApiService } from './services/paymentsApiService';
 import { emailApiService, emailCache } from './services/emailApiService';
@@ -491,7 +492,7 @@ const App: React.FC = () => {
   // verso Railway). Al logout la cache si svuota: non deve sopravvivere a un
   // cambio utente sullo stesso browser.
   useEffect(() => {
-    if (!isAuthenticated) { inboxCache.clear(); return; }
+    if (!isAuthenticated) { inboxCache.clear(); clearConfigCache(); return; }
     if (!canSeeMessages) return;
     messagesApiService.prefetchConversations();
   }, [isAuthenticated, canSeeMessages]);
@@ -1733,6 +1734,15 @@ const App: React.FC = () => {
     setReservations(prev => prev.map(r => r.id === patched.id ? patched : r));
   }, []);
 
+  // Variante upsert per Reception: il walk-in crea una riga nuova, che la
+  // map di handlePatchReservationLocal scarterebbe. Il socket created/updated
+  // arriva comunque; questo garantisce l'eco immediato sul client che agisce.
+  const handleUpsertReservationLocal = useCallback((res: Reservation) => {
+    setReservations(prev => prev.some(r => r.id === res.id)
+      ? prev.map(r => r.id === res.id ? res : r)
+      : [...prev, res]);
+  }, []);
+
   const handleAddReservation = async (newRes: Omit<Reservation, 'id'>): Promise<Reservation> => {
     try {
       const returnedRes = await createReservation(newRes);
@@ -2700,6 +2710,11 @@ const App: React.FC = () => {
           <ReceptionPage
             globalDate={globalDate}
             globalShiftFilter={globalShiftFilter}
+            reservations={reservations}
+            tables={tables}
+            rooms={rooms}
+            onReservationChangedLocal={handleUpsertReservationLocal}
+            isInitialLoading={isInitialDataLoading}
             autoOpenWalkIn={autoOpenWalkIn}
             onAutoOpenWalkInHandled={() => setAutoOpenWalkIn(false)}
           />
