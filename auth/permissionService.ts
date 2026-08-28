@@ -20,7 +20,8 @@ export const ALL_PERMISSIONS: { feature: string; permissions: Permission[] }[] =
   { feature: 'Log Attività', permissions: ['logs:view', 'logs:full'] },
   { feature: 'Conversazioni', permissions: ['voice_calls:view'] },
   { feature: 'Pagamenti', permissions: ['payments:view', 'payments:full'] },
-  { feature: 'Comande e Cucina', permissions: ['orders:view', 'orders:take', 'orders:kds', 'orders:expedite', 'orders:void'] }
+  { feature: 'Comande e Cucina', permissions: ['orders:view', 'orders:take', 'orders:kds', 'orders:expedite', 'orders:void'] },
+  { feature: 'Chat staff', permissions: ['staffchat:use'] }
 ];
 
 // Fase B2 del piano SaaS: la matrice permessi è PER TENANT — ogni

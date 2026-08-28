@@ -60,6 +60,7 @@ import { RolePermissionService } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
 import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles, sendToPlatformAdmins as pushSendToPlatformAdmins } from './services/pushService.js';
+import { channelsForRole, rolesForChannel, parseThreadKey, channelThreadKey, dmThreadKey, isStaffPresetKey, STAFF_MESSAGE_MAX_LENGTH } from './services/staffChat.js';
 import {
     isRevolutConfigured,
     verifyWebhookSignature as verifyRevolutWebhook,
@@ -14519,6 +14520,334 @@ app.post('/notifications/:id/dismiss', authenticate, async (req: any, res) => {
         res.json({ ok: true });
     } catch (err) {
         console.error('POST /notifications/:id/dismiss error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ==================== CHAT STAFF ====================
+// Messaggistica interna fra le sezioni (docs/chat-staff-plan.md). Canali
+// fissi derivati dal ruolo (services/staffChat.ts) + DM 1-a-1. Lettura a
+// cursore per (utente, thread): non letti = id > last_read_message_id e
+// mittente diverso da me; cursore assente = tutto non letto.
+// Realtime sulle room per ruolo/utente (mai broadcastToAll: un DM non deve
+// attraversare il tenant); push con persist:false — la chat ha già il suo
+// stato di lettura, una riga in notifications per messaggio farebbe del
+// centro notifiche un duplicato rumoroso.
+
+const STAFF_MSG_FIELDS = `id, kind, channel, sender_user_id, sender_name, sender_role,
+    recipient_user_id, recipient_name, body, preset_key,
+    linked_reservation_id, linked_table_id, created_at`;
+
+app.get('/staff-chat/threads', authenticate, requirePermission('staffchat:use'), async (req: any, res) => {
+    try {
+        const userId = req.user.userId;
+        const channels = channelsForRole(req.user.role);
+
+        const [lastByChannel, unreadChannels, dmLast, dmUnread, colleagues] = await Promise.all([
+            queryWithRetry(
+                `SELECT DISTINCT ON (channel) ${STAFF_MSG_FIELDS}
+                 FROM staff_messages
+                 WHERE tenant_id = $1 AND kind = 'channel' AND channel = ANY($2)
+                 ORDER BY channel, id DESC`,
+                [req.tenantId!, channels]
+            ),
+            queryWithRetry(
+                `SELECT m.channel, COUNT(*)::int AS unread
+                 FROM staff_messages m
+                 LEFT JOIN staff_message_reads r
+                   ON r.tenant_id = m.tenant_id AND r.user_id = $2
+                  AND r.thread_key = 'channel:' || m.channel
+                 WHERE m.tenant_id = $1 AND m.kind = 'channel' AND m.channel = ANY($3)
+                   AND m.sender_user_id IS DISTINCT FROM $2
+                   AND m.id > COALESCE(r.last_read_message_id, 0)
+                 GROUP BY m.channel`,
+                [req.tenantId!, userId, channels]
+            ),
+            // Thread DM: ultimo messaggio per contraltare. other_id NULL
+            // (utente cancellato da entrambi i lati) non è indirizzabile con
+            // dm:<id> e viene scartato.
+            queryWithRetry(
+                `SELECT DISTINCT ON (other_id) *
+                 FROM (
+                     SELECT ${STAFF_MSG_FIELDS},
+                            CASE WHEN sender_user_id = $2 THEN recipient_user_id ELSE sender_user_id END AS other_id
+                     FROM staff_messages
+                     WHERE tenant_id = $1 AND kind = 'direct'
+                       AND (sender_user_id = $2 OR recipient_user_id = $2)
+                 ) t
+                 WHERE other_id IS NOT NULL
+                 ORDER BY other_id, id DESC`,
+                [req.tenantId!, userId]
+            ),
+            // Non letti DM: contano solo i messaggi VERSO di me, per mittente.
+            queryWithRetry(
+                `SELECT m.sender_user_id AS other_id, COUNT(*)::int AS unread
+                 FROM staff_messages m
+                 LEFT JOIN staff_message_reads r
+                   ON r.tenant_id = m.tenant_id AND r.user_id = $2
+                  AND r.thread_key = 'dm:' || m.sender_user_id
+                 WHERE m.tenant_id = $1 AND m.kind = 'direct'
+                   AND m.recipient_user_id = $2 AND m.sender_user_id IS NOT NULL
+                   AND m.id > COALESCE(r.last_read_message_id, 0)
+                 GROUP BY m.sender_user_id`,
+                [req.tenantId!, userId]
+            ),
+            queryWithRetry(
+                `SELECT id, full_name, role FROM users
+                 WHERE tenant_id = $1 AND id <> $2 AND is_active = TRUE AND role <> 'PLATFORM_ADMIN'
+                 ORDER BY full_name`,
+                [req.tenantId!, userId]
+            ),
+        ]);
+
+        const lastMap = new Map(lastByChannel.rows.map((m: any) => [m.channel, m]));
+        const unreadMap = new Map(unreadChannels.rows.map((r: any) => [r.channel, r.unread]));
+        const dmUnreadMap = new Map(dmUnread.rows.map((r: any) => [Number(r.other_id), r.unread]));
+        const colleagueById = new Map(colleagues.rows.map((u: any) => [Number(u.id), u]));
+
+        const threads: any[] = channels.map(channel => ({
+            threadKey: channelThreadKey(channel),
+            kind: 'channel',
+            channel,
+            lastMessage: lastMap.get(channel) ?? null,
+            unreadCount: unreadMap.get(channel) ?? 0,
+        }));
+        for (const row of dmLast.rows) {
+            const otherId = Number(row.other_id);
+            const colleague: any = colleagueById.get(otherId);
+            const { other_id, ...lastMessage } = row;
+            threads.push({
+                threadKey: dmThreadKey(otherId),
+                kind: 'direct',
+                otherUser: {
+                    id: otherId,
+                    // Il nome denormalizzato sul messaggio copre i contraltari
+                    // non più attivi (fuori dalla lista colleghi).
+                    fullName: colleague?.full_name
+                        ?? (Number(lastMessage.sender_user_id) === otherId ? lastMessage.sender_name : lastMessage.recipient_name),
+                    role: colleague?.role ?? null,
+                    isActive: Boolean(colleague),
+                },
+                lastMessage,
+                unreadCount: dmUnreadMap.get(otherId) ?? 0,
+            });
+        }
+        // Ultimo messaggio più recente in testa; canali senza traffico in coda
+        // nel loro ordine fisso.
+        threads.sort((a, b) => (b.lastMessage?.id ?? 0) - (a.lastMessage?.id ?? 0));
+
+        res.json({
+            threads,
+            colleagues: colleagues.rows.map((u: any) => ({ id: Number(u.id), fullName: u.full_name, role: u.role })),
+        });
+    } catch (err) {
+        console.error('GET /staff-chat/threads error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/staff-chat/threads/:threadKey/messages', authenticate, requirePermission('staffchat:use'), async (req: any, res) => {
+    try {
+        const userId = req.user.userId;
+        const ref = parseThreadKey(String(req.params.threadKey));
+        if (!ref) return res.status(400).json({ error: 'Thread non valido' });
+        const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '50'), 10) || 50, 1), 100);
+        const before = parseInt(String(req.query.before ?? ''), 10);
+        const beforeClause = Number.isFinite(before) ? before : null;
+
+        let rows: any[];
+        if (ref.kind === 'channel') {
+            if (!channelsForRole(req.user.role).includes(ref.channel)) {
+                return res.status(403).json({ error: 'Canale non accessibile' });
+            }
+            const r = await queryWithRetry(
+                `SELECT ${STAFF_MSG_FIELDS} FROM staff_messages
+                 WHERE tenant_id = $1 AND kind = 'channel' AND channel = $2
+                   AND ($3::bigint IS NULL OR id < $3)
+                 ORDER BY id DESC LIMIT $4`,
+                [req.tenantId!, ref.channel, beforeClause, limit]
+            );
+            rows = r.rows;
+        } else {
+            const other = await queryWithRetry(
+                `SELECT id FROM users WHERE tenant_id = $1 AND id = $2`,
+                [req.tenantId!, ref.otherUserId]
+            );
+            if (other.rows.length === 0) return res.status(404).json({ error: 'Utente non trovato' });
+            const r = await queryWithRetry(
+                `SELECT ${STAFF_MSG_FIELDS} FROM staff_messages
+                 WHERE tenant_id = $1 AND kind = 'direct'
+                   AND ((sender_user_id = $2 AND recipient_user_id = $3)
+                     OR (sender_user_id = $3 AND recipient_user_id = $2))
+                   AND ($4::bigint IS NULL OR id < $4)
+                 ORDER BY id DESC LIMIT $5`,
+                [req.tenantId!, userId, ref.otherUserId, beforeClause, limit]
+            );
+            rows = r.rows;
+        }
+        // Pagina restituita in ordine cronologico ascendente.
+        res.json({ messages: rows.reverse() });
+    } catch (err) {
+        console.error('GET /staff-chat/threads/:threadKey/messages error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/staff-chat/messages', authenticate, requirePermission('staffchat:use'), async (req: any, res) => {
+    try {
+        const userId = req.user.userId;
+        const socketId = req.headers['x-socket-id'] as string;
+        const { threadKey, body, presetKey, linkedReservationId, linkedTableId } = req.body || {};
+
+        const ref = parseThreadKey(String(threadKey ?? ''));
+        if (!ref) return res.status(400).json({ error: 'Thread non valido' });
+        const text = typeof body === 'string' ? body.trim() : '';
+        if (!text || text.length > STAFF_MESSAGE_MAX_LENGTH) {
+            return res.status(400).json({ error: 'Messaggio vuoto o troppo lungo' });
+        }
+        const preset = typeof presetKey === 'string' && isStaffPresetKey(presetKey) ? presetKey : null;
+
+        const linkedReservation = Number.isInteger(linkedReservationId) ? Number(linkedReservationId) : null;
+        const linkedTable = Number.isInteger(linkedTableId) ? Number(linkedTableId) : null;
+        if (linkedReservation != null) {
+            const r = await queryWithRetry(`SELECT id FROM reservations WHERE tenant_id = $1 AND id = $2`, [req.tenantId!, linkedReservation]);
+            if (r.rows.length === 0) return res.status(400).json({ error: 'Prenotazione collegata non trovata' });
+        }
+        if (linkedTable != null) {
+            const r = await queryWithRetry(`SELECT id FROM tables WHERE tenant_id = $1 AND id = $2`, [req.tenantId!, linkedTable]);
+            if (r.rows.length === 0) return res.status(400).json({ error: 'Tavolo collegato non trovato' });
+        }
+
+        // Nome dal record utente, non dal token: il nome può cambiare.
+        const me = await queryWithRetry(`SELECT full_name FROM users WHERE tenant_id = $1 AND id = $2`, [req.tenantId!, userId]);
+        const senderName = me.rows[0]?.full_name || req.user.email;
+
+        let recipient: { id: number; name: string } | null = null;
+        if (ref.kind === 'channel') {
+            if (!channelsForRole(req.user.role).includes(ref.channel)) {
+                return res.status(403).json({ error: 'Canale non accessibile' });
+            }
+        } else {
+            if (ref.otherUserId === userId) return res.status(400).json({ error: 'Destinatario non valido' });
+            const other = await queryWithRetry(
+                `SELECT id, full_name, is_active FROM users WHERE tenant_id = $1 AND id = $2`,
+                [req.tenantId!, ref.otherUserId]
+            );
+            if (other.rows.length === 0) return res.status(404).json({ error: 'Utente non trovato' });
+            if (!other.rows[0].is_active) return res.status(400).json({ error: 'Utente non attivo' });
+            recipient = { id: Number(other.rows[0].id), name: other.rows[0].full_name };
+        }
+
+        const ins = await queryWithRetry(
+            `INSERT INTO staff_messages
+                (tenant_id, kind, channel, sender_user_id, sender_name, sender_role,
+                 recipient_user_id, recipient_name, body, preset_key,
+                 linked_reservation_id, linked_table_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+             RETURNING ${STAFF_MSG_FIELDS}`,
+            [req.tenantId!, ref.kind, ref.kind === 'channel' ? ref.channel : null,
+             userId, senderName, String(req.user.role),
+             recipient?.id ?? null, recipient?.name ?? null, text, preset,
+             linkedReservation, linkedTable]
+        );
+        const message = ins.rows[0];
+
+        // Broadcast mirato; chi origina ha già la risposta HTTP (pattern
+        // tavoli, esclusione via X-Socket-ID). Nel DM il mittente resta
+        // incluso come utente: i suoi altri device devono vedere il messaggio.
+        if (ref.kind === 'channel') {
+            socketService?.broadcastToRolesRoom(req.tenantId!, rolesForChannel(ref.channel).map(String), 'staffchat:message', message, socketId);
+        } else {
+            socketService?.broadcastToUsers(req.tenantId!, [userId, recipient!.id], 'staffchat:message', message, socketId);
+        }
+
+        // Push fire-and-forget: un fallimento web-push non deve far fallire
+        // l'invio. tag per thread: i messaggi dello stesso thread collassano.
+        const preview = text.slice(0, 120);
+        if (ref.kind === 'channel') {
+            pushSendToRoles(req.tenantId!, rolesForChannel(ref.channel).map(String), {
+                title: `${senderName} · ${ref.channel}`,
+                body: preview,
+                url: `/?staffchat=${encodeURIComponent(channelThreadKey(ref.channel))}`,
+                tag: `staffchat:${channelThreadKey(ref.channel)}`,
+                category: 'staff',
+                persist: false,
+            }, { excludeUserId: userId }).catch(err => console.error('Push (chat staff canale) failed:', err));
+        } else {
+            pushSendToUser(recipient!.id, {
+                title: senderName,
+                body: preview,
+                // Il threadKey del destinatario punta a ME (l'altro capo).
+                url: `/?staffchat=${encodeURIComponent(dmThreadKey(userId))}`,
+                tag: `staffchat:${dmThreadKey(userId)}`,
+                category: 'staff',
+                persist: false,
+            }).catch(err => console.error('Push (chat staff dm) failed:', err));
+        }
+
+        res.status(201).json(message);
+    } catch (err) {
+        console.error('POST /staff-chat/messages error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/staff-chat/threads/:threadKey/read', authenticate, requirePermission('staffchat:use'), async (req: any, res) => {
+    try {
+        const userId = req.user.userId;
+        const socketId = req.headers['x-socket-id'] as string;
+        const threadKey = String(req.params.threadKey);
+        const ref = parseThreadKey(threadKey);
+        if (!ref) return res.status(400).json({ error: 'Thread non valido' });
+        const lastReadMessageId = Number(req.body?.lastReadMessageId);
+        if (!Number.isInteger(lastReadMessageId) || lastReadMessageId <= 0) {
+            return res.status(400).json({ error: 'lastReadMessageId non valido' });
+        }
+        // Upsert monotono: un device in ritardo non riporta indietro il cursore.
+        await queryWithRetry(
+            `INSERT INTO staff_message_reads (tenant_id, user_id, thread_key, last_read_message_id)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (tenant_id, user_id, thread_key)
+             DO UPDATE SET last_read_message_id = GREATEST(staff_message_reads.last_read_message_id, EXCLUDED.last_read_message_id),
+                           updated_at = CURRENT_TIMESTAMP`,
+            [req.tenantId!, userId, threadKey, lastReadMessageId]
+        );
+        // Gli altri device dello stesso utente allineano il badge.
+        socketService?.broadcastToUsers(req.tenantId!, [userId], 'staffchat:read', { threadKey, lastReadMessageId }, socketId);
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('POST /staff-chat/threads/:threadKey/read error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/staff-chat/unread-count', authenticate, requirePermission('staffchat:use'), async (req: any, res) => {
+    try {
+        const userId = req.user.userId;
+        const channels = channelsForRole(req.user.role);
+        const r = await queryWithRetry(
+            `SELECT (
+                (SELECT COUNT(*) FROM staff_messages m
+                 LEFT JOIN staff_message_reads r
+                   ON r.tenant_id = m.tenant_id AND r.user_id = $2
+                  AND r.thread_key = 'channel:' || m.channel
+                 WHERE m.tenant_id = $1 AND m.kind = 'channel' AND m.channel = ANY($3)
+                   AND m.sender_user_id IS DISTINCT FROM $2
+                   AND m.id > COALESCE(r.last_read_message_id, 0))
+                +
+                (SELECT COUNT(*) FROM staff_messages m
+                 LEFT JOIN staff_message_reads r
+                   ON r.tenant_id = m.tenant_id AND r.user_id = $2
+                  AND r.thread_key = 'dm:' || m.sender_user_id
+                 WHERE m.tenant_id = $1 AND m.kind = 'direct'
+                   AND m.recipient_user_id = $2 AND m.sender_user_id IS NOT NULL
+                   AND m.id > COALESCE(r.last_read_message_id, 0))
+            )::int AS count`,
+            [req.tenantId!, userId, channels]
+        );
+        res.json({ count: r.rows[0]?.count ?? 0 });
+    } catch (err) {
+        console.error('GET /staff-chat/unread-count error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
