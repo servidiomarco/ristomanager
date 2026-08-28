@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -201,12 +201,13 @@ const SETTINGS_GROUPS: {
   id: string;
   label: string;
   Icon: React.ComponentType<{ size?: number; className?: string }>;
-  guard?: 'admin';
+  guard?: 'admin' | 'pay_at_table';
 }[] = [
   { id: 'imp-profilo', label: 'Profilo', Icon: UserCheck },
   { id: 'imp-ristorante', label: 'Ristorante', Icon: Clock },
   { id: 'imp-prenotazioni', label: 'Prenotazioni', Icon: Calendar },
   { id: 'imp-pagamenti', label: 'Pagamenti', Icon: CreditCard },
+  { id: 'imp-fiscalita', label: 'Fiscalità', Icon: Landmark, guard: 'pay_at_table' },
   { id: 'imp-comunicazioni', label: 'Comunicazioni', Icon: MessagesSquare },
   { id: 'imp-ai', label: 'AI', Icon: Sparkles },
   { id: 'imp-amministrazione', label: 'Amministrazione', Icon: Users, guard: 'admin' },
@@ -1782,9 +1783,12 @@ const App: React.FC = () => {
   const altroNavItems = NAV_ITEMS.filter(item => item.kind === 'link' && !item.isTab && canSeeNavItem(item));
 
   // Blocchi di Impostazioni visibili a questo utente: il blocco
-  // Amministrazione compare solo a chi può usarne almeno una card.
+  // Amministrazione compare solo a chi può usarne almeno una card, la
+  // Fiscalità solo col conto al tavolo nel piano (l'emissione parte da lì).
   const visibleSettingsGroups = SETTINGS_GROUPS.filter(g =>
-    g.guard === 'admin' ? (canManageUsers() || canViewLogs()) : true
+    g.guard === 'admin' ? (canManageUsers() || canViewLogs())
+    : g.guard === 'pay_at_table' ? hasFeature('pay_at_table')
+    : true
   );
 
   // ── Comunicazioni, mobile ────────────────────────────────────────────────
@@ -2815,13 +2819,6 @@ const App: React.FC = () => {
                     <PayAtTableSettingsManager showToast={addToast} />
                   </CardErrorBoundary>
                 )}
-                {/* Scontrino elettronico: ha senso solo dove c'è il conto al
-                    tavolo, perché l'emissione parte dalla sua chiusura. */}
-                {hasFeature('pay_at_table') && (
-                  <CardErrorBoundary label="Scontrino elettronico">
-                    <FiscalSettingsManager showToast={addToast} />
-                  </CardErrorBoundary>
-                )}
                 {/* Card #28: i link inviati e non pagati scadono da soli dopo
                     N ore, col messaggio delle prenotazioni non confermate. */}
                 <SettingsDisclosure
@@ -2834,6 +2831,30 @@ const App: React.FC = () => {
                 </SettingsDisclosure>
               </div>
             </SettingsSection>
+
+            {/* Tutta la fiscalità in un posto solo: dati dell'esercente,
+                scontrino elettronico e aliquote. Esiste solo col conto al
+                tavolo nel piano, perché l'emissione parte dalla sua
+                chiusura (stesso gate del chip in SETTINGS_GROUPS). */}
+            {hasFeature('pay_at_table') && (
+              <SettingsSection id="imp-fiscalita" label="Fiscalità">
+                <div className="space-y-3">
+                  <CardErrorBoundary label="Fiscalità">
+                    <FiscalSettingsManager showToast={addToast} />
+                  </CardErrorBoundary>
+                  {/* L'aliquota vive sul piatto: qui solo la strada per
+                      arrivarci, non un doppione della regolazione. */}
+                  {canAccessView(ViewState.MENU) && (
+                    <SettingsNavCard
+                      icon={Percent}
+                      title="Aliquote IVA"
+                      description="L'aliquota si imposta piatto per piatto nel menù (default 10%). Coperto e servizio al 10%."
+                      onClick={() => setView(ViewState.MENU)}
+                    />
+                  )}
+                </div>
+              </SettingsSection>
+            )}
 
             {/* I canali con cui il ristorante scrive e riceve: email in
                 uscita e in entrata, allegati. Le risposte AI ai messaggi
