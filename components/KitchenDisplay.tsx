@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, BellOff, Check, ChevronRight, Loader2, Play, TriangleAlert, WifiOff } from 'lucide-react';
+import { Bell, BellOff, Check, ChevronRight, Loader2, MessagesSquare, Play, TriangleAlert, WifiOff } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
+import { useAuth } from '../contexts/AuthContext';
 import { socketClient } from '../services/socketClient';
+import { staffChatApiService } from '../services/staffChatApiService';
+import { channelThreadKey, type StaffMessage } from '../services/staffChat';
 import {
   getKdsQueue, setKdsItemStatus, getMenuCatalogue,
   type KdsItem, type KdsCourseState, type MenuCatalogue,
@@ -116,6 +119,67 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   };
 
   useEffect(() => { getMenuCatalogue().then(setCatalogue).catch(() => {}); }, []);
+
+  // Striscia della chat staff: l'ultimo messaggio non letto del canale
+  // cucina, così "finito il branzino" arriva sul monitor senza aprire la
+  // chat. "Ok" marca letto col cursore e la striscia sparisce anche dagli
+  // altri device dello stesso account (evento staffchat:read).
+  const { user } = useAuth();
+  const userIdRef = useRef<number | null>(null);
+  userIdRef.current = user?.id ?? null;
+  const [chatStrip, setChatStrip] = useState<{ message: StaffMessage; unread: number } | null>(null);
+  const CUCINA_KEY = channelThreadKey('cucina');
+
+  useEffect(() => {
+    let cancelled = false;
+    // Se il ruolo non ha staffchat:use la chiamata fallisce con 403 e la
+    // striscia semplicemente non esiste.
+    staffChatApiService.listThreads()
+      .then(({ threads }) => {
+        if (cancelled) return;
+        const cucina = threads.find(t => t.threadKey === CUCINA_KEY);
+        if (cucina?.lastMessage && cucina.unreadCount > 0) {
+          setChatStrip({ message: cucina.lastMessage, unread: cucina.unreadCount });
+        }
+      })
+      .catch(() => {});
+
+    const onMessage = (msg: StaffMessage) => {
+      if (msg.kind !== 'channel' || msg.channel !== 'cucina') return;
+      if (msg.sender_user_id != null && msg.sender_user_id === userIdRef.current) return;
+      setChatStrip(prev => ({ message: msg, unread: (prev?.unread ?? 0) + 1 }));
+      // Stessa campana delle comande: in cucina un avviso muto non esiste.
+      if (soundRef.current) chime();
+    };
+    const onRead = (data: { threadKey: string; lastReadMessageId: number }) => {
+      if (data?.threadKey !== CUCINA_KEY) return;
+      setChatStrip(prev => (prev && prev.message.id <= data.lastReadMessageId ? null : prev));
+    };
+
+    let attached: ReturnType<typeof socketClient.getSocket> = null;
+    const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
+      if (attached === s) return;
+      if (attached) {
+        attached.off('staffchat:message', onMessage);
+        attached.off('staffchat:read', onRead);
+      }
+      attached = s;
+      if (attached) {
+        attached.on('staffchat:message', onMessage);
+        attached.on('staffchat:read', onRead);
+      }
+    };
+    attach(socketClient.getSocket());
+    const unsub = socketClient.onSocketChange((s) => attach(s));
+    return () => { cancelled = true; unsub(); attach(null); };
+  }, [CUCINA_KEY]);
+
+  const dismissChatStrip = useCallback(() => {
+    const current = chatStrip;
+    if (!current) return;
+    setChatStrip(null);
+    staffChatApiService.markRead(CUCINA_KEY, current.message.id).catch(() => {});
+  }, [chatStrip, CUCINA_KEY]);
 
   // Il banner segue la data/turno globale dell'header: se il cuoco naviga a
   // "Mar 18 Cena" vuole vedere il riepilogo di quel servizio, non di oggi.
@@ -311,6 +375,33 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           </button>
         </div>
       </div>
+
+      {chatStrip && (
+        <div className="flex-shrink-0 px-4 pb-3">
+          {/* Corpi grandi come il resto del monitor: si legge da un metro.
+              Il bordo nella famiglia arriving segnala "qualcuno ti parla"
+              senza gridare critico. */}
+          <div className="flex items-center gap-3 rounded-[20px] border-l-4 border-[var(--ds-arriving-solid)] bg-[var(--ds-surface)] p-3 pl-4 shadow-[var(--ds-shadow-card)]">
+            <MessagesSquare size={18} className="flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
+            <p className="min-w-0 flex-1 text-[16px] text-[var(--ds-text-primary)]">
+              <span className="font-semibold">{chatStrip.message.sender_name}</span>
+              {' '}<span className="break-words">{chatStrip.message.body}</span>
+              {chatStrip.unread > 1 && (
+                <span className="ml-2 text-[14px] text-[var(--ds-text-muted)]">
+                  +{chatStrip.unread - 1} non lett{chatStrip.unread - 1 === 1 ? 'o' : 'i'}
+                </span>
+              )}
+            </p>
+            <button
+              type="button"
+              onClick={dismissChatStrip}
+              className="inline-flex h-11 flex-shrink-0 items-center rounded-full bg-[var(--ds-surface-row)] px-5 text-[15px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              Ok
+            </button>
+          </div>
+        </div>
+      )}
 
       {summary && (
         <ServiceSummaryBanner
