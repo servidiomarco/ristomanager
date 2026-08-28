@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Sparkles, Save, Loader2, ChevronDown } from 'lucide-react';
+import { Wand2, Save, Loader2, ChevronDown } from 'lucide-react';
 import { Loader } from './Loader';
 import { getTableAssignmentAiPrompt, updateTableAssignmentAiPrompt } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
@@ -61,7 +61,7 @@ export const TableAssignmentAiPromptCard: React.FC<Props> = ({ showToast }) => {
       <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)] flex-shrink-0">
-            <Sparkles className="w-5 h-5" />
+            <Wand2 className="w-5 h-5" />
           </div>
           <div className="min-w-0">
             <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Prompt logica tavoli per AI</h4>

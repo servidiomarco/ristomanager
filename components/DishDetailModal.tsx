@@ -40,10 +40,10 @@ export const DishDetailModal: React.FC<Props> = ({ dish, onClose }) => {
           <button
             type="button"
             onClick={onClose}
-            className="absolute top-3 right-3 p-1.5 rounded-lg bg-[var(--ds-surface)]/90 hover:bg-[var(--ds-surface)] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] shadow-sm transition-colors"
+            className="absolute top-3 right-3 inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             title="Chiudi"
           >
-            <X className="h-5 w-5" />
+            <X className="h-4 w-4" />
           </button>
         </div>
 

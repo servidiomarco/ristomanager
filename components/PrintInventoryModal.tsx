@@ -210,27 +210,27 @@ export const PrintInventoryModal: React.FC<Props> = ({
       {createPortal(
         <div className="print-portal">
           <div id="print-area" className="print-only">
-            <header style={{ marginBottom: '1.25rem', paddingBottom: '0.75rem', borderBottom: '2px solid #0f172a' }}>
+            <header style={{ marginBottom: '1.25rem', paddingBottom: '0.75rem', borderBottom: '2px solid var(--ds-print-ink)' }}>
               <h1 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0 }}>Inventario — {AREA_LABEL[area]}</h1>
-              <p style={{ margin: '0.25rem 0 0', fontSize: '0.95rem', color: '#475569' }}>
+              <p style={{ margin: '0.25rem 0 0', fontSize: '0.95rem', color: 'var(--ds-print-ink-secondary)' }}>
                 {locationLabel} · {categoryLabel}
               </p>
             </header>
 
         {totalProducts === 0 ? (
-          <p style={{ fontStyle: 'italic', color: '#64748b' }}>Nessun prodotto corrispondente ai filtri.</p>
+          <p style={{ fontStyle: 'italic', color: 'var(--ds-print-ink-muted)' }}>Nessun prodotto corrispondente ai filtri.</p>
         ) : (
           groups.map(group => (
             <section key={group.id} style={{ marginBottom: '1.25rem' }}>
-              <h2 style={{ fontSize: '1.05rem', fontWeight: 700, margin: '0 0 0.4rem', borderBottom: '1px solid #cbd5e1', paddingBottom: '0.25rem' }}>
+              <h2 style={{ fontSize: '1.05rem', fontWeight: 700, margin: '0 0 0.4rem', borderBottom: '1px solid var(--ds-print-rule-strong)', paddingBottom: '0.25rem' }}>
                 {group.name}
-                <span style={{ marginLeft: 8, fontWeight: 400, fontSize: '0.8rem', color: '#64748b' }}>
+                <span style={{ marginLeft: 8, fontWeight: 400, fontSize: '0.8rem', color: 'var(--ds-print-ink-muted)' }}>
                   · {group.products.length} {group.products.length === 1 ? 'prodotto' : 'prodotti'}
                 </span>
               </h2>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                 <thead>
-                  <tr style={{ background: '#f1f5f9', borderBottom: '1px solid #cbd5e1' }}>
+                  <tr style={{ background: 'var(--ds-print-fill)', borderBottom: '1px solid var(--ds-print-rule-strong)' }}>
                     <th style={{ padding: '0.4rem 0.5rem', textAlign: 'left' }}>Prodotto</th>
                     <th style={{ padding: '0.4rem 0.5rem', textAlign: 'left', width: '80px' }}>Unità</th>
                     <th style={{ padding: '0.4rem 0.5rem', textAlign: 'right', width: '100px' }}>
@@ -246,12 +246,12 @@ export const PrintInventoryModal: React.FC<Props> = ({
                     const qty = quantityFor(p.id);
                     const breakdown = locationId == null ? breakdownFor(p.id) : [];
                     return (
-                      <tr key={p.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                      <tr key={p.id} style={{ borderBottom: '1px solid var(--ds-print-rule)' }}>
                         <td style={{ padding: '0.4rem 0.5rem' }}>{toTitleCase(p.name)}</td>
-                        <td style={{ padding: '0.4rem 0.5rem', fontSize: '0.75rem', color: '#475569' }}>{p.unit}</td>
+                        <td style={{ padding: '0.4rem 0.5rem', fontSize: '0.75rem', color: 'var(--ds-print-ink-secondary)' }}>{p.unit}</td>
                         <td style={{ padding: '0.4rem 0.5rem', textAlign: 'right', fontWeight: 600 }}>{qty}</td>
                         {locationId == null && (
-                          <td style={{ padding: '0.4rem 0.5rem', fontSize: '0.78rem', color: '#475569' }}>
+                          <td style={{ padding: '0.4rem 0.5rem', fontSize: '0.78rem', color: 'var(--ds-print-ink-secondary)' }}>
                             {breakdown.length === 0
                               ? '—'
                               : breakdown.map(b => `${toTitleCase(b.locationName)}: ${b.quantity}`).join(' · ')}
@@ -266,7 +266,7 @@ export const PrintInventoryModal: React.FC<Props> = ({
           ))
         )}
 
-            <footer style={{ marginTop: '2rem', paddingTop: '0.5rem', borderTop: '1px solid #e2e8f0', fontSize: '0.7rem', color: '#94a3b8', textAlign: 'right' }}>
+            <footer style={{ marginTop: '2rem', paddingTop: '0.5rem', borderTop: '1px solid var(--ds-print-rule)', fontSize: '0.7rem', color: 'var(--ds-print-ink-subtle)', textAlign: 'right' }}>
               Stampato il {new Date().toLocaleString('it-IT')}
             </footer>
           </div>

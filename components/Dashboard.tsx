@@ -14,7 +14,7 @@ import { SkeletonKpiRow, SkeletonReservationCard } from './SkeletonCards';
 import { staffApiService } from '../services/staffApiService';
 import { DateNavigator } from './DateNavigator';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Sparkles, Loader2, ChevronRight, Calendar, Plus, Check, Clock, Flag, AlertTriangle, CheckCircle2, ListTodo, ShoppingCart, Coffee, ChefHat, Package, Sun, Sunset, Armchair, Trees, Mountain, Waves, TreePine, Tent, Columns3, MapPin, StickyNote, Wheat, ListChecks, Phone as PhoneIcon, Globe, Mic, MessageCircle, User as UserIcon, Users as UsersIcon, X, ArrowRight, Ban, HelpCircle, LayoutGrid, UtensilsCrossed, BarChart3 } from 'lucide-react';
+import { Wand2, Loader2, ChevronRight, Calendar, Plus, Check, Clock, Flag, AlertTriangle, CheckCircle2, ListTodo, ShoppingCart, Coffee, ChefHat, Package, Sun, Sunset, Armchair, Trees, Mountain, Waves, TreePine, Tent, Columns3, MapPin, StickyNote, Wheat, ListChecks, Phone as PhoneIcon, Globe, Mic, MessageCircle, User as UserIcon, Users as UsersIcon, X, ArrowRight, Ban, HelpCircle, LayoutGrid, UtensilsCrossed, BarChart3 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { generateAiReport } from '../services/aiMessagesApiService';
 import { useAuth } from '../contexts/AuthContext';
@@ -23,13 +23,17 @@ import { useTodos } from '../contexts/TodosContext';
 import { Loader } from './Loader';
 import { ArrivalsTimeline } from './ArrivalsTimeline';
 
+/* Tinte categoriali, non famiglie di stato: qui il colore non vuol dire
+   niente, serve solo a distinguere una categoria dall'altra. Mapparle su
+   `pending` o `critical` farebbe mentire il colore — un pallino Inventario
+   in ambra si leggerebbe "in ritardo". Vedi --ds-cat-* in index.css. */
 const CATEGORY_DOT_COLORS: Record<TodoCategory, string> = {
-  [TodoCategory.GENERAL]: 'bg-slate-400',
-  [TodoCategory.RESERVATION]: 'bg-indigo-500',
-  [TodoCategory.INVENTORY]: 'bg-amber-500',
-  [TodoCategory.STAFF]: 'bg-emerald-500',
-  [TodoCategory.MAINTENANCE]: 'bg-orange-500',
-  [TodoCategory.EVENT]: 'bg-purple-500',
+  [TodoCategory.GENERAL]:     'bg-[var(--ds-cat-1-solid)]',
+  [TodoCategory.RESERVATION]: 'bg-[var(--ds-cat-2-solid)]',
+  [TodoCategory.INVENTORY]:   'bg-[var(--ds-cat-3-solid)]',
+  [TodoCategory.STAFF]:       'bg-[var(--ds-cat-4-solid)]',
+  [TodoCategory.MAINTENANCE]: 'bg-[var(--ds-cat-5-solid)]',
+  [TodoCategory.EVENT]:       'bg-[var(--ds-cat-6-solid)]',
 };
 
 const PRIORITY_RANK: Record<TodoPriority, number> = {
@@ -39,9 +43,9 @@ const PRIORITY_RANK: Record<TodoPriority, number> = {
 };
 
 const PRIORITY_COLORS: Record<TodoPriority, string> = {
-  [TodoPriority.LOW]: 'text-slate-400',
-  [TodoPriority.MEDIUM]: 'text-amber-500',
-  [TodoPriority.HIGH]: 'text-rose-500',
+  [TodoPriority.LOW]: 'text-[var(--ds-text-muted)]',
+  [TodoPriority.MEDIUM]: 'text-[var(--ds-pending-solid)]',
+  [TodoPriority.HIGH]: 'text-[var(--ds-critical-solid)]',
 };
 
 interface DashboardProps {
@@ -1717,17 +1721,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
         {affluenceTab === 'SETTIMANA' && (
           <>
-            <p className="tabular text-xs text-[var(--color-fg-muted)] mb-3">{weekRange}</p>
+            <p className="tabular text-xs text-[var(--ds-text-muted)] mb-3">{weekRange}</p>
             <div className="h-64 sm:h-72 w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={weeklyChartData} margin={{ top: 5, right: 5, left: -10, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="var(--color-chart-grid)" />
-                  <XAxis dataKey="name" axisLine={false} tickLine={false} stroke="var(--color-chart-axis)" tick={{ fill: 'var(--color-chart-axis)', fontSize: 11 }} />
-                  <YAxis domain={[0, 'auto']} axisLine={false} tickLine={false} stroke="var(--color-chart-axis)" tick={{ fill: 'var(--color-chart-axis)', fontSize: 11 }} width={30} />
+                  <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="var(--ds-border)" />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} stroke="var(--ds-border-strong)" tick={{ fill: 'var(--ds-text-muted)', fontSize: 11 }} />
+                  <YAxis domain={[0, 'auto']} axisLine={false} tickLine={false} stroke="var(--ds-border-strong)" tick={{ fill: 'var(--ds-text-muted)', fontSize: 11 }} width={30} />
                   <Tooltip
-                    cursor={{ fill: 'var(--color-surface-hover)' }}
+                    cursor={{ fill: 'var(--ds-surface-row)' }}
                     contentStyle={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: '12px', fontSize: '13px' }}
-                    labelStyle={{ color: 'var(--color-fg-muted)' }}
+                    labelStyle={{ color: 'var(--ds-text-muted)' }}
                     formatter={(value: number) => [`${value} ospiti`, 'Ospiti']}
                     labelFormatter={(label, payload) => {
                       if (payload && payload[0]) {
@@ -1738,7 +1742,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   />
                   <Bar
                     dataKey="guests"
-                    fill={globalShiftFilter === 'LUNCH' ? '#f59e0b' : globalShiftFilter === 'DINNER' ? '#3b82f6' : 'var(--color-chart-1)'}
+                    fill={globalShiftFilter === 'LUNCH' ? 'var(--ds-pending-solid)' : globalShiftFilter === 'DINNER' ? 'var(--ds-arriving-solid)' : 'var(--ds-action-bg)'}
                     radius={[4, 4, 0, 0]}
                   />
                 </BarChart>
@@ -2166,10 +2170,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       <div className="bg-[var(--ds-surface)] p-4 sm:p-5 rounded-[20px] shadow-[var(--ds-shadow-card)]">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2 min-w-0">
-            <Sparkles className="h-4 w-4 flex-shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
+            <Wand2 className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
             <div className="min-w-0">
-              <h2 className="text-base font-semibold text-[var(--color-fg)]">Come sta andando</h2>
-              <p className="text-[13px] text-[var(--color-fg-muted)]">
+              <h2 className="text-base font-semibold text-[var(--ds-text-primary)]">Come sta andando</h2>
+              <p className="text-[13px] text-[var(--ds-text-muted)]">
                 Lettura degli ultimi 30 giorni, a confronto con i 30 precedenti.
               </p>
             </div>
@@ -2178,20 +2182,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             type="button"
             onClick={handleGenerateReport}
             disabled={reportLoading}
-            className="inline-flex h-10 flex-shrink-0 items-center gap-2 rounded-[10px] bg-[var(--color-fg)] px-4 text-[14px] font-semibold text-[var(--ds-surface)] transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-10 flex-shrink-0 items-center gap-2 rounded-[10px] bg-[var(--ds-text-primary)] px-4 text-[14px] font-semibold text-[var(--ds-surface)] transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
-            {reportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            {reportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
             {reportLoading ? 'Ci penso…' : report ? 'Rigenera' : 'Genera'}
           </button>
         </div>
 
         {reportError && (
-          <p className="mt-3 rounded-[10px] bg-[var(--ds-surface-row)] px-3 py-2 text-[13px] text-[var(--color-fg-muted)]">
+          <p className="mt-3 rounded-[10px] bg-[var(--ds-surface-row)] px-3 py-2 text-[13px] text-[var(--ds-text-muted)]">
             {reportError}
           </p>
         )}
         {report && (
-          <div className="prose prose-sm mt-4 max-w-none text-[var(--color-fg-muted)] animate-fade-in">
+          <div className="prose prose-sm mt-4 max-w-none text-[var(--ds-text-muted)] animate-fade-in">
             <ReactMarkdown>{report}</ReactMarkdown>
           </div>
         )}
@@ -2231,22 +2235,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               aria-modal="true"
               aria-label="Prenotazione da confermare"
             >
-              <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+              <div className="absolute inset-0 bg-[var(--ds-backdrop)]" />
               <div
-                className="relative w-full max-w-md bg-[var(--color-surface)] rounded-2xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] overflow-hidden"
+                className="relative w-full max-w-md bg-[var(--ds-surface)] rounded-2xl shadow-[var(--ds-shadow-raised)] border border-[var(--ds-border)] overflow-hidden"
                 onClick={e => e.stopPropagation()}
               >
-                <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-line)]">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--ds-border)]">
                   <div className="flex items-center gap-2 min-w-0">
-                    <HelpCircle className="h-4 w-4 text-amber-500 flex-shrink-0" />
-                    <h3 className="text-sm font-semibold text-[var(--color-fg)] truncate">Prenotazione da confermare</h3>
+                    <HelpCircle className="h-4 w-4 text-[var(--ds-pending-solid)] flex-shrink-0" aria-hidden />
+                    <h3 className="text-sm font-semibold text-[var(--ds-text-primary)] truncate">Prenotazione da confermare</h3>
                     <PaymentBadge reservation={res} />
                   </div>
                   <button
                     type="button"
                     onClick={closeModal}
                     disabled={closeDisabled}
-                    className="p-1 rounded-md text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors disabled:opacity-50"
+                    className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                     aria-label="Chiudi"
                   >
                     <X className="h-4 w-4" />
@@ -2255,21 +2259,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
                 <div className="px-5 py-4 space-y-3">
                   <div>
-                    <p className="text-base font-semibold text-[var(--color-fg)]">{toTitleCase(res.customer_name) || '—'}</p>
-                    <p className="text-xs text-[var(--color-fg-muted)] mt-0.5 capitalize">{dateLabel} · {timeLabel}</p>
+                    <p className="text-base font-semibold text-[var(--ds-text-primary)]">{toTitleCase(res.customer_name) || '—'}</p>
+                    <p className="text-xs text-[var(--ds-text-muted)] mt-0.5 capitalize">{dateLabel} · {timeLabel}</p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3 text-[13px]">
-                    <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
+                    <div className="flex items-center gap-2 text-[var(--ds-text-muted)]">
                       <UsersIcon className="h-4 w-4 flex-shrink-0" />
                       <span>{res.guests || 0} {res.guests === 1 ? 'ospite' : 'ospiti'}</span>
                     </div>
-                    <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
+                    <div className="flex items-center gap-2 text-[var(--ds-text-muted)]">
                       <channel.Icon className="h-4 w-4 flex-shrink-0" />
                       <span>{channel.label}</span>
                     </div>
                     {res.phone && (
-                      <div className="flex items-center gap-2 text-[var(--color-fg-muted)] col-span-2">
+                      <div className="flex items-center gap-2 text-[var(--ds-text-muted)] col-span-2">
                         <PhoneIcon className="h-4 w-4 flex-shrink-0" />
                         <a href={`tel:${res.phone}`} className="hover:underline tabular truncate">{res.phone}</a>
                       </div>
@@ -2277,9 +2281,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   </div>
 
                   {res.notes && (
-                    <div className="border-t border-[var(--color-line)] pt-3">
-                      <div className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-semibold mb-1">Note</div>
-                      <p className="text-[13px] text-[var(--color-fg)] whitespace-pre-wrap break-words">{res.notes}</p>
+                    <div className="border-t border-[var(--ds-border)] pt-3">
+                      <div className="text-[11px] uppercase tracking-wide text-[var(--ds-text-subtle)] font-semibold mb-1">Note</div>
+                      <p className="text-[13px] text-[var(--ds-text-primary)] whitespace-pre-wrap break-words">{res.notes}</p>
                     </div>
                   )}
                 </div>
@@ -2289,10 +2293,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   // is still unpaid. Force an explicit "Conferma comunque"
                   // to avoid the classic "confirmed by mistake without
                   // getting paid" mishap on large groups.
-                  <div className="px-5 py-3 border-t border-amber-200 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10">
+                  <div className="px-5 py-3 bg-[var(--ds-pending-tint)]">
                     <div className="flex items-start gap-2 mb-3">
-                      <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
-                      <p className="text-[13px] text-amber-900 dark:text-amber-100 leading-snug">
+                      <AlertTriangle className="h-4 w-4 text-[var(--ds-pending-text)] flex-shrink-0 mt-0.5" aria-hidden />
+                      <p className="text-[13px] text-[var(--ds-pending-text)] leading-snug">
                         Il pagamento della caparra ancora non è avvenuto. Vuoi confermare la prenotazione lo stesso?
                       </p>
                     </div>
@@ -2301,7 +2305,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                         type="button"
                         onClick={() => setUnpaidDepositWarn(false)}
                         disabled={closeDisabled}
-                        className="inline-flex items-center h-9 px-3 rounded-lg text-[13px] font-medium border border-[var(--color-line)] text-[var(--color-fg)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50 transition-colors"
+                        className="inline-flex items-center h-9 px-3 rounded-lg text-[13px] font-medium border border-[var(--ds-border)] text-[var(--ds-text-primary)] bg-[var(--ds-surface)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50 transition-colors"
                       >
                         Annulla
                       </button>
@@ -2309,7 +2313,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                         type="button"
                         onClick={() => handlePendingDecision('confirm', { forceConfirm: true })}
                         disabled={closeDisabled || !onUpdateReservation}
-                        className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                        className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium bg-[var(--ds-pending-solid)] text-[var(--ds-pending-fg)] hover:opacity-90 disabled:opacity-50 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                       >
                         {pendingActionBusy === 'confirm' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
                         Conferma comunque
@@ -2317,12 +2321,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     </div>
                   </div>
                 ) : (
-                  <div className="px-5 py-3 border-t border-[var(--color-line)] bg-[var(--color-surface-2)] flex items-center justify-between gap-2 flex-wrap">
+                  <div className="px-5 py-3 border-t border-[var(--ds-border)] bg-[var(--ds-surface-row)] flex items-center justify-between gap-2 flex-wrap">
                     <button
                       type="button"
                       onClick={() => handlePendingDecision('decline')}
                       disabled={closeDisabled || !onUpdateReservation}
-                      className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium border border-rose-200 text-rose-700 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-500/40 dark:text-rose-300 dark:hover:bg-rose-500/10 transition-colors"
+                      className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] hover:opacity-90 disabled:opacity-50 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       {pendingActionBusy === 'decline' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />}
                       Rifiuta
@@ -2331,7 +2335,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                       type="button"
                       onClick={() => handlePendingDecision('confirm')}
                       disabled={closeDisabled || !onUpdateReservation}
-                      className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                      className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium bg-[var(--ds-seated-solid)] text-[var(--ds-seated-fg)] hover:opacity-90 disabled:opacity-50 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       {pendingActionBusy === 'confirm' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
                       Conferma
@@ -2340,7 +2344,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 )}
 
                 {onOpenReservationInList && (
-                  <div className="px-5 py-2 border-t border-[var(--color-line)] bg-[var(--color-surface-2)] text-center">
+                  <div className="px-5 py-2 border-t border-[var(--ds-border)] bg-[var(--ds-surface-row)] text-center">
                     <button
                       type="button"
                       onClick={() => {
@@ -2349,7 +2353,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                         setUnpaidDepositWarn(false);
                       }}
                       disabled={closeDisabled}
-                      className="inline-flex items-center gap-1 text-[12px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] disabled:opacity-50 transition-colors"
+                      className="inline-flex items-center gap-1 text-[12px] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] disabled:opacity-50 transition-colors"
                     >
                       Modifica completa in Prenotazioni <ArrowRight className="h-3 w-3" />
                     </button>

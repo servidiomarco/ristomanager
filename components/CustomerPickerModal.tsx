@@ -1,9 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { Customer } from '../types';
 import { createCustomer, getCustomers } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
-import { X, Search, UserPlus, Phone, Mail, BookUser } from 'lucide-react';
+import { Search, UserPlus, Phone, Mail, BookUser } from 'lucide-react';
+import { ModalShell, dsInput, dsButton, Field, Callout, EmptyState } from './ds';
+
+// Il form "nuovo cliente" vive nel corpo del modal, il suo submit nel footer:
+// ModalShell li rende come fratelli, quindi il bottone si aggancia al form
+// con l'attributo `form` invece che standoci dentro.
+const CREATE_FORM_ID = 'customer-picker-create';
 
 interface Props {
   isOpen: boolean;
@@ -93,158 +98,154 @@ export const CustomerPickerModal: React.FC<Props> = ({ isOpen, initialQuery, onC
 
   if (!isOpen) return null;
 
-  // Portaled: this picker opens on top of forms that are themselves portaled
-  // to <body> (e.g. the reservation form), so it must live at the same level.
-  return createPortal(
-    <div className="fixed inset-0 z-[60] bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center p-4" onClick={onClose}>
-      <div
-        className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
-          <div className="flex items-center gap-2">
-            <BookUser className="h-5 w-5 text-indigo-600" />
-            <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Rubrica Clienti</h3>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
-          >
-            <X className="h-5 w-5" />
-          </button>
+  return (
+    <ModalShell
+      open={isOpen}
+      onClose={onClose}
+      title={
+        <span className="inline-flex items-center gap-2">
+          <BookUser className="h-5 w-5 flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
+          Rubrica Clienti
+        </span>
+      }
+      size="md"
+      // Si apre sopra il form prenotazione, che e' gia' portato su <body>:
+      // lo z-index resta esplicito invece di dipendere dall'ordine di pittura.
+      className="!z-[60]"
+      bodyClassName="px-4 py-4 sm:px-5"
+      subheader={!showCreate ? (
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ds-text-muted)]" aria-hidden />
+          <label htmlFor="customer-picker-search" className="sr-only">Cerca un cliente</label>
+          <input
+            id="customer-picker-search"
+            type="text"
+            autoFocus
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Cerca per nome, telefono, email..."
+            className={`${dsInput} bg-[var(--ds-surface)] pl-11`}
+          />
         </div>
-
-        {!showCreate && (
+      ) : undefined}
+      footer={!showCreate
+        ? (canCreate ? (
+            <button
+              type="button"
+              onClick={() => {
+                setDraft({ name: query.trim(), phone: '', email: '' });
+                setShowCreate(true);
+              }}
+              className={`${dsButton.primary} w-full`}
+            >
+              <UserPlus className="h-4 w-4" aria-hidden />
+              Nuovo cliente
+            </button>
+          ) : undefined)
+        : (
           <>
-            <div className="p-3 border-b border-[var(--color-line)]">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                <input
-                  type="text"
-                  autoFocus
-                  value={query}
-                  onChange={e => setQuery(e.target.value)}
-                  placeholder="Cerca per nome, telefono, email..."
-                  className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-[var(--color-line-strong)] bg-[var(--color-surface-2)] dark:bg-white/[0.04] focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none"
-                />
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto">
-              {isLoading && (
-                <div className="p-6 text-center text-sm text-slate-400">Caricamento...</div>
-              )}
-              {error && !isLoading && (
-                <div className="p-4 text-sm text-rose-600 bg-rose-50 border-b border-rose-100 dark:bg-rose-500/15 dark:text-rose-400 dark:border-rose-500/30">{error}</div>
-              )}
-              {!isLoading && !error && sortedCustomers.length === 0 && (
-                <div className="p-6 text-center text-sm text-slate-500">
-                  Nessun cliente trovato.
-                </div>
-              )}
-              {!isLoading && sortedCustomers.length > 0 && (
-                <ul className="divide-y divide-slate-100">
-                  {sortedCustomers.map(c => (
-                    <li key={c.id}>
-                      <button
-                        type="button"
-                        onClick={() => handleSelect(c)}
-                        className="w-full text-left px-4 py-3 hover:bg-indigo-50/60 transition-colors"
-                      >
-                        <div className="font-medium text-slate-800">{c.name}</div>
-                        <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-slate-500">
-                          {c.phone && (
-                            <span className="inline-flex items-center gap-1">
-                              <Phone className="h-3 w-3" /> {c.phone}
-                            </span>
-                          )}
-                          {c.email && (
-                            <span className="inline-flex items-center gap-1">
-                              <Mail className="h-3 w-3" /> {c.email}
-                            </span>
-                          )}
-                        </div>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            {canCreate && (
-              <div className="p-4 border-t border-[var(--color-line)]">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDraft({ name: query.trim(), phone: '', email: '' });
-                    setShowCreate(true);
-                  }}
-                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90"
-                >
-                  <UserPlus className="h-4 w-4" />
-                  Nuovo cliente
-                </button>
-              </div>
-            )}
+            <button
+              type="button"
+              onClick={() => setShowCreate(false)}
+              className={`${dsButton.secondary} flex-1`}
+            >
+              Annulla
+            </button>
+            <button
+              type="submit"
+              form={CREATE_FORM_ID}
+              disabled={isSaving || !draft.name.trim() || !draft.phone.trim()}
+              className={`${dsButton.primary} flex-1`}
+            >
+              {isSaving ? 'Salvataggio...' : 'Salva e seleziona'}
+            </button>
           </>
         )}
+    >
+      {!showCreate && (
+        <>
+          {error && !isLoading && (
+            <div role="alert" className="mb-3">
+              <Callout tone="critical">{error}</Callout>
+            </div>
+          )}
+          {isLoading && (
+            <p className="p-6 text-center text-[14px] text-[var(--ds-text-muted)]">Caricamento...</p>
+          )}
+          {!isLoading && !error && sortedCustomers.length === 0 && (
+            <EmptyState icon={BookUser}>Nessun cliente trovato.</EmptyState>
+          )}
+          {!isLoading && sortedCustomers.length > 0 && (
+            <ul className="divide-y divide-[var(--ds-border)] overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+              {sortedCustomers.map(c => (
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    onClick={() => handleSelect(c)}
+                    className="w-full px-4 py-3 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    <div className="text-[15px] font-medium text-[var(--ds-text-primary)]">{c.name}</div>
+                    <div className="mt-0.5 flex flex-wrap gap-3 text-[13px] text-[var(--ds-text-muted)]">
+                      {c.phone && (
+                        <span className="inline-flex items-center gap-1">
+                          <Phone className="h-3 w-3" aria-hidden /> {c.phone}
+                        </span>
+                      )}
+                      {c.email && (
+                        <span className="inline-flex items-center gap-1">
+                          <Mail className="h-3 w-3" aria-hidden /> {c.email}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
 
-        {showCreate && (
-          <form onSubmit={handleCreate} className="flex-1 overflow-y-auto">
-            <div className="p-4 space-y-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Nome *</label>
-                <input
-                  type="text"
-                  autoFocus
-                  required
-                  value={draft.name}
-                  onChange={e => setDraft({ ...draft, name: e.target.value })}
-                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none"
-                />
+      {showCreate && (
+        <form id={CREATE_FORM_ID} onSubmit={handleCreate}>
+          <div className="space-y-4 rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+            <Field label="Nome" htmlFor="new-customer-name" required>
+              <input
+                id="new-customer-name"
+                type="text"
+                autoFocus
+                required
+                value={draft.name}
+                onChange={e => setDraft({ ...draft, name: e.target.value })}
+                className={dsInput}
+              />
+            </Field>
+            <Field label="Telefono" htmlFor="new-customer-phone" required>
+              <input
+                id="new-customer-phone"
+                type="tel"
+                required
+                value={draft.phone}
+                onChange={e => setDraft({ ...draft, phone: e.target.value })}
+                className={dsInput}
+              />
+            </Field>
+            <Field label="Email" htmlFor="new-customer-email">
+              <input
+                id="new-customer-email"
+                type="email"
+                value={draft.email}
+                onChange={e => setDraft({ ...draft, email: e.target.value })}
+                className={dsInput}
+              />
+            </Field>
+            {error && (
+              <div role="alert">
+                <Callout tone="critical">{error}</Callout>
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Telefono *</label>
-                <input
-                  type="tel"
-                  required
-                  value={draft.phone}
-                  onChange={e => setDraft({ ...draft, phone: e.target.value })}
-                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Email</label>
-                <input
-                  type="email"
-                  value={draft.email}
-                  onChange={e => setDraft({ ...draft, email: e.target.value })}
-                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 outline-none"
-                />
-              </div>
-              {error && <p className="text-sm text-rose-600">{error}</p>}
-            </div>
-            <div className="p-4 border-t border-[var(--color-line)] flex gap-2">
-              <button
-                type="button"
-                onClick={() => setShowCreate(false)}
-                className="flex-1 px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
-              >
-                Annulla
-              </button>
-              <button
-                type="submit"
-                disabled={isSaving || !draft.name.trim() || !draft.phone.trim()}
-                className="flex-1 px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isSaving ? 'Salvataggio...' : 'Salva e seleziona'}
-              </button>
-            </div>
-          </form>
-        )}
-      </div>
-    </div>,
-    document.body
+            )}
+          </div>
+        </form>
+      )}
+    </ModalShell>
   );
 };

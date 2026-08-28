@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { ModalShell, dsInput, dsSelect, dsButton, Field, SegmentedControl } from './ds';
 import { Reservation, Shift, Room, Table, ArrivalStatus, BanquetMenu } from '../types';
 import { Printer, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -124,153 +125,143 @@ export const PrintReservationsModal: React.FC<Props> = ({
   return (
     <>
       {/* Modal — visible on screen, hidden in print */}
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] p-4 no-print" onClick={onClose}>
-        <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
-          <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
-            <h3 className="text-[16px] font-semibold text-[var(--color-fg)] flex items-center gap-2">
-              <Printer className="h-4 w-4 text-[var(--color-fg-muted)]" />
-              Stampa Prenotazioni
-            </h3>
-            <button onClick={onClose} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]" aria-label="Chiudi">
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-
-          <div className="px-5 py-4 overflow-y-auto flex-1">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Data</label>
-                <input
-                  type="date"
-                  value={printDate}
-                  onChange={(e) => setPrintDate(e.target.value)}
-                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-                />
-              </div>
-              <div>
-                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Turno</label>
-                <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full w-full">
-                  {(['ALL', Shift.LUNCH, Shift.DINNER] as const).map(s => (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => setPrintShift(s)}
-                      className={`flex-1 px-3 py-1.5 rounded-full text-sm font-medium transition ${
-                        printShift === s ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'
-                      }`}
-                    >
-                      {s === 'ALL' ? 'Tutti' : s === Shift.LUNCH ? 'Pranzo' : 'Cena'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Sala</label>
-                <select
-                  value={printRoomId === 'ALL' ? 'ALL' : String(printRoomId)}
-                  onChange={(e) => setPrintRoomId(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
-                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-                >
-                  <option value="ALL">Tutte le sale</option>
-                  {rooms.map(r => (
-                    <option key={r.id} value={r.id}>{r.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Stato arrivo</label>
-                <select
-                  value={printArrival}
-                  onChange={(e) => setPrintArrival(e.target.value as ArrivalStatus | 'ALL')}
-                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
-                >
-                  <option value="ALL">Tutti</option>
-                  <option value={ArrivalStatus.WAITING}>In attesa</option>
-                  <option value={ArrivalStatus.ARRIVED}>Arrivati</option>
-                  <option value={ArrivalStatus.DEPARTED}>Liberati</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-[12px] tracking-[0.02em] font-medium text-[var(--color-fg-subtle)] mb-1">Ordina per</label>
-                <div className="inline-flex p-0.5 bg-[var(--color-surface-3)] rounded-full w-full">
-                  {(['TIME', 'TABLE'] as const).map(s => (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => setPrintSort(s)}
-                      className={`flex-1 px-3 py-1.5 rounded-full text-sm font-medium transition ${
-                        printSort === s ? 'bg-[var(--color-surface)] text-[var(--color-fg)] shadow-[var(--shadow-xs)]' : 'text-[var(--color-fg-muted)]'
-                      }`}
-                    >
-                      {s === 'TIME' ? 'Orario' : 'Tavolo'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <label className="flex items-center gap-2 mb-4 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={includeBanquets}
-                onChange={(e) => setIncludeBanquets(e.target.checked)}
-                className="h-4 w-4 rounded border-[var(--color-line)]"
-              />
-              <span className="text-sm text-[var(--color-fg)]">Includi banchetti del giorno</span>
-            </label>
-
-            <div className="border-t border-[var(--color-line)] pt-4">
-              <p className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)] mb-2">Anteprima</p>
-              <div className="bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded-md p-3 text-sm space-y-1">
-                <p className="font-semibold text-[var(--color-fg)] capitalize">{formatPrintDate(printDate)}</p>
-                <p className="text-[var(--color-fg-muted)]">{shiftLabel} · {roomLabel}</p>
-                <p className="text-[var(--color-fg-subtle)]">
-                  {filteredReservations.length} prenotazioni · {totalGuests} ospiti · {arrivedCount} arrivati
-                  {includeBanquets && banquetsForDate.length > 0 && ` · ${banquetsForDate.length} banchetti`}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-4 border-t border-[var(--color-line)] flex gap-2 justify-end">
-            <button
-              onClick={onClose}
-              className="rounded-full px-4 py-2 border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)] transition"
-            >
+      <ModalShell
+        open={isOpen}
+        onClose={onClose}
+        title={
+          <span className="inline-flex items-center gap-2">
+            <Printer className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
+            Stampa Prenotazioni
+          </span>
+        }
+        size="md"
+        // Il backdrop e' un figlio diretto di <body>, quindi @media print lo
+        // nasconderebbe comunque; `no-print` resta esplicito come prima.
+        className="no-print"
+        bodyClassName="px-5 py-5 sm:px-6"
+        footer={
+          <>
+            <button type="button" onClick={onClose} className={dsButton.secondary}>
               Annulla
             </button>
             <button
+              type="button"
               onClick={handlePrint}
               disabled={filteredReservations.length === 0 && banquetsForDate.length === 0}
-              className="rounded-full px-4 py-2 bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90 transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              className={dsButton.primary}
             >
-              <Printer className="h-4 w-4" />
+              <Printer className="h-4 w-4" aria-hidden />
               Stampa
             </button>
+          </>
+        }
+      >
+        <div className="space-y-4 rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Data" htmlFor="print-date">
+              <input
+                id="print-date"
+                type="date"
+                value={printDate}
+                onChange={(e) => setPrintDate(e.target.value)}
+                className={dsInput}
+              />
+            </Field>
+            <Field label="Turno">
+              <SegmentedControl<Shift | 'ALL'>
+                ariaLabel="Turno"
+                value={printShift}
+                onChange={setPrintShift}
+                options={[
+                  { value: 'ALL' as const, label: 'Tutti' },
+                  { value: Shift.LUNCH, label: 'Pranzo' },
+                  { value: Shift.DINNER, label: 'Cena' },
+                ]}
+              />
+            </Field>
+            <Field label="Sala" htmlFor="print-room">
+              <select
+                id="print-room"
+                value={printRoomId === 'ALL' ? 'ALL' : String(printRoomId)}
+                onChange={(e) => setPrintRoomId(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
+                className={dsSelect}
+              >
+                <option value="ALL">Tutte le sale</option>
+                {rooms.map(r => (
+                  <option key={r.id} value={r.id}>{r.name}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Stato arrivo" htmlFor="print-arrival">
+              <select
+                id="print-arrival"
+                value={printArrival}
+                onChange={(e) => setPrintArrival(e.target.value as ArrivalStatus | 'ALL')}
+                className={dsSelect}
+              >
+                <option value="ALL">Tutti</option>
+                <option value={ArrivalStatus.WAITING}>In attesa</option>
+                <option value={ArrivalStatus.ARRIVED}>Arrivati</option>
+                <option value={ArrivalStatus.DEPARTED}>Liberati</option>
+              </select>
+            </Field>
+            <Field label="Ordina per">
+              <SegmentedControl<'TIME' | 'TABLE'>
+                ariaLabel="Ordina per"
+                value={printSort}
+                onChange={setPrintSort}
+                options={[
+                  { value: 'TIME' as const, label: 'Orario' },
+                  { value: 'TABLE' as const, label: 'Tavolo' },
+                ]}
+              />
+            </Field>
+          </div>
+
+          <label className="flex min-h-11 cursor-pointer select-none items-center gap-2.5">
+            <input
+              type="checkbox"
+              checked={includeBanquets}
+              onChange={(e) => setIncludeBanquets(e.target.checked)}
+              className="h-5 w-5 rounded-[6px] accent-[var(--ds-action-bg)]"
+            />
+            <span className="text-[15px] text-[var(--ds-text-primary)]">Includi banchetti del giorno</span>
+          </label>
+        </div>
+
+        <div className="mt-4">
+          <p className="mb-2 text-[13px] font-semibold text-[var(--ds-text-secondary)]">Anteprima</p>
+          <div className="space-y-1 rounded-[16px] bg-[var(--ds-surface-row)] p-4 text-[14px]">
+            <p className="font-semibold capitalize text-[var(--ds-text-primary)]">{formatPrintDate(printDate)}</p>
+            <p className="text-[var(--ds-text-secondary)]">{shiftLabel} · {roomLabel}</p>
+            <p className="text-[var(--ds-text-muted)]">
+              {filteredReservations.length} prenotazioni · {totalGuests} ospiti · {arrivedCount} arrivati
+              {includeBanquets && banquetsForDate.length > 0 && ` · ${banquetsForDate.length} banchetti`}
+            </p>
           </div>
         </div>
-      </div>
+      </ModalShell>
 
       {/* Print-only area — portaled to <body> so it's a direct body child
           (see PrintInventoryModal for why this matters with App's h-screen). */}
       {createPortal(
         <div className="print-portal">
           <div id="print-area" className="print-only">
-        <header style={{ marginBottom: '1.25rem', paddingBottom: '0.75rem', borderBottom: '2px solid #0f172a' }}>
+        <header style={{ marginBottom: '1.25rem', paddingBottom: '0.75rem', borderBottom: '2px solid var(--ds-print-ink)' }}>
           <h1 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0 }}>Lista Prenotazioni</h1>
-          <p style={{ margin: '0.25rem 0 0', fontSize: '0.95rem', color: '#475569', textTransform: 'capitalize' }}>
+          <p style={{ margin: '0.25rem 0 0', fontSize: '0.95rem', color: 'var(--ds-print-ink-secondary)', textTransform: 'capitalize' }}>
             {formatPrintDate(printDate)} · {shiftLabel} · {roomLabel}
           </p>
         </header>
 
         {filteredReservations.length === 0 && banquetsForDate.length === 0 ? (
-          <p style={{ fontStyle: 'italic', color: '#64748b' }}>Nessuna prenotazione corrispondente ai filtri.</p>
+          <p style={{ fontStyle: 'italic', color: 'var(--ds-print-ink-muted)' }}>Nessuna prenotazione corrispondente ai filtri.</p>
         ) : (
           <>
             {filteredReservations.length > 0 && (
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                 <thead>
-                  <tr style={{ background: '#f1f5f9', borderBottom: '1px solid #cbd5e1' }}>
+                  <tr style={{ background: 'var(--ds-print-fill)', borderBottom: '1px solid var(--ds-print-rule-strong)' }}>
                     <th style={{ padding: '0.5rem', textAlign: 'left' }}>Orario</th>
                     <th style={{ padding: '0.5rem', textAlign: 'left' }}>Cliente</th>
                     <th style={{ padding: '0.5rem', textAlign: 'center' }}>Ospiti</th>
@@ -285,16 +276,16 @@ export const PrintReservationsModal: React.FC<Props> = ({
                     const time = getRomeTimePart(r.reservation_time);
                     const arrived = isSeated(r);
                     return (
-                      <tr key={r.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                      <tr key={r.id} style={{ borderBottom: '1px solid var(--ds-print-rule)' }}>
                         <td style={{ padding: '0.5rem', whiteSpace: 'nowrap', fontWeight: 600 }}>{time}</td>
                         <td style={{ padding: '0.5rem' }}>
                           {toTitleCase(r.customer_name)}
-                          {arrived && <span style={{ marginLeft: 6, fontSize: '0.7rem', color: '#059669' }}>✓ arrivato</span>}
+                          {arrived && <span style={{ marginLeft: 6, fontSize: '0.7rem', color: 'var(--ds-print-positive)' }}>✓ arrivato</span>}
                         </td>
                         <td style={{ padding: '0.5rem', textAlign: 'center' }}>
                           {r.guests}
                           {r.children && r.children > 0 ? (
-                            <span style={{ fontSize: '0.7rem', color: '#64748b', marginLeft: 3 }}>({r.children}b)</span>
+                            <span style={{ fontSize: '0.7rem', color: 'var(--ds-print-ink-muted)', marginLeft: 3 }}>({r.children}b)</span>
                           ) : null}
                         </td>
                         <td style={{ padding: '0.5rem' }}>{table ? table.name : '—'}</td>
@@ -305,14 +296,14 @@ export const PrintReservationsModal: React.FC<Props> = ({
                   })}
                 </tbody>
                 <tfoot>
-                  <tr style={{ borderTop: '2px solid #0f172a', fontWeight: 700 }}>
+                  <tr style={{ borderTop: '2px solid var(--ds-print-ink)', fontWeight: 700 }}>
                     <td colSpan={2} style={{ padding: '0.5rem' }}>
                       Totale: {filteredReservations.length} prenotazioni
                     </td>
                     <td style={{ padding: '0.5rem', textAlign: 'center' }}>
                       {totalGuests}
                       {totalChildren > 0 && (
-                        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', marginLeft: 4 }}>({totalChildren}b)</span>
+                        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--ds-print-ink-muted)', marginLeft: 4 }}>({totalChildren}b)</span>
                       )}
                     </td>
                     <td colSpan={3} style={{ padding: '0.5rem' }}>
@@ -330,8 +321,8 @@ export const PrintReservationsModal: React.FC<Props> = ({
                   {banquetsForDate.map(b => (
                     <li key={b.id} style={{ marginBottom: '0.25rem' }}>
                       <strong>{b.name}</strong>
-                      {b.description && <span style={{ color: '#475569' }}> — {b.description}</span>}
-                      {canViewBanquetPrice && <span style={{ color: '#475569' }}> · €{b.price_per_person}/persona</span>}
+                      {b.description && <span style={{ color: 'var(--ds-print-ink-secondary)' }}> — {b.description}</span>}
+                      {canViewBanquetPrice && <span style={{ color: 'var(--ds-print-ink-secondary)' }}> · €{b.price_per_person}/persona</span>}
                     </li>
                   ))}
                 </ul>
@@ -340,7 +331,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
           </>
         )}
 
-        <footer style={{ marginTop: '2rem', paddingTop: '0.5rem', borderTop: '1px solid #e2e8f0', fontSize: '0.7rem', color: '#94a3b8', textAlign: 'right' }}>
+        <footer style={{ marginTop: '2rem', paddingTop: '0.5rem', borderTop: '1px solid var(--ds-print-rule)', fontSize: '0.7rem', color: 'var(--ds-print-ink-subtle)', textAlign: 'right' }}>
           Stampato il {new Date().toLocaleString('it-IT')}
         </footer>
           </div>

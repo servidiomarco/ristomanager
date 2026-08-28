@@ -1297,7 +1297,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
           {/* Add Room UI - Only shown in edit mode */}
           {canEdit && (isAddingRoom ? (
-              <div className="flex items-center gap-1.5 animate-in fade-in slide-in-from-left-2">
+ <div className="flex items-center gap-1.5">
                   <input
                       autoFocus
                       value={newRoomName}
@@ -1482,7 +1482,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
         {/* Edit toolbar - Only shown when tables selected AND in edit mode */}
         {canEdit && selectedTables.length > 0 && (
-            <div className="flex flex-wrap items-center gap-2 sm:border-l sm:pl-4 border-[var(--ds-border)] animate-in slide-in-from-right duration-200 shrink-0 w-full sm:w-auto">
+ <div className="flex flex-wrap items-center gap-2 sm:border-l sm:pl-4 border-[var(--ds-border)] duration-200 shrink-0 w-full sm:w-auto">
             <span className="text-[13px] font-semibold text-[var(--ds-text-muted)] hidden xl:block">Modifica</span>
 
             {/* Lock/Unlock */}
@@ -1642,7 +1642,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         <Callout
           tone="critical"
           icon={AlertTriangle}
-          className="z-20 animate-in fade-in slide-in-from-top-1"
+ className="z-20"
           action={
             <button
               type="button"
@@ -1685,7 +1685,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 in the same room are visually distinct. */}
             {floorLabels.hulls.map((h, i) => (
               <div key={`hull-${h.banquetId}-${i}`}
-                className={`${floorLabels.banquetColorByBanquetId.get(h.banquetId) || 'banquet-color-0'} absolute rounded-2xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] pointer-events-none`}
+                className={`${floorLabels.banquetColorByBanquetId.get(h.banquetId) || 'banquet-color-0'} absolute rounded-2xl border border-[var(--ds-banquet-border)] bg-[var(--ds-banquet-bg)] pointer-events-none`}
                 style={{ left: h.box.x, top: h.box.y, width: h.box.w, height: h.box.h, zIndex: 0 }} />
             ))}
             {currentTables.map(renderTableShape)}
@@ -1749,7 +1749,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             </button>
             {isLegendOpen && (
                 <div
-                    className="absolute bottom-full right-0 mb-2 w-56 bg-[var(--ds-surface)] p-4 rounded-[16px] shadow-[var(--ds-shadow-raised)] text-[13px] space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-150"
+ className="absolute bottom-full right-0 mb-2 w-56 bg-[var(--ds-surface)] p-4 rounded-[16px] shadow-[var(--ds-shadow-raised)] text-[13px] space-y-2 duration-150"
                     onClick={(e) => e.stopPropagation()}
                 >
                     <div className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-1">Legenda stato</div>
@@ -1843,7 +1843,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         confirmLabel="Riattiva tutti"
         icon={<Eye className="h-5 w-5 text-[var(--ds-seated-fg)]" />}
         iconWrapperClassName="mx-auto w-12 h-12 bg-[var(--ds-seated-tint)] rounded-full flex items-center justify-center mb-4"
-        confirmClassName="rounded-full px-5 h-11 inline-flex items-center bg-[var(--ds-seated-solid)] text-[#ffffff] text-[15px] font-semibold hover:opacity-90 transition-opacity"
+        confirmClassName="rounded-full px-5 h-11 inline-flex items-center bg-[var(--ds-seated-solid)] text-[var(--ds-seated-fg)] text-[15px] font-semibold hover:opacity-90 transition-opacity"
         showIrreversibleWarning={false}
         onCancel={() => setUnhideAllConfirm(false)}
         onConfirm={async () => {

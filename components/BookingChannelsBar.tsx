@@ -131,12 +131,12 @@ export const BookingChannelsBar: React.FC<Props> = ({ date, shift, showToast }) 
     // interactivity and applies a muted look — l'unico modo di riabilitare
     // è cambiare il flag globale da Impostazioni.
     const iconClass = (open: boolean, globallyOff: boolean, saving: boolean) =>
-        `inline-flex items-center justify-center h-9 w-9 rounded-full border transition-colors ${
+        `inline-flex items-center justify-center h-9 w-9 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
             globallyOff
-                ? 'border-[var(--color-line)] text-[var(--color-fg-subtle)] bg-[var(--color-surface)] opacity-60'
+                ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-subtle)] opacity-60'
                 : open
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-300 dark:hover:bg-emerald-500/25'
-                    : 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 dark:border-rose-500/40 dark:bg-rose-500/15 dark:text-rose-300 dark:hover:bg-rose-500/25'
+                    ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] hover:brightness-95'
+                    : 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] hover:brightness-95'
         } ${canEdit && !globallyOff && !saving ? 'cursor-pointer' : 'cursor-default'} disabled:cursor-not-allowed`;
 
     return (

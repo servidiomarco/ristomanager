@@ -876,9 +876,10 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
               className="absolute inset-0 bg-[var(--ds-backdrop)]"
               style={{ animation: 'fadeIn 200ms ease-out both' }}
             />
-            {/* The real keyframes, not the tailwindcss-animate classes used on
-                Prenotazioni — that plugin is not installed, so `animate-in
-                slide-in-from-bottom` there compiles to nothing. */}
+            {/* Keyframes vere, dichiarate in index.css. Altrove il codice usava
+                le classi di tailwindcss-animate (`animate-in`,
+                `slide-in-from-bottom`): quel plugin non e' mai stato
+                installato, quindi non animavano nulla — sono state rimosse. */}
             <div
               onClick={e => e.stopPropagation()}
               style={{ animation: 'slideUpSheet 260ms cubic-bezier(0.32, 0.72, 0, 1) both' }}

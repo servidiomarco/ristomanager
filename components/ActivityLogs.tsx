@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, ChevronLeft, ChevronRight, RefreshCw, Filter, Search } from 'lucide-react';
+import { ModalShell, dsInput, dsSelect, dsIconButton, dsStepArrow } from './ds';
 import { ActivityLog, ActivityAction, ResourceType, LogFilters } from '../types';
 import { logApiService, LogUser } from '../services/logApiService';
 import { Loader } from './Loader';
@@ -34,11 +35,11 @@ const RESOURCE_LABELS: Record<ResourceType, string> = {
 };
 
 const ACTION_COLORS: Record<ActivityAction, string> = {
-  [ActivityAction.CREATE]: 'bg-emerald-50 text-emerald-700 border border-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30',
-  [ActivityAction.UPDATE]: 'bg-blue-50 text-blue-700 border border-blue-100 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30',
-  [ActivityAction.DELETE]: 'bg-rose-50 text-rose-700 border border-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30',
-  [ActivityAction.LOGIN]: 'bg-violet-50 text-violet-700 border border-violet-100 dark:bg-violet-500/15 dark:text-violet-300 dark:border-violet-500/30',
-  [ActivityAction.LOGOUT]: 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border border-[var(--color-line)]'
+  [ActivityAction.CREATE]: 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]',
+  [ActivityAction.UPDATE]: 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]',
+  [ActivityAction.DELETE]: 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]',
+  [ActivityAction.LOGIN]: 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]',
+  [ActivityAction.LOGOUT]: 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)]'
 };
 
 export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) => {
@@ -147,76 +148,76 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
 
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
-          <div>
-            <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Log Attività</h3>
-            <p className="text-xs text-[var(--color-fg-muted)] mt-0.5">
-              {total} {total === 1 ? 'operazione registrata' : 'operazioni registrate'}
-            </p>
-          </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={fetchLogs}
-              className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
-              title="Aggiorna"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            </button>
-            <button
-              onClick={onClose}
-              className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
-        </div>
+  const hasFilters = !!(selectedUserId || selectedResourceType || selectedAction || fromDate || toDate || search);
+  const th = 'px-4 py-3 text-left text-[13px] font-semibold text-[var(--ds-text-secondary)]';
 
-        {/* Filters */}
-        <div className="px-5 py-4 border-b border-[var(--color-line)] bg-[var(--color-surface-2)]">
-          <div className="flex items-center gap-2 mb-3">
-            <Filter className="w-3.5 h-3.5 text-[var(--color-fg-subtle)]" />
-            <span className="text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">Filtri</span>
-            {(selectedUserId || selectedResourceType || selectedAction || fromDate || toDate || search) && (
+  return (
+    <ModalShell
+      open={isOpen}
+      onClose={onClose}
+      title="Log Attività"
+      subtitle={`${total} ${total === 1 ? 'operazione registrata' : 'operazioni registrate'}`}
+      size="fluid"
+      fixedHeight
+      bodyClassName="px-5 pb-5 sm:px-6"
+      subheader={
+        <div>
+          <div className="mb-3 flex items-center gap-2">
+            <Filter className="h-3.5 w-3.5 text-[var(--ds-text-muted)]" aria-hidden />
+            <span className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">Filtri</span>
+            {hasFilters && (
               <button
+                type="button"
                 onClick={resetFilters}
-                className="text-xs text-[var(--color-fg)] hover:underline ml-2"
+                className="ml-2 rounded-full text-[13px] text-[var(--ds-text-primary)] underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 Azzera filtri
               </button>
             )}
+            {/* L'aggiornamento sta con i filtri, non nella testata: è la
+                stessa azione — cambiare cosa mostra la tabella. */}
+            <button
+              type="button"
+              onClick={fetchLogs}
+              className={`${dsIconButton} ml-auto`}
+              title="Aggiorna"
+              aria-label="Aggiorna"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} aria-hidden />
+            </button>
           </div>
           <div className="relative mb-3">
-            <Search className="w-4 h-4 text-[var(--color-fg-subtle)] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ds-text-muted)]" aria-hidden />
+            <label htmlFor="log-search" className="sr-only">Cerca nei log</label>
             <input
+              id="log-search"
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Cerca in tutte le prenotazioni (nome, email, dettagli)..."
-              className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md pl-9 pr-9 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+              className={`${dsInput} bg-[var(--ds-surface)] pl-11 pr-11`}
             />
             {search && (
               <button
+                type="button"
                 onClick={() => setSearch('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
+                className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 title="Cancella ricerca"
+                aria-label="Cancella ricerca"
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="h-3.5 w-3.5" aria-hidden />
               </button>
             )}
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-            {/* User Filter */}
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
             <select
               value={selectedUserId || ''}
               onChange={(e) => {
                 setSelectedUserId(e.target.value ? parseInt(e.target.value, 10) : undefined);
                 setPage(1);
               }}
-              className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+              aria-label="Filtra per utente"
+              className={`${dsSelect} bg-[var(--ds-surface)]`}
             >
               <option value="">Tutti gli utenti</option>
               {users.map(user => (
@@ -224,14 +225,14 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
               ))}
             </select>
 
-            {/* Resource Type Filter */}
             <select
               value={selectedResourceType || ''}
               onChange={(e) => {
                 setSelectedResourceType(e.target.value as ResourceType || undefined);
                 setPage(1);
               }}
-              className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+              aria-label="Filtra per risorsa"
+              className={`${dsSelect} bg-[var(--ds-surface)]`}
             >
               <option value="">Tutte le risorse</option>
               {Object.values(ResourceType).map(type => (
@@ -239,14 +240,14 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
               ))}
             </select>
 
-            {/* Action Filter */}
             <select
               value={selectedAction || ''}
               onChange={(e) => {
                 setSelectedAction(e.target.value as ActivityAction || undefined);
                 setPage(1);
               }}
-              className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+              aria-label="Filtra per azione"
+              className={`${dsSelect} bg-[var(--ds-surface)]`}
             >
               <option value="">Tutte le azioni</option>
               {Object.values(ActivityAction).map(action => (
@@ -254,8 +255,9 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
               ))}
             </select>
 
-            {/* From Date Filter */}
+            <label htmlFor="log-from" className="sr-only">Da</label>
             <input
+              id="log-from"
               type="date"
               value={fromDate}
               onChange={(e) => {
@@ -263,11 +265,12 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
                 setPage(1);
               }}
               placeholder="Da"
-              className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+              className={`${dsInput} bg-[var(--ds-surface)]`}
             />
 
-            {/* To Date Filter */}
+            <label htmlFor="log-to" className="sr-only">A</label>
             <input
+              id="log-to"
               type="date"
               value={toDate}
               onChange={(e) => {
@@ -275,118 +278,102 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
                 setPage(1);
               }}
               placeholder="A"
-              className="bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--color-fg)]"
+              className={`${dsInput} bg-[var(--ds-surface)]`}
             />
           </div>
         </div>
-
-        {/* Table */}
-        <div className="flex-1 overflow-auto">
-          {error ? (
-            <div className="p-8 text-center text-rose-600">
-              {error}
-            </div>
-          ) : loading && logs.length === 0 ? (
-            <div className="p-8 text-center text-[var(--color-fg-muted)]">
-              <Loader label="Caricamento…" size={40} />
-            </div>
-          ) : logs.length === 0 ? (
-            <div className="p-8 text-center text-[var(--color-fg-muted)]">
-              Nessun log trovato
-            </div>
-          ) : (
-            <table className="w-full">
-              <thead className="bg-[var(--color-surface-3)] sticky top-0">
-                <tr>
-                  <th className="px-4 py-3 text-left text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">
-                    Data/Ora
-                  </th>
-                  <th className="px-4 py-3 text-left text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">
-                    Utente
-                  </th>
-                  <th className="px-4 py-3 text-left text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">
-                    Azione
-                  </th>
-                  <th className="px-4 py-3 text-left text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">
-                    Risorsa
-                  </th>
-                  <th className="px-4 py-3 text-left text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">
-                    Nome
-                  </th>
-                  <th className="px-4 py-3 text-left text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">
-                    Dettagli
-                  </th>
-                  <th className="px-4 py-3 text-left text-[11px] tracking-[0.02em] font-semibold text-[var(--color-fg-subtle)]">
-                    Stato
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {logs.map(log => (
-                  <tr key={log.id} className="border-b border-[var(--color-line)] hover:bg-[var(--color-surface-hover)]">
-                    <td className="px-4 py-3 text-sm text-[var(--color-fg-muted)] whitespace-nowrap">
-                      {formatDate(log.created_at)}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-[var(--color-fg)]">
-                      {log.user_name || log.user_email || '-'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${ACTION_COLORS[log.action]}`}>
-                        <span className="w-1.5 h-1.5 rounded-full bg-current opacity-60" />
-                        {ACTION_LABELS[log.action]}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-[var(--color-fg-muted)]">
-                      {RESOURCE_LABELS[log.resource_type]}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-[var(--color-fg)] max-w-[150px] truncate" title={log.resource_name || '-'}>
-                      {log.resource_name || '-'}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-[var(--color-fg-subtle)] max-w-[200px] truncate" title={formatDetails(log.details)}>
-                      {formatDetails(log.details)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium border ${
-                        log.status === 'SUCCESS'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30'
-                          : 'bg-rose-50 text-rose-700 border-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30'
-                      }`}>
-                        <span className="w-1.5 h-1.5 rounded-full bg-current opacity-60" />
-                        {log.status === 'SUCCESS' ? 'OK' : 'Errore'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+      }
+      footerStart={totalPages > 1 ? `Pagina ${page} di ${totalPages}` : undefined}
+      footer={totalPages > 1 ? (
+        <>
+          <button
+            type="button"
+            onClick={() => setPage(p => Math.max(1, p - 1))}
+            disabled={page === 1}
+            className={dsStepArrow}
+            aria-label="Pagina precedente"
+          >
+            <ChevronLeft className="h-4 w-4" aria-hidden />
+          </button>
+          <button
+            type="button"
+            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+            disabled={page === totalPages}
+            className={dsStepArrow}
+            aria-label="Pagina successiva"
+          >
+            <ChevronRight className="h-4 w-4" aria-hidden />
+          </button>
+        </>
+      ) : undefined}
+      footerLayout="row"
+    >
+      {error ? (
+        <div role="alert" className="rounded-[16px] bg-[var(--ds-critical-tint)] p-8 text-center text-[var(--ds-critical-text)]">
+          {error}
         </div>
-
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between px-5 py-3 border-t border-[var(--color-line)]">
-            <div className="text-xs text-[var(--color-fg-muted)]">
-              Pagina {page} di {totalPages}
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setPage(p => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-              <button
-                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-                className="p-1.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+      ) : loading && logs.length === 0 ? (
+        <div className="p-8 text-center">
+          <Loader label="Caricamento…" size={40} />
+        </div>
+      ) : logs.length === 0 ? (
+        <div className="rounded-[20px] bg-[var(--ds-surface)] px-6 py-12 text-center text-[14px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)]">
+          Nessun log trovato
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+          <table className="w-full">
+            <thead className="sticky top-0 bg-[var(--ds-surface-row)]">
+              <tr>
+                <th className={th}>Data/Ora</th>
+                <th className={th}>Utente</th>
+                <th className={th}>Azione</th>
+                <th className={th}>Risorsa</th>
+                <th className={th}>Nome</th>
+                <th className={th}>Dettagli</th>
+                <th className={th}>Stato</th>
+              </tr>
+            </thead>
+            <tbody>
+              {logs.map(log => (
+                <tr key={log.id} className="border-t border-[var(--ds-border)] transition-colors hover:bg-[var(--ds-surface-row)]">
+                  <td className="whitespace-nowrap px-4 py-3 text-[14px] tabular-nums text-[var(--ds-text-muted)]">
+                    {formatDate(log.created_at)}
+                  </td>
+                  <td className="px-4 py-3 text-[14px] text-[var(--ds-text-primary)]">
+                    {log.user_name || log.user_email || '-'}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${ACTION_COLORS[log.action]}`}>
+                      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60" />
+                      {ACTION_LABELS[log.action]}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-[14px] text-[var(--ds-text-muted)]">
+                    {RESOURCE_LABELS[log.resource_type]}
+                  </td>
+                  <td className="max-w-[150px] truncate px-4 py-3 text-[14px] text-[var(--ds-text-primary)]" title={log.resource_name || '-'}>
+                    {log.resource_name || '-'}
+                  </td>
+                  <td className="max-w-[200px] truncate px-4 py-3 text-[14px] text-[var(--ds-text-muted)]" title={formatDetails(log.details)}>
+                    {formatDetails(log.details)}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                      log.status === 'SUCCESS'
+                        ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
+                        : 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]'
+                    }`}>
+                      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60" />
+                      {log.status === 'SUCCESS' ? 'OK' : 'Errore'}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </ModalShell>
   );
 };

@@ -112,7 +112,7 @@ export const SwipeToCheckIn: React.FC<SwipeToCheckInProps> = ({ enabled, onConfi
       {dx > 0 && (
         <div
           className={`absolute inset-0 rounded-2xl flex items-center pl-5 gap-2.5 transition-colors ${
-            armed ? 'bg-emerald-600' : 'bg-emerald-500/70'
+            armed ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-seated-solid)]/70'
           }`}
           aria-hidden="true"
         >
