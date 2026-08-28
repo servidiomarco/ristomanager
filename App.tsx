@@ -2643,6 +2643,7 @@ const App: React.FC = () => {
         {view === ViewState.CHAT_STAFF && user && (
           <StaffChatPage
             currentUserId={user.id}
+            currentUserName={user.full_name}
             initialThreadKey={pendingStaffChatThread}
             onInitialThreadConsumed={() => setPendingStaffChatThread(null)}
           />

@@ -63,11 +63,15 @@ class StaffChatApiService {
     });
   }
 
-  async send(threadKey: string, body: string, presetKey?: string | null): Promise<StaffMessage> {
+  async send(threadKey: string, body: string, presetKey?: string | null, mentionedUserIds?: number[]): Promise<StaffMessage> {
     return apiRequest(`${API_URL}/staff-chat/messages`, {
       method: 'POST',
       headers: { ...getHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ threadKey, body, presetKey: presetKey ?? undefined }),
+      body: JSON.stringify({
+        threadKey, body,
+        presetKey: presetKey ?? undefined,
+        mentionedUserIds: mentionedUserIds && mentionedUserIds.length > 0 ? mentionedUserIds : undefined,
+      }),
     });
   }
 
