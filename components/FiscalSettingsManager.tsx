@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Building2, FileText, Loader2, ChevronDown, AlertTriangle } from 'lucide-react';
-import { billsApiService, type FiscalSettings } from '../services/billsApiService';
+import { Building2, FileText, Percent, Loader2, ChevronDown, AlertTriangle } from 'lucide-react';
+import { billsApiService, type FiscalSettings, type FiscalVatMap } from '../services/billsApiService';
 import { useAuth } from '../contexts/AuthContext';
-import type { FiscalProviderSetting } from '../types';
+import { VAT_RATES, type FiscalProviderSetting } from '../types';
 
 interface Props {
     showToast: (msg: string, kind?: 'success' | 'error' | 'info') => void;
@@ -59,7 +59,7 @@ export const FiscalSettingsManager: React.FC<Props> = ({ showToast }) => {
         return () => { cancelled = true; };
     }, []);
 
-    const save = async (patch: { provider?: FiscalProviderSetting; vat_number?: string; seller?: { business_name?: string; address?: { street?: string; zip?: string; city?: string; province?: string } } }) => {
+    const save = async (patch: { provider?: FiscalProviderSetting; vat_number?: string; seller?: { business_name?: string; address?: { street?: string; zip?: string; city?: string; province?: string } }; vat_map?: Partial<FiscalVatMap> }) => {
         if (!settings || saving) return;
         setSaving(true);
         try {
@@ -69,6 +69,7 @@ export const FiscalSettingsManager: React.FC<Props> = ({ showToast }) => {
             showToast(
                 patch.provider !== undefined
                     ? `Scontrino elettronico: ${PROVIDER_LABELS[updated.provider]}`
+                    : patch.vat_map !== undefined ? 'Mappatura IVA aggiornata'
                     : patch.seller !== undefined ? 'Dati dell\'esercente aggiornati' : 'P.IVA aggiornata',
                 'success'
             );
@@ -278,6 +279,58 @@ export const FiscalSettingsManager: React.FC<Props> = ({ showToast }) => {
                             Manca la P.IVA nei dati dell'esercente: senza, lo scontrino non parte.
                         </p>
                     )}
+                    {!canEdit && (
+                        <p className="text-[12px] text-[var(--ds-text-subtle)] italic">
+                            Solo gli amministratori possono modificare queste impostazioni.
+                        </p>
+                    )}
+                </div>
+            </details>
+
+            {/* ── Mappatura IVA: default piatti e voci di sistema ─────────── */}
+            <details className="group bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden">
+                <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
+                    <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-arriving-text)] flex-shrink-0">
+                            <Percent className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                            <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Mappatura IVA</h4>
+                            <p className="text-[13px] text-[var(--ds-text-muted)] truncate">Aliquote di default: piatti, coperto, servizio e conti senza righe.</p>
+                        </div>
+                    </div>
+                    <ChevronDown className="w-4 h-4 text-[var(--ds-text-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
+                </summary>
+                <div className="px-4 pb-4 pt-3 border-t border-[var(--ds-border)] space-y-3">
+                    <p className="text-[13px] text-[var(--ds-text-muted)] leading-relaxed">
+                        Valgono per le battiture nuove: le righe già battute conservano la loro aliquota. "Consumazione generica" è la voce unica dei conti chiusi senza comanda. Gli sconti non compaiono: riducono l'imponibile delle righe su cui cadono, non hanno un'aliquota propria.
+                    </p>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                        {([
+                            ['dish_default', 'Nuovi piatti'],
+                            ['cover', 'Coperto'],
+                            ['service', 'Servizio'],
+                            ['fallback', 'Consumazione generica'],
+                        ] as const).map(([key, label]) => (
+                            <label key={key} className="block">
+                                <span className="mb-1.5 block text-[12px] font-medium text-[var(--ds-text-primary)]">{label}</span>
+                                <select
+                                    value={settings.vat_map[key]}
+                                    onChange={e => save({ vat_map: { [key]: Number(e.target.value) } })}
+                                    disabled={!canEdit || saving}
+                                    className={inputCls}
+                                >
+                                    {/* Un'aliquota fuori lista (impostata via API) resta visibile. */}
+                                    {(VAT_RATES as readonly number[]).includes(settings.vat_map[key]) ? null : (
+                                        <option value={settings.vat_map[key]}>{settings.vat_map[key]}%</option>
+                                    )}
+                                    {VAT_RATES.map(r => (
+                                        <option key={r} value={r}>{r}%</option>
+                                    ))}
+                                </select>
+                            </label>
+                        ))}
+                    </div>
                     {!canEdit && (
                         <p className="text-[12px] text-[var(--ds-text-subtle)] italic">
                             Solo gli amministratori possono modificare queste impostazioni.

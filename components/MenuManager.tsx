@@ -12,6 +12,7 @@ import { BanquetPaymentsModal } from './BanquetPaymentsModal';
 import { DishDetailModal } from './DishDetailModal';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, type MenuImportResult, type MenuTranslateResult } from '../services/apiService';
+import { billsApiService } from '../services/billsApiService';
 import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '../contexts/AuthContext';
 import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftService';
@@ -299,6 +300,18 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
   const photoFileInputRef = useRef<HTMLInputElement>(null);
 
+  // Aliquota proposta per un piatto nuovo: il dish_default della mappatura
+  // IVA (Impostazioni → Fiscalità). 10 finché non arriva — best effort, il
+  // form resta usabile anche se la lettura fallisce.
+  const [defaultVatRate, setDefaultVatRate] = useState(10);
+  useEffect(() => {
+    let cancelled = false;
+    billsApiService.getFiscalSettings()
+      .then(s => { if (!cancelled && Number.isInteger(s.vat_map?.dish_default)) setDefaultVatRate(s.vat_map.dish_default); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   // New Dish State
   const [newDish, setNewDish] = useState<Partial<Dish>>({
     name: '',
@@ -418,7 +431,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           category: newDish.category || 'Antipasti',
           allergens: newDish.allergens || [],
           photo_url: newDish.photo_url?.trim() || undefined,
-          vat_rate: newDish.vat_rate ?? 10
+          vat_rate: newDish.vat_rate ?? defaultVatRate
         });
       } else {
         await onAddDish({
@@ -428,14 +441,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           category: newDish.category || 'Antipasti',
           allergens: newDish.allergens || [],
           photo_url: newDish.photo_url?.trim() || undefined,
-          vat_rate: newDish.vat_rate ?? 10
+          vat_rate: newDish.vat_rate ?? defaultVatRate
         } as Dish);
       }
 
       setIsDishFormOpen(false);
       setIsEditingDish(false);
       setEditingDishId(null);
-      setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '', vat_rate: 10 });
+      setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '', vat_rate: defaultVatRate });
     } finally {
       setIsSavingDish(false);
     }
@@ -449,7 +462,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const handleOpenNewDish = () => {
     setIsEditingDish(false);
     setEditingDishId(null);
-    setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '', vat_rate: 10 });
+    setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '', vat_rate: defaultVatRate });
     setPhotoUploadError(null);
     setIsDishFormOpen(true);
   };
@@ -1707,7 +1720,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   <Field label="Aliquota IVA">
                     <select
                       className={dsSelect}
-                      value={newDish.vat_rate ?? 10}
+                      value={newDish.vat_rate ?? defaultVatRate}
                       onChange={e => setNewDish({ ...newDish, vat_rate: Number(e.target.value) })}
                     >
                       {VAT_RATES.map(r => (

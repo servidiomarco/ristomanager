@@ -4798,6 +4798,38 @@ async function getFiscalSellerSetting(tenantId: number): Promise<FiscalSellerSet
     }
 }
 
+// Mappatura IVA del tenant: aliquota di default dei nuovi piatti e aliquote
+// delle voci di sistema (coperto, servizio, riga "Consumazione" dei conti
+// senza righe). Blob JSON in app_settings; il 10 di somministrazione resta
+// il fallback di ogni campo. Gli sconti NON stanno qui: riducono
+// l'imponibile delle righe su cui cadono, non hanno un'aliquota propria.
+const FISCAL_VAT_MAP_KEY = 'fiscal_vat_map';
+type FiscalVatMap = { dish_default: number; cover: number; service: number; fallback: number };
+const FISCAL_VAT_MAP_DEFAULTS: FiscalVatMap = { dish_default: 10, cover: 10, service: 10, fallback: 10 };
+
+async function getFiscalVatMap(tenantId: number): Promise<FiscalVatMap> {
+    try {
+        const r = await queryWithRetry(
+            'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
+            [tenantId, FISCAL_VAT_MAP_KEY]
+        );
+        const raw = r.rows[0]?.text_value;
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : null;
+        const norm = (v: any, dflt: number) => {
+            const n = Number(v);
+            return Number.isInteger(n) && n >= 0 && n <= 100 ? n : dflt;
+        };
+        return {
+            dish_default: norm(parsed?.dish_default, FISCAL_VAT_MAP_DEFAULTS.dish_default),
+            cover: norm(parsed?.cover, FISCAL_VAT_MAP_DEFAULTS.cover),
+            service: norm(parsed?.service, FISCAL_VAT_MAP_DEFAULTS.service),
+            fallback: norm(parsed?.fallback, FISCAL_VAT_MAP_DEFAULTS.fallback),
+        };
+    } catch (_) {
+        return { ...FISCAL_VAT_MAP_DEFAULTS };
+    }
+}
+
 // Cedente completo o l'elenco di cosa manca: la fattura non parte con i
 // dati a metà, e il messaggio d'errore deve dire COSA compilare.
 async function resolveFiscalSeller(tenantId: number): Promise<{ seller: FiscalSeller } | { missing: string[] }> {
@@ -4962,6 +4994,7 @@ async function emitFiscalDocForBill(tenantId: number, billId: number, userId: nu
         items: Array.isArray(bill.items) ? bill.items : null,
         payments: paymentsRs.rows,
         depositCreditCents: depositRs.rows[0].s,
+        fallbackVatRate: (await getFiscalVatMap(tenantId)).fallback,
     });
 
     // Claim atomico del tentativo: emissione automatica (post-chiusura) e
@@ -5014,6 +5047,7 @@ app.get('/settings/fiscal', authenticate, async (req, res) => {
             provider: await getFiscalProviderSetting(req.tenantId!),
             vat_number: await getFiscalVatNumber(req.tenantId!),
             seller: await getFiscalSellerSetting(req.tenantId!),
+            vat_map: await getFiscalVatMap(req.tenantId!),
             providers: FISCAL_PROVIDERS,
             openapi_token_configured: Boolean(process.env.OPENAPI_INVOICE_TOKEN),
         });
@@ -5082,10 +5116,37 @@ app.put('/settings/fiscal', authenticate, requirePermission('settings:full'), as
                 [req.tenantId!, FISCAL_SELLER_KEY, JSON.stringify(next)]
             );
         }
+        // Mappatura IVA: merge sul salvato come per il cedente — un PUT
+        // parziale (solo il coperto) non tocca gli altri campi. Aliquote
+        // intere 0..100, come parseVatRate dei piatti.
+        if (req.body?.vat_map !== undefined) {
+            const raw = req.body.vat_map;
+            if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) {
+                return res.status(400).json({ error: 'vat_map deve essere un oggetto' });
+            }
+            const current = await getFiscalVatMap(req.tenantId!);
+            const next: FiscalVatMap = { ...current };
+            for (const field of ['dish_default', 'cover', 'service', 'fallback'] as const) {
+                if (raw[field] === undefined) continue;
+                const n = Number(raw[field]);
+                if (!Number.isInteger(n) || n < 0 || n > 100) {
+                    return res.status(400).json({ error: `vat_map.${field} deve essere un intero fra 0 e 100` });
+                }
+                next[field] = n;
+            }
+            await queryWithRetry(
+                `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+                 VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                 ON CONFLICT (tenant_id, key) DO UPDATE
+                   SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+                [req.tenantId!, FISCAL_VAT_MAP_KEY, JSON.stringify(next)]
+            );
+        }
         res.json({
             provider: await getFiscalProviderSetting(req.tenantId!),
             vat_number: await getFiscalVatNumber(req.tenantId!),
             seller: await getFiscalSellerSetting(req.tenantId!),
+            vat_map: await getFiscalVatMap(req.tenantId!),
             providers: FISCAL_PROVIDERS,
             openapi_token_configured: Boolean(process.env.OPENAPI_INVOICE_TOKEN),
         });
@@ -9437,11 +9498,12 @@ app.get('/dishes', authenticate, async (req, res) => {
     }
 });
 
-// Aliquota IVA di anagrafica: intero 0..100, default 10 (somministrazione).
-// La UI propone {0, 4, 5, 10, 22}; il server non blinda l'elenco perché le
+// Aliquota IVA di anagrafica: intero 0..100. Se il client non la manda vale
+// il dish_default della mappatura IVA del tenant (10 in assenza). La UI
+// propone {0, 4, 5, 10, 22}; il server non blinda l'elenco perché le
 // aliquote le cambia la legge, non un deploy.
 const parseVatRate = (raw: any): number | null => {
-    if (raw == null) return 10;
+    if (raw == null) return null;
     const n = Number(raw);
     return Number.isInteger(n) && n >= 0 && n <= 100 ? n : null;
 };
@@ -9449,7 +9511,9 @@ const parseVatRate = (raw: any): number | null => {
 app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { name, description, price, category, allergens, photo_url } = req.body;
-        const vatRate = parseVatRate(req.body?.vat_rate);
+        const vatRate = req.body?.vat_rate == null
+            ? (await getFiscalVatMap(req.tenantId!)).dish_default
+            : parseVatRate(req.body.vat_rate);
         if (vatRate == null) return res.status(400).json({ error: 'vat_rate deve essere un intero fra 0 e 100' });
         const result = await queryWithRetry(
             'INSERT INTO dishes (tenant_id, name, description, price, category, allergens, photo_url, vat_rate) VALUES ($7, $1, $2, $3, $4, $5, $6, $8) RETURNING *',
@@ -9487,13 +9551,12 @@ app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req,
         const { id } = req.params;
         const { name, description, price, category, allergens, photo_url } = req.body;
         const vatRate = parseVatRate(req.body?.vat_rate);
-        if (vatRate == null) return res.status(400).json({ error: 'vat_rate deve essere un intero fra 0 e 100' });
+        if (req.body?.vat_rate != null && vatRate == null) return res.status(400).json({ error: 'vat_rate deve essere un intero fra 0 e 100' });
         const result = await queryWithRetry(
             // COALESCE sul body: un client vecchio che non manda vat_rate non
-            // deve resettare a 10 l'aliquota già impostata.
+            // deve resettare l'aliquota già impostata.
             'UPDATE dishes SET name = $1, description = $2, price = $3, category = $4, allergens = $5, photo_url = $6, vat_rate = COALESCE($9, vat_rate) WHERE id = $7 AND tenant_id = $8 RETURNING *',
-            [name, description, price, category, allergens, photo_url || null, id, req.tenantId!,
-             req.body?.vat_rate != null ? vatRate : null]
+            [name, description, price, category, allergens, photo_url || null, id, req.tenantId!, vatRate]
         );
         const updatedDish = result.rows[0];
         if (!updatedDish) {
@@ -24569,13 +24632,17 @@ async function syncSystemLinesInTx(client: any, tenantId: number, orderId: numbe
         [orderId]
     );
 
+    // Aliquote di coperto e servizio dalla mappatura IVA del tenant
+    // (Impostazioni → Fiscalità); 10 di somministrazione come fallback.
+    const vatMap = await getFiscalVatMap(tenantId);
+
     if (coverCents > 0 && covers > 0) {
         await client.query(
-            // Coperto al 10%: segue la somministrazione di cui fa parte.
+            // Il coperto segue la somministrazione di cui fa parte.
             `INSERT INTO order_items
                 (tenant_id, order_id, name_snapshot, unit_price_cents, qty, course_no, status, line_kind, vat_rate)
-             VALUES ($4, $1, 'Coperto', $2, $3, 1, 'SERVED', 'COVER', 10)`,
-            [orderId, coverCents, covers, tenantId]
+             VALUES ($4, $1, 'Coperto', $2, $3, 1, 'SERVED', 'COVER', $5)`,
+            [orderId, coverCents, covers, tenantId, vatMap.cover]
         );
     }
 
@@ -24597,12 +24664,12 @@ async function syncSystemLinesInTx(client: any, tenantId: number, orderId: numbe
         const amount = Math.round((Number(sub.rows[0].total) * servicePct) / 100);
         if (amount > 0) {
             await client.query(
-                // Servizio al 10% come il coperto: accessorio della
+                // Il servizio come il coperto: accessorio della
                 // somministrazione, ne segue l'aliquota.
                 `INSERT INTO order_items
                     (tenant_id, order_id, name_snapshot, unit_price_cents, qty, course_no, status, line_kind, vat_rate)
-                 VALUES ($4, $1, $2, $3, 1, 1, 'SERVED', 'SERVICE', 10)`,
-                [orderId, `Servizio ${servicePct}%`, amount, tenantId]
+                 VALUES ($4, $1, $2, $3, 1, 1, 'SERVED', 'SERVICE', $5)`,
+                [orderId, `Servizio ${servicePct}%`, amount, tenantId, vatMap.service]
             );
         }
     }

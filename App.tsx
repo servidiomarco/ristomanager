@@ -2849,7 +2849,7 @@ const App: React.FC = () => {
                       icon={Percent}
                       title="Aliquote IVA"
                       description="L'aliquota si imposta piatto per piatto nel menù (default 10%). Coperto e servizio al 10%."
-                      onClick={() => setView(ViewState.MENU)}
+                      onClick={() => { setMenuInitialTab('DISHES'); setView(ViewState.MENU); }}
                     />
                   )}
                 </div>
