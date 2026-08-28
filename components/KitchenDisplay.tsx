@@ -590,7 +590,7 @@ const ServiceSummaryBanner: React.FC<{
           className="w-full flex items-center gap-3 px-4 py-3 text-left"
           aria-expanded={open}
         >
-          <span className="text-[13px] font-semibold uppercase tracking-wide text-[var(--ds-text-muted)]">
+          <span className="text-[13px] font-semibold text-[var(--ds-text-muted)]">
             {shift} · {summary.reservations} prenotazion{summary.reservations === 1 ? 'e' : 'i'}
           </span>
           <div className="min-w-0 flex-1 flex flex-wrap items-center gap-2">
@@ -628,7 +628,7 @@ const ServiceSummaryBanner: React.FC<{
           <div className="border-t border-[var(--ds-border)] px-4 py-3 space-y-3">
             {hasDietary && (
               <div>
-                <div className="text-[12px] font-semibold uppercase tracking-wide text-[var(--ds-text-muted)] mb-1.5">
+                <div className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-1.5">
                   Piatti del turno ({total})
                 </div>
                 <div className="flex flex-wrap gap-1.5">
@@ -646,7 +646,7 @@ const ServiceSummaryBanner: React.FC<{
             )}
             {hasDiets && (
               <div>
-                <div className="text-[12px] font-semibold uppercase tracking-wide text-[var(--ds-critical-text)] mb-1.5">
+                <div className="text-[13px] font-semibold text-[var(--ds-critical-text)] mb-1.5">
                   Allergie / diete
                 </div>
                 <ul className="space-y-1">

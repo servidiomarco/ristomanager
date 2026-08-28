@@ -440,6 +440,43 @@ Where a list is ordered by urgency (Sotto scorta, Attività), the row background
 secondary text, and its metric shift family **together**: zero/failed → `critical`,
 low/overdue → `pending`, normal → `neutral`. Three coordinated signals, not one.
 
+### 3.5 Categorical — six hues that mean nothing
+
+The five families above all **mean** something. Some things need colour that means nothing at
+all, only *different from that other one*: banquet events sharing a floor map, task categories
+in a list. Reaching for a state family there makes the colour lie — an Inventario dot in amber
+reads as *overdue* to anyone who has learned what amber means everywhere else.
+
+`--ds-cat-1…6` exists for that, and only that. Six hues sitting in the gaps the families leave
+(green 150°, amber 43°, indigo 245°, red 7°), 25°–328° apart from each other.
+
+| | hue | light solid | dark solid |
+|---|---|---|---|
+| `cat-1` | teal 182° | `#0F6E70` | `#2E9A9C` |
+| `cat-2` | azure 209° | `#2A6BA8` | `#4B8FD1` |
+| `cat-3` | violet 274° | `#7145A8` | `#9A6FD1` |
+| `cat-4` | magenta 328° | `#A83A70` | `#D06498` |
+| `cat-5` | moss 80° | `#5A7A24` | `#85A845` |
+| `cat-6` | clay 25° | `#A05A34` | `#C98457` |
+
+Four slots each — `tint`, `line`, `text`, `solid`. `line` is the extra one the families don't
+have; the banquet label needs a border tone between tint and solid.
+
+Two rules that are easy to break:
+
+- **`text` on `tint` is the readable pair** and clears AA everywhere (6.85–8.18 light,
+  7.95–9.59 dark). **`solid` is for dots, bars and borders** — and for *large* text only
+  (≥18.66px semibold, where the floor is 3:1), which is what the banquet label uses it for.
+  Two of the six measure under 4.5:1 as small text on their own tint.
+- **Six hues cannot be told apart in greyscale.** Desaturated they land inside 25 luminance
+  points. No categorical palette solves this — every use site therefore carries a label as
+  well, per §4.3's first mitigation. If you add a seventh use, give it text too.
+
+They also sit close to the families in greyscale — teal and `seated` are both ~82, azure and
+`arriving` ~95, magenta and `critical` ~96. By hue they are 32–41° apart, which is comfortable;
+what separates them in practice is context. A status chip and a category dot never do the same
+job in the same place.
+
 ---
 
 ## 4. Accessibility
@@ -1148,8 +1185,9 @@ constants**, not components — used where the element must stay native, such as
 should look like a button. `reservationState.tsx` is the single source of truth for reservation
 state and its colour; it is domain, not `ds/`, and every surface derives from it.
 
-Tokens live in `index.css` under Tailwind v4 `@theme` — this document is the specification,
-`index.css` is the implementation.
+Tokens live in `index.css`, in plain `:root` and `.dark` blocks — not under Tailwind v4
+`@theme`, which holds only the legacy `--color-*` remap that Tailwind's own utilities resolve
+through. This document is the specification, `index.css` is the implementation.
 
 ---
 
@@ -1316,3 +1354,43 @@ The floors hold without exception: 44px touch targets, `tabular-nums` on every l
 `rounded.full` on primary actions, visible focus, and §5.2 — **never uppercase, anywhere.**
 The typeface is Hanken Grotesk as in §5; a serif appears only in the fallback wordmark, where
 it is standing in for a restaurant's logo rather than setting an interface.
+
+---
+
+## 17. The print surface — `--ds-print-*`
+
+Two modals print: `PrintReservationsModal` and `PrintInventoryModal`. Unlike the booking page
+(§16) the printed sheet is **not** a separate document — it renders inside the app, portaled
+into `.print-portal`, and `@media print` hides every other body child. It therefore *does* load
+`index.css` and can see every token the app can.
+
+Which is exactly the trap. `--ds-surface` resolves to `#141417` under `.dark`, so a member of
+staff working in dark mode would print a black page.
+
+### 17.1 Light only, by construction
+
+`--ds-print-*` is declared **on `:root` and never inside `.dark`.** Nothing redefines it, so it
+cannot invert, and the sheet comes out identical in either theme. That is the whole mechanism —
+there is no media query and no theme branch to maintain.
+
+Additive over `--ds-*`, overriding nothing, the same discipline `--ds-public-*` follows (§16.1).
+
+| Token | Value | Used for |
+|---|---|---|
+| `ink` | `#0F172A` | headings, strong rules |
+| `ink-secondary` | `#475569` | supporting text |
+| `ink-muted` | `#64748B` | notes, units, empty states |
+| `ink-subtle` | `#94A3B8` | page footer |
+| `rule-strong` | `#CBD5E1` | section separator |
+| `rule` | `#E2E8F0` | row hairline |
+| `fill` | `#F1F5F9` | table header ground |
+| `positive` | `#059669` | the "✓ arrivato" tick |
+
+The values are the ones both modals already had hard-coded, identically, in two places. They
+were named rather than changed: paper coming out of the printer is unchanged.
+
+### 17.2 What this does not cover
+
+`utils/printDocument.ts` is a third path. Banchetti, HACCP and Lista della spesa print from a
+hidden iframe as standalone documents that never load `index.css`, so they cannot consume these
+tokens — the same separation §16 describes for `prenota.html`.

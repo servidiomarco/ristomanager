@@ -2282,7 +2282,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
                   {res.notes && (
                     <div className="border-t border-[var(--ds-border)] pt-3">
-                      <div className="text-[11px] uppercase tracking-wide text-[var(--ds-text-subtle)] font-semibold mb-1">Note</div>
+                      <div className="text-[12px] font-semibold text-[var(--ds-text-muted)] mb-1">Note</div>
                       <p className="text-[13px] text-[var(--ds-text-primary)] whitespace-pre-wrap break-words">{res.notes}</p>
                     </div>
                   )}
