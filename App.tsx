@@ -24,6 +24,7 @@ import { ShoppingListPage } from './components/ShoppingListPage';
 import { HaccpPage } from './components/HaccpPage';
 import ConversazioniPage from './components/ConversazioniPage';
 import InboxPage from './components/InboxPage';
+import StaffChatPage from './components/StaffChatPage';
 import { SegmentedControl, StatusPill, useMediaQuery, dsSelect } from './components/ds';
 import { NotificationsPanel } from './components/NotificationsPanel';
 import EmailPage from './components/EmailPage';
@@ -69,7 +70,8 @@ import { useScrollFade } from './hooks/useScrollFade';
 import { offlineQueue } from './services/offlineQueue';
 import { socketClient } from './services/socketClient';
 import { voiceCallsApiService } from './services/voiceCallsApiService';
-import { messagesApiService } from './services/messagesApiService';
+import { messagesApiService, inboxCache } from './services/messagesApiService';
+import { staffChatApiService } from './services/staffChatApiService';
 import { paymentsApiService } from './services/paymentsApiService';
 import { emailApiService } from './services/emailApiService';
 import { notificationsApiService } from './services/notificationsApiService';
@@ -152,6 +154,7 @@ const NAV_ITEMS: NavItem[] = [
   // ignores isTab, so desktop still lists them individually.
   { kind: 'link', label: 'Chiamate', Icon: Phone, group: 'comunicazioni', isTab: true, view: ViewState.CONVERSAZIONI, sidebarCollapse: false },
   { kind: 'link', label: 'Messaggi', Icon: MessageCircle, group: 'comunicazioni', isTab: true, view: ViewState.MESSAGGI, sidebarCollapse: false },
+  { kind: 'link', label: 'Chat staff', Icon: MessagesSquare, group: 'comunicazioni', isTab: true, view: ViewState.CHAT_STAFF, sidebarCollapse: false },
   { kind: 'link', label: 'Email', Icon: Mail, group: 'comunicazioni', isTab: true, view: ViewState.EMAIL, sidebarCollapse: false },
   { kind: 'link', label: 'Notifiche', Icon: Bell, group: 'comunicazioni', isTab: true, view: ViewState.NOTIFICHE, sidebarCollapse: false },
 
@@ -181,7 +184,7 @@ const NAV_ITEMS: NavItem[] = [
 // The Comunicazioni channels, in the order the mobile switcher shows them.
 // Presentation only — each one is still its own ViewState, so deep links from
 // the command palette, notifications and the sidebar are untouched.
-const COMMS_VIEWS: ViewState[] = [ViewState.CONVERSAZIONI, ViewState.MESSAGGI, ViewState.EMAIL];
+const COMMS_VIEWS: ViewState[] = [ViewState.CONVERSAZIONI, ViewState.MESSAGGI, ViewState.CHAT_STAFF, ViewState.EMAIL];
 
 // Stato aperto/chiuso della sidebar desktop. Scritto solo dalla linguetta.
 const SIDEBAR_COLLAPSED_KEY = 'ristocrm_sidebar_collapsed';
@@ -482,6 +485,16 @@ const App: React.FC = () => {
   // the user leaves the inbox we also refresh, in case they read some threads.
   const [messagesUnreadCount, setMessagesUnreadCount] = useState(0);
   const canSeeMessages = canAccessView(ViewState.MESSAGGI);
+  // Pre-scalda la cache dell'inbox al login: il primo ingresso in Messaggi
+  // trova la lista già pronta invece dello spinner (mezzo secondo di rete
+  // verso Railway). Al logout la cache si svuota: non deve sopravvivere a un
+  // cambio utente sullo stesso browser.
+  useEffect(() => {
+    if (!isAuthenticated) { inboxCache.clear(); return; }
+    if (!canSeeMessages) return;
+    messagesApiService.prefetchConversations();
+  }, [isAuthenticated, canSeeMessages]);
+
   useEffect(() => {
     if (!isAuthenticated || !canSeeMessages) return;
     let cancelled = false;
@@ -529,6 +542,59 @@ const App: React.FC = () => {
       .then(({ count }) => setMessagesUnreadCount(count))
       .catch(() => {});
   }, [view, isAuthenticated, canSeeMessages]);
+
+  // Non letti della chat staff — stesso schema del badge Messaggi: fetch al
+  // mount, refresh su ogni evento socket del modulo e al focus. La lettura
+  // fatta su QUESTO device non emette l'evento verso se stessa (esclusione
+  // X-Socket-ID), quindi si riconta anche quando si lascia la vista.
+  const [staffChatUnreadCount, setStaffChatUnreadCount] = useState(0);
+  const canSeeStaffChat = canAccessView(ViewState.CHAT_STAFF);
+  useEffect(() => {
+    if (!isAuthenticated || !canSeeStaffChat) return;
+    let cancelled = false;
+    const refresh = () => {
+      staffChatApiService.unreadCount()
+        .then(({ count }) => { if (!cancelled) setStaffChatUnreadCount(count); })
+        .catch(() => {});
+    };
+    refresh();
+    const onEvent = () => refresh();
+
+    let attachedSocket: ReturnType<typeof socketClient.getSocket> = null;
+    const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
+      if (attachedSocket === s) return;
+      if (attachedSocket) {
+        attachedSocket.off('staffchat:message', onEvent);
+        attachedSocket.off('staffchat:read', onEvent);
+      }
+      attachedSocket = s;
+      if (attachedSocket) {
+        attachedSocket.on('staffchat:message', onEvent);
+        attachedSocket.on('staffchat:read', onEvent);
+      }
+    };
+    attach(socketClient.getSocket());
+    const unsubSocket = socketClient.onSocketChange((s) => attach(s));
+
+    const onFocus = () => refresh();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', onFocus);
+      unsubSocket();
+      attach(null);
+    };
+  }, [isAuthenticated, canSeeStaffChat]);
+  useEffect(() => {
+    if (!isAuthenticated || !canSeeStaffChat) return;
+    staffChatApiService.unreadCount()
+      .then(({ count }) => setStaffChatUnreadCount(count))
+      .catch(() => {});
+  }, [view, isAuthenticated, canSeeStaffChat]);
+
+  // Deep-link dalla push (?staffchat=<threadKey>): il thread da aprire appena
+  // la vista monta.
+  const [pendingStaffChatThread, setPendingStaffChatThread] = useState<string | null>(null);
 
   // Email and Notifiche unread badges — poll on view change + on focus, no
   // socket wiring for now (both endpoints are cheap).
@@ -741,6 +807,15 @@ const App: React.FC = () => {
       if (!data || data.type !== 'NOTIFICATION_CLICK' || !data.url) return;
       try {
         const url = new URL(data.url, window.location.origin);
+        // Push della chat staff: apre la vista sul thread indicato.
+        const staffChatThread = url.searchParams.get('staffchat');
+        if (staffChatThread) {
+          if (getAccessibleViews().includes(ViewState.CHAT_STAFF)) {
+            setPendingStaffChatThread(staffChatThread);
+            setView(ViewState.CHAT_STAFF);
+          }
+          return;
+        }
         const requestedView = url.searchParams.get('view');
         if (!requestedView) return;
         if (!(Object.values(ViewState) as string[]).includes(requestedView)) return;
@@ -1797,6 +1872,7 @@ const App: React.FC = () => {
   const commsChannels = [
     { view: ViewState.CONVERSAZIONI, label: 'Chiamate', badge: voiceCallsPendingCount },
     { view: ViewState.MESSAGGI, label: 'Messaggi', badge: messagesUnreadCount },
+    { view: ViewState.CHAT_STAFF, label: 'Chat staff', badge: staffChatUnreadCount },
     { view: ViewState.EMAIL, label: 'Email', badge: emailUnreadCount },
   ].filter(c => canAccessView(c.view));
   const commsBadgeTotal = commsChannels.reduce((n, c) => n + (c.badge || 0), 0);
@@ -2000,6 +2076,7 @@ const App: React.FC = () => {
                       badge={
                         item.view === ViewState.CONVERSAZIONI ? voiceCallsPendingCount
                         : item.view === ViewState.MESSAGGI ? messagesUnreadCount
+                        : item.view === ViewState.CHAT_STAFF ? staffChatUnreadCount
                         : item.view === ViewState.EMAIL ? emailUnreadCount
                         : item.view === ViewState.NOTIFICHE ? notificationsUnreadCount
                         : item.view === ViewState.PAGAMENTI ? paymentsUnseenCount
@@ -2543,6 +2620,13 @@ const App: React.FC = () => {
               setPendingReservationId(reservationId);
               setView(ViewState.RESERVATIONS);
             }}
+          />
+        )}
+        {view === ViewState.CHAT_STAFF && user && (
+          <StaffChatPage
+            currentUserId={user.id}
+            initialThreadKey={pendingStaffChatThread}
+            onInitialThreadConsumed={() => setPendingStaffChatThread(null)}
           />
         )}
 
@@ -3094,6 +3178,7 @@ const App: React.FC = () => {
                         const badge =
                           item.view === ViewState.CONVERSAZIONI ? voiceCallsPendingCount
                           : item.view === ViewState.MESSAGGI ? messagesUnreadCount
+                          : item.view === ViewState.CHAT_STAFF ? staffChatUnreadCount
                           : item.view === ViewState.EMAIL ? emailUnreadCount
                           : item.view === ViewState.NOTIFICHE ? notificationsUnreadCount
                           : item.view === ViewState.PAGAMENTI ? paymentsUnseenCount
