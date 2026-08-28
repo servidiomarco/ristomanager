@@ -195,6 +195,7 @@ class BillsApiService {
     provider?: FiscalProviderSetting;
     vat_number?: string;
     seller?: { business_name?: string; regime?: string; address?: { street?: string; zip?: string; city?: string; province?: string } };
+    vat_map?: Partial<FiscalVatMap>;
   }): Promise<FiscalSettings> {
     return apiRequest<FiscalSettings>(`${API_URL}/settings/fiscal`, {
       method: 'PUT',
@@ -228,11 +229,20 @@ class BillsApiService {
   }
 }
 
+/** Mappatura IVA del tenant: default piatti e voci di sistema. */
+export interface FiscalVatMap {
+  dish_default: number;
+  cover: number;
+  service: number;
+  fallback: number;
+}
+
 export interface FiscalSettings {
   provider: FiscalProviderSetting;
   vat_number: string;
   /** Cedente della fattura elettronica (denominazione, regime, sede). */
   seller: { business_name?: string; regime?: string; address?: { street?: string; zip?: string; city?: string; province?: string } };
+  vat_map: FiscalVatMap;
   providers: readonly FiscalProviderSetting[];
   openapi_token_configured: boolean;
 }

@@ -84,6 +84,9 @@ export interface BuildEReceiptInput {
     // Acconto accreditato sul conto (quote deposit PAID): denaro già
     // incassato online prima della serata.
     depositCreditCents: number;
+    // Aliquota della riga "Consumazione" e delle righe senza vat_rate, dalla
+    // mappatura IVA del tenant. Assente = 10 (somministrazione).
+    fallbackVatRate?: number;
     lotteryCode?: string | null;
 }
 
@@ -102,9 +105,10 @@ export interface BuildEReceiptInput {
 // corrispettivo). Lo sconto delle comande (totale < somma righe) finisce nel
 // campo discount globale insieme all'omaggio.
 export function buildEReceiptPayload(input: BuildEReceiptInput): EReceiptPayload {
+    const fallbackVat = Number.isInteger(input.fallbackVatRate) ? input.fallbackVatRate! : 10;
     const srcItems = Array.isArray(input.items) && input.items.length > 0
         ? input.items
-        : [{ name: 'Consumazione', qty: 1, unit_price_cents: input.totalCents, vat_rate: 10 }];
+        : [{ name: 'Consumazione', qty: 1, unit_price_cents: input.totalCents, vat_rate: fallbackVat }];
 
     const items: EReceiptItemPayload[] = srcItems
         .filter(i => Number(i.qty) > 0 && Number(i.unit_price_cents) > 0)
@@ -112,7 +116,7 @@ export function buildEReceiptPayload(input: BuildEReceiptInput): EReceiptPayload
             quantity: Number(i.qty).toFixed(2),
             description: String(i.name || 'Articolo').slice(0, 1000),
             unit_price: centsToEuroString(Number(i.unit_price_cents)),
-            vat_rate_code: vatRateToCode(Number(i.vat_rate ?? 10)),
+            vat_rate_code: vatRateToCode(Number(i.vat_rate ?? fallbackVat)),
         }));
 
     const itemsGrossCents = srcItems.reduce(
