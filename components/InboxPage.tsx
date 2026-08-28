@@ -4,6 +4,7 @@ import { Loader } from './Loader';
 import { SkeletonInboxList } from './SkeletonCards';
 import {
   messagesApiService,
+  inboxCache,
   ConversationSummary,
   InboxMessage,
   MessageChannel,
@@ -191,8 +192,12 @@ interface InboxPageProps {
 }
 
 const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, onOpenReservation, refreshTick, reservations }) => {
-  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
-  const [convLoading, setConvLoading] = useState(true);
+  // Riparte dall'ultimo stato noto (cache modulo-level): la pagina viene
+  // smontata a ogni cambio vista, e senza questo ogni rientro mostrava lo
+  // spinner per dati visti dieci secondi prima. Il fetch parte comunque e
+  // rimpiazza in silenzio (stale-while-revalidate).
+  const [conversations, setConversations] = useState<ConversationSummary[]>(() => inboxCache.conversations ?? []);
+  const [convLoading, setConvLoading] = useState(inboxCache.conversations === null);
   const [convError, setConvError] = useState<string | null>(null);
   // Search over the conversation list. Always visible rather than behind a
   // toggle: on a list you filter before you scroll. Matches name, phone (raw +
@@ -267,6 +272,14 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
 
+  // Specchia in cache ogni cambiamento della lista (fetch, socket, letture):
+  // il prossimo mount riparte da qui. Il guard su convLoading evita di
+  // sovrascrivere una cache pre-riempita con lo stato iniziale vuoto se si
+  // esce dalla pagina prima che il primo fetch risponda.
+  useEffect(() => {
+    if (!convLoading && !convError) inboxCache.conversations = conversations;
+  }, [conversations, convLoading, convError]);
+
   // App bumps refreshTick after linking a freshly-created reservation to this
   // thread — reload the conversation list (name/last message may have moved).
   // The reservations menu itself updates from the `reservations` prop, not from
@@ -277,11 +290,22 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
     loadConversations();
   }, [refreshTick, loadConversations]);
 
+  // Con la cache il cambio thread è istantaneo, quindi due fetch possono
+  // essere in volo insieme: il ref scarta la risposta del thread che non è
+  // più aperto (prima il clobber era teorico, ora sarebbe visibile).
+  const selectedKeyRef = useRef<string | null>(null);
+  useEffect(() => { selectedKeyRef.current = selectedKey; }, [selectedKey]);
+
   const loadTimeline = useCallback(async (phoneDigits: string) => {
-    setMsgLoading(true);
+    // Timeline già vista: si mostra subito e il fetch rinfresca in background.
+    const cached = inboxCache.timelines.get(phoneDigits);
+    if (cached) setMessages(cached);
+    setMsgLoading(!cached);
     setMsgError(null);
     try {
       const { messages } = await messagesApiService.getTimeline(phoneDigits);
+      inboxCache.setTimeline(phoneDigits, messages);
+      if (selectedKeyRef.current !== phoneDigits) return;
       setMessages(messages);
       // Mark inbound messages as read once the timeline is on screen. Errors
       // are silent — worst case, the badge is stale until the next refresh.
@@ -293,9 +317,11 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
         })
         .catch(() => {});
     } catch (err: any) {
-      setMsgError(err?.message || 'Errore caricamento conversazione');
+      if (selectedKeyRef.current === phoneDigits) {
+        setMsgError(err?.message || 'Errore caricamento conversazione');
+      }
     } finally {
-      setMsgLoading(false);
+      if (selectedKeyRef.current === phoneDigits) setMsgLoading(false);
     }
   }, []);
 
@@ -321,9 +347,20 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
       return String(raw).slice(-10);
     };
 
+    // Anche la cache riceve il messaggio (qualunque thread, non solo quello
+    // aperto): così riaprire una chat mostra subito anche ciò che è arrivato
+    // mentre si era altrove, senza aspettare il refresh in background.
+    const appendToCache = (key: string, msg: InboxMessage) => {
+      const cached = inboxCache.timelines.get(key);
+      if (cached && !cached.some(m => m.id === msg.id)) {
+        inboxCache.setTimeline(key, [...cached, msg]);
+      }
+    };
+
     const onInbound = (msg: InboxMessage) => {
       const key = digitsMatch(msg);
       if (!key) return;
+      appendToCache(key, msg);
       // Optimistically bump the conversation to the top, or add it if new.
       setConversations(prev => {
         const existing = prev.find(c => c.phone_digits === key);
@@ -368,12 +405,20 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
     // fallito e chi l'ha mandato crede sia partito.
     const onStatus = (msg: InboxMessage) => {
       if (!msg?.id) return;
+      const key = digitsMatch(msg);
+      if (key) {
+        const cached = inboxCache.timelines.get(key);
+        if (cached) {
+          inboxCache.setTimeline(key, cached.map(m => (m.id === msg.id ? { ...m, ...msg } : m)));
+        }
+      }
       setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, ...msg } : m)));
     };
 
     const onOutbound = (msg: InboxMessage) => {
       const key = digitsMatch(msg);
       if (!key) return;
+      appendToCache(key, msg);
       setConversations(prev => {
         const existing = prev.find(c => c.phone_digits === key);
         if (existing) {
