@@ -1242,7 +1242,10 @@ const App: React.FC = () => {
     () => reservations.filter(r => r.reservation_status === ReservationStatus.PENDING).length,
     [reservations]
   );
-  useAppBadge(pendingReservationsCount + voiceCallsPendingCount + messagesUnreadCount);
+  // La somma deve combaciare col pezzo per-utente calcolato lato server in
+  // pushService (computeAttentionBadge + countStaffChatUnread): stesso badge
+  // ad app aperta e ad app chiusa.
+  useAppBadge(pendingReservationsCount + voiceCallsPendingCount + messagesUnreadCount + staffChatUnreadCount);
 
   // Socket.IO Real-time Event Listeners
   useEffect(() => {
