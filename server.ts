@@ -6140,6 +6140,11 @@ app.get('/messages/conversations', authenticate, requirePermission('reservations
                 WHERE tenant_id = $1
                   AND channel IN ('sms','whatsapp')
                   AND COALESCE(from_phone_digits, to_phone_digits) IS NOT NULL
+                  -- Finestra di 12 mesi: non per velocità oggi (33ms su tutto
+                  -- lo storico) ma per tenere stabile l'aggregazione quando la
+                  -- tabella sarà 10x. Un thread fermo da un anno sparisce
+                  -- dalla lista, non dal DB: riscrive il cliente e ricompare.
+                  AND sent_at > now() - interval '12 months'
             ),
             keyed AS (
                 SELECT *, right(digits, 10) AS phone_key
@@ -6224,17 +6229,22 @@ app.get('/messages/conversations/:phoneDigits', authenticate, requirePermission(
     try {
         const key = String(req.params.phoneDigits).replace(/\D/g, '').slice(-10);
         if (!key) return res.status(400).json({ error: 'Invalid phone_digits' });
+        // LIMIT sul DESC, poi ri-ordinato ASC per la UI: il vecchio
+        // `ORDER BY sent_at ASC LIMIT 500` prendeva i 500 messaggi più VECCHI
+        // del thread — superata quota, i nuovi messaggi sparivano dalla chat.
         const result = await queryWithRetry(
-            `SELECT id, provider, channel, direction, from_phone, to_phone, body,
-                    status, provider_sid, reservation_id, sent_at, delivered_at,
-                    failed_at, read_at, error_code, error_message, media
-             FROM outbound_messages
-             WHERE tenant_id = $2
-               AND channel IN ('sms','whatsapp')
-               AND (right(to_phone_digits, 10) = $1::text
-                    OR right(from_phone_digits, 10) = $1::text)
-             ORDER BY sent_at ASC
-             LIMIT 500`,
+            `SELECT * FROM (
+                SELECT id, provider, channel, direction, from_phone, to_phone, body,
+                       status, provider_sid, reservation_id, sent_at, delivered_at,
+                       failed_at, read_at, error_code, error_message, media
+                FROM outbound_messages
+                WHERE tenant_id = $2
+                  AND channel IN ('sms','whatsapp')
+                  AND (right(to_phone_digits, 10) = $1::text
+                       OR right(from_phone_digits, 10) = $1::text)
+                ORDER BY sent_at DESC
+                LIMIT 500
+             ) t ORDER BY sent_at ASC`,
             [key, req.tenantId!]
         );
         res.json({ messages: result.rows });
