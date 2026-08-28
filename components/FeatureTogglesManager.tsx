@@ -46,6 +46,10 @@ function todayISO(): string {
 
 interface Props {
     showToast: (msg: string, kind?: 'success' | 'error' | 'info') => void;
+    /** La pagina Impostazioni monta il componente due volte: la scheda voce
+     *  (Sofia) nella sezione AI, quella web in Prenotazioni. Senza filtro
+     *  restano entrambe, com'era prima dello split. */
+    only?: 'voice' | 'web';
 }
 
 type FlagKey = keyof FeatureFlags;
@@ -83,11 +87,12 @@ const CHANNELS: ChannelMeta[] = [
     },
 ];
 
-export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
+export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
     const { hasPermission, hasFeature } = useAuth();
     const canEdit = hasPermission('settings:full');
     // Gating UI sugli entitlements (nota C1): restano solo i canali del piano.
-    const visibleChannels = CHANNELS.filter(meta => hasFeature(meta.feature));
+    const visibleChannels = CHANNELS.filter(meta => hasFeature(meta.feature)
+        && (!only || meta.key === (only === 'voice' ? 'voice_agent_enabled' : 'public_bookings_enabled')));
 
     const [flags, setFlags] = useState<FeatureFlags | null>(null);
     const [channels, setChannels] = useState<ChannelSettings | null>(null);
@@ -495,7 +500,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
 
     return (
         <div className="space-y-3">
-            {visibleChannels.length === 0 && (
+            {visibleChannels.length === 0 && !only && (
                 <p className="rounded-[16px] bg-[var(--ds-surface)] px-4 py-3 text-[14px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)]">
                     Nessun canale incluso nel piano attuale.
                 </p>
@@ -998,7 +1003,10 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
             })}
 
             {/* Limiti di occupazione per sala — vale per entrambi i canali
-                self-service, quindi sta fuori dalle due schede canale. */}
+                self-service, quindi sta fuori dalle due schede canale. Con lo
+                split della pagina Impostazioni la card resta sull'istanza
+                web/Prenotazioni per non comparire due volte. */}
+            {only !== 'voice' && (
             <details className="group bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden">
                 <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
                     <div className="flex items-center gap-3 min-w-0">
@@ -1144,6 +1152,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                     </div>
                 </div>
             </details>
+            )}
 
             {!canEdit && (
                 <p className="text-[12px] text-[var(--ds-text-subtle)] mt-1">

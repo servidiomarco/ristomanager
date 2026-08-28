@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -208,6 +208,7 @@ const SETTINGS_GROUPS: {
   { id: 'imp-prenotazioni', label: 'Prenotazioni', Icon: Calendar },
   { id: 'imp-pagamenti', label: 'Pagamenti', Icon: CreditCard },
   { id: 'imp-comunicazioni', label: 'Comunicazioni', Icon: MessagesSquare },
+  { id: 'imp-ai', label: 'AI', Icon: Sparkles },
   { id: 'imp-amministrazione', label: 'Amministrazione', Icon: Users, guard: 'admin' },
 ];
 
@@ -2731,7 +2732,8 @@ const App: React.FC = () => {
                 del modal, caparra, blacklist, logica tavoli. */}
             <SettingsSection id="imp-prenotazioni" label="Prenotazioni">
               <div className="space-y-3">
-                <FeatureTogglesManager showToast={addToast} />
+                {/* Solo il canale web: la scheda di Sofia sta nella sezione AI. */}
+                <FeatureTogglesManager showToast={addToast} only="web" />
                 <SettingsDisclosure
                   icon={MessagesSquare}
                   title="Canali di risposta"
@@ -2779,11 +2781,6 @@ const App: React.FC = () => {
                 >
                   <BlacklistPolicyManager showToast={addToast} />
                 </SettingsDisclosure>
-                {/* Istruzioni testuali per una futura assegnazione tavoli
-                    guidata da AI; oggi il testo è solo salvato. */}
-                <CardErrorBoundary label="Prompt logica tavoli per AI">
-                  <TableAssignmentAiPromptCard showToast={addToast} />
-                </CardErrorBoundary>
               </div>
             </SettingsSection>
 
@@ -2839,12 +2836,10 @@ const App: React.FC = () => {
             </SettingsSection>
 
             {/* I canali con cui il ristorante scrive e riceve: email in
-                uscita e in entrata, agente AI dei messaggi, allegati. */}
+                uscita e in entrata, allegati. Le risposte AI ai messaggi
+                stanno nella sezione AI. */}
             <SettingsSection id="imp-comunicazioni" label="Comunicazioni">
               <div className="space-y-3">
-                <CardErrorBoundary label="Messaggi con AI">
-                  <AiMessagesSettingsManager showToast={addToast} />
-                </CardErrorBoundary>
                 <CardErrorBoundary label="Server Email (SMTP)">
                   <SmtpIntegrationCard showToast={addToast} />
                 </CardErrorBoundary>
@@ -2853,6 +2848,23 @@ const App: React.FC = () => {
                 </CardErrorBoundary>
                 <CardErrorBoundary label="Media">
                   <MediaLibraryManager showToast={addToast} />
+                </CardErrorBoundary>
+              </div>
+            </SettingsSection>
+
+            {/* Tutto ciò che è guidato dall'AI in un posto solo: Sofia al
+                telefono (con le sue regolazioni), le risposte AI ai messaggi
+                WhatsApp e il prompt della logica tavoli. */}
+            <SettingsSection id="imp-ai" label="AI">
+              <div className="space-y-3">
+                <FeatureTogglesManager showToast={addToast} only="voice" />
+                <CardErrorBoundary label="Messaggi con AI">
+                  <AiMessagesSettingsManager showToast={addToast} />
+                </CardErrorBoundary>
+                {/* Istruzioni testuali per una futura assegnazione tavoli
+                    guidata da AI; oggi il testo è solo salvato. */}
+                <CardErrorBoundary label="Prompt logica tavoli per AI">
+                  <TableAssignmentAiPromptCard showToast={addToast} />
                 </CardErrorBoundary>
               </div>
             </SettingsSection>
