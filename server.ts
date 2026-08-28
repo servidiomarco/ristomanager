@@ -6412,6 +6412,11 @@ app.get('/email/threads', authenticate, requirePermission('reservations:view'), 
                 WHERE tenant_id = $1
                   AND channel = 'email'
                   AND COALESCE(from_email, to_email) IS NOT NULL
+                  -- Stessa finestra di 12 mesi dell'inbox sms/whatsapp: non
+                  -- per velocità oggi ma per tenere stabile l'aggregazione
+                  -- quando la tabella sarà 10x. Il thread sparisce dalla
+                  -- lista, non dal DB: riscrive il cliente e ricompare.
+                  AND sent_at > now() - interval '12 months'
             ),
             latest AS (
                 SELECT DISTINCT ON (email_key)
@@ -6477,16 +6482,21 @@ app.get('/email/threads/:emailKey', authenticate, requirePermission('reservation
     try {
         const key = String(req.params.emailKey).trim().toLowerCase();
         if (!key || !key.includes('@')) return res.status(400).json({ error: 'Invalid email_key' });
+        // LIMIT sul DESC, poi ri-ordinato ASC per la UI: stesso fix della
+        // timeline sms/whatsapp — l'ASC diretto prendeva i 500 messaggi più
+        // VECCHI del thread, e superata quota i nuovi sparivano.
         const result = await queryWithRetry(
-            `SELECT id, provider, channel, direction, from_email, to_email, subject, body,
-                    status, provider_sid, message_id, in_reply_to, reservation_id, media,
-                    sent_at, delivered_at, failed_at, read_at, error_code, error_message
-             FROM outbound_messages
-             WHERE tenant_id = $2
-               AND channel = 'email'
-               AND (lower(to_email) = $1 OR lower(from_email) = $1)
-             ORDER BY sent_at ASC
-             LIMIT 500`,
+            `SELECT * FROM (
+                SELECT id, provider, channel, direction, from_email, to_email, subject, body,
+                       status, provider_sid, message_id, in_reply_to, reservation_id, media,
+                       sent_at, delivered_at, failed_at, read_at, error_code, error_message
+                FROM outbound_messages
+                WHERE tenant_id = $2
+                  AND channel = 'email'
+                  AND (lower(to_email) = $1 OR lower(from_email) = $1)
+                ORDER BY sent_at DESC
+                LIMIT 500
+             ) t ORDER BY sent_at ASC`,
             [key, req.tenantId!]
         );
         res.json({ messages: result.rows });
@@ -9925,6 +9935,7 @@ const SCHEDULER_LOCK_BILL_SPLIT_RECONCILE = 761001;
 const SCHEDULER_LOCK_PAYMENT_REQUEST_RECONCILE = 761002;
 const SCHEDULER_LOCK_REMINDERS = 761003;
 const SCHEDULER_LOCK_PAYMENT_LINK_EXPIRY = 761004;
+const SCHEDULER_LOCK_STAFF_CHAT_RETENTION = 761005;
 
 // Il lock advisory è di SESSIONE: va preso su un client dedicato tenuto per
 // tutta la durata del tick (sul pool condiviso un'altra query potrebbe
@@ -10378,6 +10389,42 @@ const startRemindersScheduler = () => {
         .catch((err: any) => console.error('[reminders] lock wrapper failed:', err?.message || err));
     lockedTick();
     setInterval(lockedTick, 5 * 60 * 1000);
+};
+
+// Retention della chat staff (piano §9): i messaggi sono traffico di
+// servizio, non un archivio — oltre i 90 giorni si cancellano, insieme ai
+// cursori di lettura rimasti orfani di ogni messaggio. Cross-tenant di
+// proposito (il lock wrapper dichiara runAsPlatform); un giro ogni 6 ore
+// basta, la finestra è di mesi.
+const startStaffChatRetentionScheduler = () => {
+    const tick = async () => {
+        try {
+            const purged = await queryWithRetry(
+                `DELETE FROM staff_messages
+                 WHERE created_at < NOW() - INTERVAL '90 days'
+                 RETURNING id`
+            );
+            const orphans = await queryWithRetry(
+                `DELETE FROM staff_message_reads r
+                 WHERE NOT EXISTS (
+                     SELECT 1 FROM staff_messages m
+                     WHERE m.tenant_id = r.tenant_id
+                       AND (r.thread_key = 'channel:' || m.channel
+                         OR r.thread_key IN ('dm:' || m.sender_user_id, 'dm:' || m.recipient_user_id))
+                 )
+                 RETURNING user_id`
+            );
+            if (purged.rows.length > 0 || orphans.rows.length > 0) {
+                console.log(`🧹 Chat staff: ${purged.rows.length} messaggi oltre i 90 giorni, ${orphans.rows.length} cursori orfani`);
+            }
+        } catch (err) {
+            console.error('Staff chat retention error:', err);
+        }
+    };
+    const lockedTick = () => runSchedulerTickWithLock(SCHEDULER_LOCK_STAFF_CHAT_RETENTION, 'staffchat-retention', tick)
+        .catch((err: any) => console.error('[staffchat-retention] lock wrapper failed:', err?.message || err));
+    lockedTick();
+    setInterval(lockedTick, 6 * 60 * 60 * 1000);
 };
 
 // ============================================
@@ -26559,6 +26606,12 @@ const startServer = async () => {
                         console.log('✅ Bill split reconcile scheduler started (60s)');
                     } catch (schedErr) {
                         console.error('Bill split reconcile scheduler failed to start:', schedErr);
+                    }
+                    try {
+                        startStaffChatRetentionScheduler();
+                        console.log('✅ Staff chat retention scheduler started (6h, 90 giorni)');
+                    } catch (schedErr) {
+                        console.error('Staff chat retention scheduler failed to start:', schedErr);
                     }
                     try {
                         startPaymentRequestReconcileScheduler();
