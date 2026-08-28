@@ -631,17 +631,26 @@ const ServiceSummaryBanner: React.FC<{
                 <div className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-1.5">
                   Piatti del turno ({total})
                 </div>
-                <div className="flex flex-wrap gap-1.5">
+                <ul className="space-y-1.5">
                   {summary.dietary.map(d => (
-                    <span
+                    <li
                       key={`row-${d.label}--${d.variant ?? ''}`}
-                      className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-surface-row)] px-2.5 py-1 text-[13px] font-semibold text-[var(--ds-text-primary)]"
+                      className="flex flex-wrap items-center gap-x-2 gap-y-1"
                     >
-                      <span className="tabular-nums">{d.quantity}×</span>
-                      <span>{d.label}{d.variant ? ` (${d.variant})` : ''}</span>
-                    </span>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-surface-row)] px-2.5 py-1 text-[13px] font-semibold text-[var(--ds-text-primary)]">
+                        <span className="tabular-nums">{d.quantity}×</span>
+                        <span>{d.label}{d.variant ? ` (${d.variant})` : ''}</span>
+                      </span>
+                      {(d.tables ?? []).length > 0 && (
+                        <span className="text-[13px] text-[var(--ds-text-muted)]">
+                          {d.tables.map(t =>
+                            `${t.table ? `T${t.table}` : t.customer || '—'} ×${t.quantity}`
+                          ).join(' · ')}
+                        </span>
+                      )}
+                    </li>
                   ))}
-                </div>
+                </ul>
               </div>
             )}
             {hasDiets && (
