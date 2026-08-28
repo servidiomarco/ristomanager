@@ -4,6 +4,7 @@ import { Loader } from './Loader';
 import { SkeletonInboxList, SkeletonEmailThread } from './SkeletonCards';
 import {
   emailApiService,
+  emailCache,
   publicMediaUrl,
   EmailThreadSummary,
   EmailMessage,
@@ -64,8 +65,12 @@ const displayName = (t: EmailThreadSummary): string =>
   (t.customer_name && t.customer_name.trim() && toTitleCase(t.customer_name)) || t.email;
 
 const EmailPage: React.FC = () => {
-  const [threads, setThreads] = useState<EmailThreadSummary[]>([]);
-  const [threadsLoading, setThreadsLoading] = useState(true);
+  // Riparte dall'ultimo stato noto (cache modulo-level, pre-riempita al
+  // login): la pagina viene smontata a ogni cambio vista e senza questo ogni
+  // rientro mostrava lo spinner. Il fetch parte comunque e rimpiazza in
+  // silenzio (stale-while-revalidate) — stesso schema di InboxPage.
+  const [threads, setThreads] = useState<EmailThreadSummary[]>(() => emailCache.threads ?? []);
+  const [threadsLoading, setThreadsLoading] = useState(emailCache.threads === null);
   const [threadsError, setThreadsError] = useState<string | null>(null);
 
   // Always-visible search, matching the other two Comunicazioni channels.
@@ -114,11 +119,29 @@ const EmailPage: React.FC = () => {
 
   useEffect(() => { loadThreads(); }, [loadThreads]);
 
+  // Specchia in cache ogni cambiamento della lista (fetch, socket, letture):
+  // il prossimo mount riparte da qui. Il guard evita di sovrascrivere una
+  // cache pre-riempita con lo stato iniziale vuoto o con un errore.
+  useEffect(() => {
+    if (!threadsLoading && !threadsError) emailCache.threads = threads;
+  }, [threads, threadsLoading, threadsError]);
+
+  // Con la cache il cambio thread è istantaneo, quindi due fetch possono
+  // essere in volo insieme: il ref scarta la risposta del thread che non è
+  // più aperto.
+  const selectedKeyRef = useRef<string | null>(null);
+  useEffect(() => { selectedKeyRef.current = selectedKey; }, [selectedKey]);
+
   const loadThread = useCallback(async (emailKey: string) => {
-    setMsgLoading(true);
+    // Thread già visto: si mostra subito e il fetch rinfresca in background.
+    const cached = emailCache.timelines.get(emailKey);
+    if (cached) setMessages(cached);
+    setMsgLoading(!cached);
     setMsgError(null);
     try {
       const { messages } = await emailApiService.getThread(emailKey);
+      emailCache.setTimeline(emailKey, messages);
+      if (selectedKeyRef.current !== emailKey) return;
       setMessages(messages);
       emailApiService.markThreadRead(emailKey)
         .then(() => {
@@ -126,9 +149,11 @@ const EmailPage: React.FC = () => {
         })
         .catch(() => {});
     } catch (err: any) {
-      setMsgError(err?.message || 'Errore caricamento email');
+      if (selectedKeyRef.current === emailKey) {
+        setMsgError(err?.message || 'Errore caricamento email');
+      }
     } finally {
-      setMsgLoading(false);
+      if (selectedKeyRef.current === emailKey) setMsgLoading(false);
     }
   }, []);
 
@@ -152,6 +177,13 @@ const EmailPage: React.FC = () => {
     const upsertThread = (msg: EmailMessage) => {
       const key = keyOf(msg);
       if (!key) return;
+      // Anche la cache riceve il messaggio (qualunque thread, non solo quello
+      // aperto): riaprire una chat mostra subito ciò che è arrivato mentre si
+      // era altrove, senza aspettare il refresh in background.
+      const cachedTimeline = emailCache.timelines.get(key);
+      if (cachedTimeline && !cachedTimeline.some(m => m.id === msg.id)) {
+        emailCache.setTimeline(key, [...cachedTimeline, msg]);
+      }
       const isOpen = selectedKey === key;
       setThreads(prev => {
         const existing = prev.find(t => t.email_key === key);
