@@ -631,21 +631,30 @@ const ServiceSummaryBanner: React.FC<{
                 <div className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-1.5">
                   Piatti del turno ({total})
                 </div>
-                <ul className="space-y-1.5">
+                {/* Una riga per piatto, tavoli come pill: si legge da lontano
+                    con le mani in pasta, quindi corpi grandi e testo pieno —
+                    niente muted sotto i 14px su questo schermo. */}
+                <ul className="divide-y divide-[var(--ds-border)]">
                   {summary.dietary.map(d => (
                     <li
                       key={`row-${d.label}--${d.variant ?? ''}`}
-                      className="flex flex-wrap items-center gap-x-2 gap-y-1"
+                      className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2.5 first:pt-0 last:pb-0"
                     >
-                      <span className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-surface-row)] px-2.5 py-1 text-[13px] font-semibold text-[var(--ds-text-primary)]">
+                      <span className="text-[16px] font-semibold text-[var(--ds-text-primary)]">
                         <span className="tabular-nums">{d.quantity}×</span>
-                        <span>{d.label}{d.variant ? ` (${d.variant})` : ''}</span>
+                        {' '}{d.label}{d.variant ? ` (${d.variant})` : ''}
                       </span>
                       {(d.tables ?? []).length > 0 && (
-                        <span className="text-[13px] text-[var(--ds-text-muted)]">
-                          {d.tables.map(t =>
-                            `${t.table ? `T${t.table}` : t.customer || '—'} ×${t.quantity}`
-                          ).join(' · ')}
+                        <span className="flex flex-wrap items-center gap-1.5">
+                          {d.tables.map((t, i) => (
+                            <span
+                              key={t.table ?? `c-${i}`}
+                              className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-surface-row)] px-3 py-1.5 text-[14px] font-semibold text-[var(--ds-text-primary)]"
+                            >
+                              <span className="tabular-nums">{t.quantity}×</span>
+                              <span>{t.table ? `T${t.table}` : t.customer || '—'}</span>
+                            </span>
+                          ))}
                         </span>
                       )}
                     </li>
