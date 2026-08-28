@@ -1,5 +1,7 @@
 import webpush from 'web-push';
 import { queryWithRetry, runAsPlatform } from '../db.js';
+import { channelsForRole } from './staffChat.js';
+import type { UserRole } from '../types.js';
 
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || '';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
@@ -82,11 +84,50 @@ interface SubscriptionRow {
     endpoint: string;
     p256dh: string;
     auth: string;
+    // Chi riceve, per il pezzo per-utente del badge (non letti chat staff).
+    user_id: number;
+    role: string;
+}
+
+// Non letti della chat staff per un utente: stessa semantica di
+// GET /staff-chat/unread-count (cursore monotono, canali del ruolo, DM verso
+// di me). Errori → 0: il badge degrada al solo conteggio di tenant.
+async function countStaffChatUnread(tenantId: number, userId: number, role: string): Promise<number> {
+    try {
+        const channels = channelsForRole(role as UserRole);
+        const result = await queryWithRetry(`
+            SELECT (
+                (SELECT COUNT(*) FROM staff_messages m
+                 LEFT JOIN staff_message_reads r
+                   ON r.tenant_id = m.tenant_id AND r.user_id = $2
+                  AND r.thread_key = 'channel:' || m.channel
+                 WHERE m.tenant_id = $1 AND m.kind = 'channel' AND m.channel = ANY($3)
+                   AND m.sender_user_id IS DISTINCT FROM $2
+                   AND m.id > COALESCE(r.last_read_message_id, 0))
+                +
+                (SELECT COUNT(*) FROM staff_messages m
+                 LEFT JOIN staff_message_reads r
+                   ON r.tenant_id = m.tenant_id AND r.user_id = $2
+                  AND r.thread_key = 'dm:' || m.sender_user_id
+                 WHERE m.tenant_id = $1 AND m.kind = 'direct'
+                   AND m.recipient_user_id = $2 AND m.sender_user_id IS NOT NULL
+                   AND m.id > COALESCE(r.last_read_message_id, 0))
+            )::int AS count
+        `, [tenantId, userId, channels]);
+        const n = Number(result.rows[0]?.count ?? 0);
+        return Number.isFinite(n) && n >= 0 ? n : 0;
+    } catch (err) {
+        console.warn('[push] failed to compute staff chat unread for', userId, (err as any)?.message || err);
+        return 0;
+    }
 }
 
 const fetchSubscriptionsForUser = async (userId: number): Promise<SubscriptionRow[]> => {
     const result = await queryWithRetry(
-        'SELECT id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = $1',
+        `SELECT ps.id, ps.endpoint, ps.p256dh, ps.auth, ps.user_id, u.role
+         FROM push_subscriptions ps
+         JOIN users u ON u.id = ps.user_id
+         WHERE ps.user_id = $1`,
         [userId]
     );
     return result.rows;
@@ -104,7 +145,7 @@ const fetchSubscriptionsForRoles = async (tenantId: number, roles: string[], exc
         where += ` AND u.id <> $${params.length}`;
     }
     const result = await queryWithRetry(
-        `SELECT ps.id, ps.endpoint, ps.p256dh, ps.auth
+        `SELECT ps.id, ps.endpoint, ps.p256dh, ps.auth, ps.user_id, u.role
          FROM push_subscriptions ps
          JOIN users u ON u.id = ps.user_id
          WHERE ${where}`,
@@ -125,19 +166,30 @@ const sendToSubscriptions = async (tenantId: number, subs: SubscriptionRow[], pa
     if (!configured || subs.length === 0) return { sent: 0, removed: 0 };
     // Auto-attach the badge count so the PWA icon stays in sync even quando
     // l'app è chiusa. Skipped se il caller ha già passato un valore esplicito.
-    let effectivePayload = payload;
+    // Il badge ha due pezzi: le cose da attenzionare del tenant (uguali per
+    // tutti) più i non letti chat staff del SINGOLO destinatario — quindi il
+    // corpo della push può differire per utente.
+    const bodyByUser = new Map<number, string>();
+    let defaultBody = JSON.stringify(payload);
     if (payload.badge === undefined) {
-        const badge = await computeAttentionBadge(tenantId);
-        if (badge !== null) effectivePayload = { ...payload, badge };
+        const base = await computeAttentionBadge(tenantId);
+        if (base !== null) {
+            defaultBody = JSON.stringify({ ...payload, badge: base });
+            const userIds = [...new Set(subs.map(s => s.user_id))];
+            await Promise.all(userIds.map(async (uid) => {
+                const role = subs.find(s => s.user_id === uid)?.role ?? '';
+                const chat = await countStaffChatUnread(tenantId, uid, role);
+                bodyByUser.set(uid, JSON.stringify({ ...payload, badge: base + chat }));
+            }));
+        }
     }
-    const body = JSON.stringify(effectivePayload);
     let sent = 0;
     let removed = 0;
     await Promise.all(subs.map(async (sub) => {
         try {
             await webpush.sendNotification(
                 { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
-                body
+                bodyByUser.get(sub.user_id) ?? defaultBody
             );
             sent++;
         } catch (err: any) {
