@@ -17918,8 +17918,8 @@ app.post('/voice-calls/sync', authenticate, requireFeature('voice'), voiceCallsA
 // directly — the endpoints they gate are low-volume (a handful per minute
 // at most), so caching isn't worth the complexity.
 
-type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'digital_menu_enabled';
-const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'digital_menu_enabled'];
+type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'digital_menu_enabled';
+const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'voice_double_seating_enabled', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'digital_menu_enabled'];
 
 async function getFeatureFlag(tenantId: number, key: FeatureFlagKey, fallback: boolean): Promise<boolean> {
     try {
@@ -17936,6 +17936,12 @@ const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, boolean> = {
     public_bookings_enabled: false,
     voice_agent_enabled: true,
     voice_bookings_suspended: false,
+    // Spento di default: il doppio turno (secondo giro sullo stesso tavolo
+    // nello stesso shift) dipende dallo stile di servizio della serata — oggi
+    // lo decide lo staff a mano. Acceso, i percorsi voce valutano
+    // l'occupazione per sovrapposizione di finestre orarie invece che per
+    // intero turno (elevenlabsService/roomOccupancyService).
+    voice_double_seating_enabled: false,
     // Off by default: the pay-at-table + split-bill flow depends on Revolut
     // being configured and the QR link being physically distributed at the
     // table. Owner opts in from Settings once ready.

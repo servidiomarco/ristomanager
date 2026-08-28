@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Globe, Phone, Loader2, ChevronDown, Users, PauseCircle, Clock, CalendarClock, Plus, Trash2, Percent, MessageSquare } from 'lucide-react';
+import { Globe, Phone, Loader2, ChevronDown, Users, PauseCircle, Clock, CalendarClock, Plus, Trash2, Percent, MessageSquare, Repeat } from 'lucide-react';
 import { Loader } from './Loader';
 import {
     getFeatureFlags,
@@ -184,6 +184,7 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
         voice_agent_enabled: { title: 'Agente vocale', on: 'attivo', off: 'sospeso' },
         public_bookings_enabled: { title: 'Prenotazioni web', on: 'attive', off: 'sospese' },
         voice_bookings_suspended: { title: 'Prenotazioni telefoniche', on: 'sospese', off: 'riattivate' },
+        voice_double_seating_enabled: { title: 'Doppio turno', on: 'attivo', off: 'disattivato' },
         // Managed from its own settings section (PayAtTableSettingsManager),
         // not from the booking-channels list; label kept here for type safety.
         pay_at_table_enabled: { title: 'Conto al tavolo', on: 'attivo', off: 'disattivato' },
@@ -481,6 +482,8 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
     const voiceFirstMessageDirty = (channels.voice_first_message ?? '') !== voiceFirstMessageDraft.trim();
     const suspended = flags.voice_bookings_suspended;
     const suspensionSaving = savingKey === 'voice_bookings_suspended';
+    const doubleSeating = flags.voice_double_seating_enabled;
+    const doubleSeatingSaving = savingKey === 'voice_double_seating_enabled';
     const scheduleDirty = JSON.stringify(channels.voice_bookings_suspension_schedule ?? []) !== JSON.stringify(scheduleDraft);
     const blocksDirty = JSON.stringify(channels.public_bookings_blocks ?? []) !== JSON.stringify(blocksDraft);
     const voiceBlocksDirty = JSON.stringify(channels.voice_bookings_date_blocks ?? []) !== JSON.stringify(voiceBlocksDraft);
@@ -608,6 +611,38 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast }) => {
                                             >
                                                 {savingVoiceThreshold && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                                                 Salva
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="rounded-md bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="min-w-0">
+                                                <label className="flex items-start gap-2 text-[13px] text-[var(--ds-text-primary)] font-medium">
+                                                    <Repeat className="h-4 w-4 mt-0.5 text-[var(--ds-text-muted)] flex-shrink-0" />
+                                                    <span>Doppio turno sullo stesso tavolo</span>
+                                                </label>
+                                                <p className="text-[12px] text-[var(--ds-text-muted)] mt-1 leading-relaxed">
+                                                    Quando attivo, Sofia può assegnare a un tavolo un secondo giro nello stesso servizio: il tavolo torna disponibile alla fine della prenotazione precedente (durata dal modal prenotazione; senza durata, 90 minuti a pranzo e 120 a cena). A turno pieno propone al cliente l'orario in cui si libera il primo tavolo adatto. Vale solo per il canale telefonico.
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                role="switch"
+                                                aria-checked={doubleSeating}
+                                                aria-label={doubleSeating ? 'Disattiva doppio turno' : 'Attiva doppio turno'}
+                                                onClick={() => toggle('voice_double_seating_enabled')}
+                                                disabled={!canEdit || doubleSeatingSaving}
+                                                className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+                                                    doubleSeating ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
+                                                }`}
+                                            >
+                                                <span
+                                                    aria-hidden="true"
+                                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${
+                                                        doubleSeating ? 'translate-x-5' : 'translate-x-0.5'
+                                                    } translate-y-0.5`}
+                                                />
                                             </button>
                                         </div>
                                     </div>
