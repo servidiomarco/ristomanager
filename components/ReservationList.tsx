@@ -2029,14 +2029,29 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         const slots = shift === Shift.LUNCH ? LUNCH_TIMES : DINNER_TIMES;
         return hhmm < slots[0] ? slots[0] : hhmm > slots[slots.length - 1] ? slots[slots.length - 1] : hhmm;
       };
+      // L'orario estratto dal messaggio può cadere su uno slot disabilitato:
+      // il form non deve proporre un orario che non si può prenotare, quindi
+      // aggancia lo slot disponibile più vicino e lascia la richiesta
+      // originale in nota, così lo staff propone l'alternativa in chat.
+      const daySlots = getSlotsForDateShift(dateOnly, newShift, openingHours);
+      let prefillTime = prefill?.time;
+      let requestedTimeNote = '';
+      if (!walkIn && prefillTime && daySlots.length > 0 && !daySlots.includes(prefillTime)) {
+        const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+        const requested = toMin(prefillTime);
+        const nearest = daySlots.reduce((best, s) =>
+          Math.abs(toMin(s) - requested) < Math.abs(toMin(best) - requested) ? s : best, daySlots[0]);
+        requestedTimeNote = `Orario richiesto: ${prefillTime}`;
+        prefillTime = nearest;
+      }
       const reservationTime = walkIn
         ? `${formatLocalDate(now)}T${clampToShiftWindow(now, walkInShift)}`
-        : `${dateOnly}T${prefill?.time || getDefaultTime(newShift)}`;
+        : `${dateOnly}T${prefillTime || getDefaultTime(newShift)}`;
       // Zona richiesta → nota leggibile: il form assegna il tavolo a mano, ma
       // così lo staff vede subito "esterno/interno" accanto alla richiesta.
       const zoneHint = prefill?.location_preference === 'OUTDOOR' ? 'Zona: esterno'
         : prefill?.location_preference === 'INDOOR' ? 'Zona: interno' : '';
-      const prefillNotes = walkIn ? '' : [zoneHint, prefill?.notes?.trim()].filter(Boolean).join(' · ');
+      const prefillNotes = walkIn ? '' : [zoneHint, requestedTimeNote, prefill?.notes?.trim()].filter(Boolean).join(' · ');
       setFormData({
         customer_name: prefill?.customer_name || (walkIn ? 'Walk-in' : ''),
         phone: prefill?.phone || undefined,
