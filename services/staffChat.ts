@@ -43,8 +43,14 @@ export interface StaffMessage {
     preset_key: string | null;
     linked_reservation_id: number | null;
     linked_table_id: number | null;
+    // Menzioni: id espliciti mandati dal client, mai riestratti dal testo.
+    mentioned_user_ids: number[] | null;
     created_at: string;
 }
+
+// Un messaggio può richiamare al massimo questo numero di colleghi: oltre,
+// si sta parlando al canale, non a qualcuno.
+export const STAFF_MAX_MENTIONS = 5;
 
 // threadKey: 'channel:<nome>' | 'dm:<userId dell'ALTRO utente>'. Unico punto
 // di verità sul formato — route, cursori di lettura e deep-link push passano

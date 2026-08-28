@@ -156,6 +156,25 @@ describe('chat staff', () => {
         expect(ghost.status).toBe(404);
     });
 
+    it('menzioni: valide sui membri del canale, rifiutate su chi non lo è, ignorate nei DM', async () => {
+        // Il WAITER è membro di channel:sala: menzione valida, salvata sulla riga.
+        const ok = await api().post('/staff-chat/messages').set(bearer(owner))
+            .send({ threadKey: 'channel:sala', body: 'passa al 12 appena puoi', mentionedUserIds: [waiterId] });
+        expect(ok.status).toBe(201);
+        expect(ok.body.mentioned_user_ids).toEqual([waiterId]);
+
+        // Il KITCHEN non può aprire channel:sala: menzionarlo lì è un errore.
+        const nonMember = await api().post('/staff-chat/messages').set(bearer(owner))
+            .send({ threadKey: 'channel:sala', body: 'chiedi in cucina', mentionedUserIds: [kitchenId] });
+        expect(nonMember.status).toBe(400);
+
+        // Nei DM le menzioni non esistono: il campo viene ignorato.
+        const dm = await api().post('/staff-chat/messages').set(bearer(owner))
+            .send({ threadKey: `dm:${waiterId}`, body: 'a te', mentionedUserIds: [kitchenId] });
+        expect(dm.status).toBe(201);
+        expect(dm.body.mentioned_user_ids).toBeNull();
+    });
+
     it('la lista colleghi contiene gli utenti attivi del tenant, senza chi guarda', async () => {
         const threads = await api().get('/staff-chat/threads').set(bearer(owner));
         const ids = threads.body.colleagues.map((c: any) => c.id);

@@ -3,8 +3,8 @@ import { MessagesSquare, Hash, Send, Loader2, AlertTriangle, Plus, ChevronUp, X 
 import { Loader } from './Loader';
 import { staffChatApiService, type StaffThreadSummary, type StaffColleague } from '../services/staffChatApiService';
 import {
-  STAFF_MESSAGE_PRESETS, STAFF_MESSAGE_MAX_LENGTH,
-  threadKeyFor, dmThreadKey, parseThreadKey,
+  STAFF_MESSAGE_PRESETS, STAFF_MESSAGE_MAX_LENGTH, STAFF_MAX_MENTIONS,
+  threadKeyFor, dmThreadKey, parseThreadKey, rolesForChannel,
   type StaffChannel, type StaffMessage,
 } from '../services/staffChat';
 import { socketClient } from '../services/socketClient';
@@ -64,6 +64,25 @@ const formatDayHeader = (iso: string): string => {
 
 const PAGE_SIZE = 50;
 
+const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Evidenzia le occorrenze "@Nome Cognome" dei nomi noti. Gli id menzionati
+// stanno in mentioned_user_ids; il testo resta libero, quindi il match è sui
+// nomi che il client conosce (colleghi + se stesso).
+const renderBodyWithMentions = (body: string, names: string[], mine: boolean): React.ReactNode => {
+  if (names.length === 0) return body;
+  const pattern = new RegExp(`@(${names.map(escapeRegExp).join('|')})`, 'g');
+  const parts = body.split(pattern);
+  if (parts.length === 1) return body;
+  return parts.map((part, i) => i % 2 === 1
+    ? (
+      <span key={i} className={`font-semibold ${mine ? 'underline underline-offset-2' : 'text-[var(--ds-arriving-text)]'}`}>
+        @{part}
+      </span>
+    )
+    : part);
+};
+
 const threadTitle = (t: StaffThreadSummary): string =>
   t.kind === 'channel'
     ? CHANNEL_LABELS[t.channel as StaffChannel] ?? t.channel ?? ''
@@ -71,12 +90,14 @@ const threadTitle = (t: StaffThreadSummary): string =>
 
 interface StaffChatPageProps {
   currentUserId: number;
+  /** Nome di chi guarda: serve solo a evidenziare "@me" nei messaggi. */
+  currentUserName?: string;
   /** Deep-link da una push (?staffchat=<threadKey>): thread da aprire subito. */
   initialThreadKey?: string | null;
   onInitialThreadConsumed?: () => void;
 }
 
-const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, initialThreadKey, onInitialThreadConsumed }) => {
+const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUserName, initialThreadKey, onInitialThreadConsumed }) => {
   const [threads, setThreads] = useState<StaffThreadSummary[]>([]);
   const [colleagues, setColleagues] = useState<StaffColleague[]>([]);
   const [listLoading, setListLoading] = useState(true);
@@ -93,6 +114,9 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, initialThr
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Menzioni in bozza: id → nome inserito. All'invio si mandano solo quelle
+  // il cui "@Nome" è ancora nel testo (l'utente può averlo cancellato).
+  const [mentionDraft, setMentionDraft] = useState<Map<number, string>>(new Map());
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -155,6 +179,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, initialThr
   }, [markReadLocally]);
 
   useEffect(() => {
+    setMentionDraft(new Map());
     if (!selectedKey) { setMessages([]); return; }
     loadMessages(selectedKey);
   }, [selectedKey, loadMessages]);
@@ -230,8 +255,13 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, initialThr
     setSending(true);
     setSendError(null);
     try {
-      const msg = await staffChatApiService.send(key, body, presetKey);
+      const mentionedIds = [...mentionDraft.entries()]
+        .filter(([, name]) => body.includes(`@${name}`))
+        .map(([id]) => id)
+        .slice(0, STAFF_MAX_MENTIONS);
+      const msg = await staffChatApiService.send(key, body, presetKey, mentionedIds);
       setComposerText('');
+      setMentionDraft(new Map());
       setMessages(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
       setThreads(prev => prev.map(t => t.threadKey === key ? { ...t, lastMessage: msg } : t));
       // Il proprio messaggio è per definizione letto.
@@ -242,7 +272,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, initialThr
     } finally {
       setSending(false);
     }
-  }, [selectedKey, sending]);
+  }, [selectedKey, sending, mentionDraft]);
 
   const handleComposerKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -250,6 +280,37 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, initialThr
       doSend(composerText);
     }
   };
+
+  // Autocomplete menzioni: un "@parziale" in coda al testo apre la lista dei
+  // membri del canale. Solo nei canali — nel DM l'interlocutore è già uno.
+  const mentionQuery = useMemo(() => {
+    if (!selected || selected.kind !== 'channel') return null;
+    const m = composerText.match(/@([^\s@]{0,30})$/);
+    return m ? m[1] : null;
+  }, [composerText, selected]);
+
+  const mentionCandidates = useMemo(() => {
+    if (mentionQuery === null || !selected || selected.kind !== 'channel') return [];
+    const memberRoles = rolesForChannel(selected.channel as StaffChannel).map(String) as string[];
+    const q = mentionQuery.toLowerCase();
+    return colleagues
+      .filter(c => memberRoles.includes(c.role))
+      .filter(c => c.fullName.toLowerCase().includes(q))
+      .slice(0, 6);
+  }, [mentionQuery, selected, colleagues]);
+
+  const applyMention = useCallback((c: StaffColleague) => {
+    setComposerText(prev => prev.replace(/@([^\s@]{0,30})$/, `@${c.fullName} `));
+    setMentionDraft(prev => new Map(prev).set(c.id, c.fullName));
+    composerRef.current?.focus();
+  }, []);
+
+  // Nomi noti per l'evidenziazione: i colleghi più chi guarda.
+  const knownNames = useMemo(() => {
+    const names = colleagues.map(c => c.fullName).filter(Boolean);
+    if (currentUserName) names.push(currentUserName);
+    return names;
+  }, [colleagues, currentUserName]);
 
   // Apre (o crea lato client) il DM con un collega. Il thread nasce sul
   // server col primo messaggio.
@@ -433,6 +494,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, initialThr
                         </div>
                         {g.items.map(m => {
                           const mine = m.sender_user_id === currentUserId;
+                          const mentionsMe = !mine && (m.mentioned_user_ids ?? []).includes(currentUserId);
                           return (
                             <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
                               <div
@@ -440,12 +502,16 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, initialThr
                                   mine
                                     ? 'rounded-br-[6px] bg-[var(--ds-seated-solid)] text-white'
                                     : 'rounded-bl-[6px] bg-[var(--ds-surface)] text-[var(--ds-text-primary)]'
-                                }`}
+                                } ${mentionsMe ? 'ring-1 ring-[var(--ds-arriving-solid)]' : ''}`}
                               >
                                 {!mine && selected.kind === 'channel' && (
                                   <p className="text-[12px] font-semibold text-[var(--ds-text-secondary)]">{m.sender_name}</p>
                                 )}
-                                <p className="whitespace-pre-wrap break-words text-[15px] leading-snug">{m.body}</p>
+                                <p className="whitespace-pre-wrap break-words text-[15px] leading-snug">
+                                  {(m.mentioned_user_ids ?? []).length > 0
+                                    ? renderBodyWithMentions(m.body, knownNames, mine)
+                                    : m.body}
+                                </p>
                                 <div className={`mt-1 flex justify-end text-[12px] ${mine ? 'text-white/75' : 'text-[var(--ds-text-muted)]'}`}>
                                   <span className="tabular-nums">{formatTime(m.created_at)}</span>
                                 </div>
@@ -480,6 +546,25 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, initialThr
                     </button>
                   ))}
                 </div>
+
+                {/* Autocomplete menzioni: compare quando il testo finisce con
+                    "@parziale", elenca i membri del canale. */}
+                {mentionCandidates.length > 0 && (
+                  <div className="rounded-[14px] border border-[var(--ds-border)] bg-[var(--ds-surface)] p-1.5">
+                    {mentionCandidates.map(c => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => applyMention(c)}
+                        className="flex w-full items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      >
+                        <Avatar name={c.fullName} size="sm" />
+                        <span className="min-w-0 flex-1 truncate text-[14px] text-[var(--ds-text-primary)]">{c.fullName}</span>
+                        <span className="flex-shrink-0 text-[12px] text-[var(--ds-text-muted)]">{ROLE_LABELS[c.role] ?? c.role}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
 
                 <div className="flex items-end gap-2 rounded-[24px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
                   <textarea
