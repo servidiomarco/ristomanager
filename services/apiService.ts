@@ -1361,6 +1361,7 @@ export interface LegalSettings {
   public_whatsapp: string;
   public_address: string;
   maps_url: string;
+  logo_url: string;
   data_processors: string;
   retention_customer: string;
   retention_calls: string;
@@ -1389,6 +1390,31 @@ export const updateLegalSettings = async (
     body: JSON.stringify(updates),
   });
 };
+
+// Logo del ristorante (pagina prenota). L'upload passa da una route sua:
+// legal_config tiene solo il path, i byte stanno in outbound_media.
+export const uploadTenantLogo = async (
+  contentType: string,
+  base64Data: string,
+): Promise<{ logo_url: string }> => {
+  return apiRequest<{ logo_url: string }>(`${API_URL}/settings/logo`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ content_type: contentType, data: base64Data }),
+  });
+};
+
+export const removeTenantLogo = async (): Promise<{ ok: true }> => {
+  return apiRequest<{ ok: true }>(`${API_URL}/settings/logo`, {
+    method: 'DELETE',
+    headers: getHeaders(false),
+  });
+};
+
+// Path relativo dal server (/public/media/… o /prenota/logo.png) → URL
+// assoluto sul backend, per le anteprime nel CRM (che gira su altro dominio).
+export const tenantLogoSrc = (logoUrl: string): string =>
+  /^https?:\/\//.test(logoUrl) ? logoUrl : `${API_URL}${logoUrl}`;
 
 export const getTableAssignmentAiPrompt = async (): Promise<string> => {
   const { prompt } = await apiRequest<{ prompt: string }>(
