@@ -6,7 +6,7 @@ import {
   HaccpProductionLog,
   HaccpOilAction,
 } from '../services/haccpApiService';
-import { printHtmlDocument } from './printDocument';
+import { printHtmlDocument, PRINT_TOKENS_CSS } from './printDocument';
 
 const ITALIAN_DATE_OPTS: Intl.DateTimeFormatOptions = {
   weekday: 'long',
@@ -150,6 +150,7 @@ export const printHaccpReport = (input: PrintHaccpInput): void => {
 <meta charset="utf-8" />
 <title>HACCP — Report ${escapeHtml(dateLabel || input.date)}</title>
 <style>
+${PRINT_TOKENS_CSS}
   * { box-sizing: border-box; }
   body {
     font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
@@ -165,9 +166,9 @@ export const printHaccpReport = (input: PrintHaccpInput): void => {
     padding-bottom: 12px;
     margin-bottom: 20px;
   }
-  h1 { margin: 0 0 4px; font-size: 22px; color: #0f172a; }
+  h1 { margin: 0 0 4px; font-size: 22px; color: var(--ds-print-ink); }
   .eyebrow { color: ${ACCENT}; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
-  .date { color: #475569; font-size: 12px; margin-top: 4px; text-transform: capitalize; }
+  .date { color: var(--ds-print-ink-secondary); font-size: 12px; margin-top: 4px; text-transform: capitalize; }
   .summary {
     margin-top: 8px;
     display: flex;
@@ -176,8 +177,8 @@ export const printHaccpReport = (input: PrintHaccpInput): void => {
   }
   .pill {
     padding: 3px 10px;
-    background: #f1f5f9;
-    color: #475569;
+    background: var(--ds-print-fill);
+    color: var(--ds-print-ink-secondary);
     border-radius: 999px;
     font-size: 11px;
     font-weight: 600;
@@ -189,7 +190,7 @@ export const printHaccpReport = (input: PrintHaccpInput): void => {
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: #0f172a;
+    color: var(--ds-print-ink);
     border-left: 3px solid ${ACCENT};
     padding-left: 8px;
   }
@@ -201,26 +202,26 @@ export const printHaccpReport = (input: PrintHaccpInput): void => {
   th, td {
     text-align: left;
     padding: 5px 8px;
-    border-bottom: 1px solid #e2e8f0;
+    border-bottom: 1px solid var(--ds-print-rule);
     vertical-align: top;
   }
   th {
     background: #f8fafc;
-    color: #475569;
+    color: var(--ds-print-ink-secondary);
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    border-bottom: 1px solid #cbd5e1;
+    border-bottom: 1px solid var(--ds-print-rule-strong);
   }
   td.num { font-variant-numeric: tabular-nums; text-align: right; }
   td.num.ok { color: #047857; font-weight: 600; }
   td.num.alert { color: #b91c1c; font-weight: 700; background: #fef2f2; }
   td.small, th.small { font-size: 10px; }
-  td.muted { color: #94a3b8; }
-  td.empty { text-align: center; padding: 12px; color: #94a3b8; font-style: italic; }
+  td.muted { color: var(--ds-print-ink-subtle); }
+  td.empty { text-align: center; padding: 12px; color: var(--ds-print-ink-subtle); font-style: italic; }
   .check { font-weight: 700; font-size: 14px; }
   .check.ok { color: #047857; }
-  .check.pending { color: #cbd5e1; }
+  .check.pending { color: var(--ds-print-rule-strong); }
   .badge {
     display: inline-block;
     padding: 2px 8px;
@@ -240,18 +241,18 @@ export const printHaccpReport = (input: PrintHaccpInput): void => {
     page-break-inside: avoid;
   }
   .sign-box {
-    border-top: 1px solid #94a3b8;
+    border-top: 1px solid var(--ds-print-ink-subtle);
     padding-top: 4px;
     font-size: 10px;
-    color: #475569;
+    color: var(--ds-print-ink-secondary);
     text-transform: uppercase;
     letter-spacing: 0.06em;
   }
   footer {
     margin-top: 24px;
     padding-top: 10px;
-    border-top: 1px solid #e2e8f0;
-    color: #94a3b8;
+    border-top: 1px solid var(--ds-print-rule);
+    color: var(--ds-print-ink-subtle);
     font-size: 10px;
     text-align: center;
   }

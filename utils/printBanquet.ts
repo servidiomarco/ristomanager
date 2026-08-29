@@ -1,5 +1,5 @@
 import { BanquetMenu, Dish, Shift } from '../types';
-import { printHtmlDocument } from './printDocument';
+import { printHtmlDocument, PRINT_TOKENS_CSS } from './printDocument';
 
 const ITALIAN_DATE_OPTS: Intl.DateTimeFormatOptions = {
   weekday: 'long',
@@ -152,6 +152,7 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
 <meta charset="utf-8" />
 <title>Banchetto — ${escapeHtml(menu.name)}</title>
 <style>
+${PRINT_TOKENS_CSS}
   * { box-sizing: border-box; }
   body {
     font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
@@ -183,7 +184,7 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: #64748b;
+    color: var(--ds-print-ink-muted);
     font-weight: 600;
     margin-bottom: 2px;
   }
@@ -195,7 +196,7 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
   }
   .meta-item .meta-sub {
     font-size: 11px;
-    color: #64748b;
+    color: var(--ds-print-ink-muted);
     font-weight: 500;
     margin-top: 4px;
   }
@@ -236,7 +237,7 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
   }
   h1 { margin: 0 0 6px; font-size: 32px; color: #1e1b4b; }
   .date { color: #4f46e5; font-size: 16px; font-weight: 600; text-transform: capitalize; }
-  .description { color: #475569; margin: 12px 0 0; font-size: 15px; }
+  .description { color: var(--ds-print-ink-secondary); margin: 12px 0 0; font-size: 15px; }
   .badge {
     display: inline-block;
     margin-left: 10px;
@@ -254,7 +255,7 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
     font-size: 17px;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: #64748b;
+    color: var(--ds-print-ink-muted);
     margin: 0 0 10px;
   }
   .notes-section { margin-top: 20px; }
@@ -283,7 +284,7 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
     margin: 0 0 6px;
     font-size: 18px;
     color: #4f46e5;
-    border-bottom: 1px dashed #cbd5e1;
+    border-bottom: 1px dashed var(--ds-print-rule-strong);
     padding-bottom: 4px;
   }
   .category ul { margin: 0; padding-left: 22px; }
@@ -292,14 +293,14 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
     margin: 8px 0 0;
     font-size: 14px;
     font-style: italic;
-    color: #475569;
+    color: var(--ds-print-ink-secondary);
     white-space: pre-wrap;
   }
   footer {
     margin-top: 24px;
     padding-top: 10px;
-    border-top: 1px solid #e2e8f0;
-    color: #94a3b8;
+    border-top: 1px solid var(--ds-print-rule);
+    color: var(--ds-print-ink-subtle);
     font-size: 11px;
     text-align: center;
   }
@@ -406,7 +407,7 @@ export const printBanquet = (menu: BanquetMenu, dishes: Dish[], options: PrintBa
   </header>
 
   <h2>Composizione del menù</h2>
-  ${dishesHtml || '<p style="color:#94a3b8;font-size:14px;">Nessun piatto selezionato.</p>'}
+  ${dishesHtml || '<p style="color:var(--ds-print-ink-subtle);font-size:14px;">Nessun piatto selezionato.</p>'}
 
   ${notesHtml ? `
   <div class="notes-section">
