@@ -328,6 +328,15 @@ const App: React.FC = () => {
     setTenantLogo(l.logo_url ? tenantLogoSrc(l.logo_url) : null);
     setTenantName(l.business_name || '');
   }), []);
+  // L'URL del logo arriva subito (cache config), ma l'immagine e' un download
+  // a parte: finche' non e' davvero renderizzabile in testa si mostra il NOME
+  // del ristorante, non un buco — e se il download fallisce (rete, 404) il
+  // nome resta, mai l'icona dell'immagine rotta. Reset al cambio di URL, non
+  // a ogni re-apply della config: lo stesso URL riapplicato non deve far
+  // lampeggiare il nome sopra un logo gia' visibile.
+  const [tenantLogoReady, setTenantLogoReady] = useState(false);
+  const [tenantLogoFailed, setTenantLogoFailed] = useState(false);
+  useEffect(() => { setTenantLogoReady(false); setTenantLogoFailed(false); }, [tenantLogo]);
   // Una schermata che si prende tutto lo schermo sul telefono: la barra di
   // navigazione in basso sparisce, e con lei il suo spazio di rispetto. Per ora
   // la chiede solo la comanda aperta su un tavolo.
@@ -2034,12 +2043,33 @@ const App: React.FC = () => {
                    copia sola, e quella del Vecchio Frantoio e' inchiostro nero
                    su trasparente. Il riquadro chiaro lo tiene leggibile
                    qualunque cosa venga caricata, senza chiedere al ristoratore
-                   due file o un PNG con lo sfondo. */
-                <img
-                  src={tenantLogo}
-                  alt={tenantName || PLATFORM_NAME}
-                  className="h-16 w-auto dark:rounded-[12px] dark:bg-white dark:p-1.5"
-                />
+                   due file o un PNG con lo sfondo.
+
+                   L'img resta montata anche mentre scarica (nascosta, non
+                   assente: e' lei il download); nel frattempo — e per sempre,
+                   se il download fallisce — al suo posto c'e' il nome del
+                   ristorante. */
+                <>
+                  <img
+                    src={tenantLogo}
+                    alt={tenantName || PLATFORM_NAME}
+                    onLoad={() => setTenantLogoReady(true)}
+                    onError={() => setTenantLogoFailed(true)}
+                    className={`h-16 w-auto dark:rounded-[12px] dark:bg-white dark:p-1.5 ${tenantLogoReady && !tenantLogoFailed ? '' : 'hidden'}`}
+                  />
+                  {!(tenantLogoReady && !tenantLogoFailed) && (
+                    tenantName ? (
+                      <span className="min-w-0 truncate text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
+                        {tenantName}
+                      </span>
+                    ) : (
+                      <>
+                        <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-7 w-auto dark:hidden" />
+                        <img src="/logo-sympotia-white.svg" alt={PLATFORM_NAME} className="hidden h-7 w-auto dark:block" />
+                      </>
+                    )
+                  )}
+                </>
               ) : (
                 <>
                   <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-7 w-auto dark:hidden" />
