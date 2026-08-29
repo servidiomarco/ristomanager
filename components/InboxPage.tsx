@@ -22,7 +22,7 @@ import { Shift, type Reservation } from '../types';
 import {
   SearchField, StatusPill, Callout, SegmentedControl, SplitPane, SectionHeader,
   Avatar, EmptyState, SwipeRow, useFirstRunHint, dsIconButton, PanePlaceholder, CountBadge,
-  PaneHeader,
+  PaneHeader, AttachmentRow,
 } from './ds';
 import type { PillTone } from './ds';
 
@@ -1071,33 +1071,6 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                   </div>
                 )}
 
-                {/* Allegati pronti: si vedono prima di premere invia, e si
-                    tolgono uno per uno se si sbaglia file. */}
-                {attachments.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {attachments.map(a => (
-                      <span
-                        key={a.token}
-                        className="inline-flex max-w-[220px] items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] py-1 pl-3 pr-1.5 text-[13px] text-[var(--ds-text-primary)]"
-                      >
-                        <Paperclip className="h-3.5 w-3.5 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
-                        <span className="truncate">{a.filename || a.content_type}</span>
-                        <span className="flex-shrink-0 text-[12px] text-[var(--ds-text-muted)]">
-                          {Math.max(1, Math.round(a.size_bytes / 1024))} KB
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setAttachments(prev => prev.filter(x => x.token !== a.token))}
-                          aria-label={`Togli ${a.filename || 'allegato'}`}
-                          className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
-                        >
-                          <XIcon className="h-3 w-3" />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-
                 {/* Channel toggle. The raised-pill treatment is the app's
                     segmented control; the coloured dot keeps the channel
                     legible without repainting the whole pill. */}
@@ -1121,7 +1094,28 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                 </div>
 
                 {/* Composer: one card, send button inside the field. */}
-                <div className="flex items-end gap-2 rounded-[24px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
+                <div className="rounded-[24px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
+                  {/* Allegati pronti: si vedono prima di premere invia, e si
+                      tolgono uno per uno se si sbaglia file. Stanno dentro la
+                      scheda perche' appartengono al messaggio in scrittura;
+                      fuori finivano su canvas e sparivano contro lo sfondo.
+                      Niente anteprima: il file caricato qui ha un URL solo dopo
+                      l'invio, quindi la targhetta dice di che tipo e'. */}
+                  {attachments.length > 0 && (
+                    <div className="mb-2 flex flex-wrap gap-1.5">
+                      {attachments.map(a => (
+                        <AttachmentRow
+                          key={a.token}
+                          filename={a.filename}
+                          contentType={a.content_type}
+                          sizeBytes={a.size_bytes}
+                          onRemove={() => setAttachments(prev => prev.filter(x => x.token !== a.token))}
+                        />
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex items-end gap-2">
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -1186,6 +1180,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, o
                   >
                     {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   </button>
+                  </div>
                 </div>
                 <p className="px-1 text-[12px] text-[var(--ds-text-muted)]">
                   Invio con <kbd className="rounded bg-[var(--ds-surface-row)] px-1.5 py-0.5 font-mono text-[11px]">Enter</kbd>, a capo con <kbd className="rounded bg-[var(--ds-surface-row)] px-1.5 py-0.5 font-mono text-[11px]">Shift+Enter</kbd>

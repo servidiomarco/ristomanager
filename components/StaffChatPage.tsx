@@ -10,7 +10,7 @@ import {
 } from '../services/staffChat';
 import { socketClient } from '../services/socketClient';
 import {
-  SplitPane, PaneHeader, PanePlaceholder, SectionHeader, Avatar, EmptyState,
+  SplitPane, PaneHeader, PanePlaceholder, SectionHeader, Avatar, EmptyState, AttachmentRow,
   Callout, CountBadge, dsIconButton,
 } from './ds';
 
@@ -428,8 +428,8 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
       type="button"
       onClick={() => setSelectedKey(t.threadKey)}
       aria-current={selectedKey === t.threadKey ? 'true' : undefined}
-      className={`flex w-full items-center gap-3 rounded-[16px] px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
-        selectedKey === t.threadKey ? 'bg-[var(--ds-surface-row)]' : 'hover:bg-[var(--ds-surface-row)]'
+      className={`flex w-full items-center gap-3 rounded-[16px] px-3 py-2.5 text-left shadow-[var(--ds-shadow-card)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+        selectedKey === t.threadKey ? 'bg-[var(--ds-surface-row)]' : 'bg-[var(--ds-surface)] hover:bg-[var(--ds-surface-row)]'
       }`}
     >
       {t.kind === 'channel'
@@ -553,7 +553,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                           type="button"
                           onClick={loadOlder}
                           disabled={loadingMore}
-                          className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                          className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                         >
                           {loadingMore ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChevronUp className="h-4 w-4" />}
                           Messaggi precedenti
@@ -563,7 +563,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                     {grouped.map(g => (
                       <div key={g.day} className="space-y-2">
                         <div className="flex justify-center">
-                          <span className="rounded-full bg-[var(--ds-surface)] px-2.5 py-1 text-[12px] text-[var(--ds-text-muted)]">
+                          <span className="rounded-full bg-[var(--ds-surface)] px-2.5 py-1 text-[12px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)]">
                             {formatDayHeader(g.day)}
                           </span>
                         </div>
@@ -571,12 +571,20 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                           const mine = m.sender_user_id === currentUserId;
                           const mentionsMe = !mine && (m.mentioned_user_ids ?? []).includes(currentUserId);
                           return (
+                            // Il proprio messaggio prende `action`, non una
+                            // famiglia di stato: "mio" contro "suo" non e' uno
+                            // stato del servizio, e `seated` — che vuol dire
+                            // seduto/in servizio — qui non diceva niente (§3.5).
+                            // `action` e' lo stesso nero del tasto Invia due
+                            // righe sotto, quindi la bolla appartiene a chi
+                            // scrive. Le categorie `--ds-cat-*` sono escluse:
+                            // non vanno mai dietro testo piccolo.
                             <div key={m.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
                               <div
                                 className={`max-w-[80%] rounded-[18px] px-3.5 py-2 ${
                                   mine
-                                    ? 'rounded-br-[6px] bg-[var(--ds-seated-solid)] text-white'
-                                    : 'rounded-bl-[6px] bg-[var(--ds-surface)] text-[var(--ds-text-primary)]'
+                                    ? 'rounded-br-[6px] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                                    : 'rounded-bl-[6px] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
                                 } ${mentionsMe ? 'ring-1 ring-[var(--ds-arriving-solid)]' : ''}`}
                               >
                                 {!mine && selected.kind === 'channel' && (
@@ -598,7 +606,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                                       : m.body}
                                   </p>
                                 )}
-                                <div className={`mt-1 flex justify-end text-[12px] ${mine ? 'text-white/75' : 'text-[var(--ds-text-muted)]'}`}>
+                                <div className={`mt-1 flex justify-end text-[12px] ${mine ? 'text-[var(--ds-action-fg)] opacity-75' : 'text-[var(--ds-text-muted)]'}`}>
                                   <span className="tabular-nums">{formatTime(m.created_at)}</span>
                                 </div>
                               </div>
@@ -626,7 +634,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                       type="button"
                       onClick={() => doSend(p.label, p.key)}
                       disabled={sending}
-                      className="inline-flex h-9 items-center rounded-full border border-[var(--ds-border)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      className="inline-flex h-9 items-center rounded-full bg-[var(--ds-surface)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       {p.label}
                     </button>
@@ -636,7 +644,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                 {/* Autocomplete menzioni: compare quando il testo finisce con
                     "@parziale", elenca i membri del canale. */}
                 {mentionCandidates.length > 0 && (
-                  <div className="rounded-[14px] border border-[var(--ds-border)] bg-[var(--ds-surface)] p-1.5">
+                  <div className="rounded-[14px] bg-[var(--ds-surface)] p-1.5 shadow-[var(--ds-shadow-card)]">
                     {mentionCandidates.map(c => (
                       <button
                         key={c.id}
@@ -652,29 +660,27 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                   </div>
                 )}
 
-                {attachments.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {attachments.map(a => (
-                      <span
-                        key={a.token}
-                        className="inline-flex max-w-[220px] items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] py-1 pl-3 pr-1.5 text-[13px] text-[var(--ds-text-primary)]"
-                      >
-                        <Paperclip className="h-3.5 w-3.5 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
-                        <span className="truncate">{a.filename || 'foto'}</span>
-                        <button
-                          type="button"
-                          onClick={() => setAttachments(prev => prev.filter(x => x.token !== a.token))}
-                          aria-label={`Togli ${a.filename || 'foto'}`}
-                          className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
-                        >
-                          <XIcon className="h-3 w-3" />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
+                <div className="rounded-[24px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
+                  {/* Gli allegati stanno dentro la scheda del composer, sopra
+                      la riga di scrittura: appartengono al messaggio che si sta
+                      componendo, non alla pagina. Qui la chat ha l'anteprima
+                      vera — `staffMediaUrl` da' un URL al file gia' caricato. */}
+                  {attachments.length > 0 && (
+                    <div className="mb-2 flex flex-wrap gap-1.5">
+                      {attachments.map(a => (
+                        <AttachmentRow
+                          key={a.token}
+                          filename={a.filename}
+                          contentType={a.content_type}
+                          sizeBytes={a.size_bytes}
+                          previewUrl={staffMediaUrl(a.token)}
+                          onRemove={() => setAttachments(prev => prev.filter(x => x.token !== a.token))}
+                        />
+                      ))}
+                    </div>
+                  )}
 
-                <div className="flex items-end gap-2 rounded-[24px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
+                  <div className="flex items-end gap-2">
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -710,6 +716,7 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
                   >
                     {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   </button>
+                  </div>
                 </div>
               </div>
             </div>

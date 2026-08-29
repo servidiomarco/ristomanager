@@ -268,19 +268,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       {/* Session Expired Modal */}
       {showSessionExpiredModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
- <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden duration-200">
+        <div className="fixed inset-0 bg-[var(--ds-backdrop)] flex items-center justify-center z-[100] p-4">
+          <div className="bg-[var(--ds-surface)] rounded-2xl shadow-[var(--ds-shadow-raised)] w-full max-w-sm overflow-hidden">
             <div className="p-6 text-center">
-              <div className="mx-auto w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mb-4">
-                <AlertTriangle className="h-8 w-8 text-amber-600" />
+              {/* La sessione scaduta chiede un'azione, non segnala un guasto:
+                  famiglia `pending`, non `critical`. */}
+              <div className="mx-auto w-16 h-16 bg-[var(--ds-pending-tint)] rounded-full flex items-center justify-center mb-4">
+                <AlertTriangle className="h-8 w-8 text-[var(--ds-pending-text)]" />
               </div>
-              <h3 className="text-xl font-semibold text-slate-800 mb-2">Sessione Scaduta</h3>
-              <p className="text-slate-600 mb-6">
+              <h3 className="text-xl font-semibold text-[var(--ds-text-primary)] mb-2">Sessione Scaduta</h3>
+              <p className="text-[var(--ds-text-secondary)] mb-6">
                 La tua sessione è scaduta. Effettua nuovamente il login per continuare.
               </p>
               <button
                 onClick={() => setShowSessionExpiredModal(false)}
-                className="w-full px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium"
+                className="w-full px-4 py-3 bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] rounded-xl hover:bg-[var(--ds-action-bg-hover)] transition-colors font-medium"
               >
                 Accedi
               </button>
