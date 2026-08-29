@@ -240,7 +240,7 @@ const jsonVerify = (req: any, _res: any, buf: Buffer) => { req.rawBody = buf; };
 const standardJson = express.json({ limit: '2mb', verify: jsonVerify });
 const largeJson = express.json({ limit: '8mb', verify: jsonVerify });
 app.use((req, res, next) => (
-    req.path === '/messages/attachments' || req.path === '/media' || req.path === '/staff-chat/attachments' ? largeJson(req, res, next) : standardJson(req, res, next)
+    req.path === '/messages/attachments' || req.path === '/media' || req.path === '/staff-chat/attachments' || req.path === '/settings/logo' ? largeJson(req, res, next) : standardJson(req, res, next)
 ));
 
 // Un body oltre il limite fa fallire il parser PRIMA della rotta: senza
@@ -15286,6 +15286,7 @@ type BusinessIdentity = {
     address: string;    // indirizzo del locale, come etichetta leggibile
     mapsUrl: string;
     websiteUrl: string;
+    logoUrl: string;    // path del logo per la pagina prenota ('' = nessun logo)
 };
 
 const IDENTITY_FALLBACK: BusinessIdentity = {
@@ -15297,6 +15298,11 @@ const IDENTITY_FALLBACK: BusinessIdentity = {
     address: '',
     mapsUrl: 'https://maps.app.goo.gl/pf1DjUYzkhi1sStP8',
     websiteUrl: 'https://www.vecchiofrantoio.com',
+    // Vuoto di proposito: gli altri fallback sono i letterali storici del
+    // Frantoio, ma un logo VF su un tenant nuovo sarebbe il marchio sbagliato
+    // in faccia ai SUOI clienti. Il logo VF arriva dalla migration sul
+    // legal_config del tenant 1, non da qui.
+    logoUrl: '',
 };
 
 // Cache per tenant: ogni ristorante ha la propria identità pubblica.
@@ -15334,6 +15340,7 @@ async function refreshBusinessIdentity(tenantId: number): Promise<void> {
             address: s(legal.public_address) || IDENTITY_FALLBACK.address,
             mapsUrl: s(legal.maps_url) || IDENTITY_FALLBACK.mapsUrl,
             websiteUrl: s(legal.website_url) || IDENTITY_FALLBACK.websiteUrl,
+            logoUrl: s(legal.logo_url) || IDENTITY_FALLBACK.logoUrl,
         },
         refreshedAt: Date.now(),
     });
@@ -19218,6 +19225,10 @@ const LEGAL_STRING_FIELDS = [
                            // NON è company_address: la sede legale può essere
                            // lo studio del commercialista in un'altra città.
     'maps_url',            // Link "Come raggiungerci" (Google Maps)
+    'logo_url',            // Logo del ristorante (pagina prenota). Scritto
+                           // dalle route /settings/logo: /public/media/<token>
+                           // dopo un upload, o un asset statico (es. il
+                           // /prenota/logo.png storico del Frantoio).
     'data_processors',     // Elenco responsabili/fornitori (testo multiriga)
     'retention_customer',  // Conservazione dati cliente (es. "24 mesi")
     'retention_calls',     // Conservazione registrazioni chiamate (es. "6 mesi")
@@ -19327,6 +19338,75 @@ app.put('/settings/legal', authenticate, requirePermission('settings:full'), asy
     } catch (err: any) {
         console.error('PUT /settings/legal error:', err);
         res.status(500).json({ error: 'Failed to update legal settings', detail: err?.message });
+    }
+});
+
+// Logo del ristorante (pagina prenota). I byte stanno in outbound_media
+// (token pubblico non indovinabile, stesso storage degli allegati) e in
+// legal_config resta solo il path: l'upload sostituisce, la DELETE toglie.
+// Niente SVG: servito same-origin col content-type salvato, un SVG con
+// script dentro sarebbe XSS sull'origine del backend.
+const LOGO_MEDIA_RE = /^\/public\/media\/([A-Za-z0-9_-]{20,64})$/;
+const setLegalLogoUrl = async (tenantId: number, logoUrl: string): Promise<void> => {
+    const current = await getLegalConfig(tenantId);
+    const next = { ...current, logo_url: logoUrl };
+    await queryWithRetry(
+        `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+         VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+         ON CONFLICT (tenant_id, key) DO UPDATE
+           SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+        [tenantId, LEGAL_CONFIG_KEY, JSON.stringify(next)]
+    );
+    await refreshBusinessIdentity(tenantId);
+};
+const deleteLogoMedia = async (tenantId: number, logoUrl: string): Promise<void> => {
+    const m = typeof logoUrl === 'string' ? logoUrl.match(LOGO_MEDIA_RE) : null;
+    if (!m) return; // asset statico (es. /prenota/logo.png): non si tocca
+    await queryWithRetry(`DELETE FROM outbound_media WHERE tenant_id = $1 AND token = $2`, [tenantId, m[1]])
+        .catch(err => console.warn('[logo] cleanup media fallito:', (err as any)?.message || err));
+};
+
+app.post('/settings/logo', authenticate, requirePermission('settings:full'), async (req: any, res) => {
+    try {
+        const contentType = String(req.body?.content_type || '').toLowerCase().split(';')[0].trim();
+        const dataB64 = String(req.body?.data || '');
+        if (!contentType || !dataB64) {
+            return res.status(400).json({ error: 'content_type e data sono obbligatori' });
+        }
+        if (!/^image\/(png|jpeg|webp)$/.test(contentType)) {
+            return res.status(415).json({ error: `Formato non supportato: ${contentType}. Usa PNG, JPG o WebP.` });
+        }
+        const buf = Buffer.from(dataB64.replace(/^data:[^,]+,/, ''), 'base64');
+        if (buf.length === 0) return res.status(400).json({ error: 'File vuoto' });
+        if (buf.length > 2 * 1024 * 1024) {
+            return res.status(413).json({ error: 'File troppo grande: massimo 2 MB' });
+        }
+        const previous = String((await getLegalConfig(req.tenantId!)).logo_url || '');
+        const token = crypto.randomBytes(32).toString('base64url');
+        await queryWithRetry(
+            `INSERT INTO outbound_media (tenant_id, token, content_type, filename, bytes, size_bytes, created_by_user_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [req.tenantId!, token, contentType, 'logo', buf, buf.length, req.user?.userId ?? null]
+        );
+        const logoUrl = `/public/media/${token}`;
+        await setLegalLogoUrl(req.tenantId!, logoUrl);
+        await deleteLogoMedia(req.tenantId!, previous);
+        res.status(201).json({ logo_url: logoUrl });
+    } catch (err: any) {
+        console.error('POST /settings/logo error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.delete('/settings/logo', authenticate, requirePermission('settings:full'), async (req: any, res) => {
+    try {
+        const previous = String((await getLegalConfig(req.tenantId!)).logo_url || '');
+        await setLegalLogoUrl(req.tenantId!, '');
+        await deleteLogoMedia(req.tenantId!, previous);
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('DELETE /settings/logo error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });
 
@@ -22101,6 +22181,9 @@ const handlePublicContact = async (tenantId: number, _req: express.Request, res:
             // testo generico — il link è la cosa che serve davvero.
             address: identity.address,
             maps_url: identity.mapsUrl,
+            // La pagina prenota nasconde l'immagine se manca: nessun logo
+            // rotto per i tenant che non l'hanno caricato.
+            logo_url: identity.logoUrl || null,
         },
         voice_agent_id: (process.env.ELEVENLABS_AGENT_ID || '').trim(),
     });
@@ -23874,7 +23957,7 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
             const addedIds = new Set(queued.rows.filter((r: any) => r.course_no === c).map((r: any) => r.id));
             const added = view.items.filter((i: any) => addedIds.has(i.id));
             if (added.length === 0) continue;
-            void recordOrderRevision(req.tenantId!, {
+            await recordOrderRevision(req.tenantId!, {
                 orderId, courseNo: c,
                 stationIds: added.map((i: any) => i.station_id),
                 kind: 'added',
@@ -24327,7 +24410,7 @@ app.post('/orders/:id/courses/:n/fire', authenticate, requirePermission('orders:
         } catch (_) {}
 
         if (wasAlreadyFired) {
-            void recordOrderRevision(req.tenantId!, {
+            await recordOrderRevision(req.tenantId!, {
                 orderId, courseNo,
                 stationIds: fired.map((i: any) => i.station_id),
                 kind: 'added',
@@ -24604,7 +24687,7 @@ app.post('/orders/:id/courses/:n/unserve', authenticate, requireAnyPermission('o
             });
         } catch (_) {}
 
-        void recordOrderRevision(req.tenantId!, {
+        await recordOrderRevision(req.tenantId!, {
             orderId, courseNo,
             stationIds: upd.rows.map((r: any) => r.station_id),
             kind: 'unserved',
@@ -25480,7 +25563,7 @@ app.post('/orders/items/:id/void', authenticate, requirePermission('orders:void'
         // Se la riga era già in cucina la card resta a video con un piatto in
         // meno: senza spiegazione il cuoco continua a cercarlo.
         if (item.fired_at) {
-            void recordOrderRevision(req.tenantId!, {
+            await recordOrderRevision(req.tenantId!, {
                 orderId: item.order_id, courseNo: item.course_no,
                 stationIds: [item.station_id],
                 kind: 'void',
@@ -25658,7 +25741,7 @@ app.post('/orders/:id/transfer', authenticate, requirePermission('orders:take'),
                     `SELECT name FROM tables WHERE id = $1 AND tenant_id = $2`,
                     [order.table_id, req.tenantId!]
                 );
-                void recordOrderRevision(req.tenantId!, {
+                await recordOrderRevision(req.tenantId!, {
                     orderId: id, courseNo: null,
                     stationIds: active.rows.map((r: any) => r.station_id),
                     kind: 'transfer',
