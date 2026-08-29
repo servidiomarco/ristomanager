@@ -83,6 +83,26 @@ The pg `DATE` type parser is overridden to return plain `YYYY-MM-DD` strings, be
 
 `utils/reservationTime.ts` provides `getRomeDatePart` / `getRomeTimePart`. Reservations are stored as UTC instants; any date or time shown or grouped on must go through these helpers, never through raw `Date` methods.
 
+### The reservation modal has two layouts, chosen per tenant
+
+`reservation_table_step_enabled` in `app_settings` decides where the table gets picked:
+off (the default) puts it inside Dettagli, collapsed to a summary row that expands in
+place; on gives it a step of its own. **Both do exactly the same things** — it is a layout
+preference sold per restaurant, not a feature flag gating behaviour.
+
+Consequences when editing `ReservationList.tsx`:
+
+- The step list and the indices come from `reservationSteps` and `stepIndex`, never from a
+  literal. The two views have a different number of steps, so Pagamenti is index 1 in one
+  and 2 in the other — a hardcoded `formStep === 2` is right in one view and wrong in the
+  other.
+- `sectionVisible(i)` owns the show/hide rule. On a new booking the later sections stay
+  mounted and gate on `isEditing` themselves, *except* in the step view, where Dettagli and
+  Tavolo must alternate even while creating.
+- The table block sits in the DOM **between** the two halves of the details column, not
+  after them, so one position serves both views. It is not moved by CSS `order` on purpose:
+  that would have made the eye read table-then-customer while Tab went the other way.
+
 ### Reservation state has one source of truth
 
 `components/reservationState.tsx` defines both layers and every surface derives from it:
@@ -111,7 +131,9 @@ Public identity fields (`business_name`, `public_phone`, `public_address`, `maps
 
 `docs/risto-design-system.md` is the specification; `index.css` is the implementation. The doc deliberately does not track migration progress — do not add status tables to it.
 
-**The migration is finished.** No file in the app reads `var(--color-*)` or a remapped Tailwind palette class (`bg-indigo-600`, `text-slate-400`). The legacy `@theme` block still stands in `index.css` because Tailwind's own utilities resolve through it, but nothing of ours consumes it directly. Adding a `--color-*` or a bare palette class to a component is a regression — reach for a `--ds-*` token.
+**The `--color-*` migration is finished.** No file in the app reads `var(--color-*)` or a remapped Tailwind palette class (`bg-indigo-600`, `text-slate-400`). The legacy `@theme` block still stands in `index.css` because Tailwind's own utilities resolve through it, but nothing of ours consumes it directly. Adding a `--color-*` or a bare palette class to a component is a regression — reach for a `--ds-*` token.
+
+**That is narrower than "nothing is hardcoded".** Values written as literals rather than through the old palette survived it and had to be found one at a time: `bg-black/50` scrims, a bare `#ffffff` surface, raw hex in the three print sheets, and a `shadow-[var(--shadow-xl)]` naming a token that does not exist — so that shadow simply never drew. When a colour looks wrong, check whether the line names a token at all before assuming the token is wrong.
 
 The layers, and where each one lives:
 
@@ -124,10 +146,11 @@ The layers, and where each one lives:
 | `--tg-*` | same | floor-map table glyphs — its own values, semantics that agree with the families |
 | `--ds-public-*` | `public/prenota.html` `<style>` | the booking page (§16) |
 
-Two of those bite if you forget them:
+Three of those bite if you forget them — and the first two are the same trap twice:
 
 - **`public/prenota.html` restates the `--ds-*` values by hand.** It is served by the backend, is not built by Vite, and does **not** load `index.css` — a token changed here does not reach it. Edit both, or the booking page silently keeps the old value.
-- **`--ds-print-*` is never declared under `.dark`,** and that is the point. The print sheet renders inside the app document, so a themed token would print a black page for anyone working in dark mode.
+- **`utils/printDocument.ts` restates the `--ds-print-*` values by hand, for the same reason.** The print sheets are not rendered inside the app document: `printHtmlDocument` writes them into a hidden iframe with `doc.write()`, and that document is new — it never loads `index.css`, so a `var(--ds-print-*)` there resolves to nothing and the colour falls back to whatever is inherited. `PRINT_TOKENS_CSS` is the copy the three sheets include; change a print token and change it in both places.
+- **`--ds-print-*` is never declared under `.dark`,** and that is the point. A themed print token would put a black page in the tray for anyone working in dark mode.
 
 Working rules that are easy to violate:
 
