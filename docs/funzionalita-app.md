@@ -432,7 +432,7 @@ Tutte le funzioni AI girano sul server (nessuna chiave nel browser) e seguono un
 Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e contenuti:
 
 - **Profilo** — pagina di partenza dopo il login; notifiche push del dispositivo.
-- **Ristorante** — orari settimanali per turno con passo slot e slot disattivabili; chiusure programmate (giornata o singolo turno, con motivo); sale chiuse e tavoli nascosti programmati; **promemoria** ricorrenti (destinatari per ruolo, frequenza); modulo **Sala & Cucina** (partite, mappatura categorie→partita, monitor o stampante, stampanti di rete, profili di setup salvabili, registratori telematici); **documenti legali e identità pubblica** (nome pubblico, tagline, telefono, indirizzo, link Maps, ragione sociale, P.IVA, contatti privacy/DPO, fornitori e tempi di conservazione).
+- **Ristorante** — orari settimanali per turno con passo slot e slot disattivabili; chiusure programmate (giornata o singolo turno, con motivo); sale chiuse e tavoli nascosti programmati; **promemoria** ricorrenti (destinatari per ruolo, frequenza); modulo **Sala & Cucina** (partite, mappatura categorie→partita, monitor o stampante, stampanti di rete, profili di setup salvabili, registratori telematici); **documenti legali e identità pubblica** (nome pubblico, tagline, telefono, indirizzo, link Maps, **logo caricabile** — compare in testa alla pagina di prenotazione online —, ragione sociale, P.IVA, contatti privacy/DPO, fornitori e tempi di conservazione).
 - **Prenotazioni** — interruttore prenotazioni web; blocchi per data/turno; **limiti di occupazione per sala** (la soglia della conferma automatica); **canali di risposta per fonte** (ordine e fallback email/WhatsApp/SMS); note rapide e intolleranze a chip (riordinabili); **caparra automatica** (soglia coperti, € a persona); **blacklist** per fonte (blocca o avvisa).
 - **Pagamenti** — gateway Revolut e SumUp (anche uno per flusso), conto al tavolo on/off, scadenza automatica dei link.
 - **Fiscalità** — dati esercente, provider scontrino, mappa e aliquote IVA.
@@ -512,6 +512,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-08-29 | Impostazioni | Upload del logo del ristorante nell'identità pubblica; compare sulla pagina di prenotazione online (per il Frantoio precaricato il logo storico). |
 | 2026-08-29 | Agente vocale "Sofia" | Modifica/cancellazione: se il numero del chiamante non corrisponde, Sofia ritrova la prenotazione per nome e data (accenti inclusi) o dal numero dettato. |
 | 2026-08-29 | Prenotazioni | Nella riga dei totali della mappa: sezioni "liberi" (fondo verde) e "occupati" (fondo rosso) per la sala mostrata. |
 | 2026-08-29 | Comande, Cucina e Passe | Revisioni comanda: le modifiche dopo il lancio accendono la pill rossa "modificata" sul KDS, con dettaglio (cosa/chi/quando) e ack condiviso. |

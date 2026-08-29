@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Scale, Save, Loader2, Copy, Check, Download, FileText, Phone, Cookie, ScrollText, ChevronDown,
-  ShieldCheck, Megaphone,
+  ShieldCheck, Megaphone, Upload, X,
 } from 'lucide-react';
 import { Loader } from './Loader';
-import { getLegalSettings, updateLegalSettings, type LegalSettings } from '../services/apiService';
+import { getLegalSettings, updateLegalSettings, uploadTenantLogo, removeTenantLogo, tenantLogoSrc, type LegalSettings } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
 
 interface Props {
@@ -16,7 +16,7 @@ const EMPTY: LegalSettings = {
   company_name: '', company_address: '', vat_number: '', fiscal_code: '',
   privacy_email: '', privacy_phone: '', dpo_name: '', dpo_contact: '',
   website_url: '', app_name: 'RistoManager', voice_business_name: '',
-  business_name: '', business_tagline: '', public_phone: '', public_whatsapp: '', public_address: '', maps_url: '',
+  business_name: '', business_tagline: '', public_phone: '', public_whatsapp: '', public_address: '', maps_url: '', logo_url: '',
   data_processors: '', retention_customer: '', retention_calls: '',
   retention_marketing: '', extra_eu_note: '', governing_law: '', last_updated: '',
   uses_analytics_cookies: false, records_calls: true, ask_health_consent: true,
@@ -207,6 +207,37 @@ const Field: React.FC<{
   </div>
 );
 
+// Legge il file del logo: fino a 400 KB parte com'è (formato conservato);
+// oltre, si ridimensiona a PNG max 640px di lato — il canvas in PNG conserva
+// la trasparenza, che per un logo è tutto.
+const readLogoFile = (file: File): Promise<{ contentType: string; data: string }> =>
+  new Promise((resolve, reject) => {
+    if (file.size <= 400 * 1024) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const raw = String(reader.result || '');
+        resolve({ contentType: file.type, data: raw.split(',')[1] || '' });
+      };
+      reader.onerror = () => reject(new Error('Lettura del file fallita'));
+      reader.readAsDataURL(file);
+      return;
+    }
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const max = 640;
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(img.width * scale));
+      canvas.height = Math.max(1, Math.round(img.height * scale));
+      canvas.getContext('2d')?.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve({ contentType: 'image/png', data: canvas.toDataURL('image/png').split(',')[1] || '' });
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Immagine non leggibile')); };
+    img.src = url;
+  });
+
 export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
   const { hasPermission } = useAuth();
   const canEdit = hasPermission('settings:full');
@@ -217,6 +248,43 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
   const [expanded, setExpanded] = useState(false);
   const [activeDoc, setActiveDoc] = useState<DocKey>('privacy');
   const [copied, setCopied] = useState(false);
+  const [logoBusy, setLogoBusy] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleLogoPick = async (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file || !canEdit) return;
+    if (!/^image\/(png|jpeg|webp)$/.test(file.type)) {
+      showToast('Usa un PNG, JPG o WebP', 'error');
+      return;
+    }
+    setLogoBusy(true);
+    try {
+      const { contentType, data: b64 } = await readLogoFile(file);
+      const { logo_url } = await uploadTenantLogo(contentType, b64);
+      setData(d => ({ ...d, logo_url }));
+      showToast('Logo caricato', 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Caricamento del logo non riuscito', 'error');
+    } finally {
+      setLogoBusy(false);
+      if (logoInputRef.current) logoInputRef.current.value = '';
+    }
+  };
+
+  const handleLogoRemove = async () => {
+    if (!canEdit) return;
+    setLogoBusy(true);
+    try {
+      await removeTenantLogo();
+      setData(d => ({ ...d, logo_url: '' }));
+      showToast('Logo rimosso', 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Rimozione non riuscita', 'error');
+    } finally {
+      setLogoBusy(false);
+    }
+  };
 
   const showToastRef = useRef(showToast);
   useEffect(() => { showToastRef.current = showToast; });
@@ -370,6 +438,57 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                   <Field label="WhatsApp mostrato ai clienti" value={data.public_whatsapp} onChange={set('public_whatsapp')} placeholder="+39 389 591 6494" disabled={!canEdit} />
                   <Field label="Indirizzo del locale" value={data.public_address} onChange={set('public_address')} placeholder="Via dell'Olmo 14, Lucca" disabled={!canEdit} />
                   <Field label="Link Google Maps (Come raggiungerci)" value={data.maps_url} onChange={set('maps_url')} placeholder="https://maps.app.goo.gl/…" disabled={!canEdit} wide />
+                </div>
+
+                {/* Logo: compare in testa alla pagina di prenotazione online.
+                    Salvataggio immediato (route sua), non passa dal Salva. */}
+                <div className="mt-4">
+                  <span className="mb-1.5 block text-[13px] font-medium text-[var(--ds-text-secondary)]">
+                    Logo (pagina di prenotazione online)
+                  </span>
+                  <div className="flex flex-wrap items-center gap-3">
+                    {data.logo_url ? (
+                      <img
+                        src={tenantLogoSrc(data.logo_url)}
+                        alt="Logo del ristorante"
+                        className="h-12 w-auto max-w-[220px] rounded-[8px] bg-[var(--ds-surface-row)] object-contain p-1.5"
+                      />
+                    ) : (
+                      <span className="flex h-12 items-center rounded-[8px] bg-[var(--ds-surface-row)] px-3 text-[13px] text-[var(--ds-text-muted)]">
+                        Nessun logo
+                      </span>
+                    )}
+                    {canEdit && (
+                      <>
+                        <input
+                          ref={logoInputRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          hidden
+                          onChange={e => handleLogoPick(e.target.files)}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => logoInputRef.current?.click()}
+                          disabled={logoBusy}
+                          className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--ds-border)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
+                        >
+                          {logoBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                          {data.logo_url ? 'Sostituisci' : 'Carica logo'}
+                        </button>
+                        {data.logo_url && (
+                          <button
+                            type="button"
+                            onClick={handleLogoRemove}
+                            disabled={logoBusy}
+                            className="inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
+                          >
+                            <X className="h-4 w-4" /> Rimuovi
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </div>
                 <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-3">Identità del titolare</h5>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
