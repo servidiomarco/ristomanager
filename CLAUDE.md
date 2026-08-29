@@ -83,6 +83,26 @@ The pg `DATE` type parser is overridden to return plain `YYYY-MM-DD` strings, be
 
 `utils/reservationTime.ts` provides `getRomeDatePart` / `getRomeTimePart`. Reservations are stored as UTC instants; any date or time shown or grouped on must go through these helpers, never through raw `Date` methods.
 
+### The reservation modal has two layouts, chosen per tenant
+
+`reservation_table_step_enabled` in `app_settings` decides where the table gets picked:
+off (the default) puts it inside Dettagli, collapsed to a summary row that expands in
+place; on gives it a step of its own. **Both do exactly the same things** — it is a layout
+preference sold per restaurant, not a feature flag gating behaviour.
+
+Consequences when editing `ReservationList.tsx`:
+
+- The step list and the indices come from `reservationSteps` and `stepIndex`, never from a
+  literal. The two views have a different number of steps, so Pagamenti is index 1 in one
+  and 2 in the other — a hardcoded `formStep === 2` is right in one view and wrong in the
+  other.
+- `sectionVisible(i)` owns the show/hide rule. On a new booking the later sections stay
+  mounted and gate on `isEditing` themselves, *except* in the step view, where Dettagli and
+  Tavolo must alternate even while creating.
+- The table block sits in the DOM **between** the two halves of the details column, not
+  after them, so one position serves both views. It is not moved by CSS `order` on purpose:
+  that would have made the eye read table-then-customer while Tab went the other way.
+
 ### Reservation state has one source of truth
 
 `components/reservationState.tsx` defines both layers and every surface derives from it:

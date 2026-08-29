@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, LayoutGrid } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -42,6 +42,7 @@ import { FeatureTogglesManager } from './components/FeatureTogglesManager';
 import { ScheduledClosuresManager } from './components/ScheduledClosuresManager';
 import { RemindersManager } from './components/RemindersManager';
 import { ReservationNotesManager } from './components/ReservationNotesManager';
+import { ReservationViewSettingsManager } from './components/ReservationViewSettingsManager';
 import { ReservationAllergensManager } from './components/ReservationAllergensManager';
 import { AutoDepositManager } from './components/AutoDepositManager';
 import { PaymentLinkExpiryManager } from './components/PaymentLinkExpiryManager';
@@ -2888,6 +2889,13 @@ const App: React.FC = () => {
                   description="Chip suggeriti nel modal di prenotazione. Ogni nota può avere un'icona che appare nella card. Trascina per riordinare."
                 >
                   <ReservationNotesManager showToast={addToast} />
+                </SettingsDisclosure>
+                <SettingsDisclosure
+                  icon={LayoutGrid}
+                  title="Vista del modal prenotazione"
+                  description="Dove si sceglie il tavolo: dentro Dettagli o in un passo a parte. Le due viste fanno le stesse cose."
+                >
+                  <ReservationViewSettingsManager showToast={addToast} />
                 </SettingsDisclosure>
 
                 <SettingsDisclosure

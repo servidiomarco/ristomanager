@@ -889,6 +889,8 @@ export interface FeatureFlags {
   ai_messages_enabled: boolean;
   /** Menu digitale pubblico (QR al tavolo). Gestito dal QR modal della pagina Menu. */
   digital_menu_enabled: boolean;
+  /** Vista del modal prenotazione: false = tavolo dentro Dettagli (default), true = tavolo come passo separato. */
+  reservation_table_step_enabled: boolean;
 }
 
 export const getFeatureFlags = async (): Promise<FeatureFlags> => {

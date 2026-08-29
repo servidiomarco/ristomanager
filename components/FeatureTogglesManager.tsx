@@ -199,6 +199,11 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
         ai_messages_enabled: { title: 'Messaggi con AI', on: 'attivi', off: 'disattivati' },
         // Idem: gestito dal QR modal della pagina Menu.
         digital_menu_enabled: { title: 'Menu digitale', on: 'attivo', off: 'disattivato' },
+        // Idem: gestito dalla card "Vista del modal prenotazione" in
+        // Impostazioni > Prenotazioni. Non e' un interruttore acceso/spento ma
+        // una scelta fra due viste, quindi il toast lo scrive quella card con
+        // il nome della vista scelta; qui l'etichetta esiste per il tipo.
+        reservation_table_step_enabled: { title: 'Tavolo in un passo separato', on: 'attivo', off: 'disattivato' },
     };
 
     const toggle = async (key: FlagKey) => {
