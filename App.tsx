@@ -411,8 +411,8 @@ const App: React.FC = () => {
   const [menuInitialTab, setMenuInitialTab] = useState<'DISHES' | 'BANQUETS'>('BANQUETS');
   const [autoOpenNewReservation, setAutoOpenNewReservation] = useState(false);
   const [newReservationKind, setNewReservationKind] = useState<'standard' | 'walkin'>('standard');
-  // Prefill applied when opening the new-reservation modal (currently used
-  // when converting a voice call into a booking).
+  // Prefill applied when opening the new-reservation modal — used when
+  // converting a voice call, a message or an email into a booking.
   const [newReservationPrefill, setNewReservationPrefill] = useState<NewReservationPrefill | undefined>(undefined);
   // If set, the next reservation that gets created is linked to this voice
   // call. Cleared once the link finishes (or the modal is dismissed).
@@ -2771,7 +2771,14 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.EMAIL && (
-          <EmailPage />
+          <EmailPage
+            onCreateReservationFromEmail={({ customer_name, phone, email, date, time, guests, notes }) => {
+              setNewReservationPrefill({ customer_name, phone, email, date, time, guests, notes });
+              setNewReservationKind('standard');
+              setAutoOpenNewReservation(true);
+              setView(ViewState.RESERVATIONS);
+            }}
+          />
         )}
 
         {view === ViewState.NOTIFICHE && (

@@ -474,12 +474,14 @@ const computePreflightWarnings = (
 };
 
 // Prefill applied when the new-reservation form auto-opens. Beyond
-// name/phone it can carry a parsed booking (from a voice call or the inbox
-// AI): date/time/guests/zone/notes pre-populate the form so staff only
-// confirm. All fields optional — what's missing falls back to the defaults.
+// name/phone it can carry a parsed booking (from a voice call, the inbox
+// AI or the email AI): date/time/guests/zone/notes pre-populate the form so
+// staff only confirm. All fields optional — what's missing falls back to
+// the defaults.
 export interface NewReservationPrefill {
   customer_name?: string;
   phone?: string;
+  email?: string;
   date?: string;   // YYYY-MM-DD
   time?: string;   // HH:MM
   shift?: Shift;
@@ -510,7 +512,7 @@ interface ReservationListProps {
   // 'walkin' opens it with customer="Walk-in", arrival=ARRIVED, time=now.
   autoOpenNewKind?: 'standard' | 'walkin';
   // Optional prefill applied when the form auto-opens (used when converting a
-  // voice call into a booking).
+  // voice call, a message or an email into a booking).
   newReservationPrefill?: NewReservationPrefill;
   onAutoOpenNewHandled?: () => void;
   modalOnly?: boolean;
@@ -2011,7 +2013,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       // For a walk-in we use "now" (and derive the shift from current time), so the
       // operator only has to pick a table and confirm. For standard bookings we keep
       // the date/shift currently in view — unless the prefill carries a parsed
-      // date/time/shift (inbox AI or voice call), which then wins.
+      // date/time/shift (inbox AI, email AI or voice call), which then wins.
       const now = new Date();
       const walkInShift: Shift = now.getHours() < 17 ? Shift.LUNCH : Shift.DINNER;
       // Shift from prefill: explicit, or derived from the prefilled time
@@ -2055,6 +2057,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       setFormData({
         customer_name: prefill?.customer_name || (walkIn ? 'Walk-in' : ''),
         phone: prefill?.phone || undefined,
+        email: prefill?.email || undefined,
         guests: (!walkIn && prefill?.guests && prefill.guests > 0) ? Math.trunc(prefill.guests) : 2,
         children: (!walkIn && prefill?.children && prefill.children > 0) ? Math.trunc(prefill.children) : 0,
         reservation_time: reservationTime,

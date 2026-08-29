@@ -49,6 +49,16 @@ export interface EmailMessage {
   error_message: string | null;
 }
 
+/** Dettagli di prenotazione estratti dall'ultima email ricevuta nel thread. */
+export interface ExtractedEmailBooking {
+  customer_name: string | null;
+  phone: string | null;
+  date: string | null;
+  time: string | null;
+  guests: number | null;
+  notes: string | null;
+}
+
 // Cache a livello modulo, stesso schema di inboxCache (messagesApiService):
 // EmailPage viene smontata a ogni cambio vista, quindi senza cache ogni
 // rientro rifaceva lista e thread da zero — spinner e mezzo secondo di rete
@@ -133,6 +143,12 @@ class EmailApiService {
   async markThreadRead(emailKey: string): Promise<{ ok: true; marked: number }> {
     return apiRequest(
       `${API_URL}/email/threads/${encodeURIComponent(emailKey)}/read`,
+      { method: 'POST', headers: getHeaders() }
+    );
+  }
+  async suggestBooking(emailKey: string): Promise<{ booking: ExtractedEmailBooking | null; reason: string | null }> {
+    return apiRequest(
+      `${API_URL}/email/threads/${encodeURIComponent(emailKey)}/suggest-booking`,
       { method: 'POST', headers: getHeaders() }
     );
   }
