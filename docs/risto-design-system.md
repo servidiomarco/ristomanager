@@ -101,7 +101,7 @@ semantic:
     action-bg:           "#111827"
     action-bg-hover:     "#000000"
     action-fg:           "#FFFFFF"
-    backdrop:            "rgba(11, 11, 13, 0.40)"
+    backdrop:            "rgba(11, 11, 13, 0.50)"   # heavier than dark's, deliberately — see below
 
   dark:
     canvas:              "#0B0B0D"   # [D] darkest — depth runs the other way
@@ -903,6 +903,14 @@ way back. A screen you can leave *only* through the tab bar never hides it.
 `card-padding`. Backdrop uses the `backdrop` token at `z.overlay`; content at `z.modal`.
 Focus trapped, Escape closes, focus returns to the trigger. At `<md` becomes a bottom sheet:
 full-width, top corners only, slide up at `motion.slow`.
+
+**The light backdrop is heavier than the dark one** — 0.50 against 0.60, which is a smaller
+gap than the raw numbers suggest and is deliberate in direction. In dark the page underneath
+is already spent and the dialog separates itself by being the only lit thing in the frame, so
+the scrim carries almost nothing. In light the page is bright and competes, and the scrim is
+the whole of the separation. Reading the two numbers as "light should be lower" is the trap:
+0.50 takes a white surface down to `#858586`, which reads as behind glass. Past that, around
+0.60 in light, the app stops looking backgrounded and starts looking switched off.
 
 **The footer stacks by default and stays in a row on request.** Below `sm` its two groups drop
 onto their own full-width rows, which is right for a footer of labelled buttons a thumb wants

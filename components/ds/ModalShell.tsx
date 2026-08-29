@@ -20,8 +20,10 @@ const SIZE: Record<ModalSize, string> = {
   md: 'sm:max-w-2xl',
   lg: 'sm:max-w-5xl',
   // Fills big monitors — where the floor map benefits most — without running
-  // edge to edge on an ultrawide.
-  fluid: 'sm:w-[92vw] sm:max-w-[1440px]',
+  // edge to edge on an ultrawide. Il vincolo che morde su un portatile e' il
+  // 96vw, non il tetto: su uno schermo da 1512pt il modal si ferma molto prima
+  // di 1600, quindi allargare solo il massimo non avrebbe cambiato niente li'.
+  fluid: 'sm:w-[96vw] sm:max-w-[1600px]',
 };
 
 interface ModalShellProps {
@@ -113,7 +115,7 @@ export const ModalShell: React.FC<ModalShellProps> = ({
         onClick={e => e.stopPropagation()}
         // Full-height on mobile either way — a phone sheet already fills the
         // screen, so only the desktop panel has a choice to make here.
-        className={`flex w-full flex-col overflow-hidden bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] h-full rounded-none sm:max-h-[92vh] sm:rounded-[24px] ${fixedHeight ? 'sm:h-[86vh]' : 'sm:h-auto'} ${SIZE[size]}`}
+        className={`flex w-full flex-col overflow-hidden bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] h-full rounded-none sm:max-h-[92vh] sm:rounded-[24px] ${fixedHeight ? 'sm:h-[90vh]' : 'sm:h-auto'} ${SIZE[size]}`}
       >
         <header className="flex flex-shrink-0 items-start justify-between gap-4 px-5 py-5 sm:px-6 sm:py-6">
           <div className="min-w-0">

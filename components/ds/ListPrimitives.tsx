@@ -181,6 +181,14 @@ const PILL_TONE: Record<PillTone, string> = {
   info: 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]',
 };
 
+/* Il filo neutro serve a far leggere la *forma*. Le tinte sono chiarissime:
+   sul canvas stanno a 1.03–1.07:1 di luminanza, cioè si distinguono per tinta
+   e non per chiarezza — al buio, di sbieco, o per chi separa male i colori le
+   pillole collassano in una fascia grigia sola. Il testo resta sopra i 5.9:1
+   in ogni tono, quindi non è un requisito WCAG (il bordo non porta
+   informazione che il testo non dia già): è definizione, non conformità.
+   `ring-inset` e non `border` perché l'altezza è fissa e un bordo mangerebbe
+   spazio al testo. */
 export const StatusPill: React.FC<{
   tone?: PillTone;
   title?: string;
@@ -189,7 +197,7 @@ export const StatusPill: React.FC<{
 }> = ({ tone = 'neutral', title, className = '', children }) => (
   <span
     title={title}
-    className={`inline-flex h-6 flex-shrink-0 items-center gap-1 rounded-full px-2 text-[12px] font-medium ${PILL_TONE[tone]} ${className}`}
+    className={`inline-flex h-6 flex-shrink-0 items-center gap-1 rounded-full px-2 text-[12px] font-medium ring-1 ring-inset ring-[var(--ds-border-strong)] ${PILL_TONE[tone]} ${className}`}
   >
     {children}
   </span>
