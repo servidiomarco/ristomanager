@@ -359,8 +359,8 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
             <Scale className="w-5 h-5" />
           </div>
           <div className="min-w-0">
-            <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Documenti legali</h4>
-            <p className="text-[13px] text-[var(--ds-text-muted)]">Compila i dati del titolare per generare privacy policy, avviso vocale, cookie policy e termini di servizio.</p>
+            <h4 className="font-medium text-[14px] text-[var(--ds-text-primary)]">Identità e documenti legali</h4>
+            <p className="text-[13px] text-[var(--ds-text-muted)]">Nome pubblico, logo e contatti mostrati ai clienti; dati del titolare per privacy policy, avviso vocale, cookie policy e termini di servizio.</p>
           </div>
         </div>
         <ChevronDown className="w-5 h-5 text-[var(--ds-text-muted)] flex-shrink-0 transition-transform group-open:rotate-180" />
