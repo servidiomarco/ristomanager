@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, BellOff, Check, ChevronRight, Loader2, MessagesSquare, Play, TriangleAlert, WifiOff } from 'lucide-react';
+import { Bell, BellOff, Check, ChevronRight, Loader2, MessagesSquare, Pencil, Play, TriangleAlert, WifiOff } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
 import { useAuth } from '../contexts/AuthContext';
 import { socketClient } from '../services/socketClient';
 import { staffChatApiService } from '../services/staffChatApiService';
 import { channelThreadKey, staffMessagePreview, type StaffMessage } from '../services/staffChat';
 import {
-  getKdsQueue, setKdsItemStatus, getMenuCatalogue,
-  type KdsItem, type KdsCourseState, type MenuCatalogue,
+  getKdsQueue, setKdsItemStatus, getMenuCatalogue, getKdsRevisions, ackKdsRevision,
+  type KdsItem, type KdsCourseState, type MenuCatalogue, type OrderRevision,
 } from '../services/ordersApiService';
 import { getKitchenServiceSummary, type KitchenServiceSummary } from '../services/apiService';
 import { getRomeDatePart } from '../utils/reservationTime';
@@ -94,6 +94,11 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   const [catalogue, setCatalogue] = useState<MenuCatalogue | null>(null);
   const [items, setItems] = useState<KdsItem[]>([]);
   const [courses, setCourses] = useState<KdsCourseState[]>([]);
+  // Revisioni aperte: modifiche a comande già lanciate (storno, aggiunta,
+  // riporta, trasferimento). La card mostra "modificata", il tocco apre il
+  // dettaglio, Ok le spegne per tutti gli schermi.
+  const [revisions, setRevisions] = useState<OrderRevision[]>([]);
+  const [revisionsModalKey, setRevisionsModalKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [offline, setOffline] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -205,9 +210,14 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
 
   const reload = useCallback(async () => {
     try {
-      const q = await getKdsQueue(stationId);
+      const [q, rev] = await Promise.all([
+        getKdsQueue(stationId),
+        // Un errore sulle revisioni non deve accecare la coda.
+        getKdsRevisions(stationId).catch(() => ({ revisions: [] as OrderRevision[] })),
+      ]);
       setItems(q.items);
       setCourses(q.courses);
+      setRevisions(rev.revisions);
       setOffline(false);
     } catch {
       setOffline(true);
@@ -239,6 +249,20 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
     socket.on('course:unserved', onChange);
     socket.on('orderItem:voided', onChange);
     socket.on('connect', onChange);
+    // Revisione nuova: suona come una comanda — è un cambio di piano, non
+    // rumore di fondo. station_ids NULL = riguarda tutti gli schermi.
+    const onRevised = (r: OrderRevision) => {
+      const mine = stationId == null || r.station_ids == null || r.station_ids.includes(stationId);
+      if (!mine) return;
+      setRevisions(prev => (prev.some(x => x.id === r.id) ? prev : [...prev, r]));
+      if (soundRef.current) chime();
+      reload();
+    };
+    const onRevisionAcked = (data: { id: number }) => {
+      setRevisions(prev => prev.filter(r => r.id !== data?.id));
+    };
+    socket.on('order:revised', onRevised);
+    socket.on('order:revision-acked', onRevisionAcked);
 
     const poll = setInterval(reload, 60_000);
     return () => {
@@ -248,6 +272,8 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
       socket.off('course:unserved', onChange);
       socket.off('orderItem:voided', onChange);
       socket.off('connect', onChange);
+      socket.off('order:revised', onRevised);
+      socket.off('order:revision-acked', onRevisionAcked);
       clearInterval(poll);
       if (stationId != null) socketClient.unsubscribeFromStation(stationId);
     };
@@ -306,6 +332,23 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   const isUpcoming = (col: Column): boolean =>
     col.items.every(i => i.status === 'SENT')
     && col.items.every(i => i.station_start_at != null && new Date(i.station_start_at).getTime() > now);
+
+  const revisionsByKey = useMemo(() => {
+    const map = new Map<string, OrderRevision[]>();
+    for (const col of columns) {
+      const list = revisions.filter(r =>
+        r.order_id === col.order_id && (r.course_no == null || r.course_no === col.course_no));
+      if (list.length > 0) map.set(col.key, list);
+    }
+    return map;
+  }, [columns, revisions]);
+
+  const ackRevisions = useCallback(async (list: OrderRevision[]) => {
+    setRevisionsModalKey(null);
+    // Ottimistico come advance(): la pill sparisce al tocco, il server segue.
+    setRevisions(prev => prev.filter(r => !list.some(l => l.id === r.id)));
+    await Promise.all(list.map(r => ackKdsRevision(r.id).catch(() => {})));
+  }, []);
 
   const todo = columns.filter(c => !isUpcoming(c));
   const upcoming = columns.filter(isUpcoming);
@@ -433,7 +476,15 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
         ) : (
           <div className="flex h-full items-start gap-4">
             {todo.map(col => (
-              <CourseCard key={col.key} col={col} now={now} stationId={stationId} onAdvance={advance} />
+              <CourseCard
+                key={col.key}
+                col={col}
+                now={now}
+                stationId={stationId}
+                onAdvance={advance}
+                revisions={revisionsByKey.get(col.key)}
+                onShowRevisions={() => setRevisionsModalKey(col.key)}
+              />
             ))}
           </div>
         )}
@@ -478,6 +529,36 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           </div>
         </div>
       )}
+
+      <ModalShell
+        open={revisionsModalKey != null && (revisionsByKey.get(revisionsModalKey)?.length ?? 0) > 0}
+        onClose={() => setRevisionsModalKey(null)}
+        title={`Modifiche · T${columns.find(c => c.key === revisionsModalKey)?.table_name ?? '—'}`}
+        size="sm"
+        closeOnEscape
+        bodyClassName="p-5 sm:p-6"
+      >
+        <div className="space-y-3">
+          {(revisionsByKey.get(revisionsModalKey ?? '') ?? []).map(r => (
+            <div key={r.id} className="rounded-[14px] bg-[var(--ds-surface-row)] px-3.5 py-3">
+              <p className="text-[16px] font-semibold text-[var(--ds-text-primary)]">{r.summary}</p>
+              {(r.details ?? []).filter(d => d.note).map((d, i) => (
+                <p key={i} className="mt-1 text-[14px] text-[var(--ds-text-secondary)]">{d.label} — {d.note}</p>
+              ))}
+              <p className="mt-1.5 text-[13px] text-[var(--ds-text-muted)]">
+                {r.created_by_name} · {new Date(r.created_at).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+              </p>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={() => ackRevisions(revisionsByKey.get(revisionsModalKey ?? '') ?? [])}
+            className={`${dsButton.primary} w-full`}
+          >
+            Ok, visto
+          </button>
+        </div>
+      </ModalShell>
 
       <ModalShell
         open={picking}
@@ -526,7 +607,9 @@ const CourseCard: React.FC<{
   now: number;
   stationId: number | null;
   onAdvance: (item: KdsItem, status: 'PREPARING' | 'READY') => void;
-}> = ({ col, now, onAdvance }) => {
+  revisions?: OrderRevision[];
+  onShowRevisions?: () => void;
+}> = ({ col, now, onAdvance, revisions, onShowRevisions }) => {
   const start = col.items[0]?.station_start_at ?? col.firedAt;
   const elapsed = minutesSince(start, now);
   const allReady = col.items.every(i => i.status === 'READY');
@@ -564,6 +647,19 @@ const CourseCard: React.FC<{
           {ORDINALS[col.course_no] ?? col.course_no} uscita
           {col.customer_name ? ` · ${col.customer_name}` : ''}
         </div>
+        {/* Comanda cambiata dopo il lancio: la pill nella famiglia pending
+            ("richiede attenzione") apre il dettaglio. 44px: si tocca con le
+            mani in pasta. */}
+        {revisions && revisions.length > 0 && onShowRevisions && (
+          <button
+            type="button"
+            onClick={onShowRevisions}
+            className="mt-2 flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-[12px] bg-[var(--ds-pending-tint)] px-3 text-[14px] font-semibold text-[var(--ds-pending-text)] transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            <Pencil size={14} aria-hidden />
+            modificata{revisions.length > 1 ? ` · ${revisions.length}` : ''}
+          </button>
+        )}
       </div>
 
       {col.allergens && (

@@ -23808,6 +23808,17 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
                      : mode === 'AUTO_FIRST' ? proposedCourses.filter(c => c === 1)
                      : mode === 'AUTO_NEXT' ? autoNextFirst
                      : [];
+        // Un'uscita che aveva GIÀ righe lanciate e ne riceve altre è una
+        // modifica della card a video, non una card nuova: va segnalata.
+        let alreadyFired: number[] = [];
+        if (toFire.length > 0) {
+            const prev = await client.query(
+                `SELECT DISTINCT course_no FROM order_items
+                 WHERE order_id = $1 AND course_no = ANY($2) AND fired_at IS NOT NULL`,
+                [orderId, toFire]
+            );
+            alreadyFired = prev.rows.map((r: any) => r.course_no);
+        }
         const fired: number[] = [];
         for (const c of toFire) {
             const rows = await fireCourseInTx(client, req.tenantId!, orderId, c);
@@ -23847,6 +23858,20 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
             }
         } catch (_) {}
         outboxKick();
+
+        for (const c of fired.filter(c => alreadyFired.includes(c))) {
+            const addedIds = new Set(queued.rows.filter((r: any) => r.course_no === c).map((r: any) => r.id));
+            const added = view.items.filter((i: any) => addedIds.has(i.id));
+            if (added.length === 0) continue;
+            void recordOrderRevision(req.tenantId!, {
+                orderId, courseNo: c,
+                stationIds: added.map((i: any) => i.station_id),
+                kind: 'added',
+                summary: `Aggiunto ${added.map((i: any) => `${i.qty}× ${i.name_snapshot}`).join(', ')}`,
+                details: added.map((i: any) => ({ label: `${i.qty}× ${i.name_snapshot}`, note: i.note ?? null })),
+                userId: req.user?.userId, userEmail: req.user?.email,
+            });
+        }
 
         res.json({ ...view, fire_mode: mode, fired_courses: fired, queued_courses: stillQueued });
     } catch (err: any) {
@@ -24260,6 +24285,14 @@ app.post('/orders/:id/courses/:n/fire', authenticate, requirePermission('orders:
         }
 
         await client.query('BEGIN');
+        // Prima del fire: se l'uscita aveva già righe lanciate, quelle nuove
+        // sono un'aggiunta a una card già a video (revisione, sotto).
+        const prev = await client.query(
+            `SELECT 1 FROM order_items
+             WHERE order_id = $1 AND course_no = $2 AND fired_at IS NOT NULL AND tenant_id = $3 LIMIT 1`,
+            [orderId, courseNo, req.tenantId!]
+        );
+        const wasAlreadyFired = prev.rows.length > 0;
         const fired = await fireCourseInTx(client, req.tenantId!, orderId, courseNo);
         if (fired.length === 0) {
             await client.query('ROLLBACK'); client.release();
@@ -24281,6 +24314,17 @@ app.post('/orders/:id/courses/:n/fire', authenticate, requirePermission('orders:
                 });
             }
         } catch (_) {}
+
+        if (wasAlreadyFired) {
+            void recordOrderRevision(req.tenantId!, {
+                orderId, courseNo,
+                stationIds: fired.map((i: any) => i.station_id),
+                kind: 'added',
+                summary: `Aggiunto ${fired.map((i: any) => `${i.qty}× ${i.name_snapshot}`).join(', ')}`,
+                details: fired.map((i: any) => ({ label: `${i.qty}× ${i.name_snapshot}`, note: i.note ?? null })),
+                userId: req.user?.userId, userEmail: req.user?.email,
+            });
+        }
 
         res.json({ order_id: orderId, course_no: courseNo, items: fired });
     } catch (err: any) {
@@ -24548,6 +24592,15 @@ app.post('/orders/:id/courses/:n/unserve', authenticate, requireAnyPermission('o
                 order_id: orderId, course_no: courseNo,
             });
         } catch (_) {}
+
+        void recordOrderRevision(req.tenantId!, {
+            orderId, courseNo,
+            stationIds: upd.rows.map((r: any) => r.station_id),
+            kind: 'unserved',
+            summary: `Uscita riportata in cucina`,
+            details: upd.rows.map((r: any) => ({ label: `${r.qty}× ${r.name_snapshot}` })),
+            userId: req.user?.userId, userEmail: req.user?.email,
+        });
 
         res.json({ order_id: orderId, course_no: courseNo, items: upd.rows });
     } catch (err: any) {
@@ -25272,6 +25325,105 @@ async function syncSystemLines(tenantId: number, orderId: number): Promise<void>
 
 // Storno di una riga già inviata. Da SENT in poi non si cancella: si storna,
 // con motivazione, e resta a bilancio come scarto.
+// ==================== REVISIONI COMANDA ====================
+// Una comanda già lanciata che cambia (storno di una riga inviata, aggiunta
+// sulla stessa uscita, riporta, trasferimento) genera una revisione: la card
+// sul monitor mostra "modificata", il tocco apre il dettaglio, l'ack la
+// spegne per tutti. L'evento viaggia in broadcastToAll — il KDS filtra per
+// la propria partita con station_ids (NULL = riguarda tutti).
+
+type OrderRevisionDetail = { label: string; note?: string | null };
+
+const recordOrderRevision = async (
+    tenantId: number,
+    data: {
+        orderId: number;
+        courseNo: number | null;
+        stationIds: (number | null)[];
+        kind: 'void' | 'added' | 'unserved' | 'transfer';
+        summary: string;
+        details?: OrderRevisionDetail[];
+        userId?: number | null;
+        userEmail?: string | null;
+    }
+) => {
+    try {
+        let byName = data.userEmail || '';
+        if (data.userId) {
+            const u = await queryWithRetry(`SELECT full_name FROM users WHERE id = $1 AND tenant_id = $2`, [data.userId, tenantId]);
+            byName = u.rows[0]?.full_name || byName;
+        }
+        const stationIds = [...new Set(data.stationIds.filter((st): st is number => st != null))];
+        const ins = await queryWithRetry(
+            `INSERT INTO order_revisions
+                (tenant_id, order_id, course_no, station_ids, kind, summary, details, created_by_name)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             RETURNING id, order_id, course_no, station_ids, kind, summary, details, created_by_name, created_at`,
+            [tenantId, data.orderId, data.courseNo, stationIds.length > 0 ? stationIds : null,
+             data.kind, data.summary.slice(0, 300),
+             data.details && data.details.length > 0 ? JSON.stringify(data.details) : null, byName]
+        );
+        socketService?.broadcastToAll(tenantId, 'order:revised', ins.rows[0]);
+    } catch (err: any) {
+        // La revisione è un avviso: se fallisce non deve far fallire la modifica.
+        console.error('recordOrderRevision failed:', err?.message || err);
+    }
+};
+
+// Le revisioni aperte del servizio, per i monitor. `?station=` filtra sulla
+// partita dello schermo; le revisioni senza station_ids valgono per tutti.
+app.get('/kds/revisions', authenticate, requireAnyPermission('orders:kds', 'orders:expedite', 'orders:take'), async (req: any, res) => {
+    try {
+        if (!(await ordersEnabledGuard(req, res))) return;
+        const station = req.query.station != null && req.query.station !== ''
+            ? parseInt(String(req.query.station), 10) : null;
+        const r = await queryWithRetry(
+            `SELECT r.id, r.order_id, r.course_no, r.station_ids, r.kind, r.summary,
+                    r.details, r.created_by_name, r.created_at
+             FROM order_revisions r
+             JOIN orders o ON o.id = r.order_id AND o.tenant_id = r.tenant_id
+             WHERE r.tenant_id = $1 AND r.acked_at IS NULL AND o.status = 'OPEN'
+               AND ($2::int IS NULL OR r.station_ids IS NULL OR $2 = ANY(r.station_ids))
+             ORDER BY r.id`,
+            [req.tenantId!, Number.isFinite(station) ? station : null]
+        );
+        res.json({ revisions: r.rows });
+    } catch (err: any) {
+        console.error('GET /kds/revisions error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/kds/revisions/:id/ack', authenticate, requireAnyPermission('orders:kds', 'orders:expedite', 'orders:take'), async (req: any, res) => {
+    try {
+        if (!(await ordersEnabledGuard(req, res))) return;
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        let byName = req.user?.email ?? '';
+        const u = await queryWithRetry(`SELECT full_name FROM users WHERE id = $1 AND tenant_id = $2`, [req.user?.userId ?? 0, req.tenantId!]);
+        byName = u.rows[0]?.full_name || byName;
+        const upd = await queryWithRetry(
+            `UPDATE order_revisions
+             SET acked_at = CURRENT_TIMESTAMP, acked_by_name = $3
+             WHERE id = $1 AND tenant_id = $2 AND acked_at IS NULL
+             RETURNING id, order_id`,
+            [id, req.tenantId!, byName]
+        );
+        // Già confermata da un altro schermo: non è un errore, l'avviso è spento.
+        if (upd.rows.length > 0) {
+            try {
+                socketService?.broadcastToAll(req.tenantId!, 'order:revision-acked', {
+                    id: upd.rows[0].id, order_id: upd.rows[0].order_id,
+                });
+            } catch (_) {}
+        }
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('POST /kds/revisions/:id/ack error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.post('/orders/items/:id/void', authenticate, requirePermission('orders:void'), async (req, res) => {
     try {
         if (!(await ordersEnabledGuard(req, res))) return;
@@ -25313,6 +25465,19 @@ app.post('/orders/items/:id/void', authenticate, requirePermission('orders:void'
             });
             socketService?.broadcastToAll(req.tenantId!, 'order:updated', view.order);
         } catch (_) {}
+
+        // Se la riga era già in cucina la card resta a video con un piatto in
+        // meno: senza spiegazione il cuoco continua a cercarlo.
+        if (item.fired_at) {
+            void recordOrderRevision(req.tenantId!, {
+                orderId: item.order_id, courseNo: item.course_no,
+                stationIds: [item.station_id],
+                kind: 'void',
+                summary: `Annullato ${item.qty}× ${item.name_snapshot}`,
+                details: [{ label: `${item.qty}× ${item.name_snapshot}`, note: item.void_reason }],
+                userId: req.user?.userId, userEmail: req.user?.email,
+            });
+        }
 
         LogService.logActivity(
             req.tenantId!,
@@ -25468,6 +25633,29 @@ app.post('/orders/:id/transfer', authenticate, requirePermission('orders:take'),
 
         const view = await loadOrderView(req.tenantId!, id);
         try { socketService?.broadcastToAll(req.tenantId!, 'order:updated', view.order); } catch (_) {}
+
+        // Il monitor mostrerebbe il vecchio tavolo fino al reload: la
+        // revisione avvisa le partite con righe ancora in lavorazione.
+        try {
+            const active = await queryWithRetry(
+                `SELECT DISTINCT station_id FROM order_items
+                 WHERE order_id = $1 AND tenant_id = $2 AND status IN ('SENT','PREPARING','READY')`,
+                [id, req.tenantId!]
+            );
+            if (active.rows.length > 0) {
+                const fromTbl = await queryWithRetry(
+                    `SELECT name FROM tables WHERE id = $1 AND tenant_id = $2`,
+                    [order.table_id, req.tenantId!]
+                );
+                void recordOrderRevision(req.tenantId!, {
+                    orderId: id, courseNo: null,
+                    stationIds: active.rows.map((r: any) => r.station_id),
+                    kind: 'transfer',
+                    summary: `Comanda spostata dal tavolo ${fromTbl.rows[0]?.name ?? '?'} al tavolo ${tbl.rows[0].name}`,
+                    userId: req.user?.userId, userEmail: req.user?.email,
+                });
+            }
+        } catch (_) {}
 
         LogService.logActivity(
             req.tenantId!,
