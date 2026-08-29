@@ -229,6 +229,33 @@ export const getKdsQueue = async (stationId: number | null): Promise<KdsQueue> =
     { headers: getHeaders() },
   );
 
+// Revisioni comanda: modifiche a comande già lanciate (storno, aggiunta,
+// riporta, trasferimento). Il monitor mostra "modificata" finché qualcuno
+// non conferma con l'ack, che spegne l'avviso su tutti gli schermi.
+export interface OrderRevision {
+  id: number;
+  order_id: number;
+  course_no: number | null;
+  station_ids: number[] | null;
+  kind: 'void' | 'added' | 'unserved' | 'transfer';
+  summary: string;
+  details: { label: string; note?: string | null }[] | null;
+  created_by_name: string;
+  created_at: string;
+}
+
+export const getKdsRevisions = async (stationId: number | null): Promise<{ revisions: OrderRevision[] }> =>
+  apiRequest(
+    `${API_URL}/kds/revisions${stationId != null ? `?station=${stationId}` : ''}`,
+    { headers: getHeaders() },
+  );
+
+export const ackKdsRevision = async (id: number): Promise<{ ok: true }> =>
+  apiRequest(`${API_URL}/kds/revisions/${id}/ack`, {
+    method: 'POST',
+    headers: getHeaders(),
+  });
+
 export const setKdsItemStatus = async (
   itemId: number,
   status: 'PREPARING' | 'READY',
