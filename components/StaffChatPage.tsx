@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MessagesSquare, Hash, Send, Loader2, AlertTriangle, Plus, ChevronUp, X as XIcon, Paperclip } from 'lucide-react';
 import { Loader } from './Loader';
-import { staffChatApiService, staffMediaUrl, type StaffThreadSummary, type StaffColleague, type StaffPreset, type StaffUploadedAttachment } from '../services/staffChatApiService';
+import { staffChatApiService, staffChatCache, staffMediaUrl, type StaffThreadSummary, type StaffColleague, type StaffPreset, type StaffUploadedAttachment } from '../services/staffChatApiService';
+import { swrConfig } from '../services/configCache';
 import {
   STAFF_MESSAGE_PRESETS, STAFF_MESSAGE_MAX_LENGTH, STAFF_MAX_MENTIONS, STAFF_MAX_ATTACHMENTS, staffMessagePreview,
   threadKeyFor, dmThreadKey, parseThreadKey, rolesForChannel,
@@ -98,9 +99,13 @@ interface StaffChatPageProps {
 }
 
 const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUserName, initialThreadKey, onInitialThreadConsumed }) => {
-  const [threads, setThreads] = useState<StaffThreadSummary[]>([]);
-  const [colleagues, setColleagues] = useState<StaffColleague[]>([]);
-  const [listLoading, setListLoading] = useState(true);
+  // Riparte dall'ultimo stato noto (cache modulo-level, pre-riempita al
+  // login): la pagina viene smontata a ogni cambio vista e senza questo ogni
+  // rientro mostrava lo spinner. Il fetch parte comunque e rimpiazza in
+  // silenzio (stale-while-revalidate) — stesso schema di InboxPage.
+  const [threads, setThreads] = useState<StaffThreadSummary[]>(() => staffChatCache.list?.threads ?? []);
+  const [colleagues, setColleagues] = useState<StaffColleague[]>(() => staffChatCache.list?.colleagues ?? []);
+  const [listLoading, setListLoading] = useState(staffChatCache.list === null);
   const [listError, setListError] = useState<string | null>(null);
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -158,13 +163,17 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
 
   useEffect(() => { loadThreads(); }, [loadThreads]);
 
+  // Specchia in cache ogni cambiamento di lista e colleghi (fetch, socket,
+  // letture): il prossimo mount riparte da qui. Il guard evita di
+  // sovrascrivere una cache pre-riempita con lo stato iniziale vuoto o con
+  // un errore.
   useEffect(() => {
-    let cancelled = false;
-    staffChatApiService.getPresets()
-      .then(({ presets }) => { if (!cancelled && presets.length > 0) setPresets(presets); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
+    if (!listLoading && !listError) staffChatCache.list = { threads, colleagues };
+  }, [threads, colleagues, listLoading, listError]);
+
+  useEffect(() => swrConfig('staffChatPresets', () => staffChatApiService.getPresets(), ({ presets }) => {
+    if (presets.length > 0) setPresets(presets);
+  }), []);
 
   // Deep-link dalla push: si apre appena la lista è pronta.
   useEffect(() => {
@@ -179,18 +188,31 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
   }, []);
 
   const loadMessages = useCallback(async (threadKey: string) => {
-    setMsgLoading(true);
+    // Thread già visto: si mostra subito la prima pagina in cache e il fetch
+    // rinfresca in background. Il guard su selectedKeyRef scarta la risposta
+    // del thread che non è più aperto (coi cambi istantanei due fetch possono
+    // essere in volo insieme).
+    const cached = staffChatCache.timelines.get(threadKey);
+    if (cached) {
+      setMessages(cached);
+      setHasMore(cached.length >= PAGE_SIZE);
+    }
+    setMsgLoading(!cached);
     setMsgError(null);
     try {
       const { messages } = await staffChatApiService.getMessages(threadKey);
+      staffChatCache.setTimeline(threadKey, messages);
+      if (selectedKeyRef.current !== threadKey) return;
       setMessages(messages);
       setHasMore(messages.length === PAGE_SIZE);
       const last = messages[messages.length - 1];
       if (last) markReadLocally(threadKey, last.id);
     } catch (err: any) {
-      setMsgError(err?.message || 'Errore caricamento messaggi');
+      if (selectedKeyRef.current === threadKey && !cached) {
+        setMsgError(err?.message || 'Errore caricamento messaggi');
+      }
     } finally {
-      setMsgLoading(false);
+      if (selectedKeyRef.current === threadKey) setMsgLoading(false);
     }
   }, [markReadLocally]);
 
@@ -226,6 +248,13 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
     const onMessage = (msg: StaffMessage) => {
       const key = threadKeyFor(msg, currentUserId);
       const open = selectedKeyRef.current === key;
+      // Anche la cache riceve il messaggio (qualunque thread, non solo quello
+      // aperto): riaprire una chat mostra subito ciò che è arrivato mentre si
+      // era altrove, senza aspettare il refresh in background.
+      const cachedTimeline = staffChatCache.timelines.get(key);
+      if (cachedTimeline && !cachedTimeline.some(m => m.id === msg.id)) {
+        staffChatCache.setTimeline(key, [...cachedTimeline, msg]);
+      }
       setThreads(prev => {
         const existing = prev.find(t => t.threadKey === key);
         if (!existing) {
@@ -287,6 +316,10 @@ const StaffChatPage: React.FC<StaffChatPageProps> = ({ currentUserId, currentUse
       setMentionDraft(new Map());
       setAttachments([]);
       setMessages(prev => (prev.some(m => m.id === msg.id) ? prev : [...prev, msg]));
+      const cachedTimeline = staffChatCache.timelines.get(key);
+      if (cachedTimeline && !cachedTimeline.some(m => m.id === msg.id)) {
+        staffChatCache.setTimeline(key, [...cachedTimeline, msg]);
+      }
       setThreads(prev => prev.map(t => t.threadKey === key ? { ...t, lastMessage: msg } : t));
       // Il proprio messaggio è per definizione letto.
       staffChatApiService.markRead(key, msg.id).catch(() => {});
