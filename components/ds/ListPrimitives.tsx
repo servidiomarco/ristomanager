@@ -420,9 +420,6 @@ export interface Stat {
   title?: string;
   /** Drops below the given breakpoint — for segments a phone has no room for. */
   hideBelow?: 'sm' | 'md' | 'lg';
-  /** Renders after the label, inline layout only — for a segment that carries
-   *  its own pills (es. liberi/occupati accanto al conteggio tavoli). */
-  suffix?: React.ReactNode;
 }
 
 const HIDE_BELOW: Record<NonNullable<Stat['hideBelow']>, string> = {
@@ -470,7 +467,6 @@ export const StatStrip: React.FC<{
               {s.value}
             </span>
             <span className={`truncate ${stacked ? 'text-[12px]' : ''} ${t.label}`}>{s.label}</span>
-            {!stacked && s.suffix}
             {!stacked && s.onClick && (
               <ChevronRight className={`h-3.5 w-3.5 flex-shrink-0 ${t.label}`} aria-hidden />
             )}
