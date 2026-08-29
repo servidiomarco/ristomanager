@@ -18562,8 +18562,8 @@ app.post('/voice-calls/sync', authenticate, requireFeature('voice'), voiceCallsA
 // directly — the endpoints they gate are low-volume (a handful per minute
 // at most), so caching isn't worth the complexity.
 
-type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'digital_menu_enabled';
-const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'voice_double_seating_enabled', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'digital_menu_enabled'];
+type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'digital_menu_enabled' | 'reservation_table_step_enabled';
+const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'voice_double_seating_enabled', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'digital_menu_enabled', 'reservation_table_step_enabled'];
 
 async function getFeatureFlag(tenantId: number, key: FeatureFlagKey, fallback: boolean): Promise<boolean> {
     try {
@@ -18599,6 +18599,15 @@ const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, boolean> = {
     // Spento finché il gestore non scrive le regole della casa: senza base di
     // conoscenza il modello non avrebbe da cosa rispondere.
     ai_messages_enabled: false,
+    /* Come si sceglie il tavolo nel modal prenotazione. Spento (default) =
+       vista unita: il tavolo sta dentro Dettagli, riassunto in una riga che
+       si apre dove sta. Acceso = il tavolo diventa un passo suo, a tutta
+       larghezza. Non e' un modulo da vendere ne' una funzione da accendere:
+       e' una preferenza di layout, e le due viste fanno esattamente le stesse
+       cose. Default sulla vista unita perche' e' la piu' vicina a com'era
+       prima — nessun ristorante si ritrova il flusso cambiato senza averlo
+       chiesto. */
+    reservation_table_step_enabled: false,
 };
 
 app.get('/settings/features', authenticate, async (req, res) => {

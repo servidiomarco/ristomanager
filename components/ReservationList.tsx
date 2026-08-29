@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  ModalShell, FormCard, Field, Stepper, StepNav, SegmentedControl, dsInput, dsSelect, dsTextarea, dsButton, dsStepArrow,
+  ModalShell, FormCard, Field, Stepper, StepNav, SegmentedControl, DayPicker, dsInput, dsSelect, dsTextarea, dsButton, dsStepArrow,
   SearchField, SectionHeader, StatusPill, StatStrip, EmptyState, Callout, dsIconButton, CountBadge, useMediaQuery,
 } from './ds';
 import type { SectionTone, Stat } from './ds';
@@ -10,7 +10,7 @@ import { BillFigures, billStateLabel } from './prenotazione/BillFigures';
 import { PaymentRequestRow } from './prenotazione/PaymentRequestRow';
 import { MessaggiPanel } from './prenotazione/MessaggiPanel';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, RoomClosedOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill, NoteSelection, TableAssignmentSuggestion } from '../types';
-import { Banknote, Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, ListFilter, Map as MapIcon, List, MessageCircle, Mail, Armchair, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode } from 'lucide-react';
+import { Banknote, Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, ListFilter, Map as MapIcon, List, MessageCircle, Mail, Armchair, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, revokePaymentRequest, getReservationMessages, sendReservationReminder, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap, getTableAssignmentSuggestions, confirmTableAssignmentSuggestion, dismissTableAssignmentSuggestion } from '../services/apiService';
 import { billsApiService, printBill } from '../services/billsApiService';
@@ -114,12 +114,50 @@ const RESERVATION_STEPS = [
   { label: 'Comunicazione', icon: MessageCircle },
 ] as const;
 
+/* Vista a passi (impostazione `reservation_table_step_enabled`): il tavolo
+   esce da Dettagli e diventa un passo suo. Quel che resta nel primo passo e'
+   chi prenota e quando, e l'etichetta lo dice — "Dettagli" con la sala fuori
+   descriverebbe un contenitore che non c'e' piu'. Le due viste fanno le
+   stesse cose: cambia dove sta la scelta del tavolo, non cosa si puo' fare. */
+const RESERVATION_STEPS_WITH_TABLE = [
+  { label: 'Chi e quando', icon: Calendar },
+  { label: 'Tavolo', icon: MapPin },
+  { label: 'Pagamenti', icon: CreditCard },
+  { label: 'Comunicazione', icon: MessageCircle },
+] as const;
+
 // Sezione conto-al-tavolo nel modal prenotazione. Interruttore lato client
 // sopra al feature flag backend `pay_at_table_enabled`: con entrambi attivi
 // la sezione compare in modalità edit per chi ha `payments:view`. Tenuto
 // come kill-switch rapido (già servito più volte) — mettere `false` per
 // nascondere l'operatività ai camerieri senza toccare l'endpoint QR.
 const PAY_AT_TABLE_UI_VISIBLE = true;
+
+/* Le quattro scorciatoie della riga "Giorno": oggi, domani e i due giorni
+   dopo. Oltre si passa da "Altra data". Nessun dato nuovo — sono solo date. */
+const dayShortcuts = (): { iso: string; label: string }[] => {
+  const base = new Date();
+  return [0, 1, 2, 3].map(offset => {
+    const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + offset);
+    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    if (offset === 0) return { iso, label: 'Oggi' };
+    if (offset === 1) return { iso, label: 'Domani' };
+    // "Lun 31" — maiuscola solo a inizio etichetta, il resto e' minuscolo
+    // come vuole §5.2.
+    const wd = d.toLocaleDateString('it-IT', { weekday: 'short' }).replace('.', '');
+    return { iso, label: `${wd.charAt(0).toUpperCase()}${wd.slice(1)} ${d.getDate()}` };
+  });
+};
+
+// Etichetta della pillola quando la data scelta non e' una delle quattro.
+const longDayLabel = (iso: string): string => {
+  const [y, m, d] = iso.split('-').map(Number);
+  if (!y || !m || !d) return iso;
+  const date = new Date(y, m - 1, d);
+  const wd = date.toLocaleDateString('it-IT', { weekday: 'short' }).replace('.', '');
+  const mo = date.toLocaleDateString('it-IT', { month: 'short' }).replace('.', '');
+  return `${wd.charAt(0).toUpperCase()}${wd.slice(1)} ${d} ${mo}`;
+};
 
 const formatLocalDateTime = (date: Date): string => {
   const h = String(date.getHours()).padStart(2, '0');
@@ -813,9 +851,85 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Whole pay-at-table UI is gated behind this flag; fetched once on mount.
   // Default false so we don't briefly flash the section before flags load.
   const [payAtTableEnabled, setPayAtTableEnabled] = useState(false);
+  // Vista del modal: false = tavolo dentro Dettagli (default), true = passo a
+  // parte. Default false anche qui, cosi' prima che i flag arrivino si vede la
+  // vista unita invece di un passo che poi sparisce.
+  const [tableAsStepFlag, setTableAsStepFlag] = useState(false);
   useEffect(() => swrConfig('featureFlags', getFeatureFlags, f => {
     setPayAtTableEnabled(PAY_AT_TABLE_UI_VISIBLE && !!f.pay_at_table_enabled);
+    setTableAsStepFlag(!!f.reservation_table_step_enabled);
   }), []);
+
+  /* Scorciatoia di collaudo, solo in sviluppo. Il flag vero vive nel backend:
+     finche' quello non e' in linea la card in Impostazioni risponde
+     `no_updates` e le due viste non si possono confrontare. Le viste pero'
+     sono tutte di qui, quindi per guardarle basta scavalcare il flag.
+
+       localStorage.setItem('ds_reservation_table_step', '1')  -> tavolo a parte
+       localStorage.setItem('ds_reservation_table_step', '0')  -> tutto in una vista
+       localStorage.removeItem('ds_reservation_table_step')    -> torna al flag
+
+     Ricaricare la pagina dopo averlo cambiato.
+
+     `import.meta.env.DEV` e' sostituito a build-time con `false` in
+     produzione, quindi questo ramo non finisce nel bundle: non e' una porta di
+     servizio lasciata aperta, e' codice che li' non esiste. */
+  let devTableStepOverride: string | null = null;
+  if (import.meta.env.DEV) {
+    try { devTableStepOverride = window.localStorage.getItem('ds_reservation_table_step'); } catch { /* storage negato */ }
+  }
+  const tableAsStep = devTableStepOverride != null ? devTableStepOverride === '1' : tableAsStepFlag;
+
+  /* I passi e i loro indici in un posto solo. Le due viste hanno un numero
+     diverso di passi, quindi Pagamenti e Comunicazione non stanno allo stesso
+     indice: confrontare `formStep === 2` a mano vorrebbe dire un numero
+     diverso per vista in ogni punto che lo guarda. */
+  const reservationSteps = tableAsStep ? RESERVATION_STEPS_WITH_TABLE : RESERVATION_STEPS;
+  const stepIndex = tableAsStep
+    ? { details: 0, table: 1, payments: 2, comms: 3 }
+    // Vista unita: il tavolo non ha un passo suo, vive dentro Dettagli.
+    : { details: 0, table: 0, payments: 1, comms: 2 };
+
+  /* Su una prenotazione nuova i passi oltre il primo sono spenti, e le sezioni
+     restano tutte montate: sono i loro contenuti a sapere che senza un id non
+     hanno niente da mostrare. Nella vista a passi pero' Dettagli e Tavolo
+     devono alternarsi anche in creazione — sono due schermate, non due meta'
+     della stessa — quindi li' vince sempre il passo corrente. */
+  const sectionVisible = (index: number) => (isEditing || tableAsStep) ? formStep === index : true;
+
+  /* Vista unita: il blocco sala si apre dove sta, dentro Dettagli. Chiuso
+     lascia una riga di riepilogo — quando l'assegnazione automatica ha gia'
+     scelto bene, non c'e' motivo di sfogliare ottanta tavoli.
+
+     Si apre da solo quando un tavolo non c'e' ancora: la riga di riepilogo
+     senza tavolo non riassumerebbe niente. E resta aperto durante l'unione,
+     dove chiudere vorrebbe dire nascondere una selezione a meta'. */
+  const [tableSectionOpen, setTableSectionOpen] = useState(false);
+  /* Se il tavolo l'ha scelto il sistema o una persona. Serve solo alla riga di
+     riepilogo: scriverle sotto "assegnato automaticamente" quando l'ha scelto
+     l'operatore sarebbe una bugia, e su una riga che si legge di sfuggita le
+     bugie passano. */
+  const [tableAutoAssigned, setTableAutoAssigned] = useState(false);
+
+  // "Altra data": il calendario si apre solo se serve. Le quattro scorciatoie
+  // coprono quasi tutte le prenotazioni prese al telefono.
+  const [otherDateOpen, setOtherDateOpen] = useState(false);
+  const dayPickerRef = useRef<HTMLDivElement | null>(null);
+  // Sopra il form, quindi deve chiudersi come si chiude un popover: clic fuori
+  // o Escape. Senza, l'unica uscita sarebbe scegliere una data per forza.
+  useEffect(() => {
+    if (!otherDateOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!dayPickerRef.current?.contains(e.target as Node)) setOtherDateOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOtherDateOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [otherDateOpen]);
 
   // Limiti di occupazione per sala: servono solo a disegnare la tacca sulla
   // barra di riempimento di ogni sala, così lo staff vede a colpo d'occhio
@@ -2736,6 +2850,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   message: `Il tavolo ${table.name} ha solo ${table.seats} posti ma la prenotazione è per ${guests} ospiti.`,
                   suggestions: suggestions,
                   onConfirm: () => {
+                      setTableAutoAssigned(false);
+                      setTableSectionOpen(false);
                       setFormData({...formData, table_id: table.id});
                       setSelectedTablesForMerge([]);
                       setConfirmModal(null);
@@ -2746,6 +2862,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                       setConfirmModal(null);
                   },
                   onSelectSuggestion: (suggestedTable: Table) => {
+                      setTableAutoAssigned(true);
+                      setTableSectionOpen(false);
                       setFormData({...formData, table_id: suggestedTable.id});
                       setSelectedTablesForMerge([]);
                       setConfirmModal(null);
@@ -2759,6 +2877,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   title: '⚠️ Capienza Insufficiente',
                   message: `Il tavolo ${table.name} ha solo ${table.seats} posti ma la prenotazione è per ${guests} ospiti.\n\nNon ci sono tavoli disponibili più grandi.`,
                   onConfirm: () => {
+                      setTableAutoAssigned(false);
+                      setTableSectionOpen(false);
                       setFormData({...formData, table_id: table.id});
                       setSelectedTablesForMerge([]);
                       setConfirmModal(null);
@@ -2773,16 +2893,27 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       }
 
       // Assign the table (if capacity is sufficient)
+      setTableAutoAssigned(false);
+      setTableSectionOpen(false);
       setFormData({...formData, table_id: table.id});
       setSelectedTablesForMerge([]);
   };
 
-  const handleAutoAssign = () => {
-      if (!formData.guests || !formData.reservation_time || !formData.shift) return;
+  /* I tavoli che reggono questa prenotazione, dal piu' giusto in giu' — dove
+     "piu' giusto" vuol dire il piu' piccolo che ci sta, cioe' quello che spreca
+     meno posti. Era la lista interna di `handleAutoAssign`; sta fuori perche'
+     ora la leggono in due: il bottone, che prende il primo, e la striscia dei
+     suggeriti, che mostra i primi tre. Una lista sola vuol dire che il bottone
+     e i suggerimenti non possono contraddirsi.
 
+     Non memoizzata di proposito: sono un paio di filtri su una manciata di
+     tavoli, e le dipendenze sarebbero sei fra cui due funzioni — una lista di
+     dipendenze sbagliata qui darebbe suggerimenti scaduti, che e' molto peggio
+     del costo di ricalcolarla. */
+  const rankedAvailableTables = (() => {
+      if (!formData.guests || !formData.reservation_time || !formData.shift) return [];
       const closedRoomIds = new Set(rooms.filter(isRoomClosed).map(r => r.id));
-
-      const availableTables = displayTables
+      return displayTables
         .filter(t => !closedRoomIds.has(t.room_id))
         .filter(t => t.seats >= (formData.guests || 0))
         .filter(t => !isTableOccupied(t.id as number, formData.reservation_time!.split('T')[0], formData.shift!))
@@ -2793,10 +2924,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         ))
         .filter(t => !hiddenTableIds.has(t.id))
         .sort((a, b) => a.seats - b.seats);
+  })();
 
-      if (availableTables.length > 0) {
-          setFormData({ ...formData, table_id: availableTables[0].id });
-          showToast(`Tavolo ${availableTables[0].name} assegnato automaticamente.`, 'success');
+  const handleAutoAssign = () => {
+      if (rankedAvailableTables.length > 0) {
+          setTableAutoAssigned(true);
+          setTableSectionOpen(false);
+          setFormData({ ...formData, table_id: rankedAvailableTables[0].id });
+          showToast(`Tavolo ${rankedAvailableTables[0].name} assegnato automaticamente.`, 'success');
       } else {
           showToast("Nessun tavolo ottimale trovato.", 'error');
       }
@@ -3056,6 +3191,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const openRooms = rooms.filter(r => !isRoomClosed(r));
   const displayedRooms = modalRoomFilter === 'ALL' ? openRooms : openRooms.filter(r => r.id === modalRoomFilter);
   const selectedTableObj = displayTables.find(t => t.id === formData.table_id);
+
+  // Derivati del blocco sala — qui e non piu' su, perche' `selectedTableObj`
+  // nasce in questa riga. Vedi `tableSectionOpen` per il perche' delle regole.
+  /* In Dettagli la sala parte sempre chiusa — anche senza tavolo assegnato.
+     Prima si apriva da sola quando `table_id` era vuoto, cioe' su ogni
+     prenotazione nuova: la scheda si apriva su ottanta tavoli prima ancora di
+     sapere per quante persone. Adesso senza tavolo c'e' una striscia con le
+     due uscite (assegna da solo / scegli io), e la griglia si vede quando la
+     si chiede. Nella vista a passi il tavolo E' il passo, quindi resta aperto;
+     durante un'unione pure, o si nasconderebbe una selezione a meta'. */
+  const tableExpanded = tableAsStep || tableSectionOpen || mergeMode;
+  const showTableSummary = !tableAsStep && !tableExpanded && !!selectedTableObj;
+  const showTableEmptyStrip = !tableAsStep && !tableExpanded && !selectedTableObj;
+
 
   // Calculate Free Tables for the form header
   // Helper to check if a table is merged into another table (and thus should be hidden)
@@ -4764,8 +4913,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           subheader={
             <StepNav
               steps={isEditing
-                ? RESERVATION_STEPS
-                : RESERVATION_STEPS.map((s, i) => ({ ...s, disabled: i > 0 }))}
+                ? reservationSteps
+                // In creazione Pagamenti e Comunicazione restano spenti: senza
+                // prenotazione salvata non hanno niente a cui attaccarsi. Il
+                // Tavolo invece serve subito, quindi nella vista a passi la
+                // soglia si sposta di uno.
+                : reservationSteps.map((s, i) => ({ ...s, disabled: i > stepIndex.table }))}
               current={formStep}
               onSelect={setFormStep}
               ariaLabel="Sezioni della prenotazione"
@@ -4832,7 +4985,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <button
                   type="button"
                   onClick={() => setFormStep(s => Math.min(RESERVATION_STEPS.length - 1, s + 1))}
-                  disabled={formStep === RESERVATION_STEPS.length - 1}
+                  disabled={formStep === reservationSteps.length - 1}
                   aria-label="Sezione successiva"
                   title="Sezione successiva"
                   className={dsStepArrow}
@@ -4890,7 +5043,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 <button
                                     type="button"
                                     onClick={handleRestoreDraft}
-                                    className="h-9 flex-shrink-0 rounded-full bg-[var(--ds-pending-solid)] px-3.5 text-[14px] font-semibold text-[var(--ds-pending-fg)] transition-all hover:brightness-95"
+                                    // Primary, non il gold del banner: e' l'azione
+                                    // della scheda, e il tono del contenitore non e'
+                                    // un motivo per tingerla. Sul gold il testo deve
+                                    // restare scuro (bianco = 3.25:1, §3.3), quindi
+                                    // "CTA piena con testo bianco" e "CTA gold" sono
+                                    // due cose che non stanno insieme.
+                                    className="h-9 flex-shrink-0 rounded-full bg-[var(--ds-action-bg)] px-3.5 text-[14px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                                 >
                                     Riprendi
                                 </button>
@@ -4904,21 +5063,239 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             </div>
                         </div>
                     )}
-                    {/* Step 1 — Dettagli. The wrapper carries the visibility so
-                        the form keeps its own `grid` display; putting `hidden`
-                        on the form itself would race the grid class. */}
-                    <section className={!isEditing || formStep === 0 ? 'block' : 'hidden'}>
-                    <form id="reservation-form" onSubmit={handleSubmit} className="grid grid-cols-1 gap-5 p-4 sm:p-6 lg:grid-cols-12">
-                        {/* Left Column: Details (5 cols) */}
-                        <div className="lg:col-span-5 flex flex-col gap-5 min-w-0">
+                    {/* Step 1 — Dettagli (e Tavolo, nella vista a passi). La
+                        visibilita' sta sul wrapper e non sul form: `hidden` sul
+                        form litigherebbe con la sua classe di display.
+
+                        Una colonna sola in entrambe le viste. Le due colonne
+                        affiancate davano al tavolo 7/12 dello spazio: la
+                        griglia dei tavoli ci stava stretta e il form accanto
+                        era una colonna magra. A tutta larghezza, uno per
+                        volta, respirano tutti e due. */}
+                    <section className={sectionVisible(stepIndex.details) || (tableAsStep && sectionVisible(stepIndex.table)) ? 'block' : 'hidden'}>
+                    <form id="reservation-form" onSubmit={handleSubmit} className="flex flex-col gap-5 p-4 sm:p-6">
+                        {/* Chi e quando. Nella vista a passi sparisce quando si
+                            passa al Tavolo; in quella unita c'e' sempre. */}
+                        <div className={`flex flex-col gap-5 min-w-0 ${tableAsStep && formStep !== stepIndex.details ? 'hidden' : ''}`}>
                             <FormCard>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <Field label="Numero ospiti">
+                                {/* Giorno — quattro scorciatoie e una via d'uscita.
+                                    Il campo data nativo restava chiuso su "29/08/2026"
+                                    anche quando la risposta era "domani": tre gesti per
+                                    la prenotazione piu' comune che ci sia. */}
+                                <Field label="Giorno">
+                                    <div ref={dayPickerRef}>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        {(() => {
+                                            const selected = formData.reservation_time?.split('T')[0] || '';
+                                            const shortcuts = dayShortcuts();
+                                            const chip = (active: boolean) =>
+                                                `inline-flex h-11 items-center gap-2 rounded-full px-4 text-[14px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                                                    active
+                                                        ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                                                        : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
+                                                }`;
+                                            const pick = (iso: string) => {
+                                                const time = formData.reservation_time?.split('T')[1] || '20:00';
+                                                setFormData({ ...formData, reservation_time: `${iso}T${time}` });
+                                                setOtherDateOpen(false);
+                                            };
+                                            const isShortcut = shortcuts.some(d => d.iso === selected);
+                                            return (
+                                                <>
+                                                    {shortcuts.map(d => (
+                                                        <button key={d.iso} type="button" onClick={() => pick(d.iso)} className={chip(selected === d.iso)}>
+                                                            {d.label}
+                                                        </button>
+                                                    ))}
+                                                    {/* Una data lontana resta visibile come pillola sua:
+                                                        senza, la riga direbbe che non hai scelto niente.
+                                                        Riapre il calendario; per tornare a oggi c'e' la
+                                                        pillola "Oggi", due dita piu' a sinistra. */}
+                                                    {selected && !isShortcut && (
+                                                        <button type="button" onClick={() => setOtherDateOpen(o => !o)} className={chip(true)}>
+                                                            {longDayLabel(selected)}
+                                                        </button>
+                                                    )}
+                                                    <span className="relative">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setOtherDateOpen(o => !o)}
+                                                            aria-expanded={otherDateOpen}
+                                                            className="inline-flex h-11 items-center gap-1.5 rounded-full bg-[var(--ds-surface)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                                                        >
+                                                            <Calendar className="h-4 w-4" aria-hidden /> Altra data
+                                                        </button>
+                                                        {otherDateOpen && (
+                                                            <>
+                                                                {/* Da stretti il calendario esce dal
+                                                                    modal: appeso a un bottone dentro un
+                                                                    pannello che scorre, meta' mese
+                                                                    finisce oltre il bordo. Sotto sm
+                                                                    diventa un riquadro centrato con il
+                                                                    suo velo — sempre intero, sempre
+                                                                    raggiungibile col pollice. Da sm in
+                                                                    su resta appeso al bottone. */}
+                                                                <div
+                                                                    className="fixed inset-0 z-40 bg-[var(--ds-backdrop)] sm:hidden"
+                                                                    onClick={() => setOtherDateOpen(false)}
+                                                                    aria-hidden
+                                                                />
+                                                                <div className="fixed left-1/2 top-1/2 z-50 w-[320px] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 sm:absolute sm:left-0 sm:top-full sm:z-40 sm:mt-2 sm:translate-x-0 sm:translate-y-0">
+                                                                    <DayPicker
+                                                                        value={formData.reservation_time?.split('T')[0] || ''}
+                                                                        minIso={dayShortcuts()[0].iso}
+                                                                        onPick={iso => {
+                                                                            const currentTime = formData.reservation_time?.split('T')[1] || '20:00';
+                                                                            setFormData({ ...formData, reservation_time: `${iso}T${currentTime}` });
+                                                                            setOtherDateOpen(false);
+                                                                        }}
+                                                                    />
+                                                                </div>
+                                                            </>
+                                                        )}
+                                                    </span>
+                                                </>
+                                            );
+                                        })()}
+                                    </div>
+                                    {/* Il calendario dell'app, non quello del browser:
+                                        quello nativo cambia faccia a ogni sistema e non
+                                        sa niente delle altre superfici. E' la stessa
+                                        griglia dei pagamenti — una sola, in `ds`. */}
+                                    </div>
+                                </Field>
+
+                                {/* Ora — il turno sta sulla stessa riga dell'etichetta:
+                                    scegliere pranzo o cena e' il primo taglio dell'orario,
+                                    non un campo a se'. Sotto, gli slot: erano gia' qui ma
+                                    piu' in basso, sotto un secondo menu a tendina che
+                                    diceva la stessa cosa senza dire quanti coperti. */}
+                                <div className="mt-7">
+                                    <div className="mb-3 flex items-center justify-between gap-3">
+                                        <span className="text-[14px] font-medium text-[var(--ds-text-secondary)]">Ora</span>
+                                        <span className="hidden items-center gap-2.5 text-[13px] text-[var(--ds-text-muted)] sm:inline-flex">
+                                            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--ds-seated-solid)]" /> scarsa</span>
+                                            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--ds-pending-solid)]" /> media</span>
+                                            <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--ds-critical-solid)]" /> alta</span>
+                                        </span>
+                                    </div>
+                                    {/* Il turno sta sotto al titolo, non in riga con
+                                        lui: e' un comando, e schiacciato accanto
+                                        all'etichetta sembrava una didascalia. */}
+                                    {/* Largo quanto le sue due parole, non quanto il
+                                        modal: steso su tutta la riga sembrava una
+                                        barra di navigazione invece di una scelta. */}
+                                    <div className="mb-5 w-fit">
+                                            <SegmentedControl
+                                                ariaLabel="Turno"
+                                                equalWidth={false}
+                                                value={formData.shift === Shift.LUNCH ? Shift.LUNCH : Shift.DINNER}
+                                                onChange={next => {
+                                                    const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
+                                                    const isLunch = next === Shift.LUNCH;
+                                                    setFormData({
+                                                        ...formData,
+                                                        shift: next,
+                                                        reservation_time: `${currentDate}T${isLunch ? '13:00' : '20:00'}`,
+                                                        duration_minutes: defaultDurationForShift(next),
+                                                    });
+                                                }}
+                                                options={[
+                                                    { value: Shift.LUNCH, label: 'Pranzo', icon: <Sun className="h-3.5 w-3.5" /> },
+                                                    { value: Shift.DINNER, label: 'Cena', icon: <Sunset className="h-3.5 w-3.5" /> },
+                                                ]}
+                                            />
+                                    </div>
+
+                                    {slotArrivalStats ? (
+                                        <>
+                                            <div className="flex gap-1.5">
+                                                {(() => {
+                                                    /* Una prenotazione vecchia puo' avere un orario che
+                                                       non e' piu' fra gli slot aperti. La tendina di
+                                                       prima lo teneva visibile; qui si aggiunge in coda,
+                                                       altrimenti aprire quella scheda cancellerebbe
+                                                       l'ora senza dirlo. */
+                                                    const current = formData.reservation_time?.split('T')[1]?.substring(0, 5) || '';
+                                                    const rows: { time: string; guests: number; level: string }[] = [...slotArrivalStats];
+                                                    if (current && !rows.some(r => r.time === current)) {
+                                                        rows.push({ time: current, guests: 0, level: 'empty' });
+                                                        rows.sort((a, b) => a.time.localeCompare(b.time));
+                                                    }
+                                                    return rows.map(s => {
+                                                        const bg = s.level === 'high' ? 'bg-[var(--ds-critical-solid)]'
+                                                            : s.level === 'medium' ? 'bg-[var(--ds-pending-solid)]'
+                                                            : s.level === 'low' ? 'bg-[var(--ds-seated-solid)]'
+                                                            : 'bg-[var(--ds-surface-row)]';
+                                                        const isSelected = current === s.time;
+                                                        return (
+                                                            <button
+                                                                type="button"
+                                                                key={s.time}
+                                                                onClick={() => {
+                                                                    const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
+                                                                    setFormData({ ...formData, reservation_time: `${currentDate}T${s.time}` });
+                                                                }}
+                                                                aria-pressed={isSelected}
+                                                                className={`flex min-w-0 flex-1 flex-col items-center rounded-[12px] px-1 py-2.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${isSelected ? 'bg-[var(--ds-surface-row)] ring-1 ring-inset ring-[var(--ds-border-strong)]' : 'hover:bg-[var(--ds-surface-row)]'}`}
+                                                                title={`${s.time} — ${s.guests} coperti`}
+                                                            >
+                                                                <div className={`h-2.5 w-full rounded-full ${bg}`} />
+                                                                <div className="mt-1 text-[11px] leading-tight tabular-nums text-[var(--ds-text-muted)]">{s.time}</div>
+                                                                <div className="text-[12px] font-semibold leading-tight tabular-nums text-[var(--ds-text-primary)]">{s.guests}</div>
+                                                            </button>
+                                                        );
+                                                    });
+                                                })()}
+                                            </div>
+                                            <p className="mt-3 text-[13px] text-[var(--ds-text-muted)]">
+                                                Coperti attesi per slot
+                                                {(() => {
+                                                    const start = formData.reservation_time ? parseLocalDate(formData.reservation_time) : null;
+                                                    const dur = resolveDurationMinutes({ duration_minutes: formData.duration_minutes, shift: formData.shift });
+                                                    if (!start) return null;
+                                                    const end = new Date(start.getTime() + dur * 60_000);
+                                                    const hh = String(end.getHours()).padStart(2, '0');
+                                                    const mm = String(end.getMinutes()).padStart(2, '0');
+                                                    return <> · tavolo libero alle <span className="font-semibold tabular-nums text-[var(--ds-text-primary)]">{hh}:{mm}</span></>;
+                                                })()}
+                                            </p>
+                                        </>
+                                    ) : (
+                                        /* Senza slot calcolabili resta la tendina: meglio un
+                                           campo spoglio che nessun modo di scegliere l'ora. */
+                                        <select
+                                            required
+                                            className={dsSelect}
+                                            value={formData.reservation_time?.split('T')[1]?.substring(0, 5) || ''}
+                                            onChange={e => {
+                                                const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
+                                                setFormData({ ...formData, reservation_time: `${currentDate}T${e.target.value}` });
+                                            }}
+                                        >
+                                            {(() => {
+                                                const current = formData.reservation_time?.split('T')[1]?.substring(0, 5) || '';
+                                                const options = [...formSlots];
+                                                if (current && !options.includes(current)) options.push(current);
+                                                options.sort();
+                                                if (options.length === 0) {
+                                                    return <option value="" disabled>Nessuno slot disponibile</option>;
+                                                }
+                                                return options.map(s => <option key={s} value={s}>{s}</option>);
+                                            })()}
+                                        </select>
+                                    )}
+                                </div>
+
+                                {/* Coperti, bambini e durata su una riga: sono i tre
+                                    numeri che si dicono di seguito al telefono. */}
+                                <div className="mt-7 grid grid-cols-2 gap-4 sm:grid-cols-3">
+                                    <Field label="Coperti">
                                         <Stepper
                                             value={formData.guests}
                                             min={1}
                                             required
-                                            ariaLabel="Numero ospiti"
+                                            ariaLabel="Coperti"
                                             onChange={next => setFormData({
                                                 ...formData,
                                                 guests: next,
@@ -4935,88 +5312,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                             onChange={next => setFormData({ ...formData, children: next ?? 0 })}
                                         />
                                     </Field>
-                                </div>
-
-                                <div className="mt-5">
-                                    <Field label="Turno">
-                                        <SegmentedControl
-                                            ariaLabel="Turno"
-                                            value={formData.shift === Shift.LUNCH ? Shift.LUNCH : Shift.DINNER}
-                                            onChange={next => {
-                                                const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
-                                                const isLunch = next === Shift.LUNCH;
-                                                setFormData({
-                                                    ...formData,
-                                                    shift: next,
-                                                    reservation_time: `${currentDate}T${isLunch ? '13:00' : '20:00'}`,
-                                                    duration_minutes: defaultDurationForShift(next),
-                                                });
-                                            }}
-                                            options={[
-                                                { value: Shift.LUNCH, label: 'Pranzo', icon: <Sun className="h-3.5 w-3.5" /> },
-                                                { value: Shift.DINNER, label: 'Cena', icon: <Sunset className="h-3.5 w-3.5" /> },
-                                            ]}
-                                        />
-                                    </Field>
-                                </div>
-
-                                <div className="mt-5 grid grid-cols-2 gap-3">
-                                    <Field label="Data">
-                                        <input
-                                            type="date"
-                                            required
-                                            className={`${dsInput} ds-date-input`}
-                                            value={formData.reservation_time?.split('T')[0] || ''}
-                                            onChange={e => {
-                                                const currentTime = formData.reservation_time?.split('T')[1] || '20:00';
-                                                setFormData({...formData, reservation_time: `${e.target.value}T${currentTime}`});
-                                            }}
-                                        />
-                                    </Field>
-                                    <Field label="Ora">
-                                        <select
-                                            required
-                                            className={dsSelect}
-                                            value={formData.reservation_time?.split('T')[1]?.substring(0, 5) || ''}
-                                            onChange={e => {
-                                                const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
-                                                setFormData({...formData, reservation_time: `${currentDate}T${e.target.value}`});
-                                            }}
-                                        >
-                                            {(() => {
-                                                // Keep the currently-selected time visible even if it's
-                                                // been disabled since the reservation was created — so
-                                                // editing an existing row doesn't silently blank the field.
-                                                const current = formData.reservation_time?.split('T')[1]?.substring(0, 5) || '';
-                                                const options = [...formSlots];
-                                                if (current && !options.includes(current)) options.push(current);
-                                                options.sort();
-                                                if (options.length === 0) {
-                                                    return <option value="" disabled>Nessuno slot disponibile</option>;
-                                                }
-                                                return options.map(s => <option key={s} value={s}>{s}</option>);
-                                            })()}
-                                        </select>
-                                    </Field>
-                                </div>
-
-                                <div className="mt-5">
-                                    <Field
-                                        label="Durata"
-                                        aside={(() => {
-                                            const start = formData.reservation_time ? parseLocalDate(formData.reservation_time) : null;
-                                            const dur = resolveDurationMinutes({ duration_minutes: formData.duration_minutes, shift: formData.shift });
-                                            if (!start) return null;
-                                            const end = new Date(start.getTime() + dur * 60_000);
-                                            const hh = String(end.getHours()).padStart(2, '0');
-                                            const mm = String(end.getMinutes()).padStart(2, '0');
-                                            return (
-                                                <span className="tabular-nums">
-                                                    Tavolo libero alle <span className="font-semibold text-[var(--ds-text-primary)]">{hh}:{mm}</span>
-                                                </span>
-                                            );
-                                        })()}
-                                    >
+                                    <Field label="Durata" className="col-span-2 sm:col-span-1">
                                         <select
                                             className={dsSelect}
                                             value={formData.duration_minutes ?? defaultDurationForShift(formData.shift)}
@@ -5033,48 +5329,516 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                         </select>
                                     </Field>
                                 </div>
+                            </FormCard>
+                        </div>
 
-                                {slotArrivalStats && (
-                                    <div className="mt-5">
-                                        <Field
-                                            label="Affluenza arrivi"
-                                            aside={
-                                                <span className="hidden sm:inline-flex items-center gap-2.5">
-                                                    <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--ds-seated-solid)]" /> scarsa</span>
-                                                    <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--ds-pending-solid)]" /> media</span>
-                                                    <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[var(--ds-critical-solid)]" /> alta</span>
-                                                </span>
-                                            }
+                        {/* La sala. Stesso blocco nelle due viste: qui cambia
+                            solo se e' un passo a se' o una sezione di Dettagli
+                            che si apre e si chiude. */}
+                        <div className={`flex flex-col min-w-0 rounded-[20px] bg-[var(--ds-surface)] p-5 sm:p-6 ${tableAsStep && formStep !== stepIndex.table ? 'hidden' : ''}`}>
+                             {/* Riga chiusa: cosa e' stato scelto, e come cambiarlo.
+                                 "Cambia" e non "Riassegna" — riassegnare e' quello
+                                 che fa "Assegna automatico" li' sotto, e due bottoni
+                                 vicini non possono rivendicare lo stesso verbo. */}
+                             {/* Senza tavolo: una riga sola con le due strade.
+                                 "Assegna automatico" prende il primo della lista,
+                                 "Scegli" apre la sala. Nessuna griglia finche' non
+                                 la si chiede. */}
+                             {/* Da stretti va a capo: in riga il testo si spremeva in
+                                 una colonna di due parole accanto ai bottoni. Testo
+                                 sopra, comandi sotto. */}
+                             {showTableEmptyStrip && (
+                                 <div className="flex flex-col gap-3 rounded-[16px] bg-[var(--ds-surface-row)] p-4 sm:flex-row sm:items-center">
+                                     <p className="min-w-0 flex-1 text-[14px] text-[var(--ds-text-muted)]">
+                                         Nessun tavolo assegnato · {freeTablesCount} liberi a {formData.shift === Shift.LUNCH ? 'pranzo' : 'cena'}
+                                     </p>
+                                     <div className="flex flex-shrink-0 items-center gap-2">
+                                         <button type="button" onClick={handleAutoAssign} className={dsButton.primary}>
+                                             Assegna automatico
+                                         </button>
+                                         <button type="button" onClick={() => setTableSectionOpen(true)} className={dsButton.secondary}>
+                                             Scegli
+                                         </button>
+                                     </div>
+                                 </div>
+                             )}
+
+                             {showTableSummary && selectedTableObj && (
+                                 <div className="flex items-center gap-3 rounded-[16px] bg-[var(--ds-seated-tint)] p-4">
+                                     <MapPin className="h-5 w-5 flex-shrink-0 text-[var(--ds-seated-text)]" aria-hidden />
+                                     <div className="min-w-0 flex-1">
+                                         <p className="truncate text-[15px] font-semibold text-[var(--ds-seated-text)]">
+                                             {rooms.find(r => r.id === selectedTableObj.room_id)?.name ?? 'Sala'} · tavolo {selectedTableObj.name}
+                                         </p>
+                                         <p className="text-[13px] text-[var(--ds-seated-text)]">
+                                             {selectedTableObj.seats} posti{tableAutoAssigned ? ' · assegnato automaticamente' : ''}
+                                         </p>
+                                     </div>
+                                     <button
+                                         type="button"
+                                         onClick={() => setTableSectionOpen(true)}
+                                         className={`${dsButton.secondary} flex-shrink-0`}
+                                     >
+                                         Cambia
+                                     </button>
+                                 </div>
+                             )}
+
+                             {/* Il corpo si nasconde, non si smonta: rimontarlo
+                                 farebbe ripartire da capo scroll e filtro sala
+                                 ogni volta che si chiude e riapre. */}
+                             <div className={tableExpanded ? 'contents' : 'hidden'}>
+
+                             {/* Section Header */}
+                             {/* Da stretti: titolo su una riga sua, comandi sotto.
+                                 Titolo e due bottoni sulla stessa riga lasciavano al
+                                 titolo una colonna da tre parole in colonna. */}
+                             <div className="relative flex flex-col gap-3 pb-4 mb-4 border-b border-[var(--ds-border)] pr-12 sm:flex-row sm:flex-wrap sm:items-center">
+                                {/* In alto a destra della sezione, fuori dal flusso:
+                                    e' il "chiudi" del pannello, e il suo posto e'
+                                    l'angolo — accanto ad "Assegna automatico" sembrava
+                                    il secondo di due comandi pari, e da stretti finiva
+                                    su una riga tutta sua. Il `pr-12` sul contenitore
+                                    tiene libero l'angolo. */}
+                                {!tableAsStep && !mergeMode && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setTableSectionOpen(false)}
+                                        className={`${dsIconButton} absolute right-0 top-0 h-9 w-9 bg-[var(--ds-surface-row)] shadow-none`}
+                                        aria-label="Chiudi la scelta del tavolo"
+                                        title="Chiudi"
+                                    >
+                                        <ChevronUp className="h-4 w-4" aria-hidden />
+                                    </button>
+                                )}
+                                <div className="flex min-w-0 flex-1 items-start gap-3">
+                                <MapPin className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" />
+                                <div className="flex-1 min-w-0">
+                                    {/* Il titolo dice cosa c'e' di buono, non cosa fare:
+                                        la lista sotto e' gia' ordinata, e "tre tavoli
+                                        buoni per 2 alle 20:00" e' la risposta alla
+                                        domanda con cui si arriva qui. */}
+                                    <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
+                                        {rankedAvailableTables.length === 0
+                                            ? 'Nessun tavolo libero'
+                                            : `${Math.min(3, rankedAvailableTables.length) === 1 ? 'Un tavolo buono' : `${Math.min(3, rankedAvailableTables.length)} tavoli buoni`}`}
+                                        {formData.guests ? ` per ${formData.guests}` : ''}
+                                        {formData.reservation_time?.split('T')[1]?.substring(0, 5) ? ` alle ${formData.reservation_time.split('T')[1].substring(0, 5)}` : ''}
+                                    </h3>
+                                    <p className="text-[14px] text-[var(--ds-text-muted)]">
+                                        {freeTablesCount} liberi in tutto
+                                        {(() => {
+                                            const start = formData.reservation_time ? parseLocalDate(formData.reservation_time) : null;
+                                            const dur = resolveDurationMinutes({ duration_minutes: formData.duration_minutes, shift: formData.shift });
+                                            if (!start) return null;
+                                            const end = new Date(start.getTime() + dur * 60_000);
+                                            const hh = String(end.getHours()).padStart(2, '0');
+                                            const mm = String(end.getMinutes()).padStart(2, '0');
+                                            return <> · si liberano alle <span className="tabular-nums">{hh}:{mm}</span></>;
+                                        })()}
+                                    </p>
+                                </div>
+                                </div>
+                                <div className="flex flex-shrink-0 items-center gap-2">
+                                    {/* L'assegnazione automatica sta in testa al blocco:
+                                        e' l'alternativa allo sfogliare, quindi va offerta
+                                        prima della griglia, non dopo. */}
+                                    <button type="button" onClick={handleAutoAssign} className={dsButton.primary}>
+                                        Assegna automatico
+                                    </button>
+                                    {/* La via d'uscita: si apre la sala, si cambia idea, si
+                                        richiude senza aver toccato niente. Chiudere non
+                                        sceglie e non annulla — il tavolo resta quello di
+                                        prima. Sparisce durante l'unione, dove uscire di qui
+                                        nasconderebbe una selezione a meta': li' le uscite
+                                        sono "Conferma unione" ed "Esci unione".
+                                        Solo la freccia: accanto a "Assegna automatico" la
+                                        parola faceva una seconda etichetta lunga per un
+                                        gesto che il verso della freccia dice da solo. */}
+                                </div>
+                             </div>
+
+                             {/* Tre tavoli buoni, dalla stessa lista da cui
+                                 "Assegna automatico" pesca il primo. Serve a
+                                 trasformare "scegli fra ottanta" in "uno di
+                                 questi, oppure sfoglia". Sparisce quando non c'e'
+                                 niente da suggerire. */}
+                             {rankedAvailableTables.length > 0 && (
+                                 <div className="mb-4">
+                                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                                         {rankedAvailableTables.slice(0, 3).map(t => {
+                                             const isPicked = formData.table_id === t.id;
+                                             return (
+                                                 <button
+                                                     key={t.id}
+                                                     type="button"
+                                                     onClick={() => { setTableAutoAssigned(false); setTableSectionOpen(false); setFormData({ ...formData, table_id: t.id }); }}
+                                                     aria-pressed={isPicked}
+                                                     className={`flex items-center justify-between gap-2 rounded-[16px] px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                                                         isPicked
+                                                             ? 'bg-[var(--ds-seated-tint)] ring-1 ring-inset ring-[var(--ds-seated-solid)]'
+                                                             : 'bg-[var(--ds-surface-row)] hover:bg-[var(--ds-border)]'
+                                                     }`}
+                                                 >
+                                                     <span className="min-w-0 flex-1">
+                                                         <span className="flex items-baseline justify-between gap-2">
+                                                             <span className="truncate text-[17px] font-semibold text-[var(--ds-text-primary)]">{t.name}</span>
+                                                             <span className="flex-shrink-0 text-[13px] text-[var(--ds-text-muted)]">{rooms.find(r => r.id === t.room_id)?.name ?? ''}</span>
+                                                         </span>
+                                                         <span className="mt-1 block text-[13px] text-[var(--ds-text-muted)]">{t.seats} posti</span>
+                                                     </span>
+                                                 </button>
+                                             );
+                                         })}
+                                     </div>
+                                 </div>
+                             )}
+
+                             {/* Auto-assign & Actions */}
+                             {/* Solo durante un'unione: fuori da li' il
+                                 contenitore era vuoto ma teneva comunque il suo
+                                 filetto, il pt-4 e il mb-4 — trenta pixel di
+                                 niente fra la riga e le sale. */}
+                             {selectedTablesForMerge.length >= 1 && (
+                             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    {/* Show selected tables count and total capacity */}
+                                    {selectedTablesForMerge.length >= 1 && (
+                                        <div className="text-xs text-[var(--ds-text-secondary)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] px-3 py-1.5 rounded-full font-medium">
+                                            {selectedTablesForMerge.length} {selectedTablesForMerge.length === 1 ? 'tavolo' : 'tavoli'} = {tables.filter(t => selectedTablesForMerge.includes(t.id)).reduce((sum, t) => sum + t.seats, 0)} posti
+                                        </div>
+                                    )}
+
+                                    {selectedTablesForMerge.length >= 2 && (
+                                        <button
+                                            type="button"
+                                            onClick={async () => {
+                                                if (!formData.reservation_time || !formData.shift) {
+                                                    showToast('Imposta data e turno della prenotazione prima di unire i tavoli', 'error');
+                                                    return;
+                                                }
+                                                try {
+                                                    const primaryTableId = selectedTablesForMerge[0];
+                                                    const mergeDate = formData.reservation_time.split('T')[0];
+                                                    await onMergeTables(selectedTablesForMerge, mergeDate, formData.shift);
+                                                    await refreshMerges(mergeDate, formData.shift);
+                                                    // Auto-select the merged table for the reservation
+                                                    setFormData(prev => ({ ...prev, table_id: primaryTableId }));
+                                                    showToast(`Tavoli uniti e assegnati alla prenotazione`, 'success');
+                                                    setSelectedTablesForMerge([]);
+                                                    setMergeMode(false);
+                                                } catch (error) {
+                                                    showToast('Errore durante l\'unione dei tavoli', 'error');
+                                                }
+                                            }}
+                                            className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 bg-[var(--ds-text-primary)] text-[var(--ds-action-fg)] text-sm font-medium hover:opacity-90 transition-opacity"
                                         >
-                                            <div className="flex gap-1">
-                                                {slotArrivalStats.map(s => {
-                                                    const bg = s.level === 'high' ? 'bg-[var(--ds-critical-solid)]'
-                                                        : s.level === 'medium' ? 'bg-[var(--ds-pending-solid)]'
-                                                        : s.level === 'low' ? 'bg-[var(--ds-seated-solid)]'
-                                                        : 'bg-[var(--ds-surface-row)]';
-                                                    const isSelected = formData.reservation_time?.split('T')[1]?.substring(0, 5) === s.time;
-                                                    return (
-                                                        <button
-                                                            type="button"
-                                                            key={s.time}
-                                                            onClick={() => {
-                                                                const currentDate = formData.reservation_time?.split('T')[0] || new Date().toISOString().split('T')[0];
-                                                                setFormData({ ...formData, reservation_time: `${currentDate}T${s.time}` });
-                                                            }}
-                                                            className={`flex min-w-0 flex-1 flex-col items-center rounded-[10px] px-1 py-1.5 transition-colors ${isSelected ? 'bg-[var(--ds-surface-row)] ring-1 ring-inset ring-[var(--ds-border-strong)]' : 'hover:bg-[var(--ds-surface-row)]'}`}
-                                                            title={`${s.time} — ${s.guests} coperti`}
-                                                        >
-                                                            <div className={`h-2.5 w-full rounded-full ${bg}`} />
-                                                            <div className="mt-1 text-[11px] leading-tight tabular-nums text-[var(--ds-text-muted)]">{s.time}</div>
-                                                            <div className="text-[12px] font-semibold leading-tight tabular-nums text-[var(--ds-text-primary)]">{s.guests}</div>
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        </Field>
+                                            <Combine className="h-4 w-4" /> Conferma Unione
+                                        </button>
+                                    )}
+
+                                    {selectedTableObj?.merged_with && selectedTableObj.merged_with.length > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={async () => {
+                                                if (!formData.reservation_time || !formData.shift) {
+                                                    showToast('Imposta data e turno della prenotazione prima di dividere i tavoli', 'error');
+                                                    return;
+                                                }
+                                                try {
+                                                    const splitDate = formData.reservation_time.split('T')[0];
+                                                    await onSplitTable(selectedTableObj.id, splitDate, formData.shift);
+                                                    await refreshMerges(splitDate, formData.shift);
+                                                    showToast('Tavoli divisi con successo', 'success');
+                                                    setFormData({...formData, table_id: undefined});
+                                                } catch (error) {
+                                                    showToast('Errore durante la divisione dei tavoli', 'error');
+                                                }
+                                            }}
+                                            className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 border border-[var(--ds-pending-tint)] bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] dark:text-sm font-medium transition-colors"
+                                        >
+                                            <Scissors className="h-4 w-4" /> Dividi
+                                        </button>
+                                    )}
+                                </div>
+                             </div>
+                             )}
+
+                             {/* Room Tabs — il filtro sala e l'unione sulla stessa
+                                 riga: sono i due modi di restringere la griglia, e il
+                                 filetto sopra basta a separarli dai suggeriti senza un
+                                 titolo che ripeteva quello che si vede. */}
+                             {/* Da stretti l'unione va sopra le sale: in riga si
+                                 rubavano la larghezza e le pillole restavano un
+                                 mozzicone da scorrere. `order` sposta il bottone, non
+                                 il DOM — sono due comandi dello stesso gruppo, l'ordine
+                                 in cui si leggono non cambia cosa fanno. */}
+                             <div className="mb-4 flex flex-col items-stretch gap-2 border-t border-[var(--ds-border)] pt-4 sm:flex-row sm:items-center sm:gap-3">
+                                 <div className="order-2 flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1 scrollbar-hide sm:order-1">
+                                     <button
+                                        type="button"
+                                        onClick={() => setModalRoomFilter('ALL')}
+                                        className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${modalRoomFilter === 'ALL' ? 'bg-[var(--ds-text-primary)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
+                                     >
+                                         Tutte le sale
+                                     </button>
+                                     {openRooms.map(room => (
+                                         <button
+                                            key={room.id}
+                                            type="button"
+                                            onClick={() => setModalRoomFilter(room.id)}
+                                            className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${modalRoomFilter === room.id ? 'bg-[var(--ds-text-primary)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
+                                         >
+                                             {room.name}
+                                             {/* Quanti tavoli liberi ci sono davvero li'
+                                                 dentro: la pillola sceglie la sala, e
+                                                 senza il numero la si sceglie alla cieca. */}
+                                             <span className={`ml-1.5 tabular-nums ${modalRoomFilter === room.id ? 'opacity-70' : 'text-[var(--ds-text-muted)]'}`}>
+                                                 {rankedAvailableTables.filter(t => t.room_id === room.id).length}
+                                             </span>
+                                         </button>
+                                     ))}
+                                 </div>
+                                 {/* Merge Mode Toggle */}
+                                 <button
+                                     type="button"
+                                     onClick={() => {
+                                         if (mergeMode) {
+                                             setMergeMode(false);
+                                             setSelectedTablesForMerge([]);
+                                         } else {
+                                             setMergeMode(true);
+                                             if (formData.table_id) {
+                                                 setSelectedTablesForMerge([formData.table_id]);
+                                             }
+                                         }
+                                     }}
+                                     className={`${mergeMode ? dsButton.primary : dsButton.secondary} order-1 flex-shrink-0 self-start sm:order-2 sm:self-auto`}
+                                 >
+                                     <Combine className="h-4 w-4" /> {mergeMode ? 'Esci unione' : 'Unisci tavoli'}
+                                 </button>
+                             </div>
+
+                             <div className="flex-1 min-h-0 rounded-lg overflow-y-auto relative max-h-[50vh] lg:max-h-none">
+                                {isLoadingMerges && (
+                                    <div className="absolute inset-0 z-30 bg-[var(--ds-surface-row)]/70 backdrop-blur-[1px] flex items-center justify-center rounded-lg">
+                                        <div className="flex items-center gap-2 rounded-full bg-[var(--ds-surface)] px-4 py-2 shadow-[var(--ds-shadow-card)]">
+                                            <Loader label="Caricamento tavoli…" size={40} />
+                                        </div>
                                     </div>
                                 )}
-                            </FormCard>
+                                {displayedRooms.map(room => {
+                                    const baseRoomTables = displayTables
+                                        .filter(t => t.room_id === room.id)
+                                        .filter(t => !displayTables.some(other =>
+                                            other.merged_with && other.merged_with.length > 0 &&
+                                            other.merged_with.map(id => Number(id)).includes(Number(t.id))
+                                        ))
+                                        .filter(t => !hiddenTableIds.has(t.id))
+                                        // Show tables in natural ascending order by name (e.g. 0, 1, 2,
+                                        // 3, 3 Bis, 4, 10, 11, 20…) instead of raw DB/insertion order,
+                                        // which can be scattered for rooms like "Fuori".
+                                        .sort((a, b) => a.name.localeCompare(b.name, 'it', { numeric: true }));
+
+                                    // Partition the room's tables: banquet tables collapse into one
+                                    // grouped container per event; the rest render as selectable cards.
+                                    const banquetGroups = new Map<number, { banquet: BanquetMenu; tables: typeof baseRoomTables }>();
+                                    const normalEntries: { table: (typeof baseRoomTables)[number]; reservation: Reservation | null }[] = [];
+                                    baseRoomTables.forEach(table => {
+                                        const occupier = getOccupierForTableInForm(table.id);
+                                        if (occupier?.kind === 'banquet') {
+                                            const g = banquetGroups.get(occupier.data.id) ?? { banquet: occupier.data, tables: [] };
+                                            g.tables.push(table);
+                                            banquetGroups.set(occupier.data.id, g);
+                                        } else {
+                                            normalEntries.push({ table, reservation: occupier?.kind === 'reservation' ? occupier.data : null });
+                                        }
+                                    });
+
+                                    const tavoliCount = baseRoomTables.length;
+                                    const eventiCount = banquetGroups.size;
+                                    const occupatiCount = normalEntries.filter(e => e.reservation).length;
+                                    const liberiCount = normalEntries.length - occupatiCount;
+                                    const guests = formData.guests || 1;
+                                    // Sequential per-room color assignment so the modal matches the floor plan.
+                                    const modalBanquetColorByBanquetId = buildBanquetColorClassMap([...banquetGroups.keys()]);
+
+                                    return (
+                                    <div key={room.id} className="mb-3 last:mb-0 rounded-[16px] bg-[var(--ds-surface-row)] p-4">
+                                        <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                                            <h4 className="min-w-0 text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                                                {room.name}
+                                                <span className="font-normal text-[var(--ds-text-muted)]">
+                                                    {' · '}{tavoliCount} {tavoliCount === 1 ? 'tavolo' : 'tavoli'}
+                                                    {eventiCount > 0 ? ` · ${eventiCount} ${eventiCount === 1 ? 'evento' : 'eventi'}` : ''}
+                                                </span>
+                                            </h4>
+                                            <div className="ml-auto flex flex-shrink-0 items-center gap-2">
+                                                <span className={`inline-flex h-8 flex-shrink-0 items-baseline gap-1.5 rounded-full border px-3 leading-8 ${
+                                                    liberiCount > 0
+                                                        ? 'border-[var(--ds-seated-solid)] bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
+                                                        : 'border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]'
+                                                }`}>
+                                                    <span className="text-[17px] font-bold tabular-nums">{liberiCount}</span>
+                                                    <span className="text-[13px] font-medium">{liberiCount === 1 ? 'libero' : 'liberi'}</span>
+                                                </span>
+                                                {occupatiCount > 0 && (
+                                                    <span className="inline-flex h-8 flex-shrink-0 items-baseline gap-1.5 rounded-full border border-[var(--ds-critical-solid)] bg-[var(--ds-critical-tint)] px-3 leading-8 text-[var(--ds-critical-text)]">
+                                                        <span className="text-[17px] font-bold tabular-nums">{occupatiCount}</span>
+                                                        <span className="text-[13px] font-medium">{occupatiCount === 1 ? 'occupato' : 'occupati'}</span>
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {/* Banquet / event containers — one grouped card per event,
+                                            tinted with the same per-banquet color used on the floor plan. */}
+                                        {[...banquetGroups.values()].map(({ banquet, tables: bTables }) => (
+                                            <div key={`banq-${banquet.id}`} className={`${modalBanquetColorByBanquetId.get(banquet.id) || 'banquet-color-0'} mb-4 rounded-xl border border-[var(--ds-arriving-solid)] bg-[var(--ds-arriving-tint)] p-3`}>
+                                                <div className="flex items-start gap-2 mb-3">
+                                                    <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--ds-arriving-solid)] text-white">
+                                                        <Calendar size={14} />
+                                                    </span>
+                                                    <div className="min-w-0">
+                                                        <p className="text-sm font-semibold text-[var(--ds-arriving-text)] truncate">{banquet.name}</p>
+                                                        <p className="text-xs text-[var(--ds-arriving-text)]">
+                                                            {bTables.length} {bTables.length === 1 ? 'tavolo' : 'tavoli'} · {banquet.guests ?? 0} coperti · {banquet.shift === Shift.LUNCH ? 'Pranzo' : 'Cena'}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-3">
+                                                    {bTables.map(t => (
+                                                        <div key={t.id} className="flex min-h-[44px] flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-[var(--ds-arriving-solid)] px-2 py-2 text-center">
+                                                            <TableGlyph name={t.name} seats={t.seats} shape={t.shape} status="libera" fit />
+                                                            <span className="inline-flex items-center gap-1 text-[11px] text-[var(--ds-arriving-text)]">
+                                                                <Armchair size={11} /> {t.seats}
+                                                            </span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))}
+
+                                        {/* Selectable tables */}
+                                        {normalEntries.length > 0 && (
+                                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-2 gap-y-3 sm:gap-x-3 sm:gap-y-4 pt-2">
+                                            {normalEntries.map(({ table, reservation }) => {
+                                                const isOccupied = !!reservation;
+                                                const occLabel = reservation ? formatShortName(reservation.customer_name) : '';
+                                                const occGuests = reservation?.guests;
+                                                const occTime = reservation ? getRomeTimePart(reservation.reservation_time) : '';
+                                                const isSelected = formData.table_id === table.id;
+                                                const isSelectedForMerge = selectedTablesForMerge.includes(table.id);
+                                                const isMerged = table.merged_with && table.merged_with.length > 0;
+                                                const insufficient = table.seats < guests;
+
+                                                return (
+                                                    <button
+                                                        key={table.id}
+                                                        type="button"
+                                                        disabled={isOccupied || (insufficient && !mergeMode)}
+                                                        onClick={(e) => {
+                                                            if (mergeMode || e.ctrlKey || e.metaKey) {
+                                                                e.preventDefault();
+                                                                setSelectedTablesForMerge(prev =>
+                                                                    prev.includes(table.id)
+                                                                        ? prev.filter(id => id !== table.id)
+                                                                        : [...prev, table.id]
+                                                                );
+                                                            } else if (formData.table_id === table.id) {
+                                                                // Toggle off: clicking the selected table again clears it.
+                                                                setFormData(prev => ({ ...prev, table_id: undefined }));
+                                                            } else {
+                                                                handleTableSelection(table);
+                                                            }
+                                                        }}
+                                                        className={`relative flex w-full min-h-[88px] flex-col items-center justify-center gap-1.5 rounded-[14px] p-2 sm:p-3 text-center transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                                                            isSelectedForMerge
+                                                                ? 'z-10 bg-[var(--ds-arriving-tint)] ring-2 ring-inset ring-[var(--ds-arriving-solid)]'
+                                                                : isSelected
+                                                                    ? 'z-10 bg-[var(--ds-seated-solid)] text-white'
+                                                                    : isOccupied
+                                                                        ? 'cursor-not-allowed bg-[var(--ds-critical-tint)]'
+                                                                        : insufficient
+                                                                                ? 'cursor-not-allowed bg-[var(--ds-surface)] opacity-50'
+                                                                                : 'bg-[var(--ds-surface)] ring-1 ring-inset ring-[var(--ds-border)] hover:ring-[var(--ds-border-strong)]'
+                                                        }`}
+                                                    >
+                                                        {isMerged && !isSelectedForMerge && (
+                                                            <span className={`absolute -top-1.5 sm:-top-2 -left-1.5 sm:-left-2 z-20 flex items-center gap-0.5 rounded-full px-1 sm:px-1.5 py-0.5 text-[8px] sm:text-[10px] font-bold shadow-[var(--ds-shadow-card)] ${isSelected ? 'bg-[var(--ds-surface)] text-[var(--ds-seated-text)]' : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'}`}>
+                                                                <Combine size={8} />
+                                                            </span>
+                                                        )}
+
+                                                        <TableGlyph
+                                                            name={table.name}
+                                                            seats={table.seats}
+                                                            shape={table.shape}
+                                                            status="libera"
+                                                            fit
+                                                        />
+
+                                                        {/* Capacity (chair icon) — shown on every table */}
+                                                        <span className={`inline-flex items-center gap-1 text-[11px] sm:text-xs ${isSelected ? 'text-white/80' : 'text-[var(--ds-text-muted)]'}`}>
+                                                            <Armchair size={11} /> {table.seats}
+                                                        </span>
+
+                                                        {/* Occupied footer: actual covers (people icon) + time */}
+                                                        {isOccupied && (
+                                                            <div className="mt-1 w-full pt-1">
+                                                                <p className="truncate text-[11px] sm:text-xs font-medium text-[var(--ds-text-primary)]">{occLabel}</p>
+                                                                <p className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] text-[var(--ds-text-secondary)]">
+                                                                    <Users size={10} /> {occGuests}{occTime ? ` · ${occTime}` : ''}
+                                                                </p>
+                                                            </div>
+                                                        )}
+
+                                                        {isSelected && !isSelectedForMerge && (
+                                                            <span className="absolute top-1.5 right-1.5 z-20 text-[var(--ds-action-fg)]">
+                                                                <Check size={15} strokeWidth={3} />
+                                                            </span>
+                                                        )}
+                                                        {isSelectedForMerge && (
+                                                            <span className="absolute -top-2 -right-2 z-20 flex items-center justify-center rounded-full bg-[var(--ds-arriving-solid)] p-1 shadow-[var(--ds-shadow-card)]">
+                                                                <Combine size={10} className="text-white" />
+                                                            </span>
+                                                        )}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                        )}
+                                    </div>
+                                    );
+                                })}
+                                {displayedRooms.length === 0 && (
+                                    <div className="text-center py-10 text-[var(--ds-text-muted)]">
+                                        Nessuna sala trovata.
+                                    </div>
+                                )}
+                             </div>
+                             <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-4 pt-4 border-t border-[var(--ds-border)] text-[12px] text-[var(--ds-text-secondary)]">
+                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[4px] bg-[var(--ds-surface)] ring-1 ring-inset ring-[var(--ds-border-strong)]"></span> Libero</div>
+                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[4px] bg-[var(--ds-seated-solid)]"></span> Selezionato</div>
+                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[4px] bg-[var(--ds-critical-tint)]"></span> Occupato</div>
+                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[4px] bg-[var(--ds-surface)] opacity-50"></span> Capienza insuff.</div>
+                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[4px] bg-[var(--ds-arriving-tint)]"></span> Evento / Banchetto</div>
+                             </div>
+                             {mergeMode && (
+                                 <div className="mt-3 rounded-full bg-[var(--ds-surface-row)] px-3.5 py-2 text-[13px] font-medium text-[var(--ds-text-secondary)]">
+                                     Modalità unione attiva: clicca sui tavoli da unire, poi premi "Conferma Unione"
+                                 </div>
+                             )}
+                             </div>
+                        </div>
+
+                        {/* Il resto di chi e quando: cliente, note, consensi.
+                            Stessa colonna di prima, spezzata in due perche' la
+                            sala ora sta in mezzo — sotto i coperti, sopra il
+                            nome. Due <div> invece di riordinare con `order`:
+                            cosi' l'occhio e il tabulatore leggono nello stesso
+                            ordine. */}
+                        <div className={`flex flex-col gap-5 min-w-0 ${tableAsStep && formStep !== stepIndex.details ? 'hidden' : ''}`}>
 
                             {/* Dettagli cliente — grouped in a fieldset so the legend
                                 sits on the border ("cuts" it) and gives visual
@@ -5525,390 +6289,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             </div>
                         </div>
 
-                        {/* Right Column: Table Selection (7 cols) */}
-                        <div className="lg:col-span-7 flex flex-col min-w-0 h-full rounded-[20px] bg-[var(--ds-surface)] p-5 sm:p-6">
-                             {/* Section Header */}
-                             <div className="flex flex-wrap items-center gap-3 pb-4 mb-4 border-b border-[var(--ds-border)]">
-                                <MapPin className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" />
-                                <div className="flex-1">
-                                    <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Seleziona tavolo</h3>
-                                    <p className="text-[14px] text-[var(--ds-text-muted)]">
-                                        {formData.shift === Shift.LUNCH ? 'Pranzo' : 'Cena'} — {' '}
-                                        <span className="font-semibold text-[var(--ds-seated-text)]">{freeTablesCount} tavoli liberi</span> su {totalTablesInFilter}
-                                    </p>
-                                </div>
-                                {selectedTableObj && (
-                                    /* Solid pill: table name, its capacity, and a clear action.
-                                       Green rather than near-black — near-black is this system's
-                                       "action" colour, and an assigned table is a state, not a
-                                       button. White on this green measures 6.7:1; the secondary
-                                       "posti" text at 80% still clears AA at 4.9:1. */
-                                    <div className="inline-flex flex-shrink-0 items-center gap-2 rounded-full bg-[var(--ds-seated-solid)] py-1.5 pl-4 pr-1.5">
-                                        <span className="whitespace-nowrap text-[15px] font-semibold text-white">
-                                            Tavolo {selectedTableObj.name}
-                                        </span>
-                                        <span className="whitespace-nowrap text-[14px] text-white/80">
-                                            {selectedTableObj.seats} posti
-                                        </span>
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setFormData({...formData, table_id: undefined});
-                                                showToast('Tavolo scollegato dalla prenotazione', 'info');
-                                            }}
-                                            className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-white/15 text-white transition-colors hover:bg-white/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
-                                            title="Scollega il tavolo dalla prenotazione"
-                                            aria-label="Scollega tavolo dalla prenotazione"
-                                        >
-                                            <X className="h-4 w-4" />
-                                        </button>
-                                    </div>
-                                )}
-                             </div>
-
-                             {/* Auto-assign & Actions */}
-                             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={handleAutoAssign}
-                                        className={dsButton.primary}
-                                    >
-                                        <Wand2 className="h-4 w-4" /> Assegna automatico
-                                    </button>
-
-                                    {/* Merge Mode Toggle */}
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            if (mergeMode) {
-                                                setMergeMode(false);
-                                                setSelectedTablesForMerge([]);
-                                            } else {
-                                                setMergeMode(true);
-                                                if (formData.table_id) {
-                                                    setSelectedTablesForMerge([formData.table_id]);
-                                                }
-                                            }
-                                        }}
-                                        className={mergeMode ? dsButton.primary : dsButton.secondary}
-                                    >
-                                        <Combine className="h-4 w-4" /> {mergeMode ? 'Esci unione' : 'Unisci tavoli'}
-                                    </button>
-                                </div>
-                                <div className="flex gap-2 items-center">
-                                    {/* Show selected tables count and total capacity */}
-                                    {selectedTablesForMerge.length >= 1 && (
-                                        <div className="text-xs text-[var(--ds-text-secondary)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] px-3 py-1.5 rounded-full font-medium">
-                                            {selectedTablesForMerge.length} {selectedTablesForMerge.length === 1 ? 'tavolo' : 'tavoli'} = {tables.filter(t => selectedTablesForMerge.includes(t.id)).reduce((sum, t) => sum + t.seats, 0)} posti
-                                        </div>
-                                    )}
-
-                                    {selectedTablesForMerge.length >= 2 && (
-                                        <button
-                                            type="button"
-                                            onClick={async () => {
-                                                if (!formData.reservation_time || !formData.shift) {
-                                                    showToast('Imposta data e turno della prenotazione prima di unire i tavoli', 'error');
-                                                    return;
-                                                }
-                                                try {
-                                                    const primaryTableId = selectedTablesForMerge[0];
-                                                    const mergeDate = formData.reservation_time.split('T')[0];
-                                                    await onMergeTables(selectedTablesForMerge, mergeDate, formData.shift);
-                                                    await refreshMerges(mergeDate, formData.shift);
-                                                    // Auto-select the merged table for the reservation
-                                                    setFormData(prev => ({ ...prev, table_id: primaryTableId }));
-                                                    showToast(`Tavoli uniti e assegnati alla prenotazione`, 'success');
-                                                    setSelectedTablesForMerge([]);
-                                                    setMergeMode(false);
-                                                } catch (error) {
-                                                    showToast('Errore durante l\'unione dei tavoli', 'error');
-                                                }
-                                            }}
-                                            className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 bg-[var(--ds-text-primary)] text-[var(--ds-action-fg)] text-sm font-medium hover:opacity-90 transition-opacity"
-                                        >
-                                            <Combine className="h-4 w-4" /> Conferma Unione
-                                        </button>
-                                    )}
-
-                                    {selectedTableObj?.merged_with && selectedTableObj.merged_with.length > 0 && (
-                                        <button
-                                            type="button"
-                                            onClick={async () => {
-                                                if (!formData.reservation_time || !formData.shift) {
-                                                    showToast('Imposta data e turno della prenotazione prima di dividere i tavoli', 'error');
-                                                    return;
-                                                }
-                                                try {
-                                                    const splitDate = formData.reservation_time.split('T')[0];
-                                                    await onSplitTable(selectedTableObj.id, splitDate, formData.shift);
-                                                    await refreshMerges(splitDate, formData.shift);
-                                                    showToast('Tavoli divisi con successo', 'success');
-                                                    setFormData({...formData, table_id: undefined});
-                                                } catch (error) {
-                                                    showToast('Errore durante la divisione dei tavoli', 'error');
-                                                }
-                                            }}
-                                            className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 border border-[var(--ds-pending-tint)] bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] dark:text-sm font-medium transition-colors"
-                                        >
-                                            <Scissors className="h-4 w-4" /> Dividi
-                                        </button>
-                                    )}
-                                </div>
-                             </div>
-
-                             {/* Room Tabs */}
-                             <div className="mb-4">
-                                 <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-                                     <button
-                                        type="button"
-                                        onClick={() => setModalRoomFilter('ALL')}
-                                        className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${modalRoomFilter === 'ALL' ? 'bg-[var(--ds-text-primary)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
-                                     >
-                                         Tutte le sale
-                                     </button>
-                                     {openRooms.map(room => (
-                                         <button
-                                            key={room.id}
-                                            type="button"
-                                            onClick={() => setModalRoomFilter(room.id)}
-                                            className={`px-4 py-1.5 text-sm font-medium rounded-full whitespace-nowrap transition-colors flex-shrink-0 border ${modalRoomFilter === room.id ? 'bg-[var(--ds-text-primary)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
-                                         >
-                                             {room.name}
-                                         </button>
-                                     ))}
-                                 </div>
-                             </div>
-
-                             <div className="flex-1 min-h-0 rounded-lg overflow-y-auto relative max-h-[50vh] lg:max-h-none">
-                                {isLoadingMerges && (
-                                    <div className="absolute inset-0 z-30 bg-[var(--ds-surface-row)]/70 backdrop-blur-[1px] flex items-center justify-center rounded-lg">
-                                        <div className="flex items-center gap-2 rounded-full bg-[var(--ds-surface)] px-4 py-2 shadow-[var(--ds-shadow-card)]">
-                                            <Loader label="Caricamento tavoli…" size={40} />
-                                        </div>
-                                    </div>
-                                )}
-                                {displayedRooms.map(room => {
-                                    const baseRoomTables = displayTables
-                                        .filter(t => t.room_id === room.id)
-                                        .filter(t => !displayTables.some(other =>
-                                            other.merged_with && other.merged_with.length > 0 &&
-                                            other.merged_with.map(id => Number(id)).includes(Number(t.id))
-                                        ))
-                                        .filter(t => !hiddenTableIds.has(t.id))
-                                        // Show tables in natural ascending order by name (e.g. 0, 1, 2,
-                                        // 3, 3 Bis, 4, 10, 11, 20…) instead of raw DB/insertion order,
-                                        // which can be scattered for rooms like "Fuori".
-                                        .sort((a, b) => a.name.localeCompare(b.name, 'it', { numeric: true }));
-
-                                    // Partition the room's tables: banquet tables collapse into one
-                                    // grouped container per event; the rest render as selectable cards.
-                                    const banquetGroups = new Map<number, { banquet: BanquetMenu; tables: typeof baseRoomTables }>();
-                                    const normalEntries: { table: (typeof baseRoomTables)[number]; reservation: Reservation | null }[] = [];
-                                    baseRoomTables.forEach(table => {
-                                        const occupier = getOccupierForTableInForm(table.id);
-                                        if (occupier?.kind === 'banquet') {
-                                            const g = banquetGroups.get(occupier.data.id) ?? { banquet: occupier.data, tables: [] };
-                                            g.tables.push(table);
-                                            banquetGroups.set(occupier.data.id, g);
-                                        } else {
-                                            normalEntries.push({ table, reservation: occupier?.kind === 'reservation' ? occupier.data : null });
-                                        }
-                                    });
-
-                                    const tavoliCount = baseRoomTables.length;
-                                    const eventiCount = banquetGroups.size;
-                                    const occupatiCount = normalEntries.filter(e => e.reservation).length;
-                                    const liberiCount = normalEntries.length - occupatiCount;
-                                    const guests = formData.guests || 1;
-                                    // Sequential per-room color assignment so the modal matches the floor plan.
-                                    const modalBanquetColorByBanquetId = buildBanquetColorClassMap([...banquetGroups.keys()]);
-
-                                    return (
-                                    <div key={room.id} className="mb-3 last:mb-0 rounded-[16px] bg-[var(--ds-surface-row)] p-4">
-                                        <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1.5">
-                                            <h4 className="min-w-0 text-[15px] font-semibold text-[var(--ds-text-primary)]">
-                                                {room.name}
-                                                <span className="font-normal text-[var(--ds-text-muted)]">
-                                                    {' · '}{tavoliCount} {tavoliCount === 1 ? 'tavolo' : 'tavoli'}
-                                                    {eventiCount > 0 ? ` · ${eventiCount} ${eventiCount === 1 ? 'evento' : 'eventi'}` : ''}
-                                                </span>
-                                            </h4>
-                                            <div className="ml-auto flex flex-shrink-0 items-center gap-2">
-                                                <span className={`inline-flex h-8 flex-shrink-0 items-baseline gap-1.5 rounded-full border px-3 leading-8 ${
-                                                    liberiCount > 0
-                                                        ? 'border-[var(--ds-seated-solid)] bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
-                                                        : 'border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]'
-                                                }`}>
-                                                    <span className="text-[17px] font-bold tabular-nums">{liberiCount}</span>
-                                                    <span className="text-[13px] font-medium">{liberiCount === 1 ? 'libero' : 'liberi'}</span>
-                                                </span>
-                                                {occupatiCount > 0 && (
-                                                    <span className="inline-flex h-8 flex-shrink-0 items-baseline gap-1.5 rounded-full border border-[var(--ds-critical-solid)] bg-[var(--ds-critical-tint)] px-3 leading-8 text-[var(--ds-critical-text)]">
-                                                        <span className="text-[17px] font-bold tabular-nums">{occupatiCount}</span>
-                                                        <span className="text-[13px] font-medium">{occupatiCount === 1 ? 'occupato' : 'occupati'}</span>
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </div>
-
-                                        {/* Banquet / event containers — one grouped card per event,
-                                            tinted with the same per-banquet color used on the floor plan. */}
-                                        {[...banquetGroups.values()].map(({ banquet, tables: bTables }) => (
-                                            <div key={`banq-${banquet.id}`} className={`${modalBanquetColorByBanquetId.get(banquet.id) || 'banquet-color-0'} mb-4 rounded-xl border border-[var(--ds-arriving-solid)] bg-[var(--ds-arriving-tint)] p-3`}>
-                                                <div className="flex items-start gap-2 mb-3">
-                                                    <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-[var(--ds-arriving-solid)] text-white">
-                                                        <Calendar size={14} />
-                                                    </span>
-                                                    <div className="min-w-0">
-                                                        <p className="text-sm font-semibold text-[var(--ds-arriving-text)] truncate">{banquet.name}</p>
-                                                        <p className="text-xs text-[var(--ds-arriving-text)]">
-                                                            {bTables.length} {bTables.length === 1 ? 'tavolo' : 'tavoli'} · {banquet.guests ?? 0} coperti · {banquet.shift === Shift.LUNCH ? 'Pranzo' : 'Cena'}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-3">
-                                                    {bTables.map(t => (
-                                                        <div key={t.id} className="flex min-h-[44px] flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-[var(--ds-arriving-solid)] px-2 py-2 text-center">
-                                                            <TableGlyph name={t.name} seats={t.seats} shape={t.shape} status="libera" fit />
-                                                            <span className="inline-flex items-center gap-1 text-[11px] text-[var(--ds-arriving-text)]">
-                                                                <Armchair size={11} /> {t.seats}
-                                                            </span>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        ))}
-
-                                        {/* Selectable tables */}
-                                        {normalEntries.length > 0 && (
-                                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-2 gap-y-3 sm:gap-x-3 sm:gap-y-4 pt-2">
-                                            {normalEntries.map(({ table, reservation }) => {
-                                                const isOccupied = !!reservation;
-                                                const occLabel = reservation ? formatShortName(reservation.customer_name) : '';
-                                                const occGuests = reservation?.guests;
-                                                const occTime = reservation ? getRomeTimePart(reservation.reservation_time) : '';
-                                                const isSelected = formData.table_id === table.id;
-                                                const isSelectedForMerge = selectedTablesForMerge.includes(table.id);
-                                                const isMerged = table.merged_with && table.merged_with.length > 0;
-                                                const insufficient = table.seats < guests;
-                                                const recommended = !isOccupied && table.seats >= guests && table.seats <= guests + 1;
-
-                                                return (
-                                                    <button
-                                                        key={table.id}
-                                                        type="button"
-                                                        disabled={isOccupied || (insufficient && !mergeMode)}
-                                                        onClick={(e) => {
-                                                            if (mergeMode || e.ctrlKey || e.metaKey) {
-                                                                e.preventDefault();
-                                                                setSelectedTablesForMerge(prev =>
-                                                                    prev.includes(table.id)
-                                                                        ? prev.filter(id => id !== table.id)
-                                                                        : [...prev, table.id]
-                                                                );
-                                                            } else if (formData.table_id === table.id) {
-                                                                // Toggle off: clicking the selected table again clears it.
-                                                                setFormData(prev => ({ ...prev, table_id: undefined }));
-                                                            } else {
-                                                                handleTableSelection(table);
-                                                            }
-                                                        }}
-                                                        className={`relative flex w-full min-h-[88px] flex-col items-center justify-center gap-1.5 rounded-[14px] p-2 sm:p-3 text-center transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
-                                                            isSelectedForMerge
-                                                                ? 'z-10 bg-[var(--ds-arriving-tint)] ring-2 ring-inset ring-[var(--ds-arriving-solid)]'
-                                                                : isSelected
-                                                                    ? 'z-10 bg-[var(--ds-seated-solid)] text-white'
-                                                                    : isOccupied
-                                                                        ? 'cursor-not-allowed bg-[var(--ds-critical-tint)]'
-                                                                        : recommended
-                                                                            ? 'bg-[var(--ds-seated-tint)] ring-1 ring-inset ring-[var(--ds-seated-solid)]/40 hover:brightness-[0.97]'
-                                                                            : insufficient
-                                                                                ? 'cursor-not-allowed bg-[var(--ds-surface)] opacity-50'
-                                                                                : 'bg-[var(--ds-surface)] ring-1 ring-inset ring-[var(--ds-border)] hover:ring-[var(--ds-border-strong)]'
-                                                        }`}
-                                                    >
-                                                        {recommended && !isSelected && !isSelectedForMerge && (
-                                                            <span className="absolute -top-2 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full bg-[var(--ds-seated-solid)] px-2 py-0.5 text-[10px] font-semibold text-white">
-                                                                Consigliato
-                                                            </span>
-                                                        )}
-
-                                                        {isMerged && !isSelectedForMerge && (
-                                                            <span className={`absolute -top-1.5 sm:-top-2 -left-1.5 sm:-left-2 z-20 flex items-center gap-0.5 rounded-full px-1 sm:px-1.5 py-0.5 text-[8px] sm:text-[10px] font-bold shadow-[var(--ds-shadow-card)] ${isSelected ? 'bg-[var(--ds-surface)] text-[var(--ds-seated-text)]' : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'}`}>
-                                                                <Combine size={8} />
-                                                            </span>
-                                                        )}
-
-                                                        <TableGlyph
-                                                            name={table.name}
-                                                            seats={table.seats}
-                                                            shape={table.shape}
-                                                            status="libera"
-                                                            fit
-                                                        />
-
-                                                        {/* Capacity (chair icon) — shown on every table */}
-                                                        <span className={`inline-flex items-center gap-1 text-[11px] sm:text-xs ${isSelected ? 'text-white/80' : 'text-[var(--ds-text-muted)]'}`}>
-                                                            <Armchair size={11} /> {table.seats}
-                                                        </span>
-
-                                                        {/* Occupied footer: actual covers (people icon) + time */}
-                                                        {isOccupied && (
-                                                            <div className="mt-1 w-full pt-1">
-                                                                <p className="truncate text-[11px] sm:text-xs font-medium text-[var(--ds-text-primary)]">{occLabel}</p>
-                                                                <p className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] text-[var(--ds-text-secondary)]">
-                                                                    <Users size={10} /> {occGuests}{occTime ? ` · ${occTime}` : ''}
-                                                                </p>
-                                                            </div>
-                                                        )}
-
-                                                        {isSelected && !isSelectedForMerge && (
-                                                            <span className="absolute top-1.5 right-1.5 z-20 text-[var(--ds-action-fg)]">
-                                                                <Check size={15} strokeWidth={3} />
-                                                            </span>
-                                                        )}
-                                                        {isSelectedForMerge && (
-                                                            <span className="absolute -top-2 -right-2 z-20 flex items-center justify-center rounded-full bg-[var(--ds-arriving-solid)] p-1 shadow-[var(--ds-shadow-card)]">
-                                                                <Combine size={10} className="text-white" />
-                                                            </span>
-                                                        )}
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                        )}
-                                    </div>
-                                    );
-                                })}
-                                {displayedRooms.length === 0 && (
-                                    <div className="text-center py-10 text-[var(--ds-text-muted)]">
-                                        Nessuna sala trovata.
-                                    </div>
-                                )}
-                             </div>
-                             <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mt-4 pt-4 border-t border-[var(--ds-border)] text-[12px] text-[var(--ds-text-secondary)]">
-                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[4px] bg-[var(--ds-surface)] ring-1 ring-inset ring-[var(--ds-border-strong)]"></span> Libero</div>
-                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[4px] bg-[var(--ds-seated-tint)] ring-1 ring-inset ring-[var(--ds-seated-solid)]"></span> Consigliato</div>
-                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[4px] bg-[var(--ds-seated-solid)]"></span> Selezionato</div>
-                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[4px] bg-[var(--ds-critical-tint)]"></span> Occupato</div>
-                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[4px] bg-[var(--ds-surface)] opacity-50"></span> Capienza insuff.</div>
-                                 <div className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-[4px] bg-[var(--ds-arriving-tint)]"></span> Evento / Banchetto</div>
-                             </div>
-                             {mergeMode && (
-                                 <div className="mt-3 rounded-full bg-[var(--ds-surface-row)] px-3.5 py-2 text-[13px] font-medium text-[var(--ds-text-secondary)]">
-                                     Modalità unione attiva: clicca sui tavoli da unire, poi premi "Conferma Unione"
-                                 </div>
-                             )}
-                        </div>
                     </form>
                     </section>
 
                     {/* Step 2 — Pagamenti: the table bill, then the deposit
                         request. Both were already edit-only, so this section
                         renders nothing at all on a new booking. */}
-                    <section className={!isEditing || formStep === 1 ? 'block' : 'hidden'}>
+                    <section className={sectionVisible(stepIndex.payments) ? 'block' : 'hidden'}>
                     {/* Conto al tavolo (pay-at-table + split bill) — edit mode only.
                         Hidden entirely when the feature flag is off; the toggle
                         lives in Settings → Conto al tavolo. */}
@@ -6302,7 +6689,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         behind is gone: the step is the section, so a header you
                         had to click to reveal the only thing on screen was one
                         tap that bought nothing. */}
-                    <section className={!isEditing || formStep === 2 ? 'block' : 'hidden'}>
+                    <section className={sectionVisible(stepIndex.comms) ? 'block' : 'hidden'}>
                     {isEditing && formData.id && (
                       <div className="px-4 pb-4 sm:px-6 sm:pb-6">
                         <MessaggiPanel
