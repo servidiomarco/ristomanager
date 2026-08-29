@@ -59,7 +59,7 @@ describe('auth', () => {
             name: 'Il Vecchio Frantoio',
             // Entitlements commerciali (Fase C1): il tenant 1 è grandfathered,
             // il seed della migration tenant-features li accende tutti.
-            features: { voice: true, whatsapp: true, web_booking: true, pay_at_table: true },
+            features: { voice: true, whatsapp: true, web_booking: true, pay_at_table: true, passepartout: true },
             // Onboarding (coda D1): i tenant nati prima del wizard sono
             // backfillati a completato.
             needs_onboarding: false,

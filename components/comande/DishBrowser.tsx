@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { ChevronDown, Minus, Plus, Trash2 } from 'lucide-react';
 import type { Dish } from '../../types';
 import { SearchField } from '../ds';
@@ -25,15 +25,50 @@ interface DishBrowserProps {
   hasVariants: (dishId: number) => boolean;
   onAdd: (dish: Dish) => void;
   onRemove: (dish: Dish) => void;
+  /** Tocco lungo sul piatto: apre le varianti anche dove il tocco semplice
+   *  aggiunge al volo — è la via alla variante libera sui piatti senza
+   *  varianti di menu. */
+  onLongPress: (dish: Dish) => void;
   /** 'grid' affianca la comanda su desktop, 'list' sta sotto il pollice. */
   layout: 'grid' | 'list';
 }
 
 export const DishBrowser: React.FC<DishBrowserProps> = ({
   dishes, categories, category, onCategory, query, onQuery,
-  qtyInCourse, markedCategories, hasVariants, onAdd, onRemove, layout,
+  qtyInCourse, markedCategories, hasVariants, onAdd, onRemove, onLongPress, layout,
 }) => {
   const q = query.trim().toLowerCase();
+
+  // Tocco lungo con ref (non closure): un re-render a metà pressione — il
+  // carrello ne provoca di continuo — non deve lasciare timer orfani che
+  // aprono la sheet a dito già sollevato. Il movimento oltre soglia annulla:
+  // è uno scroll, non una pressione.
+  const lpTimer = useRef<number | null>(null);
+  const lpFired = useRef(false);
+  const lpStart = useRef<{ x: number; y: number } | null>(null);
+  const pressCancel = () => {
+    if (lpTimer.current != null) { clearTimeout(lpTimer.current); lpTimer.current = null; }
+    lpStart.current = null;
+  };
+  const press = (d: Dish) => ({
+    onPointerDown: (e: React.PointerEvent) => {
+      lpFired.current = false;
+      lpStart.current = { x: e.clientX, y: e.clientY };
+      if (lpTimer.current != null) clearTimeout(lpTimer.current);
+      lpTimer.current = window.setTimeout(() => { lpFired.current = true; onLongPress(d); }, 450);
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      const s = lpStart.current;
+      if (s && (Math.abs(e.clientX - s.x) > 12 || Math.abs(e.clientY - s.y) > 12)) pressCancel();
+    },
+    onPointerUp: pressCancel,
+    onPointerLeave: pressCancel,
+    onPointerCancel: pressCancel,
+    // Sul touch il tocco lungo evoca il menu contestuale del browser: qui è
+    // un gesto nostro.
+    onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
+    onClick: () => { if (lpFired.current) { lpFired.current = false; return; } onAdd(d); },
+  });
 
   // Cercando si cerca in tutto il menu: se il piatto è fra i primi e la pista
   // è ferma sugli antipasti, una ricerca che non lo trova è una ricerca rotta.
@@ -108,8 +143,8 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                 <button
                   key={d.id}
                   type="button"
-                  onClick={() => onAdd(d)}
-                  className={`relative flex min-h-[76px] flex-col justify-center gap-0.5 rounded-[16px] bg-[var(--ds-surface)] px-4 py-3 text-left shadow-[var(--ds-shadow-card)] transition-transform hover:bg-[var(--ds-surface-row)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                  {...press(d)}
+                  className={`relative flex min-h-[76px] select-none flex-col justify-center gap-0.5 rounded-[16px] bg-[var(--ds-surface)] px-4 py-3 text-left shadow-[var(--ds-shadow-card)] transition-transform hover:bg-[var(--ds-surface-row)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                     qty > 0 ? 'ring-2 ring-[var(--ds-action-bg)]' : ''
                   }`}
                 >
@@ -146,8 +181,8 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                 >
                   <button
                     type="button"
-                    onClick={() => onAdd(d)}
-                    className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    {...press(d)}
+                    className="min-w-0 flex-1 select-none text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     <div className="truncate text-[16px] font-semibold text-[var(--ds-text-primary)]">
                       {d.name}

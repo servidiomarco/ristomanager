@@ -224,8 +224,22 @@ export const ContiAperti: React.FC<{
   if (closedView) {
     const label = (st: string) => st === 'VOIDED' ? 'Annullato' : st === 'SETTLED_PARTIAL' ? 'Parziale' : 'Chiuso';
     const tone = (st: string) => st === 'VOIDED' ? 'critical' : st === 'SETTLED_PARTIAL' ? 'pending' : 'positive';
+    // Badge scontrino: solo gli stati che chiedono un'occhiata — l'emesso è
+    // la normalità e non merita rumore su ogni riga. Un conto Passepartout
+    // senza documento ha il tavolo ancora aperto in cassa: quello sì che urge.
+    const fiscalPill = (b: OpenBillRow) =>
+      b.fiscal_status === 'FAILED' ? <StatusPill tone="critical">scontrino in errore</StatusPill>
+      : b.fiscal_status === 'PENDING' ? <StatusPill tone="pending">scontrino in emissione</StatusPill>
+      : b.fiscal_status === 'CONFIRMED' && b.fiscal_doc_type === 'PROFORMA'
+        ? <StatusPill tone="neutral">proforma</StatusPill>
+      : b.status === 'CLOSED' && !b.fiscal_status && /^pp:comanda:/.test(String(b.external_ref ?? ''))
+        ? <StatusPill tone="pending">da chiudere in cassa</StatusPill>
+      : b.status === 'CLOSED' && !b.fiscal_status ? <StatusPill tone="neutral">senza scontrino</StatusPill>
+      : null;
     const real = visible.filter(b => b.status !== 'VOIDED');
-    const incassato = real.reduce((s, b) => s + b.paid_cents + (b.cash_settled_cents ?? 0), 0);
+    // paid_cents comprende GIÀ gli incassi in cassa (libro cassa):
+    // risommare i contanti li conterebbe due volte.
+    const incassato = real.reduce((s, b) => s + b.paid_cents, 0);
     const mance = real.reduce((s, b) => s + (b.tip_cents ?? 0), 0);
     return (
       <div className="space-y-4">
@@ -251,10 +265,11 @@ export const ContiAperti: React.FC<{
         ) : (
           <div className="space-y-2">
             {visible.map(b => {
-              const carta = b.paid_cents;
-              const contanti = b.cash_settled_cents ?? 0;
+              // paid_cents = online + cassa; le voci si mostrano separate.
+              const cassa = b.staff_paid_cents ?? b.cash_settled_cents ?? 0;
+              const online = Math.max(0, b.paid_cents - cassa);
               const mancia = b.tip_cents ?? 0;
-              const ammanco = b.status === 'SETTLED_PARTIAL' ? Math.max(0, b.total_cents - carta - contanti) : 0;
+              const ammanco = b.status === 'SETTLED_PARTIAL' ? Math.max(0, b.total_cents - b.paid_cents) : 0;
               return (
                 <button
                   key={b.id}
@@ -275,10 +290,11 @@ export const ContiAperti: React.FC<{
                   </div>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-[var(--ds-text-muted)] tabular-nums">
                     <StatusPill tone={tone(b.status) as any}>{label(b.status)}</StatusPill>
+                    {fiscalPill(b)}
                     {b.status !== 'VOIDED' && (
                       <>
-                        {carta > 0 && <span>carta {euro(carta)}</span>}
-                        {contanti > 0 && <span>contanti {euro(contanti)}</span>}
+                        {online > 0 && <span>online {euro(online)}</span>}
+                        {cassa > 0 && <span>cassa {euro(cassa)}</span>}
                         {mancia > 0 && <span className="text-[var(--ds-seated-text)]">mancia {euro(mancia)}</span>}
                         {ammanco > 0 && <span className="text-[var(--ds-critical-text)]">ammanco {euro(ammanco)}</span>}
                       </>

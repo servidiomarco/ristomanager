@@ -1,13 +1,17 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, ChevronRight, Loader2, Play, TriangleAlert, WifiOff } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Bell, BellOff, Check, ChevronRight, Loader2, MessagesSquare, Pencil, Play, TriangleAlert, WifiOff } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
+import { useAuth } from '../contexts/AuthContext';
 import { socketClient } from '../services/socketClient';
+import { staffChatApiService } from '../services/staffChatApiService';
+import { channelThreadKey, staffMessagePreview, type StaffMessage } from '../services/staffChat';
 import {
-  getKdsQueue, setKdsItemStatus, getMenuCatalogue,
-  type KdsItem, type KdsCourseState, type MenuCatalogue,
+  getKdsQueue, setKdsItemStatus, getMenuCatalogue, getKdsRevisions, ackKdsRevision,
+  type KdsItem, type KdsCourseState, type MenuCatalogue, type OrderRevision,
 } from '../services/ordersApiService';
 import { getKitchenServiceSummary, type KitchenServiceSummary } from '../services/apiService';
 import { getRomeDatePart } from '../utils/reservationTime';
+import { chime } from '../utils/chime';
 import { ModalShell, EmptyState, StatusPill, dsButton } from './ds';
 
 // ---------------------------------------------------------------------------
@@ -23,6 +27,7 @@ import { ModalShell, EmptyState, StatusPill, dsButton } from './ds';
 // ---------------------------------------------------------------------------
 
 const STATION_KEY = 'kds.station_id';
+const SOUND_KEY = 'kds.sound';
 
 // Oltre questa attesa la riga pronta sta morendo sotto la lampada mentre le
 // altre partite finiscono: il bordo lampeggia.
@@ -89,6 +94,11 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   const [catalogue, setCatalogue] = useState<MenuCatalogue | null>(null);
   const [items, setItems] = useState<KdsItem[]>([]);
   const [courses, setCourses] = useState<KdsCourseState[]>([]);
+  // Revisioni aperte: modifiche a comande già lanciate (storno, aggiunta,
+  // riporta, trasferimento). La card mostra "modificata", il tocco apre il
+  // dettaglio, Ok le spegne per tutti gli schermi.
+  const [revisions, setRevisions] = useState<OrderRevision[]>([]);
+  const [revisionsModalKey, setRevisionsModalKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [offline, setOffline] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -97,8 +107,84 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   // solo quando nuove prenotazioni entrano nel turno, non serve real-time.
   const [summary, setSummary] = useState<KitchenServiceSummary | null>(null);
   const [summaryOpen, setSummaryOpen] = useState(false);
+  // Avviso sonoro sulla comanda nuova. Nel ref oltre che nello stato: il
+  // listener socket deve leggere il valore corrente senza risottoscriversi.
+  const [sound, setSound] = useState(() => localStorage.getItem(SOUND_KEY) !== 'off');
+  const soundRef = useRef(sound);
+  soundRef.current = sound;
+  const toggleSound = () => {
+    setSound(prev => {
+      const next = !prev;
+      localStorage.setItem(SOUND_KEY, next ? 'on' : 'off');
+      // Suona subito all'accensione: conferma la scelta e, essendo dentro un
+      // gesto dell'utente, sblocca l'AudioContext per gli avvisi futuri.
+      if (next) chime();
+      return next;
+    });
+  };
 
   useEffect(() => { getMenuCatalogue().then(setCatalogue).catch(() => {}); }, []);
+
+  // Striscia della chat staff: l'ultimo messaggio non letto del canale
+  // cucina, così "finito il branzino" arriva sul monitor senza aprire la
+  // chat. "Ok" marca letto col cursore e la striscia sparisce anche dagli
+  // altri device dello stesso account (evento staffchat:read).
+  const { user } = useAuth();
+  const userIdRef = useRef<number | null>(null);
+  userIdRef.current = user?.id ?? null;
+  const [chatStrip, setChatStrip] = useState<{ message: StaffMessage; unread: number } | null>(null);
+  const CUCINA_KEY = channelThreadKey('cucina');
+
+  useEffect(() => {
+    let cancelled = false;
+    // Se il ruolo non ha staffchat:use la chiamata fallisce con 403 e la
+    // striscia semplicemente non esiste.
+    staffChatApiService.listThreads()
+      .then(({ threads }) => {
+        if (cancelled) return;
+        const cucina = threads.find(t => t.threadKey === CUCINA_KEY);
+        if (cucina?.lastMessage && cucina.unreadCount > 0) {
+          setChatStrip({ message: cucina.lastMessage, unread: cucina.unreadCount });
+        }
+      })
+      .catch(() => {});
+
+    const onMessage = (msg: StaffMessage) => {
+      if (msg.kind !== 'channel' || msg.channel !== 'cucina') return;
+      if (msg.sender_user_id != null && msg.sender_user_id === userIdRef.current) return;
+      setChatStrip(prev => ({ message: msg, unread: (prev?.unread ?? 0) + 1 }));
+      // Stessa campana delle comande: in cucina un avviso muto non esiste.
+      if (soundRef.current) chime();
+    };
+    const onRead = (data: { threadKey: string; lastReadMessageId: number }) => {
+      if (data?.threadKey !== CUCINA_KEY) return;
+      setChatStrip(prev => (prev && prev.message.id <= data.lastReadMessageId ? null : prev));
+    };
+
+    let attached: ReturnType<typeof socketClient.getSocket> = null;
+    const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
+      if (attached === s) return;
+      if (attached) {
+        attached.off('staffchat:message', onMessage);
+        attached.off('staffchat:read', onRead);
+      }
+      attached = s;
+      if (attached) {
+        attached.on('staffchat:message', onMessage);
+        attached.on('staffchat:read', onRead);
+      }
+    };
+    attach(socketClient.getSocket());
+    const unsub = socketClient.onSocketChange((s) => attach(s));
+    return () => { cancelled = true; unsub(); attach(null); };
+  }, [CUCINA_KEY]);
+
+  const dismissChatStrip = useCallback(() => {
+    const current = chatStrip;
+    if (!current) return;
+    setChatStrip(null);
+    staffChatApiService.markRead(CUCINA_KEY, current.message.id).catch(() => {});
+  }, [chatStrip, CUCINA_KEY]);
 
   // Il banner segue la data/turno globale dell'header: se il cuoco naviga a
   // "Mar 18 Cena" vuole vedere il riepilogo di quel servizio, non di oggi.
@@ -124,9 +210,14 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
 
   const reload = useCallback(async () => {
     try {
-      const q = await getKdsQueue(stationId);
+      const [q, rev] = await Promise.all([
+        getKdsQueue(stationId),
+        // Un errore sulle revisioni non deve accecare la coda.
+        getKdsRevisions(stationId).catch(() => ({ revisions: [] as OrderRevision[] })),
+      ]);
       setItems(q.items);
       setCourses(q.courses);
+      setRevisions(rev.revisions);
       setOffline(false);
     } catch {
       setOffline(true);
@@ -146,17 +237,43 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
     if (stationId != null) socketClient.subscribeToStation(stationId);
 
     const onChange = () => reload();
-    socket.on('kds:fired', onChange);
+    // La comanda nuova suona, il resto no: in cucina l'unico evento che
+    // richiede di alzare la testa è un lancio che arriva.
+    const onFired = () => { if (soundRef.current) chime(); reload(); };
+    socket.on('kds:fired', onFired);
     socket.on('kds:item', onChange);
+    // Servita al passe: le righe escono dalla coda e la card verde sparisce
+    // anche dal monitor di partita, non solo dal passe. Il riporta le fa
+    // ricomparire.
+    socket.on('course:served', onChange);
+    socket.on('course:unserved', onChange);
     socket.on('orderItem:voided', onChange);
     socket.on('connect', onChange);
+    // Revisione nuova: suona come una comanda — è un cambio di piano, non
+    // rumore di fondo. station_ids NULL = riguarda tutti gli schermi.
+    const onRevised = (r: OrderRevision) => {
+      const mine = stationId == null || r.station_ids == null || r.station_ids.includes(stationId);
+      if (!mine) return;
+      setRevisions(prev => (prev.some(x => x.id === r.id) ? prev : [...prev, r]));
+      if (soundRef.current) chime();
+      reload();
+    };
+    const onRevisionAcked = (data: { id: number }) => {
+      setRevisions(prev => prev.filter(r => r.id !== data?.id));
+    };
+    socket.on('order:revised', onRevised);
+    socket.on('order:revision-acked', onRevisionAcked);
 
     const poll = setInterval(reload, 60_000);
     return () => {
-      socket.off('kds:fired', onChange);
+      socket.off('kds:fired', onFired);
       socket.off('kds:item', onChange);
+      socket.off('course:served', onChange);
+      socket.off('course:unserved', onChange);
       socket.off('orderItem:voided', onChange);
       socket.off('connect', onChange);
+      socket.off('order:revised', onRevised);
+      socket.off('order:revision-acked', onRevisionAcked);
       clearInterval(poll);
       if (stationId != null) socketClient.unsubscribeFromStation(stationId);
     };
@@ -216,8 +333,38 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
     col.items.every(i => i.status === 'SENT')
     && col.items.every(i => i.station_start_at != null && new Date(i.station_start_at).getTime() > now);
 
+  const revisionsByKey = useMemo(() => {
+    const map = new Map<string, OrderRevision[]>();
+    for (const col of columns) {
+      const list = revisions.filter(r =>
+        r.order_id === col.order_id && (r.course_no == null || r.course_no === col.course_no));
+      if (list.length > 0) map.set(col.key, list);
+    }
+    return map;
+  }, [columns, revisions]);
+
+  const ackRevisions = useCallback(async (list: OrderRevision[]) => {
+    setRevisionsModalKey(null);
+    // Ottimistico come advance(): la pill sparisce al tocco, il server segue.
+    setRevisions(prev => prev.filter(r => !list.some(l => l.id === r.id)));
+    await Promise.all(list.map(r => ackKdsRevision(r.id).catch(() => {})));
+  }, []);
+
   const todo = columns.filter(c => !isUpcoming(c));
   const upcoming = columns.filter(isUpcoming);
+
+  // Totale vivo per piatto di tutta la coda ("5× tagliata"): il cuoco che
+  // batch-a le cotture lo legge qui invece di sommare a mente fra le card.
+  // Diverso dal banner del servizio, che è previsionale dalle prenotazioni:
+  // questo conta solo ciò che è lanciato e non ancora pronto.
+  const allDay = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const i of items) {
+      if (i.status === 'READY') continue;
+      totals.set(i.name_snapshot, (totals.get(i.name_snapshot) ?? 0) + i.qty);
+    }
+    return [...totals.entries()].sort((a, b) => b[1] - a[1]);
+  }, [items]);
 
   const stationName = stationId == null
     ? 'Senza partita'
@@ -251,15 +398,53 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
               <WifiOff size={13} aria-hidden /> riconnessione…
             </StatusPill>
           )}
+          {/* Icona sola, 44px, incassata sulla card come i controlli quiet:
+              il testo qui non aggiungerebbe nulla che la campana non dica. */}
+          <button
+            type="button"
+            onClick={toggleSound}
+            aria-pressed={sound}
+            aria-label={sound ? 'Disattiva l\'avviso sonoro' : 'Attiva l\'avviso sonoro'}
+            className="ml-auto inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            {sound ? <Bell size={17} aria-hidden /> : <BellOff size={17} className="text-[var(--ds-text-muted)]" aria-hidden />}
+          </button>
           <button
             type="button"
             onClick={() => setPicking(true)}
-            className={`ml-auto flex-shrink-0 ${dsButton.quiet}`}
+            className={`flex-shrink-0 ${dsButton.quiet}`}
           >
             Cambia partita
           </button>
         </div>
       </div>
+
+      {chatStrip && (
+        <div className="flex-shrink-0 px-4 pb-3">
+          {/* Corpi grandi come il resto del monitor: si legge da un metro.
+              Il bordo nella famiglia arriving segnala "qualcuno ti parla"
+              senza gridare critico. */}
+          <div className="flex items-center gap-3 rounded-[20px] border-l-4 border-[var(--ds-arriving-solid)] bg-[var(--ds-surface)] p-3 pl-4 shadow-[var(--ds-shadow-card)]">
+            <MessagesSquare size={18} className="flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
+            <p className="min-w-0 flex-1 text-[16px] text-[var(--ds-text-primary)]">
+              <span className="font-semibold">{chatStrip.message.sender_name}</span>
+              {' '}<span className="break-words">{staffMessagePreview(chatStrip.message)}</span>
+              {chatStrip.unread > 1 && (
+                <span className="ml-2 text-[14px] text-[var(--ds-text-muted)]">
+                  +{chatStrip.unread - 1} non lett{chatStrip.unread - 1 === 1 ? 'o' : 'i'}
+                </span>
+              )}
+            </p>
+            <button
+              type="button"
+              onClick={dismissChatStrip}
+              className="inline-flex h-11 flex-shrink-0 items-center rounded-full bg-[var(--ds-surface-row)] px-5 text-[15px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              Ok
+            </button>
+          </div>
+        </div>
+      )}
 
       {summary && (
         <ServiceSummaryBanner
@@ -269,13 +454,37 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
         />
       )}
 
+      {allDay.length > 0 && (
+        <div className="flex-shrink-0 px-4 pb-3">
+          <div className="flex items-center gap-2 overflow-x-auto rounded-[20px] bg-[var(--ds-surface)] px-3 py-2 shadow-[var(--ds-shadow-card)]">
+            {allDay.map(([name, qty]) => (
+              <span
+                key={name}
+                className="inline-flex flex-shrink-0 items-baseline gap-1 rounded-full bg-[var(--ds-surface-row)] px-2.5 py-1 text-[14px] font-semibold text-[var(--ds-text-primary)]"
+              >
+                <span className="tabular-nums">{qty}×</span>
+                <span>{name}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-4 pb-4">
         {todo.length === 0 && upcoming.length === 0 ? (
           <EmptyState icon={Check}>Nessuna comanda in coda.</EmptyState>
         ) : (
           <div className="flex h-full items-start gap-4">
             {todo.map(col => (
-              <CourseCard key={col.key} col={col} now={now} stationId={stationId} onAdvance={advance} />
+              <CourseCard
+                key={col.key}
+                col={col}
+                now={now}
+                stationId={stationId}
+                onAdvance={advance}
+                revisions={revisionsByKey.get(col.key)}
+                onShowRevisions={() => setRevisionsModalKey(col.key)}
+              />
             ))}
           </div>
         )}
@@ -320,6 +529,36 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           </div>
         </div>
       )}
+
+      <ModalShell
+        open={revisionsModalKey != null && (revisionsByKey.get(revisionsModalKey)?.length ?? 0) > 0}
+        onClose={() => setRevisionsModalKey(null)}
+        title={`Modifiche · T${columns.find(c => c.key === revisionsModalKey)?.table_name ?? '—'}`}
+        size="sm"
+        closeOnEscape
+        bodyClassName="p-5 sm:p-6"
+      >
+        <div className="space-y-3">
+          {(revisionsByKey.get(revisionsModalKey ?? '') ?? []).map(r => (
+            <div key={r.id} className="rounded-[14px] bg-[var(--ds-surface-row)] px-3.5 py-3">
+              <p className="text-[16px] font-semibold text-[var(--ds-text-primary)]">{r.summary}</p>
+              {(r.details ?? []).filter(d => d.note).map((d, i) => (
+                <p key={i} className="mt-1 text-[14px] text-[var(--ds-text-secondary)]">{d.label} — {d.note}</p>
+              ))}
+              <p className="mt-1.5 text-[13px] text-[var(--ds-text-muted)]">
+                {r.created_by_name} · {new Date(r.created_at).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+              </p>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={() => ackRevisions(revisionsByKey.get(revisionsModalKey ?? '') ?? [])}
+            className={`${dsButton.primary} w-full`}
+          >
+            Ok, visto
+          </button>
+        </div>
+      </ModalShell>
 
       <ModalShell
         open={picking}
@@ -368,7 +607,9 @@ const CourseCard: React.FC<{
   now: number;
   stationId: number | null;
   onAdvance: (item: KdsItem, status: 'PREPARING' | 'READY') => void;
-}> = ({ col, now, onAdvance }) => {
+  revisions?: OrderRevision[];
+  onShowRevisions?: () => void;
+}> = ({ col, now, onAdvance, revisions, onShowRevisions }) => {
   const start = col.items[0]?.station_start_at ?? col.firedAt;
   const elapsed = minutesSince(start, now);
   const allReady = col.items.every(i => i.status === 'READY');
@@ -406,6 +647,20 @@ const CourseCard: React.FC<{
           {ORDINALS[col.course_no] ?? col.course_no} uscita
           {col.customer_name ? ` · ${col.customer_name}` : ''}
         </div>
+        {/* Comanda cambiata dopo il lancio: rosso pieno per scelta di Marco
+            (29/08) — l'ambra tinta annegava fra venti card nel picco, e qui
+            la modifica È un'interruzione: continuare a cucinare un piatto
+            stornato è spreco. 44px: si tocca con le mani in pasta. */}
+        {revisions && revisions.length > 0 && onShowRevisions && (
+          <button
+            type="button"
+            onClick={onShowRevisions}
+            className="mt-2 flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-[12px] bg-[var(--ds-critical-solid)] px-3 text-[14px] font-semibold text-[var(--ds-critical-fg)] transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            <Pencil size={14} aria-hidden />
+            modificata{revisions.length > 1 ? ` · ${revisions.length}` : ''}
+          </button>
+        )}
       </div>
 
       {col.allergens && (
@@ -415,43 +670,65 @@ const CourseCard: React.FC<{
         </div>
       )}
 
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-2.5">
-        {col.items.map(i => (
+      <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-1.5 py-2">
+        {col.items.map(i => {
           // Il fatto viene detto dal segno di spunta e dal testo attenuato, non
           // da un'opacità che porta sotto contrasto anche la quantità.
-          <div key={i.id}>
-            <div className="flex items-start gap-2">
-              <span
-                className={`font-semibold tabular-nums ${
-                  i.status === 'READY' ? 'text-[var(--ds-text-muted)]' : 'text-[var(--ds-text-primary)]'
-                }`}
-              >
-                {i.qty}
-              </span>
-              <span
-                className={`flex-1 text-[15px] leading-tight ${
-                  i.status === 'READY'
-                    ? 'text-[var(--ds-text-muted)] line-through'
-                    : 'text-[var(--ds-text-primary)]'
-                }`}
-              >
-                {i.name_snapshot}
-              </span>
-              {i.status === 'PREPARING' && (
-                <ChevronRight size={15} className="mt-0.5 flex-shrink-0 text-[var(--ds-arriving-text)]" aria-hidden />
-              )}
-              {i.status === 'READY' && (
-                <Check size={15} className="mt-0.5 flex-shrink-0 text-[var(--ds-seated-solid)]" aria-hidden />
-              )}
-            </div>
-            {i.modifiers && i.modifiers.length > 0 && (
-              <div className="ml-6 text-[13px] font-medium text-[var(--ds-pending-text)]">
-                ↳ {i.modifiers.map(m => m.name).join(', ')}
+          const body = (
+            <>
+              <div className="flex items-start gap-2">
+                <span
+                  className={`font-semibold tabular-nums ${
+                    i.status === 'READY' ? 'text-[var(--ds-text-muted)]' : 'text-[var(--ds-text-primary)]'
+                  }`}
+                >
+                  {i.qty}
+                </span>
+                <span
+                  className={`flex-1 text-[15px] leading-tight ${
+                    i.status === 'READY'
+                      ? 'text-[var(--ds-text-muted)] line-through'
+                      : 'text-[var(--ds-text-primary)]'
+                  }`}
+                >
+                  {i.name_snapshot}
+                </span>
+                {i.status === 'PREPARING' && (
+                  <ChevronRight size={15} className="mt-0.5 flex-shrink-0 text-[var(--ds-arriving-text)]" aria-hidden />
+                )}
+                {i.status === 'READY' && (
+                  <Check size={15} className="mt-0.5 flex-shrink-0 text-[var(--ds-seated-solid)]" aria-hidden />
+                )}
               </div>
-            )}
-            {i.note && <div className="ml-6 text-[13px] text-[var(--ds-text-muted)]">↳ {i.note}</div>}
-          </div>
-        ))}
+              {i.modifiers && i.modifiers.length > 0 && (
+                <div className="ml-6 text-[13px] font-medium text-[var(--ds-pending-text)]">
+                  ↳ {i.modifiers.map(m => m.name).join(', ')}
+                </div>
+              )}
+              {i.note && <div className="ml-6 text-[13px] text-[var(--ds-text-muted)]">↳ {i.note}</div>}
+            </>
+          );
+          // Ogni riga si spunta da sola: i piatti veloci escono senza aspettare
+          // il resto dell'uscita. Il server accetta anche SENT→READY diretto, e
+          // avvisa il passe solo quando l'ultima riga dell'uscita è pronta.
+          // Un tocco sulla riga spuntata la annulla (READY→PREPARING, ready_at
+          // azzerato): l'errore di spunta si corregge con lo stesso gesto che
+          // l'ha creato, finché l'uscita non è servita.
+          const ready = i.status === 'READY';
+          return (
+            <button
+              key={i.id}
+              type="button"
+              onClick={() => onAdvance(i, ready ? 'PREPARING' : 'READY')}
+              aria-label={ready
+                ? `Annulla pronto: ${i.qty} ${i.name_snapshot}`
+                : `Segna pronto: ${i.qty} ${i.name_snapshot}`}
+              className="block min-h-11 w-full rounded-[12px] px-1.5 py-1.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] active:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              {body}
+            </button>
+          );
+        })}
       </div>
 
       <div className="p-2">
@@ -462,12 +739,14 @@ const CourseCard: React.FC<{
         ) : (
           // Non "PRONTO": il maiuscolo non aggiunge nulla che il corpo e il
           // peso non dicano già, e a schermo lo si legge peggio (§5.2).
+          // "Tutto": la spunta del singolo piatto sta sulla riga, questo
+          // chiude in un colpo quello che resta.
           <button
             type="button"
             onClick={() => col.items.filter(i => i.status !== 'READY').forEach(i => onAdvance(i, 'READY'))}
             className="w-full rounded-[16px] bg-[var(--ds-action-bg)] py-3.5 text-[17px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
-            Pronto
+            Tutto pronto
           </button>
         )}
       </div>
@@ -499,7 +778,7 @@ const ServiceSummaryBanner: React.FC<{
           className="w-full flex items-center gap-3 px-4 py-3 text-left"
           aria-expanded={open}
         >
-          <span className="text-[13px] font-semibold uppercase tracking-wide text-[var(--ds-text-muted)]">
+          <span className="text-[13px] font-semibold text-[var(--ds-text-muted)]">
             {shift} · {summary.reservations} prenotazion{summary.reservations === 1 ? 'e' : 'i'}
           </span>
           <div className="min-w-0 flex-1 flex flex-wrap items-center gap-2">
@@ -537,25 +816,43 @@ const ServiceSummaryBanner: React.FC<{
           <div className="border-t border-[var(--ds-border)] px-4 py-3 space-y-3">
             {hasDietary && (
               <div>
-                <div className="text-[12px] font-semibold uppercase tracking-wide text-[var(--ds-text-muted)] mb-1.5">
+                <div className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-1.5">
                   Piatti del turno ({total})
                 </div>
-                <div className="flex flex-wrap gap-1.5">
+                {/* Una riga per piatto, tavoli come pill: si legge da lontano
+                    con le mani in pasta, quindi corpi grandi e testo pieno —
+                    niente muted sotto i 14px su questo schermo. */}
+                <ul className="divide-y divide-[var(--ds-border)]">
                   {summary.dietary.map(d => (
-                    <span
+                    <li
                       key={`row-${d.label}--${d.variant ?? ''}`}
-                      className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-surface-row)] px-2.5 py-1 text-[13px] font-semibold text-[var(--ds-text-primary)]"
+                      className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2.5 first:pt-0 last:pb-0"
                     >
-                      <span className="tabular-nums">{d.quantity}×</span>
-                      <span>{d.label}{d.variant ? ` (${d.variant})` : ''}</span>
-                    </span>
+                      <span className="text-[16px] font-semibold text-[var(--ds-text-primary)]">
+                        <span className="tabular-nums">{d.quantity}×</span>
+                        {' '}{d.label}{d.variant ? ` (${d.variant})` : ''}
+                      </span>
+                      {(d.tables ?? []).length > 0 && (
+                        <span className="flex flex-wrap items-center gap-1.5">
+                          {d.tables.map((t, i) => (
+                            <span
+                              key={t.table ?? `c-${i}`}
+                              className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-surface-row)] px-3 py-1.5 text-[14px] font-semibold text-[var(--ds-text-primary)]"
+                            >
+                              <span className="tabular-nums">{t.quantity}×</span>
+                              <span>{t.table ? `T${t.table}` : t.customer || '—'}</span>
+                            </span>
+                          ))}
+                        </span>
+                      )}
+                    </li>
                   ))}
-                </div>
+                </ul>
               </div>
             )}
             {hasDiets && (
               <div>
-                <div className="text-[12px] font-semibold uppercase tracking-wide text-[var(--ds-critical-text)] mb-1.5">
+                <div className="text-[13px] font-semibold text-[var(--ds-critical-text)] mb-1.5">
                   Allergie / diete
                 </div>
                 <ul className="space-y-1">

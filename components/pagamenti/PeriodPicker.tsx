@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { CalendarDays } from 'lucide-react';
-import { ModalShell, dsButton } from '../ds';
+import { ModalShell, dsButton, MonthGrid, asIsoDay, addDays, startOfMonth } from '../ds';
 
 /* ── Period selector for the payment links ───────────────────────────────
    What this replaces: two bare `<input type="date">` sitting in a filter row.
@@ -12,22 +12,7 @@ import { ModalShell, dsButton } from '../ds';
    Deliberately still just `from`/`to` strings underneath: the list query is
    unchanged, this only changes how those two values get chosen. */
 
-const asIsoDay = (d: Date): string =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-const addDays = (d: Date, n: number): Date =>
-  new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
-
-const startOfMonth = (d: Date): Date => new Date(d.getFullYear(), d.getMonth(), 1);
-
-/** Monday-first, the Italian week. `getDay()` is Sunday-first, hence the shift. */
-const mondayIndex = (d: Date): number => (d.getDay() + 6) % 7;
-
-const MONTHS = [
-  'Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno',
-  'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre',
-];
-const WEEKDAYS = ['L', 'M', 'M', 'G', 'V', 'S', 'D'];
 
 export type Period = { from: string; to: string };
 
@@ -59,66 +44,6 @@ export const periodLabel = (period: Period, today = new Date(), span?: Period | 
   return period.from ? `dal ${shortDay(period.from)}` : `fino al ${shortDay(period.to)}`;
 };
 
-const MonthGrid: React.FC<{
-  month: Date;
-  from: string;
-  to: string;
-  todayIso: string;
-  onPick: (iso: string) => void;
-}> = ({ month, from, to, todayIso, onPick }) => {
-  const first = startOfMonth(month);
-  const leading = mondayIndex(first);
-  const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
-
-  return (
-    <div className="min-w-0">
-      <div className="mb-2 text-center text-[14px] font-semibold text-[var(--ds-text-primary)]">
-        {MONTHS[month.getMonth()]}
-      </div>
-      <div className="grid grid-cols-7 gap-y-1">
-        {WEEKDAYS.map((w, i) => (
-          <div key={i} className="pb-1 text-center text-[12px] text-[var(--ds-text-muted)]">{w}</div>
-        ))}
-        {Array.from({ length: leading }, (_, i) => <div key={`pad-${i}`} />)}
-        {Array.from({ length: daysInMonth }, (_, i) => {
-          const day = new Date(month.getFullYear(), month.getMonth(), i + 1);
-          const iso = asIsoDay(day);
-          const isStart = iso === from;
-          const isEnd = iso === to;
-          const inRange = !!from && !!to && iso > from && iso < to;
-          // Today stays marked even with nothing selected — clearing the draft
-          // to pick a custom range otherwise left a grid of identical numbers
-          // with no anchor to count from.
-          const isToday = iso === todayIso;
-          return (
-            <button
-              key={iso}
-              type="button"
-              onClick={() => onPick(iso)}
-              aria-pressed={isStart || isEnd}
-              aria-current={isToday ? 'date' : undefined}
-              // 36px, not 44: a month grid at 44 does not fit two months side by
-              // side on a tablet, and the cells sit in a dense field of
-              // identical targets where the row/column alignment does the
-              // aiming. The shortcuts above are the 44px path.
-              className={`mx-auto inline-flex h-9 w-9 items-center justify-center rounded-full text-[14px] tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
-                isStart || isEnd
-                  ? 'bg-[var(--ds-action-bg)] font-semibold text-[var(--ds-action-fg)]'
-                  : inRange
-                    ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
-                    : isToday
-                      ? 'font-semibold text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] hover:bg-[var(--ds-surface-row)]'
-                      : 'text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)]'
-              }`}
-            >
-              {i + 1}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
 
 export const PeriodPicker: React.FC<{
   open: boolean;

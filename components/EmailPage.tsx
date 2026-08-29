@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Mail, Send, Loader2, RefreshCw, CheckCircle2, Clock, AlertTriangle, ArrowRight, Check, ArrowDownLeft, ArrowUpRight, Reply, Paperclip, X as XIcon, FolderOpen, Sparkles, Wand2, CalendarPlus } from 'lucide-react';
+import { Mail, Send, Loader2, RefreshCw, CheckCircle2, Clock, AlertTriangle, ArrowRight, Check, ArrowDownLeft, ArrowUpRight, Reply, Paperclip, X as XIcon, FolderOpen, Wand2, CalendarPlus } from 'lucide-react';
 import { Loader } from './Loader';
 import { SkeletonInboxList, SkeletonEmailThread } from './SkeletonCards';
 import {
   emailApiService,
+  emailCache,
   publicMediaUrl,
   EmailThreadSummary,
   EmailMessage,
@@ -17,7 +18,7 @@ import { toTitleCase } from '../utils/text';
 import {
   ModalShell, FormCard, Field, SearchField, Callout, SplitPane, SectionHeader,
   Avatar, EmptyState, SwipeRow, useFirstRunHint, PanePlaceholder, PaneHeader, CountBadge,
-  dsInput, dsTextarea, dsButton, dsIconButton,
+  dsInput, dsTextarea, dsButton, dsIconButton, AttachmentRow,
 } from './ds';
 
 const formatRelative = (iso: string | null): string => {
@@ -81,8 +82,12 @@ interface EmailPageProps {
 }
 
 const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) => {
-  const [threads, setThreads] = useState<EmailThreadSummary[]>([]);
-  const [threadsLoading, setThreadsLoading] = useState(true);
+  // Riparte dall'ultimo stato noto (cache modulo-level, pre-riempita al
+  // login): la pagina viene smontata a ogni cambio vista e senza questo ogni
+  // rientro mostrava lo spinner. Il fetch parte comunque e rimpiazza in
+  // silenzio (stale-while-revalidate) — stesso schema di InboxPage.
+  const [threads, setThreads] = useState<EmailThreadSummary[]>(() => emailCache.threads ?? []);
+  const [threadsLoading, setThreadsLoading] = useState(emailCache.threads === null);
   const [threadsError, setThreadsError] = useState<string | null>(null);
 
   // Always-visible search, matching the other two Comunicazioni channels.
@@ -138,11 +143,29 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
 
   useEffect(() => { loadThreads(); }, [loadThreads]);
 
+  // Specchia in cache ogni cambiamento della lista (fetch, socket, letture):
+  // il prossimo mount riparte da qui. Il guard evita di sovrascrivere una
+  // cache pre-riempita con lo stato iniziale vuoto o con un errore.
+  useEffect(() => {
+    if (!threadsLoading && !threadsError) emailCache.threads = threads;
+  }, [threads, threadsLoading, threadsError]);
+
+  // Con la cache il cambio thread è istantaneo, quindi due fetch possono
+  // essere in volo insieme: il ref scarta la risposta del thread che non è
+  // più aperto.
+  const selectedKeyRef = useRef<string | null>(null);
+  useEffect(() => { selectedKeyRef.current = selectedKey; }, [selectedKey]);
+
   const loadThread = useCallback(async (emailKey: string) => {
-    setMsgLoading(true);
+    // Thread già visto: si mostra subito e il fetch rinfresca in background.
+    const cached = emailCache.timelines.get(emailKey);
+    if (cached) setMessages(cached);
+    setMsgLoading(!cached);
     setMsgError(null);
     try {
       const { messages } = await emailApiService.getThread(emailKey);
+      emailCache.setTimeline(emailKey, messages);
+      if (selectedKeyRef.current !== emailKey) return;
       setMessages(messages);
       emailApiService.markThreadRead(emailKey)
         .then(() => {
@@ -150,9 +173,11 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
         })
         .catch(() => {});
     } catch (err: any) {
-      setMsgError(err?.message || 'Errore caricamento email');
+      if (selectedKeyRef.current === emailKey) {
+        setMsgError(err?.message || 'Errore caricamento email');
+      }
     } finally {
-      setMsgLoading(false);
+      if (selectedKeyRef.current === emailKey) setMsgLoading(false);
     }
   }, []);
 
@@ -189,6 +214,13 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
     const upsertThread = (msg: EmailMessage) => {
       const key = keyOf(msg);
       if (!key) return;
+      // Anche la cache riceve il messaggio (qualunque thread, non solo quello
+      // aperto): riaprire una chat mostra subito ciò che è arrivato mentre si
+      // era altrove, senza aspettare il refresh in background.
+      const cachedTimeline = emailCache.timelines.get(key);
+      if (cachedTimeline && !cachedTimeline.some(m => m.id === msg.id)) {
+        emailCache.setTimeline(key, [...cachedTimeline, msg]);
+      }
       const isOpen = selectedKey === key;
       setThreads(prev => {
         const existing = prev.find(t => t.email_key === key);
@@ -409,25 +441,19 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
   // Chips degli allegati pronti a partire e pannello della libreria: stessi
   // pezzi nel composer di risposta e nel modal "Nuova email", quindi vivono
   // qui una volta sola.
-  const renderAttachmentChips = () => attachments.map(a => (
-    <span
+  /* Gli allegati stanno dentro la scheda del composer, sotto l'oggetto: sono
+     parte della mail che si sta scrivendo, e sopra l'oggetto sembravano
+     appartenere al thread. Nessuna anteprima — qui il file caricato ha un URL
+     solo dopo l'invio (`mediaUrl` vuole un messageId), quindi la riga porta la
+     targhetta del tipo. */
+  const renderAttachmentRows = () => attachments.map(a => (
+    <AttachmentRow
       key={a.token}
-      className="inline-flex max-w-[220px] items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] py-1 pl-3 pr-1.5 text-[13px] text-[var(--ds-text-primary)]"
-    >
-      <Paperclip className="h-3.5 w-3.5 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
-      <span className="truncate">{a.filename || a.content_type}</span>
-      <span className="flex-shrink-0 text-[12px] text-[var(--ds-text-muted)]">
-        {Math.max(1, Math.round(a.size_bytes / 1024))} KB
-      </span>
-      <button
-        type="button"
-        onClick={() => setAttachments(prev => prev.filter(x => x.token !== a.token))}
-        aria-label={`Togli ${a.filename || 'allegato'}`}
-        className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
-      >
-        <XIcon className="h-3 w-3" />
-      </button>
-    </span>
+      filename={a.filename}
+      contentType={a.content_type}
+      sizeBytes={a.size_bytes}
+      onRemove={() => setAttachments(prev => prev.filter(x => x.token !== a.token))}
+    />
   ));
 
   const renderLibreria = () => (
@@ -641,10 +667,10 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                         onClick={handleSuggestBooking}
                         disabled={suggestingBooking}
                         title="Cerca una richiesta di prenotazione nell'ultima email e proponi i dettagli"
-                        className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-violet-600 transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] dark:text-violet-400"
+                        className={dsIconButton}
                         aria-label="Suggerisci prenotazione dall'email"
                       >
-                        {suggestingBooking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                        {suggestingBooking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
                       </button>
                     )}
                     <button type="button" onClick={openReply} className={dsButton.secondary}>
@@ -660,11 +686,13 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
               {(bookingSuggestion || bookingSuggestError) && (
                 <div className="px-4 pt-3 sm:px-6 lg:px-8">
                   {bookingSuggestion ? (
-                    <div className="rounded-[14px] border border-violet-300 bg-violet-50 px-3.5 py-3 dark:border-violet-800 dark:bg-violet-950/40">
-                      <div className="flex items-start gap-2.5">
-                        <Wand2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-violet-600 dark:text-violet-400" aria-hidden />
+                    /* Stessa cornice AI di Messaggi (.ds-ai-frame): la proposta
+                       dell'agente ha un solo aspetto in tutta l'app. */
+                    <div className="ds-ai-frame">
+                      <div className="ds-ai-card flex items-start gap-2.5 px-3.5 py-3">
+                        <Wand2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
                         <div className="min-w-0 flex-1">
-                          <p className="text-[13px] font-semibold text-violet-900 dark:text-violet-200">
+                          <p className="text-[13px] font-semibold text-[var(--ds-text-primary)]">
                             Richiesta di prenotazione trovata nell'email
                           </p>
                           <dl className="mt-1.5 space-y-0.5 text-[14px] text-[var(--ds-text-primary)]">
@@ -694,7 +722,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                             <button
                               type="button"
                               onClick={handleCreateFromSuggestion}
-                              className="inline-flex h-9 items-center gap-1.5 rounded-full bg-violet-600 px-3.5 text-[13px] font-semibold text-white transition-colors hover:bg-violet-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                              className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                             >
                               <CalendarPlus className="h-4 w-4" /> Crea prenotazione
                             </button>
@@ -710,7 +738,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                       </div>
                     </div>
                   ) : (
-                    <Callout tone="info" icon={Sparkles}>{bookingSuggestError}</Callout>
+                    <Callout tone="info" icon={Wand2}>{bookingSuggestError}</Callout>
                   )}
                 </div>
               )}
@@ -785,9 +813,6 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
 
               {/* Reply composer: subject and body as cards, send inside the body. */}
               <div className="flex-shrink-0 space-y-2 px-4 pb-4 pt-3 sm:px-6 lg:px-8">
-                {attachments.length > 0 && (
-                  <div className="flex flex-wrap gap-2">{renderAttachmentChips()}</div>
-                )}
                 {libreriaAperta && renderLibreria()}
                 <input
                   type="text"
@@ -797,7 +822,11 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                   aria-label="Oggetto"
                   className="h-11 w-full rounded-full bg-[var(--ds-surface)] px-4 text-[15px] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 />
-                <div className="flex items-end gap-2 rounded-[24px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
+                <div className="rounded-[24px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
+                  {attachments.length > 0 && (
+                    <div className="mb-2 flex flex-wrap gap-1.5">{renderAttachmentRows()}</div>
+                  )}
+                  <div className="flex items-end gap-2">
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
@@ -836,6 +865,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                   >
                     {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   </button>
+                  </div>
                 </div>
                 {sendError && (
                   <p className="px-1 text-[13px] text-[var(--ds-critical-text)]">{sendError}</p>
@@ -906,7 +936,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
             <Field label="Allegati">
               <div className="space-y-2">
                 {attachments.length > 0 && (
-                  <div className="flex flex-wrap gap-2">{renderAttachmentChips()}</div>
+                  <div className="flex flex-wrap gap-1.5">{renderAttachmentRows()}</div>
                 )}
                 <div className="flex gap-2">
                   <button

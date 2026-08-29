@@ -135,7 +135,7 @@ export const ReservationAllergensManager: React.FC<Props> = ({ showToast }) => {
 
     if (loading) {
         return (
-            <div className="flex items-center gap-2 text-[var(--color-fg-muted)] text-[13px] py-2">
+            <div className="flex items-center gap-2 text-[var(--ds-text-muted)] text-[13px] py-2">
                 <Loader label="Caricamento…" size={40} />
             </div>
         );
@@ -144,7 +144,7 @@ export const ReservationAllergensManager: React.FC<Props> = ({ showToast }) => {
     return (
         <div className="space-y-4">
             {drafts.length === 0 ? (
-                <p className="text-[13px] text-[var(--color-fg-subtle)] italic px-1">Nessuna intolleranza configurata.</p>
+                <p className="text-[13px] text-[var(--ds-text-subtle)] italic px-1">Nessuna intolleranza configurata.</p>
             ) : (
                 <ul className="space-y-1.5">
                     {drafts.map((d, i) => (
@@ -155,24 +155,24 @@ export const ReservationAllergensManager: React.FC<Props> = ({ showToast }) => {
                             onDragOver={(e) => handleDragOver(e, i)}
                             onDrop={() => handleDrop(i)}
                             onDragEnd={handleDragEnd}
-                            className={`flex items-center gap-2 rounded-md border px-2 py-1.5 bg-[var(--color-surface)] transition-colors ${
-                                dragOverIndex === i ? 'border-amber-400 bg-amber-50 dark:bg-amber-500/10' : 'border-[var(--color-line)]'
+                            className={`flex items-center gap-2 rounded-md border px-2 py-1.5 bg-[var(--ds-surface)] transition-colors ${
+                                dragOverIndex === i ? 'border-[var(--ds-arriving-solid)] bg-[var(--ds-arriving-tint)]' : 'border-[var(--ds-border)]'
                             }`}
                         >
-                            <GripVertical className={`w-4 h-4 flex-shrink-0 ${canEdit ? 'text-[var(--color-fg-muted)] cursor-grab active:cursor-grabbing' : 'text-[var(--color-fg-subtle)]'}`} />
+                            <GripVertical className={`w-4 h-4 flex-shrink-0 ${canEdit ? 'text-[var(--ds-text-muted)] cursor-grab active:cursor-grabbing' : 'text-[var(--ds-text-subtle)]'}`} />
                             <input
                                 type="text"
                                 value={d.label}
                                 disabled={!canEdit}
                                 maxLength={MAX_LABEL_LENGTH}
                                 onChange={(e) => updateLabelAt(i, e.target.value)}
-                                className="flex-1 bg-transparent text-[14px] text-[var(--color-fg)] focus:outline-none disabled:opacity-70"
+                                className="flex-1 bg-transparent text-[14px] text-[var(--ds-text-primary)] focus:outline-none disabled:opacity-70"
                             />
                             {canEdit && (
                                 <button
                                     type="button"
                                     onClick={() => removeAt(i)}
-                                    className="p-1.5 rounded-md text-rose-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-900/50 transition-colors"
+                                    className="p-1.5 rounded-md text-[var(--ds-critical-solid)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                                     title="Rimuovi"
                                     aria-label={`Rimuovi ${d.label}`}
                                 >
@@ -193,13 +193,13 @@ export const ReservationAllergensManager: React.FC<Props> = ({ showToast }) => {
                         maxLength={MAX_LABEL_LENGTH}
                         onChange={(e) => setNewLabel(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addLabel(); } }}
-                        className="flex-1 rounded-md border border-[var(--color-line)] px-3 py-1.5 text-[14px] bg-[var(--color-surface)] focus:outline-none focus:border-[var(--color-fg)]"
+                        className="flex-1 rounded-md border border-[var(--ds-border)] px-3 py-1.5 text-[14px] bg-[var(--ds-surface)] focus:outline-none focus:border-[var(--ds-action-bg)]"
                     />
                     <button
                         type="button"
                         onClick={addLabel}
                         disabled={!newLabel.trim() || drafts.length >= MAX_LABELS}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[13px] font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         <Plus className="w-4 h-4" /> Aggiungi
                     </button>
@@ -207,15 +207,15 @@ export const ReservationAllergensManager: React.FC<Props> = ({ showToast }) => {
             )}
 
             {canEdit && (
-                <div className="flex items-center justify-between gap-3 pt-2 border-t border-[var(--color-line)]">
-                    <span className="text-[12px] text-[var(--color-fg-subtle)]">
+                <div className="flex items-center justify-between gap-3 pt-2 border-t border-[var(--ds-border)]">
+                    <span className="text-[12px] text-[var(--ds-text-subtle)]">
                         {drafts.length}/{MAX_LABELS} intolleranze
                     </span>
                     <button
                         type="button"
                         onClick={save}
                         disabled={!isDirty || saving}
-                        className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-[13px] font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                         Salva modifiche
@@ -224,7 +224,7 @@ export const ReservationAllergensManager: React.FC<Props> = ({ showToast }) => {
             )}
 
             {!canEdit && (
-                <p className="text-[12px] text-[var(--color-fg-subtle)]">
+                <p className="text-[12px] text-[var(--ds-text-subtle)]">
                     Solo gli amministratori possono modificare la lista.
                 </p>
             )}

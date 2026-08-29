@@ -101,7 +101,7 @@ semantic:
     action-bg:           "#111827"
     action-bg-hover:     "#000000"
     action-fg:           "#FFFFFF"
-    backdrop:            "rgba(11, 11, 13, 0.40)"
+    backdrop:            "rgba(11, 11, 13, 0.50)"   # heavier than dark's, deliberately — see below
 
   dark:
     canvas:              "#0B0B0D"   # [D] darkest — depth runs the other way
@@ -395,7 +395,15 @@ the structure never changes.
 | `critical` | Failed, empty, destructive | Esaurito, attività scadute, cancel |
 | `neutral` | No state | Default rows, free tables |
 
-Slots: `tint`, `tint-border`, `text`, `solid`, `solid-fg`.
+Slots: `tint`, `text`, `solid`, `solid-fg`.
+
+`tint-border` is listed against each family below but **is not implemented** — there is no
+`--ds-*-tint-border` in `index.css`. It was drawn as the hairline that would let a tinted
+pill read as a shape on the canvas, and measured against that job it does not work: at
+`arriving` it is 1.08:1 against `--ds-canvas`, where the fill it was meant to rescue is
+1.03:1. Pills take a neutral `border-strong` hairline instead (§7.4). Either build the slot
+for a purpose it can serve, or drop it from the families — do not reach for it expecting a
+border to exist.
 
 ### 3.3 Amber takes dark text
 
@@ -439,6 +447,43 @@ precedent. Setting its foreground to `pending.solid-fg` restores 5.80:1 at any s
 Where a list is ordered by urgency (Sotto scorta, Attività), the row background, its
 secondary text, and its metric shift family **together**: zero/failed → `critical`,
 low/overdue → `pending`, normal → `neutral`. Three coordinated signals, not one.
+
+### 3.5 Categorical — six hues that mean nothing
+
+The five families above all **mean** something. Some things need colour that means nothing at
+all, only *different from that other one*: banquet events sharing a floor map, task categories
+in a list. Reaching for a state family there makes the colour lie — an Inventario dot in amber
+reads as *overdue* to anyone who has learned what amber means everywhere else.
+
+`--ds-cat-1…6` exists for that, and only that. Six hues sitting in the gaps the families leave
+(green 150°, amber 43°, indigo 245°, red 7°), 25°–328° apart from each other.
+
+| | hue | light solid | dark solid |
+|---|---|---|---|
+| `cat-1` | teal 182° | `#0F6E70` | `#2E9A9C` |
+| `cat-2` | azure 209° | `#2A6BA8` | `#4B8FD1` |
+| `cat-3` | violet 274° | `#7145A8` | `#9A6FD1` |
+| `cat-4` | magenta 328° | `#A83A70` | `#D06498` |
+| `cat-5` | moss 80° | `#5A7A24` | `#85A845` |
+| `cat-6` | clay 25° | `#A05A34` | `#C98457` |
+
+Four slots each — `tint`, `line`, `text`, `solid`. `line` is the extra one the families don't
+have; the banquet label needs a border tone between tint and solid.
+
+Two rules that are easy to break:
+
+- **`text` on `tint` is the readable pair** and clears AA everywhere (6.85–8.18 light,
+  7.95–9.59 dark). **`solid` is for dots, bars and borders** — and for *large* text only
+  (≥18.66px semibold, where the floor is 3:1), which is what the banquet label uses it for.
+  Two of the six measure under 4.5:1 as small text on their own tint.
+- **Six hues cannot be told apart in greyscale.** Desaturated they land inside 25 luminance
+  points. No categorical palette solves this — every use site therefore carries a label as
+  well, per §4.3's first mitigation. If you add a seventh use, give it text too.
+
+They also sit close to the families in greyscale — teal and `seated` are both ~82, azure and
+`arriving` ~95, magenta and `critical` ~96. By hue they are 32–41° apart, which is comfortable;
+what separates them in practice is context. A status chip and a category dot never do the same
+job in the same place.
 
 ---
 
@@ -647,8 +692,15 @@ these only nudge it.
 
 **Input** [der] — height 44 (mobile) / 40 (desktop), `surface` fill, `border` hairline,
 `rounded.md`, 14px horizontal padding, `body` type. Placeholder `text-subtle`. Focus: 2px
-`border-focus` ring, 2px offset. Error: `critical` tint border plus message below. Disabled:
-`surface-row` fill, `text-subtle`, `cursor: not-allowed`.
+`border-focus` ring, 2px offset. Error: append **`dsInputError`** — a `critical.solid`
+hairline ring — and put the message below via `Field`'s `error`. Disabled: `surface-row`
+fill, `text-subtle`, `cursor: not-allowed`.
+
+It is a modifier appended to `dsInput` / `dsSelect` / `dsTextarea`, not a variant of them:
+those three are plain strings consumed in some two dozen places, and turning them into
+functions would break every one. The focus ring deliberately wins over the error ring while
+the control is focused — mid-correction the field should say "you are here", not "still
+wrong".
 
 **Textarea** [der] — as Input, `rounded.lg`, min-height 96px, vertical resize only.
 
@@ -668,14 +720,42 @@ fills `action-bg` with a white glyph. A circular variant is used in task lists.
 `action-bg` track. Transition at `motion.fast`. For immediate-effect settings only — never as
 a form field requiring a save.
 
-**Field** [der] — the composite wrapper: label (`label` type, `text-secondary`) → control →
-helper (`caption`, `text-muted`) or error (`caption`, `critical.text`). Error **replaces**
-helper. Wires `htmlFor`, `aria-describedby`, and `aria-invalid` automatically.
+**Field** [impl] — the composite wrapper: label (`label` type, `text-secondary`) → control →
+helper (`caption`, `text-muted`) or error (`caption`, `critical.text`, with a leading
+`AlertCircle` so the state is not carried by colour alone). Error **replaces** helper.
 
-**DatePicker / TimePicker** [der] — Popover containing a grid of day cells at `rounded.md`,
-44px minimum. Today: `border-focus` ring. Selected: `action-bg` fill. Availability may be
-shaded using the `intensity` ramp of the relevant service. Always pair with a typable text
-input — never calendar-only.
+**The caller wires the ARIA, not the component.** `Field` renders the message with
+`id={fieldErrorId(htmlFor)}` — i.e. `"<htmlFor>-error"` — and the control passes
+`aria-invalid` and `aria-describedby` itself:
+
+```tsx
+<Field htmlFor="email" error={err}>
+  <input id="email" aria-invalid={!!err} aria-describedby={err ? fieldErrorId('email') : undefined} … />
+</Field>
+```
+
+An earlier draft of this document promised automatic wiring. Doing it would mean cloning
+`children` to inject props, and `children` is not reliably a single control — the password
+field passes a wrapper holding the input *and* its reveal button, and a clone would land
+the attributes on the wrapper. The convention is explicit instead.
+
+Pair the error with `dsInputError` on the control (§7.2, Input) so the field itself carries
+the state, not just the text below it.
+
+**DatePicker** [impl] — `MonthGrid` plus `DayPicker` in `ds/Calendar.tsx`, Monday-first with
+`L M M G V S D` headers, 36px round day cells, today ringed and the selection filled. It
+models a range (`from`/`to`); a single day is the same two values. `minIso` disables days
+before a floor and hides the arrow into a month that is entirely behind it. Anchored under
+its trigger from `sm` up; below that it becomes a centred panel with its own scrim, because
+a popover hung off a control inside a scrolling modal loses half the month off-screen.
+
+**TimePicker** [impl] — not a popover: a row of slot cells, one per opening-hours slot, each
+a bar over the time and the covers already booked into it. The bar is the load — `seated`
+under 15% of the room's seats, `pending` up to 30%, `critical` above — so choosing a time
+and reading how full it already is are the same glance. Selecting is the whole control;
+there is no separate dropdown repeating the same values. A saved time that has since left
+the grid is appended rather than dropped, or opening an old booking would silently blank
+its hour.
 
 **SearchField** [obs] — pill at `rounded.full`, 44px, leading search glyph, trailing clear
 button once there is a value. **Always visible, never behind a toggle:** on a list you filter
@@ -743,7 +823,14 @@ Choosing a fill:
 - **no badge** — a count that describes the size of a collection rather than a backlog.
   Render it as a plain `text-muted` number.
 
-**StatusPill** [obs] — pill at `rounded.full`, 24px tall, `states.X.tint` fill with the
+**StatusPill** [impl] — carries a `border-strong` hairline (`ring-1 ring-inset`, so the fixed
+height is not eaten by a border). The tints are pale enough to sit at 1.03–1.07:1 of
+*luminance* against the canvas — they separate by hue, not by lightness, so in dim light or
+for a reader who discriminates colour poorly the row flattens into one grey band. The text
+clears 5.9:1 in every tone, so the hairline is not a WCAG requirement: it is definition, not
+compliance.
+
+Pill at `rounded.full`, 24px tall, `states.X.tint` fill with the
 family's `text` colour. Carries a state as words. Where the state can be changed it gains a
 leading dot and a trailing chevron and becomes a button; where it is read-only it stays a
 `<span>`. **The dot is what makes it survive a colour-blind reader**, per §4.3.
@@ -866,6 +953,14 @@ way back. A screen you can leave *only* through the tab bar never hides it.
 `card-padding`. Backdrop uses the `backdrop` token at `z.overlay`; content at `z.modal`.
 Focus trapped, Escape closes, focus returns to the trigger. At `<md` becomes a bottom sheet:
 full-width, top corners only, slide up at `motion.slow`.
+
+**The light backdrop is heavier than the dark one** — 0.50 against 0.60, which is a smaller
+gap than the raw numbers suggest and is deliberate in direction. In dark the page underneath
+is already spent and the dialog separates itself by being the only lit thing in the frame, so
+the scrim carries almost nothing. In light the page is bright and competes, and the scrim is
+the whole of the separation. Reading the two numbers as "light should be lower" is the trap:
+0.50 takes a white surface down to `#858586`, which reads as behind glass. Past that, around
+0.60 in light, the app stops looking backgrounded and starts looking switched off.
 
 **The footer stacks by default and stays in a row on request.** Below `sm` its two groups drop
 onto their own full-width rows, which is right for a footer of labelled buttons a thumb wants
@@ -1129,9 +1224,12 @@ and `prefers-reduced-motion` on first load.
 components/
   ds/                    # design system primitives (§7)
     ModalShell.tsx       # the modal frame
-    FormPrimitives.tsx   # FormCard, Field, Stepper, SegmentedControl, dsInput/Select/Textarea, dsButton
+    FormPrimitives.tsx   # FormCard, Field, fieldErrorId, Stepper, SegmentedControl,
+                         # dsInput/Select/Textarea, dsInputError, dsButton
     ListPrimitives.tsx   # SplitPane, PaneHeader, SectionHeader, StatStrip, StatusPill, CountBadge,
                          # SearchField, Avatar, Callout, EmptyState, dsIconButton, useMediaQuery
+    Calendar.tsx         # MonthGrid, DayPicker — one month grid for the whole app
+    AttachmentRow.tsx    # a queued file inside a composer
     SwipeRow.tsx         # swipe actions + first-run hint
     index.ts             # barrel export — import from './ds', never from a file
   <screen>.tsx           # domain screens, composing ds/
@@ -1148,8 +1246,9 @@ constants**, not components — used where the element must stay native, such as
 should look like a button. `reservationState.tsx` is the single source of truth for reservation
 state and its colour; it is domain, not `ds/`, and every surface derives from it.
 
-Tokens live in `index.css` under Tailwind v4 `@theme` — this document is the specification,
-`index.css` is the implementation.
+Tokens live in `index.css`, in plain `:root` and `.dark` blocks — not under Tailwind v4
+`@theme`, which holds only the legacy `--color-*` remap that Tailwind's own utilities resolve
+through. This document is the specification, `index.css` is the implementation.
 
 ---
 
@@ -1316,3 +1415,43 @@ The floors hold without exception: 44px touch targets, `tabular-nums` on every l
 `rounded.full` on primary actions, visible focus, and §5.2 — **never uppercase, anywhere.**
 The typeface is Hanken Grotesk as in §5; a serif appears only in the fallback wordmark, where
 it is standing in for a restaurant's logo rather than setting an interface.
+
+---
+
+## 17. The print surface — `--ds-print-*`
+
+Two modals print: `PrintReservationsModal` and `PrintInventoryModal`. Unlike the booking page
+(§16) the printed sheet is **not** a separate document — it renders inside the app, portaled
+into `.print-portal`, and `@media print` hides every other body child. It therefore *does* load
+`index.css` and can see every token the app can.
+
+Which is exactly the trap. `--ds-surface` resolves to `#141417` under `.dark`, so a member of
+staff working in dark mode would print a black page.
+
+### 17.1 Light only, by construction
+
+`--ds-print-*` is declared **on `:root` and never inside `.dark`.** Nothing redefines it, so it
+cannot invert, and the sheet comes out identical in either theme. That is the whole mechanism —
+there is no media query and no theme branch to maintain.
+
+Additive over `--ds-*`, overriding nothing, the same discipline `--ds-public-*` follows (§16.1).
+
+| Token | Value | Used for |
+|---|---|---|
+| `ink` | `#0F172A` | headings, strong rules |
+| `ink-secondary` | `#475569` | supporting text |
+| `ink-muted` | `#64748B` | notes, units, empty states |
+| `ink-subtle` | `#94A3B8` | page footer |
+| `rule-strong` | `#CBD5E1` | section separator |
+| `rule` | `#E2E8F0` | row hairline |
+| `fill` | `#F1F5F9` | table header ground |
+| `positive` | `#059669` | the "✓ arrivato" tick |
+
+The values are the ones both modals already had hard-coded, identically, in two places. They
+were named rather than changed: paper coming out of the printer is unchanged.
+
+### 17.2 What this does not cover
+
+`utils/printDocument.ts` is a third path. Banchetti, HACCP and Lista della spesa print from a
+hidden iframe as standalone documents that never load `index.css`, so they cannot consume these
+tokens — the same separation §16 describes for `prenota.html`.

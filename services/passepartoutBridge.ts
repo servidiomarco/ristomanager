@@ -24,7 +24,13 @@ export type PassepartoutOp =
     | 'comanda'
     | 'tipiPagamento'
     | 'sale'
-    | 'conto';
+    | 'conto'
+    /** Catalogo articoli senza immagini — alimenta l'import menu del CRM. */
+    | 'articoli'
+    /** InviaProduzioneComanda (tutte le uscite) — per comande create via WS. */
+    | 'invia'
+    /** Sequenza di chiusura completa (chiudiComandaCompleta): azione FISCALE. */
+    | 'chiudi';
 
 export class PassepartoutBridgeError extends Error {
     constructor(

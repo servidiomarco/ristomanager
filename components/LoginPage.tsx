@@ -2,22 +2,62 @@ import React, { useState, useEffect } from 'react';
 import { AlertCircle, Loader2, Eye, EyeOff, Check, CheckCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { authApiService } from '../services/authApiService';
-import { PLATFORM_NAME } from '../platform';
+import { PLATFORM_NAME, PLATFORM_TAGLINE } from '../platform';
+import { dsInput, dsInputError, dsButton, Callout, Field, fieldErrorId } from './ds';
 
 const SAVED_CREDENTIALS_KEY = 'ristocrm_saved_credentials';
+
+/* ── Validazione per campo ────────────────────────────────────────────────
+   Messaggi nostri, non quelli del browser. `input.validationMessage` sarebbe
+   già localizzato ("Manca la parte dopo la @.") ma dice solo cos'è rotto,
+   mentre la regola di tono (§12) chiede il problema *e* la correzione. Per
+   questo i form sono `noValidate`: la validazione nativa resta come semantica
+   (`required`, `type=email`) ma non apre i suoi bubble.
+
+   Nota di sicurezza: qui sta solo ciò che il client può sapere da sé. L'esito
+   dell'autenticazione — credenziali errate, rate limit, tenant sospeso — non
+   diventa mai un errore di campo, perché un "password errata" sotto la
+   password confermerebbe che quell'email ha un account. Quello resta un
+   Callout di form, come nel flusso di recupero. */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const validateEmail = (value: string): string => {
+  if (!value.trim()) return 'Inserisci la tua email.';
+  if (!EMAIL_RE.test(value.trim())) return 'Email non valida. Controlla il formato (esempio: nome@dominio.it).';
+  return '';
+};
+
+// Sul login si controlla solo che ci sia: la lunghezza minima la impone il
+// reset, e un account storico con una password più corta deve poter entrare.
+const validateCurrentPassword = (value: string): string =>
+  value ? '' : 'Inserisci la password.';
+
+const validateNewPassword = (value: string): string => {
+  if (!value) return 'Scegli una password.';
+  if (value.length < 8) return 'La password deve avere almeno 8 caratteri.';
+  return '';
+};
+
+const validateConfirmPassword = (value: string, against: string): string => {
+  if (!value) return 'Ripeti la nuova password.';
+  if (value !== against) return 'Le due password non coincidono.';
+  return '';
+};
 
 // La pagina ha tre facce: login, richiesta reset (email) e nuova password
 // (arrivando dal link `?reset=<token>` dell'email).
 type LoginMode = 'login' | 'forgot' | 'reset';
 
-const inputClass =
-  'w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-full px-5 py-3 text-[14px] leading-[20px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:border-[var(--color-fg)] transition-colors duration-150';
-
-const submitClass =
-  'mt-3 w-full inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-[var(--color-fg)] hover:opacity-90 text-[var(--color-fg-on-brand)] text-[14px] leading-[20px] font-medium tracking-[0.01em] rounded-full transition-opacity duration-150 disabled:opacity-50 disabled:cursor-not-allowed';
+// Il submit è l'unica azione piena della pagina: primary a tutta larghezza.
+const submitClass = `${dsButton.primary} mt-3 w-full`;
 
 const linkClass =
-  'text-[13px] leading-[18px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] underline underline-offset-2 transition-colors duration-150';
+  'rounded-full text-[13px] leading-[18px] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)] underline underline-offset-2 transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-40';
+
+// Occhio mostra/nascondi, parcheggiato dentro il campo: `inset-y-0` gli dà
+// tutta l'altezza dell'input, quindi il bersaglio è già di 44px.
+const revealClass =
+  'absolute inset-y-0 right-0 pr-4 flex items-center rounded-full text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] transition-colors duration-150 disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 export const LoginPage: React.FC = () => {
   const { login } = useAuth();
@@ -27,6 +67,10 @@ export const LoginPage: React.FC = () => {
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
+  // Quali campi l'utente ha già lasciato almeno una volta.
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const markTouched = (name: string) => setTouched((t) => ({ ...t, [name]: true }));
 
   // ?reset=<token> nella query string: il link dell'email atterra qui.
   // Letto una volta al mount; la query si pulisce al termine del reset.
@@ -61,6 +105,9 @@ export const LoginPage: React.FC = () => {
 
   const handleForgotSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Submit vale come "campo lasciato": se era invalido, l'errore compare ora.
+    setTouched((t) => ({ ...t, forgotEmail: true }));
+    if (validateEmail(forgotEmail)) return;
     setError('');
     setIsLoading(true);
     try {
@@ -78,15 +125,12 @@ export const LoginPage: React.FC = () => {
 
   const handleResetSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Lunghezza e coincidenza sono errori di campo, non di form: vanno sotto
+    // l'input che li causa. Al Callout resta solo la risposta del server
+    // (token scaduto, rete).
+    setTouched((t) => ({ ...t, newPassword: true, confirmPassword: true }));
+    if (validateNewPassword(newPassword) || validateConfirmPassword(confirmPassword, newPassword)) return;
     setError('');
-    if (newPassword.length < 8) {
-      setError('La nuova password deve avere almeno 8 caratteri.');
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setError('Le due password non coincidono.');
-      return;
-    }
     setIsLoading(true);
     try {
       await authApiService.resetPassword(resetToken, newPassword);
@@ -95,6 +139,7 @@ export const LoginPage: React.FC = () => {
       window.history.replaceState(null, '', window.location.pathname);
       setNewPassword('');
       setConfirmPassword('');
+      setTouched({});
       setInfo('Password aggiornata. Accedi con la nuova password.');
       setMode('login');
     } catch (err: any) {
@@ -108,10 +153,15 @@ export const LoginPage: React.FC = () => {
     setMode('login');
     setError('');
     setForgotSent(false);
+    // Cambiando faccia si riparte puliti: gli errori dell'altro form non
+    // riguardano questo.
+    setTouched({});
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setTouched((t) => ({ ...t, email: true, password: true }));
+    if (validateEmail(email) || validateCurrentPassword(password)) return;
     setError('');
     setInfo('');
     setIsLoading(true);
@@ -133,40 +183,91 @@ export const LoginPage: React.FC = () => {
     }
   };
 
+  // Un campo mostra il suo errore solo dopo che l'utente l'ha lasciato: mentre
+  // scrivi l'indirizzo la prima volta non ha senso sentirsi dire che è
+  // incompleto. Da lì in poi si rivaluta a ogni tasto, così l'errore sparisce
+  // appena correggi invece di aspettare il blur successivo.
+  const shown = (name: string, message: string) => (touched[name] ? message : '');
+
+  const emailError = validateEmail(email);
+  const passwordError = validateCurrentPassword(password);
+  const emailErr = shown('email', emailError);
+  const passwordErr = shown('password', passwordError);
+
+  const forgotEmailError = validateEmail(forgotEmail);
+  const forgotEmailErr = shown('forgotEmail', forgotEmailError);
+
+  const newPasswordError = validateNewPassword(newPassword);
+  const confirmPasswordError = validateConfirmPassword(confirmPassword, newPassword);
+  const newPasswordErr = shown('newPassword', newPasswordError);
+  const confirmPasswordErr = shown('confirmPassword', confirmPasswordError);
+
+  // Il gate del submit guarda la validità reale, non quella già mostrata: il
+  // bottone non deve accendersi solo perché non hai ancora toccato un campo.
+  // Il client può verificare la *forma* di quello che scrivi, mai la
+  // correttezza delle credenziali — quella la sa solo il server.
+  const canSubmit = !emailError && !passwordError;
+  const canSubmitForgot = !forgotEmailError;
+  const canSubmitReset = !newPasswordError && !confirmPasswordError;
+
+  // Errore e nota di esito hanno la stessa forma — Callout, tono opposto. Il
+  // `role` sta sul contenitore perché Callout non inoltra attributi arbitrari.
+  const errorCallout = error && (
+    <div role="alert">
+      <Callout tone="critical" icon={AlertCircle}>{error}</Callout>
+    </div>
+  );
+
   return (
-    <div className="min-h-screen w-full flex font-sans text-[var(--color-fg)] bg-[var(--color-surface)]">
+    <div className="min-h-screen w-full flex font-sans text-[var(--ds-text-primary)] bg-[var(--ds-surface)]">
       {/* Left: form column */}
       <div className="flex-1 min-w-0 relative flex flex-col">
-        {/* Top bar: brand */}
-        <div className="px-6 py-6 flex items-center justify-center">
-          {/* Il tema arriva anche qui: .dark viene applicata da localStorage
-              prima dell'accesso. Stessa coppia nero/bianco della sidebar. */}
-          <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-8 w-auto dark:hidden" />
-          <img src="/logo-sympotia-white.svg" alt={PLATFORM_NAME} className="hidden h-8 w-auto dark:block" />
-        </div>
-
-        {/* Centered form */}
-        <main className="flex-1 flex items-center justify-center px-6">
+        {/* Centered form — il logo viaggia dentro il blocco centrato, non in
+            una barra in cima: appoggiato al titolo fa una testata sola invece
+            di due elementi separati da tutta l'altezza della colonna. */}
+        <main className="flex-1 flex items-center justify-center px-6 py-6">
           <div className="w-full max-w-[400px]">
-            <h1 className="text-[26px] leading-[32px] font-semibold tracking-tight text-[var(--color-fg)] text-center mb-1.5">
+            {/* Il tema arriva anche qui: .dark viene applicata da localStorage
+                prima dell'accesso. Stessa coppia nero/bianco della sidebar. */}
+            <div className="flex items-center justify-center">
+              <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-8 w-auto dark:hidden" />
+              <img src="/logo-sympotia-white.svg" alt={PLATFORM_NAME} className="hidden h-8 w-auto dark:block" />
+            </div>
+            {/* La riga che dice cos'e' Sympotia, sotto il marchio. */}
+            <p className="mt-3 text-center text-[15px] leading-[22px] text-[var(--ds-text-secondary)]">
+              {PLATFORM_TAGLINE}
+            </p>
+            {/* In accesso il titolo resta solo per chi legge con lo schermo:
+                "Accedi al tuo ristorante" sopra due campi e un bottone che dice
+                Accedi non aggiungeva niente, ma una pagina senza intestazione
+                lascia chi non la vede senza sapere dove e' finito.
+                Recupero e nuova password lo tengono visibile: li' il titolo e la
+                riga sotto dicono cosa sta per succedere, e non li ripete nulla. */}
+            <h1
+              className={mode === 'login'
+                ? 'sr-only'
+                : 'mt-10 text-[26px] leading-[32px] font-semibold tracking-tight text-[var(--ds-text-primary)] text-center mb-1.5'}
+            >
               {mode === 'forgot' ? 'Recupera la password'
                 : mode === 'reset' ? 'Scegli una nuova password'
                 : 'Accedi al tuo ristorante'}
             </h1>
-            <p className="text-sm text-[var(--color-fg-muted)] text-center mb-8">
-              {mode === 'forgot' ? 'Ti mandiamo un link per sceglierne una nuova.'
-                : mode === 'reset' ? 'Minimo 8 caratteri.'
-                : 'Inserisci le tue credenziali per continuare.'}
-            </p>
+            {mode !== 'login' && (
+              <p className="text-[15px] leading-[22px] text-[var(--ds-text-secondary)] text-center mb-8">
+                {mode === 'forgot' ? 'Ti mandiamo un link per sceglierne una nuova.' : 'Minimo 8 caratteri.'}
+              </p>
+            )}
+            {mode === 'login' && <div className="mb-10" />}
 
             {mode === 'forgot' && (
               forgotSent ? (
                 <div className="flex flex-col gap-4">
                   {/* Sempre lo stesso messaggio, che l'email esista o no:
                       la UI non conferma mai quali indirizzi hanno un account. */}
-                  <div role="status" className="flex items-start gap-2 px-4 py-3 bg-[var(--color-surface)] border border-emerald-200 rounded-2xl text-[13px] leading-[18px] text-emerald-700">
-                    <CheckCircle className="h-4 w-4 flex-shrink-0 mt-0.5 text-emerald-600" />
-                    <span>Se l'indirizzo esiste, riceverai un'email con il link per reimpostare la password. Il link vale 1 ora.</span>
+                  <div role="status">
+                    <Callout tone="positive" icon={CheckCircle}>
+                      Se l'indirizzo esiste, riceverai un'email con il link per reimpostare la password. Il link vale 1 ora.
+                    </Callout>
                   </div>
                   <div className="text-center">
                     <button type="button" onClick={goToLogin} className={linkClass}>
@@ -175,8 +276,10 @@ export const LoginPage: React.FC = () => {
                   </div>
                 </div>
               ) : (
-                <form onSubmit={handleForgotSubmit} className="flex flex-col gap-3">
-                  <div>
+                <form onSubmit={handleForgotSubmit} noValidate className="flex flex-col gap-3">
+                  {errorCallout}
+
+                  <Field htmlFor="forgot-email" error={forgotEmailErr}>
                     <label htmlFor="forgot-email" className="sr-only">Email</label>
                     <input
                       id="forgot-email"
@@ -184,22 +287,18 @@ export const LoginPage: React.FC = () => {
                       autoComplete="email"
                       value={forgotEmail}
                       onChange={(e) => setForgotEmail(e.target.value)}
+                      onBlur={() => markTouched('forgotEmail')}
                       placeholder="Email"
-                      className={inputClass}
+                      className={`${dsInput} ${forgotEmailErr ? dsInputError : ''}`}
                       required
+                      aria-invalid={!!forgotEmailErr}
+                      aria-describedby={forgotEmailErr ? fieldErrorId('forgot-email') : undefined}
                       disabled={isLoading}
                       autoFocus
                     />
-                  </div>
+                  </Field>
 
-                  {error && (
-                    <div role="alert" className="flex items-center gap-2 px-4 py-2.5 bg-[var(--color-surface)] border border-rose-200 rounded-full text-[13px] leading-[18px] text-rose-700">
-                      <AlertCircle className="h-4 w-4 flex-shrink-0 text-rose-600" />
-                      <span>{error}</span>
-                    </div>
-                  )}
-
-                  <button type="submit" disabled={isLoading} className={submitClass}>
+                  <button type="submit" disabled={isLoading || !canSubmitForgot} className={submitClass}>
                     {isLoading ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -220,8 +319,10 @@ export const LoginPage: React.FC = () => {
             )}
 
             {mode === 'reset' && (
-              <form onSubmit={handleResetSubmit} className="flex flex-col gap-3">
-                <div>
+              <form onSubmit={handleResetSubmit} noValidate className="flex flex-col gap-3">
+                {errorCallout}
+
+                <Field htmlFor="new-password" error={newPasswordErr}>
                   <label htmlFor="new-password" className="sr-only">Nuova password</label>
                   <div className="relative">
                     <input
@@ -230,10 +331,13 @@ export const LoginPage: React.FC = () => {
                       autoComplete="new-password"
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
+                      onBlur={() => markTouched('newPassword')}
                       placeholder="Nuova password"
-                      className={`${inputClass} pr-12`}
+                      className={`${dsInput} pr-12 ${newPasswordErr ? dsInputError : ''}`}
                       required
                       minLength={8}
+                      aria-invalid={!!newPasswordErr}
+                      aria-describedby={newPasswordErr ? fieldErrorId('new-password') : undefined}
                       disabled={isLoading}
                       autoFocus
                     />
@@ -241,16 +345,16 @@ export const LoginPage: React.FC = () => {
                       type="button"
                       onClick={() => setShowNewPassword((p) => !p)}
                       disabled={isLoading}
-                      className="absolute inset-y-0 right-0 pr-4 flex items-center text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors duration-150 disabled:opacity-50"
+                      className={revealClass}
                       aria-label={showNewPassword ? 'Nascondi password' : 'Mostra password'}
                       tabIndex={-1}
                     >
                       {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
-                </div>
+                </Field>
 
-                <div>
+                <Field htmlFor="confirm-password" error={confirmPasswordErr}>
                   <label htmlFor="confirm-password" className="sr-only">Conferma password</label>
                   <input
                     id="confirm-password"
@@ -258,22 +362,18 @@ export const LoginPage: React.FC = () => {
                     autoComplete="new-password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
+                    onBlur={() => markTouched('confirmPassword')}
                     placeholder="Conferma password"
-                    className={inputClass}
+                    className={`${dsInput} ${confirmPasswordErr ? dsInputError : ''}`}
                     required
                     minLength={8}
+                    aria-invalid={!!confirmPasswordErr}
+                    aria-describedby={confirmPasswordErr ? fieldErrorId('confirm-password') : undefined}
                     disabled={isLoading}
                   />
-                </div>
+                </Field>
 
-                {error && (
-                  <div role="alert" className="flex items-center gap-2 px-4 py-2.5 bg-[var(--color-surface)] border border-rose-200 rounded-full text-[13px] leading-[18px] text-rose-700">
-                    <AlertCircle className="h-4 w-4 flex-shrink-0 text-rose-600" />
-                    <span>{error}</span>
-                  </div>
-                )}
-
-                <button type="submit" disabled={isLoading} className={submitClass}>
+                <button type="submit" disabled={isLoading || !canSubmitReset} className={submitClass}>
                   {isLoading ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -301,16 +401,20 @@ export const LoginPage: React.FC = () => {
             )}
 
             {mode === 'login' && (
-            <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+            <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-3">
               {/* Esito del reset appena completato */}
               {info && (
-                <div role="status" className="flex items-center gap-2 px-4 py-2.5 bg-[var(--color-surface)] border border-emerald-200 rounded-full text-[13px] leading-[18px] text-emerald-700">
-                  <CheckCircle className="h-4 w-4 flex-shrink-0 text-emerald-600" />
-                  <span>{info}</span>
+                <div role="status">
+                  <Callout tone="positive" icon={CheckCircle}>{info}</Callout>
                 </div>
               )}
+              {/* L'esito del server sta in testa al form, non sopra il bottone:
+                  riguarda i campi, e dopo un tentativo fallito lo sguardo torna
+                  in cima per ribattere: lì lo trova prima di riscrivere. */}
+              {errorCallout}
+
               {/* Email */}
-              <div>
+              <Field htmlFor="email" error={emailErr}>
                 <label htmlFor="email" className="sr-only">Email</label>
                 <input
                   id="email"
@@ -318,15 +422,18 @@ export const LoginPage: React.FC = () => {
                   autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  onBlur={() => markTouched('email')}
                   placeholder="Email"
-                  className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-full px-5 py-3 text-[14px] leading-[20px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:border-[var(--color-fg)] transition-colors duration-150"
+                  className={`${dsInput} ${emailErr ? dsInputError : ''}`}
                   required
+                  aria-invalid={!!emailErr}
+                  aria-describedby={emailErr ? fieldErrorId('email') : undefined}
                   disabled={isLoading}
                 />
-              </div>
+              </Field>
 
               {/* Password */}
-              <div>
+              <Field htmlFor="password" error={passwordErr}>
                 <label htmlFor="password" className="sr-only">Password</label>
                 <div className="relative">
                   <input
@@ -335,28 +442,32 @@ export const LoginPage: React.FC = () => {
                     autoComplete="current-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    onBlur={() => markTouched('password')}
                     placeholder="Password"
-                    className="w-full bg-[var(--color-surface)] border border-[var(--color-line)] rounded-full px-5 py-3 pr-12 text-[14px] leading-[20px] text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none focus:border-[var(--color-fg)] transition-colors duration-150"
+                    className={`${dsInput} pr-12 ${passwordErr ? dsInputError : ''}`}
                     required
+                    aria-invalid={!!passwordErr}
+                    aria-describedby={passwordErr ? fieldErrorId('password') : undefined}
                     disabled={isLoading}
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword((p) => !p)}
                     disabled={isLoading}
-                    className="absolute inset-y-0 right-0 pr-4 flex items-center text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors duration-150 disabled:opacity-50"
+                    className={revealClass}
                     aria-label={showPassword ? 'Nascondi password' : 'Mostra password'}
                     tabIndex={-1}
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
-              </div>
+              </Field>
 
-              {/* Remember me */}
+              {/* Remember me — checkbox 20px del design system, riga a 44px
+                  perché il bersaglio è tutta la label, non il quadratino. */}
               <label
                 htmlFor="remember-me"
-                className="flex items-center gap-2 px-1 mt-1 cursor-pointer select-none"
+                className="flex min-h-11 items-center gap-2.5 px-1 cursor-pointer select-none"
               >
                 <span className="relative inline-flex items-center justify-center">
                   <input
@@ -368,32 +479,20 @@ export const LoginPage: React.FC = () => {
                     className="peer sr-only"
                   />
                   <span
-                    className="h-4 w-4 rounded-[4px] border border-[var(--color-line-strong)] bg-[var(--color-surface)] peer-checked:bg-[var(--color-fg)] peer-checked:border-[var(--color-fg)] peer-disabled:opacity-50 transition-colors duration-150"
+                    className="h-5 w-5 rounded-[6px] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] peer-checked:bg-[var(--ds-action-bg)] peer-checked:border-[var(--ds-action-bg)] peer-disabled:opacity-40 peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--ds-border-focus)] peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[var(--ds-surface)] transition-colors duration-150"
                   />
                   <Check
-                    className="absolute h-3 w-3 text-[var(--color-fg-on-brand)] opacity-0 peer-checked:opacity-100 transition-opacity duration-150 pointer-events-none"
+                    className="absolute h-3.5 w-3.5 text-[var(--ds-action-fg)] opacity-0 peer-checked:opacity-100 transition-opacity duration-150 pointer-events-none"
                     strokeWidth={3}
                   />
                 </span>
-                <span className="text-[13px] leading-[18px] text-[var(--color-fg-muted)]">
+                <span className="text-[13px] leading-[18px] text-[var(--ds-text-secondary)]">
                   Ricorda le mie credenziali
                 </span>
               </label>
 
-              {/* Error */}
-              {error && (
-                <div role="alert" className="flex items-center gap-2 px-4 py-2.5 bg-[var(--color-surface)] border border-rose-200 rounded-full text-[13px] leading-[18px] text-rose-700">
-                  <AlertCircle className="h-4 w-4 flex-shrink-0 text-rose-600" />
-                  <span>{error}</span>
-                </div>
-              )}
-
               {/* Submit (pill) */}
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="mt-3 w-full inline-flex items-center justify-center gap-2 px-5 py-3.5 bg-[var(--color-fg)] hover:opacity-90 text-[var(--color-fg-on-brand)] text-[14px] leading-[20px] font-medium tracking-[0.01em] rounded-full transition-opacity duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
+              <button type="submit" disabled={isLoading || !canSubmit} className={submitClass}>
                 {isLoading ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -430,21 +529,22 @@ export const LoginPage: React.FC = () => {
 
         {/* Footer */}
         <div className="px-6 py-6 text-center">
-          <p className="text-[12px] leading-[16px] text-[var(--color-fg-subtle)]">
+          <p className="text-[12px] leading-[16px] text-[var(--ds-text-subtle)]">
             {PLATFORM_NAME} · Italia
           </p>
         </div>
       </div>
 
-      {/* Right: framed image */}
-      <div className="hidden lg:flex flex-1 min-w-0 bg-[var(--color-surface-3)] p-6">
-        <div className="w-full h-full rounded-2xl overflow-hidden">
-          <img
-            src="https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=1400&q=80"
-            alt=""
-            className="w-full h-full object-cover"
-          />
-        </div>
+      {/* Right: full-bleed image — nessuna cornice, l'immagine arriva ai bordi
+          dello schermo. `absolute inset-0` invece di `h-full` perché il
+          contenitore prende l'altezza dallo stretch del flex padre, e una
+          percentuale su un'altezza implicita non è affidabile ovunque. */}
+      <div className="hidden lg:block relative flex-1 min-w-0">
+        <img
+          src="https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=1400&q=80"
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover"
+        />
       </div>
     </div>
   );

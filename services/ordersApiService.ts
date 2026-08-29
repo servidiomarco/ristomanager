@@ -21,6 +21,9 @@ export interface NewOrderItem {
   note?: string | null;
   modifier_ids?: number[];
   station_id?: number | null;
+  /** Chiave di idempotenza per riga: il server la vincola per tenant, quindi
+   *  rimandare la stessa riga (retry, coda offline) non la duplica mai. */
+  idempotency_key?: string;
 }
 
 export interface PatchOrderItemPayload {
@@ -226,6 +229,33 @@ export const getKdsQueue = async (stationId: number | null): Promise<KdsQueue> =
     { headers: getHeaders() },
   );
 
+// Revisioni comanda: modifiche a comande già lanciate (storno, aggiunta,
+// riporta, trasferimento). Il monitor mostra "modificata" finché qualcuno
+// non conferma con l'ack, che spegne l'avviso su tutti gli schermi.
+export interface OrderRevision {
+  id: number;
+  order_id: number;
+  course_no: number | null;
+  station_ids: number[] | null;
+  kind: 'void' | 'added' | 'unserved' | 'transfer';
+  summary: string;
+  details: { label: string; note?: string | null }[] | null;
+  created_by_name: string;
+  created_at: string;
+}
+
+export const getKdsRevisions = async (stationId: number | null): Promise<{ revisions: OrderRevision[] }> =>
+  apiRequest(
+    `${API_URL}/kds/revisions${stationId != null ? `?station=${stationId}` : ''}`,
+    { headers: getHeaders() },
+  );
+
+export const ackKdsRevision = async (id: number): Promise<{ ok: true }> =>
+  apiRequest(`${API_URL}/kds/revisions/${id}/ack`, {
+    method: 'POST',
+    headers: getHeaders(),
+  });
+
 export const setKdsItemStatus = async (
   itemId: number,
   status: 'PREPARING' | 'READY',
@@ -241,6 +271,8 @@ export const setKdsItemStatus = async (
 export interface ExpediterStationState {
   station_id: number | null;
   ready: boolean;
+  /** Righe già pronte della partita: l'avanzamento parziale (2/3). */
+  ready_items: number;
   items: number;
 }
 
@@ -268,6 +300,14 @@ export interface ExpediterCourse {
 export interface ExpediterBoard {
   stations: { id: number; name: string; color: string | null; sort_order: number }[];
   courses: ExpediterCourse[];
+  /** Uscite servite negli ultimi minuti: il cestino da cui si riporta. */
+  servite: {
+    order_id: number;
+    course_no: number;
+    served_at: string;
+    items: number;
+    table_name: string | null;
+  }[];
 }
 
 export const getExpediterBoard = async (): Promise<ExpediterBoard> =>
@@ -287,6 +327,18 @@ export const refireCourse = async (orderId: number, courseNo: number): Promise<u
 /** Chiama la sala a ritirare l'uscita pronta. */
 export const callCourse = async (orderId: number, courseNo: number): Promise<{ table_name: string }> =>
   apiRequest(`${API_URL}/orders/${orderId}/courses/${courseNo}/call`, {
+    method: 'POST', headers: getHeaders(),
+  });
+
+/** L'uscita lascia il passe: tutte le righe pronte diventano servite. */
+export const serveCourse = async (orderId: number, courseNo: number): Promise<unknown> =>
+  apiRequest(`${API_URL}/orders/${orderId}/courses/${courseNo}/serve`, {
+    method: 'POST', headers: getHeaders(),
+  });
+
+/** Il ripensamento del servito: l'uscita torna pronta al passe. */
+export const unserveCourse = async (orderId: number, courseNo: number): Promise<unknown> =>
+  apiRequest(`${API_URL}/orders/${orderId}/courses/${courseNo}/unserve`, {
     method: 'POST', headers: getHeaders(),
   });
 
@@ -367,6 +419,8 @@ export interface KitchenReport {
     delta_medio_min: string | null; delta_mediano_min: string | null; delta_massimo_min: string | null;
   };
   passe: { uscite: number; attesa_media_min: string | null; attesa_massima_min: string | null };
+  /** Da uscita tutta pronta a servita: il tempo vero sotto la lampada. */
+  ritiro: { uscite: number; attesa_media_min: string | null; attesa_massima_min: string | null };
   scarti: { motivo: string | null; righe: number; valore_cents: number }[];
 }
 
@@ -397,6 +451,8 @@ export interface ServiceBill {
   refund_due_cents?: number;
   /** Contanti già registrati sul conto (chiusura in cassa). */
   cash_settled_cents?: number;
+  /** "pp:comanda:<id>" quando il conto nasce da una comanda Passepartout. */
+  external_ref?: string | null;
   residual_cents: number;
   open_orders: number;
 }

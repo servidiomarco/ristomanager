@@ -2,6 +2,7 @@ import { Reservation, Table, Room, Dish, BanquetMenu, BanquetPayment, TableMerge
 import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
 import { buildApiError } from './apiError';
+import { offlineQueue } from './offlineQueue';
 
 // Use import.meta.env for Vite frontend environment variables
 const API_URL = import.meta.env.VITE_API_URL || "https://ristomanager-production.up.railway.app";
@@ -57,16 +58,44 @@ const fetchWithAuth = async (
   return response;
 };
 
+// Scritture che possono aspettare la rete: chi passa `offline` accetta che,
+// se il server non è mai stato raggiunto, la richiesta finisca in coda e
+// venga rigiocata al riconnettersi. Va passato SOLO su richieste sicure da
+// rigiocare: PUT e DELETE, o POST con chiave di idempotenza nel body.
+type OfflineSpec = { description: string };
+
 // Helper to make authenticated requests with error handling
 const apiRequest = async <T>(
   url: string,
-  options: RequestInit = {},
+  options: RequestInit & { offline?: OfflineSpec } = {},
   expectJson = true
 ): Promise<T> => {
-  // Bypass the browser HTTP cache by default. iOS Safari in PWA mode can
-  // otherwise serve stale GET responses after the app is backgrounded.
-  // Callers can still override by passing an explicit `cache` option.
-  const response = await fetchWithAuth(url, { cache: 'no-store', ...options });
+  const { offline, ...init } = options;
+  let response: Response;
+  try {
+    // Bypass the browser HTTP cache by default. iOS Safari in PWA mode can
+    // otherwise serve stale GET responses after the app is backgrounded.
+    // Callers can still override by passing an explicit `cache` option.
+    response = await fetchWithAuth(url, { cache: 'no-store', ...init });
+  } catch (err) {
+    // fetch rifiuta solo quando il server non è mai stato raggiunto: è
+    // l'unico caso in cui accodare è onesto — su una risposta HTTP il
+    // server ha già deciso e la coda non deve ricontestarla.
+    const method = (init.method ?? 'GET').toUpperCase();
+    if (offline && (method === 'PUT' || method === 'DELETE' || method === 'POST')) {
+      offlineQueue.enqueue({
+        method: method as 'PUT' | 'DELETE' | 'POST',
+        url,
+        body: typeof init.body === 'string' ? init.body : null,
+        description: offline.description,
+      });
+      throw buildApiError(0, {
+        error: `Sei offline: «${offline.description}» è in coda e partirà appena torna la rete`,
+        queued: true,
+      });
+    }
+    throw err;
+  }
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: 'Request failed' }));
@@ -80,8 +109,14 @@ const apiRequest = async <T>(
   return undefined as T;
 };
 
-export const getReservations = async (): Promise<Reservation[]> => {
-  return apiRequest<Reservation[]>(`${API_URL}/reservations`, {
+// Finestra opzionale (estremi inclusi, giorni Europe/Rome): il boot carica
+// prima i giorni recenti, lo storico arriva in background subito dopo.
+export const getReservations = async (range?: { from?: string; to?: string }): Promise<Reservation[]> => {
+  const params = new URLSearchParams();
+  if (range?.from) params.set('from', range.from);
+  if (range?.to) params.set('to', range.to);
+  const qs = params.toString();
+  return apiRequest<Reservation[]>(`${API_URL}/reservations${qs ? `?${qs}` : ''}`, {
     headers: getHeaders(false)
   });
 };
@@ -99,6 +134,9 @@ export const updateReservation = async (id: number, reservation: Partial<Reserva
     method: 'PUT',
     headers: getHeaders(),
     body: JSON.stringify(reservation),
+    // Check-in, cambio stato, assegnazione tavolo: il flusso della reception
+    // durante il servizio. PUT idempotente → sicuro da rigiocare.
+    offline: { description: `aggiornamento della prenotazione ${id}` },
   });
 };
 
@@ -106,6 +144,7 @@ export const deleteReservation = async (id: number): Promise<void> => {
   return apiRequest<void>(`${API_URL}/reservations/${id}`, {
     method: 'DELETE',
     headers: getHeaders(false),
+    offline: { description: `cancellazione della prenotazione ${id}` },
   }, false);
 };
 
@@ -144,6 +183,9 @@ export const updateTable = async (id: number, table: Partial<Table>): Promise<Ta
     method: 'PUT',
     headers: getHeaders(),
     body: JSON.stringify(table),
+    // Lo stato del tavolo cambia dal palmare in sala: PUT idempotente,
+    // sicuro da rigiocare al riconnettersi.
+    offline: { description: `aggiornamento del tavolo ${id}` },
   });
 
   console.log('apiService.updateTable - Backend returned:', JSON.stringify(result, null, 2));
@@ -362,6 +404,45 @@ export const deleteDish = async (id: number): Promise<void> => {
     method: 'DELETE',
     headers: getHeaders(false),
   }, false);
+};
+
+/** Esito del sync menu dalla cassa Passepartout (feature 'passepartout'). */
+export interface MenuImportResult {
+  totale_cassa: number;
+  importabili: number;
+  creati: number;
+  aggiornati: number;
+  disattivati: number;
+  /** Gruppi varianti sincronizzati (set distinti di varianti della cassa). */
+  gruppi_varianti?: number;
+}
+
+/** Sincronizza l'anagrafica piatti col catalogo della cassa. Il server
+ *  broadcasta 'dish:synced': la lista si aggiorna via socket, la risposta
+ *  serve solo a raccontare l'esito. */
+export const importMenuPassepartout = async (): Promise<MenuImportResult> => {
+  return apiRequest<MenuImportResult>(`${API_URL}/menu/import/passepartout`, {
+    method: 'POST',
+    headers: getHeaders(false),
+  });
+};
+
+/** URL pubblico del menu digitale (pagina servita dal backend, come /prenota). */
+export const digitalMenuUrl = (): string => `${API_URL}/menu`;
+
+export interface MenuTranslateResult {
+  tradotte: number;
+  lingue: string[];
+  tokens: number;
+}
+
+/** Traduce con l'AI le voci del menu che non hanno ancora una traduzione
+ *  (piatti attivi + categorie, en/fr/de). Idempotente. */
+export const translateMenu = async (): Promise<MenuTranslateResult> => {
+  return apiRequest<MenuTranslateResult>(`${API_URL}/menu/translate`, {
+    method: 'POST',
+    headers: getHeaders(false),
+  });
 };
 
 export const getBanquetMenus = async (): Promise<BanquetMenu[]> => {
@@ -800,10 +881,14 @@ export interface FeatureFlags {
   public_bookings_enabled: boolean;
   voice_agent_enabled: boolean;
   voice_bookings_suspended: boolean;
+  /** Doppio turno voce: secondo giro sullo stesso tavolo nello stesso shift. */
+  voice_double_seating_enabled: boolean;
   pay_at_table_enabled: boolean;
   table_orders_enabled: boolean;
   /** Risposte suggerite ai messaggi dei clienti. */
   ai_messages_enabled: boolean;
+  /** Menu digitale pubblico (QR al tavolo). Gestito dal QR modal della pagina Menu. */
+  digital_menu_enabled: boolean;
 }
 
 export const getFeatureFlags = async (): Promise<FeatureFlags> => {
@@ -1276,6 +1361,7 @@ export interface LegalSettings {
   public_whatsapp: string;
   public_address: string;
   maps_url: string;
+  logo_url: string;
   data_processors: string;
   retention_customer: string;
   retention_calls: string;
@@ -1304,6 +1390,31 @@ export const updateLegalSettings = async (
     body: JSON.stringify(updates),
   });
 };
+
+// Logo del ristorante (pagina prenota). L'upload passa da una route sua:
+// legal_config tiene solo il path, i byte stanno in outbound_media.
+export const uploadTenantLogo = async (
+  contentType: string,
+  base64Data: string,
+): Promise<{ logo_url: string }> => {
+  return apiRequest<{ logo_url: string }>(`${API_URL}/settings/logo`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ content_type: contentType, data: base64Data }),
+  });
+};
+
+export const removeTenantLogo = async (): Promise<{ ok: true }> => {
+  return apiRequest<{ ok: true }>(`${API_URL}/settings/logo`, {
+    method: 'DELETE',
+    headers: getHeaders(false),
+  });
+};
+
+// Path relativo dal server (/public/media/… o /prenota/logo.png) → URL
+// assoluto sul backend, per le anteprime nel CRM (che gira su altro dominio).
+export const tenantLogoSrc = (logoUrl: string): string =>
+  /^https?:\/\//.test(logoUrl) ? logoUrl : `${API_URL}${logoUrl}`;
 
 export const getTableAssignmentAiPrompt = async (): Promise<string> => {
   const { prompt } = await apiRequest<{ prompt: string }>(
@@ -1366,8 +1477,8 @@ export const completeOnboarding = async (): Promise<void> => {
 // Autenticate col JWT PLATFORM_ADMIN via il normale bearer di getHeaders():
 // il server prova prima il JWT, l'env token resta per gli script.
 
-export type AdminTenantFeature = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table';
-export const ADMIN_TENANT_FEATURES: AdminTenantFeature[] = ['voice', 'whatsapp', 'web_booking', 'pay_at_table'];
+export type AdminTenantFeature = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table' | 'passepartout';
+export const ADMIN_TENANT_FEATURES: AdminTenantFeature[] = ['voice', 'whatsapp', 'web_booking', 'pay_at_table', 'passepartout'];
 
 export interface AdminTenant {
   id: number;
@@ -1567,7 +1678,14 @@ export interface KitchenServiceSummary {
   service_date: string;
   shift: 'LUNCH' | 'DINNER';
   reservations: number;
-  dietary: Array<{ label: string; variant: string | null; quantity: number }>;
+  dietary: Array<{
+    label: string;
+    variant: string | null;
+    quantity: number;
+    // Ripartizione per tavolo; `table` è null quando il tavolo non è ancora
+    // assegnato e resta solo il nome del cliente.
+    tables: Array<{ table: string | null; customer: string; quantity: number }>;
+  }>;
   dietary_lines: Array<{ reservation_id: number; customer_name: string; text: string }>;
 }
 

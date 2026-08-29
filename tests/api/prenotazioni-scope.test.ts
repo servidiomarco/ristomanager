@@ -108,5 +108,14 @@ describe('prenotazioni per tenant', () => {
         const stinco = summary.body.dietary.find((d: any) => d.label === 'Stinco collaudo');
         expect(stinco).toBeTruthy();
         expect(stinco.quantity).toBe(2);
+        // Ripartizione per fonte: senza tavolo assegnato resta il nome cliente,
+        // e la somma delle fonti torna col totale della voce.
+        expect(Array.isArray(stinco.tables)).toBe(true);
+        const fonte = stinco.tables.find((t: any) => t.customer === 'Tavolata Cucina');
+        expect(fonte).toBeTruthy();
+        expect(fonte.table).toBeNull();
+        expect(fonte.quantity).toBe(2);
+        const somma = stinco.tables.reduce((s: number, t: any) => s + t.quantity, 0);
+        expect(somma).toBe(stinco.quantity);
     });
 });

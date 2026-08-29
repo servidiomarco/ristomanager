@@ -169,4 +169,155 @@ describe('reservations', () => {
         await api().delete(`/reservations/${senzaTel.body.id}`).set(bearer(token));
         await api().delete(`/reservations/${conTel.body.id}`).set(bearer(token));
     });
+
+    // Scenario del doppio booking del 25/08/2026: tavolo A con doppio turno
+    // (20:00 + 22:00), tavolo B con un 22:00. Lo swap tra il 20:00 di A e il
+    // 22:00 di B porterebbe due prenotazioni delle 22:00 sullo stesso tavolo:
+    // deve essere rifiutato. Lo swap tra prenotazioni della stessa finestra
+    // oraria resta lecito.
+    it('rifiuta lo swap che sovrappone un terzo doppio turno, accetta quello a parità di orario', async () => {
+        const tavoloB = await api().post('/tables').set(bearer(token)).send({
+            name: 'TP-SWAP', shape: 'SQUARE', seats: 4, x: 300, y: 100, room_id: roomId, status: 'FREE',
+        });
+        expect(tavoloB.status).toBe(201);
+        const tableB = tavoloB.body.id as number;
+
+        const crea = async (nome: string, ora: string, tavolo: number) => {
+            const r = await api().post('/reservations').set(bearer(token)).send({
+                customer_name: nome,
+                reservation_time: `2027-04-20T${ora}:00`,
+                shift: 'DINNER',
+                guests: 4,
+                table_id: tavolo,
+            });
+            expect(r.status).toBe(201);
+            return r.body.id as number;
+        };
+
+        const primoTurnoA = await crea('Swap Primo Turno', '20:00', tableId);
+        const secondoTurnoA = await crea('Swap Secondo Turno', '22:00', tableId);
+        const ventiDueB = await crea('Swap Tavolo B', '22:00', tableB);
+
+        // Il 20:00 di A finirebbe su B (ok), ma il 22:00 di B atterrerebbe su A
+        // dove le 22:00 sono già del secondo turno → 409.
+        const vietato = await api().post(`/reservations/${primoTurnoA}/swap-table`).set(bearer(token)).send({
+            other_id: ventiDueB,
+        });
+        expect(vietato.status).toBe(409);
+        expect(vietato.body.error).toContain('occupato');
+
+        // Nessuna scrittura parziale: ognuno è rimasto sul suo tavolo.
+        const lista = await api().get('/reservations').set(bearer(token));
+        const byId = new Map(lista.body.map((r: any) => [r.id, r]));
+        expect((byId.get(primoTurnoA) as any).table_id).toBe(tableId);
+        expect((byId.get(ventiDueB) as any).table_id).toBe(tableB);
+
+        // Stessa finestra oraria (22:00 ↔ 22:00): lo scambio resta permesso.
+        const lecito = await api().post(`/reservations/${secondoTurnoA}/swap-table`).set(bearer(token)).send({
+            other_id: ventiDueB,
+        });
+        expect(lecito.status).toBe(200);
+        expect(lecito.body.a.table_id).toBe(tableB);
+        expect(lecito.body.b.table_id).toBe(tableId);
+
+        for (const id of [primoTurnoA, secondoTurnoA, ventiDueB]) {
+            await api().delete(`/reservations/${id}`).set(bearer(token));
+        }
+    });
+
+    // Tavoli uniti: un tavolo occupato occupa l'intera unione. Audit 26/08:
+    // il controllo conflitti guardava solo l'id esatto, quindi con 45+47
+    // uniti e una prenotazione sul 45 l'API accettava un secondo gruppo sul
+    // 47. Il doppio turno sull'unione (finestre orarie disgiunte) resta lecito.
+    it('rifiuta la prenotazione su un tavolo la cui unione è occupata, salvo doppio turno', async () => {
+        const dataUnione = '2027-05-05';
+        const tavoli: number[] = [];
+        for (const nome of ['TP-U1', 'TP-U2']) {
+            const t = await api().post('/tables').set(bearer(token)).send({
+                name: nome, shape: 'SQUARE', seats: 4, x: 500, y: 100, room_id: roomId, status: 'FREE',
+            });
+            expect(t.status).toBe(201);
+            tavoli.push(t.body.id as number);
+        }
+        const [primario, unito] = tavoli;
+
+        const merge = await api().post('/table-merges').set(bearer(token)).send({
+            date: dataUnione, shift: 'DINNER', primary_id: primario, merged_ids: [unito],
+        });
+        expect([200, 201]).toContain(merge.status);
+
+        const sulPrimario = await api().post('/reservations').set(bearer(token)).send({
+            customer_name: 'Unione Occupante',
+            reservation_time: `${dataUnione}T20:00:00`,
+            shift: 'DINNER',
+            guests: 6,
+            table_id: primario,
+        });
+        expect(sulPrimario.status).toBe(201);
+
+        // Stessa finestra oraria sul tavolo UNITO → conflitto.
+        const vietato = await api().post('/reservations').set(bearer(token)).send({
+            customer_name: 'Unione Intruso',
+            reservation_time: `${dataUnione}T20:30:00`,
+            shift: 'DINNER',
+            guests: 2,
+            table_id: unito,
+        });
+        expect(vietato.status).toBe(409);
+        expect(vietato.body.error).toContain('occupato');
+
+        // Finestra disgiunta (dopo le 22:00): doppio turno sull'unione, lecito.
+        const doppioTurno = await api().post('/reservations').set(bearer(token)).send({
+            customer_name: 'Unione Secondo Turno',
+            reservation_time: `${dataUnione}T22:00:00`,
+            shift: 'DINNER',
+            guests: 2,
+            table_id: unito,
+        });
+        expect(doppioTurno.status).toBe(201);
+
+        await api().delete(`/reservations/${sulPrimario.body.id}`).set(bearer(token));
+        await api().delete(`/reservations/${doppioTurno.body.id}`).set(bearer(token));
+    });
+
+    // Caricamento in due tempi: il boot chiede ?from=<finestra>, lo storico
+    // arriva con ?to=<finestra>. Senza parametri la risposta resta l'intero
+    // storico (client vecchi). Estremi inclusi, giorni Europe/Rome.
+    it('la finestra ?from/?to filtra per giorno, senza parametri torna tutto', async () => {
+        const crea = async (nome: string, giorno: string) => {
+            const r = await api().post('/reservations').set(bearer(token)).send({
+                customer_name: nome,
+                reservation_time: `${giorno}T20:00:00`,
+                shift: 'DINNER',
+                guests: 2,
+            });
+            expect(r.status).toBe(201);
+            return r.body.id as number;
+        };
+        const vecchia = await crea('Finestra Vecchia', '2027-06-01');
+        const nuova = await crea('Finestra Nuova', '2027-06-20');
+
+        const tutte = await api().get('/reservations').set(bearer(token));
+        expect(tutte.status).toBe(200);
+        const idsTutte = tutte.body.map((r: any) => r.id);
+        expect(idsTutte).toContain(vecchia);
+        expect(idsTutte).toContain(nuova);
+
+        const finestra = await api().get('/reservations?from=2027-06-10').set(bearer(token));
+        const idsFinestra = finestra.body.map((r: any) => r.id);
+        expect(idsFinestra).toContain(nuova);
+        expect(idsFinestra).not.toContain(vecchia);
+
+        const archivio = await api().get('/reservations?to=2027-06-10').set(bearer(token));
+        const idsArchivio = archivio.body.map((r: any) => r.id);
+        expect(idsArchivio).toContain(vecchia);
+        expect(idsArchivio).not.toContain(nuova);
+
+        // from incluso: la prenotazione del giorno stesso rientra.
+        const bordo = await api().get('/reservations?from=2027-06-20&to=2027-06-20').set(bearer(token));
+        expect(bordo.body.map((r: any) => r.id)).toContain(nuova);
+
+        await api().delete(`/reservations/${vecchia}`).set(bearer(token));
+        await api().delete(`/reservations/${nuova}`).set(bearer(token));
+    });
 });

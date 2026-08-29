@@ -14,6 +14,7 @@ import { Banknote, Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Tra
 import { QRCodeSVG } from 'qrcode.react';
 import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, revokePaymentRequest, getReservationMessages, sendReservationReminder, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap, getTableAssignmentSuggestions, confirmTableAssignmentSuggestion, dismissTableAssignmentSuggestion } from '../services/apiService';
 import { billsApiService, printBill } from '../services/billsApiService';
+import { swrConfig } from '../services/configCache';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { Loader } from './Loader';
 import { getReservationNoteIcon } from './reservationNoteIcons';
@@ -23,7 +24,7 @@ import { applyMerges } from '../utils/tableMerge';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import {
   getReservationState, getTimedReservationState, RESERVATION_STATE_META,
-  reservationStatePatch, deriveTableDisplayStatus, isSeated, StatusChip,
+  reservationStatePatch, deriveTableDisplayStatus, isSeated,
   DsStatusChip, reservationStateDs,
   isOverdue, extendedDurationMin, OVERDUE_EXTEND_MIN, getEffectiveDurationMin,
   type ReservationStateKey,
@@ -472,17 +473,23 @@ const computePreflightWarnings = (
   return warnings;
 };
 
-/** Prefill applicato all'apertura del form di nuova prenotazione, da chiamata
- *  vocale, messaggio o email — vedi il campo newReservationPrefill sotto. */
-type NewReservationPrefill = {
+// Prefill applied when the new-reservation form auto-opens. Beyond
+// name/phone it can carry a parsed booking (from a voice call, the inbox
+// AI or the email AI): date/time/guests/zone/notes pre-populate the form so
+// staff only confirm. All fields optional — what's missing falls back to
+// the defaults.
+export interface NewReservationPrefill {
   customer_name?: string;
   phone?: string;
   email?: string;
-  date?: string;
-  time?: string;
+  date?: string;   // YYYY-MM-DD
+  time?: string;   // HH:MM
+  shift?: Shift;
   guests?: number;
+  children?: number;
   notes?: string;
-};
+  location_preference?: 'INDOOR' | 'OUTDOOR';
+}
 
 interface ReservationListProps {
   reservations: Reservation[];
@@ -505,9 +512,7 @@ interface ReservationListProps {
   // 'walkin' opens it with customer="Walk-in", arrival=ARRIVED, time=now.
   autoOpenNewKind?: 'standard' | 'walkin';
   // Optional prefill applied when the form auto-opens (used when converting a
-  // voice call, a message or an email into a booking). date/time/guests/notes
-  // arrive only from the email AI extraction — the other sources just know
-  // who's asking, not when or for how many.
+  // voice call, a message or an email into a booking).
   newReservationPrefill?: NewReservationPrefill;
   onAutoOpenNewHandled?: () => void;
   modalOnly?: boolean;
@@ -761,17 +766,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   //    (Impostazioni → Legale). Both default ON until the fetch resolves.
   const [marketingEnabled, setMarketingEnabled] = useState(true);
   const [askHealthConsent, setAskHealthConsent] = useState(true);
-  useEffect(() => {
-    let cancelled = false;
-    getLegalSettings()
-      .then(l => {
-        if (cancelled) return;
-        setMarketingEnabled(l.legal_mode !== 'simple');
-        setAskHealthConsent(l.ask_health_consent !== false); // undefined (old config) → true
-      })
-      .catch(() => { /* keep defaults */ });
-    return () => { cancelled = true; };
-  }, []);
+  // Le sei config qui sotto passano da swrConfig: valore in cache applicato
+  // subito, fetch di rinfresco in background — al rientro nella pagina niente
+  // più sei round-trip che gocciolano re-render.
+  useEffect(() => swrConfig('legalSettings', getLegalSettings, l => {
+    setMarketingEnabled(l.legal_mode !== 'simple');
+    setAskHealthConsent(l.ask_health_consent !== false); // undefined (old config) → true
+  }), []);
   const [modalRoomFilter, setModalRoomFilter] = useState<string | number>('ALL');
   const [selectedTablesForMerge, setSelectedTablesForMerge] = useState<number[]>([]);
   const [mergeMode, setMergeMode] = useState(false);
@@ -814,38 +815,24 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Whole pay-at-table UI is gated behind this flag; fetched once on mount.
   // Default false so we don't briefly flash the section before flags load.
   const [payAtTableEnabled, setPayAtTableEnabled] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    getFeatureFlags()
-      .then(f => { if (!cancelled) setPayAtTableEnabled(PAY_AT_TABLE_UI_VISIBLE && !!f.pay_at_table_enabled); })
-      .catch(() => { /* keep default false on error */ });
-    return () => { cancelled = true; };
-  }, []);
+  useEffect(() => swrConfig('featureFlags', getFeatureFlags, f => {
+    setPayAtTableEnabled(PAY_AT_TABLE_UI_VISIBLE && !!f.pay_at_table_enabled);
+  }), []);
 
   // Limiti di occupazione per sala: servono solo a disegnare la tacca sulla
   // barra di riempimento di ogni sala, così lo staff vede a colpo d'occhio
   // quali sale hanno superato la soglia oltre la quale le prenotazioni web
   // arrivano da confermare a mano. Nessun limite = nessuna tacca.
   const [roomCaps, setRoomCaps] = useState<RoomOccupancyCap[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    getChannelSettings()
-      .then(s => { if (!cancelled) setRoomCaps(s.room_occupancy_caps ?? []); })
-      .catch(() => { /* nessuna tacca se le impostazioni non arrivano */ });
-    return () => { cancelled = true; };
-  }, []);
+  useEffect(() => swrConfig('channelSettings', getChannelSettings, s => {
+    setRoomCaps(s.room_occupancy_caps ?? []);
+  }), []);
 
   // Opening hours drive the reservation-modal time dropdown and the arrival
   // heatmap. Fetched once on mount — the SettingsPage save flow invalidates
   // by full page reload today, so no live refresh needed here.
   const [openingHours, setOpeningHours] = useState<OpeningHoursRow[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    getOpeningHours()
-      .then(rows => { if (!cancelled) setOpeningHours(rows); })
-      .catch(() => { /* empty list = fallback to legacy hardcoded slots */ });
-    return () => { cancelled = true; };
-  }, []);
+  useEffect(() => swrConfig('openingHours', getOpeningHours, setOpeningHours), []);
 
   // Outbound SMS/WhatsApp log for the reservation currently open in the modal.
   // Loaded on open (edit mode only). Same lifecycle as paymentRequests above.
@@ -887,37 +874,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // Opzioni prenotazioni). One-shot fetch on mount; failure keeps the list
   // empty rather than falling back to hardcoded defaults, since the backend
   // seeds the default set on first migration.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const rows = await getReservationNotePresets();
-        if (!cancelled) setQuickNotes(rows.map(r => ({
-          id: r.id,
-          label: r.label,
-          icon: r.icon || null,
-          has_quantity: !!r.has_quantity,
-          variants: (r.variants || []).map(v => v.label),
-        })));
-      } catch {
-        // Silent: an empty chip list is a clear "not configured yet" signal.
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+  useEffect(() => swrConfig('reservationNotePresets', getReservationNotePresets, rows => {
+    setQuickNotes(rows.map(r => ({
+      id: r.id,
+      label: r.label,
+      icon: r.icon || null,
+      has_quantity: !!r.has_quantity,
+      variants: (r.variants || []).map(v => v.label),
+    })));
+  }), []);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const rows = await getReservationAllergenPresets();
-        if (!cancelled) setAllergenPresets(rows.map(r => r.label));
-      } catch {
-        // Silent — same fallback story as quickNotes.
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+  useEffect(() => swrConfig('reservationAllergenPresets', getReservationAllergenPresets, rows => {
+    setAllergenPresets(rows.map(r => r.label));
+  }), []);
 
   // Split-view state
   const [selectedReservationId, setSelectedReservationId] = useState<number | null>(null);
@@ -1710,14 +1679,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
     // Labels/dots come from the shared state meta so group headers can never
     // drift from the chips below them ('cancelled' keeps its plural label).
     const meta = (k: Exclude<ReservationStateKey, 'arriving'>) => RESERVATION_STATE_META[k];
+    const dot = (k: Exclude<ReservationStateKey, 'arriving'>) => reservationStateDs(k).solid;
     return [
-      { key: 'pending', label: meta('pending').label, dotClass: meta('pending').dotClass, items: pending },
-      { key: 'waiting', label: meta('waiting').label, dotClass: meta('waiting').dotClass, items: waiting },
-      { key: 'arrived', label: meta('arrived').label, dotClass: meta('arrived').dotClass, items: arrived },
-      { key: 'departing', label: meta('departing').label, dotClass: meta('departing').dotClass, items: departing },
-      { key: 'noshow', label: meta('noshow').label, dotClass: meta('noshow').dotClass, items: noshow },
-      { key: 'freed', label: meta('freed').label, dotClass: meta('freed').dotClass, items: freed },
-      { key: 'cancelled', label: 'Annullate', dotClass: meta('cancelled').dotClass, items: cancelled },
+      { key: 'pending', label: meta('pending').label, dotClass: dot('pending'), items: pending },
+      { key: 'waiting', label: meta('waiting').label, dotClass: dot('waiting'), items: waiting },
+      { key: 'arrived', label: meta('arrived').label, dotClass: dot('arrived'), items: arrived },
+      { key: 'departing', label: meta('departing').label, dotClass: dot('departing'), items: departing },
+      { key: 'noshow', label: meta('noshow').label, dotClass: dot('noshow'), items: noshow },
+      { key: 'freed', label: meta('freed').label, dotClass: dot('freed'), items: freed },
+      { key: 'cancelled', label: 'Annullate', dotClass: dot('cancelled'), items: cancelled },
     ].filter(g => g.items.length > 0);
   }, [reservations, selectedDate, selectedShift, filterRoomId, filterStatus, filterArrivalStatus, filterGuestRange, filterHasAllergens, filterHasNotes, filterNoTable, filterSource, searchTerm, displayTables, sortBy, isViewingToday, nowTick]);
 
@@ -2042,18 +2012,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       const prefill = opts.prefill;
       // For a walk-in we use "now" (and derive the shift from current time), so the
       // operator only has to pick a table and confirm. For standard bookings we keep
-      // the date/shift currently in view — unless the AI extraction from an email
-      // proposed its own date/time, which then wins.
+      // the date/shift currently in view — unless the prefill carries a parsed
+      // date/time/shift (inbox AI, email AI or voice call), which then wins.
       const now = new Date();
       const walkInShift: Shift = now.getHours() < 17 ? Shift.LUNCH : Shift.DINNER;
-      // Stessa soglia usata per il walk-in: sotto le 17 e' pranzo, altrimenti cena.
-      const prefillShift: Shift | null = prefill?.time
-        ? (Number(prefill.time.split(':')[0]) < 17 ? Shift.LUNCH : Shift.DINNER)
-        : null;
+      // Shift from prefill: explicit, or derived from the prefilled time
+      // (matches the backend rule hh<17 → LUNCH).
+      const prefillShift: Shift | undefined = prefill?.shift
+        ?? (prefill?.time ? (parseInt(prefill.time.split(':')[0], 10) < 17 ? Shift.LUNCH : Shift.DINNER) : undefined);
       const newShift = walkIn
         ? walkInShift
         : (prefillShift ?? (selectedShift === 'ALL' ? Shift.DINNER : selectedShift));
-      const dateOnly = (!walkIn && prefill?.date) || selectedDate.split('T')[0];
+      const dateOnly = (!walkIn && prefill?.date) ? prefill.date : selectedDate.split('T')[0];
       // Walk-in = "adesso", ma dentro la finestra del turno: registrato alle
       // 11:18 il tavolo parte all'apertura (13:00), non a metà mattina.
       const clampToShiftWindow = (d: Date, shift: Shift): string => {
@@ -2061,15 +2031,35 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         const slots = shift === Shift.LUNCH ? LUNCH_TIMES : DINNER_TIMES;
         return hhmm < slots[0] ? slots[0] : hhmm > slots[slots.length - 1] ? slots[slots.length - 1] : hhmm;
       };
+      // L'orario estratto dal messaggio può cadere su uno slot disabilitato:
+      // il form non deve proporre un orario che non si può prenotare, quindi
+      // aggancia lo slot disponibile più vicino e lascia la richiesta
+      // originale in nota, così lo staff propone l'alternativa in chat.
+      const daySlots = getSlotsForDateShift(dateOnly, newShift, openingHours);
+      let prefillTime = prefill?.time;
+      let requestedTimeNote = '';
+      if (!walkIn && prefillTime && daySlots.length > 0 && !daySlots.includes(prefillTime)) {
+        const toMin = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+        const requested = toMin(prefillTime);
+        const nearest = daySlots.reduce((best, s) =>
+          Math.abs(toMin(s) - requested) < Math.abs(toMin(best) - requested) ? s : best, daySlots[0]);
+        requestedTimeNote = `Orario richiesto: ${prefillTime}`;
+        prefillTime = nearest;
+      }
       const reservationTime = walkIn
         ? `${formatLocalDate(now)}T${clampToShiftWindow(now, walkInShift)}`
-        : `${dateOnly}T${prefill?.time || getDefaultTime(newShift)}`;
+        : `${dateOnly}T${prefillTime || getDefaultTime(newShift)}`;
+      // Zona richiesta → nota leggibile: il form assegna il tavolo a mano, ma
+      // così lo staff vede subito "esterno/interno" accanto alla richiesta.
+      const zoneHint = prefill?.location_preference === 'OUTDOOR' ? 'Zona: esterno'
+        : prefill?.location_preference === 'INDOOR' ? 'Zona: interno' : '';
+      const prefillNotes = walkIn ? '' : [zoneHint, requestedTimeNote, prefill?.notes?.trim()].filter(Boolean).join(' · ');
       setFormData({
         customer_name: prefill?.customer_name || (walkIn ? 'Walk-in' : ''),
         phone: prefill?.phone || undefined,
         email: prefill?.email || undefined,
-        guests: prefill?.guests || 2,
-        children: 0,
+        guests: (!walkIn && prefill?.guests && prefill.guests > 0) ? Math.trunc(prefill.guests) : 2,
+        children: (!walkIn && prefill?.children && prefill.children > 0) ? Math.trunc(prefill.children) : 0,
         reservation_time: reservationTime,
         shift: newShift,
         payment_status: PaymentStatus.PENDING,
@@ -2077,7 +2067,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         enable_reminder: walkIn ? false : true,
         reminder_sent: false,
         arrival_status: walkIn ? ArrivalStatus.ARRIVED : ArrivalStatus.WAITING,
-        notes: prefill?.notes || '',
+        notes: prefillNotes,
         duration_minutes: defaultDurationForShift(newShift),
         // Il consenso allergie compare (e si auto-spunta) solo quando viene
         // inserito un allergene — vedi l'effect dedicato. Una nuova prenotazione
@@ -3056,11 +3046,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
   const getStatusColor = (status: PaymentStatus) => {
     switch (status) {
-      case PaymentStatus.PAID_FULL: return 'bg-emerald-50 text-emerald-700 border-emerald-100 dark:bg-emerald-500/15 dark:text-emerald-300 dark:border-emerald-500/30';
-      case PaymentStatus.PAID_DEPOSIT: return 'bg-blue-50 text-blue-700 border-blue-100 dark:bg-blue-500/15 dark:text-blue-300 dark:border-blue-500/30';
-      case PaymentStatus.PENDING: return 'bg-amber-50 text-amber-700 border-amber-100 dark:bg-amber-500/15 dark:text-amber-300 dark:border-amber-500/30';
-      case PaymentStatus.REFUNDED: return 'bg-rose-50 text-rose-700 border-rose-100 dark:bg-rose-500/15 dark:text-rose-300 dark:border-rose-500/30';
-      default: return 'bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] border-[var(--color-line)]';
+      case PaymentStatus.PAID_FULL: return 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]';
+      case PaymentStatus.PAID_DEPOSIT: return 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]';
+      case PaymentStatus.PENDING: return 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]';
+      case PaymentStatus.REFUNDED: return 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]';
+      default: return 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border-[var(--ds-border)]';
     }
   };
 
@@ -3209,7 +3199,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             }}
         >
             <div
-                className={`${isHighlighted ? 'rounded-[12px] outline outline-3 outline-blue-400 outline-offset-2 animate-pulse-ring' : ''} ${(isSearchMatch || isHoverMatch) && !isHighlighted ? 'rounded-[12px] outline outline-2 outline-rose-500 outline-offset-2 animate-search-pulse' : ''} ${isMapHovered && isOccupied && !isHighlighted && !isHoverMatch ? 'animate-hover-pulse' : ''}`}
+                className={`${isHighlighted ? 'rounded-[12px] outline outline-3 outline-[var(--ds-arriving-solid)] outline-offset-2 animate-pulse-ring' : ''} ${(isSearchMatch || isHoverMatch) && !isHighlighted ? 'rounded-[12px] outline outline-2 outline-[var(--ds-pending-solid)] outline-offset-2 animate-search-pulse' : ''} ${isMapHovered && isOccupied && !isHighlighted && !isHoverMatch ? 'animate-hover-pulse' : ''}`}
                 style={{ transform: table.rotation ? `rotate(${table.rotation}deg)` : undefined, ['--pulse-color' as string]: accentVar }}
             >
                 <TableGlyph
@@ -3224,13 +3214,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             </div>
 
             {isHidden && (
-                <div className="absolute bg-slate-500 text-[#ffffff] text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-[#ffffff] pointer-events-none" style={{ top: -4, left: -4 }}>
+                <div className="absolute bg-[var(--ds-text-muted)] text-[#ffffff] text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm flex items-center gap-0.5 border border-[#ffffff] pointer-events-none" style={{ top: -4, left: -4 }}>
                     <EyeOff size={8} />
                 </div>
             )}
             {hasMultipleReservations && (
                 <div
-                    className="absolute bg-indigo-600 text-[#ffffff] text-[13px] font-bold px-2 py-0.5 rounded-full shadow-sm border-2 border-[#ffffff] pointer-events-none tabular"
+                    className="absolute bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)] text-[13px] font-bold px-2 py-0.5 rounded-full shadow-sm border-2 border-[#ffffff] pointer-events-none tabular"
                     style={{ top: -10, right: -10 }}
                     aria-label={`${allReservations.length} prenotazioni sullo stesso tavolo`}
                 >
@@ -3257,7 +3247,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         return (
                             <span
                                 key={r.id}
-                                className="text-[14px] font-semibold leading-tight px-2.5 py-1 rounded-full bg-indigo-100 border border-indigo-200 text-indigo-800 dark:bg-indigo-500/20 dark:border-indigo-500/40 dark:text-indigo-200 whitespace-nowrap shadow-sm"
+                                className="text-[14px] font-semibold leading-tight px-2.5 py-1 rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] whitespace-nowrap shadow-[var(--ds-shadow-card)]"
                             >
                                 <span className="opacity-70 tabular mr-1">{i + 1}°</span>
                                 {toTitleCase(r.customer_name).split(' ')[0]}
@@ -3275,12 +3265,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 const isMulti = hoverPillNames.length > 1;
                 return (
                     <div
-                        className={`absolute left-1/2 ${isMulti ? 'px-2 py-1 rounded-lg' : 'px-2 py-0.5 rounded-full'} border text-[12px] font-semibold whitespace-nowrap pointer-events-none shadow-[var(--shadow-md)]`}
+                        className={`absolute left-1/2 ${isMulti ? 'px-2 py-1 rounded-lg' : 'px-2 py-0.5 rounded-full'} border text-[12px] font-semibold whitespace-nowrap pointer-events-none shadow-[var(--ds-shadow-card)]`}
                         style={{
                             top: -8,
-                            background: accentVar || 'var(--color-surface)',
+                            background: accentVar || 'var(--ds-surface)',
                             color: '#fff',
-                            borderColor: 'var(--color-surface)',
+                            borderColor: 'var(--ds-surface)',
                             transform: `translate(-50%, -100%) scale(${invScale})`,
                             transformOrigin: 'bottom center',
                         }}
@@ -3335,32 +3325,33 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   };
 
   // Renders the table number(s) inside a reservation's table strip. A merged
-  // assignment carries a "74+70+71" name; cramming that into the narrow cell is
-  // unreadable, so for 3+ tables we surface the first number plus a "+N" badge
-  // and expose the full list through a tap/hover tooltip. One or two tables fit
-  // as-is. `textClass` keeps the colour in sync with the strip's state styling.
-  // expandTables: when true (mobile cards), every merged table name is shown in
-  // full with wrapping instead of collapsing to "first (+N)" behind a tooltip.
-  const renderTableStripContent = (res: Reservation, table: Table, tableRoom: Room | null | undefined, textClass: string, expandTables = false) => {
+  // assignment carries a "74+70+71" name, which is unreadable in a narrow cell
+  // and, at three or more tables, wider than the strip itself. Any union now
+  // collapses to the first table plus a quiet "+N": the count is the part you
+  // scan for, the full list is one tap away in the tooltip. `textClass` keeps
+  // the colour in sync with the strip's state styling; the "+N" rides the same
+  // colour at reduced opacity so it stays inside the state family in both
+  // themes instead of needing a token of its own.
+  const renderTableStripContent = (res: Reservation, table: Table, tableRoom: Room | null | undefined, textClass: string) => {
     const names = table.name.split('+').map(n => n.trim()).filter(Boolean);
     const extraCount = names.length - 1;
     return (
       <>
-        {!expandTables && names.length > 2 ? (
+        {extraCount > 0 ? (
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); setTooltipReservation({ id: res.id, type: 'tables', text: table.name, x: e.clientX, y: e.clientY }); }}
-            className="flex items-center gap-0.5 leading-6 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            className="flex items-center justify-center gap-0.5 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             title={`Tavoli uniti: ${names.join(', ')}`}
             aria-label={`${names.length} tavoli uniti: ${names.join(', ')}. Tocca per i dettagli.`}
           >
-            <span className={`text-base font-bold ${textClass}`}>{names[0]}</span>
-            <span className={`text-xs font-semibold leading-none ${textClass}`}>(+{extraCount})</span>
+            <span className={`text-base font-bold leading-tight ${textClass}`}>{names[0]}</span>
+            <span className={`text-[11px] font-semibold leading-none opacity-60 ${textClass}`}>+{extraCount}</span>
           </button>
         ) : (
           <span className={`text-base font-bold leading-tight text-center break-words ${textClass}`}>{table.name}</span>
         )}
-        {tableRoom && <span className="text-xs text-[#4d4d4d] dark:text-[var(--color-fg-muted)] text-center leading-4">{tableRoom.name}</span>}
+        {tableRoom && <span className="text-xs text-[var(--ds-text-muted)] text-center leading-4">{tableRoom.name}</span>}
       </>
     );
   };
@@ -3565,7 +3556,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             <div
               className={`flex min-h-[56px] w-[64px] max-w-[120px] flex-shrink-0 flex-col items-center justify-center rounded-[14px] px-2 py-1.5 ${ds.tint} ${ds.text}`}
             >
-              {renderTableStripContent(res, table, tableRoom, ds.text, true)}
+              {renderTableStripContent(res, table, tableRoom, ds.text)}
             </div>
           ) : canEdit ? (
             // The dashed box is the affordance for the assign-table action the
@@ -3639,19 +3630,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       : [];
 
     return (
-      <div className="bg-[var(--color-surface)] border-t border-[var(--color-line)] shadow-[0_-4px_12px_rgba(0,0,0,0.08)] rounded-t-xl overflow-hidden animate-in slide-in-from-bottom-4 duration-200">
+ <div className="bg-[var(--ds-surface)] border-t border-[var(--ds-border)] shadow-[0_-4px_12px_rgba(0,0,0,0.08)] rounded-t-xl overflow-hidden duration-200">
         {/* Drag handle */}
         <div className="flex justify-center pt-2 pb-1">
-          <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+          <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
         </div>
 
         <div className="px-4 pb-4 space-y-3 max-h-[50vh] lg:max-h-none overflow-y-auto">
           {/* Header */}
           <div className="flex items-start justify-between">
             <div>
-              <h3 className="text-base font-semibold text-[var(--color-fg)] inline-flex items-center gap-1.5">
+              <h3 className="text-base font-semibold text-[var(--ds-text-primary)] inline-flex items-center gap-1.5">
                 {res.customer_is_vip && (
-                  <Star className="h-4 w-4 text-amber-500 fill-amber-400 flex-shrink-0" aria-label="Cliente VIP" />
+                  <Star className="h-4 w-4 text-[var(--ds-pending-solid)] fill-[var(--ds-pending-solid)] flex-shrink-0" aria-label="Cliente VIP" />
                 )}
                 {res.customer_is_blacklisted && (
                   <Ban className="h-4 w-4 flex-shrink-0 text-[var(--ds-critical-text)]" aria-label="Cliente in blacklist" />
@@ -3662,7 +3653,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   if (!turno) return null;
                   return (
                     <span
-                      className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-indigo-100 border border-indigo-200 text-indigo-700 dark:bg-indigo-500/15 dark:border-indigo-500/30 dark:text-indigo-300 text-[10px] font-semibold uppercase tracking-wide"
+                      className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] text-[10px] font-semibold"
                       title={`Doppio turno sullo stesso tavolo (${turno.total} prenotazioni)`}
                     >
                       {turno.position}° turno
@@ -3670,13 +3661,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   );
                 })()}
               </h3>
-              <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
+              <div className="flex items-center gap-3 text-xs text-[var(--ds-text-muted)] mt-0.5">
                 <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {res.guests} {res.guests === 1 ? 'ospite' : 'ospiti'}{res.children && res.children > 0 ? ` (${res.children} bambin${res.children === 1 ? 'o' : 'i'})` : ''}</span>
                 <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(res.reservation_time)}</span>
                 {table && <span className="flex items-center gap-1"><MapPin className="h-3 w-3" /> T.{table.name}{tableRoomName ? ` · ${tableRoomName}` : ''}</span>}
               </div>
             </div>
-            <button type="button" onClick={closeDetailDrawer} className="p-1 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors">
+            <button type="button" onClick={closeDetailDrawer} className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
               <X className="h-4 w-4" />
             </button>
           </div>
@@ -3690,18 +3681,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               </span>
             )}
             {menu && (
-              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 dark:bg-[#4f46e5]/15 dark:border-[#4f46e5]/30 dark:text-[#a5b4fc] text-[10px] font-medium">
+              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] text-[10px] font-medium">
                 <BookOpen className="h-2.5 w-2.5" /> {menu.name}
               </span>
             )}
             <DietaryChips notes={res.notes} presets={allergenPresets} size="sm" />
             {res.customer_preferred_table_id != null && res.customer_preferred_table_id === res.table_id && (
-              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:border-emerald-500/30 dark:text-emerald-300 text-[10px] font-medium" title={`Tavolo preferito: ${res.customer_preferred_table_name || ''}`}>
+              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] text-[10px] font-medium" title={`Tavolo preferito: ${res.customer_preferred_table_name || ''}`}>
                 <Armchair className="h-2.5 w-2.5" /> Tavolo preferito
               </span>
             )}
             {res.customer_preferred_table_id != null && res.customer_preferred_table_id !== res.table_id && (
-              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-amber-50 border border-amber-100 text-amber-700 dark:bg-amber-500/15 dark:border-amber-500/30 dark:text-amber-300 text-[10px] font-medium" title={`Preferito: ${res.customer_preferred_table_name || ''}`}>
+              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] text-[10px] font-medium" title={`Preferito: ${res.customer_preferred_table_name || ''}`}>
                 <Armchair className="h-2.5 w-2.5" /> Preferito non disponibile
               </span>
             )}
@@ -3710,7 +3701,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               return (
                 <span
                   key={m.label}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:border-indigo-500/30 dark:text-indigo-300 text-[10px] font-medium"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] text-[10px] font-medium"
                 >
                   <Icon className="h-2.5 w-2.5" /> {m.label}
                 </span>
@@ -3720,7 +3711,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
           {/* Contact info */}
           {(res.phone || res.email) && (
-            <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)]">
+            <div className="flex items-center gap-3 text-xs text-[var(--ds-text-muted)]">
               {res.phone && <span className="flex items-center gap-1"><MessageCircle className="h-3 w-3" /> {res.phone}</span>}
               {res.email && <span className="flex items-center gap-1 truncate"><Mail className="h-3 w-3 flex-shrink-0" /> {res.email}</span>}
             </div>
@@ -3728,32 +3719,32 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
           {/* Notes */}
           {noteText && (
-            <div className="text-xs text-[var(--color-fg-muted)] bg-[var(--color-surface-2)] rounded-md px-3 py-2">
+            <div className="text-xs text-[var(--ds-text-muted)] bg-[var(--ds-surface-row)] rounded-md px-3 py-2">
               <StickyNote className="h-3 w-3 inline mr-1" />{noteText}
             </div>
           )}
 
           {/* Consensi privacy (read-only) — mostrati solo se registrati almeno una volta */}
           {(res.consent_marketing != null || res.consent_data_health != null || res.consent_updated_at) && (
-            <div className="text-xs bg-[var(--color-surface-2)] rounded-md px-3 py-2 space-y-1">
-              <div className="font-medium text-[var(--color-fg-muted)]">Consensi privacy</div>
+            <div className="text-xs bg-[var(--ds-surface-row)] rounded-md px-3 py-2 space-y-1">
+              <div className="font-medium text-[var(--ds-text-muted)]">Consensi privacy</div>
               {[
                 { label: 'Allergie / dati sanitari', v: res.consent_data_health },
                 { label: 'Marketing', v: res.consent_marketing },
               ].map(({ label, v }) => (
-                <div key={label} className="flex items-center gap-1.5 text-[var(--color-fg)]">
+                <div key={label} className="flex items-center gap-1.5 text-[var(--ds-text-primary)]">
                   {v === true ? (
-                    <Check className="h-3 w-3 text-emerald-600 flex-shrink-0" />
+                    <Check className="h-3 w-3 text-[var(--ds-seated-solid)] flex-shrink-0" />
                   ) : v === false ? (
-                    <X className="h-3 w-3 text-rose-600 flex-shrink-0" />
+                    <X className="h-3 w-3 text-[var(--ds-critical-solid)] flex-shrink-0" />
                   ) : (
-                    <span className="h-3 w-3 inline-flex items-center justify-center text-[var(--color-fg-subtle)] flex-shrink-0">—</span>
+                    <span className="h-3 w-3 inline-flex items-center justify-center text-[var(--ds-text-subtle)] flex-shrink-0">—</span>
                   )}
-                  <span>{label}: <span className="text-[var(--color-fg-muted)]">{v === true ? 'concesso' : v === false ? 'negato' : 'non registrato'}</span></span>
+                  <span>{label}: <span className="text-[var(--ds-text-muted)]">{v === true ? 'concesso' : v === false ? 'negato' : 'non registrato'}</span></span>
                 </div>
               ))}
               {res.consent_updated_at && (
-                <div className="text-[11px] text-[var(--color-fg-subtle)]">
+                <div className="text-[11px] text-[var(--ds-text-subtle)]">
                   Aggiornati il {new Date(res.consent_updated_at).toLocaleString('it-IT', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                 </div>
               )}
@@ -3763,7 +3754,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           {/* Actions */}
           {canEdit && (
             <div className="flex items-center gap-2.5 pt-1 flex-wrap">
-              <StatusChip
+              <DsStatusChip
                 state={isViewingToday ? getTimedReservationState(res, nowTick) : getReservationState(res)}
                 onClick={() => setStateChangeReservation(res)}
                 title="Cambia stato"
@@ -3771,16 +3762,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               />
               {isSeated(res) && !res.table_id && (
                 <button onClick={() => { handleEditClick(res); closeDetailDrawer(); }}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-500/15 dark:text-slate-300 dark:hover:bg-slate-500/25 transition-colors">
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)] transition-colors">
                   <MapPin className="h-3.5 w-3.5" /> Assegna tavolo
                 </button>
               )}
               <button onClick={() => { handleEditClick(res); closeDetailDrawer(); }}
-                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)] transition-colors">
                 <Edit2 className="h-3.5 w-3.5" /> Modifica
               </button>
               <button onClick={() => { handleDeleteClick(res.id, res.customer_name); closeDetailDrawer(); }}
-                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium text-rose-400 hover:bg-rose-50 hover:text-rose-600 dark:text-rose-400 dark:hover:bg-rose-900/50 transition-colors">
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium text-[var(--ds-critical-solid)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] transition-colors">
                 <Trash2 className="h-3.5 w-3.5" /> Annulla
               </button>
             </div>
@@ -3942,12 +3933,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       {showSortModal && (
         <div className="absolute inset-0 z-50 flex items-end" onClick={() => setShowSortModal(false)}>
           <div className="absolute inset-0 bg-black/30" />
-          <div className="relative w-full bg-[var(--color-surface)] rounded-t-2xl shadow-[var(--shadow-overlay)] pb-6 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
+ <div className="relative w-full bg-[var(--ds-surface)] rounded-t-2xl shadow-[var(--ds-shadow-raised)] pb-6 duration-200"onClick={e => e.stopPropagation()}>
             <div className="flex justify-center pt-3 pb-2">
-              <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+              <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
             </div>
             <div className="px-5 pb-2">
-              <h3 className="text-base font-semibold text-[var(--color-fg)]">Ordina per</h3>
+              <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">Ordina per</h3>
             </div>
             <div className="px-3">
               {[
@@ -3963,10 +3954,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <button key={opt.value} type="button"
                   onClick={() => { setSortBy(opt.value); setShowSortModal(false); }}
                   className={`w-full flex items-center justify-between px-4 py-2.5 text-sm rounded-lg transition-colors ${
-                    sortBy === opt.value ? 'bg-[var(--color-surface-3)] font-medium text-[var(--color-fg)]' : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+                    sortBy === opt.value ? 'bg-[var(--ds-surface-row)] font-medium text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
                   }`}>
                   {opt.label}
-                  {sortBy === opt.value && <Check className="h-4 w-4 text-[var(--color-fg)]" />}
+                  {sortBy === opt.value && <Check className="h-4 w-4 text-[var(--ds-text-primary)]" />}
                 </button>
               ))}
             </div>
@@ -3978,40 +3969,40 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       {showFiltersPanel && (
         <div className="absolute inset-0 z-50 flex items-end" onClick={() => setShowFiltersPanel(false)}>
           <div className="absolute inset-0 bg-black/30" />
-          <div className="relative w-full bg-[var(--color-surface)] rounded-t-2xl shadow-[var(--shadow-overlay)] pb-6 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
+ <div className="relative w-full bg-[var(--ds-surface)] rounded-t-2xl shadow-[var(--ds-shadow-raised)] pb-6 duration-200"onClick={e => e.stopPropagation()}>
             <div className="flex justify-center pt-3 pb-2">
-              <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+              <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
             </div>
             <div className="px-5 pb-3 flex items-center justify-between">
-              <h3 className="text-base font-semibold text-[var(--color-fg)]">Filtri</h3>
+              <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">Filtri</h3>
               {activeFilterCount > 0 && (
-                <button type="button" onClick={resetFilters} className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]">
+                <button type="button" onClick={resetFilters} className="flex items-center gap-1.5 text-xs font-medium text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]">
                   <RotateCcw className="h-3.5 w-3.5" /> Reimposta
                 </button>
               )}
             </div>
             <div className="px-5 space-y-4">
               <div>
-                <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Sala</label>
+                <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Sala</label>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" onClick={() => setFilterRoomId('ALL')}
                     className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
                       filterRoomId === 'ALL'
-                        ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                        : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
+                        ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                        : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
                     }`}>Tutte</button>
                   {rooms.filter(rm => !rm.is_closed).map(rm => (
                     <button key={rm.id} type="button" onClick={() => setFilterRoomId(rm.id)}
                       className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
                         filterRoomId === rm.id
-                          ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                          : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
+                          ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                          : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
                       }`}>{rm.name}</button>
                   ))}
                 </div>
               </div>
               <div>
-                <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Stato pagamento</label>
+                <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Stato pagamento</label>
                 <div className="flex flex-wrap gap-2">
                   {[
                     { value: 'ALL', label: 'Tutti' },
@@ -4022,14 +4013,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     <button key={opt.value} type="button" onClick={() => setFilterStatus(opt.value)}
                       className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
                         filterStatus === opt.value
-                          ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                          : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
+                          ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                          : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
                       }`}>{opt.label}</button>
                   ))}
                 </div>
               </div>
               <div>
-                <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Canale</label>
+                <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Canale</label>
                 <div className="flex flex-wrap gap-2">
                   {[
                     { value: 'ALL', label: 'Tutti' },
@@ -4041,25 +4032,25 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     <button key={opt.value} type="button" onClick={() => setFilterSource(opt.value)}
                       className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
                         filterSource === opt.value
-                          ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                          : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
+                          ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                          : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
                       }`}>{opt.label}</button>
                   ))}
                 </div>
               </div>
               <div>
-                <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Altro</label>
+                <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Altro</label>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" onClick={() => setFilterHasAllergens(v => !v)}
-                    className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+                    className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
                     Allergeni
                   </button>
                   <button type="button" onClick={() => setFilterHasNotes(v => !v)}
-                    className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+                    className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
                     Con note
                   </button>
                   <button type="button" onClick={() => setFilterNoTable(v => !v)}
-                    className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+                    className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
                     Senza tavolo
                   </button>
                 </div>
@@ -4316,6 +4307,27 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               onClick: () => setShowUnassignedModal(true),
               title: 'Tocca per vedere le prenotazioni senza tavolo',
             }] : []),
+            // Liberi e occupati come segmenti pieni della strip (scelta di
+            // Marco, 29/08: qui il tint marca i due numeri che si cercano al
+            // volo, non un'azione): verde quando c'è posto, rosso quando è
+            // impegnato — a zero restano neutri, un verde "0 liberi"
+            // racconterebbe il contrario del vero.
+            {
+              value: totalTablesInRoom - occupiedTablesCount,
+              label: totalTablesInRoom - occupiedTablesCount === 1 ? 'libero' : 'liberi',
+              ...(totalTablesInRoom - occupiedTablesCount > 0
+                ? { tone: 'positive' as const, tint: true }
+                : {}),
+              hideBelow: 'sm' as const,
+            },
+            {
+              value: occupiedTablesCount,
+              label: occupiedTablesCount === 1 ? 'occupato' : 'occupati',
+              ...(occupiedTablesCount > 0
+                ? { tone: 'critical' as const, tint: true }
+                : {}),
+              hideBelow: 'sm' as const,
+            },
             {
               value: `${occupiedTablesCount}/${totalTablesInRoom}`,
               label: `tavoli (${occupancyPercentage}%)`,
@@ -4333,20 +4345,20 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
         {/* Map canvas */}
         {isPhone ? (
-          <div className="flex-1 overflow-y-auto rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] relative m-3">
+          <div className="flex-1 overflow-y-auto rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] relative m-3">
             {isLoadingMerges && (
-              <div className="absolute inset-0 z-30 bg-[var(--color-surface)]/70 backdrop-blur-[1px] flex items-center justify-center">
-                <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface)] rounded-md shadow-[var(--shadow-xs)] border border-[var(--color-line)]">
+              <div className="absolute inset-0 z-30 bg-[var(--ds-surface)]/70 backdrop-blur-[1px] flex items-center justify-center">
+                <div className="flex items-center gap-2 px-4 py-2 bg-[var(--ds-surface)] rounded-md shadow-[var(--ds-shadow-card)] border border-[var(--ds-border)]">
                   <Loader label="Caricamento tavoli…" size={40} />
                 </div>
               </div>
             )}
             {tablesInRoom.length === 0 ? (
-              <div className="text-center py-10 px-4 text-sm text-[var(--color-fg-muted)]">
+              <div className="text-center py-10 px-4 text-sm text-[var(--ds-text-muted)]">
                 Nessun tavolo in questa sala.
               </div>
             ) : (
-              <ul className="divide-y divide-[var(--color-line)]">
+              <ul className="divide-y divide-[var(--ds-border)]">
                 {[...tablesInRoom]
                   .sort((a, b) => {
                     const oa = getOccupierForTable(a.id);
@@ -4387,13 +4399,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             else if (canEdit) setAssignTableModal(table);
                           }}
                           className={`w-full text-left px-3 py-3 flex items-center gap-3 transition-colors ${
-                            isSearchMatch ? 'bg-[var(--color-surface-3)]' : 'hover:bg-[var(--color-surface-hover)]'
+                            isSearchMatch ? 'bg-[var(--ds-surface-row)]' : 'hover:bg-[var(--ds-surface-row)]'
                           }`}>
                           <div className={`min-w-[4.5rem] h-16 px-2 rounded-md flex items-center justify-center flex-shrink-0 border font-semibold ${isMerged ? 'text-base' : 'text-xl'} ${
-                            isArrived ? 'bg-orange-50 border-orange-300 text-orange-700 dark:bg-orange-500/15 dark:border-orange-500/40 dark:text-orange-300'
-                              : reservation ? 'bg-rose-50 border-rose-300 text-rose-700 dark:bg-rose-500/15 dark:border-rose-500/40 dark:text-rose-300'
-                              : banquet ? 'bg-indigo-50 border-indigo-300 text-indigo-700 dark:bg-[#4f46e5]/20 dark:border-[#4f46e5]/50 dark:text-[#a5b4fc]'
-                              : 'bg-[var(--color-surface)] border-emerald-300 text-emerald-700 dark:border-emerald-500/40 dark:text-emerald-300'
+                            isArrived ? 'bg-[var(--ds-seated-tint)] border-[var(--ds-seated-solid)] text-[var(--ds-seated-text)]'
+                              : reservation ? 'bg-[var(--ds-arriving-tint)] border-[var(--ds-arriving-solid)] text-[var(--ds-arriving-text)]'
+                              : banquet ? 'bg-[var(--ds-arriving-tint)] border-[var(--ds-arriving-solid)] text-[var(--ds-arriving-text)]'
+                              : 'bg-[var(--ds-surface)] border-[var(--ds-border-strong)] text-[var(--ds-text-secondary)]'
                           }`}>
                             <span className="text-center leading-tight break-all">{displayName}</span>
                           </div>
@@ -4401,38 +4413,38 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             {reservation ? (
                               <>
                                 <div className="flex items-center gap-2">
-                                  <span className="font-medium text-[var(--color-fg)] truncate">{toTitleCase(reservation.customer_name)}</span>
-                                  {isArrived && <span className="text-[10px] font-medium bg-orange-50 text-orange-700 border border-orange-100 px-1.5 py-0.5 rounded-full flex-shrink-0 dark:bg-orange-500/15 dark:text-orange-300 dark:border-orange-500/30">Arrivato</span>}
+                                  <span className="font-medium text-[var(--ds-text-primary)] truncate">{toTitleCase(reservation.customer_name)}</span>
+                                  {isArrived && <span className="text-[10px] font-medium bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] px-1.5 py-0.5 rounded-full flex-shrink-0">Arrivato</span>}
                                 </div>
-                                <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
+                                <div className="flex items-center gap-3 text-xs text-[var(--ds-text-muted)] mt-0.5">
                                   <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(reservation.reservation_time)}</span>
                                   <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {reservation.guests}{reservation.children && reservation.children > 0 ? ` (${reservation.children}b)` : ''}</span>
-                                  <span className="flex items-center gap-1 text-[var(--color-fg-subtle)]"><Armchair className="h-3 w-3" /> {table.seats}</span>
+                                  <span className="flex items-center gap-1 text-[var(--ds-text-subtle)]"><Armchair className="h-3 w-3" /> {table.seats}</span>
                                 </div>
                               </>
                             ) : banquet ? (
                               <>
                                 <div className="flex items-center gap-2">
-                                  <BookOpen className="h-3.5 w-3.5 text-indigo-600 flex-shrink-0" />
-                                  <span className="font-medium text-indigo-700 truncate">{banquet.name}</span>
-                                  <span className="text-[10px] font-medium bg-indigo-50 text-indigo-700 border border-indigo-100 px-1.5 py-0.5 rounded-full flex-shrink-0">Banchetto</span>
+                                  <BookOpen className="h-3.5 w-3.5 text-[var(--ds-arriving-solid)] flex-shrink-0" aria-hidden />
+                                  <span className="font-medium text-[var(--ds-arriving-text)] truncate">{banquet.name}</span>
+                                  <span className="text-[10px] font-medium bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] px-1.5 py-0.5 rounded-full flex-shrink-0">Banchetto</span>
                                 </div>
-                                <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
+                                <div className="flex items-center gap-3 text-xs text-[var(--ds-text-muted)] mt-0.5">
                                   {typeof banquet.guests === 'number' && <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {banquet.guests}</span>}
-                                  <span className="flex items-center gap-1 text-[var(--color-fg-subtle)]"><Armchair className="h-3 w-3" /> {table.seats}</span>
+                                  <span className="flex items-center gap-1 text-[var(--ds-text-subtle)]"><Armchair className="h-3 w-3" /> {table.seats}</span>
                                 </div>
                               </>
                             ) : (
                               <>
-                                <div className="font-medium text-emerald-700 dark:text-emerald-400">Libero</div>
-                                <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
+                                <div className="font-medium text-[var(--ds-text-secondary)]">Libero</div>
+                                <div className="flex items-center gap-3 text-xs text-[var(--ds-text-muted)] mt-0.5">
                                   <span className="flex items-center gap-1"><Armchair className="h-3 w-3" /> {table.seats} posti</span>
-                                  {canEdit && <span className="text-[var(--color-fg)] font-medium">Tocca per assegnare</span>}
+                                  {canEdit && <span className="text-[var(--ds-text-primary)] font-medium">Tocca per assegnare</span>}
                                 </div>
                               </>
                             )}
                           </div>
-                          <ChevronRight className="h-4 w-4 text-[var(--color-fg-subtle)] flex-shrink-0" />
+                          <ChevronRight className="h-4 w-4 text-[var(--ds-text-subtle)] flex-shrink-0" />
                         </button>
                       </li>
                     );
@@ -4478,7 +4490,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   events in the same room are visually distinct. */}
               {floorLabels.hulls.map((h, i) => (
                 <div key={`hull-${h.banquetId}-${i}`}
-                  className={`${banquetColorByBanquetId.get(h.banquetId) || 'banquet-color-0'} absolute rounded-2xl border border-[var(--color-banquet-border)] bg-[var(--color-banquet-bg)] pointer-events-none`}
+                  className={`${banquetColorByBanquetId.get(h.banquetId) || 'banquet-color-0'} absolute rounded-2xl border border-[var(--ds-banquet-border)] bg-[var(--ds-banquet-bg)] pointer-events-none`}
                   style={{ left: h.box.x, top: h.box.y, width: h.box.w, height: h.box.h, zIndex: 0 }} />
               ))}
               {tablesInRoom.map(t => renderMapTable(t, layoutPositions, scale))}
@@ -4503,7 +4515,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 <Info size={16} aria-hidden /> Legenda
               </button>
               {isLegendOpen && (
-                <div className="animate-in fade-in slide-in-from-bottom-2 absolute bottom-full right-0 mb-2 w-60 space-y-2 rounded-[20px] bg-[var(--ds-surface)] p-4 text-[13px] shadow-[var(--ds-shadow-raised)] duration-150"
+ <div className="absolute bottom-full right-0 mb-2 w-60 space-y-2 rounded-[20px] bg-[var(--ds-surface)] p-4 text-[13px] shadow-[var(--ds-shadow-raised)] duration-150"
                   onClick={(e) => e.stopPropagation()}>
                   <div className="text-[14px] font-semibold text-[var(--ds-text-primary)]">Stato dei tavoli</div>
                   <div className="flex items-center gap-2 text-[var(--ds-text-secondary)]"><div className="h-3 w-3 rounded-[4px] border" style={{ background: 'var(--tg-libera-bg)', borderColor: 'var(--tg-libera-stroke)' }}></div> Libera</div>
@@ -4627,12 +4639,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           {showSortModal && (
             <div className="fixed inset-0 z-50 flex items-end" onClick={() => setShowSortModal(false)}>
               <div className="absolute inset-0 bg-black/30" />
-              <div className="relative w-full bg-[var(--color-surface)] rounded-t-2xl shadow-[var(--shadow-overlay)] pb-8 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
+ <div className="relative w-full bg-[var(--ds-surface)] rounded-t-2xl shadow-[var(--ds-shadow-raised)] pb-8 duration-200"onClick={e => e.stopPropagation()}>
                 <div className="flex justify-center pt-3 pb-2">
-                  <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+                  <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
                 </div>
                 <div className="px-5 pb-2">
-                  <h3 className="text-base font-semibold text-[var(--color-fg)]">Ordina per</h3>
+                  <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">Ordina per</h3>
                 </div>
                 <div className="px-3">
                   {[
@@ -4648,10 +4660,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     <button key={opt.value} type="button"
                       onClick={() => { setSortBy(opt.value); setShowSortModal(false); }}
                       className={`w-full flex items-center justify-between px-4 py-3 text-sm rounded-lg transition-colors ${
-                        sortBy === opt.value ? 'bg-[var(--color-surface-3)] font-medium text-[var(--color-fg)]' : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)]'
+                        sortBy === opt.value ? 'bg-[var(--ds-surface-row)] font-medium text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
                       }`}>
                       {opt.label}
-                      {sortBy === opt.value && <Check className="h-4 w-4 text-[var(--color-fg)]" />}
+                      {sortBy === opt.value && <Check className="h-4 w-4 text-[var(--ds-text-primary)]" />}
                     </button>
                   ))}
                 </div>
@@ -4663,40 +4675,40 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           {showFiltersPanel && (
             <div className="fixed inset-0 z-50 flex items-end" onClick={() => setShowFiltersPanel(false)}>
               <div className="absolute inset-0 bg-black/30" />
-              <div className="relative w-full bg-[var(--color-surface)] rounded-t-2xl shadow-[var(--shadow-overlay)] pb-8 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
+ <div className="relative w-full bg-[var(--ds-surface)] rounded-t-2xl shadow-[var(--ds-shadow-raised)] pb-8 duration-200"onClick={e => e.stopPropagation()}>
                 <div className="flex justify-center pt-3 pb-2">
-                  <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+                  <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
                 </div>
                 <div className="px-5 pb-3 flex items-center justify-between">
-                  <h3 className="text-base font-semibold text-[var(--color-fg)]">Filtri</h3>
+                  <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">Filtri</h3>
                   {activeFilterCount > 0 && (
-                    <button type="button" onClick={resetFilters} className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]">
+                    <button type="button" onClick={resetFilters} className="flex items-center gap-1.5 text-xs font-medium text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]">
                       <RotateCcw className="h-3.5 w-3.5" /> Reimposta
                     </button>
                   )}
                 </div>
                 <div className="px-5 space-y-4">
                   <div>
-                    <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Sala</label>
+                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Sala</label>
                     <div className="flex flex-wrap gap-2">
                       <button type="button" onClick={() => setFilterRoomId('ALL')}
                         className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
                           filterRoomId === 'ALL'
-                            ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                            : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
+                            ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                            : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
                         }`}>Tutte</button>
                       {rooms.filter(rm => !rm.is_closed).map(rm => (
                         <button key={rm.id} type="button" onClick={() => setFilterRoomId(rm.id)}
                           className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
                             filterRoomId === rm.id
-                              ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                              : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
+                              ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                              : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
                           }`}>{rm.name}</button>
                       ))}
                     </div>
                   </div>
                   <div>
-                    <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Stato pagamento</label>
+                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Stato pagamento</label>
                     <div className="flex flex-wrap gap-2">
                       {[
                         { value: 'ALL', label: 'Tutti' },
@@ -4707,14 +4719,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         <button key={opt.value} type="button" onClick={() => setFilterStatus(opt.value)}
                           className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
                             filterStatus === opt.value
-                              ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                              : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
+                              ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                              : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
                           }`}>{opt.label}</button>
                       ))}
                     </div>
                   </div>
                   <div>
-                    <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Canale</label>
+                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Canale</label>
                     <div className="flex flex-wrap gap-2">
                       {[
                         { value: 'ALL', label: 'Tutti' },
@@ -4726,25 +4738,25 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         <button key={opt.value} type="button" onClick={() => setFilterSource(opt.value)}
                           className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${
                             filterSource === opt.value
-                              ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]'
-                              : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'
+                              ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]'
+                              : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
                           }`}>{opt.label}</button>
                       ))}
                     </div>
                   </div>
                   <div>
-                    <label className="text-xs font-semibold text-[var(--color-fg)] mb-2 block">Altro</label>
+                    <label className="text-xs font-semibold text-[var(--ds-text-primary)] mb-2 block">Altro</label>
                     <div className="flex flex-wrap gap-2">
                       <button type="button" onClick={() => setFilterHasAllergens(v => !v)}
-                        className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+                        className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasAllergens ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
                         Allergeni
                       </button>
                       <button type="button" onClick={() => setFilterHasNotes(v => !v)}
-                        className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+                        className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterHasNotes ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
                         Con note
                       </button>
                       <button type="button" onClick={() => setFilterNoTable(v => !v)}
-                        className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] border-[var(--color-fg)]' : 'bg-[var(--color-surface)] text-[var(--color-fg-muted)] border-[var(--color-line)]'}`}>
+                        className={`px-3.5 py-2 rounded-full text-xs font-medium border transition-colors ${filterNoTable ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-action-bg)]' : 'bg-[var(--ds-surface)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'}`}>
                         Senza tavolo
                       </button>
                     </div>
@@ -5387,7 +5399,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                             </div>
                                                             <span className="text-sm font-medium truncate">{item}</span>
                                                             {inOther && !inActive && (
-                                                                <span className="ml-auto text-[9px] font-semibold uppercase tracking-wide text-[var(--ds-text-muted)] flex-shrink-0">
+                                                                <span className="ml-auto text-[10px] font-semibold text-[var(--ds-text-muted)] flex-shrink-0">
                                                                     {dietaryTab === 'allergie' ? 'intoll.' : 'allergia'}
                                                                 </span>
                                                             )}
@@ -5732,20 +5744,44 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     const tavoliCount = baseRoomTables.length;
                                     const eventiCount = banquetGroups.size;
                                     const occupatiCount = normalEntries.filter(e => e.reservation).length;
+                                    // Il tavolo selezionato nel form non è "libero": è il tuo.
+                                    // getOccupierForTableInForm esclude la prenotazione in
+                                    // modifica (giusto: deve poter tenere il suo tavolo), ma
+                                    // contarlo tra i liberi diceva "1 libero" su una sala
+                                    // piena — l'operatore lo leggeva come un tavolo disponibile.
+                                    const selectedHereCount = normalEntries.filter(e => !e.reservation && e.table.id === formData.table_id).length;
+                                    const liberiCount = normalEntries.length - occupatiCount - selectedHereCount;
                                     const guests = formData.guests || 1;
                                     // Sequential per-room color assignment so the modal matches the floor plan.
                                     const modalBanquetColorByBanquetId = buildBanquetColorClassMap([...banquetGroups.keys()]);
 
                                     return (
                                     <div key={room.id} className="mb-3 last:mb-0 rounded-[16px] bg-[var(--ds-surface-row)] p-4">
-                                        <h4 className="mb-3 text-[15px] font-semibold text-[var(--ds-text-primary)]">
-                                            {room.name}
-                                            <span className="font-normal text-[var(--ds-text-muted)]">
-                                                {' · '}{tavoliCount} {tavoliCount === 1 ? 'tavolo' : 'tavoli'}
-                                                {eventiCount > 0 ? ` · ${eventiCount} ${eventiCount === 1 ? 'evento' : 'eventi'}` : ''}
-                                                {occupatiCount > 0 ? ` · ${occupatiCount} ${occupatiCount === 1 ? 'occupato' : 'occupati'}` : ''}
-                                            </span>
-                                        </h4>
+                                        <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                                            <h4 className="min-w-0 text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                                                {room.name}
+                                                <span className="font-normal text-[var(--ds-text-muted)]">
+                                                    {' · '}{tavoliCount} {tavoliCount === 1 ? 'tavolo' : 'tavoli'}
+                                                    {eventiCount > 0 ? ` · ${eventiCount} ${eventiCount === 1 ? 'evento' : 'eventi'}` : ''}
+                                                </span>
+                                            </h4>
+                                            <div className="ml-auto flex flex-shrink-0 items-center gap-2">
+                                                <span className={`inline-flex h-8 flex-shrink-0 items-baseline gap-1.5 rounded-full border px-3 leading-8 ${
+                                                    liberiCount > 0
+                                                        ? 'border-[var(--ds-seated-solid)] bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
+                                                        : 'border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]'
+                                                }`}>
+                                                    <span className="text-[17px] font-bold tabular-nums">{liberiCount}</span>
+                                                    <span className="text-[13px] font-medium">{liberiCount === 1 ? 'libero' : 'liberi'}</span>
+                                                </span>
+                                                {occupatiCount > 0 && (
+                                                    <span className="inline-flex h-8 flex-shrink-0 items-baseline gap-1.5 rounded-full border border-[var(--ds-critical-solid)] bg-[var(--ds-critical-tint)] px-3 leading-8 text-[var(--ds-critical-text)]">
+                                                        <span className="text-[17px] font-bold tabular-nums">{occupatiCount}</span>
+                                                        <span className="text-[13px] font-medium">{occupatiCount === 1 ? 'occupato' : 'occupati'}</span>
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
 
                                         {/* Banquet / event containers — one grouped card per event,
                                             tinted with the same per-banquet color used on the floor plan. */}
@@ -5830,7 +5866,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                         )}
 
                                                         {isMerged && !isSelectedForMerge && (
-                                                            <span className={`absolute -top-1.5 sm:-top-2 -left-1.5 sm:-left-2 z-20 flex items-center gap-0.5 rounded-full px-1 sm:px-1.5 py-0.5 text-[8px] sm:text-[10px] font-bold shadow-[var(--shadow-xs)] ${isSelected ? 'bg-[var(--ds-surface)] text-[var(--ds-seated-text)]' : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'}`}>
+                                                            <span className={`absolute -top-1.5 sm:-top-2 -left-1.5 sm:-left-2 z-20 flex items-center gap-0.5 rounded-full px-1 sm:px-1.5 py-0.5 text-[8px] sm:text-[10px] font-bold shadow-[var(--ds-shadow-card)] ${isSelected ? 'bg-[var(--ds-surface)] text-[var(--ds-seated-text)]' : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'}`}>
                                                                 <Combine size={8} />
                                                             </span>
                                                         )}
@@ -5864,7 +5900,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                                             </span>
                                                         )}
                                                         {isSelectedForMerge && (
-                                                            <span className="absolute -top-2 -right-2 z-20 flex items-center justify-center rounded-full bg-[var(--ds-arriving-solid)] p-1 shadow-[var(--shadow-xs)]">
+                                                            <span className="absolute -top-2 -right-2 z-20 flex items-center justify-center rounded-full bg-[var(--ds-arriving-solid)] p-1 shadow-[var(--ds-shadow-card)]">
                                                                 <Combine size={10} className="text-white" />
                                                             </span>
                                                         )}
@@ -6282,6 +6318,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                           deposit_paid_cents: bill.deposit_paid_cents,
                           refund_due_cents: bill.refund_due_cents,
                           residual_cents: bill.residual_cents,
+                          external_ref: bill.bill.external_ref,
                         }}
                         busy={billActionLoading === 'close'}
                         onClose={() => setBillSheetOpen(false)}
@@ -6328,21 +6365,21 @@ export const ReservationList: React.FC<ReservationListProps> = ({
           form, so inside the list subtree it would paint underneath it. */}
       {confirmModal?.isOpen && createPortal(
         <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={confirmModal.onCancel}>
-            <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[90vh] overflow-hidden" onClick={e => e.stopPropagation()}>
-                <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
-                    <h3 className="text-[16px] font-semibold text-[var(--color-fg)] flex items-center gap-2">
+            <div className="bg-[var(--ds-surface)] rounded-2xl shadow-2xl border border-[var(--ds-border)] w-full max-w-md max-h-[90vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between p-4 border-b border-[var(--ds-border)]">
+                    <h3 className="text-[16px] font-semibold text-[var(--ds-text-primary)] flex items-center gap-2">
                         {confirmModal.title}
                     </h3>
                 </div>
 
                 <div className="px-5 py-4 space-y-4">
-                    <p className="text-sm text-[var(--color-fg)] leading-relaxed whitespace-pre-line">
+                    <p className="text-sm text-[var(--ds-text-primary)] leading-relaxed whitespace-pre-line">
                         {confirmModal.message}
                     </p>
 
                     {confirmModal.suggestions && confirmModal.suggestions.length > 0 && (
-                        <div className="bg-[var(--color-surface-3)] border border-[var(--color-line)] rounded-lg p-3">
-                            <p className="text-sm font-semibold text-[var(--color-fg)] mb-3">
+                        <div className="bg-[var(--ds-surface-row)] border border-[var(--ds-border)] rounded-lg p-3">
+                            <p className="text-sm font-semibold text-[var(--ds-text-primary)] mb-3">
                                 Tavoli disponibili con capienza adeguata
                             </p>
                             <div className="space-y-2">
@@ -6350,13 +6387,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     <button
                                         key={index}
                                         onClick={() => confirmModal.onSelectSuggestion?.(suggestion.table)}
-                                        className="w-full flex items-center justify-between gap-3 p-3 bg-[var(--color-surface)] border border-[var(--color-line)] rounded-md hover:border-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors group"
+                                        className="w-full flex items-center justify-between gap-3 p-3 bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-md hover:border-[var(--ds-action-bg)] hover:bg-[var(--ds-surface-row)] transition-colors group"
                                     >
-                                        <div className="flex items-center gap-2 text-[var(--color-fg)]">
-                                            <Armchair size={16} className="text-[var(--color-fg-muted)]" />
+                                        <div className="flex items-center gap-2 text-[var(--ds-text-primary)]">
+                                            <Armchair size={16} className="text-[var(--ds-text-muted)]" />
                                             <span className="text-sm font-medium">{suggestion.label}</span>
                                         </div>
-                                        <div className="text-[var(--color-fg-muted)] opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <div className="text-[var(--ds-text-muted)] opacity-0 group-hover:opacity-100 transition-opacity">
                                             <Check size={16} />
                                         </div>
                                     </button>
@@ -6366,16 +6403,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     )}
                 </div>
 
-                <div className="p-4 border-t border-[var(--color-line)] flex flex-col sm:flex-row justify-end gap-2">
+                <div className="p-4 border-t border-[var(--ds-border)] flex flex-col sm:flex-row justify-end gap-2">
                     <button
                         onClick={confirmModal.onCancel}
-                        className="w-full sm:w-auto px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
+                        className="w-full sm:w-auto px-4 py-2 rounded-full border border-[var(--ds-border)] text-[var(--ds-text-primary)] text-sm font-medium hover:bg-[var(--ds-surface-row)]"
                     >
                         Annulla
                     </button>
                     <button
                         onClick={confirmModal.onConfirm}
-                        className="w-full sm:w-auto px-4 py-2 rounded-full bg-[var(--color-fg)] text-[var(--color-fg-on-brand)] text-sm font-medium hover:opacity-90"
+                        className="w-full sm:w-auto px-4 py-2 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-sm font-medium hover:opacity-90"
                     >
                         Procedi Comunque
                     </button>
@@ -6399,9 +6436,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         title="Riattiva tutti i tavoli"
         message={`Stai per riattivare ${hiddenTableIds.size} ${hiddenTableIds.size === 1 ? 'tavolo nascosto' : 'tavoli nascosti'} per questo turno.`}
         confirmLabel="Riattiva tutti"
-        icon={<Eye className="h-5 w-5 text-emerald-600" />}
-        iconWrapperClassName="mx-auto w-12 h-12 bg-emerald-50 border border-emerald-100 dark:bg-emerald-500/15 dark:border-emerald-500/30 rounded-full flex items-center justify-center mb-4"
-        confirmClassName="rounded-full px-4 py-2 bg-emerald-600 text-[#ffffff] text-sm font-medium hover:bg-emerald-700 transition"
+        icon={<Eye className="h-5 w-5 text-[var(--ds-seated-text)]" />}
+        iconWrapperClassName="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--ds-seated-tint)]"
+        confirmClassName="inline-flex items-center justify-center gap-2 h-11 px-5 rounded-full bg-[var(--ds-seated-solid)] text-[var(--ds-seated-fg)] text-[15px] font-semibold hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         showIrreversibleWarning={false}
         onCancel={() => setUnhideAllConfirm(false)}
         onConfirm={async () => {
@@ -6434,91 +6471,91 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             onClick={() => { if (!isSavingReservation) setPreflightModal(null); }}
           >
             <div
-              className="bg-[var(--color-surface)] w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] overflow-hidden animate-in slide-in-from-bottom sm:slide-in-from-bottom-4 duration-200 pb-[env(safe-area-inset-bottom)] sm:pb-0"
+ className="bg-[var(--ds-surface)] w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-[var(--ds-shadow-raised)] border border-[var(--ds-border)] overflow-hidden duration-200 pb-[env(safe-area-inset-bottom)] sm:pb-0"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex justify-center pt-3 pb-1 sm:hidden">
-                <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+                <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
               </div>
-              <div className="flex items-start justify-between p-4 border-b border-[var(--color-line)]">
+              <div className="flex items-start justify-between p-4 border-b border-[var(--ds-border)]">
                 <div className="flex items-start gap-3 min-w-0">
-                  <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-amber-50 dark:bg-amber-500/15 text-amber-600 dark:text-amber-300 flex-shrink-0">
+                  <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] flex-shrink-0">
                     <AlertTriangle className="h-5 w-5" />
                   </span>
                   <div className="min-w-0">
-                    <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">
+                    <h3 className="text-[16px] font-semibold text-[var(--ds-text-primary)]">
                       {hasDuplicate ? 'Verifica prenotazione' : 'Conferma prenotazione'}
                     </h3>
-                    <p className="text-xs text-[var(--color-fg-muted)] mt-0.5 truncate">
+                    <p className="text-xs text-[var(--ds-text-muted)] mt-0.5 truncate">
                       {toTitleCase(preflightModal.payload.customer_name || '')}
                     </p>
                   </div>
                 </div>
                 <button
                   onClick={() => { if (!isSavingReservation) setPreflightModal(null); }}
-                  className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
+                  className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
-                  <X className="h-5 w-5" />
+                  <X className="h-4 w-4" />
                 </button>
               </div>
 
               <div className="p-4 space-y-4">
                 {futureWarning && (
-                  <div className="rounded-xl border border-blue-200/70 dark:border-blue-500/30 bg-blue-50/70 dark:bg-blue-500/10 p-4">
-                    <p className="text-xs uppercase tracking-wide font-semibold text-blue-700 dark:text-blue-300">
+                  <div className="rounded-[16px] bg-[var(--ds-arriving-tint)] p-4">
+                    <p className="text-[13px] font-semibold text-[var(--ds-arriving-text)]">
                       Prenotazione futura
                       {futureWarning.daysAhead === 1 ? ' · domani' : ` · tra ${futureWarning.daysAhead} giorni`}
                     </p>
-                    <p className="mt-2 text-[20px] font-semibold text-[var(--color-fg)] capitalize leading-tight">
+                    <p className="mt-2 text-[20px] font-semibold text-[var(--ds-text-primary)] capitalize leading-tight">
                       {futureWarning.weekday} {futureWarning.date}
                     </p>
-                    <p className="mt-1 text-[28px] font-bold text-[var(--color-fg)] tabular-nums">
+                    <p className="mt-1 text-[28px] font-bold text-[var(--ds-text-primary)] tabular-nums">
                       {futureWarning.time}
                     </p>
-                    <p className="mt-2 text-sm text-[var(--color-fg-muted)]">
+                    <p className="mt-2 text-sm text-[var(--ds-text-muted)]">
                       Conferma che la data e l'ora siano corrette.
                     </p>
                   </div>
                 )}
 
                 {pastWarning && (
-                  <div className="rounded-xl border border-rose-200/70 dark:border-rose-500/30 bg-rose-50/70 dark:bg-rose-500/10 p-4">
-                    <p className="text-xs uppercase tracking-wide font-semibold text-rose-700 dark:text-rose-300">
+                  <div className="rounded-[16px] bg-[var(--ds-critical-tint)] p-4">
+                    <p className="text-[13px] font-semibold text-[var(--ds-critical-text)]">
                       Orario già passato
                       {pastWarning.minutesAgo >= 60
                         ? ` · ${Math.floor(pastWarning.minutesAgo / 60)}h fa`
                         : ` · ${pastWarning.minutesAgo} min fa`}
                     </p>
-                    <p className="mt-2 text-[20px] font-semibold text-[var(--color-fg)] capitalize leading-tight">
+                    <p className="mt-2 text-[20px] font-semibold text-[var(--ds-text-primary)] capitalize leading-tight">
                       {pastWarning.date}
                     </p>
-                    <p className="mt-1 text-[28px] font-bold text-[var(--color-fg)] tabular-nums">
+                    <p className="mt-1 text-[28px] font-bold text-[var(--ds-text-primary)] tabular-nums">
                       {pastWarning.time}
                     </p>
-                    <p className="mt-2 text-sm text-[var(--color-fg-muted)]">
+                    <p className="mt-2 text-sm text-[var(--ds-text-muted)]">
                       Questo orario di oggi è già trascorso. Verifica di non aver sbagliato giorno o turno (es. pranzo invece di cena).
                     </p>
                   </div>
                 )}
 
                 {hasDuplicate && (
-                  <div className="rounded-xl border border-amber-200/70 dark:border-amber-500/30 bg-amber-50/70 dark:bg-amber-500/10 p-4">
-                    <p className="text-xs uppercase tracking-wide font-semibold text-amber-700 dark:text-amber-300">
+                  <div className="rounded-[16px] bg-[var(--ds-pending-tint)] p-4">
+                    <p className="text-[13px] font-semibold text-[var(--ds-pending-text)]">
                       Possibile duplicato
                     </p>
-                    <p className="mt-2 text-sm text-[var(--color-fg)]">
+                    <p className="mt-2 text-sm text-[var(--ds-text-primary)]">
                       Una prenotazione simile esiste già per <strong>{toTitleCase(preflightModal.payload.customer_name || '')}</strong>:
                     </p>
                     <ul className="mt-2 space-y-1.5">
                       {sameDayMatches.map(w => (
-                        <li key={`s-${w.match.id}`} className="text-sm text-[var(--color-fg)] flex items-center gap-2">
-                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-600" />
+                        <li key={`s-${w.match.id}`} className="text-sm text-[var(--ds-text-primary)] flex items-center gap-2">
+                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--ds-pending-solid)]" />
                           <span>Stesso giorno · {formatMatchLine(w.match)}</span>
                         </li>
                       ))}
                       {nearMatches.map(w => (
-                        <li key={`n-${w.match.id}`} className="text-sm text-[var(--color-fg)] flex items-center gap-2">
-                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500" />
+                        <li key={`n-${w.match.id}`} className="text-sm text-[var(--ds-text-primary)] flex items-center gap-2">
+                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--ds-pending-solid)]" />
                           <span>{w.dayDiff === 1 ? 'A 1 giorno' : `A ${w.dayDiff} giorni`} · {formatMatchLine(w.match)}</span>
                         </li>
                       ))}
@@ -6527,12 +6564,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 )}
               </div>
 
-              <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-[var(--color-line)] bg-[var(--color-surface-2)]">
+              <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-[var(--ds-border)] bg-[var(--ds-surface-row)]">
                 <button
                   type="button"
                   onClick={() => setPreflightModal(null)}
                   disabled={isSavingReservation}
-                  className="px-4 py-2 rounded-full text-sm font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
+                  className="px-4 py-2 rounded-full text-sm font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50"
                 >
                   Annulla
                 </button>
@@ -6540,7 +6577,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   type="button"
                   onClick={async () => { await performSave(preflightModal.payload); }}
                   disabled={isSavingReservation}
-                  className="px-4 py-2 rounded-full text-sm font-medium bg-[var(--color-fg)] text-[var(--color-surface)] hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-2"
+                  className="px-4 py-2 rounded-full text-sm font-medium bg-[var(--ds-action-bg)] text-[var(--ds-surface)] hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-2"
                 >
                   {isSavingReservation && <Loader2 className="h-4 w-4 animate-spin" />}
                   Conferma e salva
@@ -6576,14 +6613,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             onClick={closePicker}
           >
             <div
-              className="bg-[var(--color-surface)] rounded-2xl shadow-[var(--shadow-xl)] w-full max-w-md overflow-hidden"
+              className="bg-[var(--ds-surface)] rounded-2xl shadow-[var(--ds-shadow-raised)] w-full max-w-md overflow-hidden"
               onClick={e => e.stopPropagation()}
             >
-              <div className="p-5 border-b border-[var(--color-line)]">
-                <h3 className="text-lg font-semibold text-[var(--color-fg)]">
+              <div className="p-5 border-b border-[var(--ds-border)]">
+                <h3 className="text-lg font-semibold text-[var(--ds-text-primary)]">
                   {isPending ? 'Conferma la prenotazione' : 'Invia conferma al cliente?'}
                 </h3>
-                <p className="mt-1 text-sm text-[var(--color-fg-muted)]">
+                <p className="mt-1 text-sm text-[var(--ds-text-muted)]">
                   {isPending ? (
                     <>Scegli il canale per confermare la prenotazione di <strong>{toTitleCase(target.customer_name || '')}</strong>: lo stato passerà da "Da confermare" a "Confermata".</>
                   ) : (
@@ -6597,14 +6634,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     type="button"
                     onClick={() => handlePickConfirmationChannel('sms')}
                     disabled={sendingConfirmation !== null}
-                    className="w-full flex items-center gap-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-hover)] px-4 py-3 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    className="w-full flex items-center gap-3 rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-row)] hover:bg-[var(--ds-surface-row)] px-4 py-3 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     {sendingConfirmation === 'sms'
-                      ? <Loader2 className="h-5 w-5 animate-spin text-emerald-600" />
-                      : <MessageCircle className="h-5 w-5 text-emerald-600" />}
+                      ? <Loader2 className="h-5 w-5 animate-spin text-[var(--ds-seated-solid)]" />
+                      : <MessageCircle className="h-5 w-5 text-[var(--ds-seated-solid)]" />}
                     <div className="text-left flex-1">
-                      <div className="text-sm font-semibold text-[var(--color-fg)]">{actionPrefix} SMS</div>
-                      <div className="text-[11px] text-[var(--color-fg-muted)]">{target.phone}</div>
+                      <div className="text-sm font-semibold text-[var(--ds-text-primary)]">{actionPrefix} SMS</div>
+                      <div className="text-[11px] text-[var(--ds-text-muted)]">{target.phone}</div>
                     </div>
                   </button>
                 )}
@@ -6613,14 +6650,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     type="button"
                     onClick={() => handlePickConfirmationChannel('whatsapp')}
                     disabled={sendingConfirmation !== null}
-                    className="w-full flex items-center gap-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-hover)] px-4 py-3 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    className="w-full flex items-center gap-3 rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-row)] hover:bg-[var(--ds-surface-row)] px-4 py-3 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     {sendingConfirmation === 'whatsapp'
-                      ? <Loader2 className="h-5 w-5 animate-spin text-green-600" />
-                      : <MessageCircle className="h-5 w-5 text-green-600" />}
+                      ? <Loader2 className="h-5 w-5 animate-spin text-[var(--ds-seated-solid)]" />
+                      : <MessageCircle className="h-5 w-5 text-[var(--ds-seated-solid)]" />}
                     <div className="text-left flex-1">
-                      <div className="text-sm font-semibold text-[var(--color-fg)]">{actionPrefix} WhatsApp</div>
-                      <div className="text-[11px] text-[var(--color-fg-muted)]">{target.phone}</div>
+                      <div className="text-sm font-semibold text-[var(--ds-text-primary)]">{actionPrefix} WhatsApp</div>
+                      <div className="text-[11px] text-[var(--ds-text-muted)]">{target.phone}</div>
                     </div>
                   </button>
                 )}
@@ -6629,19 +6666,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     type="button"
                     onClick={() => handlePickConfirmationChannel('email')}
                     disabled={sendingConfirmation !== null}
-                    className="w-full flex items-center gap-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-hover)] px-4 py-3 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    className="w-full flex items-center gap-3 rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-row)] hover:bg-[var(--ds-surface-row)] px-4 py-3 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
-                    <Send className="h-5 w-5 text-indigo-600" />
+                    <Send className="h-5 w-5 text-[var(--ds-arriving-solid)]" />
                     <div className="text-left flex-1">
-                      <div className="text-sm font-semibold text-[var(--color-fg)]">{actionPrefix} Email</div>
-                      <div className="text-[11px] text-[var(--color-fg-muted)]">{target.email}</div>
+                      <div className="text-sm font-semibold text-[var(--ds-text-primary)]">{actionPrefix} Email</div>
+                      <div className="text-[11px] text-[var(--ds-text-muted)]">{target.email}</div>
                     </div>
                   </button>
                 )}
               </div>
-              <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-[var(--color-line)] bg-[var(--color-surface-2)]">
+              <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-[var(--ds-border)] bg-[var(--ds-surface-row)]">
                 {isPending ? (
-                  <span className="text-[11px] text-[var(--color-fg-subtle)]">
+                  <span className="text-[11px] text-[var(--ds-text-subtle)]">
                     La conferma parte solo dopo la tua scelta di canale.
                   </span>
                 ) : <span />}
@@ -6649,7 +6686,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   type="button"
                   onClick={closePicker}
                   disabled={sendingConfirmation !== null}
-                  className="px-4 py-2 rounded-full text-sm font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
+                  className="px-4 py-2 rounded-full text-sm font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50"
                 >
                   {isPending ? 'Salva senza confermare' : 'Non ora'}
                 </button>
@@ -6680,23 +6717,23 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             onClick={closeComposer}
           >
             <div
-              className="bg-[var(--color-surface)] rounded-2xl shadow-[var(--shadow-xl)] w-full max-w-lg overflow-hidden flex flex-col max-h-[92vh]"
+              className="bg-[var(--ds-surface)] rounded-2xl shadow-[var(--ds-shadow-raised)] w-full max-w-lg overflow-hidden flex flex-col max-h-[92vh]"
               onClick={e => e.stopPropagation()}
             >
-              <div className="p-5 border-b border-[var(--color-line)]">
+              <div className="p-5 border-b border-[var(--ds-border)]">
                 <div className="flex items-center gap-2">
-                  <Mail className="h-4 w-4 text-indigo-600" />
-                  <h3 className="text-lg font-semibold text-[var(--color-fg)]">Nuova email</h3>
+                  <Mail className="h-4 w-4 text-[var(--ds-arriving-solid)]" />
+                  <h3 className="text-lg font-semibold text-[var(--ds-text-primary)]">Nuova email</h3>
                 </div>
-                <p className="mt-1 text-sm text-[var(--color-fg-muted)]">
-                  Invia un'email libera a <strong className="text-[var(--color-fg)]">{formData.email}</strong>.
+                <p className="mt-1 text-sm text-[var(--ds-text-muted)]">
+                  Invia un'email libera a <strong className="text-[var(--ds-text-primary)]">{formData.email}</strong>.
                 </p>
               </div>
               <div className="p-5 space-y-3 overflow-y-auto">
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs font-medium text-[var(--color-fg-muted)]">Oggetto</label>
-                    <span className={`text-[10px] tabular ${customEmailSubject.length > subjectLimit ? 'text-rose-600' : 'text-[var(--color-fg-subtle)]'}`}>
+                    <label className="text-xs font-medium text-[var(--ds-text-muted)]">Oggetto</label>
+                    <span className={`text-[10px] tabular ${customEmailSubject.length > subjectLimit ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-text-subtle)]'}`}>
                       {customEmailSubject.length}/{subjectLimit}
                     </span>
                   </div>
@@ -6706,14 +6743,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     onChange={e => setCustomEmailSubject(e.target.value.slice(0, subjectLimit))}
                     disabled={customEmailSending}
                     placeholder="Es. Correzione orario prenotazione"
-                    className="w-full h-10 px-3 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    className="w-full h-10 px-3 rounded-lg border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] text-sm focus:outline-none focus:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus:border-transparent"
                     autoFocus
                   />
                 </div>
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs font-medium text-[var(--color-fg-muted)]">Messaggio</label>
-                    <span className={`text-[10px] tabular ${customEmailBody.length > bodyLimit ? 'text-rose-600' : 'text-[var(--color-fg-subtle)]'}`}>
+                    <label className="text-xs font-medium text-[var(--ds-text-muted)]">Messaggio</label>
+                    <span className={`text-[10px] tabular ${customEmailBody.length > bodyLimit ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-text-subtle)]'}`}>
                       {customEmailBody.length}/{bodyLimit}
                     </span>
                   </div>
@@ -6723,19 +6760,19 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     disabled={customEmailSending}
                     rows={8}
                     placeholder="Ciao Francesca, ci scusiamo: l'email precedente riportava un orario errato. La prenotazione è confermata per le 21:00, non le 23:00. Grazie!"
-                    className="w-full px-3 py-2 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-y"
+                    className="w-full px-3 py-2 rounded-lg border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] text-sm leading-relaxed focus:outline-none focus:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus:border-transparent resize-y"
                   />
-                  <p className="mt-1.5 text-[11px] text-[var(--color-fg-subtle)]">
+                  <p className="mt-1.5 text-[11px] text-[var(--ds-text-subtle)]">
                     L'email userà il template grafico standard con logo e footer. Il saluto iniziale ("Ciao {toTitleCase((formData.customer_name || '').split(' ')[0] || 'cliente')}") e la firma finale vengono aggiunti automaticamente.
                   </p>
                 </div>
               </div>
-              <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-[var(--color-line)] bg-[var(--color-surface-2)]">
+              <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-[var(--ds-border)] bg-[var(--ds-surface-row)]">
                 <button
                   type="button"
                   onClick={closeComposer}
                   disabled={customEmailSending}
-                  className="px-4 py-2 rounded-full text-sm font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50"
+                  className="px-4 py-2 rounded-full text-sm font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50"
                 >
                   Annulla
                 </button>
@@ -6743,7 +6780,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   type="button"
                   onClick={handleSendCustomEmail}
                   disabled={!canSend}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-sm font-medium hover:bg-[var(--ds-action-bg-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
                   {customEmailSending
                     ? <><Loader2 className="h-4 w-4 animate-spin" /> Invio…</>
@@ -6772,18 +6809,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       {showChannelsSheet && createPortal(
         <div className="fixed inset-0 z-[80] flex items-end" onClick={() => setShowChannelsSheet(false)} role="dialog" aria-modal="true" aria-label="Canali di prenotazione">
           <div className="absolute inset-0 bg-black/40" />
-          <div className="relative w-full bg-[var(--color-surface)] rounded-t-2xl shadow-[var(--shadow-overlay)] pb-6 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
+ <div className="relative w-full bg-[var(--ds-surface)] rounded-t-2xl shadow-[var(--ds-shadow-raised)] pb-6 duration-200"onClick={e => e.stopPropagation()}>
             <div className="flex justify-center pt-3 pb-2">
-              <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+              <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
             </div>
             <div className="px-5 pb-3 flex items-center justify-between">
               <div>
-                <h3 className="text-base font-semibold text-[var(--color-fg)]">Canali di prenotazione</h3>
-                <p className="text-[12px] text-[var(--color-fg-muted)] mt-0.5">
+                <h3 className="text-base font-semibold text-[var(--ds-text-primary)]">Canali di prenotazione</h3>
+                <p className="text-[12px] text-[var(--ds-text-muted)] mt-0.5">
                   {selectedDate.split('T')[0]} · {selectedShift === Shift.LUNCH ? 'Pranzo' : 'Cena'}
                 </p>
               </div>
-              <button type="button" onClick={() => setShowChannelsSheet(false)} className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]" aria-label="Chiudi">
+              <button type="button" onClick={() => setShowChannelsSheet(false)} className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]" aria-label="Chiudi">
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -6793,7 +6830,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 shift={selectedShift === Shift.LUNCH ? 'LUNCH' : 'DINNER'}
                 showToast={(msg, kind) => showToast(msg, kind ?? 'info')}
               />
-              <p className="text-[12px] text-[var(--color-fg-muted)] leading-tight">
+              <p className="text-[12px] text-[var(--ds-text-muted)] leading-tight">
                 Tocca l'icona per bloccare o riattivare il canale per questo turno.
               </p>
             </div>
@@ -6813,57 +6850,67 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         // Portaled to <body>: inside the list's stacking context the mobile
         // bottom nav paints over the sheet and hides the action buttons.
         return createPortal(
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] sm:px-4" onClick={() => snoozeOverduePrompt(res)}>
-            <div className="bg-[var(--color-surface)] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] overflow-hidden animate-in slide-in-from-bottom sm:slide-in-from-bottom-4 duration-200 pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(e) => e.stopPropagation()}>
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[var(--ds-backdrop)] sm:px-4" onClick={() => snoozeOverduePrompt(res)}>
+ <div className="bg-[var(--ds-surface)] w-full sm:max-w-md rounded-t-[24px] sm:rounded-[24px] shadow-[var(--ds-shadow-raised)] overflow-hidden duration-200 pb-[env(safe-area-inset-bottom)] sm:pb-0"onClick={(e) => e.stopPropagation()}>
               <div className="flex justify-center pt-3 pb-1 sm:hidden">
-                <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+                <div className="w-9 h-1 rounded-full bg-[var(--ds-border-strong)]" />
               </div>
-              <div className="flex items-start justify-between p-4 border-b border-[var(--color-line)]">
-                <div className="min-w-0">
-                  <h3 className="text-[16px] font-semibold text-[var(--color-fg)] flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-cyan-600" /> Tavolo ancora occupato?
+
+              {/* Testata: solo titolo e chiusura. "Chiudi tutti" stava qui e
+                  rubava larghezza al titolo, che andava a capo e portava con
+                  se' il troncamento del sottotitolo — ora sta in fondo. */}
+              <div className="flex items-start gap-4 px-5 pt-5 pb-4 sm:px-6 sm:pt-6">
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-[18px] font-semibold leading-snug tracking-[-0.01em] text-[var(--ds-text-primary)]">
+                    Tavolo ancora occupato?
                   </h3>
-                  <p className="text-xs text-[var(--color-fg-muted)] mt-0.5 truncate">
+                  <p className="mt-1 truncate text-[14px] text-[var(--ds-text-muted)]">
                     {toTitleCase(res.customer_name)} · {formatTime(res.reservation_time)}{table ? ` · Tavolo ${table.name}` : ''}
                   </p>
                 </div>
-                <div className="flex items-center gap-1 flex-shrink-0">
-                  {/* Compare solo quando ce n'e' piu' d'uno: con un tavolo solo
-                      farebbe esattamente quello che fa la X accanto. */}
-                  {overdueQueue.length > 1 && (
-                    <button type="button" onClick={snoozeAllOverduePrompts}
-                      title={`Rimanda tutti i ${overdueQueue.length} avvisi di ${OVERDUE_SNOOZE_MIN} minuti`}
-                      className="px-2.5 h-8 rounded-lg text-[13px] font-medium text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
-                      Chiudi tutti · {overdueQueue.length}
-                    </button>
-                  )}
-                  <button onClick={() => snoozeOverduePrompt(res)}
-                    aria-label="Chiudi questo avviso"
-                    className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
+                <button onClick={() => snoozeOverduePrompt(res)}
+                  aria-label="Chiudi questo avviso"
+                  className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
+                  <X className="h-4 w-4" />
+                </button>
               </div>
-              <div className="p-4 space-y-3">
-                <p className="text-sm text-[var(--color-fg)]">
-                  Il tempo previsto è terminato alle {endLabel} e lo stato non è stato aggiornato. I clienti sono ancora al tavolo?
+
+              <div className="px-5 pb-5 sm:px-6 sm:pb-6">
+                <p className="text-[15px] leading-relaxed text-[var(--ds-text-secondary)]">
+                  Il tempo previsto è terminato alle {endLabel} e lo stato non è stato aggiornato.
                 </p>
-                <div className="grid grid-cols-2 gap-2 pt-1">
+                <p className="mt-4 text-[15px] leading-relaxed text-[var(--ds-text-secondary)]">
+                  I clienti sono ancora al tavolo?
+                </p>
+
+                {/* Impilati e a tutta larghezza: affiancati, "Ancora qui · +30
+                    min" non ci sta e va a capo dentro il bottone. */}
+                <div className="mt-3 flex flex-col gap-2.5">
                   <button type="button"
                     onClick={() => {
                       snoozeOverduePrompt(res);
                       onUpdateReservation({ ...res, duration_minutes: extendedDurationMin(res, nowTick) });
                       showToast(`${toTitleCase(res.customer_name)}: +${OVERDUE_EXTEND_MIN} minuti al tavolo`, 'success');
                     }}
-                    className="inline-flex items-center justify-center gap-1.5 px-3 h-10 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors">
-                    <UserCheck className="h-4 w-4" /> Ancora qui · +{OVERDUE_EXTEND_MIN} min
+                    className="inline-flex w-full items-center justify-center gap-2 h-11 rounded-full text-[15px] font-semibold bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
+                    <UserCheck className="h-4 w-4" aria-hidden /> Ancora qui · +{OVERDUE_EXTEND_MIN} min
                   </button>
                   <button type="button"
                     onClick={() => { snoozeOverduePrompt(res); handleSetReservationState(res, 'freed'); }}
-                    className="inline-flex items-center justify-center gap-1.5 px-3 h-10 rounded-lg text-sm font-semibold border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
-                    <Armchair className="h-4 w-4" /> Libera il tavolo
+                    className="inline-flex w-full items-center justify-center gap-2 h-11 rounded-full text-[15px] font-medium bg-[var(--ds-surface)] text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] hover:bg-[var(--ds-surface-row)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
+                    <Armchair className="h-4 w-4" aria-hidden /> Libera il tavolo
                   </button>
                 </div>
+
+                {/* Compare solo quando ce n'e' piu' d'uno: con un tavolo solo
+                    farebbe esattamente quello che fa la X in testata. */}
+                {overdueQueue.length > 1 && (
+                  <button type="button" onClick={snoozeAllOverduePrompts}
+                    title={`Rimanda tutti i ${overdueQueue.length} avvisi di ${OVERDUE_SNOOZE_MIN} minuti`}
+                    className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-full text-[14px] font-medium text-[var(--ds-text-secondary)] underline underline-offset-2 transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
+                    Chiudi tutti · {overdueQueue.length}
+                  </button>
+                )}
               </div>
             </div>
           </div>,
@@ -6887,26 +6934,27 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         const title = isPending ? 'Rispondi al cliente' : 'Cambia stato';
         return createPortal(
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] sm:px-4" onClick={() => setStateChangeReservation(null)}>
-            <div className="bg-[var(--color-surface)] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] overflow-hidden animate-in slide-in-from-bottom sm:slide-in-from-bottom-4 duration-200 pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(e) => e.stopPropagation()}>
+ <div className="bg-[var(--ds-surface)] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-[var(--ds-shadow-raised)] border border-[var(--ds-border)] overflow-hidden duration-200 pb-[env(safe-area-inset-bottom)] sm:pb-0"onClick={(e) => e.stopPropagation()}>
               {/* Drag handle (mobile only) */}
               <div className="flex justify-center pt-3 pb-1 sm:hidden">
-                <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+                <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
               </div>
-              <div className="flex items-start justify-between p-4 border-b border-[var(--color-line)]">
+              <div className="flex items-start justify-between p-4 border-b border-[var(--ds-border)]">
                   <div className="min-w-0">
-                    <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">{title}</h3>
-                    <p className="text-xs text-[var(--color-fg-muted)] mt-0.5 truncate">
+                    <h3 className="text-[16px] font-semibold text-[var(--ds-text-primary)]">{title}</h3>
+                    <p className="text-xs text-[var(--ds-text-muted)] mt-0.5 truncate">
                       {toTitleCase(res.customer_name)} · {formatTime(res.reservation_time)}
                     </p>
                   </div>
                   <button onClick={() => setStateChangeReservation(null)}
-                    className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
-                    <X className="h-5 w-5" />
+                    className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
+                    <X className="h-4 w-4" />
                   </button>
               </div>
               <div className="p-3 space-y-1.5">
                 {options.map(opt => {
                   const meta = RESERVATION_STATE_META[opt];
+                  const ds = reservationStateDs(opt);
                   const isCurrent = opt === current;
                   return (
                     <button
@@ -6928,15 +6976,15 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                       }}
                       className={`w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border transition-colors ${
                         isCurrent
-                          ? `${meta.chipClass} ring-2 ring-offset-1 ring-[var(--color-fg)]/20`
-                          : 'border-[var(--color-line)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)]'
+                          ? `${ds.tint} ${ds.text} border-transparent ring-2 ring-offset-1 ring-[var(--ds-action-bg)]/20`
+                          : 'border-[var(--ds-border)] bg-[var(--ds-surface)] hover:bg-[var(--ds-surface-row)]'
                       }`}
                     >
                       <span className="flex items-center gap-2.5">
-                        <span className={`w-2 h-2 rounded-full ${meta.dotClass}`} />
-                        <span className="text-sm font-medium text-[var(--color-fg)]">{meta.label}</span>
+                        <span className={`w-2 h-2 rounded-full ${ds.solid}`} />
+                        <span className="text-sm font-medium text-[var(--ds-text-primary)]">{meta.label}</span>
                       </span>
-                      {isCurrent && <Check className="h-4 w-4 text-[var(--color-fg-muted)]" />}
+                      {isCurrent && <Check className="h-4 w-4 text-[var(--ds-text-muted)]" />}
                     </button>
                   );
                 })}
@@ -6952,33 +7000,33 @@ export const ReservationList: React.FC<ReservationListProps> = ({
         const res = declineReservation;
         return createPortal(
           <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] sm:px-4" onClick={() => setDeclineReservation(null)}>
-            <div className="bg-[var(--color-surface)] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] overflow-hidden animate-in slide-in-from-bottom sm:slide-in-from-bottom-4 duration-200 pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(e) => e.stopPropagation()}>
+ <div className="bg-[var(--ds-surface)] w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-[var(--ds-shadow-raised)] border border-[var(--ds-border)] overflow-hidden duration-200 pb-[env(safe-area-inset-bottom)] sm:pb-0"onClick={(e) => e.stopPropagation()}>
               <div className="flex justify-center pt-3 pb-1 sm:hidden">
-                <div className="w-8 h-1 rounded-full bg-[var(--color-fg-subtle)]" />
+                <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
               </div>
-              <div className="flex items-start justify-between p-4 border-b border-[var(--color-line)]">
+              <div className="flex items-start justify-between p-4 border-b border-[var(--ds-border)]">
                 <div className="min-w-0">
-                  <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">Non confermare</h3>
-                  <p className="text-xs text-[var(--color-fg-muted)] mt-0.5 truncate">
+                  <h3 className="text-[16px] font-semibold text-[var(--ds-text-primary)]">Non confermare</h3>
+                  <p className="text-xs text-[var(--ds-text-muted)] mt-0.5 truncate">
                     {toTitleCase(res.customer_name)} · {formatTime(res.reservation_time)}
                   </p>
                 </div>
                 <button onClick={() => setDeclineReservation(null)}
-                  className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]">
-                  <X className="h-5 w-5" />
+                  className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
+                  <X className="h-4 w-4" />
                 </button>
               </div>
               <div className="p-4 space-y-3">
-                <p className="text-sm text-[var(--color-fg)]">
+                <p className="text-sm text-[var(--ds-text-primary)]">
                   Verrà inviato un SMS al cliente per informarlo che non è stato possibile confermare la prenotazione. Procedere?
                 </p>
                 <div className="flex items-center justify-end gap-2 pt-1">
                   <button type="button" onClick={() => setDeclineReservation(null)}
-                    className="px-3 h-9 rounded-lg text-sm font-medium border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors">
+                    className="px-3 h-9 rounded-lg text-sm font-medium border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] transition-colors">
                     Annulla
                   </button>
                   <button type="button" onClick={() => { handleSetReservationState(res, 'declined'); setDeclineReservation(null); }}
-                    className="inline-flex items-center gap-1.5 px-3 h-9 rounded-lg text-sm font-semibold bg-rose-600 text-white hover:bg-rose-700 transition-colors">
+                    className="inline-flex items-center gap-1.5 px-3 h-9 rounded-lg text-sm font-semibold bg-[var(--ds-critical-solid)] text-[var(--ds-critical-fg)] hover:opacity-90 transition-opacity">
                     <X className="h-4 w-4" /> Non confermare
                   </button>
                 </div>
@@ -7064,27 +7112,27 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 onClick={() => setTableChooserModal(null)}
             >
               <div
-                  className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col"
+                  className="bg-[var(--ds-surface)] rounded-2xl shadow-2xl border border-[var(--ds-border)] w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col"
                   onClick={e => e.stopPropagation()}
               >
-                <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+                <div className="flex items-center justify-between p-4 border-b border-[var(--ds-border)]">
                   <div className="min-w-0">
-                    <h3 className="text-[16px] font-semibold text-[var(--color-fg)]">
+                    <h3 className="text-[16px] font-semibold text-[var(--ds-text-primary)]">
                       Tavolo {table.name} · {rows.length} turni
                     </h3>
-                    <p className="text-xs text-[var(--color-fg-muted)] mt-0.5">
+                    <p className="text-xs text-[var(--ds-text-muted)] mt-0.5">
                       {dateLabel} — scegli quale prenotazione aprire
                     </p>
                   </div>
                   <button
                       onClick={() => setTableChooserModal(null)}
-                      className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
+                      className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
-                    <X className="h-5 w-5" />
+                    <X className="h-4 w-4" />
                   </button>
                 </div>
 
-                <ul className="flex-1 overflow-y-auto divide-y divide-[var(--color-line)]">
+                <ul className="flex-1 overflow-y-auto divide-y divide-[var(--ds-border)]">
                   {rows.map((r, i) => {
                     const t = getRomeTimePart(r.reservation_time);
                     const duration = resolveDurationMinutes(r);
@@ -7100,22 +7148,22 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                               setTableChooserModal(null);
                               handleEditClick(r);
                             }}
-                            className="w-full text-left px-4 py-3 hover:bg-[var(--color-surface-hover)] transition-colors flex items-center gap-3"
+                            className="w-full text-left px-4 py-3 hover:bg-[var(--ds-surface-row)] transition-colors flex items-center gap-3"
                         >
-                          <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300 text-xs font-bold flex-shrink-0">
+                          <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] text-xs font-bold flex-shrink-0">
                             {i + 1}°
                           </span>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
-                              {r.customer_is_vip && <Star className="h-3.5 w-3.5 text-amber-500 fill-amber-400 flex-shrink-0" />}
-                              <span className="font-semibold text-[var(--color-fg)] truncate">{toTitleCase(r.customer_name)}</span>
+                              {r.customer_is_vip && <Star className="h-3.5 w-3.5 text-[var(--ds-pending-solid)] fill-[var(--ds-pending-solid)] flex-shrink-0" />}
+                              <span className="font-semibold text-[var(--ds-text-primary)] truncate">{toTitleCase(r.customer_name)}</span>
                             </div>
-                            <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
+                            <div className="flex items-center gap-3 text-xs text-[var(--ds-text-muted)] mt-0.5">
                               <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {t}{endLabel ? ` → ${endLabel}` : ''}</span>
                               <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {r.guests}</span>
                             </div>
                           </div>
-                          <ChevronRight className="h-4 w-4 text-[var(--color-fg-muted)] flex-shrink-0" />
+                          <ChevronRight className="h-4 w-4 text-[var(--ds-text-muted)] flex-shrink-0" />
                         </button>
                       </li>
                     );
@@ -7123,13 +7171,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                 </ul>
 
                 {canEdit && (
-                  <div className="p-3 border-t border-[var(--color-line)]">
+                  <div className="p-3 border-t border-[var(--ds-border)]">
                     <button
                         onClick={() => {
                           setTableChooserModal(null);
                           setAssignTableModal(table);
                         }}
-                        className="w-full px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
+                        className="w-full px-4 py-2 rounded-full border border-[var(--ds-border)] text-[var(--ds-text-primary)] text-sm font-medium hover:bg-[var(--ds-surface-row)]"
                     >
                       Aggiungi un altro turno
                     </button>
@@ -7165,18 +7213,18 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
           return (
             <div className="fixed inset-0 bg-[rgba(15,23,42,0.5)] dark:bg-[rgba(0,0,0,0.7)] flex items-center justify-center z-[60] p-4" onClick={() => setAssignTableModal(null)}>
-              <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl border border-[var(--color-line)] w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
-                <div className="flex items-center justify-between p-4 border-b border-[var(--color-line)]">
+              <div className="bg-[var(--ds-surface)] rounded-2xl shadow-2xl border border-[var(--ds-border)] w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between p-4 border-b border-[var(--ds-border)]">
                   <div className="min-w-0">
-                    <h3 className="text-[16px] font-semibold text-[var(--color-fg)] flex items-center gap-2">
+                    <h3 className="text-[16px] font-semibold text-[var(--ds-text-primary)] flex items-center gap-2">
                       <span className="truncate">Assegna Tavolo {table.name}</span>
                       {isHidden && (
-                        <span className="flex-shrink-0 inline-flex items-center gap-1 text-[10px] font-bold tracking-wide bg-[var(--color-surface-3)] text-[var(--color-fg-muted)] px-1.5 py-0.5 rounded">
+                        <span className="flex-shrink-0 inline-flex items-center gap-1 text-[10px] font-bold tracking-wide bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] px-1.5 py-0.5 rounded">
                           <EyeOff size={10} /> Nascosto
                         </span>
                       )}
                     </h3>
-                    <p className="text-xs text-[var(--color-fg-muted)] mt-0.5 flex items-center gap-1.5">
+                    <p className="text-xs text-[var(--ds-text-muted)] mt-0.5 flex items-center gap-1.5">
                       <Armchair className="h-3 w-3" /> {table.seats} posti · {effectiveShift === Shift.LUNCH ? 'Pranzo' : 'Cena'} · {new Date(dateOnly).toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short' })}
                     </p>
                   </div>
@@ -7193,7 +7241,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                             showToast('Errore durante la divisione dei tavoli', 'error');
                           }
                         }}
-                        className="p-2 rounded-lg text-amber-700 hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-500/15 transition-colors"
+                        className="p-2 rounded-lg text-[var(--ds-pending-text)] hover:bg-[var(--ds-pending-tint)] transition-colors"
                         title={`Dividi i tavoli uniti (${table.name})`}
                       >
                         <Scissors className="h-5 w-5" />
@@ -7207,8 +7255,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         }}
                         className={`p-2 rounded-lg transition-colors ${
                           isHidden
-                            ? 'text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-500/15'
-                            : 'text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)]'
+                            ? 'text-[var(--ds-seated-text)] hover:bg-[var(--ds-seated-tint)]'
+                            : 'text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]'
                         }`}
                         title={isHidden ? 'Riattiva tavolo per questo turno' : 'Nascondi tavolo per questo turno'}
                       >
@@ -7217,9 +7265,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                     )}
                     <button
                       onClick={() => setAssignTableModal(null)}
-                      className="p-1.5 rounded-lg text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
+                      className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
-                      <X className="h-5 w-5" />
+                      <X className="h-4 w-4" />
                     </button>
                   </div>
                 </div>
@@ -7246,16 +7294,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         }
                         setAssignTableModal(null);
                     }}
-                    className="w-full text-left px-3 py-3 mb-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 dark:bg-emerald-500/15 dark:hover:bg-emerald-500/25 dark:border-emerald-500/30 rounded-lg transition-colors flex items-center gap-3"
+                    className="w-full text-left px-3 py-3 mb-2 bg-[var(--ds-seated-tint)] hover:opacity-90  rounded-lg transition-colors flex items-center gap-3"
                   >
-                    <div className="w-9 h-9 bg-emerald-600 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <div className="w-9 h-9 bg-[var(--ds-seated-solid)] rounded-lg flex items-center justify-center flex-shrink-0">
                       <UserCheck className="h-5 w-5 text-[#ffffff]" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-emerald-900 dark:text-emerald-200">Walk-in</div>
-                      <div className="text-xs text-emerald-700 dark:text-emerald-400 mt-0.5">Occupa subito il tavolo {table.name} con un cliente senza prenotazione</div>
+                      <div className="font-semibold text-[var(--ds-seated-text)]">Walk-in</div>
+                      <div className="text-xs text-[var(--ds-seated-text)] mt-0.5">Occupa subito il tavolo {table.name} con un cliente senza prenotazione</div>
                     </div>
-                    <ChevronRight className="h-4 w-4 text-emerald-400 dark:text-emerald-500 flex-shrink-0" />
+                    <ChevronRight className="h-4 w-4 text-[var(--ds-seated-text)] flex-shrink-0" />
                   </button>
 
                   <button
@@ -7264,53 +7312,53 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                         handleOpenNew();
                         setFormData(prev => ({ ...prev, table_id: table.id }));
                     }}
-                    className="w-full text-left px-3 py-3 mb-2 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 dark:bg-[#4f46e5]/15 dark:hover:bg-[#4f46e5]/25 dark:border-[#4f46e5]/30 rounded-lg transition-colors flex items-center gap-3"
+                    className="w-full text-left px-3 py-3 mb-2 bg-[var(--ds-arriving-tint)] hover:opacity-90 rounded-lg transition-opacity flex items-center gap-3"
                   >
-                    <div className="w-9 h-9 bg-[#4f46e5] rounded-lg flex items-center justify-center flex-shrink-0">
+                    <div className="w-9 h-9 bg-[var(--ds-arriving-solid)] rounded-lg flex items-center justify-center flex-shrink-0">
                       <Plus className="h-5 w-5 text-[#ffffff]" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-indigo-900 dark:text-[#c7d2fe]">Nuova prenotazione</div>
-                      <div className="text-xs text-indigo-700 dark:text-[#a5b4fc] mt-0.5">Crea e assegna direttamente al tavolo {table.name}</div>
+                      <div className="font-semibold text-[var(--ds-arriving-text)]">Nuova prenotazione</div>
+                      <div className="text-xs text-[var(--ds-arriving-text)] mt-0.5">Crea e assegna direttamente al tavolo {table.name}</div>
                     </div>
-                    <ChevronRight className="h-4 w-4 text-indigo-400 dark:text-[#818cf8] flex-shrink-0" />
+                    <ChevronRight className="h-4 w-4 text-[var(--ds-arriving-text)] flex-shrink-0" />
                   </button>
 
                   {unassigned.length === 0 ? (
                     <div className="text-center py-6 px-4">
-                      <p className="text-xs text-[var(--color-fg-muted)]">Nessuna prenotazione senza tavolo per questo turno.</p>
+                      <p className="text-xs text-[var(--ds-text-muted)]">Nessuna prenotazione senza tavolo per questo turno.</p>
                     </div>
                   ) : (
                     <>
-                      <div className="px-1 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-[var(--color-fg-muted)]">
+                      <div className="px-1 pt-2 pb-1 text-[11px] font-semibold tracking-wide text-[var(--ds-text-muted)]">
                         Oppure assegna a una prenotazione esistente
                       </div>
-                      <ul className="divide-y divide-[var(--color-line)]">
+                      <ul className="divide-y divide-[var(--ds-border)]">
                         {unassigned.map(r => {
                           const insufficient = (r.guests || 0) > table.seats;
                           return (
                             <li key={r.id}>
                               <button
                                 onClick={() => assign(r)}
-                                className="w-full text-left px-3 py-3 hover:bg-[var(--color-surface-hover)] rounded-lg transition-colors flex items-center gap-3"
+                                className="w-full text-left px-3 py-3 hover:bg-[var(--ds-surface-row)] rounded-lg transition-colors flex items-center gap-3"
                               >
                                 <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2">
-                                    <span className="font-semibold text-[var(--color-fg)] truncate">{toTitleCase(r.customer_name)}</span>
+                                    <span className="font-semibold text-[var(--ds-text-primary)] truncate">{toTitleCase(r.customer_name)}</span>
                                     {renderOperatorBadge(r)}
                                     {insufficient && (
-                                      <span className="text-[10px] font-bold tracking-wide bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300 px-1.5 py-0.5 rounded">
+                                      <span className="text-[10px] font-bold tracking-wide bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] px-1.5 py-0.5 rounded">
                                         Capienza insufficiente
                                       </span>
                                     )}
                                   </div>
-                                  <div className="flex items-center gap-3 text-xs text-[var(--color-fg-muted)] mt-0.5">
+                                  <div className="flex items-center gap-3 text-xs text-[var(--ds-text-muted)] mt-0.5">
                                     <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {formatTime(r.reservation_time)}</span>
                                     <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {r.guests}</span>
                                     {r.phone && <span className="truncate">{r.phone}</span>}
                                   </div>
                                 </div>
-                                <ChevronRight className="h-4 w-4 text-[var(--color-fg-muted)] flex-shrink-0" />
+                                <ChevronRight className="h-4 w-4 text-[var(--ds-text-muted)] flex-shrink-0" />
                               </button>
                             </li>
                           );
@@ -7320,10 +7368,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   )}
                 </div>
 
-                <div className="p-4 border-t border-[var(--color-line)]">
+                <div className="p-4 border-t border-[var(--ds-border)]">
                   <button
                     onClick={() => setAssignTableModal(null)}
-                    className="w-full px-4 py-2 rounded-full border border-[var(--color-line)] text-[var(--color-fg)] text-sm font-medium hover:bg-[var(--color-surface-hover)]"
+                    className="w-full px-4 py-2 rounded-full border border-[var(--ds-border)] text-[var(--ds-text-primary)] text-sm font-medium hover:bg-[var(--ds-surface-row)]"
                   >
                     Annulla
                   </button>
@@ -7352,7 +7400,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       {tooltipReservation && (
         <div className="fixed inset-0 z-[9999]" onClick={() => setTooltipReservation(null)}>
           <div
-            className="absolute bg-[var(--color-surface)] border border-[var(--color-line)] rounded-xl shadow-[var(--shadow-lg)] px-4 py-3 max-w-xs min-w-[200px]"
+            className="absolute bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-xl shadow-[var(--ds-shadow-raised)] px-4 py-3 max-w-xs min-w-[200px]"
             style={{
               left: Math.min(tooltipReservation.x, window.innerWidth - 280),
               top: tooltipReservation.y + 8,
@@ -7363,31 +7411,31 @@ export const ReservationList: React.FC<ReservationListProps> = ({
             <div className="flex items-start justify-between gap-2">
               <div className="flex items-center gap-1.5 mb-1.5">
                 {tooltipReservation.type === 'allergen'
-                  ? <AlertTriangle className="h-4 w-4 text-rose-500 flex-shrink-0" />
+                  ? <AlertTriangle className="h-4 w-4 text-[var(--ds-critical-solid)] flex-shrink-0" />
                   : tooltipReservation.type === 'tables'
-                  ? <MapPin className="h-4 w-4 text-blue-500 flex-shrink-0" />
-                  : tooltipReservation.type === 'bookedAt' ? <Info className="h-4 w-4 text-blue-500 flex-shrink-0" /> : <StickyNote className="h-4 w-4 text-amber-500 flex-shrink-0" />}
-                <span className="text-xs font-semibold text-[var(--color-fg)]">
+                  ? <MapPin className="h-4 w-4 text-[var(--ds-arriving-solid)] flex-shrink-0" />
+                  : tooltipReservation.type === 'bookedAt' ? <Info className="h-4 w-4 text-[var(--ds-arriving-solid)] flex-shrink-0" /> : <StickyNote className="h-4 w-4 text-[var(--ds-pending-solid)] flex-shrink-0" />}
+                <span className="text-xs font-semibold text-[var(--ds-text-primary)]">
                   {tooltipReservation.type === 'allergen' ? 'Intolleranze'
                     : tooltipReservation.type === 'tables' ? `Tavoli uniti (${tooltipReservation.text.split('+').filter(Boolean).length})`
                     : tooltipReservation.type === 'bookedAt' ? 'Prenotazione' : 'Note'}
                 </span>
               </div>
               <button type="button" onClick={() => setTooltipReservation(null)}
-                className="p-0.5 rounded-md text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-fg)] transition-colors flex-shrink-0">
+                className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]">
                 <X className="h-4 w-4" />
               </button>
             </div>
             {tooltipReservation.type === 'tables' ? (
               <div className="flex flex-wrap gap-1.5">
                 {tooltipReservation.text.split('+').map(n => n.trim()).filter(Boolean).map((name, i) => (
-                  <span key={i} className="inline-flex items-center justify-center min-w-[2.25rem] px-2 py-1 rounded-md bg-[#dbeafe] dark:bg-blue-500/15 text-[#193cb8] dark:text-blue-300 text-sm font-bold tabular">
+                  <span key={i} className="inline-flex items-center justify-center min-w-[2.25rem] px-2 py-1 rounded-md bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)] text-sm font-bold tabular">
                     {name}
                   </span>
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-[var(--color-fg-muted)] leading-relaxed">{tooltipReservation.text}</p>
+              <p className="text-sm text-[var(--ds-text-muted)] leading-relaxed">{tooltipReservation.text}</p>
             )}
           </div>
         </div>
@@ -7602,7 +7650,7 @@ const NotePickerPopover: React.FC<NotePickerPopoverProps> = ({ preset, picks, an
                 <button
                     type="button"
                     onClick={clear}
-                    className={`text-rose-500 hover:text-rose-600 font-medium ${isWide ? 'text-[12px]' : 'text-[15px] min-h-11 px-2'}`}
+                    className={`text-[var(--ds-critical-solid)] hover:text-[var(--ds-critical-text)] font-medium ${isWide ? 'text-[12px]' : 'text-[15px] min-h-11 px-2'}`}
                 >
                     Rimuovi
                 </button>
@@ -7652,7 +7700,7 @@ const NotePickerPopover: React.FC<NotePickerPopoverProps> = ({ preset, picks, an
         >
             <div className="absolute inset-0 bg-black/40" />
             <div
-                className="relative w-full bg-[var(--ds-surface)] rounded-t-2xl shadow-[var(--ds-shadow-overlay)] px-4 pt-3 pb-[max(env(safe-area-inset-bottom),1rem)] animate-in slide-in-from-bottom duration-200"
+ className="relative w-full bg-[var(--ds-surface)] rounded-t-2xl shadow-[var(--ds-shadow-overlay)] px-4 pt-3 pb-[max(env(safe-area-inset-bottom),1rem)] duration-200"
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="flex justify-center pb-2">

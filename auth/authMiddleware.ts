@@ -88,6 +88,30 @@ export const requirePermission = (permission: Permission) => {
   };
 };
 
+// Come requirePermission, ma basta uno dei permessi elencati. Serve alle
+// azioni condivise fra sala e passe (es. segnare servita un'uscita): WAITER
+// ha orders:take senza expedite, KITCHEN l'inverso, e un permesso nuovo solo
+// per questo gonfierebbe la matrice.
+export const requireAnyPermission = (...permissions: Permission[]) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    try {
+      for (const permission of permissions) {
+        if (await RolePermissionService.hasPermission(req.user.tenantId, req.user.role, permission)) {
+          return next();
+        }
+      }
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    } catch (err) {
+      console.error('Permission check failed:', err);
+      return res.status(500).json({ error: 'Permission check failed' });
+    }
+  };
+};
+
 // Optional authentication - doesn't fail if no token, but adds user if present
 export const optionalAuth = (req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;

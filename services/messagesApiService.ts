@@ -63,6 +63,33 @@ export interface UploadedAttachment {
 export const mediaUrl = (messageId: number, index: number): string =>
   `${API_URL}/messages/${messageId}/media/${index}`;
 
+// Cache a livello modulo dell'inbox. App monta InboxPage in modo condizionale
+// (`view === MESSAGGI && ...`), quindi ogni cambio vista smonta tutto: senza
+// questa cache ogni rientro ripartiva da zero — spinner e ~mezzo secondo di
+// rete verso Railway per rivedere dati di dieci secondi prima. La pagina
+// mostra subito l'ultimo stato noto e lo rinfresca in background
+// (stale-while-revalidate); App la pre-riempie al login e la svuota al logout
+// perché non sopravviva a un cambio utente sullo stesso browser.
+const TIMELINE_CACHE_MAX = 30;
+export const inboxCache = {
+  conversations: null as ConversationSummary[] | null,
+  timelines: new Map<string, InboxMessage[]>(),
+  setTimeline(phoneDigits: string, messages: InboxMessage[]) {
+    // Ri-inserire la chiave la sposta in coda: la Map mantiene l'ordine di
+    // inserimento, quindi la prima chiave è sempre la meno recente.
+    this.timelines.delete(phoneDigits);
+    this.timelines.set(phoneDigits, messages);
+    if (this.timelines.size > TIMELINE_CACHE_MAX) {
+      const oldest = this.timelines.keys().next().value;
+      if (oldest !== undefined) this.timelines.delete(oldest);
+    }
+  },
+  clear() {
+    this.conversations = null;
+    this.timelines.clear();
+  },
+};
+
 
 const getHeaders = (): HeadersInit => {
   const headers: Record<string, string> = {};
@@ -139,6 +166,17 @@ class MessagesApiService {
     return apiRequest(`${API_URL}/messages/conversations`, { headers: getHeaders() });
   }
 
+  /** Pre-scalda la cache al login, così il primo ingresso in Messaggi trova la
+   *  lista pronta invece dello spinner. Silenzioso: se fallisce, la pagina
+   *  farà comunque il suo fetch. */
+  async prefetchConversations(): Promise<void> {
+    if (inboxCache.conversations) return;
+    try {
+      const { conversations } = await this.listConversations();
+      inboxCache.conversations = conversations;
+    } catch { /* niente: il caricamento normale copre */ }
+  }
+
   async unreadCount(): Promise<{ count: number }> {
     return apiRequest(`${API_URL}/messages/unread-count`, { headers: getHeaders() });
   }
@@ -153,6 +191,16 @@ class MessagesApiService {
     return apiRequest(`${API_URL}/messages/conversations/${encodeURIComponent(phoneDigits)}/read`, {
       method: 'POST',
       headers: getHeaders(),
+    });
+  }
+
+  // Aggancia una prenotazione al thread così lo staff può riaprirla dalla
+  // chat. Usato dopo la creazione rapida dalla conversazione.
+  async linkReservation(phoneDigits: string, reservationId: number): Promise<{ ok: true; reservation_id: number }> {
+    return apiRequest(`${API_URL}/messages/conversations/${encodeURIComponent(phoneDigits)}/link`, {
+      method: 'PATCH',
+      headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reservation_id: reservationId }),
     });
   }
 

@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
 import { MenuManager } from './components/MenuManager';
-import { ReservationList } from './components/ReservationList';
+import { ReservationList, type NewReservationPrefill } from './components/ReservationList';
 import { LoginPage } from './components/LoginPage';
 import { ProfiloSheet } from './components/ProfiloSheet';
 import { OnboardingWizard } from './components/OnboardingWizard';
@@ -24,6 +24,7 @@ import { ShoppingListPage } from './components/ShoppingListPage';
 import { HaccpPage } from './components/HaccpPage';
 import ConversazioniPage from './components/ConversazioniPage';
 import InboxPage from './components/InboxPage';
+import StaffChatPage from './components/StaffChatPage';
 import { SegmentedControl, StatusPill, useMediaQuery, dsSelect } from './components/ds';
 import { NotificationsPanel } from './components/NotificationsPanel';
 import EmailPage from './components/EmailPage';
@@ -35,6 +36,7 @@ import { MonitoringPage } from './components/MonitoringPage';
 import ReceptionPage from './components/ReceptionPage';
 import { AttivitaPage } from './components/AttivitaPage';
 import { PushNotificationsCard } from './components/PushNotificationsCard';
+import { StaffChatPresetsCard } from './components/StaffChatPresetsCard';
 import { OpeningHoursManager } from './components/OpeningHoursManager';
 import { FeatureTogglesManager } from './components/FeatureTogglesManager';
 import { ScheduledClosuresManager } from './components/ScheduledClosuresManager';
@@ -45,6 +47,7 @@ import { AutoDepositManager } from './components/AutoDepositManager';
 import { PaymentLinkExpiryManager } from './components/PaymentLinkExpiryManager';
 import { BlacklistPolicyManager } from './components/BlacklistPolicyManager';
 import { PayAtTableSettingsManager } from './components/PayAtTableSettingsManager';
+import { FiscalSettingsManager } from './components/FiscalSettingsManager';
 import { SalaCucinaSettingsManager } from './components/SalaCucinaSettingsManager';
 import { AiMessagesSettingsManager } from './components/AiMessagesSettingsManager';
 import { MediaLibraryManager } from './components/MediaLibraryManager';
@@ -67,10 +70,13 @@ import { useAppBadge } from './hooks/useAppBadge';
 import { useScrollFade } from './hooks/useScrollFade';
 import { offlineQueue } from './services/offlineQueue';
 import { socketClient } from './services/socketClient';
-import { voiceCallsApiService } from './services/voiceCallsApiService';
-import { messagesApiService } from './services/messagesApiService';
+import { voiceCallsApiService, voiceCallsCache } from './services/voiceCallsApiService';
+import { messagesApiService, inboxCache } from './services/messagesApiService';
+import { clearConfigCache } from './services/configCache';
+import { staffChatApiService, staffChatCache } from './services/staffChatApiService';
+import { customersCache } from './services/customersCache';
 import { paymentsApiService } from './services/paymentsApiService';
-import { emailApiService } from './services/emailApiService';
+import { emailApiService, emailCache } from './services/emailApiService';
 import { notificationsApiService } from './services/notificationsApiService';
 import { useAuth } from './contexts/AuthContext';
 import { sortRooms } from './utils/roomOrder';
@@ -101,7 +107,10 @@ import {
   createTableMerge,
   deleteTableMerge,
   getFeatureFlags,
+  getLegalSettings,
+  tenantLogoSrc,
 } from './services/apiService';
+import { swrConfig } from './services/configCache';
 
 // ---------------------------------------------------------------------------
 // Navigation taxonomy — single source of truth for the desktop sidebar AND the
@@ -152,6 +161,7 @@ const NAV_ITEMS: NavItem[] = [
   { kind: 'link', label: 'Chiamate', Icon: Phone, group: 'comunicazioni', isTab: true, view: ViewState.CONVERSAZIONI, sidebarCollapse: false },
   { kind: 'link', label: 'Messaggi', Icon: MessageCircle, group: 'comunicazioni', isTab: true, view: ViewState.MESSAGGI, sidebarCollapse: false },
   { kind: 'link', label: 'Email', Icon: Mail, group: 'comunicazioni', isTab: true, view: ViewState.EMAIL, sidebarCollapse: false },
+  { kind: 'link', label: 'Chat staff', Icon: MessagesSquare, group: 'comunicazioni', isTab: true, view: ViewState.CHAT_STAFF, sidebarCollapse: false },
   { kind: 'link', label: 'Notifiche', Icon: Bell, group: 'comunicazioni', isTab: true, view: ViewState.NOTIFICHE, sidebarCollapse: false },
 
   // Operazioni
@@ -180,7 +190,7 @@ const NAV_ITEMS: NavItem[] = [
 // The Comunicazioni channels, in the order the mobile switcher shows them.
 // Presentation only — each one is still its own ViewState, so deep links from
 // the command palette, notifications and the sidebar are untouched.
-const COMMS_VIEWS: ViewState[] = [ViewState.CONVERSAZIONI, ViewState.MESSAGGI, ViewState.EMAIL];
+const COMMS_VIEWS: ViewState[] = [ViewState.CONVERSAZIONI, ViewState.MESSAGGI, ViewState.EMAIL, ViewState.CHAT_STAFF];
 
 // Stato aperto/chiuso della sidebar desktop. Scritto solo dalla linguetta.
 const SIDEBAR_COLLAPSED_KEY = 'ristocrm_sidebar_collapsed';
@@ -189,38 +199,27 @@ const SIDEBAR_COLLAPSED_KEY = 'ristocrm_sidebar_collapsed';
 // (flag table_orders_enabled) — spento, le voci spariscono dalla sidebar.
 const SALA_VIEWS: ViewState[] = [ViewState.COMANDE, ViewState.CUCINA, ViewState.PASSE];
 
-/* ── Sottovoci di Impostazioni ────────────────────────────────────────────
-   La pagina era una colonna unica con undici sezioni impilate: per arrivare a
-   "Integrazioni" si scorreva tutto. Ora Impostazioni è una voce padre della
-   sidebar e ogni sezione è una figlia: la pagina mostra SOLO la sezione
-   attiva. Non è routing (resta l'enum ViewState): è uno stato in più che
-   sceglie quale fetta della stessa vista renderizzare. Su mobile, dove la
-   sidebar non c'è, la stessa lista diventa la riga di chip in testa alla
-   pagina. `guard` decide la visibilità per chi non ha i permessi della
-   sezione (amministrazione, monitoraggio). */
-type SettingsSectionKey =
-  | 'profilo' | 'orari' | 'chiusure' | 'promemoria' | 'canali'
-  | 'prenotazioni' | 'amministrazione' | 'monitoraggio' | 'notifiche'
-  | 'legale' | 'tavoli-ai' | 'integrazioni';
-
-const SETTINGS_SECTIONS: {
-  key: SettingsSectionKey;
+/* ── Blocchi della pagina Impostazioni ────────────────────────────────────
+   Impostazioni è tornata una voce piatta della sidebar e una pagina unica:
+   il sottomenu costringeva a sapere in anticipo in quale delle dodici voci
+   stava una regolazione. Ora la pagina impila pochi blocchi tematici — le
+   card sono raggruppate per natura — e questa lista alimenta solo la riga
+   di chip-àncora in testa, che salta al blocco senza stato né routing.
+   `guard` nasconde il blocco a chi non ha i permessi delle sue card. */
+const SETTINGS_GROUPS: {
+  id: string;
   label: string;
   Icon: React.ComponentType<{ size?: number; className?: string }>;
-  guard?: 'userManagement' | 'logs';
+  guard?: 'admin' | 'pay_at_table';
 }[] = [
-  { key: 'profilo', label: 'Profilo', Icon: UserCheck },
-  { key: 'orari', label: 'Orari di apertura', Icon: Clock },
-  { key: 'chiusure', label: 'Chiusure programmate', Icon: DoorClosed },
-  { key: 'promemoria', label: 'Promemoria', Icon: BellRing },
-  { key: 'canali', label: 'Canali di prenotazione', Icon: MessagesSquare },
-  { key: 'prenotazioni', label: 'Opzioni prenotazioni', Icon: Calendar },
-  { key: 'amministrazione', label: 'Amministrazione', Icon: Users, guard: 'userManagement' },
-  { key: 'monitoraggio', label: 'Monitoraggio', Icon: FileText, guard: 'logs' },
-  { key: 'notifiche', label: 'Notifiche push', Icon: Bell },
-  { key: 'legale', label: 'Legale', Icon: ShieldCheck },
-  { key: 'tavoli-ai', label: 'Logica tavoli AI', Icon: Zap },
-  { key: 'integrazioni', label: 'Integrazioni', Icon: CreditCard },
+  { id: 'imp-profilo', label: 'Profilo', Icon: UserCheck },
+  { id: 'imp-ristorante', label: 'Ristorante', Icon: Clock },
+  { id: 'imp-prenotazioni', label: 'Prenotazioni', Icon: Calendar },
+  { id: 'imp-pagamenti', label: 'Pagamenti', Icon: CreditCard },
+  { id: 'imp-fiscalita', label: 'Fiscalità', Icon: Landmark, guard: 'pay_at_table' },
+  { id: 'imp-comunicazioni', label: 'Comunicazioni', Icon: MessagesSquare },
+  { id: 'imp-ai', label: 'AI', Icon: Sparkles },
+  { id: 'imp-amministrazione', label: 'Amministrazione', Icon: Users, guard: 'admin' },
 ];
 
 /* ── Impostazioni ─────────────────────────────────────────────────────────
@@ -232,8 +231,10 @@ const SETTINGS_SECTIONS: {
    Le etichette restano in tondo: erano in maiuscolo con 0.08em di spaziatura,
    che a 11px cancella la forma della parola senza renderla più leggibile
    (§5.2). Peso e colore portano la gerarchia. */
-const SettingsSection: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-  <section className="mb-6">
+const SettingsSection: React.FC<{ id?: string; label: string; children: React.ReactNode }> = ({ id, label, children }) => (
+  // scroll-mt: quando i chip-àncora saltano qui, l'intestazione non finisce
+  // incollata al bordo superiore della zona che scorre.
+  <section id={id} className="mb-6 scroll-mt-4">
     <h3 className="mb-2 px-1 text-[13px] font-semibold text-[var(--ds-text-muted)]">{label}</h3>
     {children}
   </section>
@@ -310,17 +311,32 @@ const App: React.FC = () => {
   const { user, isAuthenticated, isLoading: authLoading, logout, canAccessView, canManageUsers, hasPermission, hasFeature, getAccessibleViews, canViewLogs, updatePreferences } = useAuth();
 
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
-  // Sottovoce attiva di Impostazioni + apertura del ramo nella sidebar.
-  const [settingsSection, setSettingsSection] = useState<SettingsSectionKey>('profilo');
-  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
-  // Il ramo segue la vista SOLO al cambio di vista: entrando in Impostazioni
-  // (da qualunque strada: palette, chip, sidebar) si apre, uscendo si chiude.
-  // Lo stato resta l'unica fonte del rendering — prima il render sommava
-  // "|| view === SETTINGS" e il toggle non poteva mai chiudere il ramo
-  // restando sulla pagina.
-  useEffect(() => {
-    setSettingsMenuOpen(view === ViewState.SETTINGS);
-  }, [view]);
+
+  /* Il marchio del ristorante in testa alla barra: chi la tiene aperta dieci
+     ore al giorno lavora da lui, non da noi. Sympotia scende in fondo.
+
+     Arriva da `legal_config.logo_url`, lo stesso caricato da Impostazioni per
+     la pagina prenota — un logo solo, in un posto solo. `tenantLogoSrc` lo
+     rende assoluto: il CRM gira su un dominio diverso dal backend, e un path
+     relativo cercherebbe l'immagine su Vercel.
+
+     Finche' non arriva resta null e in testa si vede Sympotia: meglio il
+     marchio del prodotto per un istante che un buco che poi si riempie. */
+  const [tenantLogo, setTenantLogo] = useState<string | null>(null);
+  const [tenantName, setTenantName] = useState<string>('');
+  useEffect(() => swrConfig('legalSettings', getLegalSettings, l => {
+    setTenantLogo(l.logo_url ? tenantLogoSrc(l.logo_url) : null);
+    setTenantName(l.business_name || '');
+  }), []);
+  // L'URL del logo arriva subito (cache config), ma l'immagine e' un download
+  // a parte: finche' non e' davvero renderizzabile in testa si mostra il NOME
+  // del ristorante, non un buco — e se il download fallisce (rete, 404) il
+  // nome resta, mai l'icona dell'immagine rotta. Reset al cambio di URL, non
+  // a ogni re-apply della config: lo stesso URL riapplicato non deve far
+  // lampeggiare il nome sopra un logo gia' visibile.
+  const [tenantLogoReady, setTenantLogoReady] = useState(false);
+  const [tenantLogoFailed, setTenantLogoFailed] = useState(false);
+  useEffect(() => { setTenantLogoReady(false); setTenantLogoFailed(false); }, [tenantLogo]);
   // Una schermata che si prende tutto lo schermo sul telefono: la barra di
   // navigazione in basso sparisce, e con lei il suo spazio di rispetto. Per ora
   // la chiede solo la comanda aperta su un tavolo.
@@ -397,14 +413,16 @@ const App: React.FC = () => {
   const [newReservationKind, setNewReservationKind] = useState<'standard' | 'walkin'>('standard');
   // Prefill applied when opening the new-reservation modal — used when
   // converting a voice call, a message or an email into a booking.
-  // date/time/guests/notes arrive only from the email AI extraction.
-  const [newReservationPrefill, setNewReservationPrefill] = useState<{
-    customer_name?: string; phone?: string; email?: string;
-    date?: string; time?: string; guests?: number; notes?: string;
-  } | undefined>(undefined);
+  const [newReservationPrefill, setNewReservationPrefill] = useState<NewReservationPrefill | undefined>(undefined);
   // If set, the next reservation that gets created is linked to this voice
   // call. Cleared once the link finishes (or the modal is dismissed).
   const linkVoiceCallOnCreateRef = useRef<number | null>(null);
+  // Phone_digits of the inbox conversation a new reservation should link back
+  // to (set when creating from the chat). Cleared once the link finishes.
+  const linkInboxConversationOnCreateRef = useRef<string | null>(null);
+  // Bumped after an inbox conversation gets linked so InboxPage refetches and
+  // shows the "Apri prenotazione" affordance without a manual reload.
+  const [inboxRefreshTick, setInboxRefreshTick] = useState(0);
   const [autoOpenNewBanquet, setAutoOpenNewBanquet] = useState(false);
   const [autoOpenNewDish, setAutoOpenNewDish] = useState(false);
   const [autoOpenNewCustomer, setAutoOpenNewCustomer] = useState(false);
@@ -499,6 +517,24 @@ const App: React.FC = () => {
   // the user leaves the inbox we also refresh, in case they read some threads.
   const [messagesUnreadCount, setMessagesUnreadCount] = useState(0);
   const canSeeMessages = canAccessView(ViewState.MESSAGGI);
+  // Pre-scalda la cache dell'inbox al login: il primo ingresso in Messaggi
+  // trova la lista già pronta invece dello spinner (mezzo secondo di rete
+  // verso Railway). Al logout la cache si svuota: non deve sopravvivere a un
+  // cambio utente sullo stesso browser.
+  useEffect(() => {
+    if (!isAuthenticated) { inboxCache.clear(); clearConfigCache(); return; }
+    if (!canSeeMessages) return;
+    messagesApiService.prefetchConversations();
+  }, [isAuthenticated, canSeeMessages]);
+
+  // Stesso pre-riscaldamento per Chiamate: la lista di partenza è pronta al
+  // primo ingresso e la cache muore col logout.
+  useEffect(() => {
+    if (!isAuthenticated) { voiceCallsCache.clear(); return; }
+    if (!canSeeVoiceCalls) return;
+    voiceCallsApiService.prefetchList();
+  }, [isAuthenticated, canSeeVoiceCalls]);
+
   useEffect(() => {
     if (!isAuthenticated || !canSeeMessages) return;
     let cancelled = false;
@@ -547,10 +583,79 @@ const App: React.FC = () => {
       .catch(() => {});
   }, [view, isAuthenticated, canSeeMessages]);
 
+  // Non letti della chat staff — stesso schema del badge Messaggi: fetch al
+  // mount, refresh su ogni evento socket del modulo e al focus. La lettura
+  // fatta su QUESTO device non emette l'evento verso se stessa (esclusione
+  // X-Socket-ID), quindi si riconta anche quando si lascia la vista.
+  const [staffChatUnreadCount, setStaffChatUnreadCount] = useState(0);
+  const canSeeStaffChat = canAccessView(ViewState.CHAT_STAFF);
+  // Stesso pre-riscaldamento delle altre pagine di comunicazione: la lista
+  // thread è pronta al primo ingresso e la cache muore col logout (insieme
+  // a quella della rubrica clienti, che invece non si pre-scalda: pesa di
+  // più e la pagina non è tra le prime aperte).
+  useEffect(() => {
+    if (!isAuthenticated) { staffChatCache.clear(); customersCache.clear(); return; }
+    if (!canSeeStaffChat) return;
+    staffChatApiService.prefetchThreads();
+  }, [isAuthenticated, canSeeStaffChat]);
+  useEffect(() => {
+    if (!isAuthenticated || !canSeeStaffChat) return;
+    let cancelled = false;
+    const refresh = () => {
+      staffChatApiService.unreadCount()
+        .then(({ count }) => { if (!cancelled) setStaffChatUnreadCount(count); })
+        .catch(() => {});
+    };
+    refresh();
+    const onEvent = () => refresh();
+
+    let attachedSocket: ReturnType<typeof socketClient.getSocket> = null;
+    const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
+      if (attachedSocket === s) return;
+      if (attachedSocket) {
+        attachedSocket.off('staffchat:message', onEvent);
+        attachedSocket.off('staffchat:read', onEvent);
+      }
+      attachedSocket = s;
+      if (attachedSocket) {
+        attachedSocket.on('staffchat:message', onEvent);
+        attachedSocket.on('staffchat:read', onEvent);
+      }
+    };
+    attach(socketClient.getSocket());
+    const unsubSocket = socketClient.onSocketChange((s) => attach(s));
+
+    const onFocus = () => refresh();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', onFocus);
+      unsubSocket();
+      attach(null);
+    };
+  }, [isAuthenticated, canSeeStaffChat]);
+  useEffect(() => {
+    if (!isAuthenticated || !canSeeStaffChat) return;
+    staffChatApiService.unreadCount()
+      .then(({ count }) => setStaffChatUnreadCount(count))
+      .catch(() => {});
+  }, [view, isAuthenticated, canSeeStaffChat]);
+
+  // Deep-link dalla push (?staffchat=<threadKey>): il thread da aprire appena
+  // la vista monta.
+  const [pendingStaffChatThread, setPendingStaffChatThread] = useState<string | null>(null);
+
   // Email and Notifiche unread badges — poll on view change + on focus, no
   // socket wiring for now (both endpoints are cheap).
   const [emailUnreadCount, setEmailUnreadCount] = useState(0);
   const canSeeEmail = canAccessView(ViewState.EMAIL);
+  // Stesso pre-riscaldamento di Messaggi e Chiamate: la lista thread è pronta
+  // al primo ingresso e la cache muore col logout.
+  useEffect(() => {
+    if (!isAuthenticated) { emailCache.clear(); return; }
+    if (!canSeeEmail) return;
+    emailApiService.prefetchThreads();
+  }, [isAuthenticated, canSeeEmail]);
   useEffect(() => {
     if (!isAuthenticated || !canSeeEmail) return;
     let cancelled = false;
@@ -758,6 +863,15 @@ const App: React.FC = () => {
       if (!data || data.type !== 'NOTIFICATION_CLICK' || !data.url) return;
       try {
         const url = new URL(data.url, window.location.origin);
+        // Push della chat staff: apre la vista sul thread indicato.
+        const staffChatThread = url.searchParams.get('staffchat');
+        if (staffChatThread) {
+          if (getAccessibleViews().includes(ViewState.CHAT_STAFF)) {
+            setPendingStaffChatThread(staffChatThread);
+            setView(ViewState.CHAT_STAFF);
+          }
+          return;
+        }
         const requestedView = url.searchParams.get('view');
         if (!requestedView) return;
         if (!(Object.values(ViewState) as string[]).includes(requestedView)) return;
@@ -1015,6 +1129,38 @@ const App: React.FC = () => {
     };
   }, [isAuthenticated]);
 
+  // Caricamento in due tempi (26/08): il boot scarica solo la finestra
+  // recente (RESERVATIONS_WINDOW_DAYS indietro + tutto il futuro) e l'app
+  // diventa interattiva subito; lo storico arriva in background e si fonde
+  // nello stato, così schede clienti, ricerca globale e storico telefonate
+  // — che leggono tutto — restano completi. Il tempo di avvio smette di
+  // crescere con lo storico. archiveRef sopravvive alle riconnessioni: la
+  // fetchData di un reconnect ricarica la finestra e rimonta l'archivio già
+  // in memoria senza riscaricarlo.
+  const RESERVATIONS_WINDOW_DAYS = 45;
+  const reservationsArchiveRef = useRef<Reservation[]>([]);
+  const archiveLoadedRef = useRef(false);
+
+  const mergeReservationsById = (primary: Reservation[], secondary: Reservation[]): Reservation[] => {
+    const ids = new Set(primary.map(r => r.id));
+    return [...primary, ...secondary.filter(r => !ids.has(r.id))];
+  };
+
+  const loadReservationsArchive = async (windowFrom: string) => {
+    try {
+      const archive = await getReservations({ to: windowFrom });
+      reservationsArchiveRef.current = archive;
+      archiveLoadedRef.current = true;
+      // prev vince sul duplicato di confine: contiene già gli aggiornamenti
+      // socket arrivati mentre l'archivio era in volo.
+      setReservations(prev => mergeReservationsById(prev, archive));
+    } catch (error) {
+      // Non bloccante: l'app funziona sulla finestra; si ritenta al prossimo
+      // fetchData (reconnect) finché l'archivio non entra.
+      console.warn('Archivio prenotazioni non caricato, si ritenta al prossimo sync:', error);
+    }
+  };
+
   const fetchData = async () => {
     // L'admin piattaforma non opera il CRM del tenant: per scelta (D2) non ha
     // righe nella matrice permessi, quindi questi cinque endpoint gli
@@ -1025,13 +1171,14 @@ const App: React.FC = () => {
       setIsInitialDataLoading(false);
       return;
     }
+    const windowFrom = getRomeDatePart(new Date(Date.now() - RESERVATIONS_WINDOW_DAYS * 86400000));
     try {
       const [roomsData, tablesData, dishesData, banquetMenusData, reservationsData] = await Promise.all([
         getRooms(),
         getTables(),
         getDishes(),
         getBanquetMenus(),
-        getReservations(),
+        getReservations({ from: windowFrom }),
       ]);
 
       // Check for duplicate table IDs and filter them out
@@ -1061,7 +1208,7 @@ const App: React.FC = () => {
       setTables(uniqueTables);
       setDishes(dishesData);
       setBanquetMenus(banquetMenusData);
-      setReservations(reservationsData);
+      setReservations(mergeReservationsById(reservationsData, reservationsArchiveRef.current));
       hydrateBellFromRecentReservations(reservationsData);
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -1069,6 +1216,10 @@ const App: React.FC = () => {
     } finally {
       setIsInitialDataLoading(false);
     }
+    // Secondo tempo, fuori dal percorso critico: parte dopo che l'app è
+    // interattiva. `to` = windowFrom incluso: un giorno di sovrapposizione
+    // col primo tempo, il dedup per id lo assorbe.
+    if (!archiveLoadedRef.current) void loadReservationsArchive(windowFrom);
   };
 
   // Dedup guard: same message+type+title emitted within this window are
@@ -1139,7 +1290,10 @@ const App: React.FC = () => {
     () => reservations.filter(r => r.reservation_status === ReservationStatus.PENDING).length,
     [reservations]
   );
-  useAppBadge(pendingReservationsCount + voiceCallsPendingCount + messagesUnreadCount);
+  // La somma deve combaciare col pezzo per-utente calcolato lato server in
+  // pushService (computeAttentionBadge + countStaffChatUnread): stesso badge
+  // ad app aperta e ad app chiusa.
+  useAppBadge(pendingReservationsCount + voiceCallsPendingCount + messagesUnreadCount + staffChatUnreadCount);
 
   // Socket.IO Real-time Event Listeners
   useEffect(() => {
@@ -1257,6 +1411,12 @@ const App: React.FC = () => {
       setDishes(prev => prev.filter(d => d.id !== id));
     });
 
+    // Sync di massa dalla cassa (import Passepartout): un evento solo al
+    // posto di centinaia di dish:updated — si ricarica l'anagrafica intera.
+    socket.on('dish:synced', () => {
+      getDishes().then(setDishes).catch(() => {});
+    });
+
     // Banquet Menu events
     socket.on('banquet:created', (menu: BanquetMenu) => {
       setBanquetMenus(prev => [...prev, menu]);
@@ -1315,6 +1475,9 @@ const App: React.FC = () => {
         if (result.failed > 0) {
           addToast(`⚠ ${result.failed} operazioni non riuscite`, 'error');
         }
+        if (result.dropped > 0) {
+          addToast(`${result.dropped} operazioni troppo vecchie non sono state rigiocate`, 'info');
+        }
 
         // Refresh again after the flush so the UI reflects the server state
         // produced by replaying the queue.
@@ -1352,6 +1515,7 @@ const App: React.FC = () => {
       socket.off('dish:created');
       socket.off('dish:updated');
       socket.off('dish:deleted');
+      socket.off('dish:synced');
       socket.off('banquet:created');
       socket.off('banquet:updated');
       socket.off('banquet:deleted');
@@ -1609,6 +1773,15 @@ const App: React.FC = () => {
     setReservations(prev => prev.map(r => r.id === patched.id ? patched : r));
   }, []);
 
+  // Variante upsert per Reception: il walk-in crea una riga nuova, che la
+  // map di handlePatchReservationLocal scarterebbe. Il socket created/updated
+  // arriva comunque; questo garantisce l'eco immediato sul client che agisce.
+  const handleUpsertReservationLocal = useCallback((res: Reservation) => {
+    setReservations(prev => prev.some(r => r.id === res.id)
+      ? prev.map(r => r.id === res.id ? res : r)
+      : [...prev, res]);
+  }, []);
+
   const handleAddReservation = async (newRes: Omit<Reservation, 'id'>): Promise<Reservation> => {
     try {
       const returnedRes = await createReservation(newRes);
@@ -1628,6 +1801,15 @@ const App: React.FC = () => {
               .catch(() => {});
           })
           .catch((err) => console.warn('linkReservation failed:', err));
+      }
+      // If created from an inbox conversation, link it back so staff can
+      // reopen/modify the booking from the chat. Best-effort.
+      const linkInboxPhone = linkInboxConversationOnCreateRef.current;
+      if (linkInboxPhone) {
+        linkInboxConversationOnCreateRef.current = null;
+        messagesApiService.linkReservation(linkInboxPhone, returnedRes.id)
+          .then(() => setInboxRefreshTick(t => t + 1))
+          .catch((err) => console.warn('inbox linkReservation failed:', err));
       }
       // Optimistically include the new row so checks that scan `reservations`
       // (e.g. the duplicate preflight) see it immediately instead of waiting
@@ -1668,7 +1850,7 @@ const App: React.FC = () => {
   // Show loading spinner while checking auth
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-[var(--color-surface-2)] flex items-center justify-center">
+      <div className="min-h-screen bg-[var(--ds-canvas)] flex items-center justify-center">
         <Loader label="Caricamento..." />
       </div>
     );
@@ -1743,29 +1925,23 @@ const App: React.FC = () => {
   // Drives the bottom-tab "Altro" button's visibility and active state.
   const altroNavItems = NAV_ITEMS.filter(item => item.kind === 'link' && !item.isTab && canSeeNavItem(item));
 
-  // Sottovoci di Impostazioni visibili a questo utente. Se la sezione attiva
-  // diventa invisibile (cambio ruolo, logout/login), si ripiega sulla prima.
-  const visibleSettingsSections = SETTINGS_SECTIONS.filter(sec =>
-    sec.guard === 'userManagement' ? canManageUsers()
-    : sec.guard === 'logs' ? canViewLogs()
+  // Blocchi di Impostazioni visibili a questo utente: il blocco
+  // Amministrazione compare solo a chi può usarne almeno una card, la
+  // Fiscalità solo col conto al tavolo nel piano (l'emissione parte da lì).
+  const visibleSettingsGroups = SETTINGS_GROUPS.filter(g =>
+    g.guard === 'admin' ? (canManageUsers() || canViewLogs())
+    : g.guard === 'pay_at_table' ? hasFeature('pay_at_table')
     : true
   );
-  const activeSettingsSection = visibleSettingsSections.some(sec => sec.key === settingsSection)
-    ? settingsSection
-    : (visibleSettingsSections[0]?.key ?? 'profilo');
-  const selectSettingsSection = (key: SettingsSectionKey) => {
-    setSettingsSection(key);
-    setSettingsMenuOpen(true);
-    setView(ViewState.SETTINGS);
-  };
 
   // ── Comunicazioni, mobile ────────────────────────────────────────────────
   // One bottom tab stands in for three views. The channels the user can't
   // reach drop out, so a single-channel user gets a plain tab with no switcher.
   const commsChannels = [
-    { view: ViewState.CONVERSAZIONI, label: 'Chiamate', badge: voiceCallsPendingCount },
-    { view: ViewState.MESSAGGI, label: 'Messaggi', badge: messagesUnreadCount },
-    { view: ViewState.EMAIL, label: 'Email', badge: emailUnreadCount },
+    { view: ViewState.CONVERSAZIONI, label: 'Chiamate', Icon: Phone, badge: voiceCallsPendingCount },
+    { view: ViewState.MESSAGGI, label: 'Messaggi', Icon: MessageCircle, badge: messagesUnreadCount },
+    { view: ViewState.EMAIL, label: 'Email', Icon: Mail, badge: emailUnreadCount },
+    { view: ViewState.CHAT_STAFF, label: 'Chat staff', Icon: MessagesSquare, badge: staffChatUnreadCount },
   ].filter(c => canAccessView(c.view));
   const commsBadgeTotal = commsChannels.reduce((n, c) => n + (c.badge || 0), 0);
   const isCommsView = COMMS_VIEWS.includes(view);
@@ -1806,7 +1982,7 @@ const App: React.FC = () => {
     .filter(cluster => cluster.length > 0);
 
   return (
-    <div className="flex h-[100dvh] overflow-hidden bg-[var(--ds-canvas)] font-sans text-[var(--color-fg)]">
+    <div className="flex h-[100dvh] overflow-hidden bg-[var(--ds-canvas)] font-sans text-[var(--ds-text-primary)]">
       {/* Version banner — shows when the running bundle is older than the
           server. Fixed at the top, above every view. */}
       <AppVersionBanner />
@@ -1853,7 +2029,7 @@ const App: React.FC = () => {
             non cambia fra i due stati — è sempre il pannello, non una freccia:
             resta lo stesso bersaglio nello stesso punto, e lo stato lo dicono
             aria-expanded e il title. */}
-        <div className={`flex ${sidebarCollapsed ? 'flex-col items-center gap-1 pt-4 pb-2' : 'h-16 items-center px-4'}`}>
+        <div className={`flex ${sidebarCollapsed ? 'flex-col items-center gap-1 pt-4 pb-2' : 'items-center px-4 pt-6 pb-3'}`}>
           <div className="flex items-center min-w-0">
             {/* Wordmark Sympotia a sidebar aperta; chiusa non ci sta, resta il
                 quadrato. Due img nero/bianco: il tema le scambia via CSS. */}
@@ -1862,10 +2038,44 @@ const App: React.FC = () => {
                 <ChefHat className="text-[var(--ds-action-fg)] h-5 w-5" />
               </div>
             ) : (
-              <>
-                <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-7 w-auto dark:hidden" />
-                <img src="/logo-sympotia-white.svg" alt={PLATFORM_NAME} className="hidden h-7 w-auto dark:block" />
-              </>
+              tenantLogo ? (
+                /* Su fondo scuro il logo caricato puo' sparire: ne esiste una
+                   copia sola, e quella del Vecchio Frantoio e' inchiostro nero
+                   su trasparente. Il riquadro chiaro lo tiene leggibile
+                   qualunque cosa venga caricata, senza chiedere al ristoratore
+                   due file o un PNG con lo sfondo.
+
+                   L'img resta montata anche mentre scarica (nascosta, non
+                   assente: e' lei il download); nel frattempo — e per sempre,
+                   se il download fallisce — al suo posto c'e' il nome del
+                   ristorante. */
+                <>
+                  <img
+                    src={tenantLogo}
+                    alt={tenantName || PLATFORM_NAME}
+                    onLoad={() => setTenantLogoReady(true)}
+                    onError={() => setTenantLogoFailed(true)}
+                    className={`h-16 w-auto dark:rounded-[12px] dark:bg-white dark:p-1.5 ${tenantLogoReady && !tenantLogoFailed ? '' : 'hidden'}`}
+                  />
+                  {!(tenantLogoReady && !tenantLogoFailed) && (
+                    tenantName ? (
+                      <span className="min-w-0 truncate text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
+                        {tenantName}
+                      </span>
+                    ) : (
+                      <>
+                        <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-7 w-auto dark:hidden" />
+                        <img src="/logo-sympotia-white.svg" alt={PLATFORM_NAME} className="hidden h-7 w-auto dark:block" />
+                      </>
+                    )
+                  )}
+                </>
+              ) : (
+                <>
+                  <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-7 w-auto dark:hidden" />
+                  <img src="/logo-sympotia-white.svg" alt={PLATFORM_NAME} className="hidden h-7 w-auto dark:block" />
+                </>
+              )
             )}
           </div>
           <button
@@ -1957,66 +2167,6 @@ const App: React.FC = () => {
                         </span>
                       </button>
                     )
-                  ) : item.view === ViewState.SETTINGS ? (
-                    // Impostazioni è una voce padre: il click apre la pagina e
-                    // il ramo; le figlie sono le sezioni della pagina. A
-                    // sidebar chiusa resta la sola icona (le figlie tornano
-                    // riaprendola — e la pagina ha comunque i chip in testa).
-                    <React.Fragment key={item.label}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (view === ViewState.SETTINGS && !sidebarCollapsed) {
-                            setSettingsMenuOpen(open => !open);
-                          } else {
-                            setSettingsMenuOpen(true);
-                            selectNavItem(item);
-                          }
-                        }}
-                        title={sidebarCollapsed ? item.label : undefined}
-                        aria-expanded={!sidebarCollapsed && settingsMenuOpen}
-                        className={`group w-full flex items-center ${sidebarCollapsed ? 'justify-center' : 'justify-between'} gap-3 px-3 h-10 rounded-[12px] transition-colors ${
-                          view === ViewState.SETTINGS
-                            ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
-                            : 'text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]'
-                        }`}
-                      >
-                        <span className="flex min-w-0 items-center gap-3">
-                          <span className={view === ViewState.SETTINGS ? '' : 'text-[var(--ds-text-secondary)]'}>
-                            <item.Icon size={20} />
-                          </span>
-                          {!sidebarCollapsed && (
-                            <span className="font-medium text-[15px] tracking-[-0.01em] whitespace-nowrap">{item.label}</span>
-                          )}
-                        </span>
-                        {!sidebarCollapsed && (
-                          <ChevronDown
-                            className={`h-4 w-4 flex-shrink-0 transition-transform ${settingsMenuOpen ? 'rotate-180' : ''}`}
-                            aria-hidden
-                          />
-                        )}
-                      </button>
-                      {!sidebarCollapsed && settingsMenuOpen && (
-                        <div className="space-y-0.5 py-0.5">
-                          {visibleSettingsSections.map(sec => (
-                            <button
-                              key={sec.key}
-                              type="button"
-                              onClick={() => selectSettingsSection(sec.key)}
-                              aria-current={view === ViewState.SETTINGS && activeSettingsSection === sec.key ? 'page' : undefined}
-                              className={`group w-full flex items-center gap-2.5 rounded-[10px] py-1.5 pl-[30px] pr-3 text-left text-[14px] transition-colors ${
-                                view === ViewState.SETTINGS && activeSettingsSection === sec.key
-                                  ? 'bg-[var(--ds-surface-row)] font-medium text-[var(--ds-text-primary)]'
-                                  : 'text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]'
-                              }`}
-                            >
-                              <sec.Icon size={16} className="flex-shrink-0 opacity-70" />
-                              <span className="truncate">{sec.label}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </React.Fragment>
                   ) : (
                     <SidebarItem
                       key={item.label}
@@ -2028,6 +2178,7 @@ const App: React.FC = () => {
                       badge={
                         item.view === ViewState.CONVERSAZIONI ? voiceCallsPendingCount
                         : item.view === ViewState.MESSAGGI ? messagesUnreadCount
+                        : item.view === ViewState.CHAT_STAFF ? staffChatUnreadCount
                         : item.view === ViewState.EMAIL ? emailUnreadCount
                         : item.view === ViewState.NOTIFICHE ? notificationsUnreadCount
                         : item.view === ViewState.PAGAMENTI ? paymentsUnseenCount
@@ -2093,6 +2244,23 @@ const App: React.FC = () => {
             </div>
           )}
         </div>
+
+        {/* Sympotia in fondo, spento: in testa ora c'e' il marchio del
+            ristorante, ma il prodotto ha comunque diritto a firmarsi. In fondo
+            e in grigio dice "questo lo fa Sympotia" senza contendere la
+            testata a chi la barra la usa tutto il giorno.
+
+            Il wordmark e' nero o bianco fisso — due SVG, non un font — quindi
+            il grigio si ottiene con l'opacita'. Sparisce a barra chiusa: a
+            76px resterebbe un mozzicone illeggibile. E sparisce anche quando
+            in testa non c'e' un logo caricato, o Sympotia comparirebbe due
+            volte nella stessa colonna. */}
+        {!sidebarCollapsed && tenantLogo && (
+          <div className="flex flex-shrink-0 items-center justify-center px-3 pb-4 pt-1">
+            <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-4 w-auto opacity-35 dark:hidden" />
+            <img src="/logo-sympotia-white.svg" alt={PLATFORM_NAME} className="hidden h-4 w-auto opacity-35 dark:block" />
+          </div>
+        )}
       </aside>
 
       {/* Main Content - Add bottom padding on mobile for bottom nav */}
@@ -2109,9 +2277,22 @@ const App: React.FC = () => {
             z-20) or the dropdown paints behind them. Mobile stays z-10 — the
             bottom-sheet backdrop (z-[29]) has to dim the header there. */}
         <header className="flex-shrink-0 h-16 md:h-[72px] m-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] z-10 md:z-30 flex items-center justify-between px-3 md:px-4">
-           <div className="flex items-center gap-2.5 lg:hidden">
-              <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-6 w-auto dark:hidden" />
-              <img src="/logo-sympotia-white.svg" alt={PLATFORM_NAME} className="hidden h-6 w-auto dark:block" />
+           {/* `pl-2` sopra al `px-3` della testata: il marchio ha aria propria
+               dentro l'immagine solo sopra e sotto, ai lati arriva al bordo, e
+               attaccato alla curva della card sembrava scivolato fuori. */}
+           <div className="flex items-center gap-2.5 pl-2 lg:hidden">
+              {tenantLogo ? (
+                <img
+                  src={tenantLogo}
+                  alt={tenantName || PLATFORM_NAME}
+                  className="h-11 w-auto dark:rounded-[10px] dark:bg-white dark:p-1"
+                />
+              ) : (
+                <>
+                  <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-6 w-auto dark:hidden" />
+                  <img src="/logo-sympotia-white.svg" alt={PLATFORM_NAME} className="hidden h-6 w-auto dark:block" />
+                </>
+              )}
            </div>
 
            {/* Desktop date/time/shift control group. Uses flex-1 (not a fixed
@@ -2291,20 +2472,20 @@ const App: React.FC = () => {
                     <div
                       role="menu"
                       aria-label="Crea nuovo"
-                      className="absolute right-0 top-full mt-2 w-60 p-1.5 rounded-[18px] border border-[var(--color-line)] bg-[var(--color-surface)] shadow-[var(--shadow-lg)] z-30 animate-in fade-in slide-in-from-top-2"
+ className="absolute right-0 top-full mt-2 w-60 p-1.5 rounded-[18px] border border-[var(--ds-border)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] z-30"
                     >
                       {visibleCreateClusters.map((cluster, ci) => (
                         <React.Fragment key={ci}>
-                          {ci > 0 && <div className="my-1.5 border-t border-[var(--color-line)]" />}
+                          {ci > 0 && <div className="my-1.5 border-t border-[var(--ds-border)]" />}
                           {cluster.map(item => (
                             <button
                               key={item.label}
                               type="button"
                               role="menuitem"
                               onClick={() => runCreateAction(item.run)}
-                              className="w-full flex items-center gap-3 px-3 h-11 rounded-xl text-sm font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors text-left"
+                              className="w-full flex items-center gap-3 px-3 h-11 rounded-xl text-sm font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] transition-colors text-left"
                             >
-                              <item.Icon className="h-[18px] w-[18px] text-[var(--color-fg-muted)]" />
+                              <item.Icon className="h-[18px] w-[18px] text-[var(--ds-text-muted)]" />
                               <span>{item.label}</span>
                             </button>
                           ))}
@@ -2339,12 +2520,19 @@ const App: React.FC = () => {
           // no gap the shadow gets sliced by a hard horizontal edge.
           <div className="flex-shrink-0 px-4 pb-4 pt-4 lg:hidden">
             <div className="rounded-full bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)]">
+              {/* Con quattro canali le etichette si troncano a "Chiam…": qui
+                  parlano le icone, le label restano per gli screen reader. */}
               <SegmentedControl
                 value={view}
                 onChange={next => setView(next)}
                 ariaLabel="Tipo di comunicazione"
-                equalWidth={false}
-                options={commsChannels.map(c => ({ value: c.view, label: c.label, badge: c.badge }))}
+                iconOnly
+                options={commsChannels.map(c => ({
+                  value: c.view,
+                  label: c.label,
+                  icon: <c.Icon className="h-[18px] w-[18px]" aria-hidden />,
+                  badge: c.badge,
+                }))}
               />
             </div>
           </div>
@@ -2414,6 +2602,7 @@ const App: React.FC = () => {
               setNewReservationKind('standard');
               setNewReservationPrefill(undefined);
               linkVoiceCallOnCreateRef.current = null;
+              linkInboxConversationOnCreateRef.current = null;
             }}
           />
         )}
@@ -2555,12 +2744,29 @@ const App: React.FC = () => {
 
         {view === ViewState.MESSAGGI && (
           <InboxPage
-            onCreateReservationFromContact={({ customer_name, phone }) => {
-              setNewReservationPrefill({ customer_name, phone });
+            refreshTick={inboxRefreshTick}
+            reservations={reservations}
+            onCreateReservationFromContact={({ phone_digits, ...prefill }) => {
+              // Remember which conversation to link the new booking back to,
+              // so it becomes reopenable from the chat after creation.
+              linkInboxConversationOnCreateRef.current = phone_digits ?? null;
+              setNewReservationPrefill(prefill);
               setNewReservationKind('standard');
               setAutoOpenNewReservation(true);
               setView(ViewState.RESERVATIONS);
             }}
+            onOpenReservation={(reservationId) => {
+              setPendingReservationId(reservationId);
+              setView(ViewState.RESERVATIONS);
+            }}
+          />
+        )}
+        {view === ViewState.CHAT_STAFF && user && (
+          <StaffChatPage
+            currentUserId={user.id}
+            currentUserName={user.full_name}
+            initialThreadKey={pendingStaffChatThread}
+            onInitialThreadConsumed={() => setPendingStaffChatThread(null)}
           />
         )}
 
@@ -2621,6 +2827,11 @@ const App: React.FC = () => {
           <ReceptionPage
             globalDate={globalDate}
             globalShiftFilter={globalShiftFilter}
+            reservations={reservations}
+            tables={tables}
+            rooms={rooms}
+            onReservationChangedLocal={handleUpsertReservationLocal}
+            isInitialLoading={isInitialDataLoading}
             autoOpenWalkIn={autoOpenWalkIn}
             onAutoOpenWalkInHandled={() => setAutoOpenWalkIn(false)}
           />
@@ -2646,31 +2857,27 @@ const App: React.FC = () => {
           <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto max-w-4xl p-4 sm:p-6 lg:p-8">
 
-            {/* Su mobile la sidebar (e quindi le sottovoci) non esiste: la
-                stessa lista diventa una riga di chip scorrevole. Su desktop
-                sparisce — sceglie la sidebar. */}
-            <div className="-mx-4 mb-4 flex gap-2 overflow-x-auto px-4 pb-1 md:hidden">
-              {visibleSettingsSections.map(sec => (
+            {/* Indice della pagina: chip-àncora che saltano al blocco. Nessuno
+                stato — la pagina è unica e i blocchi sono sempre tutti
+                montati, i chip fanno solo scorrere. */}
+            <div className="-mx-4 mb-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
+              {visibleSettingsGroups.map(g => (
                 <button
-                  key={sec.key}
+                  key={g.id}
                   type="button"
-                  onClick={() => setSettingsSection(sec.key)}
-                  aria-pressed={activeSettingsSection === sec.key}
-                  className={`inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
-                    activeSettingsSection === sec.key
-                      ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
-                      : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)]'
-                  }`}
+                  onClick={() => document.getElementById(g.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                  className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full bg-[var(--ds-surface)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
-                  <sec.Icon size={14} className="flex-shrink-0" />
-                  {sec.label}
+                  <g.Icon size={14} className="flex-shrink-0" />
+                  {g.label}
                 </button>
               ))}
             </div>
 
-            {/* Profile / Personal preferences */}
-            {activeSettingsSection === 'profilo' && (
-            <SettingsSection label="Profilo">
+            {/* Preferenze personali: valgono per chi è collegato (e per questo
+                dispositivo, nel caso delle push), non per il ristorante. */}
+            <SettingsSection id="imp-profilo" label="Profilo">
+              <div className="space-y-3">
               <div className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
                 <label htmlFor="preferred-landing" className="mb-1 block text-[15px] font-semibold text-[var(--ds-text-primary)]">
                   Pagina di partenza
@@ -2698,6 +2905,7 @@ const App: React.FC = () => {
                       [ViewState.DASHBOARD]: 'Dashboard',
                       [ViewState.RESERVATIONS]: 'Prenotazioni',
                       [ViewState.RECEPTION]: 'Reception',
+                      [ViewState.CHAT_STAFF]: 'Chat staff',
                       [ViewState.FLOOR_PLAN]: 'Sale & Tavoli',
                       [ViewState.MENU]: 'Menu & Banchetti',
                       [ViewState.COMANDE]: 'Comande',
@@ -2727,51 +2935,46 @@ const App: React.FC = () => {
                   })}
                 </select>
               </div>
+                <PushNotificationsCard />
+              </div>
             </SettingsSection>
-            )}
 
-            {/* Opening hours & closures — collapsible to keep the page compact */}
-            {activeSettingsSection === 'orari' && (
-            <SettingsSection label="Orari di apertura">
-              <SettingsDisclosure
-                icon={Clock}
-                title="Orari settimanali e chiusure"
-                description="Gestisci servizi (pranzo/cena), giorni di chiusura e date speciali."
-              >
-                <OpeningHoursManager showToast={addToast} />
-              </SettingsDisclosure>
-            </SettingsSection>
-            )}
-
-            {/* Chiusure programmate — per-shift closures of rooms and tables (future occurrences aggregated) */}
-            {activeSettingsSection === 'chiusure' && (
-            <SettingsSection label="Chiusure programmate">
-              <SettingsDisclosure
-                icon={DoorClosed}
-                title="Sale chiuse e tavoli nascosti"
-                description="Programma o rimuovi chiusure per turno di sale e tavoli."
-              >
-                <ScheduledClosuresManager showToast={addToast} />
-              </SettingsDisclosure>
-            </SettingsSection>
-            )}
-
-            {/* Promemoria — notifiche automatiche configurabili (una tantum,
-                giornaliere, settimanali, mensili). Include per default il
-                "Promemoria pane" che ora è modificabile ed eliminabile
-                come qualsiasi altro. */}
-            {activeSettingsSection === 'promemoria' && (
-            <SettingsSection label="Promemoria">
-              <RemindersManager showToast={addToast} />
-            </SettingsSection>
-            )}
-
-            {/* Canali di prenotazione — collapsible per-channel cards: enable/disable
-                toggle in the header, channel-specific settings inside the body. */}
-            {activeSettingsSection === 'canali' && (
-            <SettingsSection label="Canali di prenotazione">
+            {/* Il ristorante in quanto luogo: quando è aperto, cosa è chiuso,
+                le routine di servizio, sala e cucina, l'identità legale. */}
+            <SettingsSection id="imp-ristorante" label="Ristorante">
               <div className="space-y-3">
-                <FeatureTogglesManager showToast={addToast} />
+                <SettingsDisclosure
+                  icon={Clock}
+                  title="Orari settimanali e chiusure"
+                  description="Gestisci servizi (pranzo/cena), giorni di chiusura e date speciali."
+                >
+                  <OpeningHoursManager showToast={addToast} />
+                </SettingsDisclosure>
+                <SettingsDisclosure
+                  icon={DoorClosed}
+                  title="Sale chiuse e tavoli nascosti"
+                  description="Programma o rimuovi chiusure per turno di sale e tavoli."
+                >
+                  <ScheduledClosuresManager showToast={addToast} />
+                </SettingsDisclosure>
+                {/* Promemoria automatici (una tantum, giornalieri, settimanali,
+                    mensili), incluso il "Promemoria pane". */}
+                <RemindersManager showToast={addToast} />
+                <CardErrorBoundary label="Sala & Cucina">
+                  <SalaCucinaSettingsManager showToast={addToast} />
+                </CardErrorBoundary>
+                {/* Identità del tenant + documenti legali generati. */}
+                <LegalSettingsCard showToast={addToast} />
+              </div>
+            </SettingsSection>
+
+            {/* Tutto ciò che governa come nascono e si comportano le
+                prenotazioni: canali di ingresso, risposte all'ospite, opzioni
+                del modal, caparra, blacklist, logica tavoli. */}
+            <SettingsSection id="imp-prenotazioni" label="Prenotazioni">
+              <div className="space-y-3">
+                {/* Solo il canale web: la scheda di Sofia sta nella sezione AI. */}
+                <FeatureTogglesManager showToast={addToast} only="web" />
                 <SettingsDisclosure
                   icon={MessagesSquare}
                   title="Canali di risposta"
@@ -2779,14 +2982,6 @@ const App: React.FC = () => {
                 >
                   <BookingChannelsManager showToast={addToast} />
                 </SettingsDisclosure>
-              </div>
-            </SettingsSection>
-            )}
-
-            {/* Opzioni prenotazioni — customizable chip lists (note rapide + intolleranze) surfaced in the reservation modal */}
-            {activeSettingsSection === 'prenotazioni' && (
-            <SettingsSection label="Opzioni prenotazioni">
-              <div className="space-y-3">
                 <SettingsDisclosure
                   icon={StickyNote}
                   title="Note rapide prenotazione"
@@ -2817,17 +3012,6 @@ const App: React.FC = () => {
                   </SettingsDisclosure>
                 )}
 
-                {/* Card #28: i link inviati e non pagati scadono da soli dopo
-                    N ore, col messaggio delle prenotazioni non confermate. */}
-                <SettingsDisclosure
-                  icon={CreditCard}
-                  iconTone="pending"
-                  title="Scadenza link di pagamento"
-                  description="Annulla da solo i link non pagati dopo una soglia di ore e avvisa il cliente che la prenotazione non è confermata."
-                >
-                  <PaymentLinkExpiryManager showToast={addToast} />
-                </SettingsDisclosure>
-
                 {/* Card #27: comportamento della blacklist deciso dal tenant,
                     fonte per fonte — niente più scelta hardcoded. */}
                 <SettingsDisclosure
@@ -2840,69 +3024,9 @@ const App: React.FC = () => {
                 </SettingsDisclosure>
               </div>
             </SettingsSection>
-            )}
 
-            {/* Admin Section */}
-            {activeSettingsSection === 'amministrazione' && canManageUsers() && (
-              <SettingsSection label="Amministrazione">
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <SettingsNavCard
-                    icon={Users}
-                    title="Gestione utenti"
-                    description="Crea, modifica, elimina utenti"
-                    onClick={() => setView(ViewState.USERS)}
-                  />
-                  <SettingsNavCard
-                    icon={ShieldCheck}
-                    title="Permessi ruoli"
-                    description="Configura i permessi per ogni ruolo"
-                    onClick={() => setShowRolePermissions(true)}
-                  />
-                </div>
-              </SettingsSection>
-            )}
-
-            {/* Monitoring Section */}
-            {activeSettingsSection === 'monitoraggio' && canViewLogs() && (
-              <SettingsSection label="Monitoraggio">
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <SettingsNavCard
-                    icon={FileText}
-                    title="Log attività"
-                    description="Operazioni degli utenti"
-                    onClick={() => setShowActivityLogs(true)}
-                  />
-                </div>
-              </SettingsSection>
-            )}
-
-            {activeSettingsSection === 'notifiche' && (
-            <SettingsSection label="Notifiche push">
-              <PushNotificationsCard />
-            </SettingsSection>
-            )}
-
-            {/* Legale — tenant identity + generated legal documents (SaaS-ready) */}
-            {activeSettingsSection === 'legale' && (
-            <SettingsSection label="Legale">
-              <LegalSettingsCard showToast={addToast} />
-            </SettingsSection>
-            )}
-
-            {/* Logica tavoli AI — istruzioni testuali per una futura logica di
-                assegnazione/spostamento tavoli guidata da AI; oggi il testo è
-                solo salvato, nessuna automazione lo consuma ancora. */}
-            {activeSettingsSection === 'tavoli-ai' && (
-            <SettingsSection label="Logica tavoli AI">
-              <CardErrorBoundary label="Prompt logica tavoli per AI">
-                <TableAssignmentAiPromptCard showToast={addToast} />
-              </CardErrorBoundary>
-            </SettingsSection>
-            )}
-
-            {/* Integrations */}
-            {activeSettingsSection === 'integrazioni' && (
-            <SettingsSection label="Integrazioni">
+            {/* Gateway e regole dei pagamenti. */}
+            <SettingsSection id="imp-pagamenti" label="Pagamenti">
               <div className="space-y-3">
                 <div className="rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
                   <div className="flex min-h-[40px] items-center justify-between gap-3">
@@ -2932,23 +3056,111 @@ const App: React.FC = () => {
                     <PayAtTableSettingsManager showToast={addToast} />
                   </CardErrorBoundary>
                 )}
-                <CardErrorBoundary label="Sala & Cucina">
-                  <SalaCucinaSettingsManager showToast={addToast} />
-                </CardErrorBoundary>
-                <CardErrorBoundary label="Messaggi con AI">
-                  <AiMessagesSettingsManager showToast={addToast} />
-                </CardErrorBoundary>
-                <CardErrorBoundary label="Media">
-                  <MediaLibraryManager showToast={addToast} />
-                </CardErrorBoundary>
+                {/* Card #28: i link inviati e non pagati scadono da soli dopo
+                    N ore, col messaggio delle prenotazioni non confermate. */}
+                <SettingsDisclosure
+                  icon={CreditCard}
+                  iconTone="pending"
+                  title="Scadenza link di pagamento"
+                  description="Annulla da solo i link non pagati dopo una soglia di ore e avvisa il cliente che la prenotazione non è confermata."
+                >
+                  <PaymentLinkExpiryManager showToast={addToast} />
+                </SettingsDisclosure>
+              </div>
+            </SettingsSection>
+
+            {/* Tutta la fiscalità in un posto solo: dati dell'esercente,
+                scontrino elettronico e aliquote. Esiste solo col conto al
+                tavolo nel piano, perché l'emissione parte dalla sua
+                chiusura (stesso gate del chip in SETTINGS_GROUPS). */}
+            {hasFeature('pay_at_table') && (
+              <SettingsSection id="imp-fiscalita" label="Fiscalità">
+                <div className="space-y-3">
+                  <CardErrorBoundary label="Fiscalità">
+                    <FiscalSettingsManager showToast={addToast} />
+                  </CardErrorBoundary>
+                  {/* L'aliquota vive sul piatto: qui solo la strada per
+                      arrivarci, non un doppione della regolazione. */}
+                  {canAccessView(ViewState.MENU) && (
+                    <SettingsNavCard
+                      icon={Percent}
+                      title="Aliquote IVA"
+                      description="L'aliquota si imposta piatto per piatto nel menù (default 10%). Coperto e servizio al 10%."
+                      onClick={() => { setMenuInitialTab('DISHES'); setView(ViewState.MENU); }}
+                    />
+                  )}
+                </div>
+              </SettingsSection>
+            )}
+
+            {/* I canali con cui il ristorante scrive e riceve: email in
+                uscita e in entrata, allegati. Le risposte AI ai messaggi
+                stanno nella sezione AI. */}
+            <SettingsSection id="imp-comunicazioni" label="Comunicazioni">
+              <div className="space-y-3">
                 <CardErrorBoundary label="Server Email (SMTP)">
                   <SmtpIntegrationCard showToast={addToast} />
                 </CardErrorBoundary>
                 <CardErrorBoundary label="Ricezione Email (IMAP)">
                   <ImapIntegrationCard showToast={addToast} />
                 </CardErrorBoundary>
+                <CardErrorBoundary label="Media">
+                  <MediaLibraryManager showToast={addToast} />
+                </CardErrorBoundary>
+                <CardErrorBoundary label="Chat staff">
+                  <StaffChatPresetsCard showToast={addToast} />
+                </CardErrorBoundary>
               </div>
             </SettingsSection>
+
+            {/* Tutto ciò che è guidato dall'AI in un posto solo: Sofia al
+                telefono (con le sue regolazioni), le risposte AI ai messaggi
+                WhatsApp e il prompt della logica tavoli. */}
+            <SettingsSection id="imp-ai" label="AI">
+              <div className="space-y-3">
+                <FeatureTogglesManager showToast={addToast} only="voice" />
+                <CardErrorBoundary label="Messaggi con AI">
+                  <AiMessagesSettingsManager showToast={addToast} />
+                </CardErrorBoundary>
+                {/* Istruzioni testuali per una futura assegnazione tavoli
+                    guidata da AI; oggi il testo è solo salvato. */}
+                <CardErrorBoundary label="Prompt logica tavoli per AI">
+                  <TableAssignmentAiPromptCard showToast={addToast} />
+                </CardErrorBoundary>
+              </div>
+            </SettingsSection>
+
+            {/* Utenti, ruoli e log: visibile solo a chi può usarne
+                almeno una card. */}
+            {(canManageUsers() || canViewLogs()) && (
+              <SettingsSection id="imp-amministrazione" label="Amministrazione">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {canManageUsers() && (
+                    <>
+                      <SettingsNavCard
+                        icon={Users}
+                        title="Gestione utenti"
+                        description="Crea, modifica, elimina utenti"
+                        onClick={() => setView(ViewState.USERS)}
+                      />
+                      <SettingsNavCard
+                        icon={ShieldCheck}
+                        title="Permessi ruoli"
+                        description="Configura i permessi per ogni ruolo"
+                        onClick={() => setShowRolePermissions(true)}
+                      />
+                    </>
+                  )}
+                  {canViewLogs() && (
+                    <SettingsNavCard
+                      icon={FileText}
+                      title="Log attività"
+                      description="Operazioni degli utenti"
+                      onClick={() => setShowActivityLogs(true)}
+                    />
+                  )}
+                </div>
+              </SettingsSection>
             )}
           </div>
           </div>
@@ -3081,7 +3293,7 @@ const App: React.FC = () => {
               className="absolute inset-0 bg-[var(--ds-backdrop)]"
               onClick={() => setShowMoreMenu(false)}
             />
-            <div className="absolute bottom-0 left-0 right-0 max-h-[calc(100dvh-env(safe-area-inset-top)-1rem)] flex flex-col bg-[var(--ds-surface)] rounded-t-[28px] shadow-[var(--ds-shadow-raised)] animate-in slide-in-from-bottom duration-200">
+ <div className="absolute bottom-0 left-0 right-0 max-h-[calc(100dvh-env(safe-area-inset-top)-1rem)] flex flex-col bg-[var(--ds-surface)] rounded-t-[28px] shadow-[var(--ds-shadow-raised)] duration-200">
               <div className="flex-shrink-0 bg-[var(--ds-surface)] rounded-t-[28px]">
                 <div className="flex justify-center pt-3 pb-1">
                   <div className="w-10 h-1 rounded-full bg-[var(--ds-border-strong)]" />
@@ -3121,6 +3333,7 @@ const App: React.FC = () => {
                         const badge =
                           item.view === ViewState.CONVERSAZIONI ? voiceCallsPendingCount
                           : item.view === ViewState.MESSAGGI ? messagesUnreadCount
+                          : item.view === ViewState.CHAT_STAFF ? staffChatUnreadCount
                           : item.view === ViewState.EMAIL ? emailUnreadCount
                           : item.view === ViewState.NOTIFICHE ? notificationsUnreadCount
                           : item.view === ViewState.PAGAMENTI ? paymentsUnseenCount
@@ -3234,33 +3447,33 @@ const App: React.FC = () => {
             {toasts.map(toast => {
                 const hasDetails = toast.details && toast.details.length > 0;
                 const accent = toast.type === 'success'
-                    ? { iconText: 'text-emerald-600' }
+                    ? { iconText: 'text-[var(--ds-seated-text)]' }
                     : toast.type === 'error'
-                    ? { iconText: 'text-rose-600' }
-                    : { iconText: 'text-[var(--color-fg)]' };
+                    ? { iconText: 'text-[var(--ds-critical-text)]' }
+                    : { iconText: 'text-[var(--ds-text-primary)]' };
                 return (
                     <div
                         key={toast.id}
                         role={toast.type === 'error' ? 'alert' : undefined}
-                        className={`bg-[var(--color-surface)] shadow-[var(--shadow-lg)] border border-[var(--color-line)] rounded-lg animate-in slide-in-from-right duration-300 ${
+ className={`bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] border border-[var(--ds-border)] rounded-lg duration-300 ${
                             hasDetails ? 'p-3.5 min-w-[300px] sm:min-w-[360px]' : 'flex items-center gap-2.5 px-3.5 py-2.5'
                         }`}
                     >
                         {hasDetails ? (
                             <div className="flex items-start gap-3">
-                                <div className={`p-1.5 rounded-md bg-[var(--color-surface-3)] ${accent.iconText} flex-shrink-0`}>
+                                <div className={`p-1.5 rounded-md bg-[var(--ds-surface-row)] ${accent.iconText} flex-shrink-0`}>
                                     {toast.type === 'success' && <CheckCircle className="h-4 w-4" />}
                                     {toast.type === 'error' && <AlertTriangle className="h-4 w-4" />}
                                     {toast.type === 'info' && <Info className="h-4 w-4" />}
                                 </div>
                                 <div className="flex-1 min-w-0">
                                     {toast.title && (
-                                        <p className="text-[13px] font-semibold text-[var(--color-fg)] mb-0.5">{toast.title}</p>
+                                        <p className="text-[13px] font-semibold text-[var(--ds-text-primary)] mb-0.5">{toast.title}</p>
                                     )}
-                                    <p className="text-sm font-medium text-[var(--color-fg)] mb-1">{toast.message}</p>
+                                    <p className="text-sm font-medium text-[var(--ds-text-primary)] mb-1">{toast.message}</p>
                                     <ul className="space-y-0.5">
                                         {toast.details!.map((d, i) => (
-                                            <li key={i} className="text-[13px] text-[var(--color-fg-muted)] leading-snug">{d}</li>
+                                            <li key={i} className="text-[13px] text-[var(--ds-text-muted)] leading-snug">{d}</li>
                                         ))}
                                     </ul>
                                     {toast.action && (
@@ -3270,7 +3483,7 @@ const App: React.FC = () => {
                                                 toast.action!.onClick();
                                                 setToasts(prev => prev.filter(t => t.id !== toast.id));
                                             }}
-                                            className={`mt-2 px-3 py-1.5 text-xs font-semibold rounded-md bg-[var(--color-surface-3)] ${accent.iconText} hover:opacity-80`}
+                                            className={`mt-2 px-3 py-1.5 text-xs font-semibold rounded-md bg-[var(--ds-surface-row)] ${accent.iconText} hover:opacity-80`}
                                         >
                                             {toast.action.label}
                                         </button>
@@ -3282,7 +3495,7 @@ const App: React.FC = () => {
                                 {toast.type === 'success' && <CheckCircle className={`h-4 w-4 ${accent.iconText} shrink-0`} />}
                                 {toast.type === 'error' && <AlertTriangle className={`h-4 w-4 ${accent.iconText} shrink-0`} />}
                                 {toast.type === 'info' && <Info className={`h-4 w-4 ${accent.iconText} shrink-0`} />}
-                                <span className="text-[13px] font-medium text-[var(--color-fg)] flex-1">{toast.message}</span>
+                                <span className="text-[13px] font-medium text-[var(--ds-text-primary)] flex-1">{toast.message}</span>
                                 {toast.action && (
                                     <button
                                         type="button"
@@ -3290,7 +3503,7 @@ const App: React.FC = () => {
                                             toast.action!.onClick();
                                             setToasts(prev => prev.filter(t => t.id !== toast.id));
                                         }}
-                                        className={`px-3 py-1 text-xs font-semibold rounded-md bg-[var(--color-surface-3)] ${accent.iconText} hover:opacity-80 flex-shrink-0`}
+                                        className={`px-3 py-1 text-xs font-semibold rounded-md bg-[var(--ds-surface-row)] ${accent.iconText} hover:opacity-80 flex-shrink-0`}
                                     >
                                         {toast.action.label}
                                     </button>

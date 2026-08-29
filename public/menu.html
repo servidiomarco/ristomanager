@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="robots" content="noindex" />
+<title>Menu</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+/* =========================================================================
+   Menu digitale — pagina pubblica, self-contained come prenota.html: nessun
+   asset del CRM, token --ds-* restati qui (§16 del design system). La pagina
+   è bloccata sul tema chiaro di proposito: la legge l'ospite del ristorante
+   e un tema scuro automatico la ribalterebbe sotto i piedi.
+   ========================================================================= */
+:root {
+    --ds-surface: #ffffff;
+    --ds-surface-row: #f4f4f5;
+    --ds-border: #e9e9ec;
+    --ds-border-focus: #5250c9;
+
+    --ds-text-primary: #111113;
+    --ds-text-secondary: #52525b;
+    --ds-text-muted: #6f6f78;
+    --ds-text-subtle: #a1a1aa;
+
+    --ds-action-bg: #111827;
+    --ds-action-fg: #ffffff;
+
+    --ds-critical-tint: #fceeeb;
+    --ds-critical-text: #82251b;
+
+    --ds-shadow-card: 0 1px 2px rgba(16, 17, 25, 0.04), 0 8px 24px rgba(16, 17, 25, 0.05);
+
+    --ds-public-canvas: #f7f4ec;
+    --ds-public-header-bg: #17171a;
+    --ds-public-header-fg: #ffffff;
+    --ds-public-header-fg-muted: rgba(255, 255, 255, 0.64);
+    --ds-public-header-pill: rgba(255, 255, 255, 0.10);
+    --ds-public-font: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --ds-public-wordmark: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+body {
+    margin: 0;
+    font-family: var(--ds-public-font);
+    font-size: 15px;
+    line-height: 1.5;
+    color: var(--ds-text-primary);
+    background: var(--ds-public-canvas);
+    -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; cursor: pointer; border: none; background: none; }
+:focus-visible { outline: 2px solid var(--ds-border-focus); outline-offset: 2px; border-radius: 4px; }
+.tnum { font-variant-numeric: tabular-nums; }
+[hidden] { display: none !important; }
+
+/* --- Testata ------------------------------------------------------------ */
+.header {
+    background: var(--ds-public-header-bg);
+    color: var(--ds-public-header-fg);
+    padding: 20px 20px 18px;
+    padding-top: max(20px, env(safe-area-inset-top));
+}
+.header__inner {
+    max-width: 760px; margin: 0 auto;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+}
+.header__name { font-family: var(--ds-public-wordmark); font-size: 26px; line-height: 1.15; }
+.header__sub { color: var(--ds-public-header-fg-muted); font-size: 13px; margin-top: 2px; }
+.langs { display: flex; gap: 6px; }
+.langs button {
+    padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 600;
+    background: var(--ds-public-header-pill); color: var(--ds-public-header-fg-muted);
+}
+.langs button[aria-pressed="true"] { background: var(--ds-public-header-fg); color: var(--ds-public-header-bg); }
+
+/* --- Navigazione categorie ---------------------------------------------- */
+.catnav {
+    position: sticky; top: 0; z-index: 5;
+    background: var(--ds-public-canvas);
+    border-bottom: 1px solid var(--ds-border);
+    overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+}
+.catnav::-webkit-scrollbar { display: none; }
+.catnav__inner { max-width: 760px; margin: 0 auto; display: flex; gap: 6px; padding: 10px 16px; width: max-content; min-width: 100%; }
+.catnav a {
+    white-space: nowrap; text-decoration: none; color: var(--ds-text-secondary);
+    font-size: 13px; font-weight: 600; padding: 7px 13px; border-radius: 999px;
+    background: var(--ds-surface); box-shadow: var(--ds-shadow-card);
+}
+
+/* --- Sezioni e piatti ---------------------------------------------------- */
+main { max-width: 760px; margin: 0 auto; padding: 8px 16px 64px; }
+.sezione { margin-top: 28px; }
+.sezione h2 {
+    font-family: var(--ds-public-wordmark); font-size: 24px; font-weight: 600;
+    margin: 0 0 12px; scroll-margin-top: 64px;
+}
+.card {
+    background: var(--ds-surface); border-radius: 1.25rem; box-shadow: var(--ds-shadow-card);
+    overflow: hidden;
+}
+.piatto { display: flex; gap: 12px; padding: 14px 16px; align-items: flex-start; }
+.piatto + .piatto { border-top: 1px solid var(--ds-border); }
+.piatto__foto { width: 56px; height: 56px; border-radius: 12px; object-fit: cover; flex-shrink: 0; }
+.piatto__testo { flex: 1; min-width: 0; }
+.piatto__nome { font-weight: 600; font-size: 15px; }
+.piatto__desc { color: var(--ds-text-muted); font-size: 13px; margin-top: 2px; }
+.piatto__allergeni { color: var(--ds-text-subtle); font-size: 12px; margin-top: 4px; }
+.piatto__prezzo { font-weight: 600; font-size: 15px; white-space: nowrap; }
+
+.stato { text-align: center; color: var(--ds-text-muted); padding: 56px 20px; }
+footer { text-align: center; color: var(--ds-text-subtle); font-size: 12px; padding: 0 20px 40px; }
+</style>
+</head>
+<body>
+
+<header class="header">
+    <div class="header__inner">
+        <div>
+            <div class="header__name" id="nome-ristorante">&nbsp;</div>
+            <div class="header__sub" id="sottotitolo"></div>
+        </div>
+        <nav class="langs" id="langs" aria-label="Lingua"></nav>
+    </div>
+</header>
+
+<nav class="catnav" id="catnav" hidden><div class="catnav__inner" id="catnav-inner"></div></nav>
+
+<main id="main"><p class="stato" id="stato">…</p></main>
+
+<footer id="footer"></footer>
+
+<script>
+'use strict';
+(function () {
+    /* Testi della pagina nelle quattro lingue del menu. I piatti usano le
+       traduzioni del CRM quando ci sono, altrimenti restano in italiano. */
+    var UI = {
+        it: { menu: 'Menu', allergeni: 'Allergeni', vuoto: 'Il menu non è al momento disponibile.', errore: 'Non riusciamo a caricare il menu. Riprova tra poco.' },
+        en: { menu: 'Menu', allergeni: 'Allergens', vuoto: 'The menu is not available right now.', errore: 'We could not load the menu. Please try again shortly.' },
+        fr: { menu: 'Menu', allergeni: 'Allergènes', vuoto: 'Le menu n’est pas disponible pour le moment.', errore: 'Impossible de charger le menu. Réessayez dans un instant.' },
+        de: { menu: 'Speisekarte', allergeni: 'Allergene', vuoto: 'Die Speisekarte ist derzeit nicht verfügbar.', errore: 'Die Speisekarte konnte nicht geladen werden. Bitte versuche es gleich noch einmal.' }
+    };
+    var LANG_LABEL = { it: 'it', en: 'en', fr: 'fr', de: 'de' };
+
+    /* L'ordine delle portate non è alfabetico: si mangia in quest'ordine. Le
+       categorie fuori elenco vanno in coda, in ordine di nome. */
+    var ORDINE = ['antipast', 'primi', 'second', 'griglia', 'contorn', 'senza glutine', 'frutta', 'gelat', 'dessert', 'dolc', 'menu', 'bibite', 'vini bianchi', 'vini ross', 'vino', 'caff', 'liquor'];
+    function pesoCategoria(nome) {
+        var n = String(nome).toLowerCase();
+        for (var i = 0; i < ORDINE.length; i++) if (n.indexOf(ORDINE[i]) !== -1) return i;
+        return ORDINE.length;
+    }
+
+    var slugMatch = location.pathname.match(/^\/m\/([^/]+)/);
+    var apiPath = slugMatch ? '/public/' + slugMatch[1] + '/menu' : '/public/menu';
+
+    var lang = localStorage.getItem('menu_lang');
+    if (!lang || !UI[lang]) {
+        var nav = (navigator.language || 'it').slice(0, 2).toLowerCase();
+        lang = UI[nav] ? nav : 'it';
+    }
+
+    var dati = null;
+    var main = document.getElementById('main');
+    var stato = document.getElementById('stato');
+
+    function t(chiave) { return UI[lang][chiave]; }
+    function euro(n) {
+        return new Intl.NumberFormat(lang === 'it' ? 'it-IT' : lang, { style: 'currency', currency: 'EUR' }).format(n);
+    }
+    function testoPiatto(p) {
+        var tr = p.translations && p.translations[lang];
+        return {
+            nome: (lang !== 'it' && tr && tr.name) ? tr.name : p.name,
+            desc: (lang !== 'it' && tr && tr.description) ? tr.description : (p.description || '')
+        };
+    }
+    function nomeCategoria(cat) {
+        var tr = dati.categorie && dati.categorie[cat];
+        return (lang !== 'it' && tr && tr[lang]) ? tr[lang] : cat;
+    }
+    function esc(s) {
+        return String(s).replace(/[&<>"]/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+        });
+    }
+
+    function renderLangs() {
+        var box = document.getElementById('langs');
+        box.innerHTML = '';
+        Object.keys(UI).forEach(function (l) {
+            var b = document.createElement('button');
+            b.type = 'button';
+            b.textContent = LANG_LABEL[l];
+            b.setAttribute('aria-pressed', String(l === lang));
+            b.addEventListener('click', function () {
+                lang = l;
+                localStorage.setItem('menu_lang', l);
+                document.documentElement.lang = l;
+                renderLangs();
+                render();
+            });
+            box.appendChild(b);
+        });
+    }
+
+    function render() {
+        document.getElementById('sottotitolo').textContent = t('menu');
+        if (!dati) return;
+        var perCat = {};
+        dati.piatti.forEach(function (p) { (perCat[p.category] = perCat[p.category] || []).push(p); });
+        var cats = Object.keys(perCat).sort(function (a, b) {
+            var d = pesoCategoria(a) - pesoCategoria(b);
+            return d !== 0 ? d : a.localeCompare(b);
+        });
+
+        var navBox = document.getElementById('catnav-inner');
+        navBox.innerHTML = '';
+        cats.forEach(function (cat, i) {
+            var a = document.createElement('a');
+            a.href = '#cat-' + i;
+            a.textContent = nomeCategoria(cat);
+            navBox.appendChild(a);
+        });
+        document.getElementById('catnav').hidden = cats.length < 2;
+
+        var html = '';
+        cats.forEach(function (cat, i) {
+            html += '<section class="sezione"><h2 id="cat-' + i + '">' + esc(nomeCategoria(cat)) + '</h2><div class="card">';
+            perCat[cat].forEach(function (p) {
+                var tp = testoPiatto(p);
+                html += '<div class="piatto">'
+                    + (p.photo_url ? '<img class="piatto__foto" src="' + esc(p.photo_url) + '" alt="" loading="lazy" />' : '')
+                    + '<div class="piatto__testo"><div class="piatto__nome">' + esc(tp.nome) + '</div>'
+                    + (tp.desc ? '<div class="piatto__desc">' + esc(tp.desc) + '</div>' : '')
+                    + (p.allergens && p.allergens.length ? '<div class="piatto__allergeni">' + esc(t('allergeni')) + ': ' + esc(p.allergens.join(', ')) + '</div>' : '')
+                    + '</div>'
+                    + (p.price > 0 ? '<div class="piatto__prezzo tnum">' + esc(euro(p.price)) + '</div>' : '')
+                    + '</div>';
+            });
+            html += '</div></section>';
+        });
+        main.innerHTML = html || '<p class="stato">' + esc(t('vuoto')) + '</p>';
+    }
+
+    document.documentElement.lang = lang;
+    renderLangs();
+    render();
+
+    fetch(apiPath, { headers: { Accept: 'application/json' } })
+        .then(function (r) {
+            if (!r.ok) throw new Error(String(r.status));
+            return r.json();
+        })
+        .then(function (json) {
+            dati = json;
+            document.getElementById('nome-ristorante').textContent = json.restaurant || '';
+            document.title = (json.restaurant ? json.restaurant + ' · ' : '') + 'Menu';
+            document.getElementById('footer').textContent = json.restaurant || '';
+            render();
+        })
+        .catch(function (err) {
+            stato.textContent = err && err.message === '503' ? t('vuoto') : t('errore');
+        });
+})();
+</script>
+</body>
+</html>

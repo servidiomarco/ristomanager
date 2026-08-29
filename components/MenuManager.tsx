@@ -1,8 +1,8 @@
 
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, Customer, Table, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
-import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info } from 'lucide-react';
+import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, VAT_RATES, Customer, Table, TableMerge, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
+import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { getRomeDatePart } from '../utils/reservationTime';
 import { printBanquet } from '../utils/printBanquet';
@@ -11,7 +11,9 @@ import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BanquetPaymentsModal } from './BanquetPaymentsModal';
 import { DishDetailModal } from './DishDetailModal';
 import { CustomerPickerModal } from './CustomerPickerModal';
-import { getCustomers } from '../services/apiService';
+import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, type MenuImportResult, type MenuTranslateResult } from '../services/apiService';
+import { billsApiService } from '../services/billsApiService';
+import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '../contexts/AuthContext';
 import { saveDraft, loadDraft, clearDraft, DRAFT_KEYS } from '../services/draftService';
 import {
@@ -97,6 +99,21 @@ const endOfCurrentWeek = (from: Date): string => {
 const endOfCurrentMonth = (from: Date): string =>
   formatLocalDate(new Date(from.getFullYear(), from.getMonth() + 1, 0));
 
+/* ── Quanto urge il saldo ─────────────────────────────────────────────────
+   Un banchetto nasce sempre non pagato, quindi "manca l'incasso" da solo non
+   dice niente: dipingerlo di rosso vorrebbe dire una lista rossa dal primo
+   giorno, e un rosso sempre acceso smette di essere un segnale. È il
+   calendario a decidere — la stessa idea di `getTimedReservationState`, dove
+   lo stato si carica avvicinandosi all'ora.
+
+   `pending` finché l'evento è lontano: c'è da incassare, con calma.
+   `critical` da fine settimana in giù, passati compresi (una data già scaduta
+   è <= weekEnd): sta per succedere, o è successo, e i soldi non ci sono.
+
+   Senza data non è imminente per definizione, quindi resta `pending`. */
+const isOutstandingUrgent = (menu: BanquetMenu, weekEnd: string): boolean =>
+  !!menu.event_date && menu.event_date <= weekEnd;
+
 const banquetGroupFor = (menu: BanquetMenu, today: string, weekEnd: string, monthEnd: string): BanquetGroupKey => {
   const date = menu.event_date;
   // No date yet: it is still being planned, so it belongs with what is coming
@@ -176,9 +193,84 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     onAutoOpenNewDishHandled,
     onActiveTabChange
 }) => {
-  const { hasPermission } = useAuth();
+  const { hasPermission, hasFeature } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
   const canManageBanquetPayments = hasPermission('banquet:manage_payments');
+  // Import dalla cassa Passepartout: entitlement del solo ristorante col
+  // gestionale (oggi Vecchio Frantoio). Gli altri tenant non vedono il bottone.
+  const canImportCassa = canEdit && hasFeature('passepartout');
+  const [importing, setImporting] = useState(false);
+  const [importEsito, setImportEsito] = useState<MenuImportResult | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+
+  const handleImportCassa = async () => {
+    if (importing) return;
+    setImporting(true);
+    setImportEsito(null);
+    setImportError(null);
+    try {
+      // La lista si aggiorna da sola via socket 'dish:synced'.
+      setImportEsito(await importMenuPassepartout());
+    } catch (err: any) {
+      setImportError(err?.data?.message ?? err?.data?.error ?? err?.message ?? 'Import non riuscito');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  // Menu digitale: QR pubblico, interruttore del flag e traduzioni AI.
+  const [qrOpen, setQrOpen] = useState(false);
+  const [menuAttivo, setMenuAttivo] = useState<boolean | null>(null);
+  const [menuFlagBusy, setMenuFlagBusy] = useState(false);
+  const [translating, setTranslating] = useState(false);
+  const [translateEsito, setTranslateEsito] = useState<MenuTranslateResult | null>(null);
+  const [translateError, setTranslateError] = useState<string | null>(null);
+  const [linkCopiato, setLinkCopiato] = useState(false);
+  const menuUrl = digitalMenuUrl();
+
+  useEffect(() => {
+    if (!qrOpen) return;
+    let cancelled = false;
+    getFeatureFlags()
+      .then(f => { if (!cancelled) setMenuAttivo(f.digital_menu_enabled === true); })
+      .catch(() => { if (!cancelled) setMenuAttivo(null); });
+    return () => { cancelled = true; };
+  }, [qrOpen]);
+
+  const toggleMenuDigitale = async () => {
+    if (menuFlagBusy || menuAttivo == null) return;
+    setMenuFlagBusy(true);
+    try {
+      const updated = await updateFeatureFlags({ digital_menu_enabled: !menuAttivo });
+      setMenuAttivo(updated.digital_menu_enabled === true);
+    } catch (_) {
+      /* lo stato resta quello vero: al prossimo open si ricarica */
+    } finally {
+      setMenuFlagBusy(false);
+    }
+  };
+
+  const handleTranslate = async () => {
+    if (translating) return;
+    setTranslating(true);
+    setTranslateEsito(null);
+    setTranslateError(null);
+    try {
+      setTranslateEsito(await translateMenu());
+    } catch (err: any) {
+      setTranslateError(err?.data?.message ?? err?.data?.error ?? err?.message ?? 'Traduzione non riuscita');
+    } finally {
+      setTranslating(false);
+    }
+  };
+
+  const copiaLinkMenu = () => {
+    navigator.clipboard?.writeText(menuUrl).then(() => {
+      setLinkCopiato(true);
+      setTimeout(() => setLinkCopiato(false), 2000);
+    }).catch(() => {});
+  };
+
   const [activeTab, setActiveTab] = useState<'DISHES' | 'BANQUETS'>(initialTab);
   const [banquetView, setBanquetView] = useState<'LIST' | 'CALENDAR'>('LIST');
   type BanquetSortBy = 'date-asc' | 'date-desc' | 'name-asc' | 'name-desc' | 'guests-asc' | 'guests-desc';
@@ -223,6 +315,18 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [photoUploadError, setPhotoUploadError] = useState<string | null>(null);
   const photoFileInputRef = useRef<HTMLInputElement>(null);
 
+  // Aliquota proposta per un piatto nuovo: il dish_default della mappatura
+  // IVA (Impostazioni → Fiscalità). 10 finché non arriva — best effort, il
+  // form resta usabile anche se la lettura fallisce.
+  const [defaultVatRate, setDefaultVatRate] = useState(10);
+  useEffect(() => {
+    let cancelled = false;
+    billsApiService.getFiscalSettings()
+      .then(s => { if (!cancelled && Number.isInteger(s.vat_map?.dish_default)) setDefaultVatRate(s.vat_map.dish_default); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   // New Dish State
   const [newDish, setNewDish] = useState<Partial<Dish>>({
     name: '',
@@ -230,7 +334,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     price: 0,
     category: 'Antipasti',
     allergens: [],
-    photo_url: ''
+    photo_url: '',
+    vat_rate: 10
   });
 
   // New Banquet Menu State
@@ -340,7 +445,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           price: Number(newDish.price),
           category: newDish.category || 'Antipasti',
           allergens: newDish.allergens || [],
-          photo_url: newDish.photo_url?.trim() || undefined
+          photo_url: newDish.photo_url?.trim() || undefined,
+          vat_rate: newDish.vat_rate ?? defaultVatRate
         });
       } else {
         await onAddDish({
@@ -349,14 +455,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           price: Number(newDish.price),
           category: newDish.category || 'Antipasti',
           allergens: newDish.allergens || [],
-          photo_url: newDish.photo_url?.trim() || undefined
+          photo_url: newDish.photo_url?.trim() || undefined,
+          vat_rate: newDish.vat_rate ?? defaultVatRate
         } as Dish);
       }
 
       setIsDishFormOpen(false);
       setIsEditingDish(false);
       setEditingDishId(null);
-      setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '' });
+      setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '', vat_rate: defaultVatRate });
     } finally {
       setIsSavingDish(false);
     }
@@ -370,7 +477,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const handleOpenNewDish = () => {
     setIsEditingDish(false);
     setEditingDishId(null);
-    setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '' });
+    setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '', vat_rate: defaultVatRate });
     setPhotoUploadError(null);
     setIsDishFormOpen(true);
   };
@@ -382,7 +489,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       price: dish.price,
       category: dish.category,
       allergens: dish.allergens,
-      photo_url: dish.photo_url || ''
+      photo_url: dish.photo_url || '',
+      vat_rate: dish.vat_rate ?? 10
     });
     setEditingDishId(dish.id);
     setIsEditingDish(true);
@@ -683,6 +791,21 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     });
   }, [dishes]);
 
+  // Unioni tavoli attive per la data+turno scelti nel form: un tavolo
+  // occupato occupa l'intera unione (stessa regola del controllo server),
+  // quindi anche i tavoli uniti al suo gruppo vanno disabilitati in griglia.
+  const [banquetMerges, setBanquetMerges] = useState<TableMerge[]>([]);
+  useEffect(() => {
+    const date = newBanquet.event_date;
+    const shift = newBanquet.shift;
+    if (!date || !shift) { setBanquetMerges([]); return; }
+    let cancelled = false;
+    getTableMerges(date, shift)
+      .then(merges => { if (!cancelled) setBanquetMerges(merges); })
+      .catch(() => { if (!cancelled) setBanquetMerges([]); });
+    return () => { cancelled = true; };
+  }, [newBanquet.event_date, newBanquet.shift]);
+
   // Map of tableId -> occupancy info for the currently selected event_date+shift
   // (excluding the banquet being edited). Used by the table picker in the form.
   const tableOccupancyMap = useMemo(() => {
@@ -715,8 +838,16 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       }
     }
 
+    // Estende l'occupazione all'intero gruppo di unione: il tavolo unito a
+    // uno occupato eredita la stessa etichetta di chi occupa il gruppo.
+    for (const m of banquetMerges) {
+      const group = [m.primary_id, ...m.merged_ids];
+      const occ = group.map(id => map.get(id)).find(Boolean);
+      if (occ) for (const id of group) { if (!map.has(id)) map.set(id, occ); }
+    }
+
     return map;
-  }, [newBanquet.event_date, newBanquet.shift, reservations, banquetMenus, editingBanquetId]);
+  }, [newBanquet.event_date, newBanquet.shift, reservations, banquetMenus, editingBanquetId, banquetMerges]);
 
   const groupedBanquets = useMemo(() => {
     const today = formatLocalDate(new Date());
@@ -773,7 +904,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       const paid = Number(b.total_paid || 0);
       return s + Math.max(0, due - paid);
     }, 0);
-    return { count: upcoming.length, covers, outstanding };
+    // La somma è quasi sempre > 0 — ogni banchetto nasce da pagare — quindi da
+    // sola non merita il rosso. Si accende se almeno un evento entro fine
+    // settimana (o già passato) è ancora scoperto: lì sì che c'è da correre.
+    const weekEnd = endOfCurrentWeek(new Date());
+    const urgent = upcoming.some(b =>
+      Math.max(0, computeBanquetTotalDue(b) - Number(b.total_paid || 0)) > 0
+      && isOutstandingUrgent(b, weekEnd)
+    );
+    return { count: upcoming.length, covers, outstanding, urgent };
   }, [banquetMenus]);
 
   const BANQUET_SORT_OPTIONS: { value: BanquetSortBy; label: string }[] = [
@@ -838,7 +977,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               <span className="font-normal">coperti prenotati</span>
             </StatusPill>
             {canViewBanquetPrice && banquetKpis.outstanding > 0 && (
-              <StatusPill tone="pending" className="h-8 px-3">
+              <StatusPill tone={banquetKpis.urgent ? 'critical' : 'pending'} className="h-8 px-3">
                 <span className="font-semibold tabular-nums">€ {formatEuro(banquetKpis.outstanding)}</span>
                 <span className="font-normal">da incassare</span>
               </StatusPill>
@@ -847,6 +986,27 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         )}
         {activeTab === 'DISHES' && (
           <div className="flex items-center gap-2 sm:flex-1 sm:justify-end">
+            <button
+              type="button"
+              onClick={() => setQrOpen(true)}
+              title="QR e traduzioni del menu per gli ospiti"
+              className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              <QrCode className="h-4 w-4" aria-hidden />
+              Menu digitale
+            </button>
+            {canImportCassa && (
+              <button
+                type="button"
+                onClick={handleImportCassa}
+                disabled={importing}
+                title="Allinea i piatti al catalogo della cassa Passepartout"
+                className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              >
+                {importing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <RefreshCw className="h-4 w-4" aria-hidden />}
+                Importa da cassa
+              </button>
+            )}
             <SearchField
               value={searchTerm}
               onChange={setSearchTerm}
@@ -884,6 +1044,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
       {activeTab === 'DISHES' && (
           <>
+            {(importEsito || importError) && (
+              <div className="mb-4">
+                <Callout tone={importError ? 'critical' : 'positive'}>
+                  {importError
+                    ?? `Menu allineato alla cassa: ${importEsito!.creati} nuovi, ${importEsito!.aggiornati} aggiornati, ${importEsito!.disattivati} disattivati${importEsito!.gruppi_varianti ? `, ${importEsito!.gruppi_varianti} gruppi varianti` : ''}.`}
+                </Callout>
+              </div>
+            )}
             <div className="flex flex-col gap-3 md:flex-row md:items-center mb-5">
               {dishCategories.length > 0 && (
                 <div className="flex flex-1 flex-wrap gap-2">
@@ -935,9 +1103,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             onClick={() => setViewDish(isSelected ? null : dish)}
                             className={`flex flex-col overflow-hidden rounded-[20px] bg-[var(--ds-surface)] text-left shadow-[var(--ds-shadow-card)] transition-shadow hover:shadow-[var(--ds-shadow-raised)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                               isSelected ? 'ring-2 ring-[var(--ds-text-primary)]' : ''
-                            }`}
+                            } ${dish.is_active === false ? 'opacity-60' : ''}`}
                           >
                             <div className="relative">
+                              {dish.is_active === false && (
+                                <span className="absolute bottom-2 left-2 z-10 rounded-full bg-[var(--ds-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--ds-critical-text)]">
+                                  spento in cassa
+                                </span>
+                              )}
                               {dish.photo_url ? (
                                 <img
                                   src={dish.photo_url}
@@ -1027,8 +1200,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                 <ImageIcon className="h-4 w-4 text-[var(--ds-text-subtle)]" aria-hidden />
                               </div>
                             )}
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">{dish.name}</div>
+                            <div className={`min-w-0 flex-1 ${dish.is_active === false ? 'opacity-60' : ''}`}>
+                              <div className="flex items-center gap-2">
+                                <span className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">{dish.name}</span>
+                                {dish.is_active === false && <StatusPill tone="critical">spento in cassa</StatusPill>}
+                              </div>
                               <div className="truncate text-[13px] text-[var(--ds-text-muted)]">
                                 {[dish.category, dish.description].filter(Boolean).join(' · ')}
                               </div>
@@ -1235,11 +1411,34 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 // Guard the divide: a banquet with no price yet has due = 0, and
                 // 0/0 would paint a full bar on something nobody has paid for.
                 const paidRatio = due > 0 ? Math.min(1, paid / due) : 0;
+                // Rosso solo se l'evento è entro fine settimana (o già passato).
+                const urgent = outstanding > 0 && isOutstandingUrgent(menu, endOfCurrentWeek(new Date()));
 
                 const courseCount = menu.courses && menu.courses.length > 0 ? menu.courses.length : null;
                 const dishCount = menu.courses && menu.courses.length > 0
                   ? menu.courses.reduce((sum, c) => sum + c.dish_ids.length, 0)
                   : menu.dish_ids.length;
+
+                /* Gli stessi tre numeri, due volte: la striscia da desktop li
+                   incolonna e ha ~110px a testa, la lista da mobile ha tutta la
+                   riga. Da larghi "3/5" con l'etichetta accanto sta; da stretti
+                   la frase intera si legge senza doverla decifrare. Il valore lo
+                   si calcola qui una volta, così le due rese non possono
+                   divergere. */
+                /* Le note sono tre caselle fisse — cucina, sala, mise en place —
+                   non una lista, quindi il conteggio non passa mai 3: dice su
+                   quante aree c'è qualcosa da leggere, non quanto. Il testo
+                   sta nella scheda di dettaglio e nelle stampe. */
+                const notesCount = [menu.notes_courses, menu.notes_service, menu.notes_mise_en_place]
+                  .filter(n => n?.trim()).length;
+
+                const guestsValue = menu.guests != null && Number(menu.guests) > 0 ? Number(menu.guests) : '—';
+                const priceValue = `€ ${Number(menu.price_per_person) || 0}`;
+                // Senza portate definite resta il solo conteggio dei piatti:
+                // "5 in 0 portate" sarebbe falso.
+                const dishesLong = courseCount != null
+                  ? `${dishCount} in ${courseCount} ${courseCount === 1 ? 'portata' : 'portate'}`
+                  : `${dishCount}`;
 
                 const eventDate = menu.event_date ? new Date(menu.event_date + 'T00:00') : null;
                 const isLunch = menu.shift === Shift.LUNCH;
@@ -1262,11 +1461,21 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     // Raised only while its own menu is open. Grid siblings paint
                     // in DOM order, so without this the dropdown slides under the
                     // next card instead of over it.
-                    className={`flex cursor-pointer flex-col rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] transition-shadow hover:shadow-[var(--ds-shadow-raised)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${isPast ? 'opacity-75' : ''} ${cardMenuOpenId === menu.id ? 'relative z-40' : ''}`}
+                    className={`flex cursor-pointer flex-col rounded-[20px] bg-[var(--ds-surface)] p-5 shadow-[var(--ds-shadow-card)] transition-shadow hover:shadow-[var(--ds-shadow-raised)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${isPast ? 'opacity-75' : ''} ${cardMenuOpenId === menu.id ? 'relative z-40' : ''}`}
                   >
-                      <div className="flex items-start gap-3">
-                          {/* Date tile — the thing you scan a banquet list for. */}
-                          <div className={`flex h-[76px] w-[62px] flex-shrink-0 flex-col items-center justify-center rounded-[16px] ${tileTone}`}>
+                      <div className="flex items-start gap-4">
+                          {/* Date tile — the thing you scan a banquet list for.
+                              Il turno sta in cima: è il primo filtro con cui si
+                              legge la lista (pranzo o cena), e sopra la data fa
+                              da intestazione invece che da coda.
+                              `min-h` invece di `h`: l'altezza la decide il
+                              contenuto più il padding, così le tessere restano
+                              allineate fra loro ma non strozzate. */}
+                          <div className={`flex min-h-[92px] w-[62px] flex-shrink-0 flex-col items-center justify-center rounded-[16px] px-2 py-3 ${tileTone}`}>
+                              {menu.shift && (
+                                isLunch ? <Sun className="mb-1 h-3.5 w-3.5" aria-label="Pranzo" />
+                                        : <Sunset className="mb-1 h-3.5 w-3.5" aria-label="Cena" />
+                              )}
                               {eventDate ? (
                                 <>
                                   <span className="text-[11px] font-semibold leading-none">
@@ -1278,35 +1487,68 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                   </span>
                                 </>
                               ) : (
-                                <span className="px-1 text-center text-[11px] font-medium leading-tight">Senza data</span>
-                              )}
-                              {menu.shift && (
-                                isLunch ? <Sun className="mt-1 h-3.5 w-3.5" aria-label="Pranzo" />
-                                        : <Sunset className="mt-1 h-3.5 w-3.5" aria-label="Cena" />
+                                <span className="text-center text-[11px] font-medium leading-tight">Senza data</span>
                               )}
                           </div>
 
                           <div className="min-w-0 flex-1">
                               <div className="flex items-start justify-between gap-2">
                                   <div className="min-w-0">
-                                      <h3 className="flex items-center gap-1.5 truncate text-[19px] font-semibold leading-tight tracking-[-0.01em] text-[var(--ds-text-primary)]">
-                                        <span className="truncate">{menu.name}</span>
-                                        {(menu.table_ids?.length ?? 0) > 0 && (
-                                          <BookOpen className="h-3.5 w-3.5 flex-shrink-0 text-[var(--ds-text-subtle)]" aria-label="Tavoli assegnati" />
-                                        )}
+                                      <h3 className="truncate text-[19px] font-semibold leading-tight tracking-[-0.01em] text-[var(--ds-text-primary)]">
+                                        {menu.name}
                                       </h3>
                                       {menu.description && (
-                                        <p className="mt-0.5 line-clamp-1 text-[13px] text-[var(--ds-text-muted)]">{menu.description}</p>
+                                        <p className="mt-1 hidden line-clamp-1 text-[13px] text-[var(--ds-text-muted)] sm:block">{menu.description}</p>
+                                      )}
+                                      {/* Da mobile la descrizione se ne va nel blocco
+                                          grigio, quindi qui la pill resta attaccata al
+                                          titolo; da sm segue la descrizione. Una
+                                          posizione sola che funziona in entrambi. */}
+                                      {notesCount > 0 && (
+                                        <StatusPill tone="neutral" className="mt-2 h-7 px-2.5">
+                                          <StickyNote className="h-3.5 w-3.5" aria-hidden />
+                                          {notesCount} {notesCount === 1 ? 'nota' : 'note'}
+                                        </StatusPill>
                                       )}
                                   </div>
                                   <div className="flex flex-shrink-0 items-center gap-1">
+                                      {/* Indicatore, non comando: dice che il
+                                          banchetto ha tavoli assegnati. Sta nella
+                                          fila delle azioni per stare in cerchio
+                                          come le altre, ma resta uno <span> —
+                                          niente hover, niente focus, non finisce
+                                          nella tabulazione. */}
+                                      {(menu.table_ids?.length ?? 0) > 0 && (
+                                      // Stessa base delle due accanto, `dsIconButton`
+                                      // incluso: scritto a mano restava di 36px mentre
+                                      // le altre si risolvevano diverse — fra `h-11`
+                                      // della base e `h-9` qui vince l'ordine del CSS
+                                      // generato, non quello dell'attributo. Gli hover
+                                      // sono rimessi al valore di riposo perché questo
+                                      // non è un comando.
+                                      <span
+                                          className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] shadow-none hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-muted)]`}
+                                          title="Tavoli assegnati"
+                                          aria-label="Tavoli assegnati"
+                                          role="img"
+                                      >
+                                          <BookOpen className="h-4 w-4" />
+                                      </span>
+                                      )}
                                       {canManageBanquetPayments && (
+                                      // Il cerchio è neutro come quello dei tre
+                                      // puntini — la tinta di stato era così
+                                      // pallida da non leggersi come cerchio. Lo
+                                      // stato resta sul glifo, e comunque la riga
+                                      // dell'importo e la barra lo dicono più forte.
                                       <button
                                           onClick={e => { e.stopPropagation(); setPaymentsBanquet(menu); }}
-                                          className={`${dsIconButton} h-9 w-9 shadow-none ${
+                                          className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] shadow-none ${
                                             paymentStatus === 'PAID'
-                                              ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] hover:bg-[var(--ds-seated-tint)] hover:text-[var(--ds-seated-text)]'
-                                              : 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]'
+                                              ? 'text-[var(--ds-seated-text)] hover:text-[var(--ds-seated-text)]'
+                                              : urgent
+                                                ? 'text-[var(--ds-critical-text)] hover:text-[var(--ds-critical-text)]'
+                                                : 'text-[var(--ds-pending-text)] hover:text-[var(--ds-pending-text)]'
                                           }`}
                                           title="Pagamenti"
                                       >
@@ -1330,7 +1572,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                           </button>
                                           {cardMenuOpenId === menu.id && (
                                               <div
-                                                  className="absolute right-0 top-full z-30 mt-1 w-48 overflow-hidden rounded-[16px] bg-[var(--ds-surface)] py-1 shadow-[var(--ds-shadow-raised)] animate-in fade-in slide-in-from-top-1 duration-100"
+ className="absolute right-0 top-full z-30 mt-1 w-48 overflow-hidden rounded-[16px] bg-[var(--ds-surface)] py-1 shadow-[var(--ds-shadow-raised)] duration-100"
                                               >
                                                   <button
                                                       type="button"
@@ -1373,22 +1615,22 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
                               {/* Three figures, one strip — the shape repeats on every
                                   card so the eye lands on the same spot each time. */}
-                              <div className="mt-3 flex items-stretch rounded-[16px] bg-[var(--ds-surface-row)]">
-                                  <div className="flex-1 px-3 py-2 text-center">
+                              <div className="mt-4 hidden items-stretch rounded-[16px] bg-[var(--ds-surface-row)] sm:flex">
+                                  <div className="flex-1 px-3 py-3 text-center">
                                       <div className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
-                                        {menu.guests != null && Number(menu.guests) > 0 ? Number(menu.guests) : '—'}
+                                        {guestsValue}
                                       </div>
                                       <div className="text-[11px] text-[var(--ds-text-muted)]">coperti</div>
                                   </div>
                                   {canViewBanquetPrice && (
-                                    <div className="flex-1 border-l border-[var(--ds-border)] px-3 py-2 text-center">
+                                    <div className="flex-1 border-l border-[var(--ds-border)] px-3 py-3 text-center">
                                         <div className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
-                                          € {Number(menu.price_per_person) || 0}
+                                          {priceValue}
                                         </div>
                                         <div className="text-[11px] text-[var(--ds-text-muted)]">a persona</div>
                                     </div>
                                   )}
-                                  <div className="flex-1 border-l border-[var(--ds-border)] px-3 py-2 text-center">
+                                  <div className="flex-1 border-l border-[var(--ds-border)] px-3 py-3 text-center">
                                       <div className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
                                         {courseCount != null ? `${courseCount}/${dishCount}` : dishCount}
                                       </div>
@@ -1400,28 +1642,68 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           </div>
                       </div>
 
+                      {/* Solo mobile. I numeri escono dalla colonna della tessera:
+                          rientrati di 78px (tessera piu' gap) i tre incolonnati
+                          mandavano "a persona" a capo. Fuori dalla riga prendono
+                          tutta la scheda — etichetta a sinistra, valore a destra,
+                          allineati su un bordo solo.
+
+                          La descrizione apre il blocco invece di stare sotto al
+                          titolo: li' si troncava a "Menu per...". Il filetto lo
+                          mette ogni riga e lo toglie la prima, cosi' quando la
+                          descrizione manca il bordo non resta appeso sopra
+                          "Coperti". Il padding sta sul contenitore, cosi' i
+                          filetti restano rientrati. */}
+                      <div className="mt-3 rounded-[16px] bg-[var(--ds-surface-row)] px-4 sm:hidden">
+                          {menu.description && (
+                            <p className="line-clamp-2 border-t border-[var(--ds-border)] py-3 text-[13px] text-[var(--ds-text-muted)] first:border-t-0">
+                              {menu.description}
+                            </p>
+                          )}
+                          <div className="flex items-center justify-between gap-3 border-t border-[var(--ds-border)] py-3 first:border-t-0">
+                              <span className="text-[13px] text-[var(--ds-text-muted)]">Coperti</span>
+                              <span className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">{guestsValue}</span>
+                          </div>
+                          {canViewBanquetPrice && (
+                            <div className="flex items-center justify-between gap-3 border-t border-[var(--ds-border)] py-3 first:border-t-0">
+                                <span className="text-[13px] text-[var(--ds-text-muted)]">A persona</span>
+                                <span className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">{priceValue}</span>
+                            </div>
+                          )}
+                          <div className="flex items-center justify-between gap-3 border-t border-[var(--ds-border)] py-3 first:border-t-0">
+                              <span className="text-[13px] text-[var(--ds-text-muted)]">Piatti</span>
+                              <span className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">{dishesLong}</span>
+                          </div>
+                      </div>
+
                       {/* Payment line + how far along the money is. */}
                       {canViewBanquetPrice && due > 0 && (
-                        <div className="mt-3">
-                            <div className="text-[13px]">
+                        <div className="mt-4">
+                            {/* Quanto manca a sinistra, quanto è già entrato in
+                                fondo alla riga, sopra i due capi della barra che
+                                dicono la stessa cosa. L'acconto si mostra anche a
+                                zero: "acconto € 0" è un'informazione, la sua
+                                assenza si legge come un dato che manca. A saldo
+                                fatto sparisce — non c'è più un resto da separare. */}
+                            <div className="flex items-baseline justify-between gap-3 text-[13px]">
                                 {outstanding > 0 ? (
                                   <>
-                                    <span className="font-semibold tabular-nums text-[var(--ds-critical-text)]">€ {formatEuro(outstanding)}</span>
-                                    <span className="text-[var(--ds-text-muted)]"> da incassare</span>
-                                    {paid > 0 && (
-                                      <span className="text-[var(--ds-text-muted)]"> · acconto € {formatEuro(paid)}</span>
-                                    )}
+                                    <span className="min-w-0">
+                                      <span className={`font-semibold tabular-nums ${urgent ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-pending-text)]'}`}>€ {formatEuro(outstanding)}</span>
+                                      <span className="text-[var(--ds-text-muted)]"> da incassare</span>
+                                    </span>
+                                    <span className="flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">acconto € {formatEuro(paid)}</span>
                                   </>
                                 ) : (
-                                  <>
+                                  <span className="min-w-0">
                                     <span className="font-semibold tabular-nums text-[var(--ds-seated-text)]">€ {formatEuro(due)}</span>
                                     <span className="text-[var(--ds-text-muted)]"> saldato</span>
-                                  </>
+                                  </span>
                                 )}
                             </div>
-                            <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-[var(--ds-surface-row)]">
+                            <div className="mt-2.5 h-1 w-full overflow-hidden rounded-full bg-[var(--ds-surface-row)]">
                                 <div
-                                  className={`h-full rounded-full ${outstanding > 0 ? 'bg-[var(--ds-critical-solid)]' : 'bg-[var(--ds-seated-solid)]'}`}
+                                  className={`h-full rounded-full ${outstanding <= 0 ? 'bg-[var(--ds-seated-solid)]' : urgent ? 'bg-[var(--ds-critical-solid)]' : 'bg-[var(--ds-pending-solid)]'}`}
                                   style={{ width: `${Math.round(paidRatio * 100)}%` }}
                                 />
                             </div>
@@ -1559,6 +1841,20 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       <option>Contorni</option>
                       <option>Dolci</option>
                       <option>Bevande</option>
+                    </select>
+                  </Field>
+                  {/* Il 10% è la somministrazione in loco: quasi ogni piatto
+                      resta lì. Serve solo per i casi diversi (asporto 22,
+                      pane 4…) e alimenta scontrino e fattura per aliquota. */}
+                  <Field label="Aliquota IVA">
+                    <select
+                      className={dsSelect}
+                      value={newDish.vat_rate ?? defaultVatRate}
+                      onChange={e => setNewDish({ ...newDish, vat_rate: Number(e.target.value) })}
+                    >
+                      {VAT_RATES.map(r => (
+                        <option key={r} value={r}>{r}%</option>
+                      ))}
                     </select>
                   </Field>
                 </div>
@@ -1752,7 +2048,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   <button
                     type="button"
                     onClick={handleRestoreBanquetDraft}
-                    className="inline-flex h-9 items-center rounded-full bg-[var(--ds-pending-solid)] px-4 text-[13px] font-semibold text-[#ffffff] transition-opacity hover:opacity-90"
+                    // Era bianco su gold: 3.25:1, sotto AA (§3.3), con l'esadecimale
+                    // scritto a mano invece del token. Stesso primary del gemello in
+                    // ReservationList.
+                    className="inline-flex h-9 items-center rounded-full bg-[var(--ds-action-bg)] px-4 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     Riprendi
                   </button>
@@ -2387,6 +2686,83 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         </ModalShell>
       )}
 
+      {/* Menu digitale: QR da mettere al tavolo, interruttore di visibilità
+          e traduzioni AI. La pagina pubblica è servita dal backend, come la
+          pagina prenotazioni. */}
+      <ModalShell
+        open={qrOpen}
+        onClose={() => setQrOpen(false)}
+        title="Menu digitale"
+        subtitle="L'ospite inquadra il QR e sfoglia il menu in quattro lingue."
+      >
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3 rounded-2xl bg-[var(--ds-surface-row)] px-4 py-3">
+            <span className="text-[14px] font-medium text-[var(--ds-text-primary)]">
+              {menuAttivo == null ? 'Stato…' : menuAttivo ? 'Menu visibile agli ospiti' : 'Menu non visibile'}
+            </span>
+            <button
+              type="button"
+              onClick={toggleMenuDigitale}
+              disabled={menuFlagBusy || menuAttivo == null}
+              className={`inline-flex h-9 items-center rounded-full px-4 text-[13px] font-semibold transition-colors disabled:opacity-40 ${
+                menuAttivo
+                  ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
+                  : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+              }`}
+            >
+              {menuFlagBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : menuAttivo ? 'Spegni' : 'Pubblica'}
+            </button>
+          </div>
+
+          <div className="flex flex-col items-center gap-3">
+            {/* Piatto bianco fisso: un QR su fondo scuro non si inquadra. */}
+            <div className="rounded-[16px] bg-[#ffffff] p-3 shadow-[var(--ds-shadow-card)]">
+              <QRCodeSVG value={menuUrl} size={168} level="M" />
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={copiaLinkMenu}
+                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]"
+              >
+                {linkCopiato ? <><Check className="h-4 w-4" /> Copiato</> : <><Copy className="h-4 w-4" /> Copia link</>}
+              </button>
+              <a
+                href={menuUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]"
+              >
+                Apri la pagina
+              </a>
+            </div>
+          </div>
+
+          {canEdit && (
+            <div className="space-y-2 border-t border-[var(--ds-border)] pt-4">
+              <button
+                type="button"
+                onClick={handleTranslate}
+                disabled={translating}
+                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40"
+              >
+                {translating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Languages className="h-4 w-4" />}
+                Traduci le voci nuove
+              </button>
+              <p className="text-[13px] text-[var(--ds-text-muted)]">
+                Inglese, francese e tedesco. Traduce solo le voci senza traduzione: si può rilanciare dopo ogni import.
+              </p>
+              {translateEsito && (
+                <p className="text-[13px] text-[var(--ds-seated-text)]">
+                  {translateEsito.tradotte === 0 ? 'Tutto già tradotto.' : `${translateEsito.tradotte} voci tradotte.`}
+                </p>
+              )}
+              {translateError && <p className="text-[13px] text-[var(--ds-critical-text)]">{translateError}</p>}
+            </div>
+          )}
+        </div>
+      </ModalShell>
+
       <ConfirmDeleteModal
         isOpen={!!deleteDishConfirm}
         title="Elimina Piatto"
@@ -2448,7 +2824,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       {showBanquetSortModal && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center" onClick={() => setShowBanquetSortModal(false)}>
           <div className="absolute inset-0 bg-black/30" />
-          <div className="relative w-full sm:max-w-sm bg-[var(--ds-surface)] rounded-t-2xl sm:rounded-2xl shadow-[var(--ds-shadow-raised)] pb-6 animate-in slide-in-from-bottom duration-200" onClick={e => e.stopPropagation()}>
+ <div className="relative w-full sm:max-w-sm bg-[var(--ds-surface)] rounded-t-2xl sm:rounded-2xl shadow-[var(--ds-shadow-raised)] pb-6 duration-200"onClick={e => e.stopPropagation()}>
             <div className="flex justify-center pt-3 pb-2 sm:hidden">
               <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
             </div>
@@ -2644,6 +3020,7 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
             {selectedBanquets.map(menu => {
               const hasNotes = !!(menu.notes_courses?.trim() || menu.notes_service?.trim() || menu.notes_mise_en_place?.trim());
               const outstanding = Math.max(0, computeBanquetTotalDue(menu) - Number(menu.total_paid || 0));
+              const urgent = outstanding > 0 && isOutstandingUrgent(menu, endOfCurrentWeek(new Date()));
               const isLunch = menu.shift === Shift.LUNCH;
               return (
                 <div
@@ -2683,7 +3060,7 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
                         <p className="mt-1 text-[13px]">
                           {outstanding > 0 ? (
                             <>
-                              <span className="font-semibold tabular-nums text-[var(--ds-critical-text)]">€ {formatEuro(outstanding)}</span>
+                              <span className={`font-semibold tabular-nums ${urgent ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-pending-text)]'}`}>€ {formatEuro(outstanding)}</span>
                               <span className="text-[var(--ds-text-muted)]"> da incassare</span>
                             </>
                           ) : (

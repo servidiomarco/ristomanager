@@ -11,11 +11,14 @@
 // stato venduto. Feature assente a DB = non venduta = spenta.
 import { queryWithRetry } from '../db.js';
 
-export const TENANT_FEATURES = ['voice', 'whatsapp', 'web_booking', 'pay_at_table'] as const;
+// 'passepartout' = integrazione col gestionale di cassa (import menu,
+// chiusura conti): la vende solo chi ha Passepartout in sala — oggi il
+// Vecchio Frantoio (tenant 1, acceso dalla migration import-menu-passepartout).
+export const TENANT_FEATURES = ['voice', 'whatsapp', 'web_booking', 'pay_at_table', 'passepartout'] as const;
 export type TenantFeature = (typeof TENANT_FEATURES)[number];
 export type TenantFeatureMap = Record<TenantFeature, boolean>;
 
-const ALL_DISABLED: TenantFeatureMap = { voice: false, whatsapp: false, web_booking: false, pay_at_table: false };
+const ALL_DISABLED: TenantFeatureMap = { voice: false, whatsapp: false, web_booking: false, pay_at_table: false, passepartout: false };
 
 // Cache per tenant con TTL breve, stesso schema di identityCache
 // (businessIdentity in server.ts): gli entitlement si leggono su ogni
@@ -61,4 +64,15 @@ export async function isFeatureEnabledForTenant(tenantId: number, feature: Tenan
 // fatto il PUT deve vedere subito il nuovo stato, senza aspettare il TTL.
 export function invalidateTenantFeaturesCache(tenantId: number): void {
     featuresCache.delete(tenantId);
+}
+
+// Da chiamare a migration completate. Il server accetta richieste PRIMA che
+// le migration finiscano (deliberato: il boot non blocca il servizio), quindi
+// un login arrivato in quella finestra mette in cache lo stato
+// pre-migration: un entitlement appena acceso da una migration (com'è
+// successo con 'passepartout') resta invisibile per tutto il TTL — nei test
+// è la finestra in cui girano auth ed entitlements, in produzione il primo
+// minuto dopo il deploy.
+export function clearTenantFeaturesCache(): void {
+    featuresCache.clear();
 }

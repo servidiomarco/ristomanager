@@ -39,7 +39,11 @@ export type Permission =
   | 'orders:take'
   | 'orders:kds'
   | 'orders:expedite'
-  | 'orders:void';
+  | 'orders:void'
+  // Chat interna dello staff (docs/chat-staff-plan.md). Un solo permesso:
+  // chi ce l'ha legge e scrive nei canali del suo ruolo e nei DM — cosa
+  // vede lo decide la membership per ruolo in services/staffChat.ts.
+  | 'staffchat:use';
 
 // Role-permission mapping
 const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
@@ -81,7 +85,8 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'orders:take',
     'orders:kds',
     'orders:expedite',
-    'orders:void'
+    'orders:void',
+    'staffchat:use'
   ],
   [UserRole.OWNER]: [
     'dashboard:view',
@@ -117,7 +122,8 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'orders:take',
     'orders:kds',
     'orders:expedite',
-    'orders:void'
+    'orders:void',
+    'staffchat:use'
   ],
   [UserRole.GENERAL_MANAGER]: [
     'dashboard:view',
@@ -148,7 +154,8 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'orders:take',
     'orders:kds',
     'orders:expedite',
-    'orders:void'
+    'orders:void',
+    'staffchat:use'
   ],
   [UserRole.MANAGER]: [
     'dashboard:view',
@@ -174,7 +181,8 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'orders:view',
     'orders:take',
     'orders:expedite',
-    'orders:void'
+    'orders:void',
+    'staffchat:use'
   ],
   [UserRole.RECEPTION]: [
     'dashboard:view',
@@ -187,7 +195,8 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'reception:view',
     'voice_calls:view',
     'payments:view',
-    'orders:view'
+    'orders:view',
+    'staffchat:use'
   ],
   [UserRole.WAITER]: [
     'dashboard:view',
@@ -199,7 +208,8 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'inventory:view',
     'reception:view',
     'orders:view',
-    'orders:take'
+    'orders:take',
+    'staffchat:use'
   ],
   [UserRole.KITCHEN]: [
     'menu:view',
@@ -208,7 +218,8 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'inventory:full',
     'orders:view',
     'orders:kds',
-    'orders:expedite'
+    'orders:expedite',
+    'staffchat:use'
   ]
 };
 
@@ -227,6 +238,7 @@ const VIEW_PERMISSIONS: Record<ViewState, Permission[]> = {
   [ViewState.HACCP]: ['dashboard:view'],
   [ViewState.CONVERSAZIONI]: ['voice_calls:view'],
   [ViewState.MESSAGGI]: ['reservations:view'],
+  [ViewState.CHAT_STAFF]: ['staffchat:use'],
   [ViewState.STAFF]: ['staff:view'],
   [ViewState.CLIENTI]: ['customers:view'],
   [ViewState.INVENTARIO]: ['inventory:view'],

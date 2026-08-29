@@ -101,6 +101,25 @@ export const runAgent = (phoneDigits: string): Promise<AgentRunResult> =>
     method: 'POST', headers: getHeaders(), body: JSON.stringify({ phone_digits: phoneDigits }),
   });
 
+export interface ExtractedBooking {
+  customer_name: string | null;
+  date: string | null;   // YYYY-MM-DD
+  time: string | null;   // HH:MM
+  shift: 'LUNCH' | 'DINNER' | null;
+  guests: number | null;
+  children: number | null;
+  location_preference: 'INDOOR' | 'OUTDOOR' | null;
+  notes: string | null;
+}
+
+/** Estrae i campi di una prenotazione dal thread per precompilare il modulo.
+ *  Non crea nulla: forza solo la lettura del messaggio. `booking` è null se
+ *  non c'è abbastanza da estrarre. */
+export const extractBooking = (phoneDigits: string): Promise<{ booking: ExtractedBooking | null }> =>
+  apiRequest(`${API_URL}/messages/agent/extract-booking`, {
+    method: 'POST', headers: getHeaders(), body: JSON.stringify({ phone_digits: phoneDigits }),
+  });
+
 /** Esegue davvero la proposta: è l'unico punto in cui l'agente scrive. */
 export const confirmProposal = (id: number): Promise<{ ok: boolean; tool: string; result: any }> =>
   apiRequest(`${API_URL}/messages/agent/proposals/${id}/confirm`, { method: 'POST', headers: getHeaders() });

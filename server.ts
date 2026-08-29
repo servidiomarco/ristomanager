@@ -10,9 +10,10 @@ import { createServer } from 'http';
 import crypto from 'crypto';
 import path from 'path';
 import cors from 'cors';
+import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import QRCode from 'qrcode';
-import pool, { createSchema, queryWithRetry, runMigrations, tenantQuery, runWithTenantContext, runAsPlatform } from './db.js';
+import pool, { createSchema, queryWithRetry, runMigrations, tenantQuery, runWithTenantContext, runAsPlatform, withTenant } from './db.js';
 import { SocketService } from './services/socketService.js';
 import * as bookingTools from './services/bookingTools.js';
 import * as whatsappAgent from './services/whatsappAgent.js';
@@ -20,8 +21,9 @@ import * as tableAssignmentAgent from './services/tableAssignmentAgent.js';
 import * as aiReport from './services/aiReportService.js';
 import { renderPrenota } from './services/prenotaSeo.js';
 import { COST_USD_SQL, UNPRICED_SQL, USD_EUR } from './services/aiPricing.js';
+import { outboxEnqueueInTx, outboxKick, outboxRegister, startOutboxDispatcher } from './services/outboxService.js';
 import { VOICE_CHANNEL, WHATSAPP_CHANNEL, type ToolOutcome } from './services/bookingTools.js';
-import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
+import { TENANT_FEATURES, getTenantFeatures, isFeatureEnabledForTenant, invalidateTenantFeaturesCache, clearTenantFeaturesCache, type TenantFeature } from './services/entitlements.js';
 import { provisionTenant, ProvisioningError } from './services/tenantProvisioning.js';
 import {
     createCheckoutSession,
@@ -51,16 +53,18 @@ import {
     comandaToBillPayload,
     PassepartoutBridgeError,
 } from './services/passepartoutBridge.js';
-import type { PassepartoutComanda } from './services/passepartoutService.js';
+import type { PassepartoutComanda, EsitoChiusuraComanda, PassepartoutArticolo } from './services/passepartoutService.js';
+import { MENU_LANGS, isMenuTranslationConfigured, translateMenuEntries } from './services/menuTranslationService.js';
 import { Shift, PaymentStatus, UserRole } from './types.js';
 import authRoutes from './auth/authRoutes.js';
 import logRoutes from './activityLogs/logRoutes.js';
-import { authenticate, authorize, requirePermission } from './auth/authMiddleware.js';
+import { authenticate, authorize, requirePermission, requireAnyPermission } from './auth/authMiddleware.js';
 import { AuthService } from './auth/authService.js';
 import { RolePermissionService } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
 import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles, sendToPlatformAdmins as pushSendToPlatformAdmins } from './services/pushService.js';
+import { channelsForRole, rolesForChannel, parseThreadKey, channelThreadKey, dmThreadKey, isStaffPresetKey, STAFF_MESSAGE_MAX_LENGTH, STAFF_MAX_MENTIONS, STAFF_MESSAGE_PRESETS, STAFF_MAX_ATTACHMENTS, staffMessagePreview } from './services/staffChat.js';
 import {
     isRevolutConfigured,
     verifyWebhookSignature as verifyRevolutWebhook,
@@ -171,7 +175,8 @@ import {
     type BlacklistSource,
 } from './services/blacklistPolicy.js';
 import { toTitleCase } from './utils/text.js';
-import { getRomeTimePart } from './utils/reservationTime.js';
+import { getRomeDatePart, getRomeTimePart } from './utils/reservationTime.js';
+import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
 import {
     getAvailableSlots,
     getAllOpeningHours,
@@ -219,6 +224,12 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+// Nessuna compressione a monte (il proxy Railway non la fa): la GET
+// /reservations di boot pesava 6.3 MB di JSON nudo su ogni avvio e
+// riconnessione — su mobile era il collo di bottiglia percepito (26/08).
+// Il filtro di default comprime json/testo e lascia stare immagini e
+// stream già compressi (proxy media Twilio incluso).
+app.use(compression());
 // 2 MB body limit accommodates inlined dish photos as base64 data URLs
 // (resized client-side to ~200KB). Default 100KB would reject them.
 // `verify` stashes the raw payload so HMAC-signed webhooks (e.g. ElevenLabs)
@@ -233,7 +244,7 @@ const jsonVerify = (req: any, _res: any, buf: Buffer) => { req.rawBody = buf; };
 const standardJson = express.json({ limit: '2mb', verify: jsonVerify });
 const largeJson = express.json({ limit: '8mb', verify: jsonVerify });
 app.use((req, res, next) => (
-    req.path === '/messages/attachments' || req.path === '/media' ? largeJson(req, res, next) : standardJson(req, res, next)
+    req.path === '/messages/attachments' || req.path === '/media' || req.path === '/staff-chat/attachments' || req.path === '/settings/logo' ? largeJson(req, res, next) : standardJson(req, res, next)
 ));
 
 // Un body oltre il limite fa fallire il parser PRIMA della rotta: senza
@@ -1508,7 +1519,7 @@ app.post('/webhook/t/:tenantToken/elevenlabs/lookup-customer', async (req, res) 
 const elevenLabsParams = (req: express.Request): Record<string, any> => {
     const body: any = req.body || {};
     const p = (body.parameters && typeof body.parameters === 'object') ? body.parameters : body;
-    return {
+    const params: Record<string, any> = {
         ...p,
         conversation_id: body.conversation_id || p.conversation_id,
         // Card #32 — la lingua rilevata da ElevenLabs può arrivare sotto nomi
@@ -1516,6 +1527,17 @@ const elevenLabsParams = (req: express.Request): Record<string, any> => {
         // normalizza e la ignora del tutto se non è nel payload.
         language: p.language ?? p.detected_language ?? p.language_code ?? body.language_code,
     };
+    // Un dynamic variable non sostituito arriva come stringa letterale
+    // ('{{system__caller_id}}'): succede quando il tool su ElevenLabs chiede
+    // il placeholder all'LLM nella descrizione invece di usare il campo
+    // dynamic_variable (Tammaro 2026-08-29: modify falliva con phone
+    // letterale e la prenotazione non veniva mai trovata). Nessun valore
+    // legittimo ha questa forma: lo scartiamo, così il tool vede il campo
+    // come assente e usa i suoi fallback.
+    for (const [k, v] of Object.entries(params)) {
+        if (typeof v === 'string' && /^\s*\{\{[^{}]*\}\}\s*$/.test(v)) delete params[k];
+    }
+    return params;
 };
 
 /** Interruttori del canale telefonico. Restituisce true se si può procedere. */
@@ -1997,10 +2019,28 @@ async function findTableConflicts(
 ): Promise<TableConflict[]> {
     if (!eventDate || !shift || !Array.isArray(tableIds) || tableIds.length === 0) return [];
 
+    // Tavoli uniti: un tavolo occupato occupa l'intera unione. I tavoli
+    // richiesti vengono espansi al loro gruppo di unione per la stessa
+    // data+turno, così il conflitto emerge anche quando la prenotazione
+    // esistente sta su un ALTRO tavolo dell'unione (audit 26/08: dalla
+    // timeline arrivi si poteva sedere un secondo gruppo sul tavolo unito,
+    // perché qui si guardava solo l'id esatto richiesto).
+    let effectiveTableIds = [...new Set(tableIds.map(Number))].filter(Number.isFinite);
+    const mergeRows = await queryWithRetry(
+        `SELECT primary_id, merged_ids FROM table_merges
+         WHERE tenant_id = $1 AND date = $2::date AND shift = $3
+           AND (primary_id = ANY($4::int[]) OR merged_ids && $4::int[])`,
+        [tenantId, eventDate, shift, effectiveTableIds]
+    );
+    for (const row of mergeRows.rows) {
+        effectiveTableIds.push(Number(row.primary_id), ...((row.merged_ids || []).map(Number)));
+    }
+    effectiveTableIds = [...new Set(effectiveTableIds)];
+
     const conflicts: TableConflict[] = [];
 
     const useWindow = options?.reservationStart != null && options?.reservationDurationMin != null;
-    const resParams: any[] = [tableIds, eventDate, tenantId];
+    const resParams: any[] = [effectiveTableIds, eventDate, tenantId];
     let resWhere = `r.table_id = ANY($1::int[])
                     AND r.tenant_id = $3
                     AND DATE(r.reservation_time) = $2::date
@@ -2039,7 +2079,7 @@ async function findTableConflicts(
         });
     }
 
-    const banParams: any[] = [eventDate, shift, tableIds, tenantId];
+    const banParams: any[] = [eventDate, shift, effectiveTableIds, tenantId];
     let banWhere = `b.event_date = $1::date AND b.shift = $2 AND b.table_ids && $3::int[] AND b.tenant_id = $4`;
     if (options?.excludeBanquetId) {
         banParams.push(options.excludeBanquetId);
@@ -2050,7 +2090,7 @@ async function findTableConflicts(
         banParams
     );
     for (const row of banResult.rows) {
-        const overlap: number[] = (row.table_ids || []).filter((tid: number) => tableIds.includes(tid));
+        const overlap: number[] = (row.table_ids || []).filter((tid: number) => effectiveTableIds.includes(tid));
         if (overlap.length === 0) continue;
         const tableNames = await queryWithRetry(
             'SELECT id, name FROM tables WHERE id = ANY($1::int[]) AND tenant_id = $2',
@@ -2081,6 +2121,26 @@ const buildConflictMessage = (conflicts: TableConflict[]): string => {
 // Reservations - require authentication
 app.get('/reservations', authenticate, async (req, res) => {
     try {
+        // Finestra opzionale (?from=YYYY-MM-DD&to=YYYY-MM-DD, estremi inclusi,
+        // giorni Europe/Rome). Il boot dell'app carica prima la finestra
+        // recente e poi lo storico in background (caricamento in due tempi,
+        // 26/08): senza parametri la risposta resta l'intero storico, come
+        // hanno sempre visto client vecchi e test.
+        const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+        const from = DATE_RE.test(String(req.query.from ?? '')) ? String(req.query.from) : null;
+        const to = DATE_RE.test(String(req.query.to ?? '')) ? String(req.query.to) : null;
+        const params: any[] = [req.tenantId!];
+        let windowSql = '';
+        if (from) {
+            params.push(from);
+            // Mezzanotte di Roma convertita a istante UTC: il confronto resta
+            // sargabile sulla colonna, niente AT TIME ZONE sul lato indice.
+            windowSql += ` AND r.reservation_time >= ($${params.length}::date::timestamp AT TIME ZONE 'Europe/Rome')`;
+        }
+        if (to) {
+            params.push(to);
+            windowSql += ` AND r.reservation_time < (($${params.length}::date + 1)::timestamp AT TIME ZONE 'Europe/Rome')`;
+        }
         // Enrich each reservation with the matching rubrica entry, joined on the
         // digit-only phone so "+39 333 1234567" and "3331234567" align. Used by
         // the booking card to render VIP/preferred-table chips without an extra
@@ -2129,9 +2189,9 @@ app.get('/reservations', authenticate, async (req, res) => {
                 ORDER BY pr.created_at DESC
                 LIMIT 1
             ) lp ON true
-            WHERE r.tenant_id = $1
+            WHERE r.tenant_id = $1${windowSql}
             ORDER BY r.reservation_time DESC
-        `, [req.tenantId!]);
+        `, params);
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -2753,7 +2813,7 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
         await client.query('BEGIN');
 
         const rows = await client.query(
-            `SELECT id, table_id, customer_name FROM reservations WHERE id = ANY($1::int[]) AND tenant_id = $2 FOR UPDATE`,
+            `SELECT id, table_id, customer_name, reservation_time, shift, duration_minutes FROM reservations WHERE id = ANY($1::int[]) AND tenant_id = $2 FOR UPDATE`,
             [[aId, bId], req.tenantId!]
         );
         if (rows.rows.length !== 2) {
@@ -2765,6 +2825,27 @@ app.post('/reservations/:id/swap-table', authenticate, requirePermission('reserv
         if (!a?.table_id || !b?.table_id) {
             await client.query('ROLLBACK');
             return res.status(400).json({ error: 'Entrambe le prenotazioni devono avere un tavolo assegnato per essere scambiate' });
+        }
+
+        // Lo scambio in sé non può creare conflitti tra a e b, ma il tavolo di
+        // destinazione può ospitare un TERZO doppio turno: il 25/08 uno swap ha
+        // spostato una prenotazione delle 22:00 su un tavolo dove un altro
+        // ospite aveva già le 22:00 (tavolo 7, indagine doppio booking). Quindi
+        // ogni prenotazione va verificata contro la finestra oraria del suo
+        // nuovo tavolo, ignorando solo i due partecipanti allo scambio.
+        for (const [resv, newTableId] of [[a, b.table_id], [b, a.table_id]] as Array<[any, number]>) {
+            const eventDate = new Date(resv.reservation_time).toISOString().substring(0, 10);
+            const conflicts = (await findTableConflicts(req.tenantId!, eventDate, resv.shift, [Number(newTableId)], {
+                reservationStart: resv.reservation_time,
+                reservationDurationMin: resv.duration_minutes ?? (resv.shift === 'LUNCH' ? 90 : 120),
+            })).filter(c => !(c.source === 'reservation' && (c.source_id === aId || c.source_id === bId)));
+            if (conflicts.length > 0) {
+                await client.query('ROLLBACK');
+                return res.status(409).json({
+                    error: `Scambio non possibile per ${resv.customer_name}: ${buildConflictMessage(conflicts)}`,
+                    conflicts,
+                });
+            }
         }
 
         await client.query(
@@ -3308,6 +3389,405 @@ app.get('/passepartout/tavolo/:nome', authenticate, requirePermission('payments:
     }
 });
 
+// --- Chiusura comanda in cassa al saldo del conto CRM ------------------------
+// Quando un conto nato da una comanda Passepartout (external_ref
+// "pp:comanda:<id>") viene CHIUSO saldato per intero, il gestionale chiude il
+// tavolo ed emette LUI il documento fiscale (RT di cassa) — per questi conti
+// l'emissione Openapi del CRM viene saltata, altrimenti due documenti per lo
+// stesso incasso. Config da env come il resto dell'integrazione:
+// - PASSEPARTOUT_TIPO_PAGAMENTO: tipo pagamento di cassa sotto cui registrare
+//   l'incasso (un tipo DEDICATO, es. "ESTERNO" — mai "Contanti", che
+//   conteggerebbe due volte l'incasso nei report di cassa). Vuoto = chiusura
+//   automatica spenta: il tavolo si chiude in cassa a mano come prima.
+// - PASSEPARTOUT_TIPO_DOCUMENTO: default "Scontrino".
+
+function passepartoutComandaIdFromRef(externalRef: unknown): number | null {
+    const m = /^pp:comanda:(\d+)$/.exec(String(externalRef ?? ''));
+    return m ? Number(m[1]) : null;
+}
+
+function getPassepartoutChiusuraConfig(): { tipoPagamento: string; tipoDocumento: string } | null {
+    const tipoPagamento = (process.env.PASSEPARTOUT_TIPO_PAGAMENTO || '').trim();
+    if (!tipoPagamento) return null;
+    return {
+        tipoPagamento,
+        tipoDocumento: (process.env.PASSEPARTOUT_TIPO_DOCUMENTO || 'Scontrino').trim(),
+    };
+}
+
+async function chiudiComandaPassepartoutPerBill(
+    tenantId: number,
+    billId: number,
+    idComanda: number,
+    config: { tipoPagamento: string; tipoDocumento: string },
+    /** 'Proforma' = la chiusura di routine della cassa senza scontrino: il
+     *  pagamento si registra comunque (ESTERNO), cambia solo il documento.
+     *  Scelta del cameriere nel dialog di chiusura, non un'euristica. */
+    documento?: 'Scontrino' | 'Proforma',
+): Promise<EsitoChiusuraComanda> {
+    const proforma = documento === 'Proforma';
+    // Timeout largo: la sequenza sull'agente può includere invio in
+    // produzione, attesa e saldo del sospeso (vedi chiudiComandaCompleta).
+    const esito = await callPassepartout<EsitoChiusuraComanda>('chiudi', {
+        idComanda,
+        tipoPagamento: config.tipoPagamento,
+        tipoDocumento: proforma ? 'Proforma' : config.tipoDocumento,
+        proforma,
+    }, 60_000);
+    try { socketService?.broadcastToAll(tenantId, 'passepartout:chiusura', { bill_id: billId, id_comanda: idComanda, esito }); } catch (_) {}
+    if (esito.avviso) console.warn('[passepartout] chiusura comanda', idComanda, 'con avviso:', esito.avviso);
+    // Il documento l'ha emesso la cassa: registrarlo in fiscal_documents dà
+    // alla card Scontrino lo stesso ciclo di vita dei documenti Openapi
+    // (badge, numero, niente bottone Emetti). Per lo scontrino provider_ref
+    // è il numero fiscale dell'RT; la proforma non ne ha (doc_type PROFORMA,
+    // provider_ref NULL). L'indice one-live-per-bill assorbe i replay del
+    // retry. La registrazione non deve mai far fallire la chiusura.
+    if (esito.numeroScontrino || proforma) {
+        try {
+            const billRs = await queryWithRetry(
+                `SELECT total_cents FROM table_bills WHERE id = $1 AND tenant_id = $2`,
+                [billId, tenantId]
+            );
+            if (billRs.rows[0]) {
+                const ins = await queryWithRetry(
+                    // Arbitro sull'indice a livello conto (predicato con
+                    // split IS NULL dalla migration fattura-elettronica).
+                    `INSERT INTO fiscal_documents
+                        (tenant_id, table_bill_id, doc_type, provider, status, provider_ref, response, total_cents, confirmed_at)
+                     VALUES ($1, $2, $6, 'passepartout', 'CONFIRMED', $3, $4::jsonb, $5, CURRENT_TIMESTAMP)
+                     ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') AND table_bill_split_id IS NULL DO NOTHING
+                     RETURNING ${FISCAL_DOC_COLUMNS}`,
+                    [tenantId, billId, esito.numeroScontrino || null, JSON.stringify(esito),
+                     billRs.rows[0].total_cents, proforma ? 'PROFORMA' : 'RECEIPT']
+                );
+                if (ins.rows[0]) {
+                    try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: billId, doc: ins.rows[0] }); } catch (_) {}
+                }
+            }
+        } catch (err: any) {
+            console.error('[passepartout] registrazione documento fallita per conto', billId, err?.message);
+        }
+    }
+    return esito;
+}
+
+// Ritenta la chiusura in cassa di un conto Passepartout già CLOSED (agente
+// offline al momento del saldo, tipo pagamento non ancora configurato, ecc.).
+// Speculare a POST /bills/:id/fiscal-docs per i conti nativi CRM.
+app.post('/bills/:id/passepartout-close', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        const rs = await queryWithRetry(
+            `SELECT id, status, external_ref FROM table_bills WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        const bill = rs.rows[0];
+        if (!bill) return res.status(404).json({ error: 'Bill not found' });
+        const idComanda = passepartoutComandaIdFromRef(bill.external_ref);
+        if (idComanda == null) {
+            return res.status(400).json({ error: 'not_passepartout', message: 'Il conto non nasce da una comanda Passepartout' });
+        }
+        if (bill.status !== 'CLOSED') {
+            return res.status(409).json({ error: 'bill_not_closed', message: 'Il conto va prima chiuso saldato per intero' });
+        }
+        const config = getPassepartoutChiusuraConfig();
+        if (!config) {
+            return res.status(409).json({ error: 'passepartout_non_configurato', message: 'PASSEPARTOUT_TIPO_PAGAMENTO non configurato sul server' });
+        }
+        const documento = req.body?.documento === 'Proforma' ? 'Proforma' as const : undefined;
+        const esito = await chiudiComandaPassepartoutPerBill(req.tenantId!, id, idComanda, config, documento);
+        res.json({ id_comanda: idComanda, esito });
+    } catch (err: any) {
+        if (sendPassepartoutError(res, err)) return;
+        console.error('POST /bills/:id/passepartout-close error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// --- Import del menu dalla cassa ---------------------------------------------
+// Sincronizza l'anagrafica `dishes` col catalogo articoli del gestionale:
+// upsert per external_ref "pp:articolo:<id>", spegnimento di ciò che non è
+// più in cassa. Il sync è SEMPRE completo (non delta): solo la lista intera
+// rivela gli articoli spariti. La cassa possiede identità e prezzo (nome,
+// categoria, prezzo, IVA, attivo); i campi che la cassa non ha — descrizione,
+// allergeni, foto, stazione, tempi — restano del CRM e l'update non li tocca.
+// Gated dall'entitlement 'passepartout' (oggi solo Vecchio Frantoio): gli
+// altri tenant gestiscono il menu a mano e questa route per loro è un 403.
+app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full'), requireFeature('passepartout'), async (req, res) => {
+    try {
+        // Timeout largo: il gestionale serializza ~14MB di catalogo (immagini
+        // incluse) prima che l'agente lo riduca agli ~85KB che viaggiano qui.
+        const articoli = await callPassepartout<PassepartoutArticolo[]>('articoli', {}, 150_000);
+        // Solo le voci di menu vere: le varianti di battitura, il coperto e
+        // gli acconti non sono piatti.
+        const IMPORTABILI = new Set(['Semplice', 'Generico']);
+        const validi = articoli.filter(a => a && Number.isFinite(Number(a.idGestionale))
+            && IMPORTABILI.has(String(a.tipo)) && String(a.descrizione ?? '').trim() !== '');
+
+        // Varianti: nel gestionale sono articoli (tipo Variante) referenziati
+        // per Codice dagli articoli veri e dalle categorie. Qui diventano
+        // modifier_groups sincronizzati: un gruppo per SET distinto di
+        // varianti (external_ref pp:varianti:<codici ordinati>), così
+        // "Ghiaccio" da solo è UN gruppo condiviso da tutti gli amari, non
+        // cinquanta copie. I gruppi creati a mano (external_ref NULL) non
+        // vengono mai toccati.
+        const varByCode = new Map<string, { nome: string; delta: number }>();
+        for (const a of articoli) {
+            if ((a.tipo === 'Variante' || a.tipo === 'VarianteModificatore') && a.attivo
+                && a.codice && String(a.descrizione ?? '').trim() !== '') {
+                varByCode.set(String(a.codice).trim().toLowerCase(), {
+                    nome: String(a.descrizione).trim(),
+                    delta: Number.isFinite(Number(a.prezzo)) ? Math.round(Number(a.prezzo) * 100) : 0,
+                });
+            }
+        }
+
+        const esito = await withTenant(req.tenantId!, async (client) => {
+            let creati = 0, aggiornati = 0;
+            const refs: string[] = [];
+            const groupCache = new Map<string, number>();
+            for (const a of validi) {
+                const ref = `pp:articolo:${Number(a.idGestionale)}`;
+                refs.push(ref);
+                const iva = a.ivaPercento != null && Number.isInteger(a.ivaPercento)
+                    && a.ivaPercento >= 0 && a.ivaPercento <= 100 ? a.ivaPercento : null;
+                const up = await client.query(
+                    `INSERT INTO dishes (tenant_id, name, price, category, allergens, vat_rate, external_ref, is_active)
+                     VALUES ($1, $2, $3, $4, '{}', COALESCE($5, 10), $6, $7)
+                     ON CONFLICT (tenant_id, external_ref) WHERE external_ref IS NOT NULL
+                     DO UPDATE SET name = EXCLUDED.name, price = EXCLUDED.price,
+                                   category = EXCLUDED.category,
+                                   vat_rate = COALESCE($5, dishes.vat_rate),
+                                   is_active = EXCLUDED.is_active
+                     RETURNING id, (xmax = 0) AS inserted`,
+                    [req.tenantId!, String(a.descrizione).trim(),
+                     Number.isFinite(Number(a.prezzo)) ? Number(a.prezzo) : 0,
+                     String(a.categoria ?? 'Senza categoria').trim() || 'Senza categoria',
+                     iva, ref, a.attivo === true]
+                );
+                if (up.rows[0]?.inserted) creati++; else aggiornati++;
+                const dishId: number = up.rows[0].id;
+
+                // Set effettivo: varianti dell'articolo + della sua categoria.
+                const codes = [...new Set(
+                    [...(a.varianti ?? []), ...(a.categoriaVarianti ?? [])]
+                        .map((c: unknown) => String(c).trim().toLowerCase())
+                )].filter((c) => varByCode.has(c)).sort();
+
+                let groupId: number | null = null;
+                if (codes.length > 0) {
+                    const setRef = `pp:varianti:${codes.join('|')}`;
+                    let cached = groupCache.get(setRef);
+                    if (cached == null) {
+                        const nomi = codes.map((c) => varByCode.get(c)!.nome);
+                        const label = `Varianti (${nomi.slice(0, 3).join(', ')}${nomi.length > 3 ? ', …' : ''})`.slice(0, 100);
+                        const gr = await client.query(
+                            `INSERT INTO modifier_groups (tenant_id, name, min_select, max_select, external_ref)
+                             VALUES ($1, $2, 0, $3, $4)
+                             ON CONFLICT (tenant_id, external_ref) WHERE external_ref IS NOT NULL
+                             DO UPDATE SET name = EXCLUDED.name, max_select = EXCLUDED.max_select
+                             RETURNING id`,
+                            [req.tenantId!, label, codes.length, setRef]
+                        );
+                        cached = gr.rows[0].id as number;
+                        for (const [i, c] of codes.entries()) {
+                            const v = varByCode.get(c)!;
+                            // Cast espliciti: $3 compare sia nella SELECT sia
+                            // dentro LOWER() e Postgres altrimenti non deduce
+                            // il tipo ("inconsistent types deduced").
+                            await client.query(
+                                `INSERT INTO modifiers (tenant_id, group_id, name, price_delta_cents, is_active, sort_order)
+                                 SELECT $1::bigint, $2::int, $3::varchar, $4::int, true, $5::int
+                                 WHERE NOT EXISTS (SELECT 1 FROM modifiers WHERE group_id = $2::int AND LOWER(name) = LOWER($3::varchar))`,
+                                [req.tenantId!, cached, v.nome, v.delta, i]
+                            );
+                            await client.query(
+                                `UPDATE modifiers SET price_delta_cents = $3, is_active = true
+                                 WHERE group_id = $2 AND LOWER(name) = LOWER($1)`,
+                                [v.nome, cached, v.delta]
+                            );
+                        }
+                        groupCache.set(setRef, cached);
+                    }
+                    groupId = cached;
+                    await client.query(
+                        `INSERT INTO dish_modifier_groups (tenant_id, dish_id, group_id)
+                         VALUES ($1, $2, $3) ON CONFLICT (dish_id, group_id) DO NOTHING`,
+                        [req.tenantId!, dishId, groupId]
+                    );
+                }
+                // Via i legami pp che non corrispondono più al set corrente
+                // (tutti, se l'articolo non ha più varianti).
+                await client.query(
+                    `DELETE FROM dish_modifier_groups l USING modifier_groups g
+                     WHERE l.dish_id = $1 AND l.group_id = g.id
+                       AND g.external_ref LIKE 'pp:varianti:%' AND g.id IS DISTINCT FROM $2`,
+                    [dishId, groupId]
+                );
+            }
+            const off = await client.query(
+                `UPDATE dishes SET is_active = false
+                 WHERE tenant_id = $1 AND external_ref LIKE 'pp:articolo:%'
+                   AND is_active AND NOT (external_ref = ANY($2::text[]))`,
+                [req.tenantId!, refs]
+            );
+            // Gruppi pp rimasti senza piatti: si eliminano (CASCADE sui membri).
+            await client.query(
+                `DELETE FROM modifier_groups g
+                 WHERE g.tenant_id = $1 AND g.external_ref LIKE 'pp:varianti:%'
+                   AND NOT EXISTS (SELECT 1 FROM dish_modifier_groups l WHERE l.group_id = g.id)`,
+                [req.tenantId!]
+            );
+            return { creati, aggiornati, disattivati: off.rowCount ?? 0, gruppi_varianti: groupCache.size };
+        });
+
+        // Un evento solo, non centinaia di dish:updated: i client ricaricano
+        // l'anagrafica intera.
+        try { socketService?.broadcastToAll(req.tenantId!, 'dish:synced', esito); } catch (_) {}
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.DISH, undefined,
+                `Menu importato dalla cassa: ${esito.creati} nuovi, ${esito.aggiornati} aggiornati, ${esito.disattivati} disattivati`
+            ).catch(() => {});
+        }
+        res.json({ totale_cassa: articoli.length, importabili: validi.length, ...esito });
+    } catch (err: any) {
+        if (sendPassepartoutError(res, err)) return;
+        console.error('POST /menu/import/passepartout error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// --- Menu digitale per gli ospiti --------------------------------------------
+// Pagina pubblica multilingua servita dal backend (come /prenota): QR al
+// tavolo → /menu → fetch di /public/menu. Il testo tradotto vive nel CRM:
+// dishes.translations per i piatti, un blob in app_settings per le categorie
+// (che sono stringhe libere, non righe). Acceso dal flag operativo
+// digital_menu_enabled (default off), gestito dal QR modal della pagina Menu.
+
+const MENU_CAT_TRANSLATIONS_KEY = 'menu_category_translations';
+
+async function getMenuCategoryTranslations(tenantId: number): Promise<Record<string, Record<string, string>>> {
+    const rs = await queryWithRetry(
+        `SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2`,
+        [tenantId, MENU_CAT_TRANSLATIONS_KEY]
+    );
+    try {
+        return rs.rows[0]?.text_value ? JSON.parse(rs.rows[0].text_value) : {};
+    } catch {
+        return {};
+    }
+}
+
+async function saveMenuCategoryTranslations(tenantId: number, map: Record<string, Record<string, string>>): Promise<void> {
+    await queryWithRetry(
+        `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+         VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+         ON CONFLICT (tenant_id, key) DO UPDATE
+           SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+        [tenantId, MENU_CAT_TRANSLATIONS_KEY, JSON.stringify(map)]
+    );
+}
+
+// Traduce in batch le voci mancanti (piatti attivi + categorie) nelle lingue
+// del menu. Idempotente: ritradurre non tocca ciò che è già tradotto — per
+// rifare una traduzione si svuota translations dal DB (caso raro, niente UI).
+app.post('/menu/translate', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        if (!isMenuTranslationConfigured()) {
+            return res.status(503).json({ error: 'not_configured', message: 'ANTHROPIC_API_KEY non configurata sul backend' });
+        }
+        const richieste = Array.isArray(req.body?.langs)
+            ? MENU_LANGS.filter((l) => req.body.langs.includes(l))
+            : [...MENU_LANGS];
+        const dishesRs = await queryWithRetry(
+            `SELECT id, name, description, translations FROM dishes
+             WHERE tenant_id = $1 AND is_active ORDER BY id`,
+            [req.tenantId!]
+        );
+        const catRs = await queryWithRetry(
+            `SELECT DISTINCT category FROM dishes
+             WHERE tenant_id = $1 AND is_active AND COALESCE(category, '') <> ''`,
+            [req.tenantId!]
+        );
+        const catTrad = await getMenuCategoryTranslations(req.tenantId!);
+        let tradotte = 0;
+        let tokens = 0;
+        for (const lang of richieste) {
+            const daFare = dishesRs.rows
+                .filter((d: any) => !d.translations?.[lang]?.name)
+                .map((d: any) => ({ id: `d${d.id}`, name: d.name as string, description: d.description as string | null }));
+            for (const c of catRs.rows) {
+                if (!catTrad[c.category]?.[lang]) daFare.push({ id: `c:${c.category}`, name: c.category, description: null });
+            }
+            if (daFare.length === 0) continue;
+            const mappa = await translateMenuEntries(daFare, lang, (t) => { tokens += t; });
+            for (const [id, t] of mappa) {
+                if (id.startsWith('d')) {
+                    const dishId = Number(id.slice(1));
+                    if (!Number.isFinite(dishId)) continue;
+                    await queryWithRetry(
+                        `UPDATE dishes
+                         SET translations = COALESCE(translations, '{}'::jsonb) || jsonb_build_object($3::text, $4::jsonb)
+                         WHERE id = $1 AND tenant_id = $2`,
+                        [dishId, req.tenantId!, lang, JSON.stringify(t)]
+                    );
+                    tradotte++;
+                } else if (id.startsWith('c:')) {
+                    const cat = id.slice(2);
+                    catTrad[cat] = { ...(catTrad[cat] ?? {}), [lang]: t.name };
+                    tradotte++;
+                }
+            }
+        }
+        await saveMenuCategoryTranslations(req.tenantId!, catTrad);
+        try { socketService?.broadcastToAll(req.tenantId!, 'dish:synced', { tradotte }); } catch (_) {}
+        res.json({ tradotte, lingue: richieste, tokens });
+    } catch (err: any) {
+        console.error('POST /menu/translate error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Dati del menu per la pagina pubblica: piatti attivi con traduzioni e
+// categorie tradotte. Niente id interni, niente campi gestionali.
+const handlePublicMenu = async (tenantId: number, _req: express.Request, res: express.Response) => {
+    if (!(await getFeatureFlag(tenantId, 'digital_menu_enabled', false))) {
+        return res.status(503).json({ error: 'menu_disabled' });
+    }
+    const dishesRs = await queryWithRetry(
+        `SELECT name, description, price, category, allergens, photo_url, translations
+         FROM dishes WHERE tenant_id = $1 AND is_active
+         ORDER BY category, name`,
+        [tenantId]
+    );
+    res.json({
+        restaurant: businessIdentity(tenantId).name,
+        lingue: ['it', ...MENU_LANGS],
+        categorie: await getMenuCategoryTranslations(tenantId),
+        piatti: dishesRs.rows.map((d: any) => ({
+            name: d.name,
+            description: d.description || null,
+            price: Number(d.price),
+            category: d.category || 'Altro',
+            allergens: Array.isArray(d.allergens) ? d.allergens : [],
+            photo_url: d.photo_url || null,
+            translations: d.translations || null,
+        })),
+    });
+};
+app.get(['/public/menu', '/public/:slug/menu'], withPublicTenant(handlePublicMenu));
+
+const serveMenuDigitale = async (_tenantId: number, _req: express.Request, res: express.Response) => {
+    res.sendFile(path.join(process.cwd(), 'public', 'menu.html'));
+};
+// La variante con slug NON è /menu/:slug: oscurerebbe GET /menu/catalogue
+// (il catalogo dell'orderpad). /m/<slug> è anche più corto dentro un QR.
+app.get('/menu', withPublicTenant(serveMenuDigitale));
+app.get('/m/:slug', withPublicTenant(serveMenuDigitale));
+
 // Porta gli acconti/caparre già PAGATI di una prenotazione dentro il suo conto
 // come quote PAID di kind='deposit'. Così l'importo abbassa il residuo (e la
 // barra di avanzamento, il SETTLED, la chiusura, il preconto e il self-pay) SENZA
@@ -3367,7 +3847,10 @@ async function creditPaidDepositsToBill(tenantId: number, billId: number): Promi
                  WHERE table_bill_id = $1 AND status IN ('CLAIMED', 'PAID')`,
                 [billId]
             );
-            const capacity = bill.total_cents - capRs.rows[0].live;
+            // Anche gli incassi staff occupano capienza: un conto già pagato
+            // in contanti non assorbe l'acconto (che resta da rimborsare).
+            const staffPaid = await staffPaidCentsForBill(billId, client);
+            const capacity = bill.total_cents - capRs.rows[0].live - staffPaid;
             const credit = Math.min(Number(dep.amount_cents), Math.max(0, capacity));
             if (credit <= 0) continue; // conto già coperto: l'acconto resta eccedenza da rimborsare
             const ins = await client.query(
@@ -3381,11 +3864,14 @@ async function creditPaidDepositsToBill(tenantId: number, billId: number): Promi
             if (ins.rowCount) created.push(ins.rows[0]);
         }
 
-        // Se gli acconti da soli coprono il totale, il conto è già saldato.
+        // Se acconti + incassi staff coprono il totale, il conto è già saldato.
         const settledRs = await client.query(
             `UPDATE table_bills SET status = 'SETTLED'
              WHERE id = $1 AND status IN ('OPEN', 'LOCKED')
-               AND total_cents = (SELECT COALESCE(SUM(amount_cents), 0) FROM table_bill_splits WHERE table_bill_id = $1 AND status = 'PAID')
+               AND total_cents <= (
+                     (SELECT COALESCE(SUM(amount_cents), 0) FROM table_bill_splits WHERE table_bill_id = $1 AND status = 'PAID')
+                   + (SELECT COALESCE(SUM(amount_cents), 0) FROM table_bill_payments WHERE table_bill_id = $1 AND table_bill_split_id IS NULL AND voided_at IS NULL)
+               )
              RETURNING id`,
             [billId]
         );
@@ -3428,6 +3914,18 @@ async function depositPaidCentsForReservation(tenantId: number, reservationId: n
     return r.rows[0].s;
 }
 
+// Somma degli incassi staff attivi sul conto: le righe del libro cassa senza
+// specchio quota (table_bill_split_id NULL) e non stornate. Pesano sul residuo
+// accanto alle quote CLAIMED/PAID — le righe LINK_ONLINE specchiano quote già
+// contate e qui restano fuori per non raddoppiare l'incasso.
+async function staffPaidCentsForBill(billId: number, client?: any): Promise<number> {
+    const sql = `SELECT COALESCE(SUM(amount_cents), 0)::int AS s
+                 FROM table_bill_payments
+                 WHERE table_bill_id = $1 AND table_bill_split_id IS NULL AND voided_at IS NULL`;
+    const r = client ? await client.query(sql, [billId]) : await queryWithRetry(sql, [billId]);
+    return r.rows[0].s;
+}
+
 async function loadBillView(tenantId: number, billId: number): Promise<any | null> {
     const billResult = await queryWithRetry(
         `SELECT id, reservation_id, table_id, total_cents, covers, currency,
@@ -3447,6 +3945,28 @@ async function loadBillView(tenantId: number, billId: number): Promise<any | nul
          ORDER BY claimed_at ASC`,
         [billId]
     );
+    // Libro cassa completo (specchi e storni inclusi): la UI mostra i
+    // movimenti; nei totali gli specchi e gli storni non contano.
+    const paymentsResult = await queryWithRetry(
+        `SELECT id, table_bill_id, method, amount_cents, table_bill_split_id,
+                meta, recorded_by_user_id, recorded_at,
+                voided_at, voided_by_user_id, void_reason
+         FROM table_bill_payments WHERE table_bill_id = $1
+         ORDER BY recorded_at ASC`,
+        [billId]
+    );
+    const staff_paid_cents = paymentsResult.rows.reduce(
+        (n: number, p: any) => n + (p.table_bill_split_id == null && p.voided_at == null ? p.amount_cents : 0), 0
+    );
+    // Documenti fiscali del conto (senza request/response: pesano e alla UI
+    // servono stato, riferimento ed eventuale errore).
+    const fiscalResult = await queryWithRetry(
+        `SELECT id, table_bill_id, doc_type, provider, status, provider_ref, error,
+                total_cents, attempts, created_at, confirmed_at, voided_at
+         FROM fiscal_documents WHERE table_bill_id = $1
+         ORDER BY created_at ASC`,
+        [billId]
+    );
     const totals = splitsResult.rows.reduce(
         (acc, s) => {
             if (s.status === 'PAID') {
@@ -3458,7 +3978,7 @@ async function loadBillView(tenantId: number, billId: number): Promise<any | nul
         },
         { paid_cents: 0, claimed_cents: 0, deposit_credit_cents: 0 }
     );
-    const residual_cents = Math.max(0, bill.total_cents - totals.paid_cents - totals.claimed_cents);
+    const residual_cents = Math.max(0, bill.total_cents - totals.paid_cents - totals.claimed_cents - staff_paid_cents);
     // Acconto pieno versato e quota non assorbita dal conto (da rimborsare al
     // cliente quando la caparra supera il totale).
     const deposit_paid_cents = await depositPaidCentsForReservation(tenantId, bill.reservation_id);
@@ -3466,12 +3986,18 @@ async function loadBillView(tenantId: number, billId: number): Promise<any | nul
     return {
         bill,
         splits: splitsResult.rows,
+        payments: paymentsResult.rows,
+        staff_paid_cents,
         paid_cents: totals.paid_cents,
         claimed_cents: totals.claimed_cents,
         deposit_credit_cents: totals.deposit_credit_cents,
         deposit_paid_cents,
         refund_due_cents,
         residual_cents,
+        // Vuoto per i conti aperti a mano (niente righe): la UI non mostra
+        // la sezione IVA finché non c'è un dettaglio da cui derivarla.
+        vat_breakdown: vatBreakdownFromItems(bill.items, bill.total_cents),
+        fiscal_documents: fiscalResult.rows,
     };
 }
 
@@ -3496,6 +4022,14 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid reservation id' });
 
+        const resRow = await queryWithRetry(
+            // Scopata sul tenant: un reservation_id altrui cade qui nel 404
+            // prima di poter aprire un conto sul tavolo di un altro ristorante.
+            'SELECT id, guests, table_id, reservation_time, shift FROM reservations WHERE id = $1 AND tenant_id = $2',
+            [id, req.tenantId!]
+        );
+        if (resRow.rows.length === 0) return res.status(404).json({ error: 'Reservation not found' });
+
         // Sorgente Passepartout: righe e totale arrivano dalla comanda del
         // gestionale, non dal cameriere. total_cents nel body viene ignorato.
         const fromPassepartout = req.body?.source === 'passepartout';
@@ -3503,9 +4037,31 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
         if (fromPassepartout) {
             const tavolo = String(req.body?.pp_tavolo || '').trim();
             if (!tavolo) return res.status(400).json({ error: 'pp_tavolo mancante per source=passepartout' });
-            const found = await findComandaTavolo(tavolo);
+            let found = await findComandaTavolo(tavolo);
+            // Tavoli uniti: in sala la comanda può essere stata aperta su uno
+            // qualsiasi dei tavoli dell'unione (25/08: 45+47 uniti, comanda
+            // battuta sul 47, prenotazione sul 45 → import a vuoto). Se il
+            // tavolo della prenotazione non ha comanda, si provano gli altri
+            // tavoli della sua unione per la stessa data e turno.
+            if (!found && resRow.rows[0].table_id != null) {
+                const mergeDate = getRomeDatePart(resRow.rows[0].reservation_time);
+                const siblings = await queryWithRetry(
+                    `SELECT t.name
+                       FROM table_merges m
+                       JOIN tables t ON t.tenant_id = m.tenant_id
+                        AND t.id = ANY(array_append(m.merged_ids, m.primary_id))
+                      WHERE m.tenant_id = $1 AND m.date = $2::date AND m.shift = $3
+                        AND (m.primary_id = $4 OR $4 = ANY(m.merged_ids))
+                        AND t.id <> $4`,
+                    [req.tenantId!, mergeDate, resRow.rows[0].shift, resRow.rows[0].table_id]
+                );
+                for (const s of siblings.rows) {
+                    found = await findComandaTavolo(String(s.name));
+                    if (found) break;
+                }
+            }
             if (!found) {
-                return res.status(404).json({ error: 'no_comanda', message: `Nessuna comanda attiva sul tavolo "${tavolo}" nel gestionale. Il nome deve combaciare con quello di Passepartout (punto e spazi compresi).` });
+                return res.status(404).json({ error: 'no_comanda', message: `Nessuna comanda attiva sul tavolo "${tavolo}" nel gestionale (provati anche gli eventuali tavoli uniti). Il nome deve combaciare con quello di Passepartout (punto e spazi compresi).` });
             }
             ppPayload = comandaToBillPayload(found.comanda);
             if (ppPayload.total_cents <= 0) {
@@ -3518,14 +4074,6 @@ app.post('/reservations/:id/bill', authenticate, requirePermission('payments:ful
             return res.status(400).json({ error: 'total_cents must be a positive integer' });
         }
         const totalRounded = Math.round(totalCents);
-
-        const resRow = await queryWithRetry(
-            // Scopata sul tenant: un reservation_id altrui cade qui nel 404
-            // prima di poter aprire un conto sul tavolo di un altro ristorante.
-            'SELECT id, guests, table_id FROM reservations WHERE id = $1 AND tenant_id = $2',
-            [id, req.tenantId!]
-        );
-        if (resRow.rows.length === 0) return res.status(404).json({ error: 'Reservation not found' });
 
         // covers: usa quello passato dal cameriere se valido, poi i coperti
         // della comanda Passepartout, poi i guests della prenotazione. Serve
@@ -3697,27 +4245,56 @@ app.post('/reservations/:id/bill/notify', authenticate, requirePermission('payme
 // il payload della POST /chiudi-conto verso Passepartout). Il token
 // pubblico viene invalidato subito (SET NULL) così un QR fotografato
 // prima non funziona più.
+// Metodi registrabili a mano dallo staff. LINK_ONLINE è escluso: quelle
+// righe le scrive solo il webhook come specchio di una quota PAID.
+const STAFF_BILL_PAYMENT_METHODS = ['CONTANTI', 'POS_FISICO', 'SATISPAY', 'BUONO_PASTO', 'GIFT_CARD', 'SOSPESO', 'OMAGGIO'] as const;
+
+function parseStaffBillPayment(raw: any): { method: string; amount_cents: number; meta: any } | { error: string } {
+    const method = String(raw?.method || '');
+    if (!STAFF_BILL_PAYMENT_METHODS.includes(method as any)) {
+        return { error: `method must be one of ${STAFF_BILL_PAYMENT_METHODS.join(', ')}` };
+    }
+    const amount = Number(raw?.amount_cents);
+    if (!Number.isFinite(amount) || !Number.isInteger(amount) || amount <= 0) {
+        return { error: 'amount_cents must be a positive integer' };
+    }
+    const meta = raw?.meta && typeof raw.meta === 'object' && !Array.isArray(raw.meta) ? raw.meta : null;
+    return { method, amount_cents: amount, meta };
+}
+
 app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), async (req, res) => {
     try {
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid bill id' });
 
+        // Corpo nuovo: `payments` è la lista dei movimenti di incasso da
+        // registrare contestualmente alla chiusura (metodo + importo).
+        // `cash_settled_cents` resta accettato per i client vecchi, che
+        // mandano il TOTALE contanti desiderato sul conto: la differenza
+        // rispetto ai contanti già a libro diventa una riga CONTANTI.
         const cashRaw = req.body?.cash_settled_cents;
         const tipRaw = req.body?.tip_cents;
-        const cashCents = cashRaw != null ? Number(cashRaw) : 0;
+        const legacyCashCents = cashRaw != null ? Number(cashRaw) : null;
         const tipCents = tipRaw != null ? Number(tipRaw) : 0;
-        if (!Number.isFinite(cashCents) || cashCents < 0) {
+        if (legacyCashCents != null && (!Number.isFinite(legacyCashCents) || legacyCashCents < 0)) {
             return res.status(400).json({ error: 'cash_settled_cents must be >= 0' });
         }
         if (!Number.isFinite(tipCents) || tipCents < 0) {
             return res.status(400).json({ error: 'tip_cents must be >= 0' });
         }
+        const rawPayments = Array.isArray(req.body?.payments) ? req.body.payments : [];
+        const parsedPayments: { method: string; amount_cents: number; meta: any }[] = [];
+        for (const raw of rawPayments) {
+            const p = parseStaffBillPayment(raw);
+            if ('error' in p) return res.status(400).json({ error: p.error });
+            parsedPayments.push(p);
+        }
         const notes = typeof req.body?.notes === 'string' ? req.body.notes.slice(0, 500) : null;
 
-        // Need the current total + sum of PAID splits to decide between
-        // CLOSED and SETTLED_PARTIAL and to sanity-check the caller's
-        // cash/tip values. Fetch under a lock so a webhook-triggered
-        // PAID→SETTLED promotion can't race us and flip status underneath.
+        // Need the current total + sums to decide between CLOSED and
+        // SETTLED_PARTIAL and to sanity-check the caller's values. Fetch
+        // under a lock so a webhook-triggered PAID→SETTLED promotion can't
+        // race us and flip status underneath.
         const client = await pool.connect();
         let updatedRow: any = null;
         try {
@@ -3733,15 +4310,15 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
             }
             const totalCents: number = billRs.rows[0].total_cents;
 
-            // Sanity caps: a tip above the bill total or a cash-settled
-            // above 2x is almost certainly a typo. 2x on cash covers the
-            // waiter who accidentally records the tip inside cash — still
-            // wrong, but not a data-loss-level typo.
+            // Sanity caps: a tip above the bill total or a cash amount above
+            // 2x is almost certainly a typo. 2x on cash covers the waiter who
+            // accidentally records the tip inside cash — still wrong, but not
+            // a data-loss-level typo.
             if (tipCents > totalCents) {
                 await client.query('ROLLBACK');
                 return res.status(400).json({ error: 'tip_cents exceeds total (max 100%)', max_allowed_cents: totalCents });
             }
-            if (cashCents > totalCents * 2) {
+            if (legacyCashCents != null && legacyCashCents > totalCents * 2) {
                 await client.query('ROLLBACK');
                 return res.status(400).json({ error: 'cash_settled_cents implausible (>200% of total)', max_allowed_cents: totalCents * 2 });
             }
@@ -3753,7 +4330,38 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
                 [id]
             );
             const paidViaSplits: number = paidRs.rows[0].paid_cents;
-            const totalSettled = paidViaSplits + Math.round(cashCents);
+
+            // Traduzione del parametro legacy in un movimento: il client
+            // vecchio manda il totale contanti cumulativo, a libro va solo
+            // la differenza rispetto ai CONTANTI già registrati.
+            if (legacyCashCents != null) {
+                const cashRs = await client.query(
+                    `SELECT COALESCE(SUM(amount_cents), 0)::int AS s
+                     FROM table_bill_payments
+                     WHERE table_bill_id = $1 AND method = 'CONTANTI' AND table_bill_split_id IS NULL AND voided_at IS NULL`,
+                    [id]
+                );
+                const cashDelta = Math.round(legacyCashCents) - cashRs.rows[0].s;
+                if (cashDelta > 0) parsedPayments.push({ method: 'CONTANTI', amount_cents: cashDelta, meta: null });
+            }
+
+            // Registra i movimenti della chiusura. Ogni importo è clampato al
+            // residuo corrente: l'eccedenza (resto, arrotondamenti del client)
+            // non entra a libro — il resto si calcola in UI, non qui.
+            let staffPaid = await staffPaidCentsForBill(id, client);
+            for (const p of parsedPayments) {
+                const residual = totalCents - paidViaSplits - staffPaid;
+                const amount = Math.min(p.amount_cents, Math.max(0, residual));
+                if (amount <= 0) continue;
+                await client.query(
+                    `INSERT INTO table_bill_payments (tenant_id, table_bill_id, method, amount_cents, meta, recorded_by_user_id)
+                     VALUES ($1, $2, $3, $4, $5, $6)`,
+                    [req.tenantId!, id, p.method, amount, p.meta ? JSON.stringify(p.meta) : null, req.user?.userId ?? null]
+                );
+                staffPaid += amount;
+            }
+
+            const totalSettled = paidViaSplits + staffPaid;
             const finalStatus = totalSettled >= totalCents ? 'CLOSED' : 'SETTLED_PARTIAL';
 
             // Stamp an audit prefix on notes when closing with a shortfall
@@ -3767,21 +4375,27 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
                 notesForDb = notes ? `${shortfallTag} ${notes}` : shortfallTag;
             }
 
+            // cash_settled_cents resta popolato per i lettori vecchi, ma ora
+            // è una PROIEZIONE del libro cassa: somma delle righe CONTANTI.
             const upd = await client.query(
                 `UPDATE table_bills
                  SET status = $2,
                      closed_at = CURRENT_TIMESTAMP,
                      closed_by_user_id = $3,
-                     cash_settled_cents = $4,
-                     tip_cents = $5,
-                     notes = COALESCE($6, notes),
+                     cash_settled_cents = (
+                         SELECT COALESCE(SUM(amount_cents), 0)::int
+                         FROM table_bill_payments
+                         WHERE table_bill_id = $1 AND method = 'CONTANTI' AND table_bill_split_id IS NULL AND voided_at IS NULL
+                     ),
+                     tip_cents = $4,
+                     notes = COALESCE($5, notes),
                      share_token = NULL
-                 WHERE id = $1 AND tenant_id = $7
+                 WHERE id = $1 AND tenant_id = $6
                  RETURNING id, reservation_id, table_id, total_cents, covers, currency,
                            items, status, share_token, opened_at, closed_at,
                            opened_by_user_id, closed_by_user_id, external_ref,
                            cash_settled_cents, tip_cents, notes`,
-                [id, finalStatus, req.user?.userId ?? null, Math.round(cashCents), Math.round(tipCents), notesForDb, req.tenantId!]
+                [id, finalStatus, req.user?.userId ?? null, Math.round(tipCents), notesForDb, req.tenantId!]
             );
             updatedRow = upd.rows[0];
             await client.query('COMMIT');
@@ -3793,6 +4407,41 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
         }
 
         try { socketService?.broadcastToAll(req.tenantId!, 'bill:closed', updatedRow); } catch (_) {}
+
+        // Documento commerciale: parte in automatico sui conti saldati per
+        // intero, fuori dalla risposta — la chiusura non aspetta il fisco.
+        // Esito via socket 'fiscal:updated'; retry da POST /bills/:id/fiscal-docs.
+        // ECCEZIONE: un conto nato da una comanda Passepartout si chiude sul
+        // gestionale, che emette lui il documento fiscale dall'RT di cassa —
+        // l'emissione Openapi qui produrrebbe un secondo documento per lo
+        // stesso incasso. Retry da POST /bills/:id/passepartout-close.
+        if (updatedRow.status === 'CLOSED') {
+            const ppComandaId = passepartoutComandaIdFromRef(updatedRow.external_ref);
+            if (ppComandaId != null) {
+                const ppConfig = getPassepartoutChiusuraConfig();
+                // Documento scelto dal cameriere nel dialog di chiusura:
+                // Proforma = la chiusura senza scontrino usata di routine in
+                // cassa. Assente o non valido → Scontrino.
+                const ppDocumento = req.body?.passepartout_documento === 'Proforma' ? 'Proforma' as const : undefined;
+                if (ppConfig) {
+                    chiudiComandaPassepartoutPerBill(req.tenantId!, id, ppComandaId, ppConfig, ppDocumento)
+                        .catch(err => console.error('[passepartout] chiusura comanda fallita per conto', id, err?.message));
+                } else {
+                    console.warn('[passepartout] conto', id, 'chiuso ma PASSEPARTOUT_TIPO_PAGAMENTO non configurato: comanda', ppComandaId, 'da chiudere in cassa a mano');
+                }
+            } else if (req.body?.documento === 'Proforma') {
+                // Proforma anche per i conti nativi: chiusura DELIBERATA
+                // senza documento fiscale. La riga PROFORMA registra la
+                // scelta (in lista è "proforma", non "senza scontrino" =
+                // dimenticato) e resta sostituibile: scontrino o fattura
+                // emessi dopo la superano da soli.
+                registerNativeProforma(req.tenantId!, id, req.user?.userId ?? null)
+                    .catch(err => console.error('[fiscal] registrazione proforma fallita per conto', id, err?.message));
+            } else {
+                emitFiscalDocForBill(req.tenantId!, id, req.user?.userId ?? null)
+                    .catch(err => console.error('[fiscal] emissione post-chiusura fallita per conto', id, err?.message));
+            }
+        }
 
         res.json(updatedRow);
     } catch (err: any) {
@@ -3839,6 +4488,1013 @@ app.post('/bills/:id/void', authenticate, requirePermission('payments:full'), as
         res.json(updated.rows[0]);
     } catch (err: any) {
         console.error('POST /bills/:id/void error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Registra un movimento di incasso a conto ancora aperto — l'ospite che va
+// via prima e paga la sua parte in contanti al banco, il POS passato a metà
+// cena. Importo validato sotto lock contro il residuo VERO (quote CLAIMED
+// comprese: una quota impegnata da un QR non si incassa anche in cassa).
+// Se il movimento copre il residuo il conto passa a SETTLED, come per le
+// quote online.
+app.post('/bills/:id/payments', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid bill id' });
+        const parsed = parseStaffBillPayment(req.body);
+        if ('error' in parsed) return res.status(400).json({ error: parsed.error });
+
+        const client = await pool.connect();
+        let payment: any = null;
+        let settledRow: any = null;
+        try {
+            await client.query('BEGIN');
+            const billRs = await client.query(
+                `SELECT id, total_cents, status FROM table_bills WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+                [id, req.tenantId!]
+            );
+            if (billRs.rowCount === 0 || !['OPEN', 'LOCKED'].includes(billRs.rows[0].status)) {
+                await client.query('ROLLBACK');
+                return res.status(409).json({ error: 'Il conto non è aperto: registra gli incassi dalla chiusura.' });
+            }
+            const liveRs = await client.query(
+                `SELECT COALESCE(SUM(amount_cents), 0)::int AS live
+                 FROM table_bill_splits
+                 WHERE table_bill_id = $1 AND status IN ('CLAIMED', 'PAID')`,
+                [id]
+            );
+            const staffPaid = await staffPaidCentsForBill(id, client);
+            const residual = billRs.rows[0].total_cents - liveRs.rows[0].live - staffPaid;
+            if (parsed.amount_cents > residual) {
+                await client.query('ROLLBACK');
+                return res.status(409).json({ error: 'Importo oltre il residuo', max_allowed_cents: Math.max(0, residual) });
+            }
+            const ins = await client.query(
+                `INSERT INTO table_bill_payments (tenant_id, table_bill_id, method, amount_cents, meta, recorded_by_user_id)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 RETURNING id, table_bill_id, method, amount_cents, table_bill_split_id,
+                           meta, recorded_by_user_id, recorded_at, voided_at, voided_by_user_id, void_reason`,
+                [req.tenantId!, id, parsed.method, parsed.amount_cents, parsed.meta ? JSON.stringify(parsed.meta) : null, req.user?.userId ?? null]
+            );
+            payment = ins.rows[0];
+            const settled = await client.query(
+                `UPDATE table_bills b SET status = 'SETTLED'
+                 WHERE b.id = $1 AND b.status IN ('OPEN', 'LOCKED')
+                   AND b.total_cents <= (
+                         (SELECT COALESCE(SUM(amount_cents), 0) FROM table_bill_splits WHERE table_bill_id = $1 AND status = 'PAID')
+                       + (SELECT COALESCE(SUM(amount_cents), 0) FROM table_bill_payments WHERE table_bill_id = $1 AND table_bill_split_id IS NULL AND voided_at IS NULL)
+                   )
+                 RETURNING id, reservation_id, table_id, total_cents, covers, status`,
+                [id]
+            );
+            settledRow = settled.rows[0] ?? null;
+            await client.query('COMMIT');
+        } catch (txErr) {
+            await client.query('ROLLBACK').catch(() => {});
+            throw txErr;
+        } finally {
+            client.release();
+        }
+
+        try {
+            socketService?.broadcastToAll(req.tenantId!, 'bill:payment-recorded', { bill_id: id, payment });
+            if (settledRow) socketService?.broadcastToAll(req.tenantId!, 'bill:settled', settledRow);
+        } catch (_) {}
+
+        const view = await loadBillView(req.tenantId!, id);
+        res.status(201).json(view ?? { payment });
+    } catch (err: any) {
+        console.error('POST /bills/:id/payments error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Storno di un movimento: soft-void, la riga resta a libro con voided_at per
+// l'audit. Solo righe staff — lo specchio di una quota online si storna col
+// rimborso della quota, non da qui. Se il conto era SETTLED (o già chiuso
+// CLOSED) grazie a quel movimento, riapre per la parte stornata.
+app.post('/bills/:id/payments/:paymentId/void', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        const paymentId = parseInt(req.params.paymentId, 10);
+        if (!Number.isFinite(id) || !Number.isFinite(paymentId)) return res.status(400).json({ error: 'Invalid id' });
+        const reason = typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 300) : null;
+
+        const client = await pool.connect();
+        let voided: any = null;
+        let reopenedRow: any = null;
+        try {
+            await client.query('BEGIN');
+            const billRs = await client.query(
+                `SELECT id, total_cents, status FROM table_bills WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+                [id, req.tenantId!]
+            );
+            if (billRs.rowCount === 0 || billRs.rows[0].status === 'VOIDED') {
+                await client.query('ROLLBACK');
+                return res.status(404).json({ error: 'Bill not found' });
+            }
+            const upd = await client.query(
+                `UPDATE table_bill_payments
+                 SET voided_at = CURRENT_TIMESTAMP, voided_by_user_id = $3, void_reason = $4
+                 WHERE id = $1 AND table_bill_id = $2 AND tenant_id = $5
+                   AND table_bill_split_id IS NULL AND voided_at IS NULL
+                 RETURNING id, table_bill_id, method, amount_cents, table_bill_split_id,
+                           meta, recorded_by_user_id, recorded_at, voided_at, voided_by_user_id, void_reason`,
+                [paymentId, id, req.user?.userId ?? null, reason, req.tenantId!]
+            );
+            if (upd.rowCount === 0) {
+                await client.query('ROLLBACK');
+                return res.status(404).json({ error: 'Movimento non trovato, già stornato o non stornabile' });
+            }
+            voided = upd.rows[0];
+
+            // Il saldo non regge più? Il conto torna incassabile. Vale anche
+            // per un CLOSED riaperto per correzione: torna OPEN e si richiude
+            // con i movimenti giusti. cash_settled_cents si riallinea al libro.
+            const reopen = await client.query(
+                `UPDATE table_bills b
+                 SET status = 'OPEN', closed_at = NULL, closed_by_user_id = NULL,
+                     cash_settled_cents = (
+                         SELECT COALESCE(SUM(amount_cents), 0)::int
+                         FROM table_bill_payments
+                         WHERE table_bill_id = $1 AND method = 'CONTANTI' AND table_bill_split_id IS NULL AND voided_at IS NULL
+                     )
+                 WHERE b.id = $1 AND b.status IN ('SETTLED', 'SETTLED_PARTIAL', 'CLOSED')
+                   AND b.total_cents > (
+                         (SELECT COALESCE(SUM(amount_cents), 0) FROM table_bill_splits WHERE table_bill_id = $1 AND status = 'PAID')
+                       + (SELECT COALESCE(SUM(amount_cents), 0) FROM table_bill_payments WHERE table_bill_id = $1 AND table_bill_split_id IS NULL AND voided_at IS NULL)
+                   )
+                 RETURNING id, reservation_id, table_id, total_cents, covers, currency,
+                           items, status, share_token, opened_at, closed_at,
+                           opened_by_user_id, closed_by_user_id, external_ref,
+                           cash_settled_cents, tip_cents, notes`,
+                [id]
+            );
+            reopenedRow = reopen.rows[0] ?? null;
+            await client.query('COMMIT');
+        } catch (txErr) {
+            await client.query('ROLLBACK').catch(() => {});
+            throw txErr;
+        } finally {
+            client.release();
+        }
+
+        try {
+            socketService?.broadcastToAll(req.tenantId!, 'bill:payment-voided', { bill_id: id, payment: voided });
+            if (reopenedRow) socketService?.broadcastToAll(req.tenantId!, 'bill:opened', reopenedRow);
+        } catch (_) {}
+
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!,
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.RESERVATION,
+                undefined,
+                `Stornato incasso ${voided.method} ${formatEuroMinor(voided.amount_cents)} (conto #${id}${reason ? ', motivo: ' + reason : ''})`
+            );
+        }
+
+        const view = await loadBillView(req.tenantId!, id);
+        res.json(view ?? { payment: voided });
+    } catch (err: any) {
+        console.error('POST /bills/:id/payments/:paymentId/void error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Chiusura di cassa giornaliera: quanto è entrato oggi e da dove. Somma i
+// movimenti del giorno (Europe/Rome) per metodo — specchi LINK_ONLINE
+// inclusi, storni esclusi — più i dati dei conti chiusi nel giorno: mance,
+// acconti maturati, ammanchi dei SETTLED_PARTIAL. È il report che si legge
+// a fine serata contando il cassetto.
+app.get('/reports/cash-closure', authenticate, requirePermission('payments:view'), async (req, res) => {
+    try {
+        const raw = typeof req.query.date === 'string' ? req.query.date : '';
+        const date = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : getRomeDatePart(new Date());
+
+        const methodsRs = await queryWithRetry(
+            `SELECT method, SUM(amount_cents)::int AS amount_cents, COUNT(*)::int AS movements
+             FROM table_bill_payments
+             WHERE tenant_id = $1 AND voided_at IS NULL
+               AND (recorded_at AT TIME ZONE 'Europe/Rome')::date = $2::date
+             GROUP BY method
+             ORDER BY amount_cents DESC`,
+            [req.tenantId!, date]
+        );
+
+        const billsRs = await queryWithRetry(
+            `SELECT COUNT(*)::int AS bills_closed,
+                    COALESCE(SUM(b.tip_cents), 0)::int AS tip_cents,
+                    COALESCE(SUM(dep.dep), 0)::int AS deposit_credit_cents,
+                    COALESCE(SUM(CASE WHEN b.status = 'SETTLED_PARTIAL'
+                        THEN GREATEST(0, b.total_cents - paid.paid - staff.staff) ELSE 0 END), 0)::int AS shortfall_cents
+             FROM table_bills b
+             LEFT JOIN LATERAL (
+                 SELECT COALESCE(SUM(amount_cents), 0)::int AS paid
+                 FROM table_bill_splits s WHERE s.table_bill_id = b.id AND s.status = 'PAID'
+             ) paid ON TRUE
+             LEFT JOIN LATERAL (
+                 SELECT COALESCE(SUM(amount_cents), 0)::int AS dep
+                 FROM table_bill_splits s WHERE s.table_bill_id = b.id AND s.status = 'PAID' AND s.kind = 'deposit'
+             ) dep ON TRUE
+             LEFT JOIN LATERAL (
+                 SELECT COALESCE(SUM(amount_cents), 0)::int AS staff
+                 FROM table_bill_payments p WHERE p.table_bill_id = b.id AND p.table_bill_split_id IS NULL AND p.voided_at IS NULL
+             ) staff ON TRUE
+             WHERE b.tenant_id = $1 AND b.status IN ('CLOSED', 'SETTLED_PARTIAL')
+               AND b.closed_at IS NOT NULL
+               AND (b.closed_at AT TIME ZONE 'Europe/Rome')::date = $2::date`,
+            [req.tenantId!, date]
+        );
+
+        // Dettaglio per tavolo: un conto per riga con documento fiscale e
+        // incassi, così la chiusura serale si riscontra tavolo per tavolo e
+        // si filtra per tipo di chiusura (scontrino/fattura/proforma/senza).
+        const billListRs = await queryWithRetry(
+            `SELECT b.id, b.total_cents, b.status, b.tip_cents, b.closed_at, b.covers,
+                    t.name AS table_name, r.customer_name,
+                    -- Turno del conto (dalla comanda, o dedotto dall'apertura
+                    -- come in /bills/open): lo stesso tavolo serve pranzo e
+                    -- cena, senza turno le righe del giorno si confondono.
+                    COALESCE(
+                        (SELECT o.shift FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
+                        CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
+                             THEN 'LUNCH' ELSE 'DINNER' END
+                    ) AS shift,
+                    fd.doc_type AS fiscal_doc_type, fd.status AS fiscal_status, fd.doc_number AS fiscal_doc_number,
+                    COALESCE((SELECT jsonb_agg(jsonb_build_object('method', p.method, 'amount_cents', p.amount_cents) ORDER BY p.recorded_at)
+                              FROM table_bill_payments p
+                              WHERE p.table_bill_id = b.id AND p.voided_at IS NULL), '[]'::jsonb) AS payments
+             FROM table_bills b
+             LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
+             LEFT JOIN reservations r ON r.id = b.reservation_id AND r.tenant_id = b.tenant_id
+             LEFT JOIN LATERAL (
+                 SELECT doc_type, status, doc_number FROM fiscal_documents
+                 WHERE table_bill_id = b.id ORDER BY created_at DESC LIMIT 1
+             ) fd ON TRUE
+             WHERE b.tenant_id = $1 AND b.status IN ('CLOSED', 'SETTLED_PARTIAL')
+               AND b.closed_at IS NOT NULL
+               AND (b.closed_at AT TIME ZONE 'Europe/Rome')::date = $2::date
+             ORDER BY b.closed_at DESC`,
+            [req.tenantId!, date]
+        );
+
+        const methods = methodsRs.rows;
+        res.json({
+            date,
+            methods,
+            total_cents: methods.reduce((n: number, m: any) => n + m.amount_cents, 0),
+            tip_cents: billsRs.rows[0].tip_cents,
+            deposit_credit_cents: billsRs.rows[0].deposit_credit_cents,
+            bills_closed: billsRs.rows[0].bills_closed,
+            shortfall_cents: billsRs.rows[0].shortfall_cents,
+            bills: billListRs.rows,
+        });
+    } catch (err: any) {
+        console.error('GET /reports/cash-closure error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// ============================================
+// DOCUMENTI FISCALI — documento commerciale (fase 3 fatturazione)
+// ============================================
+// Il driver (Openapi sandbox / mock) e il payload builder stanno in
+// services/fiscalService.ts; qui vivono persistenza, idempotenza e flusso.
+// Regola del piano: la trasmissione non blocca MAI l'operatività — il conto
+// chiude comunque, il documento resta PENDING/FAILED da ritentare.
+
+const FISCAL_PROVIDER_KEY = 'fiscal_provider';
+const FISCAL_VAT_NUMBER_KEY = 'fiscal_vat_number';
+const FISCAL_PROVIDERS = ['none', 'openapi', 'mock'] as const;
+
+async function getFiscalProviderSetting(tenantId: number): Promise<string> {
+    try {
+        const r = await queryWithRetry(
+            'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
+            [tenantId, FISCAL_PROVIDER_KEY]
+        );
+        const raw = r.rows[0]?.text_value;
+        return (FISCAL_PROVIDERS as readonly string[]).includes(raw) ? raw : 'none';
+    } catch (err) {
+        console.error('[fiscal] lettura provider fallita:', (err as any)?.message);
+        return 'none';
+    }
+}
+
+async function getFiscalVatNumber(tenantId: number): Promise<string> {
+    try {
+        const r = await queryWithRetry(
+            'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
+            [tenantId, FISCAL_VAT_NUMBER_KEY]
+        );
+        return typeof r.rows[0]?.text_value === 'string' ? r.rows[0].text_value : '';
+    } catch (_) {
+        return '';
+    }
+}
+
+// Dati del cedente per la fattura (denominazione, regime, sede): blob JSON
+// in app_settings. Il regime di default è RF01 (ordinario).
+const FISCAL_SELLER_KEY = 'fiscal_seller';
+type FiscalSellerSetting = { business_name?: string; regime?: string; address?: { street?: string; zip?: string; city?: string; province?: string } };
+
+async function getFiscalSellerSetting(tenantId: number): Promise<FiscalSellerSetting> {
+    try {
+        const r = await queryWithRetry(
+            'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
+            [tenantId, FISCAL_SELLER_KEY]
+        );
+        const raw = r.rows[0]?.text_value;
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : null;
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (_) {
+        return {};
+    }
+}
+
+// Mappatura IVA del tenant: aliquota di default dei nuovi piatti e aliquote
+// delle voci di sistema (coperto, servizio, riga "Consumazione" dei conti
+// senza righe). Blob JSON in app_settings; il 10 di somministrazione resta
+// il fallback di ogni campo. Gli sconti NON stanno qui: riducono
+// l'imponibile delle righe su cui cadono, non hanno un'aliquota propria.
+const FISCAL_VAT_MAP_KEY = 'fiscal_vat_map';
+type FiscalVatMap = { dish_default: number; cover: number; service: number; fallback: number };
+const FISCAL_VAT_MAP_DEFAULTS: FiscalVatMap = { dish_default: 10, cover: 10, service: 10, fallback: 10 };
+
+async function getFiscalVatMap(tenantId: number): Promise<FiscalVatMap> {
+    try {
+        const r = await queryWithRetry(
+            'SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2',
+            [tenantId, FISCAL_VAT_MAP_KEY]
+        );
+        const raw = r.rows[0]?.text_value;
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : null;
+        const norm = (v: any, dflt: number) => {
+            const n = Number(v);
+            return Number.isInteger(n) && n >= 0 && n <= 100 ? n : dflt;
+        };
+        return {
+            dish_default: norm(parsed?.dish_default, FISCAL_VAT_MAP_DEFAULTS.dish_default),
+            cover: norm(parsed?.cover, FISCAL_VAT_MAP_DEFAULTS.cover),
+            service: norm(parsed?.service, FISCAL_VAT_MAP_DEFAULTS.service),
+            fallback: norm(parsed?.fallback, FISCAL_VAT_MAP_DEFAULTS.fallback),
+        };
+    } catch (_) {
+        return { ...FISCAL_VAT_MAP_DEFAULTS };
+    }
+}
+
+// Cedente completo o l'elenco di cosa manca: la fattura non parte con i
+// dati a metà, e il messaggio d'errore deve dire COSA compilare.
+async function resolveFiscalSeller(tenantId: number): Promise<{ seller: FiscalSeller } | { missing: string[] }> {
+    const vat = await getFiscalVatNumber(tenantId);
+    const s = await getFiscalSellerSetting(tenantId);
+    const missing: string[] = [];
+    if (!vat) missing.push('P.IVA');
+    if (!s.business_name?.trim()) missing.push('denominazione');
+    if (!s.address?.street?.trim()) missing.push('indirizzo');
+    if (!s.address?.zip?.trim()) missing.push('CAP');
+    if (!s.address?.city?.trim()) missing.push('comune');
+    if (missing.length > 0) return { missing };
+    return {
+        seller: {
+            vat_number: vat,
+            business_name: s.business_name!.trim(),
+            regime: s.regime?.trim() || 'RF01',
+            address: {
+                street: s.address!.street!.trim(),
+                zip: s.address!.zip!.trim(),
+                city: s.address!.city!.trim(),
+                province: s.address?.province?.trim() || undefined,
+            },
+        },
+    };
+}
+
+// Prossimo numero fattura del tenant per l'anno: contatore dedicato sotto
+// lock di riga — MAX+1 senza lock produce doppioni, e il numero fattura è
+// un obbligo di legge. Formato "N/ANNO".
+async function nextInvoiceNumber(tenantId: number, year: number): Promise<string> {
+    const r = await queryWithRetry(
+        `INSERT INTO invoice_counters (tenant_id, year, last_number)
+         VALUES ($1, $2, 1)
+         ON CONFLICT (tenant_id, year)
+         DO UPDATE SET last_number = invoice_counters.last_number + 1
+         RETURNING last_number`,
+        [tenantId, year]
+    );
+    return `${r.rows[0].last_number}/${year}`;
+}
+
+const FISCAL_DOC_COLUMNS = `id, table_bill_id, table_bill_split_id, doc_type, doc_number, provider, fiscal_id_snapshot, status,
+    provider_ref, error, total_cents, attempts, created_by_user_id, created_at, confirmed_at, voided_at`;
+
+// Chiusura proforma di un conto NATIVO (fuori Passepartout): nessun
+// documento fiscale, ma la scelta resta scritta come riga PROFORMA
+// (provider 'crm'). È un segnaposto, non un atto fiscale: chi emette
+// scontrino o fattura dopo la supera automaticamente (VOIDED).
+async function registerNativeProforma(tenantId: number, billId: number, userId: number | null): Promise<{ doc?: any; skipped?: string }> {
+    const billRs = await queryWithRetry(
+        `SELECT id, total_cents, status, external_ref FROM table_bills WHERE id = $1 AND tenant_id = $2`,
+        [billId, tenantId]
+    );
+    const bill = billRs.rows[0];
+    if (!bill || bill.status !== 'CLOSED') return { skipped: 'bill_not_closed' };
+    if (passepartoutComandaIdFromRef(bill.external_ref) != null) return { skipped: 'passepartout' }; // il PP ha la sua proforma di cassa
+    const ins = await queryWithRetry(
+        `INSERT INTO fiscal_documents (tenant_id, table_bill_id, doc_type, provider, status, total_cents, created_by_user_id, confirmed_at)
+         VALUES ($1, $2, 'PROFORMA', 'crm', 'CONFIRMED', $3, $4, CURRENT_TIMESTAMP)
+         ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') AND table_bill_split_id IS NULL DO NOTHING
+         RETURNING ${FISCAL_DOC_COLUMNS}`,
+        [tenantId, billId, bill.total_cents, userId]
+    );
+    if (!ins.rows[0]) return { skipped: 'doc_exists' };
+    try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: billId, doc: ins.rows[0] }); } catch (_) {}
+    return { doc: ins.rows[0] };
+}
+
+// La proforma nativa cede il posto al documento vero: VOID del segnaposto
+// vivo (se c'è) prima di emettere scontrino o fattura. Ritorna true se
+// qualcosa è stato superato — chi chiama può ricalcolare le guardie.
+async function supersedeNativeProforma(tenantId: number, billId: number): Promise<boolean> {
+    const upd = await queryWithRetry(
+        `UPDATE fiscal_documents
+         SET status = 'VOIDED', voided_at = CURRENT_TIMESTAMP
+         WHERE table_bill_id = $1 AND tenant_id = $2 AND doc_type = 'PROFORMA' AND provider = 'crm'
+           AND table_bill_split_id IS NULL AND status IN ('PENDING', 'CONFIRMED')
+         RETURNING id`,
+        [billId, tenantId]
+    );
+    return (upd.rowCount ?? 0) > 0;
+}
+
+// Emissione del documento commerciale per un conto CHIUSO. Idempotente:
+// l'indice unico ammette un documento vivo per conto — il replay ritorna il
+// CONFIRMED esistente, il retry riusa il PENDING, un FAILED lascia spazio a
+// un tentativo nuovo. Chiamata fire-and-forget dalla chiusura e in modo
+// esplicito da POST /bills/:id/fiscal-docs.
+async function emitFiscalDocForBill(tenantId: number, billId: number, userId: number | null): Promise<{ doc?: any; skipped?: string }> {
+    const providerName = await getFiscalProviderSetting(tenantId);
+    if (providerName === 'none') return { skipped: 'not_configured' };
+    const fiscalId = await getFiscalVatNumber(tenantId);
+    if (!fiscalId) return { skipped: 'missing_vat_number' };
+
+    const billRs = await queryWithRetry(
+        `SELECT id, total_cents, items, status, external_ref FROM table_bills WHERE id = $1 AND tenant_id = $2`,
+        [billId, tenantId]
+    );
+    const bill = billRs.rows[0];
+    // Solo conti CLOSED (saldati per intero): un SETTLED_PARTIAL ha un
+    // ammanco che non quadrerebbe col documento.
+    if (!bill || bill.status !== 'CLOSED') return { skipped: 'bill_not_closed' };
+    // Conto nato da una comanda Passepartout: il documento fiscale lo emette
+    // il gestionale (RT di cassa) alla chiusura comanda — emetterlo anche via
+    // Openapi farebbe due documenti per lo stesso incasso.
+    if (passepartoutComandaIdFromRef(bill.external_ref) != null) return { skipped: 'passepartout' };
+
+    // Un solo binario fiscale: se sul conto vive una fattura (sull'intero o
+    // su una quota), lo scontrino non parte — sarebbe un secondo documento
+    // sullo stesso importo. L'indice unico copre solo il livello conto,
+    // quindi la fattura su quota va controllata qui.
+    const liveInvoices = await queryWithRetry(
+        `SELECT 1 FROM fiscal_documents
+         WHERE table_bill_id = $1 AND doc_type = 'INVOICE' AND status IN ('PENDING', 'CONFIRMED')
+         LIMIT 1`,
+        [billId]
+    );
+    if ((liveInvoices.rowCount ?? 0) > 0) return { skipped: 'invoice_exists' };
+
+    // La proforma nativa è un segnaposto: lo scontrino vero la supera.
+    await supersedeNativeProforma(tenantId, billId);
+
+    let ins = await queryWithRetry(
+        // Arbitro sull'indice a livello conto (predicato con split IS NULL,
+        // vedi migration fattura-elettronica che ha sdoppiato l'indice).
+        `INSERT INTO fiscal_documents (tenant_id, table_bill_id, provider, fiscal_id_snapshot, total_cents, created_by_user_id)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') AND table_bill_split_id IS NULL DO NOTHING
+         RETURNING ${FISCAL_DOC_COLUMNS}`,
+        [tenantId, billId, providerName, fiscalId, bill.total_cents, userId]
+    );
+    let doc = ins.rows[0] ?? null;
+    if (!doc) {
+        const existing = await queryWithRetry(
+            `SELECT ${FISCAL_DOC_COLUMNS} FROM fiscal_documents
+             WHERE table_bill_id = $1 AND tenant_id = $2 AND status IN ('PENDING', 'CONFIRMED')
+             LIMIT 1`,
+            [billId, tenantId]
+        );
+        doc = existing.rows[0] ?? null;
+        if (!doc) return { skipped: 'race' };
+        if (doc.status === 'CONFIRMED') return { doc };
+    }
+
+    // Incassi attivi (specchi LINK_ONLINE inclusi) + acconto: sono i numeri
+    // che devono quadrare col totale delle righe nel documento.
+    const paymentsRs = await queryWithRetry(
+        `SELECT method, amount_cents, meta FROM table_bill_payments
+         WHERE table_bill_id = $1 AND voided_at IS NULL`,
+        [billId]
+    );
+    const depositRs = await queryWithRetry(
+        `SELECT COALESCE(SUM(amount_cents), 0)::int AS s FROM table_bill_splits
+         WHERE table_bill_id = $1 AND status = 'PAID' AND kind = 'deposit'`,
+        [billId]
+    );
+
+    const payload = buildEReceiptPayload({
+        fiscalId,
+        totalCents: bill.total_cents,
+        items: Array.isArray(bill.items) ? bill.items : null,
+        payments: paymentsRs.rows,
+        depositCreditCents: depositRs.rows[0].s,
+        fallbackVatRate: (await getFiscalVatMap(tenantId)).fallback,
+    });
+
+    // Claim atomico del tentativo: emissione automatica (post-chiusura) e
+    // POST manuale possono correre sulla stessa riga PENDING, e senza questo
+    // guard ENTRAMBE chiamerebbero il provider — due scontrini reali per lo
+    // stesso conto (successo davvero nella prova sandbox del 24/08). Vince
+    // chi bumpa attempts per primo; l'altro esce con 'in_progress'. Un
+    // PENDING orfano di un processo morto resta reclamabile: il retry vede
+    // gli attempts correnti e passa.
+    const claim = await queryWithRetry(
+        `UPDATE fiscal_documents SET attempts = attempts + 1, request = $2::jsonb
+         WHERE id = $1 AND status = 'PENDING' AND attempts = $3
+         RETURNING id`,
+        [doc.id, JSON.stringify(payload), doc.attempts]
+    );
+    if ((claim.rowCount ?? 0) === 0) return { skipped: 'in_progress' };
+
+    let finalRow: any;
+    try {
+        const driver = getFiscalDriver(providerName);
+        const result = await driver.issueEReceipt(payload);
+        const upd = await queryWithRetry(
+            `UPDATE fiscal_documents
+             SET status = 'CONFIRMED', provider_ref = $2, response = $3::jsonb,
+                 confirmed_at = CURRENT_TIMESTAMP, error = NULL
+             WHERE id = $1
+             RETURNING ${FISCAL_DOC_COLUMNS}`,
+            [doc.id, result.provider_ref, JSON.stringify(result.raw ?? null)]
+        );
+        finalRow = upd.rows[0];
+    } catch (err: any) {
+        const upd = await queryWithRetry(
+            `UPDATE fiscal_documents SET status = 'FAILED', error = $2 WHERE id = $1
+             RETURNING ${FISCAL_DOC_COLUMNS}`,
+            [doc.id, String(err?.message ?? err).slice(0, 1000)]
+        );
+        finalRow = upd.rows[0];
+        console.error('[fiscal] emissione fallita per conto', billId, err?.message);
+    }
+
+    try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: billId, doc: finalRow }); } catch (_) {}
+    return { doc: finalRow };
+}
+
+// Configurazione fiscale del tenant. Il token API del provider resta in env
+// (piattaforma); qui vivono la scelta del driver e la P.IVA dell'esercente.
+app.get('/settings/fiscal', authenticate, async (req, res) => {
+    try {
+        res.json({
+            provider: await getFiscalProviderSetting(req.tenantId!),
+            vat_number: await getFiscalVatNumber(req.tenantId!),
+            seller: await getFiscalSellerSetting(req.tenantId!),
+            vat_map: await getFiscalVatMap(req.tenantId!),
+            providers: FISCAL_PROVIDERS,
+            openapi_token_configured: Boolean(process.env.OPENAPI_INVOICE_TOKEN),
+        });
+    } catch (err: any) {
+        console.error('GET /settings/fiscal error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/settings/fiscal', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const provider = req.body?.provider;
+        const vatNumber = req.body?.vat_number;
+        if (provider !== undefined) {
+            if (!(FISCAL_PROVIDERS as readonly string[]).includes(provider)) {
+                return res.status(400).json({ error: 'invalid_provider' });
+            }
+            if (provider === 'mock' && process.env.NODE_ENV === 'production') {
+                return res.status(400).json({ error: 'Il driver mock non è ammesso in produzione' });
+            }
+            await queryWithRetry(
+                `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+                 VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                 ON CONFLICT (tenant_id, key) DO UPDATE
+                   SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+                [req.tenantId!, FISCAL_PROVIDER_KEY, provider]
+            );
+        }
+        if (vatNumber !== undefined) {
+            const v = String(vatNumber).trim();
+            if (v !== '' && !/^\d{11}$/.test(v)) {
+                return res.status(400).json({ error: 'vat_number deve essere una P.IVA di 11 cifre (senza prefisso IT)' });
+            }
+            await queryWithRetry(
+                `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+                 VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                 ON CONFLICT (tenant_id, key) DO UPDATE
+                   SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+                [req.tenantId!, FISCAL_VAT_NUMBER_KEY, v]
+            );
+        }
+        // Cedente per la fattura: merge sul salvato, così un PUT parziale
+        // (solo la denominazione) non azzera l'indirizzo.
+        if (req.body?.seller !== undefined) {
+            const raw = req.body.seller;
+            if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) {
+                return res.status(400).json({ error: 'seller deve essere un oggetto' });
+            }
+            const current = await getFiscalSellerSetting(req.tenantId!);
+            const str = (v: any) => typeof v === 'string' ? v.trim().slice(0, 200) : undefined;
+            const next: FiscalSellerSetting = {
+                business_name: str(raw.business_name) ?? current.business_name,
+                regime: str(raw.regime) ?? current.regime,
+                address: {
+                    street: str(raw.address?.street) ?? current.address?.street,
+                    zip: str(raw.address?.zip) ?? current.address?.zip,
+                    city: str(raw.address?.city) ?? current.address?.city,
+                    province: str(raw.address?.province) ?? current.address?.province,
+                },
+            };
+            await queryWithRetry(
+                `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+                 VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                 ON CONFLICT (tenant_id, key) DO UPDATE
+                   SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+                [req.tenantId!, FISCAL_SELLER_KEY, JSON.stringify(next)]
+            );
+        }
+        // Mappatura IVA: merge sul salvato come per il cedente — un PUT
+        // parziale (solo il coperto) non tocca gli altri campi. Aliquote
+        // intere 0..100, come parseVatRate dei piatti.
+        if (req.body?.vat_map !== undefined) {
+            const raw = req.body.vat_map;
+            if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) {
+                return res.status(400).json({ error: 'vat_map deve essere un oggetto' });
+            }
+            const current = await getFiscalVatMap(req.tenantId!);
+            const next: FiscalVatMap = { ...current };
+            for (const field of ['dish_default', 'cover', 'service', 'fallback'] as const) {
+                if (raw[field] === undefined) continue;
+                const n = Number(raw[field]);
+                if (!Number.isInteger(n) || n < 0 || n > 100) {
+                    return res.status(400).json({ error: `vat_map.${field} deve essere un intero fra 0 e 100` });
+                }
+                next[field] = n;
+            }
+            await queryWithRetry(
+                `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+                 VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                 ON CONFLICT (tenant_id, key) DO UPDATE
+                   SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+                [req.tenantId!, FISCAL_VAT_MAP_KEY, JSON.stringify(next)]
+            );
+        }
+        res.json({
+            provider: await getFiscalProviderSetting(req.tenantId!),
+            vat_number: await getFiscalVatNumber(req.tenantId!),
+            seller: await getFiscalSellerSetting(req.tenantId!),
+            vat_map: await getFiscalVatMap(req.tenantId!),
+            providers: FISCAL_PROVIDERS,
+            openapi_token_configured: Boolean(process.env.OPENAPI_INVOICE_TOKEN),
+        });
+    } catch (err: any) {
+        console.error('PUT /settings/fiscal error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Emissione manuale / retry. La chiusura la innesca già da sola; questo
+// endpoint serve al bottone "Emetti scontrino" e a ritentare un FAILED.
+app.post('/bills/:id/fiscal-docs', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid bill id' });
+
+        // documento: 'Proforma' → niente emissione: si registra (anche a
+        // posteriori) il segnaposto sul conto chiuso senza documento. Serve
+        // per i conti chiusi prima della scelta in dialog, o dimenticati.
+        if (req.body?.documento === 'Proforma') {
+            const marked = await registerNativeProforma(req.tenantId!, id, req.user?.userId ?? null);
+            if (marked.skipped) {
+                const proformaMessages: Record<string, string> = {
+                    bill_not_closed: 'La proforma si segna su un conto chiuso e saldato per intero',
+                    passepartout: 'Conto del gestionale: la proforma la batte la cassa (chiusura Passepartout)',
+                    doc_exists: 'Il conto ha già un documento: la proforma non serve',
+                };
+                return res.status(409).json({ error: proformaMessages[marked.skipped] ?? marked.skipped, reason: marked.skipped });
+            }
+            return res.status(200).json({ doc: marked.doc, request: null });
+        }
+
+        const outcome = await emitFiscalDocForBill(req.tenantId!, id, req.user?.userId ?? null);
+        if (outcome.skipped) {
+            const messages: Record<string, string> = {
+                not_configured: 'Nessun provider fiscale configurato (Impostazioni → Fiscale)',
+                missing_vat_number: 'P.IVA mancante nelle impostazioni fiscali',
+                bill_not_closed: 'Il documento si emette solo su un conto chiuso e saldato per intero',
+                race: 'Emissione già in corso, riprova',
+                in_progress: 'Emissione già in corso, riprova tra qualche secondo',
+                passepartout: 'Conto del gestionale: lo scontrino lo emette la cassa alla chiusura comanda (POST /bills/:id/passepartout-close)',
+                invoice_exists: 'Il conto ha una fattura: lo scontrino non si emette sullo stesso importo',
+            };
+            return res.status(409).json({ error: messages[outcome.skipped] ?? outcome.skipped, reason: outcome.skipped });
+        }
+        // Il payload trasmesso viaggia nella risposta dell'emissione manuale:
+        // è quello che si guarda quando lo scontrino non torna.
+        const reqRs = await queryWithRetry(`SELECT request FROM fiscal_documents WHERE id = $1`, [outcome.doc.id]);
+        res.status(outcome.doc.status === 'CONFIRMED' ? 200 : 502).json({ doc: outcome.doc, request: reqRs.rows[0]?.request ?? null });
+    } catch (err: any) {
+        console.error('POST /bills/:id/fiscal-docs error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Annullo del documento presso il provider (DELETE /IT-e-receipts/:id lato
+// Openapi). Il conto non si tocca: annullare lo scontrino è un atto fiscale,
+// riaprire il conto è un atto operativo, e non sempre vanno insieme.
+app.post('/bills/:id/fiscal-docs/:fid/void', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        const fid = parseInt(req.params.fid, 10);
+        if (!Number.isFinite(id) || !Number.isFinite(fid)) return res.status(400).json({ error: 'Invalid id' });
+
+        const docRs = await queryWithRetry(
+            `SELECT ${FISCAL_DOC_COLUMNS} FROM fiscal_documents
+             WHERE id = $1 AND table_bill_id = $2 AND tenant_id = $3`,
+            [fid, id, req.tenantId!]
+        );
+        const doc = docRs.rows[0];
+        if (!doc) return res.status(404).json({ error: 'Documento non trovato' });
+        if (doc.status !== 'CONFIRMED' || !doc.provider_ref) {
+            return res.status(409).json({ error: `Solo un documento confermato si può annullare (stato ${doc.status})` });
+        }
+        // Una fattura trasmessa a SDI non si "annulla": si storna con nota
+        // di credito (TD04), che oggi non emettiamo — fase successiva del
+        // piano. Meglio un no chiaro che un DELETE sul binario sbagliato.
+        if (doc.doc_type === 'INVOICE') {
+            return res.status(409).json({ error: 'Una fattura inviata a SDI si storna con nota di credito, non si annulla da qui' });
+        }
+        // Documento emesso dall'RT di cassa alla chiusura Passepartout: il
+        // reso/annullo è un'operazione del registratore, non c'è un provider
+        // cloud da chiamare.
+        if (doc.provider === 'passepartout') {
+            return res.status(409).json({ error: 'Scontrino emesso dalla cassa: si annulla dal registratore, non da qui' });
+        }
+
+        const driver = getFiscalDriver(doc.provider);
+        const raw = await driver.voidEReceipt(doc.provider_ref);
+        const upd = await queryWithRetry(
+            `UPDATE fiscal_documents
+             SET status = 'VOIDED', voided_at = CURRENT_TIMESTAMP, response = $2::jsonb
+             WHERE id = $1
+             RETURNING ${FISCAL_DOC_COLUMNS}`,
+            [fid, JSON.stringify(raw ?? null)]
+        );
+        try { socketService?.broadcastToAll(req.tenantId!, 'fiscal:updated', { bill_id: id, doc: upd.rows[0] }); } catch (_) {}
+
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!,
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.RESERVATION,
+                undefined,
+                `Annullato documento fiscale #${fid} (conto #${id})`
+            );
+        }
+        res.json({ doc: upd.rows[0] });
+    } catch (err: any) {
+        console.error('POST /bills/:id/fiscal-docs/:fid/void error:', err);
+        res.status(502).json({ error: 'Annullo non riuscito', detail: err?.message });
+    }
+});
+
+// Emissione fattura elettronica (SDI) su un conto CHIUSO o su una singola
+// quota PAGATA (l'azienda al tavolo misto che paga la sua parte con
+// fattura). Il cessionario arriva dalla rubrica (customers.billing) o
+// inline nel body — l'inline vince campo per campo, così il cameriere può
+// correggere al volo senza toccare l'anagrafica.
+//
+// Regola fiscale MVP: sullo stesso importo non viaggiano due documenti.
+// La fattura (su conto o su quota) esige che NON ci sia uno scontrino vivo
+// sul conto: prima si annulla quello, poi si fattura. Il caso "fattura
+// sulla quota + scontrino sul resto" richiede lo scontrino parziale, che
+// oggi non esiste — segnalato nel piano come domanda per il commercialista.
+app.post('/bills/:id/invoices', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid bill id' });
+
+        const providerName = await getFiscalProviderSetting(req.tenantId!);
+        if (providerName === 'none') {
+            return res.status(409).json({ error: 'Nessun provider fiscale configurato (Impostazioni → Scontrino elettronico)', reason: 'not_configured' });
+        }
+        const sellerRes = await resolveFiscalSeller(req.tenantId!);
+        if ('missing' in sellerRes) {
+            return res.status(409).json({
+                error: `Dati del cedente incompleti nelle impostazioni fiscali: manca ${sellerRes.missing.join(', ')}`,
+                reason: 'missing_seller',
+            });
+        }
+
+        const billRs = await queryWithRetry(
+            `SELECT b.id, b.total_cents, b.items, b.status, b.external_ref, t.name AS table_name
+             FROM table_bills b
+             LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
+             WHERE b.id = $1 AND b.tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        const bill = billRs.rows[0];
+        if (!bill) return res.status(404).json({ error: 'Conto non trovato' });
+        // Conto del gestionale Passepartout: come per lo scontrino, i
+        // documenti fiscali li emette la cassa — non si raddoppia via Openapi.
+        if (passepartoutComandaIdFromRef(bill.external_ref) != null) {
+            return res.status(409).json({ error: 'Conto del gestionale: la fattura si emette dalla cassa Passepartout', reason: 'passepartout' });
+        }
+
+        // Quota (facoltativa): la fattura copre solo quell'importo.
+        const splitIdRaw = req.body?.split_id;
+        const splitId = splitIdRaw != null ? Number(splitIdRaw) : null;
+        let amountCents = bill.total_cents;
+        if (splitId != null) {
+            if (!Number.isFinite(splitId)) return res.status(400).json({ error: 'split_id non valido' });
+            const splitRs = await queryWithRetry(
+                `SELECT id, amount_cents, status, kind FROM table_bill_splits
+                 WHERE id = $1 AND table_bill_id = $2 AND tenant_id = $3`,
+                [splitId, id, req.tenantId!]
+            );
+            const split = splitRs.rows[0];
+            if (!split) return res.status(404).json({ error: 'Quota non trovata' });
+            if (split.status !== 'PAID' || split.kind === 'deposit') {
+                return res.status(409).json({ error: 'Si fattura solo una quota pagata da un cliente' });
+            }
+            amountCents = split.amount_cents;
+        } else if (bill.status !== 'CLOSED') {
+            return res.status(409).json({ error: 'La fattura sull\'intero conto si emette a conto chiuso e saldato', reason: 'bill_not_closed' });
+        }
+
+        // Un solo binario fiscale: niente scontrino vivo sul conto, e mai
+        // fattura-intero sopra fatture-quota (o viceversa: l'indice unico a
+        // livello conto copre già intero-su-intero).
+        const liveDocs = await queryWithRetry(
+            `SELECT id, doc_type, table_bill_split_id FROM fiscal_documents
+             WHERE table_bill_id = $1 AND status IN ('PENDING', 'CONFIRMED')`,
+            [id]
+        );
+        // Tutte le guardie PRIMA della numerazione: un tentativo destinato al
+        // 409 non deve bruciare un numero fattura (buchi = problemi legali).
+        // La proforma nativa non è un documento fiscale e non blocca: esce
+        // dalle guardie qui e viene superata (VOID) prima dell'inserimento.
+        const proformaLive = liveDocs.rows.some((d: any) => d.doc_type === 'PROFORMA');
+        liveDocs.rows = liveDocs.rows.filter((d: any) => d.doc_type !== 'PROFORMA');
+        const liveReceipt = liveDocs.rows.find((d: any) => d.doc_type === 'RECEIPT');
+        if (liveReceipt) {
+            return res.status(409).json({
+                error: 'Il conto ha già uno scontrino: annullalo prima di emettere la fattura',
+                reason: 'receipt_exists',
+            });
+        }
+        if (splitId == null && liveDocs.rows.some((d: any) => d.table_bill_split_id == null)) {
+            return res.status(409).json({ error: 'Il conto ha già una fattura', reason: 'invoice_exists' });
+        }
+        if (splitId == null && liveDocs.rows.some((d: any) => d.table_bill_split_id != null)) {
+            return res.status(409).json({ error: 'Esistono fatture su singole quote: non si può fatturare anche l\'intero', reason: 'split_invoices_exist' });
+        }
+        if (splitId != null && liveDocs.rows.some((d: any) => d.table_bill_split_id == null)) {
+            return res.status(409).json({ error: 'Esiste già un documento sull\'intero conto', reason: 'bill_doc_exists' });
+        }
+        if (splitId != null && liveDocs.rows.some((d: any) => d.table_bill_split_id === splitId)) {
+            return res.status(409).json({ error: 'Questa quota ha già una fattura', reason: 'invoice_exists' });
+        }
+
+        // Cessionario: rubrica come base, body come override campo per campo.
+        let base: any = {};
+        const customerId = req.body?.customer_id != null ? Number(req.body.customer_id) : null;
+        let customerName = '';
+        if (customerId != null && Number.isFinite(customerId)) {
+            const c = await queryWithRetry(
+                `SELECT name, billing FROM customers WHERE id = $1 AND tenant_id = $2`,
+                [customerId, req.tenantId!]
+            );
+            if (c.rowCount === 0) return res.status(404).json({ error: 'Cliente non trovato' });
+            base = c.rows[0].billing ?? {};
+            customerName = c.rows[0].name;
+        }
+        const inline = req.body?.buyer && typeof req.body.buyer === 'object' ? req.body.buyer : {};
+        const str = (v: any) => typeof v === 'string' && v.trim() ? v.trim() : undefined;
+        const buyer: InvoiceBuyer = {
+            name: str(inline.name) ?? str(base.name) ?? customerName,
+            vat_number: str(inline.vat_number) ?? str(base.vat_number) ?? null,
+            tax_code: str(inline.tax_code) ?? str(base.tax_code) ?? null,
+            sdi_code: str(inline.sdi_code) ?? str(base.sdi_code) ?? null,
+            pec: str(inline.pec) ?? str(base.pec) ?? null,
+            address: {
+                street: str(inline.address?.street) ?? str(base.address?.street) ?? '',
+                zip: str(inline.address?.zip) ?? str(base.address?.zip) ?? '',
+                city: str(inline.address?.city) ?? str(base.address?.city) ?? '',
+                province: str(inline.address?.province) ?? str(base.address?.province),
+            },
+        };
+        const buyerMissing: string[] = [];
+        if (!buyer.name) buyerMissing.push('denominazione');
+        if (!buyer.vat_number && !buyer.tax_code) buyerMissing.push('P.IVA o codice fiscale');
+        if (buyer.vat_number && !/^\d{11}$/.test(buyer.vat_number)) {
+            return res.status(400).json({ error: 'P.IVA del cliente non valida (11 cifre senza IT)' });
+        }
+        if (!buyer.address.street || !buyer.address.zip || !buyer.address.city) buyerMissing.push('indirizzo completo');
+        if (buyerMissing.length > 0) {
+            return res.status(400).json({ error: `Dati del cliente incompleti: manca ${buyerMissing.join(', ')}`, reason: 'missing_buyer' });
+        }
+
+        // Scomposizione IVA sull'importo fatturato: per la quota lo scorporo
+        // viene riproporzionato dalle stesse righe del conto.
+        const vatRows = vatBreakdownFromItems(Array.isArray(bill.items) ? bill.items : null, amountCents);
+        if (vatRows.length === 0) {
+            // Conto aperto a mano senza righe: riga unica al 10, come lo scontrino.
+            vatRows.push({ rate: 10, gross_cents: amountCents, net_cents: Math.round(amountCents / 1.1), vat_cents: amountCents - Math.round(amountCents / 1.1) });
+        }
+
+        // Validazioni passate: il segnaposto proforma cede il posto alla
+        // fattura sull'INTERO (VOID prima di consumare il numero). Sulla
+        // quota invece resta: continua a marcare il resto del conto come
+        // "chiuso senza documento, di proposito".
+        if (proformaLive && splitId == null) await supersedeNativeProforma(req.tenantId!, id);
+
+        const year = Number(getRomeDatePart(new Date()).slice(0, 4));
+        const docNumber = await nextInvoiceNumber(req.tenantId!, year);
+        const docDate = getRomeDatePart(new Date());
+        const xml = buildFatturaPaXml({
+            seller: sellerRes.seller,
+            buyer,
+            doc_number: docNumber,
+            doc_date: docDate,
+            vat_rows: vatRows,
+            total_gross_cents: amountCents,
+            description: `Somministrazione alimenti e bevande${bill.table_name ? ` — tavolo ${bill.table_name}` : ''}`,
+        });
+
+        // La riga nasce direttamente col payload e viene reclamata come per
+        // lo scontrino (claim su attempts) — qui il chiamante è uno solo, ma
+        // il doppio submit del bottone è lo stesso race.
+        const ins = await queryWithRetry(
+            `INSERT INTO fiscal_documents (tenant_id, table_bill_id, table_bill_split_id, doc_type, doc_number, provider, fiscal_id_snapshot, total_cents, created_by_user_id, request, attempts)
+             VALUES ($1, $2, $3, 'INVOICE', $4, $5, $6, $7, $8, $9::jsonb, 1)
+             ON CONFLICT DO NOTHING
+             RETURNING ${FISCAL_DOC_COLUMNS}`,
+            [req.tenantId!, id, splitId, docNumber, providerName, sellerRes.seller.vat_number, amountCents,
+             req.user?.userId ?? null, JSON.stringify({ xml, buyer })]
+        );
+        if (ins.rowCount === 0) {
+            return res.status(409).json({ error: 'Emissione già in corso o documento già presente', reason: 'in_progress' });
+        }
+        const doc = ins.rows[0];
+
+        let finalRow: any;
+        try {
+            const driver = getFiscalDriver(providerName);
+            const result = await driver.issueInvoice(xml);
+            const upd = await queryWithRetry(
+                `UPDATE fiscal_documents
+                 SET status = 'CONFIRMED', provider_ref = $2, response = $3::jsonb,
+                     confirmed_at = CURRENT_TIMESTAMP, error = NULL
+                 WHERE id = $1
+                 RETURNING ${FISCAL_DOC_COLUMNS}`,
+                [doc.id, result.provider_ref, JSON.stringify(result.raw ?? null)]
+            );
+            finalRow = upd.rows[0];
+        } catch (err: any) {
+            const upd = await queryWithRetry(
+                `UPDATE fiscal_documents SET status = 'FAILED', error = $2 WHERE id = $1
+                 RETURNING ${FISCAL_DOC_COLUMNS}`,
+                [doc.id, String(err?.message ?? err).slice(0, 1000)]
+            );
+            finalRow = upd.rows[0];
+            console.error('[fiscal] fattura fallita per conto', id, err?.message);
+        }
+
+        try { socketService?.broadcastToAll(req.tenantId!, 'fiscal:updated', { bill_id: id, doc: finalRow }); } catch (_) {}
+
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!,
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.CREATE, ResourceType.RESERVATION,
+                undefined,
+                `Fattura ${docNumber} ${finalRow.status === 'CONFIRMED' ? 'emessa' : 'NON emessa'} · ${formatEuroMinor(amountCents)} a ${buyer.name} (conto #${id}${splitId ? `, quota #${splitId}` : ''})`
+            );
+        }
+
+        res.status(finalRow.status === 'CONFIRMED' ? 201 : 502).json({ doc: finalRow });
+    } catch (err: any) {
+        console.error('POST /bills/:id/invoices error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });
@@ -3911,6 +5567,14 @@ app.post('/bills/splits/:id/refund', authenticate, requirePermission('payments:f
              WHERE id = $1
              RETURNING id, table_bill_id, amount_cents`,
             [splitId]
+        );
+        // Lo specchio LINK_ONLINE nel libro cassa segue la quota: stornato,
+        // così la chiusura di cassa non conta denaro restituito.
+        await queryWithRetry(
+            `UPDATE table_bill_payments
+             SET voided_at = CURRENT_TIMESTAMP, voided_by_user_id = $2, void_reason = 'Rimborso quota'
+             WHERE table_bill_split_id = $1 AND voided_at IS NULL`,
+            [splitId, req.user?.userId ?? null]
         );
         let updatedPr: any = null;
         if (row.payment_request_id) {
@@ -4056,12 +5720,16 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => runAsPlatform(async
              ORDER BY claimed_at ASC`,
             [bill.id]
         );
+        // Incassi registrati in cassa dallo staff (contanti, POS, …): per
+        // l'ospite sono denaro già versato come le quote PAID — entrano nella
+        // barra e nel residuo, ma non nella lista dei paganti (come l'acconto).
+        const staffPaidCents = await staffPaidCentsForBill(bill.id);
         const paidCents = splitsRows.rows
             .filter((r: any) => r.status === 'PAID')
-            .reduce((sum: number, r: any) => sum + Number(r.amount_cents || 0), 0);
+            .reduce((sum: number, r: any) => sum + Number(r.amount_cents || 0), 0) + staffPaidCents;
         const claimedCents = splitsRows.rows
             .filter((r: any) => r.status === 'CLAIMED' || r.status === 'PAID')
-            .reduce((sum: number, r: any) => sum + Number(r.amount_cents || 0), 0);
+            .reduce((sum: number, r: any) => sum + Number(r.amount_cents || 0), 0) + staffPaidCents;
         const residual = Math.max(0, bill.total_cents - claimedCents);
         // Acconto già versato: quota PAID di kind='deposit'. Già dentro
         // paidCents/claimedCents (quindi già scalato dal residuo e dalla barra);
@@ -4213,14 +5881,17 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         const billLabel = bill.table_name ? `tavolo ${bill.table_name}` : `conto #${bill.id}`;
 
         // Compute claimed_cents under the lock so the residual is
-        // authoritative at insert time.
+        // authoritative at insert time. Gli incassi staff del libro cassa
+        // contano come le quote: quello che il cameriere ha già preso in
+        // contanti non è più reclamabile dal QR.
         const sumRs = await client.query(
             `SELECT COALESCE(SUM(amount_cents), 0)::int AS claimed_cents
              FROM table_bill_splits
              WHERE table_bill_id = $1 AND status IN ('CLAIMED','PAID')`,
             [bill.id]
         );
-        const claimed = Number(sumRs.rows[0].claimed_cents || 0);
+        const staffPaid = await staffPaidCentsForBill(bill.id, client);
+        const claimed = Number(sumRs.rows[0].claimed_cents || 0) + staffPaid;
         const residual = bill.total_cents - claimed;
         if (residual <= 0) {
             await client.query('ROLLBACK');
@@ -4484,6 +6155,11 @@ app.get('/messages/conversations', authenticate, requirePermission('reservations
                 WHERE tenant_id = $1
                   AND channel IN ('sms','whatsapp')
                   AND COALESCE(from_phone_digits, to_phone_digits) IS NOT NULL
+                  -- Finestra di 12 mesi: non per velocità oggi (33ms su tutto
+                  -- lo storico) ma per tenere stabile l'aggregazione quando la
+                  -- tabella sarà 10x. Un thread fermo da un anno sparisce
+                  -- dalla lista, non dal DB: riscrive il cliente e ricompare.
+                  AND sent_at > now() - interval '12 months'
             ),
             keyed AS (
                 SELECT *, right(digits, 10) AS phone_key
@@ -4502,6 +6178,16 @@ app.get('/messages/conversations', authenticate, requirePermission('reservations
                        MAX(sent_at) FILTER (WHERE direction = 'inbound') AS last_inbound_at
                 FROM keyed
                 GROUP BY phone_key
+            ),
+            -- Il link prenotazione del thread è il reservation_id più recente
+            -- NON nullo, non quello dell'ultimo messaggio: così l'aggancio
+            -- sopravvive a un nuovo messaggio in arrivo (che entra con
+            -- reservation_id NULL e altrimenti azzererebbe il link).
+            last_res AS (
+                SELECT DISTINCT ON (phone_key) phone_key, reservation_id
+                FROM keyed
+                WHERE reservation_id IS NOT NULL
+                ORDER BY phone_key, sent_at DESC
             )
             SELECT l.phone_key AS phone_digits,
                    l.phone,
@@ -4509,12 +6195,13 @@ app.get('/messages/conversations', authenticate, requirePermission('reservations
                    l.direction    AS last_direction,
                    l.body         AS last_body,
                    l.sent_at      AS last_sent_at,
-                   l.reservation_id AS last_reservation_id,
+                   lr.reservation_id AS last_reservation_id,
                    COALESCE(c.unread_count, 0)::int AS unread_count,
                    c.last_inbound_at,
                    r.customer_name
             FROM latest l
             LEFT JOIN counts c ON c.phone_key = l.phone_key
+            LEFT JOIN last_res lr ON lr.phone_key = l.phone_key
             LEFT JOIN LATERAL (
                 SELECT customer_name FROM reservations
                 WHERE tenant_id = $1
@@ -4557,17 +6244,22 @@ app.get('/messages/conversations/:phoneDigits', authenticate, requirePermission(
     try {
         const key = String(req.params.phoneDigits).replace(/\D/g, '').slice(-10);
         if (!key) return res.status(400).json({ error: 'Invalid phone_digits' });
+        // LIMIT sul DESC, poi ri-ordinato ASC per la UI: il vecchio
+        // `ORDER BY sent_at ASC LIMIT 500` prendeva i 500 messaggi più VECCHI
+        // del thread — superata quota, i nuovi messaggi sparivano dalla chat.
         const result = await queryWithRetry(
-            `SELECT id, provider, channel, direction, from_phone, to_phone, body,
-                    status, provider_sid, reservation_id, sent_at, delivered_at,
-                    failed_at, read_at, error_code, error_message, media
-             FROM outbound_messages
-             WHERE tenant_id = $2
-               AND channel IN ('sms','whatsapp')
-               AND (right(to_phone_digits, 10) = $1::text
-                    OR right(from_phone_digits, 10) = $1::text)
-             ORDER BY sent_at ASC
-             LIMIT 500`,
+            `SELECT * FROM (
+                SELECT id, provider, channel, direction, from_phone, to_phone, body,
+                       status, provider_sid, reservation_id, sent_at, delivered_at,
+                       failed_at, read_at, error_code, error_message, media
+                FROM outbound_messages
+                WHERE tenant_id = $2
+                  AND channel IN ('sms','whatsapp')
+                  AND (right(to_phone_digits, 10) = $1::text
+                       OR right(from_phone_digits, 10) = $1::text)
+                ORDER BY sent_at DESC
+                LIMIT 500
+             ) t ORDER BY sent_at ASC`,
             [key, req.tenantId!]
         );
         res.json({ messages: result.rows });
@@ -4675,6 +6367,46 @@ app.post('/messages/conversations/:phoneDigits/read', authenticate, requirePermi
     }
 });
 
+// Link a reservation to an SMS/WhatsApp conversation so staff can jump back
+// to it from the chat (mirrors the voice-call link). The thread's linked
+// reservation is the most-recent non-null reservation_id across its messages
+// (see /messages/conversations), so we stamp every message of the thread —
+// the link then survives later inbound messages that arrive with a null
+// reservation_id. Requires reservations:full (it's a write on the booking).
+app.patch('/messages/conversations/:phoneDigits/link', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    try {
+        const phoneKey = String(req.params.phoneDigits || '').replace(/\D/g, '').slice(-10);
+        if (phoneKey.length < 8) return res.status(400).json({ error: 'Invalid phone' });
+
+        const rid = typeof req.body?.reservation_id === 'number'
+            ? req.body.reservation_id
+            : parseInt(req.body?.reservation_id, 10);
+        if (!Number.isFinite(rid)) return res.status(400).json({ error: 'Invalid reservation_id' });
+
+        // Cross-tenant FK guard (pattern B3): una prenotazione altrui non si
+        // aggancia — 404, come se non esistesse.
+        const resvOk = await queryWithRetry(
+            'SELECT 1 FROM reservations WHERE id = $1 AND tenant_id = $2',
+            [rid, req.tenantId!]
+        );
+        if (resvOk.rowCount === 0) return res.status(404).json({ error: 'Reservation not found' });
+
+        const result = await queryWithRetry(
+            `UPDATE outbound_messages
+             SET reservation_id = $1
+             WHERE tenant_id = $2
+               AND channel IN ('sms','whatsapp')
+               AND right(COALESCE(from_phone_digits, to_phone_digits), 10) = $3`,
+            [rid, req.tenantId!, phoneKey]
+        );
+        if (result.rowCount === 0) return res.status(404).json({ error: 'Conversation not found' });
+        res.json({ ok: true, reservation_id: rid, updated: result.rowCount });
+    } catch (err) {
+        console.error('PATCH /messages/conversations/:phoneDigits/link error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // ============================================
 // INBOX (Email conversations) — parallel to the SMS/WhatsApp block above.
 // Threads are keyed by lowercased email address (union of from_email +
@@ -4695,6 +6427,11 @@ app.get('/email/threads', authenticate, requirePermission('reservations:view'), 
                 WHERE tenant_id = $1
                   AND channel = 'email'
                   AND COALESCE(from_email, to_email) IS NOT NULL
+                  -- Stessa finestra di 12 mesi dell'inbox sms/whatsapp: non
+                  -- per velocità oggi ma per tenere stabile l'aggregazione
+                  -- quando la tabella sarà 10x. Il thread sparisce dalla
+                  -- lista, non dal DB: riscrive il cliente e ricompare.
+                  AND sent_at > now() - interval '12 months'
             ),
             latest AS (
                 SELECT DISTINCT ON (email_key)
@@ -4760,16 +6497,21 @@ app.get('/email/threads/:emailKey', authenticate, requirePermission('reservation
     try {
         const key = String(req.params.emailKey).trim().toLowerCase();
         if (!key || !key.includes('@')) return res.status(400).json({ error: 'Invalid email_key' });
+        // LIMIT sul DESC, poi ri-ordinato ASC per la UI: stesso fix della
+        // timeline sms/whatsapp — l'ASC diretto prendeva i 500 messaggi più
+        // VECCHI del thread, e superata quota i nuovi sparivano.
         const result = await queryWithRetry(
-            `SELECT id, provider, channel, direction, from_email, to_email, subject, body,
-                    status, provider_sid, message_id, in_reply_to, reservation_id, media,
-                    sent_at, delivered_at, failed_at, read_at, error_code, error_message
-             FROM outbound_messages
-             WHERE tenant_id = $2
-               AND channel = 'email'
-               AND (lower(to_email) = $1 OR lower(from_email) = $1)
-             ORDER BY sent_at ASC
-             LIMIT 500`,
+            `SELECT * FROM (
+                SELECT id, provider, channel, direction, from_email, to_email, subject, body,
+                       status, provider_sid, message_id, in_reply_to, reservation_id, media,
+                       sent_at, delivered_at, failed_at, read_at, error_code, error_message
+                FROM outbound_messages
+                WHERE tenant_id = $2
+                  AND channel = 'email'
+                  AND (lower(to_email) = $1 OR lower(from_email) = $1)
+                ORDER BY sent_at DESC
+                LIMIT 500
+             ) t ORDER BY sent_at ASC`,
             [key, req.tenantId!]
         );
         res.json({ messages: result.rows });
@@ -5459,6 +7201,76 @@ app.post('/messages/agent/run', authenticate, requirePermission('reservations:fu
             return res.status(status).json({ error: err.kind, message: err.message });
         }
         console.error('POST /messages/agent/run error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Estrae i campi di una prenotazione dal thread per precompilare il modulo
+// "Crea prenotazione" della chat. Diversa da /agent/run: forza la lettura dei
+// campi (data/ora/coperti/zona/note) invece di aspettare che l'agente proponga
+// un'azione, che per una richiesta nuova non avviene. Non crea nulla.
+app.post('/messages/agent/extract-booking', authenticate, requirePermission('reservations:full'), async (req, res) => {
+    try {
+        if (!(await getFeatureFlag(req.tenantId!, 'ai_messages_enabled', false))) {
+            return res.status(403).json({ error: 'feature_disabled', message: 'Messaggi con AI disattivato.' });
+        }
+        if (!whatsappAgent.isAgentConfigured()) {
+            return res.status(503).json({ error: 'not_configured', message: 'ANTHROPIC_API_KEY non configurata sul backend' });
+        }
+        const key = String(req.body?.phone_digits ?? '').replace(/\D/g, '').slice(-10);
+        if (!key) return res.status(400).json({ error: 'phone_digits mancante' });
+
+        const msgs = await queryWithRetry(
+            `SELECT direction, body, from_phone, to_phone
+               FROM outbound_messages
+              WHERE tenant_id = $2
+                AND channel IN ('sms','whatsapp')
+                AND (right(to_phone_digits, 10) = $1::text OR right(from_phone_digits, 10) = $1::text)
+              ORDER BY sent_at DESC LIMIT 15`, [key, req.tenantId!]);
+        const messages = msgs.rows.reverse();
+        if (messages.length === 0) return res.status(404).json({ error: 'Conversazione vuota' });
+
+        const inbound = messages.find((m: any) => m.direction === 'inbound');
+        const phone = inbound?.from_phone || `+${key}`;
+
+        const { args, usage } = await whatsappAgent.extractBooking({
+            phone,
+            todayRome: getRomeDatePart(new Date()),
+            messages: messages as any,
+        });
+
+        if (usage.calls > 0) {
+            queryWithRetry(
+                `INSERT INTO ai_token_usage (provider, feature, model, prompt_tokens, output_tokens, total_tokens, user_email, tenant_id)
+                 VALUES ('anthropic', 'whatsapp_extract', $1, $2, $3, $4, $5, $6)`,
+                [usage.model, usage.promptTokens, usage.outputTokens, usage.totalTokens, (req.user?.email || null), req.tenantId!]
+            ).catch(err => console.error('ai_token_usage insert (whatsapp_extract) failed:', err));
+        }
+
+        if (!args) return res.json({ booking: null });
+
+        // Normalizza data/ora col parser condiviso: robusto anche se il modello
+        // restituisce "sabato 29 agosto" o "7:30" invece del formato canonico.
+        const date = args.date ? parseFlexibleDate(args.date) : null;
+        const time = args.time ? parseFlexibleTime(args.time) : null;
+        res.json({
+            booking: {
+                customer_name: args.customer_name ?? null,
+                date: date ?? null,
+                time: time ?? null,
+                shift: args.shift ?? null,
+                guests: typeof args.guests === 'number' && args.guests > 0 ? Math.trunc(args.guests) : null,
+                children: typeof args.children === 'number' && args.children > 0 ? Math.trunc(args.children) : null,
+                location_preference: args.location_preference ?? null,
+                notes: args.notes ?? null,
+            },
+        });
+    } catch (err: any) {
+        if (err instanceof whatsappAgent.AgentError) {
+            const status = err.kind === 'not_configured' ? 503 : 502;
+            return res.status(status).json({ error: err.kind, message: err.message });
+        }
+        console.error('POST /messages/agent/extract-booking error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -6272,26 +8084,48 @@ async function applyBillSplitTransition(
             }
         }
 
+        // Specchio nel libro cassa: la quota pagata online diventa una riga
+        // LINK_ONLINE, così la chiusura di cassa somma per metodo da una
+        // tabella sola. Idempotente sull'indice unico parziale: il replay
+        // del webhook non raddoppia la riga. Il residuo NON la conta (conta
+        // la quota): table_bill_split_id valorizzato la marca come specchio.
+        try {
+            await queryWithRetry(
+                `INSERT INTO table_bill_payments (tenant_id, table_bill_id, method, amount_cents, table_bill_split_id)
+                 VALUES ($1, $2, 'LINK_ONLINE', $3, $4)
+                 ON CONFLICT (table_bill_split_id) WHERE table_bill_split_id IS NOT NULL DO NOTHING`,
+                [tenantId, billId, amount, splitId]
+            );
+        } catch (mirrorErr: any) {
+            // Il libro cassa non deve mai bloccare l'incasso: la quota è già
+            // PAID, al peggio il report perde una riga e lo segnaliamo.
+            console.error('[bill-split] mirror insert failed for split', splitId, mirrorErr?.message);
+        }
+
         try {
             socketService?.broadcastToAll(tenantId, 'bill:split-paid', {
                 bill_id: billId, split_id: splitId, amount_cents: amount,
             });
         } catch (_) {}
 
-        // SETTLED promotion: total_cents == sum of PAID splits. Guard on
-        // status IN OPEN/LOCKED so a manually-closed bill doesn't get
-        // clobbered. Race-safe because it's a single UPDATE ... WHERE
-        // comparing against a sub-select computed atomically by PG.
+        // SETTLED promotion: total_cents covered by PAID splits + staff
+        // payments from the cash book. Guard on status IN OPEN/LOCKED so a
+        // manually-closed bill doesn't get clobbered. Race-safe because it's
+        // a single UPDATE ... WHERE comparing against sub-selects computed
+        // atomically by PG.
         const settled = await queryWithRetry(
             `UPDATE table_bills b
              SET status = 'SETTLED'
              WHERE b.id = $1
                AND b.tenant_id = $2
                AND b.status IN ('OPEN','LOCKED')
-               AND b.total_cents = (
-                   SELECT COALESCE(SUM(amount_cents), 0)
-                   FROM table_bill_splits
-                   WHERE table_bill_id = $1 AND status = 'PAID'
+               AND b.total_cents <= (
+                     (SELECT COALESCE(SUM(amount_cents), 0)
+                      FROM table_bill_splits
+                      WHERE table_bill_id = $1 AND status = 'PAID')
+                   + (SELECT COALESCE(SUM(amount_cents), 0)
+                      FROM table_bill_payments
+                      WHERE table_bill_id = $1 AND table_bill_split_id IS NULL AND voided_at IS NULL)
                )
              RETURNING id, reservation_id, table_id, total_cents, covers, status`,
             [billId, tenantId]
@@ -7762,12 +9596,26 @@ app.get('/dishes', authenticate, async (req, res) => {
     }
 });
 
+// Aliquota IVA di anagrafica: intero 0..100. Se il client non la manda vale
+// il dish_default della mappatura IVA del tenant (10 in assenza). La UI
+// propone {0, 4, 5, 10, 22}; il server non blinda l'elenco perché le
+// aliquote le cambia la legge, non un deploy.
+const parseVatRate = (raw: any): number | null => {
+    if (raw == null) return null;
+    const n = Number(raw);
+    return Number.isInteger(n) && n >= 0 && n <= 100 ? n : null;
+};
+
 app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { name, description, price, category, allergens, photo_url } = req.body;
+        const vatRate = req.body?.vat_rate == null
+            ? (await getFiscalVatMap(req.tenantId!)).dish_default
+            : parseVatRate(req.body.vat_rate);
+        if (vatRate == null) return res.status(400).json({ error: 'vat_rate deve essere un intero fra 0 e 100' });
         const result = await queryWithRetry(
-            'INSERT INTO dishes (tenant_id, name, description, price, category, allergens, photo_url) VALUES ($7, $1, $2, $3, $4, $5, $6) RETURNING *',
-            [name, description, price, category, allergens, photo_url || null, req.tenantId!]
+            'INSERT INTO dishes (tenant_id, name, description, price, category, allergens, photo_url, vat_rate) VALUES ($7, $1, $2, $3, $4, $5, $6, $8) RETURNING *',
+            [name, description, price, category, allergens, photo_url || null, req.tenantId!, vatRate]
         );
         const newDish = result.rows[0];
 
@@ -7800,9 +9648,13 @@ app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req,
     try {
         const { id } = req.params;
         const { name, description, price, category, allergens, photo_url } = req.body;
+        const vatRate = parseVatRate(req.body?.vat_rate);
+        if (req.body?.vat_rate != null && vatRate == null) return res.status(400).json({ error: 'vat_rate deve essere un intero fra 0 e 100' });
         const result = await queryWithRetry(
-            'UPDATE dishes SET name = $1, description = $2, price = $3, category = $4, allergens = $5, photo_url = $6 WHERE id = $7 AND tenant_id = $8 RETURNING *',
-            [name, description, price, category, allergens, photo_url || null, id, req.tenantId!]
+            // COALESCE sul body: un client vecchio che non manda vat_rate non
+            // deve resettare l'aliquota già impostata.
+            'UPDATE dishes SET name = $1, description = $2, price = $3, category = $4, allergens = $5, photo_url = $6, vat_rate = COALESCE($9, vat_rate) WHERE id = $7 AND tenant_id = $8 RETURNING *',
+            [name, description, price, category, allergens, photo_url || null, id, req.tenantId!, vatRate]
         );
         const updatedDish = result.rows[0];
         if (!updatedDish) {
@@ -8160,6 +10012,7 @@ const SCHEDULER_LOCK_BILL_SPLIT_RECONCILE = 761001;
 const SCHEDULER_LOCK_PAYMENT_REQUEST_RECONCILE = 761002;
 const SCHEDULER_LOCK_REMINDERS = 761003;
 const SCHEDULER_LOCK_PAYMENT_LINK_EXPIRY = 761004;
+const SCHEDULER_LOCK_STAFF_CHAT_RETENTION = 761005;
 
 // Il lock advisory è di SESSIONE: va preso su un client dedicato tenuto per
 // tutta la durata del tick (sul pool condiviso un'altra query potrebbe
@@ -8615,6 +10468,53 @@ const startRemindersScheduler = () => {
     setInterval(lockedTick, 5 * 60 * 1000);
 };
 
+// Retention della chat staff (piano §9): i messaggi sono traffico di
+// servizio, non un archivio — oltre i 90 giorni si cancellano, insieme ai
+// cursori di lettura rimasti orfani di ogni messaggio. Cross-tenant di
+// proposito (il lock wrapper dichiara runAsPlatform); un giro ogni 6 ore
+// basta, la finestra è di mesi.
+const startStaffChatRetentionScheduler = () => {
+    const tick = async () => {
+        try {
+            // Le foto dei messaggi in scadenza si cancellano PRIMA delle
+            // righe: dopo, i token sarebbero persi e i bytea orfani per sempre.
+            await queryWithRetry(
+                `DELETE FROM outbound_media
+                 WHERE token IN (
+                     SELECT jsonb_array_elements(m.media)->>'token'
+                     FROM staff_messages m
+                     WHERE m.created_at < NOW() - INTERVAL '90 days'
+                       AND m.media IS NOT NULL
+                 )`
+            );
+            const purged = await queryWithRetry(
+                `DELETE FROM staff_messages
+                 WHERE created_at < NOW() - INTERVAL '90 days'
+                 RETURNING id`
+            );
+            const orphans = await queryWithRetry(
+                `DELETE FROM staff_message_reads r
+                 WHERE NOT EXISTS (
+                     SELECT 1 FROM staff_messages m
+                     WHERE m.tenant_id = r.tenant_id
+                       AND (r.thread_key = 'channel:' || m.channel
+                         OR r.thread_key IN ('dm:' || m.sender_user_id, 'dm:' || m.recipient_user_id))
+                 )
+                 RETURNING user_id`
+            );
+            if (purged.rows.length > 0 || orphans.rows.length > 0) {
+                console.log(`🧹 Chat staff: ${purged.rows.length} messaggi oltre i 90 giorni, ${orphans.rows.length} cursori orfani`);
+            }
+        } catch (err) {
+            console.error('Staff chat retention error:', err);
+        }
+    };
+    const lockedTick = () => runSchedulerTickWithLock(SCHEDULER_LOCK_STAFF_CHAT_RETENTION, 'staffchat-retention', tick)
+        .catch((err: any) => console.error('[staffchat-retention] lock wrapper failed:', err?.message || err));
+    lockedTick();
+    setInterval(lockedTick, 6 * 60 * 60 * 1000);
+};
+
 // ============================================
 // CUSTOMERS (rubrica) - require authentication
 // ============================================
@@ -8831,13 +10731,22 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
         const cap = Math.min(Math.max(parseInt(limit || '5000', 10) || 5000, 1), 10000);
         // Sub-select counts past NO_SHOW reservations matching this customer's phone.
         // Phone is required on rubrica records, so this is the reliable identifier.
+        // Confronto sulle ULTIME 10 CIFRE nella forma esatta di
+        // idx_reservations_phone_last10 (COALESCE compreso): il vecchio
+        // confronto sull'intera stringa di cifre non combaciava con nessun
+        // indice e faceva una scansione completa di reservations PER OGNI
+        // cliente — 1,4 secondi di risposta con 3.300 clienti in rubrica.
+        // Le ultime 10 cifre sono la chiave telefono canonica del resto
+        // dell'app (inbox, aggancio rubrica), quindi ora i conteggi contano
+        // anche le varianti di prefisso (+39/39/0) dello stesso numero.
         const noShowSubquery = `(
             SELECT COUNT(*)::int
             FROM reservations r
             WHERE r.reservation_status = 'NO_SHOW'
               AND r.tenant_id = c.tenant_id
               AND r.phone IS NOT NULL
-              AND REGEXP_REPLACE(r.phone, '\\D', '', 'g') = REGEXP_REPLACE(c.phone, '\\D', '', 'g')
+              AND right(regexp_replace(COALESCE(r.phone, ''), '\\D', '', 'g'), 10)
+                = right(regexp_replace(COALESCE(c.phone, ''), '\\D', '', 'g'), 10)
         ) AS no_show_count`;
         if (q && q.trim()) {
             const term = `%${q.trim().toLowerCase()}%`;
@@ -8845,7 +10754,7 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
                 `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
                         preferred_table_id, preferences_notes, dietary_notes, is_vip,
                         is_blacklisted, blacklist_reason,
-                        consent_marketing, consent_marketing_updated_at, language,
+                        consent_marketing, consent_marketing_updated_at, language, billing,
                         ${noShowSubquery}
                  FROM customers c
                  WHERE c.tenant_id = $3
@@ -8861,7 +10770,7 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
             `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
                     preferred_table_id, preferences_notes, dietary_notes, is_vip,
                     is_blacklisted, blacklist_reason,
-                    consent_marketing, consent_marketing_updated_at, language,
+                    consent_marketing, consent_marketing_updated_at, language, billing,
                     ${noShowSubquery}
              FROM customers c
              WHERE c.tenant_id = $2
@@ -8906,9 +10815,33 @@ app.get('/customers/marketing-audience', authenticate, requirePermission('custom
     }
 });
 
+// Dati di fatturazione del cliente (fase 4 fatturazione): blob sanificato
+// campo per campo — mai lo JSON del client com'è. undefined = non toccare.
+const normalizeCustomerBilling = (raw: any): string | null | undefined => {
+    if (raw === undefined) return undefined;
+    if (raw === null) return null;
+    if (typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+    const str = (v: any, max = 200) => typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined;
+    const out = {
+        name: str(raw.name),
+        vat_number: str(raw.vat_number, 11),
+        tax_code: str(raw.tax_code, 16)?.toUpperCase(),
+        sdi_code: str(raw.sdi_code, 7)?.toUpperCase(),
+        pec: str(raw.pec),
+        address: {
+            street: str(raw.address?.street),
+            zip: str(raw.address?.zip, 5),
+            city: str(raw.address?.city),
+            province: str(raw.address?.province, 2)?.toUpperCase(),
+        },
+    };
+    return JSON.stringify(out);
+};
+
 app.post('/customers', authenticate, requirePermission('customers:full'), async (req, res) => {
     try {
         const { name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason } = req.body;
+        const billingJson = normalizeCustomerBilling(req.body?.billing);
         if (!name || !String(name).trim()) {
             return res.status(400).json({ error: 'name is required' });
         }
@@ -8946,10 +10879,10 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
         }
 
         const result = await queryWithRetry(
-            `INSERT INTO customers (tenant_id, name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason)
-             VALUES ($12, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $13, $14)
+            `INSERT INTO customers (tenant_id, name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason, billing)
+             VALUES ($12, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $13, $14, $15::jsonb)
              RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
-                       preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason, language`,
+                       preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason, language, billing`,
             [
                 normalizeCustomerName(String(name).trim()),
                 trimmedPhone || null,
@@ -8965,6 +10898,7 @@ app.post('/customers', authenticate, requirePermission('customers:full'), async 
                 req.tenantId!,
                 normalizedIsBlacklisted,
                 normalizedBlacklistReason,
+                billingJson ?? null,
             ]
         );
         const newCustomer = result.rows[0];
@@ -8993,6 +10927,7 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
     try {
         const { id } = req.params;
         const { name, phone, email, address, city, postal_code, notes, preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason } = req.body;
+        const billingJson = normalizeCustomerBilling(req.body?.billing);
         if (!name || !String(name).trim()) {
             return res.status(400).json({ error: 'name is required' });
         }
@@ -9071,10 +11006,11 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
                     is_vip = $11,
                     is_blacklisted = $12,
                     blacklist_reason = $13,
+                    billing = COALESCE($16::jsonb, billing),
                     updated_at = CURRENT_TIMESTAMP
                  WHERE id = $14 AND tenant_id = $15
                  RETURNING id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
-                           preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason, language`,
+                           preferred_table_id, preferences_notes, dietary_notes, is_vip, is_blacklisted, blacklist_reason, language, billing`,
                 [
                     newName,
                     newPhone,
@@ -9091,6 +11027,7 @@ app.put('/customers/:id', authenticate, requirePermission('customers:full'), asy
                     normalizedBlacklistReason,
                     id,
                     req.tenantId!,
+                    billingJson ?? null,
                 ]
             );
             updated = result.rows[0];
@@ -9347,13 +11284,85 @@ app.post('/customers/:sourceId/merge-into/:targetId', authenticate, requirePermi
 app.delete('/customers/:id', authenticate, requirePermission('customers:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const existing = await queryWithRetry('SELECT name FROM customers WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
+        const existing = await queryWithRetry('SELECT name, phone FROM customers WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
         if (existing.rowCount === 0) {
             return res.status(404).json({ error: 'Customer not found' });
         }
         const resourceName = existing.rows[0].name;
+        const phone = existing.rows[0].phone as string | null;
+
+        // Le prenotazioni della persona, PRIMA di cancellare la scheda: il
+        // legame cliente↔prenotazione in questo schema è il telefono (stesse
+        // ultime dieci cifre, come il dedupe della rubrica). È il modo esatto
+        // di trovare i log da anonimizzare — per id, non per somiglianza del
+        // nome — e copre anche le prenotazioni registrate con un nome scritto
+        // diversamente.
+        const digits = (phone ?? '').replace(/\D/g, '');
+        let reservationIds: number[] = [];
+        if (digits.length >= 8) {
+            const rs = await queryWithRetry(
+                `SELECT id FROM reservations
+                  WHERE tenant_id = $2
+                    AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10)
+                      = right($1, 10)`,
+                [digits, req.tenantId!]
+            );
+            reservationIds = rs.rows.map((r: any) => Number(r.id));
+        }
 
         await queryWithRetry('DELETE FROM customers WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
+
+        // Diritto all'oblio, lato audit: la scheda sparisce e il nome non deve
+        // sopravvivere nei log. Senza questo, una richiesta GDPR di
+        // cancellazione diventa una caccia al tesoro in activity_logs.
+        // Tre passate: i log del cliente per resource_id; i log delle SUE
+        // prenotazioni per id (esatto, niente omonimi); e in coda l'euristica
+        // sul prefisso del nome, che resta per le prenotazioni senza telefono
+        // e per le righe storiche. Lì un omonimo esatto può perdere il
+        // prefisso anche lui: per una cancellazione, cancellare troppo è
+        // l'errore giusto.
+        await queryWithRetry(
+            `UPDATE activity_logs
+                SET resource_name = 'cliente rimosso', details = NULL
+              WHERE tenant_id = $2 AND resource_type = 'CUSTOMER' AND resource_id = $1`,
+            [id, req.tenantId!]
+        );
+        if (reservationIds.length > 0) {
+            await queryWithRetry(
+                `UPDATE activity_logs
+                    SET resource_name = CASE
+                            WHEN left(resource_name, char_length($3)) = $3
+                                THEN 'cliente rimosso' || substr(resource_name, char_length($3) + 1)
+                            ELSE 'cliente rimosso'
+                        END
+                  WHERE tenant_id = $2
+                    AND resource_type = 'RESERVATION'
+                    AND resource_id = ANY($1::int[])`,
+                [reservationIds, req.tenantId!, resourceName]
+            );
+            // L'oblio vero sta qui, non solo nei log: nome e contatti nelle
+            // righe prenotazione della persona. Solo quelle PASSATE — una
+            // prenotazione futura serve al servizio, e anonimizzarla
+            // accecherebbe la reception su chi sta per arrivare.
+            await queryWithRetry(
+                `UPDATE reservations
+                    SET customer_name = 'cliente rimosso', phone = NULL, email = NULL
+                  WHERE tenant_id = $2
+                    AND id = ANY($1::int[])
+                    AND reservation_time < CURRENT_TIMESTAMP`,
+                [reservationIds, req.tenantId!]
+            );
+        }
+        await queryWithRetry(
+            `UPDATE activity_logs
+                SET resource_name = 'cliente rimosso' || substr(resource_name, char_length($1) + 1)
+              WHERE tenant_id = $2
+                AND resource_type = 'RESERVATION'
+                AND left(resource_name, char_length($1)) = $1
+                AND (char_length(resource_name) = char_length($1)
+                     OR substr(resource_name, char_length($1) + 1, 3) = ' — ')`,
+            [resourceName, req.tenantId!]
+        );
 
         if (req.user) {
             LogService.logActivity(
@@ -9364,7 +11373,9 @@ app.delete('/customers/:id', authenticate, requirePermission('customers:full'), 
                 ActivityAction.DELETE,
                 ResourceType.CUSTOMER,
                 parseInt(id, 10),
-                resourceName
+                // L'id, non il nome: la riga che registra la cancellazione non
+                // deve reintrodurre ciò che si è appena cancellato.
+                `cliente ${id}`
             );
         }
 
@@ -12667,6 +14678,509 @@ app.post('/notifications/:id/dismiss', authenticate, async (req: any, res) => {
     }
 });
 
+// ==================== CHAT STAFF ====================
+// Messaggistica interna fra le sezioni (docs/chat-staff-plan.md). Canali
+// fissi derivati dal ruolo (services/staffChat.ts) + DM 1-a-1. Lettura a
+// cursore per (utente, thread): non letti = id > last_read_message_id e
+// mittente diverso da me; cursore assente = tutto non letto.
+// Realtime sulle room per ruolo/utente (mai broadcastToAll: un DM non deve
+// attraversare il tenant); push con persist:false — la chat ha già il suo
+// stato di lettura, una riga in notifications per messaggio farebbe del
+// centro notifiche un duplicato rumoroso.
+
+const STAFF_MSG_FIELDS = `id, kind, channel, sender_user_id, sender_name, sender_role,
+    recipient_user_id, recipient_name, body, preset_key,
+    linked_reservation_id, linked_table_id, mentioned_user_ids, media, created_at`;
+
+app.get('/staff-chat/threads', authenticate, requirePermission('staffchat:use'), async (req: any, res) => {
+    try {
+        const userId = req.user.userId;
+        const channels = channelsForRole(req.user.role);
+
+        const [lastByChannel, unreadChannels, dmLast, dmUnread, colleagues] = await Promise.all([
+            queryWithRetry(
+                `SELECT DISTINCT ON (channel) ${STAFF_MSG_FIELDS}
+                 FROM staff_messages
+                 WHERE tenant_id = $1 AND kind = 'channel' AND channel = ANY($2)
+                 ORDER BY channel, id DESC`,
+                [req.tenantId!, channels]
+            ),
+            queryWithRetry(
+                `SELECT m.channel, COUNT(*)::int AS unread
+                 FROM staff_messages m
+                 LEFT JOIN staff_message_reads r
+                   ON r.tenant_id = m.tenant_id AND r.user_id = $2
+                  AND r.thread_key = 'channel:' || m.channel
+                 WHERE m.tenant_id = $1 AND m.kind = 'channel' AND m.channel = ANY($3)
+                   AND m.sender_user_id IS DISTINCT FROM $2
+                   AND m.id > COALESCE(r.last_read_message_id, 0)
+                 GROUP BY m.channel`,
+                [req.tenantId!, userId, channels]
+            ),
+            // Thread DM: ultimo messaggio per contraltare. other_id NULL
+            // (utente cancellato da entrambi i lati) non è indirizzabile con
+            // dm:<id> e viene scartato.
+            queryWithRetry(
+                `SELECT DISTINCT ON (other_id) *
+                 FROM (
+                     SELECT ${STAFF_MSG_FIELDS},
+                            CASE WHEN sender_user_id = $2 THEN recipient_user_id ELSE sender_user_id END AS other_id
+                     FROM staff_messages
+                     WHERE tenant_id = $1 AND kind = 'direct'
+                       AND (sender_user_id = $2 OR recipient_user_id = $2)
+                 ) t
+                 WHERE other_id IS NOT NULL
+                 ORDER BY other_id, id DESC`,
+                [req.tenantId!, userId]
+            ),
+            // Non letti DM: contano solo i messaggi VERSO di me, per mittente.
+            queryWithRetry(
+                `SELECT m.sender_user_id AS other_id, COUNT(*)::int AS unread
+                 FROM staff_messages m
+                 LEFT JOIN staff_message_reads r
+                   ON r.tenant_id = m.tenant_id AND r.user_id = $2
+                  AND r.thread_key = 'dm:' || m.sender_user_id
+                 WHERE m.tenant_id = $1 AND m.kind = 'direct'
+                   AND m.recipient_user_id = $2 AND m.sender_user_id IS NOT NULL
+                   AND m.id > COALESCE(r.last_read_message_id, 0)
+                 GROUP BY m.sender_user_id`,
+                [req.tenantId!, userId]
+            ),
+            queryWithRetry(
+                `SELECT id, full_name, role FROM users
+                 WHERE tenant_id = $1 AND id <> $2 AND is_active = TRUE AND role <> 'PLATFORM_ADMIN'
+                 ORDER BY full_name`,
+                [req.tenantId!, userId]
+            ),
+        ]);
+
+        const lastMap = new Map(lastByChannel.rows.map((m: any) => [m.channel, m]));
+        const unreadMap = new Map(unreadChannels.rows.map((r: any) => [r.channel, r.unread]));
+        const dmUnreadMap = new Map(dmUnread.rows.map((r: any) => [Number(r.other_id), r.unread]));
+        const colleagueById = new Map(colleagues.rows.map((u: any) => [Number(u.id), u]));
+
+        const threads: any[] = channels.map(channel => ({
+            threadKey: channelThreadKey(channel),
+            kind: 'channel',
+            channel,
+            lastMessage: lastMap.get(channel) ?? null,
+            unreadCount: unreadMap.get(channel) ?? 0,
+        }));
+        for (const row of dmLast.rows) {
+            const otherId = Number(row.other_id);
+            const colleague: any = colleagueById.get(otherId);
+            const { other_id, ...lastMessage } = row;
+            threads.push({
+                threadKey: dmThreadKey(otherId),
+                kind: 'direct',
+                otherUser: {
+                    id: otherId,
+                    // Il nome denormalizzato sul messaggio copre i contraltari
+                    // non più attivi (fuori dalla lista colleghi).
+                    fullName: colleague?.full_name
+                        ?? (Number(lastMessage.sender_user_id) === otherId ? lastMessage.sender_name : lastMessage.recipient_name),
+                    role: colleague?.role ?? null,
+                    isActive: Boolean(colleague),
+                },
+                lastMessage,
+                unreadCount: dmUnreadMap.get(otherId) ?? 0,
+            });
+        }
+        // Ultimo messaggio più recente in testa; canali senza traffico in coda
+        // nel loro ordine fisso.
+        threads.sort((a, b) => (b.lastMessage?.id ?? 0) - (a.lastMessage?.id ?? 0));
+
+        res.json({
+            threads,
+            colleagues: colleagues.rows.map((u: any) => ({ id: Number(u.id), fullName: u.full_name, role: u.role })),
+        });
+    } catch (err) {
+        console.error('GET /staff-chat/threads error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/staff-chat/threads/:threadKey/messages', authenticate, requirePermission('staffchat:use'), async (req: any, res) => {
+    try {
+        const userId = req.user.userId;
+        const ref = parseThreadKey(String(req.params.threadKey));
+        if (!ref) return res.status(400).json({ error: 'Thread non valido' });
+        const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '50'), 10) || 50, 1), 100);
+        const before = parseInt(String(req.query.before ?? ''), 10);
+        const beforeClause = Number.isFinite(before) ? before : null;
+
+        let rows: any[];
+        if (ref.kind === 'channel') {
+            if (!channelsForRole(req.user.role).includes(ref.channel)) {
+                return res.status(403).json({ error: 'Canale non accessibile' });
+            }
+            const r = await queryWithRetry(
+                `SELECT ${STAFF_MSG_FIELDS} FROM staff_messages
+                 WHERE tenant_id = $1 AND kind = 'channel' AND channel = $2
+                   AND ($3::bigint IS NULL OR id < $3)
+                 ORDER BY id DESC LIMIT $4`,
+                [req.tenantId!, ref.channel, beforeClause, limit]
+            );
+            rows = r.rows;
+        } else {
+            const other = await queryWithRetry(
+                `SELECT id FROM users WHERE tenant_id = $1 AND id = $2`,
+                [req.tenantId!, ref.otherUserId]
+            );
+            if (other.rows.length === 0) return res.status(404).json({ error: 'Utente non trovato' });
+            const r = await queryWithRetry(
+                `SELECT ${STAFF_MSG_FIELDS} FROM staff_messages
+                 WHERE tenant_id = $1 AND kind = 'direct'
+                   AND ((sender_user_id = $2 AND recipient_user_id = $3)
+                     OR (sender_user_id = $3 AND recipient_user_id = $2))
+                   AND ($4::bigint IS NULL OR id < $4)
+                 ORDER BY id DESC LIMIT $5`,
+                [req.tenantId!, userId, ref.otherUserId, beforeClause, limit]
+            );
+            rows = r.rows;
+        }
+        // Pagina restituita in ordine cronologico ascendente.
+        res.json({ messages: rows.reverse() });
+    } catch (err) {
+        console.error('GET /staff-chat/threads/:threadKey/messages error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/staff-chat/messages', authenticate, requirePermission('staffchat:use'), async (req: any, res) => {
+    try {
+        const userId = req.user.userId;
+        const socketId = req.headers['x-socket-id'] as string;
+        const { threadKey, body, presetKey, linkedReservationId, linkedTableId, mentionedUserIds, attachments } = req.body || {};
+
+        const ref = parseThreadKey(String(threadKey ?? ''));
+        if (!ref) return res.status(400).json({ error: 'Thread non valido' });
+        const text = typeof body === 'string' ? body.trim() : '';
+        if (text.length > STAFF_MESSAGE_MAX_LENGTH) {
+            return res.status(400).json({ error: 'Messaggio troppo lungo' });
+        }
+
+        // Allegati: token di outbound_media caricati via /staff-chat/attachments.
+        // Il messaggio porta solo i riferimenti; con una foto il testo puo'
+        // mancare (vincolo body-o-media a DB).
+        let media: { token: string; content_type: string; filename: string | null }[] | null = null;
+        if (Array.isArray(attachments) && attachments.length > 0) {
+            const tokens = attachments.filter((t: any) => typeof t === 'string' && /^[A-Za-z0-9_-]{20,64}$/.test(t));
+            if (tokens.length !== attachments.length || tokens.length > STAFF_MAX_ATTACHMENTS) {
+                return res.status(400).json({ error: 'Allegati non validi' });
+            }
+            const rows = await queryWithRetry(
+                `SELECT token, content_type, filename FROM outbound_media WHERE tenant_id = $1 AND token = ANY($2)`,
+                [req.tenantId!, tokens]
+            );
+            if (rows.rows.length !== tokens.length) {
+                return res.status(400).json({ error: 'Allegato non trovato' });
+            }
+            media = tokens.map((t: string) => {
+                const r = rows.rows.find((x: any) => x.token === t);
+                return { token: t, content_type: r.content_type, filename: r.filename ?? null };
+            });
+        }
+        if (!text && !media) {
+            return res.status(400).json({ error: 'Messaggio vuoto' });
+        }
+        // db:<id> = preset del tenant (tabella); slug fissa = builtin. Le key
+        // sconosciute si scartano senza errore: il messaggio vale comunque.
+        let preset: string | null = null;
+        if (typeof presetKey === 'string') {
+            if (isStaffPresetKey(presetKey)) {
+                preset = presetKey;
+            } else {
+                const dbMatch = presetKey.match(/^db:(\d+)$/);
+                if (dbMatch) {
+                    const p = await queryWithRetry(
+                        `SELECT id FROM staff_chat_presets WHERE tenant_id = $1 AND id = $2`,
+                        [req.tenantId!, Number(dbMatch[1])]
+                    );
+                    if (p.rows.length > 0) preset = presetKey;
+                }
+            }
+        }
+
+        const linkedReservation = Number.isInteger(linkedReservationId) ? Number(linkedReservationId) : null;
+        const linkedTable = Number.isInteger(linkedTableId) ? Number(linkedTableId) : null;
+        if (linkedReservation != null) {
+            const r = await queryWithRetry(`SELECT id FROM reservations WHERE tenant_id = $1 AND id = $2`, [req.tenantId!, linkedReservation]);
+            if (r.rows.length === 0) return res.status(400).json({ error: 'Prenotazione collegata non trovata' });
+        }
+        if (linkedTable != null) {
+            const r = await queryWithRetry(`SELECT id FROM tables WHERE tenant_id = $1 AND id = $2`, [req.tenantId!, linkedTable]);
+            if (r.rows.length === 0) return res.status(400).json({ error: 'Tavolo collegato non trovato' });
+        }
+
+        // Nome dal record utente, non dal token: il nome può cambiare.
+        const me = await queryWithRetry(`SELECT full_name FROM users WHERE tenant_id = $1 AND id = $2`, [req.tenantId!, userId]);
+        const senderName = me.rows[0]?.full_name || req.user.email;
+
+        // Menzioni: solo nei canali, id espliciti dal client (mai riestratti
+        // dal testo), utenti attivi del tenant che il canale possono aprirlo
+        // — menzionare chi non è membro produrrebbe una push su un thread
+        // che per lui non esiste.
+        let mentions: number[] | null = null;
+        if (ref.kind === 'channel' && Array.isArray(mentionedUserIds) && mentionedUserIds.length > 0) {
+            const ids = [...new Set(mentionedUserIds.filter((n: any) => Number.isInteger(n) && n > 0 && n !== userId))];
+            if (ids.length > STAFF_MAX_MENTIONS) {
+                return res.status(400).json({ error: 'Troppe menzioni' });
+            }
+            if (ids.length > 0) {
+                const found = await queryWithRetry(
+                    `SELECT id, role FROM users
+                     WHERE tenant_id = $1 AND id = ANY($2) AND is_active = TRUE`,
+                    [req.tenantId!, ids]
+                );
+                const memberRoles = rolesForChannel(ref.channel).map(String);
+                const valid = found.rows
+                    .filter((u: any) => memberRoles.includes(String(u.role)))
+                    .map((u: any) => Number(u.id));
+                if (valid.length !== ids.length) {
+                    return res.status(400).json({ error: 'Menzione non valida' });
+                }
+                mentions = valid;
+            }
+        }
+
+        let recipient: { id: number; name: string } | null = null;
+        if (ref.kind === 'channel') {
+            if (!channelsForRole(req.user.role).includes(ref.channel)) {
+                return res.status(403).json({ error: 'Canale non accessibile' });
+            }
+        } else {
+            if (ref.otherUserId === userId) return res.status(400).json({ error: 'Destinatario non valido' });
+            const other = await queryWithRetry(
+                `SELECT id, full_name, is_active FROM users WHERE tenant_id = $1 AND id = $2`,
+                [req.tenantId!, ref.otherUserId]
+            );
+            if (other.rows.length === 0) return res.status(404).json({ error: 'Utente non trovato' });
+            if (!other.rows[0].is_active) return res.status(400).json({ error: 'Utente non attivo' });
+            recipient = { id: Number(other.rows[0].id), name: other.rows[0].full_name };
+        }
+
+        const ins = await queryWithRetry(
+            `INSERT INTO staff_messages
+                (tenant_id, kind, channel, sender_user_id, sender_name, sender_role,
+                 recipient_user_id, recipient_name, body, preset_key,
+                 linked_reservation_id, linked_table_id, mentioned_user_ids, media)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+             RETURNING ${STAFF_MSG_FIELDS}`,
+            [req.tenantId!, ref.kind, ref.kind === 'channel' ? ref.channel : null,
+             userId, senderName, String(req.user.role),
+             recipient?.id ?? null, recipient?.name ?? null, text || null, preset,
+             linkedReservation, linkedTable, mentions, media ? JSON.stringify(media) : null]
+        );
+        const message = ins.rows[0];
+
+        // Broadcast mirato; chi origina ha già la risposta HTTP (pattern
+        // tavoli, esclusione via X-Socket-ID). Nel DM il mittente resta
+        // incluso come utente: i suoi altri device devono vedere il messaggio.
+        if (ref.kind === 'channel') {
+            socketService?.broadcastToRolesRoom(req.tenantId!, rolesForChannel(ref.channel).map(String), 'staffchat:message', message, socketId);
+        } else {
+            socketService?.broadcastToUsers(req.tenantId!, [userId, recipient!.id], 'staffchat:message', message, socketId);
+        }
+
+        // Push fire-and-forget: un fallimento web-push non deve far fallire
+        // l'invio. tag per thread: i messaggi dello stesso thread collassano.
+        const preview = staffMessagePreview({ body: text || null, media }).slice(0, 120);
+        if (ref.kind === 'channel') {
+            const channelKey = channelThreadKey(ref.channel);
+            const channelPayload = {
+                url: `/?staffchat=${encodeURIComponent(channelKey)}`,
+                tag: `staffchat:${channelKey}`,
+                category: 'staff',
+                persist: false,
+            };
+            // La push di menzione parte DOPO quella di canale e condivide il
+            // tag: sul device del menzionato la seconda sostituisce la prima,
+            // quindi resta una sola notifica, con la dicitura giusta.
+            pushSendToRoles(req.tenantId!, rolesForChannel(ref.channel).map(String), {
+                ...channelPayload,
+                title: `${senderName} · ${ref.channel}`,
+                body: preview,
+            }, { excludeUserId: userId })
+                .then(() => Promise.all((mentions ?? []).map(uid =>
+                    pushSendToUser(uid, {
+                        ...channelPayload,
+                        title: `${senderName} ti ha menzionato · ${ref.channel}`,
+                        body: preview,
+                    })
+                )))
+                .catch(err => console.error('Push (chat staff canale) failed:', err));
+        } else {
+            pushSendToUser(recipient!.id, {
+                title: senderName,
+                body: preview,
+                // Il threadKey del destinatario punta a ME (l'altro capo).
+                url: `/?staffchat=${encodeURIComponent(dmThreadKey(userId))}`,
+                tag: `staffchat:${dmThreadKey(userId)}`,
+                category: 'staff',
+                persist: false,
+            }).catch(err => console.error('Push (chat staff dm) failed:', err));
+        }
+
+        res.status(201).json(message);
+    } catch (err) {
+        console.error('POST /staff-chat/messages error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/staff-chat/threads/:threadKey/read', authenticate, requirePermission('staffchat:use'), async (req: any, res) => {
+    try {
+        const userId = req.user.userId;
+        const socketId = req.headers['x-socket-id'] as string;
+        const threadKey = String(req.params.threadKey);
+        const ref = parseThreadKey(threadKey);
+        if (!ref) return res.status(400).json({ error: 'Thread non valido' });
+        const lastReadMessageId = Number(req.body?.lastReadMessageId);
+        if (!Number.isInteger(lastReadMessageId) || lastReadMessageId <= 0) {
+            return res.status(400).json({ error: 'lastReadMessageId non valido' });
+        }
+        // Upsert monotono: un device in ritardo non riporta indietro il cursore.
+        await queryWithRetry(
+            `INSERT INTO staff_message_reads (tenant_id, user_id, thread_key, last_read_message_id)
+             VALUES ($1, $2, $3, $4)
+             ON CONFLICT (tenant_id, user_id, thread_key)
+             DO UPDATE SET last_read_message_id = GREATEST(staff_message_reads.last_read_message_id, EXCLUDED.last_read_message_id),
+                           updated_at = CURRENT_TIMESTAMP`,
+            [req.tenantId!, userId, threadKey, lastReadMessageId]
+        );
+        // Gli altri device dello stesso utente allineano il badge.
+        socketService?.broadcastToUsers(req.tenantId!, [userId], 'staffchat:read', { threadKey, lastReadMessageId }, socketId);
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('POST /staff-chat/threads/:threadKey/read error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/staff-chat/unread-count', authenticate, requirePermission('staffchat:use'), async (req: any, res) => {
+    try {
+        const userId = req.user.userId;
+        const channels = channelsForRole(req.user.role);
+        const r = await queryWithRetry(
+            `SELECT (
+                (SELECT COUNT(*) FROM staff_messages m
+                 LEFT JOIN staff_message_reads r
+                   ON r.tenant_id = m.tenant_id AND r.user_id = $2
+                  AND r.thread_key = 'channel:' || m.channel
+                 WHERE m.tenant_id = $1 AND m.kind = 'channel' AND m.channel = ANY($3)
+                   AND m.sender_user_id IS DISTINCT FROM $2
+                   AND m.id > COALESCE(r.last_read_message_id, 0))
+                +
+                (SELECT COUNT(*) FROM staff_messages m
+                 LEFT JOIN staff_message_reads r
+                   ON r.tenant_id = m.tenant_id AND r.user_id = $2
+                  AND r.thread_key = 'dm:' || m.sender_user_id
+                 WHERE m.tenant_id = $1 AND m.kind = 'direct'
+                   AND m.recipient_user_id = $2 AND m.sender_user_id IS NOT NULL
+                   AND m.id > COALESCE(r.last_read_message_id, 0))
+            )::int AS count`,
+            [req.tenantId!, userId, channels]
+        );
+        res.json({ count: r.rows[0]?.count ?? 0 });
+    } catch (err) {
+        console.error('GET /staff-chat/unread-count error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Preset dei messaggi rapidi. Tabella vuota = valgono i default hardcoded
+// (services/staffChat.ts); un tenant li personalizza da Impostazioni. La key
+// dei preset da tabella è db:<id>, quelle builtin restano le slug fisse.
+app.get('/staff-chat/presets', authenticate, requirePermission('staffchat:use'), async (req: any, res) => {
+    try {
+        const r = await queryWithRetry(
+            `SELECT id, label FROM staff_chat_presets WHERE tenant_id = $1 ORDER BY sort_order, id`,
+            [req.tenantId!]
+        );
+        if (r.rows.length > 0) {
+            return res.json({
+                presets: r.rows.map((p: any) => ({ key: `db:${p.id}`, label: p.label })),
+                custom: true,
+            });
+        }
+        res.json({ presets: STAFF_MESSAGE_PRESETS, custom: false });
+    } catch (err) {
+        console.error('GET /staff-chat/presets error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Sostituzione integrale della lista (pattern setPermissionsForRole): la
+// card di Impostazioni manda l'elenco intero; lista vuota = ripristina i
+// default. Broadcast così i composer aperti aggiornano le chip.
+app.put('/staff-chat/presets', authenticate, requirePermission('settings:full'), async (req: any, res) => {
+    try {
+        const socketId = req.headers['x-socket-id'] as string;
+        const raw = req.body?.labels;
+        if (!Array.isArray(raw) || raw.length > 12) {
+            return res.status(400).json({ error: 'Lista preset non valida' });
+        }
+        const labels = raw.map((l: any) => (typeof l === 'string' ? l.trim() : '')).filter(Boolean);
+        if (labels.length !== raw.length || labels.some((l: string) => l.length > 60)) {
+            return res.status(400).json({ error: 'Etichetta vuota o troppo lunga' });
+        }
+        const rows = await withTenant(req.tenantId!, async (client) => {
+            await client.query(`DELETE FROM staff_chat_presets WHERE tenant_id = $1`, [req.tenantId!]);
+            const inserted: any[] = [];
+            for (let i = 0; i < labels.length; i++) {
+                const ins = await client.query(
+                    `INSERT INTO staff_chat_presets (tenant_id, label, sort_order)
+                     VALUES ($1, $2, $3) RETURNING id, label`,
+                    [req.tenantId!, labels[i], i]
+                );
+                inserted.push(ins.rows[0]);
+            }
+            return inserted;
+        });
+        const presets = rows.length > 0
+            ? rows.map((p: any) => ({ key: `db:${p.id}`, label: p.label }))
+            : STAFF_MESSAGE_PRESETS;
+        socketService?.broadcastToAll(req.tenantId!, 'staffchat:presets', { presets }, socketId);
+        res.json({ presets, custom: rows.length > 0 });
+    } catch (err) {
+        console.error('PUT /staff-chat/presets error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Upload foto per la chat staff: stesso storage degli allegati WhatsApp
+// (outbound_media, token pubblico non indovinabile) ma permesso della chat
+// e solo immagini — la cucina non ha reservations:full.
+app.post('/staff-chat/attachments', authenticate, requirePermission('staffchat:use'), async (req: any, res) => {
+    try {
+        const contentType = String(req.body?.content_type || '').toLowerCase().split(';')[0].trim();
+        const dataB64 = String(req.body?.data || '');
+        const filename = req.body?.filename ? String(req.body.filename).slice(0, 200) : null;
+        if (!contentType || !dataB64) {
+            return res.status(400).json({ error: 'content_type e data sono obbligatori' });
+        }
+        if (!/^image\/(jpeg|png|webp|gif)$/.test(contentType)) {
+            return res.status(415).json({ error: `Solo foto: ${contentType} non supportato` });
+        }
+        const buf = Buffer.from(dataB64.replace(/^data:[^,]+,/, ''), 'base64');
+        if (buf.length === 0) return res.status(400).json({ error: 'File vuoto' });
+        if (buf.length > OUTBOUND_MEDIA_MAX_BYTES) {
+            return res.status(413).json({ error: 'File troppo grande: massimo 5 MB' });
+        }
+        const token = crypto.randomBytes(32).toString('base64url');
+        const ins = await queryWithRetry(
+            `INSERT INTO outbound_media (tenant_id, token, content_type, filename, bytes, size_bytes, created_by_user_id)
+             VALUES ($7, $1, $2, $3, $4, $5, $6) RETURNING token, content_type, filename, size_bytes`,
+            [token, contentType, filename, buf, buf.length, req.user?.userId ?? null, req.tenantId!]
+        );
+        res.status(201).json(ins.rows[0]);
+    } catch (err: any) {
+        console.error('POST /staff-chat/attachments error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // ============================================
 // WHATSAPP HELPER FUNCTIONS
 // ============================================
@@ -12838,6 +15352,7 @@ type BusinessIdentity = {
     address: string;    // indirizzo del locale, come etichetta leggibile
     mapsUrl: string;
     websiteUrl: string;
+    logoUrl: string;    // path del logo per la pagina prenota ('' = nessun logo)
 };
 
 const IDENTITY_FALLBACK: BusinessIdentity = {
@@ -12849,6 +15364,11 @@ const IDENTITY_FALLBACK: BusinessIdentity = {
     address: '',
     mapsUrl: 'https://maps.app.goo.gl/pf1DjUYzkhi1sStP8',
     websiteUrl: 'https://www.vecchiofrantoio.com',
+    // Vuoto di proposito: gli altri fallback sono i letterali storici del
+    // Frantoio, ma un logo VF su un tenant nuovo sarebbe il marchio sbagliato
+    // in faccia ai SUOI clienti. Il logo VF arriva dalla migration sul
+    // legal_config del tenant 1, non da qui.
+    logoUrl: '',
 };
 
 // Cache per tenant: ogni ristorante ha la propria identità pubblica.
@@ -12886,6 +15406,7 @@ async function refreshBusinessIdentity(tenantId: number): Promise<void> {
             address: s(legal.public_address) || IDENTITY_FALLBACK.address,
             mapsUrl: s(legal.maps_url) || IDENTITY_FALLBACK.mapsUrl,
             websiteUrl: s(legal.website_url) || IDENTITY_FALLBACK.websiteUrl,
+            logoUrl: s(legal.logo_url) || IDENTITY_FALLBACK.logoUrl,
         },
         refreshedAt: Date.now(),
     });
@@ -16125,8 +18646,8 @@ app.post('/voice-calls/sync', authenticate, requireFeature('voice'), voiceCallsA
 // directly — the endpoints they gate are low-volume (a handful per minute
 // at most), so caching isn't worth the complexity.
 
-type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled';
-const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled'];
+type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'digital_menu_enabled';
+const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'voice_double_seating_enabled', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'digital_menu_enabled'];
 
 async function getFeatureFlag(tenantId: number, key: FeatureFlagKey, fallback: boolean): Promise<boolean> {
     try {
@@ -16143,6 +18664,12 @@ const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, boolean> = {
     public_bookings_enabled: false,
     voice_agent_enabled: true,
     voice_bookings_suspended: false,
+    // Spento di default: il doppio turno (secondo giro sullo stesso tavolo
+    // nello stesso shift) dipende dallo stile di servizio della serata — oggi
+    // lo decide lo staff a mano. Acceso, i percorsi voce valutano
+    // l'occupazione per sovrapposizione di finestre orarie invece che per
+    // intero turno (elevenlabsService/roomOccupancyService).
+    voice_double_seating_enabled: false,
     // Off by default: the pay-at-table + split-bill flow depends on Revolut
     // being configured and the QR link being physically distributed at the
     // table. Owner opts in from Settings once ready.
@@ -16150,6 +18677,9 @@ const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, boolean> = {
     // Off by default: il modulo comande resta spento finché non c'è una UI
     // che lo usi (PR 3). Gli endpoint esistono ma rispondono 403.
     table_orders_enabled: false,
+    // Off by default: il menu digitale pubblico si accende dal QR modal
+    // della pagina Menu quando il ristoratore è pronto a esporlo.
+    digital_menu_enabled: false,
     // Spento finché il gestore non scrive le regole della casa: senza base di
     // conoscenza il modello non avrebbe da cosa rispondere.
     ai_messages_enabled: false,
@@ -16761,6 +19291,10 @@ const LEGAL_STRING_FIELDS = [
                            // NON è company_address: la sede legale può essere
                            // lo studio del commercialista in un'altra città.
     'maps_url',            // Link "Come raggiungerci" (Google Maps)
+    'logo_url',            // Logo del ristorante (pagina prenota). Scritto
+                           // dalle route /settings/logo: /public/media/<token>
+                           // dopo un upload, o un asset statico (es. il
+                           // /prenota/logo.png storico del Frantoio).
     'data_processors',     // Elenco responsabili/fornitori (testo multiriga)
     'retention_customer',  // Conservazione dati cliente (es. "24 mesi")
     'retention_calls',     // Conservazione registrazioni chiamate (es. "6 mesi")
@@ -16870,6 +19404,75 @@ app.put('/settings/legal', authenticate, requirePermission('settings:full'), asy
     } catch (err: any) {
         console.error('PUT /settings/legal error:', err);
         res.status(500).json({ error: 'Failed to update legal settings', detail: err?.message });
+    }
+});
+
+// Logo del ristorante (pagina prenota). I byte stanno in outbound_media
+// (token pubblico non indovinabile, stesso storage degli allegati) e in
+// legal_config resta solo il path: l'upload sostituisce, la DELETE toglie.
+// Niente SVG: servito same-origin col content-type salvato, un SVG con
+// script dentro sarebbe XSS sull'origine del backend.
+const LOGO_MEDIA_RE = /^\/public\/media\/([A-Za-z0-9_-]{20,64})$/;
+const setLegalLogoUrl = async (tenantId: number, logoUrl: string): Promise<void> => {
+    const current = await getLegalConfig(tenantId);
+    const next = { ...current, logo_url: logoUrl };
+    await queryWithRetry(
+        `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+         VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+         ON CONFLICT (tenant_id, key) DO UPDATE
+           SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+        [tenantId, LEGAL_CONFIG_KEY, JSON.stringify(next)]
+    );
+    await refreshBusinessIdentity(tenantId);
+};
+const deleteLogoMedia = async (tenantId: number, logoUrl: string): Promise<void> => {
+    const m = typeof logoUrl === 'string' ? logoUrl.match(LOGO_MEDIA_RE) : null;
+    if (!m) return; // asset statico (es. /prenota/logo.png): non si tocca
+    await queryWithRetry(`DELETE FROM outbound_media WHERE tenant_id = $1 AND token = $2`, [tenantId, m[1]])
+        .catch(err => console.warn('[logo] cleanup media fallito:', (err as any)?.message || err));
+};
+
+app.post('/settings/logo', authenticate, requirePermission('settings:full'), async (req: any, res) => {
+    try {
+        const contentType = String(req.body?.content_type || '').toLowerCase().split(';')[0].trim();
+        const dataB64 = String(req.body?.data || '');
+        if (!contentType || !dataB64) {
+            return res.status(400).json({ error: 'content_type e data sono obbligatori' });
+        }
+        if (!/^image\/(png|jpeg|webp)$/.test(contentType)) {
+            return res.status(415).json({ error: `Formato non supportato: ${contentType}. Usa PNG, JPG o WebP.` });
+        }
+        const buf = Buffer.from(dataB64.replace(/^data:[^,]+,/, ''), 'base64');
+        if (buf.length === 0) return res.status(400).json({ error: 'File vuoto' });
+        if (buf.length > 2 * 1024 * 1024) {
+            return res.status(413).json({ error: 'File troppo grande: massimo 2 MB' });
+        }
+        const previous = String((await getLegalConfig(req.tenantId!)).logo_url || '');
+        const token = crypto.randomBytes(32).toString('base64url');
+        await queryWithRetry(
+            `INSERT INTO outbound_media (tenant_id, token, content_type, filename, bytes, size_bytes, created_by_user_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [req.tenantId!, token, contentType, 'logo', buf, buf.length, req.user?.userId ?? null]
+        );
+        const logoUrl = `/public/media/${token}`;
+        await setLegalLogoUrl(req.tenantId!, logoUrl);
+        await deleteLogoMedia(req.tenantId!, previous);
+        res.status(201).json({ logo_url: logoUrl });
+    } catch (err: any) {
+        console.error('POST /settings/logo error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.delete('/settings/logo', authenticate, requirePermission('settings:full'), async (req: any, res) => {
+    try {
+        const previous = String((await getLegalConfig(req.tenantId!)).logo_url || '');
+        await setLegalLogoUrl(req.tenantId!, '');
+        await deleteLogoMedia(req.tenantId!, previous);
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('DELETE /settings/logo error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });
 
@@ -19644,6 +22247,9 @@ const handlePublicContact = async (tenantId: number, _req: express.Request, res:
             // testo generico — il link è la cosa che serve davvero.
             address: identity.address,
             maps_url: identity.mapsUrl,
+            // La pagina prenota nasconde l'immagine se manca: nessun logo
+            // rotto per i tenant che non l'hanno caricato.
+            logo_url: identity.logoUrl || null,
         },
         voice_agent_id: (process.env.ELEVENLABS_AGENT_ID || '').trim(),
     });
@@ -20571,16 +23177,18 @@ function serviceFromQuery(query: any): CurrentService {
     return { service_date: d ?? now.service_date, shift: sh ?? now.shift };
 }
 
-type CourseFireModeValue = 'AUTO_ALL' | 'AUTO_FIRST' | 'MANUAL';
+type CourseFireModeValue = 'AUTO_ALL' | 'AUTO_FIRST' | 'AUTO_NEXT' | 'MANUAL';
 
 // Come vengono lanciate le uscite. Default prudente ad AUTO_ALL: finché la
 // vista passe non esiste (PR 5) nessuno può lanciare a mano, e un default
 // diverso lascerebbe le uscite ferme in QUEUED senza che nessuno se ne accorga.
+// AUTO_NEXT è il fuoco a consumo: parte una sola uscita alla volta, la
+// successiva quando la precedente viene segnata servita.
 async function getCourseFireMode(tenantId: number): Promise<CourseFireModeValue> {
     try {
         const r = await queryWithRetry(`SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = 'course_fire_mode'`, [tenantId]);
         const v = r.rows[0]?.text_value;
-        if (v === 'AUTO_FIRST' || v === 'MANUAL' || v === 'AUTO_ALL') return v;
+        if (v === 'AUTO_FIRST' || v === 'AUTO_NEXT' || v === 'MANUAL' || v === 'AUTO_ALL') return v;
         return 'AUTO_ALL';
     } catch (err) {
         console.error('[orders] lettura course_fire_mode fallita, uso AUTO_ALL:', err);
@@ -20938,7 +23546,7 @@ app.get('/tables/bills-status', authenticate, requirePermission('orders:view'), 
         const service = serviceFromQuery(req.query);
         const rows = await queryWithRetry(
             `SELECT b.id, b.table_id, b.total_cents, b.covers, b.status,
-                    b.share_token, b.items, b.cash_settled_cents,
+                    b.share_token, b.items, b.cash_settled_cents, b.external_ref,
                     t.name AS table_name,
                     COALESCE((SELECT SUM(s.amount_cents)::int FROM table_bill_splits s
                               WHERE s.table_bill_id = b.id AND s.status = 'PAID'), 0) AS paid_cents,
@@ -20947,6 +23555,8 @@ app.get('/tables/bills-status', authenticate, requirePermission('orders:view'), 
                     COALESCE((SELECT SUM(pr.amount_cents)::int FROM payment_requests pr
                               WHERE pr.reservation_id = b.reservation_id AND pr.table_bill_split_id IS NULL
                                 AND UPPER(pr.status) IN ('COMPLETED','PAID') AND pr.completed_at IS NOT NULL), 0) AS deposit_paid_cents,
+                    COALESCE((SELECT SUM(p.amount_cents)::int FROM table_bill_payments p
+                              WHERE p.table_bill_id = b.id AND p.table_bill_split_id IS NULL AND p.voided_at IS NULL), 0) AS staff_paid_cents,
                     (SELECT COUNT(*)::int FROM orders o
                      WHERE o.table_bill_id = b.id AND o.status = 'OPEN') AS open_orders
              FROM table_bills b
@@ -20958,6 +23568,9 @@ app.get('/tables/bills-status', authenticate, requirePermission('orders:view'), 
             [service.service_date, service.shift, req.tenantId!]
         );
         const bills = rows.rows
+            // Il vecchio addendo cash_settled_cents è sostituito dagli incassi
+            // staff del libro cassa: cash_settled ne è ormai una proiezione
+            // (sole righe CONTANTI) e sommarlo qui conterebbe doppio.
             .map((r: any) => ({
                 id: r.id,
                 table_id: r.table_id,
@@ -20967,12 +23580,16 @@ app.get('/tables/bills-status', authenticate, requirePermission('orders:view'), 
                 status: r.status,
                 share_token: r.share_token,
                 items: r.items ?? null,
-                paid_cents: Number(r.paid_cents) + Number(r.cash_settled_cents),
+                // "pp:comanda:<id>" per i conti nati dal gestionale: il dialog
+                // di chiusura ci appende la scelta Scontrino/Proforma.
+                external_ref: r.external_ref ?? null,
+                paid_cents: Number(r.paid_cents) + Number(r.staff_paid_cents),
                 cash_settled_cents: Number(r.cash_settled_cents),
+                staff_paid_cents: Number(r.staff_paid_cents),
                 deposit_credit_cents: Number(r.deposit_credit_cents),
                 deposit_paid_cents: Number(r.deposit_paid_cents),
                 refund_due_cents: Math.max(0, Number(r.deposit_paid_cents) - Number(r.deposit_credit_cents)),
-                residual_cents: Number(r.total_cents) - Number(r.paid_cents) - Number(r.cash_settled_cents),
+                residual_cents: Number(r.total_cents) - Number(r.paid_cents) - Number(r.staff_paid_cents),
                 open_orders: Number(r.open_orders),
             }))
             // Restano visibili anche i conti già coperti dall'acconto (residuo 0):
@@ -21079,7 +23696,7 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
             // Risolta e congelata qui: cambiare la mappa domani non deve
             // spostare le comande di stasera fra i monitor.
             const dish = await client.query(
-                `SELECT d.id, d.name, d.price,
+                `SELECT d.id, d.name, d.price, d.vat_rate,
                         COALESCE(d.station_id, cs.station_id) AS station_id
                  FROM dishes d
                  LEFT JOIN category_stations cs ON cs.category = d.category AND cs.tenant_id = d.tenant_id
@@ -21151,21 +23768,36 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
                 : (batchKey ? `${batchKey}:${i}` : null);
 
             await client.query(
-                // ON CONFLICT sul nuovo vincolo composto (tenant_id, key):
-                // il replay vale dentro il ristorante, non attraverso.
+                // ON CONFLICT sul vincolo composto (tenant_id, key): il replay
+                // vale dentro il ristorante, non attraverso. Sul conflitto NON
+                // si ignora: se la riga è ancora in bozza si allinea a qty/nota
+                // dell'ultimo invio — è il retry del palmare dopo un timeout in
+                // cui il cameriere ha nel frattempo ritoccato la quantità, e
+                // l'intento più recente deve vincere. Oltre DRAFT la cucina
+                // l'ha vista: il replay non tocca più niente.
+                // vat_rate: snapshot dall'anagrafica come il prezzo — se
+                // l'aliquota del piatto cambia domani, la riga di stasera
+                // resta com'era al momento della battitura.
                 `INSERT INTO order_items
                     (tenant_id, order_id, dish_id, name_snapshot, unit_price_cents, modifiers, qty,
-                     course_no, seat_no, station_id, note, created_by_user_id, idempotency_key)
-                 VALUES ($13, $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12)
-                 ON CONFLICT (tenant_id, idempotency_key) DO NOTHING`,
+                     course_no, seat_no, station_id, note, created_by_user_id, idempotency_key, vat_rate)
+                 VALUES ($13, $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $14)
+                 ON CONFLICT (tenant_id, idempotency_key) DO UPDATE
+                    SET qty = EXCLUDED.qty, note = EXCLUDED.note
+                    WHERE order_items.status = 'DRAFT' AND order_items.order_id = EXCLUDED.order_id`,
                 [orderId, dishId, dish.rows[0].name, unitPrice,
                  modifiers ? JSON.stringify(modifiers) : null, qty, courseNo, seatNo,
                  Number.isFinite(stationId) ? stationId : null,
                  typeof raw?.note === 'string' ? raw.note.slice(0, 300) : null,
-                 req.user?.userId ?? null, itemKey, req.tenantId!]
+                 req.user?.userId ?? null, itemKey, req.tenantId!,
+                 Number.isFinite(Number(dish.rows[0].vat_rate)) ? Number(dish.rows[0].vat_rate) : 10]
             );
         }
 
+        // L'evento fa parte della transazione: o righe + evento, o niente.
+        // Il broadcast lo fa il dispatcher dell'outbox (kick sotto), così un
+        // processo morto fra COMMIT e notifica non lascia la cucina cieca.
+        await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId });
         await client.query('COMMIT');
         client.release();
 
@@ -21173,7 +23805,7 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
         const view = await loadOrderView(req.tenantId!, orderId);
         // Se la comanda è già agganciata a un conto, il totale lo segue.
         const sync = await resyncBillForOrder(req.tenantId!, orderId);
-        try { socketService?.broadcastToAll(req.tenantId!, 'order:updated', view.order); } catch (_) {}
+        outboxKick();
         res.status(201).json({ ...view, ...(sync?.warning ? { bill_warning: sync.warning } : {}) });
     } catch (err: any) {
         await client.query('ROLLBACK').catch(() => {});
@@ -21319,15 +23951,44 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
         }
 
         const proposedCourses = [...new Set(queued.rows.map((r: any) => r.course_no))].sort((a, b) => a - b);
+        // AUTO_NEXT lancia la prima uscita proposta solo se il tavolo non ha
+        // già qualcosa in cucina: se c'è, la prossima partirà dal servito.
+        // Non "solo la 1" come AUTO_FIRST: un dolce ordinato a fine pasto,
+        // a tavolo ormai vuoto di piatti, deve partire da solo.
+        let autoNextFirst: number[] = [];
+        if (mode === 'AUTO_NEXT' && proposedCourses.length > 0) {
+            const inFlight = await client.query(
+                `SELECT 1 FROM order_items
+                 WHERE order_id = $1 AND status IN ('SENT','PREPARING','READY') LIMIT 1`,
+                [orderId]
+            );
+            if (inFlight.rows.length === 0) autoNextFirst = [proposedCourses[0]];
+        }
         const toFire = mode === 'AUTO_ALL' ? proposedCourses
                      : mode === 'AUTO_FIRST' ? proposedCourses.filter(c => c === 1)
+                     : mode === 'AUTO_NEXT' ? autoNextFirst
                      : [];
+        // Un'uscita che aveva GIÀ righe lanciate e ne riceve altre è una
+        // modifica della card a video, non una card nuova: va segnalata.
+        let alreadyFired: number[] = [];
+        if (toFire.length > 0) {
+            const prev = await client.query(
+                `SELECT DISTINCT course_no FROM order_items
+                 WHERE order_id = $1 AND course_no = ANY($2) AND fired_at IS NOT NULL`,
+                [orderId, toFire]
+            );
+            alreadyFired = prev.rows.map((r: any) => r.course_no);
+        }
         const fired: number[] = [];
         for (const c of toFire) {
             const rows = await fireCourseInTx(client, req.tenantId!, orderId, c);
             if (rows.length > 0) fired.push(c);
         }
 
+        // L'invio (e l'eventuale lancio automatico) viaggia con la stessa
+        // transazione che cambia gli stati: la cucina non può restare cieca
+        // su un invio committato.
+        await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId });
         await client.query('COMMIT');
         client.release();
 
@@ -21355,8 +24016,22 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
                     });
                 }
             }
-            socketService?.broadcastToAll(req.tenantId!, 'order:updated', view.order);
         } catch (_) {}
+        outboxKick();
+
+        for (const c of fired.filter(c => alreadyFired.includes(c))) {
+            const addedIds = new Set(queued.rows.filter((r: any) => r.course_no === c).map((r: any) => r.id));
+            const added = view.items.filter((i: any) => addedIds.has(i.id));
+            if (added.length === 0) continue;
+            await recordOrderRevision(req.tenantId!, {
+                orderId, courseNo: c,
+                stationIds: added.map((i: any) => i.station_id),
+                kind: 'added',
+                summary: `Aggiunto ${added.map((i: any) => `${i.qty}× ${i.name_snapshot}`).join(', ')}`,
+                details: added.map((i: any) => ({ label: `${i.qty}× ${i.name_snapshot}`, note: i.note ?? null })),
+                userId: req.user?.userId, userEmail: req.user?.email,
+            });
+        }
 
         res.json({ ...view, fire_mode: mode, fired_courses: fired, queued_courses: stillQueued });
     } catch (err: any) {
@@ -21379,15 +24054,35 @@ app.post('/orders/:id/courses/:n/recall', authenticate, requirePermission('order
             return res.status(400).json({ error: 'Parametri non validi' });
         }
 
-        const upd = await queryWithRetry(
-            `UPDATE order_items
-             SET status = 'DRAFT', queued_at = NULL
-             WHERE order_id = $1 AND course_no = $2 AND status = 'QUEUED' AND fired_at IS NULL
-               AND tenant_id = $3
-             RETURNING id`,
-            [orderId, courseNo, req.tenantId!]
-        );
-        if (upd.rows.length === 0) {
+        // Transazione esplicita per portare l'evento outbox insieme al
+        // cambio di stato: un recall committato ma mai comunicato lascerebbe
+        // il passe convinto che l'uscita sia ancora in attesa.
+        const client = await pool.connect();
+        let recalled = 0;
+        try {
+            await client.query('BEGIN');
+            const upd = await client.query(
+                `UPDATE order_items
+                 SET status = 'DRAFT', queued_at = NULL
+                 WHERE order_id = $1 AND course_no = $2 AND status = 'QUEUED' AND fired_at IS NULL
+                   AND tenant_id = $3
+                 RETURNING id`,
+                [orderId, courseNo, req.tenantId!]
+            );
+            recalled = upd.rows.length;
+            if (recalled === 0) {
+                await client.query('ROLLBACK');
+            } else {
+                await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId });
+                await client.query('COMMIT');
+            }
+        } catch (err) {
+            await client.query('ROLLBACK').catch(() => {});
+            throw err;
+        } finally {
+            client.release();
+        }
+        if (recalled === 0) {
             return res.status(409).json({
                 error: 'Nessuna riga richiamabile: l\'uscita non è in attesa oppure è già stata lanciata',
             });
@@ -21396,8 +24091,8 @@ app.post('/orders/:id/courses/:n/recall', authenticate, requirePermission('order
         const view = await loadOrderView(req.tenantId!, orderId);
         try {
             socketService?.broadcastToAll(req.tenantId!, 'course:recalled', { order_id: orderId, course_no: courseNo });
-            socketService?.broadcastToAll(req.tenantId!, 'order:updated', view.order);
         } catch (_) {}
+        outboxKick();
         res.json(view);
     } catch (err: any) {
         console.error('POST /orders/:id/courses/:n/recall error:', err);
@@ -21512,10 +24207,12 @@ app.post('/kds/items/:id/status', authenticate, requirePermission('orders:kds'),
         if (next !== 'PREPARING' && next !== 'READY') {
             return res.status(400).json({ error: "status deve essere PREPARING o READY" });
         }
-        // PREPARING solo da SENT, READY da SENT o PREPARING: il cuoco che
-        // segna pronto senza passare da "in preparazione" è normale sui
-        // piatti veloci e non va ostacolato.
-        const allowedFrom = next === 'PREPARING' ? ['SENT'] : ['SENT', 'PREPARING'];
+        // READY da SENT o PREPARING: il cuoco che segna pronto senza passare
+        // da "in preparazione" è normale sui piatti veloci e non va
+        // ostacolato. PREPARING anche da READY: è l'annulla di una spunta
+        // sbagliata — finché l'uscita non è servita si può tornare indietro,
+        // e ready_at si azzera perché quel "pronto" non è mai esistito.
+        const allowedFrom = next === 'PREPARING' ? ['SENT', 'READY'] : ['SENT', 'PREPARING'];
 
         const upd = await queryWithRetry(
             // $2 va castato esplicitamente: senza, Postgres deve dedurne il
@@ -21524,7 +24221,7 @@ app.post('/kds/items/:id/status', authenticate, requirePermission('orders:kds'),
             `UPDATE order_items
              SET status = $2::varchar,
                  started_at = CASE WHEN started_at IS NULL THEN CURRENT_TIMESTAMP ELSE started_at END,
-                 ready_at   = CASE WHEN $2::text = 'READY' THEN CURRENT_TIMESTAMP ELSE ready_at END
+                 ready_at   = CASE WHEN $2::text = 'READY' THEN CURRENT_TIMESTAMP ELSE NULL END
              WHERE id = $1 AND tenant_id = $4 AND status = ANY($3::varchar[])
              RETURNING *`,
             [id, next, allowedFrom, req.tenantId!]
@@ -21642,11 +24339,15 @@ app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), as
             const status = queuedOnly ? 'QUEUED' : allReady ? 'READY' : 'FIRED';
 
             // Una riga per partita coinvolta: sono i pallini del monitor.
+            // ready_items oltre al booleano: da quando la cucina spunta i
+            // piatti uno a uno, il passe vede l'avanzamento (2/3), non solo
+            // il tutto-o-niente.
             const stations = [...new Set(items.map(i => i.station_id))].map(sid => {
                 const mine = items.filter(i => i.station_id === sid);
                 return {
                     station_id: sid,
                     ready: mine.every(i => i.status === 'READY'),
+                    ready_items: mine.filter(i => i.status === 'READY').length,
                     items: mine.length,
                 };
             });
@@ -21689,9 +24390,30 @@ app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), as
             [req.tenantId!]
         );
 
+        // Le uscite servite da poco, per il ripensamento: un "Servita" toccato
+        // per errore si corregge da qui. Finestra breve e lista corta — è un
+        // cestino della carta, non uno storico. ready_at IS NOT NULL esclude
+        // le righe di sistema nate SERVED (coperto, servizio).
+        const servite = await queryWithRetry(
+            `SELECT oi.order_id, oi.course_no, MAX(oi.served_at) AS served_at,
+                    COUNT(*)::int AS items, t.name AS table_name
+             FROM order_items oi
+             JOIN orders o ON o.id = oi.order_id
+             LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
+             WHERE o.status = 'OPEN' AND o.tenant_id = $3
+               AND o.service_date = $1 AND o.shift = $2
+               AND oi.status = 'SERVED' AND oi.ready_at IS NOT NULL
+               AND oi.served_at >= NOW() - INTERVAL '30 minutes'
+             GROUP BY oi.order_id, oi.course_no, t.name
+             ORDER BY MAX(oi.served_at) DESC
+             LIMIT 10`,
+            [service.service_date, service.shift, req.tenantId!]
+        );
+
         res.json({
             ...service,
             stations: stations.rows,
+            servite: servite.rows,
             // In corso prima, poi le proposte in attesa: sono le due domande
             // diverse che si fa il passe — cosa sta uscendo, cosa far partire.
             courses: courses.sort((a, b) => {
@@ -21723,6 +24445,14 @@ app.post('/orders/:id/courses/:n/fire', authenticate, requirePermission('orders:
         }
 
         await client.query('BEGIN');
+        // Prima del fire: se l'uscita aveva già righe lanciate, quelle nuove
+        // sono un'aggiunta a una card già a video (revisione, sotto).
+        const prev = await client.query(
+            `SELECT 1 FROM order_items
+             WHERE order_id = $1 AND course_no = $2 AND fired_at IS NOT NULL AND tenant_id = $3 LIMIT 1`,
+            [orderId, courseNo, req.tenantId!]
+        );
+        const wasAlreadyFired = prev.rows.length > 0;
         const fired = await fireCourseInTx(client, req.tenantId!, orderId, courseNo);
         if (fired.length === 0) {
             await client.query('ROLLBACK'); client.release();
@@ -21744,6 +24474,17 @@ app.post('/orders/:id/courses/:n/fire', authenticate, requirePermission('orders:
                 });
             }
         } catch (_) {}
+
+        if (wasAlreadyFired) {
+            await recordOrderRevision(req.tenantId!, {
+                orderId, courseNo,
+                stationIds: fired.map((i: any) => i.station_id),
+                kind: 'added',
+                summary: `Aggiunto ${fired.map((i: any) => `${i.qty}× ${i.name_snapshot}`).join(', ')}`,
+                details: fired.map((i: any) => ({ label: `${i.qty}× ${i.name_snapshot}`, note: i.note ?? null })),
+                userId: req.user?.userId, userEmail: req.user?.email,
+            });
+        }
 
         res.json({ order_id: orderId, course_no: courseNo, items: fired });
     } catch (err: any) {
@@ -21863,6 +24604,171 @@ app.post('/orders/:id/courses/:n/call', authenticate, requirePermission('orders:
     }
 });
 
+// L'uscita lascia il passe: READY → SERVED su tutte le righe. Prima il ciclo
+// moriva a READY e il monitor accumulava uscite verdi già portate al tavolo;
+// con served_at diventa anche misurabile il tempo reale sotto la lampada.
+// Permessi in alternativa: la segna il passe (expedite) o la sala (take).
+app.post('/orders/:id/courses/:n/serve', authenticate, requireAnyPermission('orders:expedite', 'orders:take'), async (req, res) => {
+    const client = await pool.connect();
+    try {
+        if (!(await ordersEnabledGuard(req, res))) { client.release(); return; }
+        const orderId = parseInt(req.params.id, 10);
+        const courseNo = parseInt(req.params.n, 10);
+        if (!Number.isFinite(orderId) || !Number.isFinite(courseNo)) {
+            client.release();
+            return res.status(400).json({ error: 'Parametri non validi' });
+        }
+
+        const mode = await getCourseFireMode(req.tenantId!);
+        await client.query('BEGIN');
+
+        const ord = await client.query(
+            `SELECT id, table_id FROM orders WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+            [orderId, req.tenantId!]
+        );
+        if (ord.rows.length === 0) {
+            await client.query('ROLLBACK'); client.release();
+            return res.status(404).json({ error: 'Comanda non trovata' });
+        }
+
+        const cur = await client.query(
+            `SELECT id, status FROM order_items
+             WHERE order_id = $1 AND course_no = $2 AND tenant_id = $3 AND status <> 'VOIDED'`,
+            [orderId, courseNo, req.tenantId!]
+        );
+        if (cur.rows.length === 0) {
+            await client.query('ROLLBACK'); client.release();
+            return res.status(404).json({ error: 'Uscita non trovata' });
+        }
+
+        // Si serve solo un'uscita interamente pronta: servirla a metà
+        // lascerebbe il resto orfano di un momento di uscita vero, e la
+        // metrica della lampada racconterebbe una bugia.
+        const pending = cur.rows.filter((r: any) => r.status !== 'READY' && r.status !== 'SERVED');
+        if (pending.length > 0) {
+            await client.query('ROLLBACK'); client.release();
+            return res.status(409).json({ error: "L'uscita non è ancora tutta pronta" });
+        }
+        if (!cur.rows.some((r: any) => r.status === 'READY')) {
+            await client.query('ROLLBACK'); client.release();
+            return res.status(409).json({ error: 'Uscita già servita' });
+        }
+
+        // Il filtro su READY rende l'operazione idempotente anche sotto due
+        // tocchi concorrenti: il secondo non trova righe e fa 409, non danni.
+        const upd = await client.query(
+            `UPDATE order_items
+             SET status = 'SERVED', served_at = CURRENT_TIMESTAMP
+             WHERE order_id = $1 AND course_no = $2 AND tenant_id = $3 AND status = 'READY'
+             RETURNING *`,
+            [orderId, courseNo, req.tenantId!]
+        );
+
+        // Fuoco a consumo: servita un'uscita, parte da sola la più bassa in
+        // coda. Nella stessa transazione del servito — come per l'invio, la
+        // cucina non può restare cieca su un lancio committato.
+        let nextFired: number | null = null;
+        let nextItems: any[] = [];
+        if (mode === 'AUTO_NEXT') {
+            const nq = await client.query(
+                `SELECT MIN(course_no) AS n FROM order_items WHERE order_id = $1 AND status = 'QUEUED'`,
+                [orderId]
+            );
+            if (nq.rows[0]?.n != null) {
+                const n = Number(nq.rows[0].n);
+                nextItems = await fireCourseInTx(client, req.tenantId!, orderId, n);
+                if (nextItems.length > 0) nextFired = n;
+            }
+        }
+
+        await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId });
+        await client.query('COMMIT');
+        client.release();
+
+        try {
+            socketService?.broadcastToAll(req.tenantId!, 'course:served', {
+                order_id: orderId, course_no: courseNo,
+            });
+            if (nextFired != null) {
+                socketService?.broadcastToAll(req.tenantId!, 'course:fired', {
+                    order_id: orderId, course_no: nextFired, table_id: ord.rows[0].table_id, items: nextItems,
+                });
+                for (const st of new Set(nextItems.map((i: any) => i.station_id))) {
+                    socketService?.broadcastToStation(req.tenantId!, st as number | null, 'kds:fired', {
+                        order_id: orderId, course_no: nextFired, table_id: ord.rows[0].table_id,
+                        items: nextItems.filter((i: any) => i.station_id === st),
+                    });
+                }
+            }
+        } catch (_) {}
+        outboxKick();
+
+        res.json({ order_id: orderId, course_no: courseNo, items: upd.rows, next_fired_course: nextFired });
+    } catch (err: any) {
+        await client.query('ROLLBACK').catch(() => {});
+        client.release();
+        console.error('POST /orders/:id/courses/:n/serve error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Riporta al passe un'uscita servita per errore: SERVED → READY, served_at
+// azzerato. Il filtro su ready_at esclude le righe di sistema (coperto,
+// servizio), che nascono SERVED senza essere mai passate dalla cucina.
+// Se il servito aveva lanciato l'uscita successiva (AUTO_NEXT), quella non
+// si richiama: le stampe sono già in partita, e un lancio non si disfa.
+app.post('/orders/:id/courses/:n/unserve', authenticate, requireAnyPermission('orders:expedite', 'orders:take'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(req, res))) return;
+        const orderId = parseInt(req.params.id, 10);
+        const courseNo = parseInt(req.params.n, 10);
+        if (!Number.isFinite(orderId) || !Number.isFinite(courseNo)) {
+            return res.status(400).json({ error: 'Parametri non validi' });
+        }
+
+        const ord = await queryWithRetry(
+            `SELECT status FROM orders WHERE id = $1 AND tenant_id = $2`,
+            [orderId, req.tenantId!]
+        );
+        if (ord.rows.length === 0) return res.status(404).json({ error: 'Comanda non trovata' });
+        if (ord.rows[0].status !== 'OPEN') {
+            return res.status(409).json({ error: 'La comanda non è aperta', status: ord.rows[0].status });
+        }
+
+        const upd = await queryWithRetry(
+            `UPDATE order_items
+             SET status = 'READY', served_at = NULL
+             WHERE order_id = $1 AND course_no = $2 AND tenant_id = $3
+               AND status = 'SERVED' AND ready_at IS NOT NULL
+             RETURNING *`,
+            [orderId, courseNo, req.tenantId!]
+        );
+        if (upd.rows.length === 0) {
+            return res.status(409).json({ error: 'Niente da riportare: l\'uscita non risulta servita' });
+        }
+
+        try {
+            socketService?.broadcastToAll(req.tenantId!, 'course:unserved', {
+                order_id: orderId, course_no: courseNo,
+            });
+        } catch (_) {}
+
+        await recordOrderRevision(req.tenantId!, {
+            orderId, courseNo,
+            stationIds: upd.rows.map((r: any) => r.station_id),
+            kind: 'unserved',
+            summary: `Uscita riportata in cucina`,
+            details: upd.rows.map((r: any) => ({ label: `${r.qty}× ${r.name_snapshot}` })),
+            userId: req.user?.userId, userEmail: req.user?.email,
+        });
+
+        res.json({ order_id: orderId, course_no: courseNo, items: upd.rows });
+    } catch (err: any) {
+        console.error('POST /orders/:id/courses/:n/unserve error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 // --- Ponte comanda → conto (PR 6) -------------------------------------------
 // `table_bills.total_cents` smette di essere un numero digitato dal cameriere
 // e diventa la somma delle righe non stornate. È la parte delicata del piano,
@@ -21880,7 +24786,7 @@ class BillSyncError extends Error {
 async function billItemsSnapshot(client: any, billId: number): Promise<any[]> {
     const rows = await client.query(
         `SELECT oi.id, oi.name_snapshot, oi.qty, oi.unit_price_cents, oi.modifiers,
-                oi.course_no, d.category
+                oi.course_no, oi.vat_rate, d.category
          FROM order_items oi
          JOIN orders o ON o.id = oi.order_id
          LEFT JOIN dishes d ON d.id = oi.dish_id AND d.tenant_id = oi.tenant_id
@@ -21898,7 +24804,50 @@ async function billItemsSnapshot(client: any, billId: number): Promise<any[]> {
             unit_price_cents: Number(r.unit_price_cents) + delta,
             category: r.category ?? null,
             course_no: r.course_no,
+            // Le varianti seguono l'aliquota della riga madre: sono parte
+            // dello stesso piatto somministrato.
+            vat_rate: Number.isFinite(Number(r.vat_rate)) ? Number(r.vat_rate) : 10,
         };
+    });
+}
+
+// Scomposizione IVA del conto per aliquota, dallo snapshot righe. I prezzi
+// sono IVA inclusa: l'imponibile è lo scorporo (lordo ÷ (1+r)). Con uno
+// sconto il totale del conto scende sotto la somma delle righe: il lordo di
+// ogni aliquota viene riproporzionato al totale prima dello scorporo — lo
+// sconto pesa su tutte le aliquote in proporzione, come su un registratore
+// di cassa — e i centesimi di resto vanno alle frazioni maggiori, così la
+// somma dei lordi torna ESATTAMENTE il totale. È la base dei totali per
+// aliquota del documento commerciale (fase 3 del piano fatturazione).
+function vatBreakdownFromItems(items: any[] | null, totalCents: number): { rate: number; gross_cents: number; net_cents: number; vat_cents: number }[] {
+    if (!Array.isArray(items) || items.length === 0 || totalCents <= 0) return [];
+    const byRate = new Map<number, number>();
+    let itemsSum = 0;
+    for (const i of items) {
+        const gross = Math.round(Number(i.unit_price_cents || 0) * Number(i.qty || 0));
+        if (gross <= 0) continue;
+        // Snapshot vecchi senza aliquota: 10 (somministrazione), come il
+        // default di anagrafica.
+        const rate = Number.isFinite(Number(i.vat_rate)) ? Number(i.vat_rate) : 10;
+        byRate.set(rate, (byRate.get(rate) ?? 0) + gross);
+        itemsSum += gross;
+    }
+    if (itemsSum <= 0) return [];
+    const scaled = [...byRate.entries()].map(([rate, gross]) => {
+        const exact = (gross * totalCents) / itemsSum;
+        return { rate, exact, gross_cents: Math.floor(exact) };
+    });
+    let residue = totalCents - scaled.reduce((n, r) => n + r.gross_cents, 0);
+    scaled.sort((a, b) => (b.exact - Math.floor(b.exact)) - (a.exact - Math.floor(a.exact)));
+    for (const r of scaled) {
+        if (residue <= 0) break;
+        r.gross_cents += 1;
+        residue -= 1;
+    }
+    scaled.sort((a, b) => a.rate - b.rate);
+    return scaled.map(({ rate, gross_cents }) => {
+        const net = Math.round(gross_cents / (1 + rate / 100));
+        return { rate, gross_cents, net_cents: net, vat_cents: gross_cents - net };
     });
 }
 
@@ -21941,7 +24890,10 @@ async function maintainDepositCredit(client: any, tenantId: number, billId: numb
          WHERE table_bill_id = $1 AND status IN ('CLAIMED', 'PAID') AND kind <> 'deposit'`,
         [billId]
     );
-    let remaining = Math.max(0, newTotal - otherLiveRs.rows[0].s);
+    // Gli incassi staff del libro cassa occupano capienza come le quote dei
+    // clienti: l'acconto si ridimensiona su quel che resta davvero.
+    const staffPaidForDeposit = await staffPaidCentsForBill(billId, client);
+    let remaining = Math.max(0, newTotal - otherLiveRs.rows[0].s - staffPaidForDeposit);
 
     for (const dep of deposits.rows) {
         const want = Math.min(Number(dep.amount_cents), remaining);
@@ -22033,13 +24985,17 @@ async function syncBillTotalInTx(client: any, tenantId: number, billId: number):
         [billId]
     );
     const guestRows = splitsRs.rows.filter((s: any) => s.kind !== 'deposit');
+    // Il già incassato comprende anche i movimenti staff del libro cassa
+    // (contanti, POS, …): pure quelli, se il totale scende sotto, vanno
+    // restituiti a mano — non si cancellano da soli.
+    const staffPaid = await staffPaidCentsForBill(billId, client);
     const paid = guestRows.filter((s: any) => s.status === 'PAID')
-                          .reduce((n: number, s: any) => n + s.amount_cents, 0);
+                          .reduce((n: number, s: any) => n + s.amount_cents, 0) + staffPaid;
     const claimed = guestRows.filter((s: any) => s.status === 'CLAIMED')
                              .reduce((n: number, s: any) => n + s.amount_cents, 0);
 
     // Sotto il già pagato dai clienti non si scende: la strada corretta è il
-    // rimborso Revolut, che esiste già ed è tracciato.
+    // rimborso (gateway per le quote online, storno per gli incassi staff).
     if (newTotal < paid) {
         throw new BillSyncError(
             'Il nuovo totale è inferiore a quanto già incassato: serve un rimborso',
@@ -22234,9 +25190,10 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
                  WHERE id = $1`,
                 [orderId, req.user?.userId ?? null]
             );
+            await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId });
             await client.query('COMMIT');
             client.release();
-            try { socketService?.broadcastToAll(req.tenantId!, 'order:updated', { ...order, status: 'CLOSED' }); } catch (_) {}
+            outboxKick();
             return res.json({
                 order_id: orderId,
                 bill: null,
@@ -22297,13 +25254,16 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
              WHERE id = $1`,
             [orderId, req.user?.userId ?? null]
         );
+        // La chiusura viaggia con la transazione: sala e cassa non possono
+        // restare con una comanda che risulta ancora aperta.
+        await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId });
         await client.query('COMMIT');
         client.release();
 
         try {
             socketService?.broadcastToAll(req.tenantId!, 'bill:updated', synced.bill);
-            socketService?.broadcastToAll(req.tenantId!, 'order:updated', { ...order, status: 'CLOSED', table_bill_id: billId });
         } catch (_) {}
+        outboxKick();
 
         LogService.logActivity(
             req.tenantId!,
@@ -22325,15 +25285,17 @@ app.post('/orders/:id/close', authenticate, requirePermission('orders:take'), as
             [billId]
         );
         const depositPaid = await depositPaidCentsForReservation(req.tenantId!, synced.bill.reservation_id);
+        const staffPaidAfterClose = await staffPaidCentsForBill(billId!);
         res.json({
             order_id: orderId,
             bill: {
                 ...synced.bill,
                 paid_cents: fig.rows[0].paid_cents,
+                staff_paid_cents: staffPaidAfterClose,
                 deposit_credit_cents: fig.rows[0].deposit_credit_cents,
                 deposit_paid_cents: depositPaid,
                 refund_due_cents: Math.max(0, depositPaid - fig.rows[0].deposit_credit_cents),
-                residual_cents: Math.max(0, synced.bill.total_cents - fig.rows[0].live),
+                residual_cents: Math.max(0, synced.bill.total_cents - fig.rows[0].live - staffPaidAfterClose),
             },
             released_split_ids: synced.released_split_ids,
         });
@@ -22464,12 +25426,17 @@ async function syncSystemLinesInTx(client: any, tenantId: number, orderId: numbe
         [orderId]
     );
 
+    // Aliquote di coperto e servizio dalla mappatura IVA del tenant
+    // (Impostazioni → Fiscalità); 10 di somministrazione come fallback.
+    const vatMap = await getFiscalVatMap(tenantId);
+
     if (coverCents > 0 && covers > 0) {
         await client.query(
+            // Il coperto segue la somministrazione di cui fa parte.
             `INSERT INTO order_items
-                (tenant_id, order_id, name_snapshot, unit_price_cents, qty, course_no, status, line_kind)
-             VALUES ($4, $1, 'Coperto', $2, $3, 1, 'SERVED', 'COVER')`,
-            [orderId, coverCents, covers, tenantId]
+                (tenant_id, order_id, name_snapshot, unit_price_cents, qty, course_no, status, line_kind, vat_rate)
+             VALUES ($4, $1, 'Coperto', $2, $3, 1, 'SERVED', 'COVER', $5)`,
+            [orderId, coverCents, covers, tenantId, vatMap.cover]
         );
     }
 
@@ -22491,10 +25458,12 @@ async function syncSystemLinesInTx(client: any, tenantId: number, orderId: numbe
         const amount = Math.round((Number(sub.rows[0].total) * servicePct) / 100);
         if (amount > 0) {
             await client.query(
+                // Il servizio come il coperto: accessorio della
+                // somministrazione, ne segue l'aliquota.
                 `INSERT INTO order_items
-                    (tenant_id, order_id, name_snapshot, unit_price_cents, qty, course_no, status, line_kind)
-                 VALUES ($4, $1, $2, $3, 1, 1, 'SERVED', 'SERVICE')`,
-                [orderId, `Servizio ${servicePct}%`, amount, tenantId]
+                    (tenant_id, order_id, name_snapshot, unit_price_cents, qty, course_no, status, line_kind, vat_rate)
+                 VALUES ($4, $1, $2, $3, 1, 1, 'SERVED', 'SERVICE', $5)`,
+                [orderId, `Servizio ${servicePct}%`, amount, tenantId, vatMap.service]
             );
         }
     }
@@ -22516,6 +25485,105 @@ async function syncSystemLines(tenantId: number, orderId: number): Promise<void>
 
 // Storno di una riga già inviata. Da SENT in poi non si cancella: si storna,
 // con motivazione, e resta a bilancio come scarto.
+// ==================== REVISIONI COMANDA ====================
+// Una comanda già lanciata che cambia (storno di una riga inviata, aggiunta
+// sulla stessa uscita, riporta, trasferimento) genera una revisione: la card
+// sul monitor mostra "modificata", il tocco apre il dettaglio, l'ack la
+// spegne per tutti. L'evento viaggia in broadcastToAll — il KDS filtra per
+// la propria partita con station_ids (NULL = riguarda tutti).
+
+type OrderRevisionDetail = { label: string; note?: string | null };
+
+const recordOrderRevision = async (
+    tenantId: number,
+    data: {
+        orderId: number;
+        courseNo: number | null;
+        stationIds: (number | null)[];
+        kind: 'void' | 'added' | 'unserved' | 'transfer';
+        summary: string;
+        details?: OrderRevisionDetail[];
+        userId?: number | null;
+        userEmail?: string | null;
+    }
+) => {
+    try {
+        let byName = data.userEmail || '';
+        if (data.userId) {
+            const u = await queryWithRetry(`SELECT full_name FROM users WHERE id = $1 AND tenant_id = $2`, [data.userId, tenantId]);
+            byName = u.rows[0]?.full_name || byName;
+        }
+        const stationIds = [...new Set(data.stationIds.filter((st): st is number => st != null))];
+        const ins = await queryWithRetry(
+            `INSERT INTO order_revisions
+                (tenant_id, order_id, course_no, station_ids, kind, summary, details, created_by_name)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             RETURNING id, order_id, course_no, station_ids, kind, summary, details, created_by_name, created_at`,
+            [tenantId, data.orderId, data.courseNo, stationIds.length > 0 ? stationIds : null,
+             data.kind, data.summary.slice(0, 300),
+             data.details && data.details.length > 0 ? JSON.stringify(data.details) : null, byName]
+        );
+        socketService?.broadcastToAll(tenantId, 'order:revised', ins.rows[0]);
+    } catch (err: any) {
+        // La revisione è un avviso: se fallisce non deve far fallire la modifica.
+        console.error('recordOrderRevision failed:', err?.message || err);
+    }
+};
+
+// Le revisioni aperte del servizio, per i monitor. `?station=` filtra sulla
+// partita dello schermo; le revisioni senza station_ids valgono per tutti.
+app.get('/kds/revisions', authenticate, requireAnyPermission('orders:kds', 'orders:expedite', 'orders:take'), async (req: any, res) => {
+    try {
+        if (!(await ordersEnabledGuard(req, res))) return;
+        const station = req.query.station != null && req.query.station !== ''
+            ? parseInt(String(req.query.station), 10) : null;
+        const r = await queryWithRetry(
+            `SELECT r.id, r.order_id, r.course_no, r.station_ids, r.kind, r.summary,
+                    r.details, r.created_by_name, r.created_at
+             FROM order_revisions r
+             JOIN orders o ON o.id = r.order_id AND o.tenant_id = r.tenant_id
+             WHERE r.tenant_id = $1 AND r.acked_at IS NULL AND o.status = 'OPEN'
+               AND ($2::int IS NULL OR r.station_ids IS NULL OR $2 = ANY(r.station_ids))
+             ORDER BY r.id`,
+            [req.tenantId!, Number.isFinite(station) ? station : null]
+        );
+        res.json({ revisions: r.rows });
+    } catch (err: any) {
+        console.error('GET /kds/revisions error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/kds/revisions/:id/ack', authenticate, requireAnyPermission('orders:kds', 'orders:expedite', 'orders:take'), async (req: any, res) => {
+    try {
+        if (!(await ordersEnabledGuard(req, res))) return;
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        let byName = req.user?.email ?? '';
+        const u = await queryWithRetry(`SELECT full_name FROM users WHERE id = $1 AND tenant_id = $2`, [req.user?.userId ?? 0, req.tenantId!]);
+        byName = u.rows[0]?.full_name || byName;
+        const upd = await queryWithRetry(
+            `UPDATE order_revisions
+             SET acked_at = CURRENT_TIMESTAMP, acked_by_name = $3
+             WHERE id = $1 AND tenant_id = $2 AND acked_at IS NULL
+             RETURNING id, order_id`,
+            [id, req.tenantId!, byName]
+        );
+        // Già confermata da un altro schermo: non è un errore, l'avviso è spento.
+        if (upd.rows.length > 0) {
+            try {
+                socketService?.broadcastToAll(req.tenantId!, 'order:revision-acked', {
+                    id: upd.rows[0].id, order_id: upd.rows[0].order_id,
+                });
+            } catch (_) {}
+        }
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('POST /kds/revisions/:id/ack error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.post('/orders/items/:id/void', authenticate, requirePermission('orders:void'), async (req, res) => {
     try {
         if (!(await ordersEnabledGuard(req, res))) return;
@@ -22557,6 +25625,19 @@ app.post('/orders/items/:id/void', authenticate, requirePermission('orders:void'
             });
             socketService?.broadcastToAll(req.tenantId!, 'order:updated', view.order);
         } catch (_) {}
+
+        // Se la riga era già in cucina la card resta a video con un piatto in
+        // meno: senza spiegazione il cuoco continua a cercarlo.
+        if (item.fired_at) {
+            await recordOrderRevision(req.tenantId!, {
+                orderId: item.order_id, courseNo: item.course_no,
+                stationIds: [item.station_id],
+                kind: 'void',
+                summary: `Annullato ${item.qty}× ${item.name_snapshot}`,
+                details: [{ label: `${item.qty}× ${item.name_snapshot}`, note: item.void_reason }],
+                userId: req.user?.userId, userEmail: req.user?.email,
+            });
+        }
 
         LogService.logActivity(
             req.tenantId!,
@@ -22713,6 +25794,29 @@ app.post('/orders/:id/transfer', authenticate, requirePermission('orders:take'),
         const view = await loadOrderView(req.tenantId!, id);
         try { socketService?.broadcastToAll(req.tenantId!, 'order:updated', view.order); } catch (_) {}
 
+        // Il monitor mostrerebbe il vecchio tavolo fino al reload: la
+        // revisione avvisa le partite con righe ancora in lavorazione.
+        try {
+            const active = await queryWithRetry(
+                `SELECT DISTINCT station_id FROM order_items
+                 WHERE order_id = $1 AND tenant_id = $2 AND status IN ('SENT','PREPARING','READY')`,
+                [id, req.tenantId!]
+            );
+            if (active.rows.length > 0) {
+                const fromTbl = await queryWithRetry(
+                    `SELECT name FROM tables WHERE id = $1 AND tenant_id = $2`,
+                    [order.table_id, req.tenantId!]
+                );
+                await recordOrderRevision(req.tenantId!, {
+                    orderId: id, courseNo: null,
+                    stationIds: active.rows.map((r: any) => r.station_id),
+                    kind: 'transfer',
+                    summary: `Comanda spostata dal tavolo ${fromTbl.rows[0]?.name ?? '?'} al tavolo ${tbl.rows[0].name}`,
+                    userId: req.user?.userId, userEmail: req.user?.email,
+                });
+            }
+        } catch (_) {}
+
         LogService.logActivity(
             req.tenantId!,
             req.user?.userId ?? null, req.user?.email ?? '', req.user?.email ?? '',
@@ -22734,7 +25838,9 @@ app.post('/orders/:id/transfer', authenticate, requirePermission('orders:take'),
 // Aggrega le scelte strutturate (note_selections) e le note dietetiche del
 // turno per dare alla cucina un colpo d'occhio "stasera 8 stinchi di maiale,
 // 3 di vitello". Le note dei preset senza varianti si contano per etichetta;
-// quelle con varianti si aggregano per coppia (label, variant). Le allergie
+// quelle con varianti si aggregano per coppia (label, variant); ogni voce
+// porta anche la ripartizione per tavolo (o per cliente, se il tavolo non è
+// ancora assegnato), così la cucina sa a chi vanno i 7 stinchi. Le allergie
 // restano nelle dietary_notes del cliente (testo libero) e le restituiamo
 // per prenotazione, così l'UI può elencarle senza aprire la scheda cliente.
 app.get('/kitchen/service-summary', authenticate, requirePermission('orders:kds'), async (req, res) => {
@@ -22747,8 +25853,10 @@ app.get('/kitchen/service-summary', authenticate, requirePermission('orders:kds'
                     r.reservation_time,
                     r.guests,
                     r.note_selections,
+                    t.name AS table_name,
                     c.dietary_notes AS customer_dietary_notes
              FROM reservations r
+             LEFT JOIN tables t ON t.id = r.table_id AND t.tenant_id = r.tenant_id
              LEFT JOIN LATERAL (
                  SELECT cc.dietary_notes
                  FROM customers cc
@@ -22770,11 +25878,21 @@ app.get('/kitchen/service-summary', authenticate, requirePermission('orders:kds'
         // Aggregazione per (label, variant): raggruppiamo lato Node per non
         // stressare il planner con array_agg + jsonb_each dentro la stessa query.
         // Il volume è al massimo qualche decina di prenotazioni per turno.
-        const byLabel = new Map<string, { label: string; variant: string | null; quantity: number }>();
+        // Ogni voce porta anche le sue fonti: aggregate per tavolo quando c'è
+        // (due prenotazioni sullo stesso tavolo a turni sfalsati si sommano),
+        // per prenotazione col nome cliente quando il tavolo non è assegnato.
+        type SummarySource = { table: string | null; customer: string; quantity: number };
+        const byLabel = new Map<string, {
+            label: string; variant: string | null; quantity: number;
+            sources: Map<string, SummarySource>;
+        }>();
         const dietary_lines: { reservation_id: number; customer_name: string; text: string }[] = [];
 
         for (const row of rows.rows) {
             const selections = Array.isArray(row.note_selections) ? row.note_selections : [];
+            const tableName = typeof row.table_name === 'string' && row.table_name.trim()
+                ? row.table_name.trim() : null;
+            const sourceKey = tableName ?? `res-${row.id}`;
             for (const sel of selections) {
                 if (!sel || typeof sel.label !== 'string') continue;
                 const label = sel.label.trim();
@@ -22783,9 +25901,15 @@ app.get('/kitchen/service-summary', authenticate, requirePermission('orders:kds'
                 const qty = Number(sel.quantity);
                 if (!Number.isFinite(qty) || qty <= 0) continue;
                 const key = `${label} ${variant ?? ''}`;
-                const cur = byLabel.get(key);
-                if (cur) cur.quantity += qty;
-                else byLabel.set(key, { label, variant, quantity: qty });
+                let cur = byLabel.get(key);
+                if (!cur) {
+                    cur = { label, variant, quantity: 0, sources: new Map() };
+                    byLabel.set(key, cur);
+                }
+                cur.quantity += qty;
+                const src = cur.sources.get(sourceKey);
+                if (src) src.quantity += qty;
+                else cur.sources.set(sourceKey, { table: tableName, customer: row.customer_name ?? '', quantity: qty });
             }
             const diet = typeof row.customer_dietary_notes === 'string'
                 ? row.customer_dietary_notes.trim() : '';
@@ -22798,11 +25922,22 @@ app.get('/kitchen/service-summary', authenticate, requirePermission('orders:kds'
             }
         }
 
-        const dietary = [...byLabel.values()].sort((a, b) =>
-            b.quantity - a.quantity
-            || a.label.localeCompare(b.label)
-            || (a.variant ?? '').localeCompare(b.variant ?? '')
-        );
+        // I tavoli assegnati prima, poi per quantità: in cucina si cerca il
+        // numero del tavolo, i "senza tavolo" chiudono la riga.
+        const dietary = [...byLabel.values()]
+            .sort((a, b) =>
+                b.quantity - a.quantity
+                || a.label.localeCompare(b.label)
+                || (a.variant ?? '').localeCompare(b.variant ?? '')
+            )
+            .map(({ sources, ...entry }) => ({
+                ...entry,
+                tables: [...sources.values()].sort((a, b) =>
+                    Number(b.table !== null) - Number(a.table !== null)
+                    || b.quantity - a.quantity
+                    || (a.table ?? a.customer).localeCompare(b.table ?? b.customer)
+                ),
+            }));
 
         res.json({
             service_date: service.service_date,
@@ -22897,6 +26032,26 @@ app.get('/reports/kitchen', authenticate, requirePermission('orders:expedite'), 
             [from, to, req.tenantId!]
         );
 
+        // Attesa al ritiro: da quando l'uscita è tutta pronta a quando la
+        // sala la porta via. È il tempo vero sotto la lampada — misurabile
+        // solo da quando esiste il "servita", quindi su dati vecchi è vuoto.
+        const ritiro = await queryWithRetry(
+            `SELECT COUNT(*)::int AS uscite,
+                    ROUND(AVG(GREATEST(0, EXTRACT(epoch FROM (served_at - ready_at))))/60.0, 1) AS attesa_media_min,
+                    ROUND(MAX(GREATEST(0, EXTRACT(epoch FROM (served_at - ready_at))))/60.0, 1) AS attesa_massima_min
+             FROM (
+                 SELECT MAX(ready_at) AS ready_at, MAX(served_at) AS served_at
+                 FROM order_items
+                 WHERE status = 'SERVED' AND line_kind = 'DISH'
+                   AND ready_at IS NOT NULL AND served_at IS NOT NULL
+                   AND tenant_id = $3
+                   AND ($1::date IS NULL OR fired_at >= $1::date)
+                   AND ($2::date IS NULL OR fired_at < ($2::date + INTERVAL '1 day'))
+                 GROUP BY order_id, course_no
+             ) q`,
+            [from, to, req.tenantId!]
+        );
+
         // Scarto: cosa è stato stornato e perché. La motivazione è
         // obbligatoria dalla PR 7, quindi qui c'è sempre qualcosa da leggere.
         const scarti = await queryWithRetry(
@@ -22921,6 +26076,7 @@ app.get('/reports/kitchen', authenticate, requirePermission('orders:expedite'), 
             partite: perStation.rows,
             sincronia: sync.rows[0],
             passe: passe.rows[0],
+            ritiro: ritiro.rows[0],
             scarti: scarti.rows,
         });
     } catch (err: any) {
@@ -22960,7 +26116,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
         const rows = await queryWithRetry(
             `SELECT b.id, b.reservation_id, b.table_id, b.total_cents, b.covers,
                     b.currency, b.items, b.status, b.share_token, b.opened_at, b.closed_at,
-                    b.cash_settled_cents, b.tip_cents,
+                    b.cash_settled_cents, b.tip_cents, b.external_ref,
                     t.name AS table_name,
                     r.customer_name,
                     -- Il servizio del conto arriva dalla comanda; per un conto
@@ -22984,11 +26140,33 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                               WHERE pr.reservation_id = b.reservation_id AND pr.table_bill_split_id IS NULL
                                 AND UPPER(pr.status) IN ('COMPLETED','PAID') AND pr.completed_at IS NOT NULL), 0) AS deposit_paid_cents,
                     COUNT(s.id) FILTER (WHERE s.status = 'PAID')::int AS paid_splits,
+                    COALESCE((SELECT SUM(p.amount_cents)::int FROM table_bill_payments p
+                              WHERE p.table_bill_id = b.id AND p.table_bill_split_id IS NULL AND p.voided_at IS NULL), 0) AS staff_paid_cents,
+                    -- Ultimo documento fiscale del conto: alimenta il badge
+                    -- scontrino nella vista Chiusi senza una fetch per riga.
+                    -- provider distingue Openapi da Passepartout (RT di cassa),
+                    -- provider_ref è il numero del documento.
+                    fd.status AS fiscal_status, fd.id AS fiscal_doc_id, fd.error AS fiscal_error,
+                    fd.provider AS fiscal_provider, fd.provider_ref AS fiscal_ref,
+                    fd.doc_type AS fiscal_doc_type, fd.doc_number AS fiscal_doc_number,
+                    -- Come è stato pagato: i movimenti vivi del libro cassa
+                    -- (incassi staff + specchi delle quote online), per la
+                    -- sezione Pagamenti del conto senza una fetch per riga.
+                    COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                                  'id', p.id, 'method', p.method, 'amount_cents', p.amount_cents,
+                                  'recorded_at', p.recorded_at, 'online', p.table_bill_split_id IS NOT NULL
+                              ) ORDER BY p.recorded_at)
+                              FROM table_bill_payments p
+                              WHERE p.table_bill_id = b.id AND p.voided_at IS NULL), '[]'::jsonb) AS payments,
                     (SELECT COUNT(*) FROM orders o WHERE o.table_bill_id = b.id AND o.status = 'OPEN')::int AS open_orders
              FROM table_bills b
              LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
              LEFT JOIN reservations r ON r.id = b.reservation_id AND r.tenant_id = b.tenant_id
              LEFT JOIN table_bill_splits s ON s.table_bill_id = b.id
+             LEFT JOIN LATERAL (
+                 SELECT id, status, error, provider, provider_ref, doc_type, doc_number FROM fiscal_documents
+                 WHERE table_bill_id = b.id ORDER BY created_at DESC LIMIT 1
+             ) fd ON TRUE
              WHERE b.status = ANY($3::varchar[])
                AND b.tenant_id = $4
                AND ($1::date IS NULL OR COALESCE(
@@ -23000,7 +26178,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                         (SELECT o.shift FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
                         CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
                              THEN 'LUNCH' ELSE 'DINNER' END) = $2::varchar)
-             GROUP BY b.id, t.name, r.customer_name
+             GROUP BY b.id, t.name, r.customer_name, fd.id, fd.status, fd.error, fd.provider, fd.provider_ref, fd.doc_type, fd.doc_number
              ORDER BY b.closed_at DESC NULLS LAST, b.opened_at DESC`,
             [filterDate, filterShift, statuses, req.tenantId!]
         );
@@ -23047,7 +26225,10 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                         : b.service_date) === service.service_date
                     && b.shift === service.shift,
                 refund_due_cents: Math.max(0, Number(b.deposit_paid_cents) - Number(b.deposit_credit_cents)),
-                residual_cents: Math.max(0, b.total_cents - b.paid_cents - b.claimed_cents),
+                // Gli incassi staff del libro cassa entrano nel pagato e nel
+                // residuo come le quote online.
+                paid_cents: Number(b.paid_cents) + Number(b.staff_paid_cents),
+                residual_cents: Math.max(0, b.total_cents - b.paid_cents - b.claimed_cents - b.staff_paid_cents),
             })),
             stale_orders: stale.rows.map((o: any) => ({
                 ...o,
@@ -23141,7 +26322,10 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
             [bill.id]
         );
         const depositCreditCents = billTotalsRs.rows[0].deposit_credit_cents;
-        const residualCents = Math.max(0, bill.total_cents - billTotalsRs.rows[0].live_cents);
+        // Il preconto mostra il residuo VERO: anche gli incassi staff già
+        // registrati (contanti/POS a metà servizio) lo abbassano.
+        const staffPaidForPrint = await staffPaidCentsForBill(bill.id);
+        const residualCents = Math.max(0, bill.total_cents - billTotalsRs.rows[0].live_cents - staffPaidForPrint);
         const depositPaidCents = await depositPaidCentsForReservation(req.tenantId!, bill.reservation_id);
         const refundDueCents = Math.max(0, depositPaidCents - depositCreditCents);
 
@@ -23172,6 +26356,10 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
                 refund_due_cents: refundDueCents,
                 residual_cents: residualCents,
                 items,
+                // Totali per aliquota per il piede del preconto, dallo
+                // snapshot GREZZO (items qui sopra è già ridotto e non ha i
+                // prezzi unitari). L'agente vecchio ignora il campo.
+                vat_breakdown: vatBreakdownFromItems(Array.isArray(bill.items) ? bill.items : null, bill.total_cents),
                 share_url: shareUrl,
             }), req.user?.userId ?? null, printer, kind, req.tenantId!]
         );
@@ -23252,7 +26440,7 @@ app.post('/print-agent/jobs/:id/ack', printAgentAuth, async (req: any, res) => {
 // in Impostazioni, scritture solo per chi ha settings:full.
 
 const PRINTER_NAME_RE = /^[a-z0-9_-]{1,30}$/;
-const FIRE_MODES = ['AUTO_ALL', 'AUTO_FIRST', 'MANUAL'];
+const FIRE_MODES = ['AUTO_ALL', 'AUTO_FIRST', 'AUTO_NEXT', 'MANUAL'];
 
 // Instradamento per funzionalità: su quale termica escono il preconto e il
 // foglietto QR del conto. Chiavi app_settings, NULL/assente = default
@@ -23636,7 +26824,7 @@ app.post('/sala/profiles/:id/activate', authenticate, requirePermission('setting
         const { name, payload } = p.rows[0];
 
         await client.query('BEGIN');
-        if (payload?.fire_mode && ['AUTO_ALL', 'AUTO_FIRST', 'MANUAL'].includes(payload.fire_mode)) {
+        if (payload?.fire_mode && FIRE_MODES.includes(payload.fire_mode)) {
             await client.query(
                 `INSERT INTO app_settings (tenant_id, key, text_value) VALUES ($1, 'course_fire_mode', $2)
                  ON CONFLICT (tenant_id, key) DO UPDATE SET text_value = $2, updated_at = CURRENT_TIMESTAMP`,
@@ -23845,6 +27033,22 @@ const startServer = async () => {
                         // Solo qui: se le migration falliscono /ready resta
                         // 503 e Railway tiene in servizio il container vecchio.
                         databaseReady = true;
+                        // Le richieste servite durante le migration possono
+                        // aver messo in cache entitlement pre-migration
+                        // (60s di TTL): si riparte da zero ora che lo stato
+                        // a DB è quello vero.
+                        clearTenantFeaturesCache();
+                        // L'outbox parte solo a migration riuscite (la sua
+                        // tabella deve esistere). Il primo giro consegna ciò
+                        // che un eventuale crash aveva lasciato indietro.
+                        outboxRegister('order:updated', async (tenantId, payload) => {
+                            const orderId = Number(payload?.order_id);
+                            if (!Number.isFinite(orderId)) return;
+                            const view = await loadOrderView(tenantId, orderId);
+                            if (!view) return;
+                            socketService?.broadcastToAll(tenantId, 'order:updated', view.order);
+                        });
+                        startOutboxDispatcher();
                     } catch (migErr) {
                         console.error('❌ Database migrations failed:', migErr);
                     }
@@ -23903,6 +27107,12 @@ const startServer = async () => {
                         console.log('✅ Bill split reconcile scheduler started (60s)');
                     } catch (schedErr) {
                         console.error('Bill split reconcile scheduler failed to start:', schedErr);
+                    }
+                    try {
+                        startStaffChatRetentionScheduler();
+                        console.log('✅ Staff chat retention scheduler started (6h, 90 giorni)');
+                    } catch (schedErr) {
+                        console.error('Staff chat retention scheduler failed to start:', schedErr);
                     }
                     try {
                         startPaymentRequestReconcileScheduler();

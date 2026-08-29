@@ -16,13 +16,15 @@ import {
     getComanda,
     getConto,
     getContiGiorno,
-    contoComanda,
+    getArticoliMenu,
+    inviaProduzioneComanda,
+    chiudiComandaCompleta,
     isPassepartoutConfigured,
     PassepartoutError,
     type TipoDocumentoConto,
 } from '../services/passepartoutService.js';
 
-const [cmd, arg, arg2, arg3, arg4, arg5] = process.argv.slice(2);
+const [cmd, arg, arg2, arg3, arg4] = process.argv.slice(2);
 
 if (!isPassepartoutConfigured()) {
     console.error('Config mancante: servono PASSEPARTOUT_WS_URL e PASSEPARTOUT_WS_USER (più password).');
@@ -74,26 +76,53 @@ try {
             console.log(`${conti.length} conti`);
             break;
         }
+        case 'invia': {
+            // Invio in produzione di tutte le uscite (per comande create via WS).
+            if (!arg) throw new Error('Uso: invia <idComanda>');
+            await inviaProduzioneComanda({ idComanda: Number(arg), inviaTutto: true });
+            console.log('InviaProduzioneComanda eseguito senza errori.');
+            break;
+        }
         case 'chiudi': {
             // ATTENZIONE: azione fiscale — può emettere lo scontrino sul RT.
-            // Uso: chiudi <idComanda> <tipoPagamento> [tipoDocumento] [importo] [invio]
-            // Il 5° argomento letterale "invio" imposta noInvio=false (le righe
-            // non ancora inviate partono in produzione alla chiusura).
-            if (!arg || !arg2) throw new Error('Uso: chiudi <idComanda> <tipoPagamento> [tipoDocumento] [importo] [invio]');
+            // Uso: chiudi <idComanda> <tipoPagamento> [tipoDocumento] [importo]
+            // Sequenza del supporto: eventuale invio separato, ContoComanda con
+            // noInvio=true, verdetto da GetContiGiorno. Importo omesso o "-" =
+            // chiusura piena (mai passare il totale a mano: un centesimo di
+            // scarto lascia il conto sospeso).
+            if (!arg || !arg2) throw new Error('Uso: chiudi <idComanda> <tipoPagamento> [tipoDocumento] [importo]');
             const params = {
                 idComanda: Number(arg),
-                noInvio: arg5 !== 'invio',
                 tipoPagamento: arg2,
                 tipoDocumento: (arg3 || undefined) as TipoDocumentoConto | undefined,
                 importoPagato: arg4 != null && arg4 !== '' && arg4 !== '-' ? Number(arg4) : undefined,
             };
             console.log('Chiusura con parametri:', JSON.stringify(params));
-            await contoComanda(params);
-            console.log('ContoComanda eseguito senza errori.');
+            const esito = await chiudiComandaCompleta(params);
+            console.log('Esito:', JSON.stringify(esito, null, 2));
+            if (esito.importoSospeso > 0 && params.importoPagato == null) {
+                console.log('⚠ Il conto è rimasto a sospeso: saldaConto non è riuscito, controllare in cassa.');
+            }
+            break;
+        }
+        case 'articoli': {
+            // Catalogo menu mappato per l'import (arg opzionale: ISO ultimaModifica).
+            const articoli = await getArticoliMenu(arg || undefined);
+            for (const a of articoli) console.log(JSON.stringify(a));
+            console.log(`${articoli.length} articoli`);
+            break;
+        }
+        case 'proforma': {
+            // Chiusura proforma: nessuno scontrino, pagamento registrato.
+            // Senza tipoPagamento il gestionale registra Contanti (default):
+            // qui il default è il tipo dedicato ESTERNO.
+            if (!arg) throw new Error('Uso: proforma <idComanda> [tipoPagamento=ESTERNO]');
+            const esito = await chiudiComandaCompleta({ idComanda: Number(arg), proforma: true, tipoPagamento: arg2 || 'ESTERNO' });
+            console.log('Esito:', JSON.stringify(esito, null, 2));
             break;
         }
         default:
-            console.log('Comandi: versione | pagamenti | sale | tavolo <nome> | comanda <id> | conto <id> | chiudi <id> <tipoPag> [tipoDoc] [importo]');
+            console.log('Comandi: versione | pagamenti | sale | tavolo <nome> | comanda <id> | conto <id> | conti-giorno [data] | invia <id> | chiudi <id> <tipoPag> [tipoDoc] [importo] | proforma <id>');
             process.exit(1);
     }
 } catch (err) {

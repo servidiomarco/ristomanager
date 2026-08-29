@@ -24,6 +24,7 @@ const VIEW_PERMISSIONS: Record<ViewState, string> = {
   [ViewState.HACCP]: 'dashboard:view',
   [ViewState.CONVERSAZIONI]: 'voice_calls:view',
   [ViewState.MESSAGGI]: 'reservations:view',
+  [ViewState.CHAT_STAFF]: 'staffchat:use',
   [ViewState.STAFF]: 'staff:view',
   [ViewState.CLIENTI]: 'customers:view',
   [ViewState.INVENTARIO]: 'inventory:view',
@@ -45,7 +46,10 @@ const DEV_BOARD_ADMIN_EMAIL = 'admin@ristomanager.com';
 // canale non compreso nel piano non compare proprio — niente bottone che
 // risponde 403. L'enforcement vero resta il server; qui si toglie solo la
 // porta dalla parete. EMAIL non c'è: l'email è canale base, non un add-on.
-export type TenantFeatureKey = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table';
+// 'passepartout' fa eccezione al fail-open di hasFeature: è un'integrazione
+// venduta a UN ristorante (chi ha la cassa Passepartout), non un canale
+// storico — un payload vecchio senza la chiave non deve accenderla per tutti.
+export type TenantFeatureKey = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table' | 'passepartout';
 const VIEW_FEATURES: Partial<Record<ViewState, TenantFeatureKey>> = {
   [ViewState.CONVERSAZIONI]: 'voice',
   [ViewState.MESSAGGI]: 'whatsapp',
@@ -164,7 +168,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [permissions]);
 
   const hasFeature = useCallback((feature: TenantFeatureKey): boolean => {
-    const features = user?.tenant?.features;
+    const features = user?.tenant?.features as Record<string, boolean | undefined> | undefined;
+    // Add-on venduto a un solo ristorante: acceso solo se il payload lo dice
+    // — il fail-open qui sotto vale per i canali storici, non per questo.
+    if (feature === 'passepartout') return features?.passepartout === true;
     if (!features) return true;
     return features[feature] !== false;
   }, [user]);
@@ -261,19 +268,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       {/* Session Expired Modal */}
       {showSessionExpiredModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in duration-200">
+        <div className="fixed inset-0 bg-[var(--ds-backdrop)] flex items-center justify-center z-[100] p-4">
+          <div className="bg-[var(--ds-surface)] rounded-2xl shadow-[var(--ds-shadow-raised)] w-full max-w-sm overflow-hidden">
             <div className="p-6 text-center">
-              <div className="mx-auto w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mb-4">
-                <AlertTriangle className="h-8 w-8 text-amber-600" />
+              {/* La sessione scaduta chiede un'azione, non segnala un guasto:
+                  famiglia `pending`, non `critical`. */}
+              <div className="mx-auto w-16 h-16 bg-[var(--ds-pending-tint)] rounded-full flex items-center justify-center mb-4">
+                <AlertTriangle className="h-8 w-8 text-[var(--ds-pending-text)]" />
               </div>
-              <h3 className="text-xl font-semibold text-slate-800 mb-2">Sessione Scaduta</h3>
-              <p className="text-slate-600 mb-6">
+              <h3 className="text-xl font-semibold text-[var(--ds-text-primary)] mb-2">Sessione Scaduta</h3>
+              <p className="text-[var(--ds-text-secondary)] mb-6">
                 La tua sessione è scaduta. Effettua nuovamente il login per continuare.
               </p>
               <button
                 onClick={() => setShowSessionExpiredModal(false)}
-                className="w-full px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium"
+                className="w-full px-4 py-3 bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] rounded-xl hover:bg-[var(--ds-action-bg-hover)] transition-colors font-medium"
               >
                 Accedi
               </button>

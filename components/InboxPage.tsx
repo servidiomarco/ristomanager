@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowRight, Check, CalendarPlus, Paperclip, X as XIcon, Sparkles, Wand2, FolderOpen } from 'lucide-react';
+import { MessageCircle, Send, Loader2, RefreshCw, AlertTriangle, CheckCircle2, Clock, ArrowRight, Check, CalendarPlus, Paperclip, X as XIcon, Wand2, FolderOpen } from 'lucide-react';
 import { Loader } from './Loader';
 import { SkeletonInboxList } from './SkeletonCards';
 import {
   messagesApiService,
+  inboxCache,
   ConversationSummary,
   InboxMessage,
   MessageChannel,
@@ -13,14 +14,15 @@ import {
   type UploadedAttachment,
 } from '../services/messagesApiService';
 import { socketClient } from '../services/socketClient';
-import { runAgent, confirmProposal, discardProposal, type AgentProposal } from '../services/aiMessagesApiService';
+import { runAgent, confirmProposal, discardProposal, extractBooking, type AgentProposal, type ExtractedBooking } from '../services/aiMessagesApiService';
 import { listMedia, attachFromLibrary, type MediaFile } from '../services/mediaApiService';
 import { getFeatureFlags } from '../services/apiService';
 import { toTitleCase } from '../utils/text';
+import { Shift, type Reservation } from '../types';
 import {
   SearchField, StatusPill, Callout, SegmentedControl, SplitPane, SectionHeader,
   Avatar, EmptyState, SwipeRow, useFirstRunHint, dsIconButton, PanePlaceholder, CountBadge,
-  PaneHeader,
+  PaneHeader, AttachmentRow,
 } from './ds';
 import type { PillTone } from './ds';
 
@@ -137,14 +139,65 @@ const statusIcon = (m: InboxMessage) => {
 const displayName = (c: ConversationSummary): string =>
   (c.customer_name && c.customer_name.trim() && toTitleCase(c.customer_name)) || c.phone || `+${c.phone_digits}`;
 
+// Ultime 10 cifre di un telefono: i thread sono già chiavati così e le
+// prenotazioni arrivano con formati misti (+39…, 3…, 0985…).
+const lastTen = (s: string | null | undefined): string => (s || '').replace(/\D/g, '').slice(-10);
+
+const reservationStatusPill = (status: string | null | undefined): { label: string; tone: PillTone } | null => {
+  switch (status) {
+    case 'CONFIRMED': return { label: 'Confermata', tone: 'positive' };
+    case 'PENDING': return { label: 'In attesa', tone: 'pending' };
+    case 'CANCELLED': return { label: 'Annullata', tone: 'critical' };
+    case 'DECLINED': return { label: 'Rifiutata', tone: 'critical' };
+    default: return status ? { label: status, tone: 'neutral' } : null;
+  }
+};
+
+// Stessa resa di ConversazioniPage: l'istante è UTC, si mostra in Europe/Rome.
+const formatReservationWhen = (iso: string): string => {
+  try {
+    return new Date(iso).toLocaleString('it-IT', {
+      timeZone: 'Europe/Rome',
+      day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+    });
+  } catch { return iso; }
+};
+
 interface InboxPageProps {
-  /** Apre il modulo nuova prenotazione col contatto già compilato. */
-  onCreateReservationFromContact?: (contact: { customer_name?: string; phone?: string }) => void;
+  /**
+   * Apre il modulo nuova prenotazione precompilato dal messaggio. `phone_digits`
+   * dice ad App a quale conversazione riagganciare la prenotazione creata; gli
+   * altri campi (data/ora/coperti/zona/note) arrivano dal parsing AT del thread.
+   */
+  onCreateReservationFromContact?: (contact: {
+    phone_digits?: string;
+    customer_name?: string;
+    phone?: string;
+    date?: string;
+    time?: string;
+    shift?: Shift;
+    guests?: number;
+    children?: number;
+    notes?: string;
+    location_preference?: 'INDOOR' | 'OUTDOOR';
+  }) => void;
+  /** Apre una prenotazione del numero, per modificarla. */
+  onOpenReservation?: (reservationId: number) => void;
+  /** Bumped da App dopo un aggancio: la lista si ricarica senza reload. */
+  refreshTick?: number;
+  /** Prenotazioni note ad App (finestra archivio+futuro): la chat mostra
+   *  quelle che combaciano col numero, così più prenotazioni dello stesso
+   *  cliente sono tutte gestibili senza un aggancio manuale. */
+  reservations?: Reservation[];
 }
 
-const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact }) => {
-  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
-  const [convLoading, setConvLoading] = useState(true);
+const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact, onOpenReservation, refreshTick, reservations }) => {
+  // Riparte dall'ultimo stato noto (cache modulo-level): la pagina viene
+  // smontata a ogni cambio vista, e senza questo ogni rientro mostrava lo
+  // spinner per dati visti dieci secondi prima. Il fetch parte comunque e
+  // rimpiazza in silenzio (stale-while-revalidate).
+  const [conversations, setConversations] = useState<ConversationSummary[]>(() => inboxCache.conversations ?? []);
+  const [convLoading, setConvLoading] = useState(inboxCache.conversations === null);
   const [convError, setConvError] = useState<string | null>(null);
   // Search over the conversation list. Always visible rather than behind a
   // toggle: on a list you filter before you scroll. Matches name, phone (raw +
@@ -180,6 +233,23 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
     [conversations, selectedKey]
   );
 
+  // Tutte le prenotazioni (non annullate) del numero di questa chat, dalla più
+  // recente. Deriva dal telefono, non da un aggancio singolo: così una chat con
+  // più prenotazioni le mostra tutte e la lista resta in pari da sola quando ne
+  // crei una nuova (App aggiorna `reservations`).
+  const reservationsForPhone = useMemo(() => {
+    const key = selected?.phone_digits;
+    if (!key || key.length < 8 || !reservations) return [];
+    return reservations
+      .filter(r => lastTen(r.phone) === key)
+      .filter(r => r.reservation_status !== 'CANCELLED' && r.reservation_status !== 'DECLINED')
+      .sort((a, b) => new Date(b.reservation_time).getTime() - new Date(a.reservation_time).getTime());
+  }, [reservations, selected]);
+
+  // Popover "Prenotazioni · N" nella testata della chat.
+  const [resMenuOpen, setResMenuOpen] = useState(false);
+  useEffect(() => { setResMenuOpen(false); }, [selectedKey]);
+
   // When a conversation is picked, default the composer channel to whatever
   // the last inbound used (or WA when there's no inbound at all, since WA is
   // still the primary outbound path when the window is open).
@@ -202,11 +272,40 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
 
+  // Specchia in cache ogni cambiamento della lista (fetch, socket, letture):
+  // il prossimo mount riparte da qui. Il guard su convLoading evita di
+  // sovrascrivere una cache pre-riempita con lo stato iniziale vuoto se si
+  // esce dalla pagina prima che il primo fetch risponda.
+  useEffect(() => {
+    if (!convLoading && !convError) inboxCache.conversations = conversations;
+  }, [conversations, convLoading, convError]);
+
+  // App bumps refreshTick after linking a freshly-created reservation to this
+  // thread — reload the conversation list (name/last message may have moved).
+  // The reservations menu itself updates from the `reservations` prop, not from
+  // this. Skip the very first render (loadConversations already ran above).
+  const firstRefreshTick = useRef(true);
+  useEffect(() => {
+    if (firstRefreshTick.current) { firstRefreshTick.current = false; return; }
+    loadConversations();
+  }, [refreshTick, loadConversations]);
+
+  // Con la cache il cambio thread è istantaneo, quindi due fetch possono
+  // essere in volo insieme: il ref scarta la risposta del thread che non è
+  // più aperto (prima il clobber era teorico, ora sarebbe visibile).
+  const selectedKeyRef = useRef<string | null>(null);
+  useEffect(() => { selectedKeyRef.current = selectedKey; }, [selectedKey]);
+
   const loadTimeline = useCallback(async (phoneDigits: string) => {
-    setMsgLoading(true);
+    // Timeline già vista: si mostra subito e il fetch rinfresca in background.
+    const cached = inboxCache.timelines.get(phoneDigits);
+    if (cached) setMessages(cached);
+    setMsgLoading(!cached);
     setMsgError(null);
     try {
       const { messages } = await messagesApiService.getTimeline(phoneDigits);
+      inboxCache.setTimeline(phoneDigits, messages);
+      if (selectedKeyRef.current !== phoneDigits) return;
       setMessages(messages);
       // Mark inbound messages as read once the timeline is on screen. Errors
       // are silent — worst case, the badge is stale until the next refresh.
@@ -218,9 +317,11 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
         })
         .catch(() => {});
     } catch (err: any) {
-      setMsgError(err?.message || 'Errore caricamento conversazione');
+      if (selectedKeyRef.current === phoneDigits) {
+        setMsgError(err?.message || 'Errore caricamento conversazione');
+      }
     } finally {
-      setMsgLoading(false);
+      if (selectedKeyRef.current === phoneDigits) setMsgLoading(false);
     }
   }, []);
 
@@ -246,9 +347,20 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
       return String(raw).slice(-10);
     };
 
+    // Anche la cache riceve il messaggio (qualunque thread, non solo quello
+    // aperto): così riaprire una chat mostra subito anche ciò che è arrivato
+    // mentre si era altrove, senza aspettare il refresh in background.
+    const appendToCache = (key: string, msg: InboxMessage) => {
+      const cached = inboxCache.timelines.get(key);
+      if (cached && !cached.some(m => m.id === msg.id)) {
+        inboxCache.setTimeline(key, [...cached, msg]);
+      }
+    };
+
     const onInbound = (msg: InboxMessage) => {
       const key = digitsMatch(msg);
       if (!key) return;
+      appendToCache(key, msg);
       // Optimistically bump the conversation to the top, or add it if new.
       setConversations(prev => {
         const existing = prev.find(c => c.phone_digits === key);
@@ -293,12 +405,20 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
     // fallito e chi l'ha mandato crede sia partito.
     const onStatus = (msg: InboxMessage) => {
       if (!msg?.id) return;
+      const key = digitsMatch(msg);
+      if (key) {
+        const cached = inboxCache.timelines.get(key);
+        if (cached) {
+          inboxCache.setTimeline(key, cached.map(m => (m.id === msg.id ? { ...m, ...msg } : m)));
+        }
+      }
       setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, ...msg } : m)));
     };
 
     const onOutbound = (msg: InboxMessage) => {
       const key = digitsMatch(msg);
       if (!key) return;
+      appendToCache(key, msg);
       setConversations(prev => {
         const existing = prev.find(c => c.phone_digits === key);
         if (existing) {
@@ -409,6 +529,40 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
 
   // Cambiando conversazione la proposta non deve seguirti addosso.
   useEffect(() => { setProposal(null); }, [selectedKey]);
+
+  // "Crea prenotazione" dalla chat: precompila il modulo coi campi estratti dal
+  // messaggio (data/ora/coperti/zona/note, anche in inglese). Usa l'estrazione
+  // dedicata — che FORZA la lettura dei campi — invece di aspettare una proposta
+  // dell'agente, che per una richiesta nuova non arriva. Se l'AI è spenta o non
+  // estrae nulla, apre col solo nome+telefono. `phone_digits` serve ad App per
+  // riagganciare la prenotazione al thread.
+  const handleCreateReservation = useCallback(async () => {
+    if (!selected || !onCreateReservationFromContact) return;
+    let booking: ExtractedBooking | null = null;
+    if (aiEnabled) {
+      setSuggesting(true);
+      setSendError(null);
+      try {
+        booking = (await extractBooking(selected.phone_digits)).booking;
+      } catch {
+        /* niente parsing: si apre con nome+telefono */
+      } finally {
+        setSuggesting(false);
+      }
+    }
+    onCreateReservationFromContact({
+      phone_digits: selected.phone_digits,
+      customer_name: booking?.customer_name?.trim() || selected.customer_name || undefined,
+      phone: selected.phone || selected.phone_digits,
+      date: booking?.date ?? undefined,
+      time: booking?.time ?? undefined,
+      shift: booking?.shift ? (booking.shift as Shift) : undefined,
+      guests: booking?.guests ?? undefined,
+      children: booking?.children ?? undefined,
+      notes: booking?.notes ?? undefined,
+      location_preference: booking?.location_preference ?? undefined,
+    });
+  }, [selected, aiEnabled, onCreateReservationFromContact]);
 
   const handleConfirmProposal = useCallback(async () => {
     if (!proposal || proposalBusy) return;
@@ -692,19 +846,65 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
                       <Clock className="h-3 w-3" aria-hidden /> Finestra WA: {windowRemaining}
                     </StatusPill>
                   )}
-                  {/* Chi scrive senza avere una prenotazione e' un cliente da
-                      acquisire: il numero e' gia' qui, ricopiarlo a mano e'
-                      l'unico attrito fra il messaggio e il tavolo prenotato. */}
-                  {onCreateReservationFromContact && !selected.last_reservation_id && (
+                  {/* Prenotazioni del numero (N) in un menu, ciascuna apribile
+                      per modificarla — supporta più prenotazioni nella stessa
+                      chat. "Crea prenotazione" resta sempre disponibile per
+                      aggiungerne una nuova. */}
+                  {onOpenReservation && reservationsForPhone.length > 0 && (
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setResMenuOpen(o => !o)}
+                        aria-haspopup="menu"
+                        aria-expanded={resMenuOpen}
+                        className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--ds-border)] px-3.5 text-[13px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      >
+                        <ArrowRight className="h-4 w-4" aria-hidden />
+                        <span className="hidden sm:inline">Prenotazioni</span>
+                        <CountBadge count={reservationsForPhone.length} />
+                      </button>
+                      {resMenuOpen && (
+                        <>
+                          {/* Backdrop invisibile: un click fuori chiude il menu. */}
+                          <div className="fixed inset-0 z-40" onClick={() => setResMenuOpen(false)} aria-hidden />
+                          <div
+                            role="menu"
+                            className="absolute right-0 z-50 mt-1.5 max-h-[60vh] w-[19rem] max-w-[85vw] overflow-y-auto rounded-[14px] border border-[var(--ds-border)] bg-[var(--ds-surface)] p-1.5 shadow-lg"
+                          >
+                            {reservationsForPhone.map(res => {
+                              const badge = reservationStatusPill(res.reservation_status ?? null);
+                              return (
+                                <button
+                                  key={res.id}
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => { setResMenuOpen(false); onOpenReservation(res.id); }}
+                                  className="flex w-full flex-col gap-0.5 rounded-[10px] px-2.5 py-2 text-left transition-colors hover:bg-[var(--ds-surface-row)]"
+                                >
+                                  <span className="flex items-center gap-2 text-[14px] text-[var(--ds-text-primary)]">
+                                    <span className="truncate font-medium">{toTitleCase(res.customer_name) || 'Prenotazione'}</span>
+                                    {badge && <StatusPill tone={badge.tone}>{badge.label}</StatusPill>}
+                                  </span>
+                                  <span className="text-[12px] text-[var(--ds-text-muted)]">
+                                    {formatReservationWhen(res.reservation_time)}
+                                    {res.guests != null && ` · ${res.guests} ospiti`}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {onCreateReservationFromContact && (
                     <button
                       type="button"
-                      onClick={() => onCreateReservationFromContact({
-                        customer_name: selected.customer_name || undefined,
-                        phone: selected.phone || selected.phone_digits,
-                      })}
-                      className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      onClick={handleCreateReservation}
+                      disabled={suggesting}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
-                      <CalendarPlus className="h-4 w-4" aria-hidden />
+                      {suggesting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <CalendarPlus className="h-4 w-4" aria-hidden />}
                       <span className="hidden sm:inline">Crea prenotazione</span>
                     </button>
                   )}
@@ -836,11 +1036,11 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
                     non parte da sola: l'agente ha capito cosa fare, la
                     decisione resta di chi legge. */}
                 {proposal && (
-                  <div className="rounded-[14px] border border-violet-300 bg-violet-50 px-3.5 py-3 dark:border-violet-800 dark:bg-violet-950/40">
-                    <div className="flex items-start gap-2.5">
-                      <Wand2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-violet-600 dark:text-violet-400" aria-hidden />
+                  <div className="ds-ai-frame">
+                    <div className="ds-ai-card flex items-start gap-2.5 px-3.5 py-3">
+                      <Wand2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--ds-text-secondary)]" aria-hidden />
                       <div className="min-w-0 flex-1">
-                        <p className="text-[13px] font-semibold text-violet-900 dark:text-violet-200">
+                        <p className="text-[13px] font-semibold text-[var(--ds-text-primary)]">
                           L'agente propone un'azione sulla prenotazione
                         </p>
                         <p className="mt-0.5 text-[14px] text-[var(--ds-text-primary)]">{proposal.summary}</p>
@@ -852,7 +1052,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
                             type="button"
                             onClick={handleConfirmProposal}
                             disabled={proposalBusy}
-                            className="inline-flex h-9 items-center gap-1.5 rounded-full bg-violet-600 px-3.5 text-[13px] font-semibold text-white transition-colors hover:bg-violet-700 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                            className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                           >
                             {proposalBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                             Conferma ed esegui
@@ -868,33 +1068,6 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
                         </div>
                       </div>
                     </div>
-                  </div>
-                )}
-
-                {/* Allegati pronti: si vedono prima di premere invia, e si
-                    tolgono uno per uno se si sbaglia file. */}
-                {attachments.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {attachments.map(a => (
-                      <span
-                        key={a.token}
-                        className="inline-flex max-w-[220px] items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] py-1 pl-3 pr-1.5 text-[13px] text-[var(--ds-text-primary)]"
-                      >
-                        <Paperclip className="h-3.5 w-3.5 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
-                        <span className="truncate">{a.filename || a.content_type}</span>
-                        <span className="flex-shrink-0 text-[12px] text-[var(--ds-text-muted)]">
-                          {Math.max(1, Math.round(a.size_bytes / 1024))} KB
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setAttachments(prev => prev.filter(x => x.token !== a.token))}
-                          aria-label={`Togli ${a.filename || 'allegato'}`}
-                          className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
-                        >
-                          <XIcon className="h-3 w-3" />
-                        </button>
-                      </span>
-                    ))}
                   </div>
                 )}
 
@@ -921,7 +1094,28 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
                 </div>
 
                 {/* Composer: one card, send button inside the field. */}
-                <div className="flex items-end gap-2 rounded-[24px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
+                <div className="rounded-[24px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
+                  {/* Allegati pronti: si vedono prima di premere invia, e si
+                      tolgono uno per uno se si sbaglia file. Stanno dentro la
+                      scheda perche' appartengono al messaggio in scrittura;
+                      fuori finivano su canvas e sparivano contro lo sfondo.
+                      Niente anteprima: il file caricato qui ha un URL solo dopo
+                      l'invio, quindi la targhetta dice di che tipo e'. */}
+                  {attachments.length > 0 && (
+                    <div className="mb-2 flex flex-wrap gap-1.5">
+                      {attachments.map(a => (
+                        <AttachmentRow
+                          key={a.token}
+                          filename={a.filename}
+                          contentType={a.content_type}
+                          sizeBytes={a.size_bytes}
+                          onRemove={() => setAttachments(prev => prev.filter(x => x.token !== a.token))}
+                        />
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex items-end gap-2">
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -937,9 +1131,9 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
                       disabled={suggesting || sending}
                       aria-label="Suggerisci una risposta"
                       title="Proponi una risposta in base alla conversazione e alle regole della casa"
-                      className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-violet-600 transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] dark:text-violet-400"
+                      className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
-                      {suggesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                      {suggesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
                     </button>
                   )}
                   <button
@@ -986,6 +1180,7 @@ const InboxPage: React.FC<InboxPageProps> = ({ onCreateReservationFromContact })
                   >
                     {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   </button>
+                  </div>
                 </div>
                 <p className="px-1 text-[12px] text-[var(--ds-text-muted)]">
                   Invio con <kbd className="rounded bg-[var(--ds-surface-row)] px-1.5 py-0.5 font-mono text-[11px]">Enter</kbd>, a capo con <kbd className="rounded bg-[var(--ds-surface-row)] px-1.5 py-0.5 font-mono text-[11px]">Shift+Enter</kbd>

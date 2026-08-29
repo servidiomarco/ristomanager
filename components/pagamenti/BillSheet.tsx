@@ -1,13 +1,38 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { QRCodeSVG } from 'qrcode.react';
-import { Check, Copy, Loader2, Printer, QrCode, X, Banknote } from 'lucide-react';
-import { printBill, type OpenBillRow } from '../../services/billsApiService';
+import { Check, Copy, FileText, Loader2, Printer, QrCode, X, Banknote } from 'lucide-react';
+import { billsApiService, printBill, type BillPaymentInput, type OpenBillRow } from '../../services/billsApiService';
+import { getCustomers } from '../../services/apiService';
+import type { Customer } from '../../types';
 import { FormCard, PaneHeader, Sheet, StatusPill } from '../ds';
 import { formatEuro } from './paymentsView';
+import { getRomeTimePart } from '../../utils/reservationTime';
 
-/** Chiusura conto: quanto incassato in contanti (totale sul conto) e mancia. */
-export type SettleOpts = { cash_settled_cents?: number; tip_cents?: number };
+/** Chiusura conto: i movimenti di incasso (metodo + importo) e la mancia.
+ *  Passa dritto a POST /bills/:id/close come CloseBillPayload. */
+export type SettleOpts = {
+  payments?: BillPaymentInput[];
+  cash_settled_cents?: number;
+  tip_cents?: number;
+  passepartout_documento?: 'Scontrino' | 'Proforma';
+  /** Conti nativi: 'Proforma' = chiusura deliberata senza documento fiscale
+   *  (scontrino o fattura emettibili dopo, dal conto). */
+  documento?: 'Scontrino' | 'Proforma';
+};
+
+/** Metodi registrabili in cassa, nell'ordine in cui si usano davvero. */
+const METHODS: { value: BillPaymentInput['method']; label: string }[] = [
+  { value: 'CONTANTI', label: 'Contanti' },
+  { value: 'POS_FISICO', label: 'POS' },
+  { value: 'SATISPAY', label: 'Satispay' },
+  { value: 'BUONO_PASTO', label: 'Buoni pasto' },
+  { value: 'GIFT_CARD', label: 'Gift card' },
+  { value: 'SOSPESO', label: 'Sospeso' },
+  { value: 'OMAGGIO', label: 'Omaggio' },
+];
+const methodLabel = (m: string) =>
+  m === 'LINK_ONLINE' ? 'Online' : METHODS.find(x => x.value === m)?.label ?? m;
 
 // Parsing tollerante dell'importo digitato: "12,50" / "12.50" / "12" → cents.
 const eurToCents = (s: string): number => {
@@ -33,7 +58,7 @@ const euro = (cents: number) => formatEuro(cents);
 
 type BillLike =
   Pick<OpenBillRow, 'id' | 'table_name' | 'total_cents' | 'covers' | 'share_token' | 'items'>
-  & Partial<Pick<OpenBillRow, 'paid_cents' | 'residual_cents' | 'open_orders' | 'deposit_credit_cents' | 'deposit_paid_cents' | 'refund_due_cents' | 'cash_settled_cents'>>;
+  & Partial<Pick<OpenBillRow, 'paid_cents' | 'residual_cents' | 'open_orders' | 'deposit_credit_cents' | 'deposit_paid_cents' | 'refund_due_cents' | 'cash_settled_cents' | 'status' | 'fiscal_status' | 'fiscal_doc_id' | 'fiscal_error' | 'fiscal_provider' | 'fiscal_ref' | 'fiscal_doc_type' | 'fiscal_doc_number' | 'external_ref' | 'payments'>>;
 
 const isSettled = (bill: BillLike) => bill.residual_cents === 0;
 
@@ -58,10 +83,9 @@ const BillMeta: React.FC<{ bill: BillLike }> = ({ bill }) => (
   </>
 );
 
-/** Dialog di chiusura conto: registra quanto incassato in contanti (il resto
- *  non pagato via QR/carta) e l'eventuale mancia. Sostituisce la vecchia
- *  chiusura a due tap, che scriveva il residuo come ammanco senza chiedere
- *  nulla — l'unico modo di pagare era la carta. */
+/** Dialog di chiusura conto: registra i movimenti di incasso — metodo per
+ *  metodo, il tavolo reale paga misto — e l'eventuale mancia. Il percorso a
+ *  un tap resta: residuo preimpostato, metodo Contanti, "Chiudi conto". */
 export const SettleDialog: React.FC<{
   bill: BillLike;
   busy?: boolean;
@@ -69,51 +93,163 @@ export const SettleDialog: React.FC<{
   onConfirm: (opts: SettleOpts) => void;
 }> = ({ bill, busy, onCancel, onConfirm }) => {
   const residual = bill.residual_cents ?? bill.total_cents;
-  const existingCash = bill.cash_settled_cents ?? 0;
-  // Pagato via QR/carta = tutto il pagato meno i contanti già registrati.
-  const paidCard = Math.max(0, (bill.paid_cents ?? 0) - existingCash);
-  // Default: il residuo tutto in contanti → conto saldato in un tap.
-  const [cash, setCash] = useState(residual > 0 ? (residual / 100).toFixed(2) : '0');
+  const alreadyPaid = Math.max(0, bill.total_cents - residual);
+  const [movements, setMovements] = useState<BillPaymentInput[]>([]);
+  const [method, setMethod] = useState<BillPaymentInput['method']>('CONTANTI');
+  // Conto del gestionale: la chiusura in cassa può emettere lo scontrino
+  // oppure la proforma (la routine della cassa, nessun documento fiscale).
+  const isPP = /^pp:comanda:/.test(String(bill.external_ref ?? ''));
+  const [ppDoc, setPpDoc] = useState<'Scontrino' | 'Proforma'>('Scontrino');
+  // Conti nativi: la scelta c'è SEMPRE. Con un provider fiscale attivo
+  // "Scontrino" emette davvero; senza, resta la dichiarazione d'intento —
+  // ma "Proforma" marca comunque il conto come chiuso senza documento DI
+  // PROPOSITO, che in lista è tutt'altra cosa di "senza scontrino".
+  const showDocChoice = true;
+  const recorded = movements.reduce((n, m) => n + m.amount_cents, 0);
+  const remaining = Math.max(0, residual - recorded);
+  const [amount, setAmount] = useState(residual > 0 ? (residual / 100).toFixed(2) : '0');
   const [tip, setTip] = useState('');
-  const cashNow = eurToCents(cash);
+  const amountCents = eurToCents(amount);
   const tipCents = eurToCents(tip);
-  const shortfall = Math.max(0, residual - cashNow);
+  // Contanti sopra il dovuto = resto da rendere: a libro va solo il dovuto.
+  const applied = Math.min(amountCents, remaining);
+  const change = method === 'CONTANTI' ? Math.max(0, amountCents - remaining) : 0;
+  const shortfall = Math.max(0, remaining - applied);
   const willSettle = shortfall === 0;
+
+  const addMovement = () => {
+    if (applied <= 0) return;
+    setMovements(prev => [...prev, { method, amount_cents: applied }]);
+    const next = Math.max(0, remaining - applied);
+    setAmount(next > 0 ? (next / 100).toFixed(2) : '0');
+  };
+
+  const confirm = () => {
+    // L'importo ancora nel campo è un movimento non ancora aggiunto: vale.
+    const pending = applied > 0 ? [{ method, amount_cents: applied }] : [];
+    onConfirm({
+      payments: [...movements, ...pending],
+      tip_cents: tipCents,
+      ...(isPP ? { passepartout_documento: ppDoc } : { documento: ppDoc }),
+    });
+  };
 
   const field =
     'h-11 w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-right text-[15px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
 
   return createPortal(
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4" onClick={busy ? undefined : onCancel}>
-      <div className="w-full max-w-sm overflow-hidden rounded-2xl bg-[var(--ds-surface)] shadow-[var(--shadow-xl)]" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[var(--ds-backdrop)] p-4" onClick={busy ? undefined : onCancel}>
+      <div className="w-full max-w-sm overflow-hidden rounded-2xl bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]" onClick={e => e.stopPropagation()}>
         <div className="border-b border-[var(--ds-border)] p-5">
           <h3 className="text-[16px] font-semibold text-[var(--ds-text-primary)]">Chiudi conto in cassa</h3>
           <p className="mt-1 text-[13px] text-[var(--ds-text-muted)]">Tavolo {bill.table_name ?? '—'} · totale {euro(bill.total_cents)}</p>
         </div>
         <div className="space-y-3 p-5">
           <dl className="space-y-1.5 text-[14px]">
-            {paidCard > 0 && (
+            {alreadyPaid > 0 && (
               <div className="flex justify-between text-[var(--ds-text-muted)]">
-                <dt>Già pagato (QR/carta)</dt><dd className="tabular-nums">{euro(paidCard)}</dd>
-              </div>
-            )}
-            {existingCash > 0 && (
-              <div className="flex justify-between text-[var(--ds-text-muted)]">
-                <dt>Contanti già registrati</dt><dd className="tabular-nums">{euro(existingCash)}</dd>
+                <dt>Già pagato</dt><dd className="tabular-nums">{euro(alreadyPaid)}</dd>
               </div>
             )}
             <div className="flex justify-between font-medium text-[var(--ds-text-primary)]">
-              <dt>Residuo da incassare</dt><dd className="tabular-nums">{euro(residual)}</dd>
+              <dt>Residuo da incassare</dt><dd className="tabular-nums">{euro(remaining)}</dd>
             </div>
           </dl>
 
-          <label className="block">
-            <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Incasso in contanti</span>
-            <div className="relative">
-              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">€</span>
-              <input type="text" inputMode="decimal" value={cash} onChange={e => setCash(e.target.value)} disabled={busy} className={`${field} pl-7`} />
+          {movements.length > 0 && (
+            <ul className="space-y-1">
+              {movements.map((m, i) => (
+                <li key={i} className="flex items-center justify-between rounded-lg bg-[var(--ds-surface-row)] px-3 py-1.5 text-[14px] text-[var(--ds-text-secondary)]">
+                  <span>{methodLabel(m.method)}</span>
+                  <span className="flex items-center gap-2">
+                    <span className="tabular-nums">{euro(m.amount_cents)}</span>
+                    <button
+                      type="button"
+                      aria-label="Togli movimento"
+                      onClick={() => setMovements(prev => prev.filter((_, j) => j !== i))}
+                      disabled={busy}
+                      className="rounded-full p-1 text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)] disabled:opacity-40"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {remaining > 0 && (
+            <>
+              <div className="flex flex-wrap gap-1.5">
+                {METHODS.map(m => (
+                  <button
+                    key={m.value}
+                    type="button"
+                    onClick={() => setMethod(m.value)}
+                    disabled={busy}
+                    className={`rounded-full px-3 py-1.5 text-[13px] font-medium transition-colors disabled:opacity-40 ${
+                      method === m.value
+                        ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                        : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-end gap-2">
+                <label className="block flex-1">
+                  <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Importo</span>
+                  <div className="relative">
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-[var(--ds-text-muted)]">€</span>
+                    <input type="text" inputMode="decimal" value={amount} onChange={e => setAmount(e.target.value)} disabled={busy} className={`${field} pl-7`} />
+                  </div>
+                </label>
+                <button
+                  type="button"
+                  onClick={addMovement}
+                  disabled={busy || applied <= 0 || applied >= remaining}
+                  className="h-11 rounded-xl bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40"
+                >
+                  Aggiungi
+                </button>
+              </div>
+              {change > 0 && (
+                <p className="text-[13px] text-[var(--ds-text-secondary)]">Resto {euro(change)}</p>
+              )}
+            </>
+          )}
+
+          {showDocChoice && (
+            <div>
+              <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{isPP ? 'Documento in cassa' : 'Documento fiscale'}</span>
+              <div className="flex gap-1.5">
+                {(['Scontrino', 'Proforma'] as const).map(d => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setPpDoc(d)}
+                    disabled={busy}
+                    className={`rounded-full px-3 py-1.5 text-[13px] font-medium transition-colors disabled:opacity-40 ${
+                      ppDoc === d
+                        ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                        : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
+                    }`}
+                  >
+                    {d}
+                  </button>
+                ))}
+              </div>
+              {ppDoc === 'Proforma' && (
+                <p className="mt-1.5 text-[13px] text-[var(--ds-text-muted)]">
+                  {isPP
+                    ? 'Niente scontrino: in cassa esce la proforma.'
+                    : 'Nessun documento adesso: scontrino o fattura si emettono dopo, dal conto.'}
+                </p>
+              )}
             </div>
-          </label>
+          )}
 
           <label className="block">
             <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Mancia <span className="font-normal text-[var(--ds-text-muted)]">(facoltativa)</span></span>
@@ -133,7 +269,7 @@ export const SettleDialog: React.FC<{
           <button type="button" onClick={onCancel} disabled={busy} className="rounded-full px-4 py-2 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-hover)] disabled:opacity-40">Annulla</button>
           <button
             type="button"
-            onClick={() => onConfirm({ cash_settled_cents: existingCash + cashNow, tip_cents: tipCents })}
+            onClick={confirm}
             disabled={busy}
             className="inline-flex items-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-5 py-2 text-[14px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
           >
@@ -313,7 +449,370 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
           </p>
         )}
       </FormCard>
+
+      {/* Come è stato pagato: i movimenti del libro cassa, ora e importo.
+          "Online" è lo specchio di una quota pagata dal QR/link. */}
+      {bill.payments && bill.payments.length > 0 && (
+        <FormCard title="Pagamenti">
+          <ul>
+            {bill.payments.map((p) => (
+              <li
+                key={p.id}
+                className="flex items-center justify-between gap-3 py-2.5 text-[14px] [&+li]:border-t [&+li]:border-[var(--ds-border)]"
+              >
+                <span className="min-w-0 truncate text-[var(--ds-text-primary)]">{methodLabel(p.method)}</span>
+                <span className="flex flex-shrink-0 items-baseline gap-3">
+                  <span className="text-[13px] text-[var(--ds-text-muted)]">{getRomeTimePart(p.recorded_at)}</span>
+                  <span className="tabular-nums text-[var(--ds-text-secondary)]">{euro(p.amount_cents)}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </FormCard>
+      )}
     </>
+  );
+};
+
+/* ── Fattura elettronica ──────────────────────────────────────────────────
+   Il cliente chiede fattura invece dello scontrino. Si parte dalla rubrica
+   (i dati di fatturazione stanno sul cliente) e ogni campo resta
+   correggibile al volo: quello che si digita qui vince, ma NON riscrive
+   l'anagrafica — il tavolo aspetta, la rubrica si sistema dopo. */
+const InvoiceDialog: React.FC<{
+  bill: BillLike;
+  onCancel: () => void;
+  onDone: () => void;
+}> = ({ bill, onCancel, onDone }) => {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<Customer[]>([]);
+  const [customerId, setCustomerId] = useState<number | null>(null);
+  const [buyer, setBuyer] = useState({
+    name: '', vat_number: '', tax_code: '', sdi_code: '', pec: '',
+    street: '', zip: '', city: '', province: '',
+  });
+
+  // Ricerca in rubrica con debounce: il cameriere digita tre lettere, non
+  // scorre cinquecento nomi.
+  useEffect(() => {
+    if (!query.trim() || customerId != null) { setResults([]); return; }
+    const t = setTimeout(() => {
+      getCustomers(query.trim())
+        .then(rows => setResults(rows.slice(0, 5)))
+        .catch(() => setResults([]));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [query, customerId]);
+
+  const pick = (c: Customer) => {
+    setCustomerId(c.id);
+    setQuery(c.name);
+    setResults([]);
+    const b = c.billing ?? {};
+    setBuyer({
+      name: b.name ?? c.name,
+      vat_number: b.vat_number ?? '',
+      tax_code: b.tax_code ?? '',
+      sdi_code: b.sdi_code ?? '',
+      pec: b.pec ?? '',
+      street: b.address?.street ?? c.address ?? '',
+      zip: b.address?.zip ?? c.postal_code ?? '',
+      city: b.address?.city ?? c.city ?? '',
+      province: b.address?.province ?? '',
+    });
+  };
+
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await billsApiService.issueInvoice(bill.id, {
+        ...(customerId != null ? { customer_id: customerId } : {}),
+        buyer: {
+          name: buyer.name, vat_number: buyer.vat_number, tax_code: buyer.tax_code,
+          sdi_code: buyer.sdi_code, pec: buyer.pec,
+          address: { street: buyer.street, zip: buyer.zip, city: buyer.city, province: buyer.province },
+        },
+      });
+      onDone();
+    } catch (err: any) {
+      setError(err?.data?.error ?? err?.message ?? 'Fattura non emessa');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const field =
+    'h-11 w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
+  const label = 'mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]';
+  const set = (k: keyof typeof buyer) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setBuyer(prev => ({ ...prev, [k]: e.target.value }));
+
+  return createPortal(
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[var(--ds-backdrop)] p-4" onClick={busy ? undefined : onCancel}>
+      <div className="flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]" onClick={e => e.stopPropagation()}>
+        <div className="border-b border-[var(--ds-border)] p-5">
+          <h3 className="text-[16px] font-semibold text-[var(--ds-text-primary)]">Fattura elettronica</h3>
+          <p className="mt-1 text-[13px] text-[var(--ds-text-muted)]">Tavolo {bill.table_name ?? '—'} · {euro(bill.total_cents)} · sostituisce lo scontrino</p>
+        </div>
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-5">
+          <label className="relative block">
+            <span className={label}>Cliente in rubrica</span>
+            <input
+              type="text"
+              value={query}
+              placeholder="Cerca per nome…"
+              onChange={e => { setQuery(e.target.value); setCustomerId(null); }}
+              disabled={busy}
+              className={field}
+            />
+            {results.length > 0 && (
+              <ul className="absolute z-10 mt-1 w-full overflow-hidden rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+                {results.map(c => (
+                  <li key={c.id}>
+                    <button
+                      type="button"
+                      onClick={() => pick(c)}
+                      className="flex w-full items-baseline justify-between gap-2 px-3 py-2 text-left text-[14px] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]"
+                    >
+                      <span className="min-w-0 truncate">{c.name}</span>
+                      {c.billing?.vat_number && (
+                        <span className="flex-shrink-0 text-[12px] tabular-nums text-[var(--ds-text-muted)]">P.IVA {c.billing.vat_number}</span>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </label>
+
+          <label className="block">
+            <span className={label}>Denominazione</span>
+            <input type="text" value={buyer.name} onChange={set('name')} disabled={busy} className={field} />
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className={label}>P.IVA</span>
+              <input type="text" inputMode="numeric" value={buyer.vat_number} onChange={set('vat_number')} disabled={busy} className={`${field} tabular-nums`} />
+            </label>
+            <label className="block">
+              <span className={label}>Codice fiscale</span>
+              <input type="text" value={buyer.tax_code} onChange={set('tax_code')} disabled={busy} className={field} />
+            </label>
+            <label className="block">
+              <span className={label}>Codice SDI</span>
+              <input type="text" value={buyer.sdi_code} onChange={set('sdi_code')} disabled={busy} className={field} />
+            </label>
+            <label className="block">
+              <span className={label}>PEC</span>
+              <input type="email" value={buyer.pec} onChange={set('pec')} disabled={busy} className={field} />
+            </label>
+          </div>
+          <label className="block">
+            <span className={label}>Indirizzo</span>
+            <input type="text" value={buyer.street} onChange={set('street')} disabled={busy} className={field} />
+          </label>
+          <div className="grid grid-cols-4 gap-3">
+            <label className="block">
+              <span className={label}>CAP</span>
+              <input type="text" inputMode="numeric" value={buyer.zip} onChange={set('zip')} disabled={busy} className={`${field} tabular-nums`} />
+            </label>
+            <label className="col-span-2 block">
+              <span className={label}>Comune</span>
+              <input type="text" value={buyer.city} onChange={set('city')} disabled={busy} className={field} />
+            </label>
+            <label className="block">
+              <span className={label}>Prov.</span>
+              <input type="text" maxLength={2} value={buyer.province} onChange={set('province')} disabled={busy} className={field} />
+            </label>
+          </div>
+          {error && <p className="text-[13px] text-[var(--ds-critical-text)]">{error}</p>}
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-4 py-3">
+          <button type="button" onClick={onCancel} disabled={busy} className="rounded-full px-4 py-2 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-hover)] disabled:opacity-40">Annulla</button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={busy || !buyer.name.trim()}
+            className="inline-flex items-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-5 py-2 text-[14px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+          >
+            {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+            Invia a SDI
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+};
+
+/* ── Scontrino elettronico ────────────────────────────────────────────────
+   Sul conto chiuso: lo stato del documento commerciale e le due azioni che
+   servono davvero — emetti/riprova e annulla. L'emissione parte già da sola
+   alla chiusura; questa card copre il resto: il fallito da ritentare, il
+   conto vecchio senza documento, l'annullo. L'annullo è un atto fiscale e
+   chiede un secondo tap di conferma, non un dialog. */
+export const FiscalCard: React.FC<{
+  bill: BillLike;
+  onChanged?: () => void;
+}> = ({ bill, onChanged }) => {
+  const [busy, setBusy] = useState(false);
+  const [armed, setArmed] = useState(false);
+  const [invoiceOpen, setInvoiceOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Solo un conto CLOSED (saldato per intero) emette; la card compare anche
+  // quando un documento esiste già, qualunque sia lo stato del conto.
+  if (bill.status !== 'CLOSED' && !bill.fiscal_status) return null;
+
+  const st = bill.fiscal_status ?? null;
+  // Conto nato da una comanda Passepartout: lo scontrino lo emette l'RT di
+  // cassa alla chiusura del tavolo sul gestionale, non il provider cloud.
+  const isPP = /^pp:comanda:/.test(String(bill.external_ref ?? ''));
+  const viaPP = bill.fiscal_provider === 'passepartout';
+  const proforma = bill.fiscal_doc_type === 'PROFORMA';
+  const invoice = bill.fiscal_doc_type === 'INVOICE';
+  // La proforma nativa è un segnaposto sostituibile: scontrino e fattura
+  // restano emettibili e la superano da soli lato server.
+  const nativeProforma = proforma && !viaPP && st === 'CONFIRMED';
+  const pill =
+    st === 'CONFIRMED' && proforma ? { tone: 'neutral' as const, label: 'proforma' }
+    : st === 'CONFIRMED' && invoice ? { tone: 'positive' as const, label: 'fattura emessa' }
+    : st === 'CONFIRMED' ? { tone: 'positive' as const, label: viaPP ? 'emesso in cassa' : 'emesso' }
+    : st === 'PENDING' ? { tone: 'pending' as const, label: 'in emissione' }
+    : st === 'FAILED' ? { tone: 'critical' as const, label: invoice ? 'errore fattura' : 'errore' }
+    : st === 'VOIDED' ? { tone: 'neutral' as const, label: 'annullato' }
+    : isPP ? { tone: 'pending' as const, label: 'da chiudere in cassa' }
+    : { tone: 'neutral' as const, label: 'non emesso' };
+
+  const run = async (fn: () => Promise<unknown>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+      setArmed(false);
+      onChanged?.();
+    } catch (err: any) {
+      // 409 in_progress: l'altra emissione è in volo — il reload mostrerà
+      // l'esito; non è un errore da urlare.
+      if (err?.data?.reason === 'in_progress') onChanged?.();
+      else setError(err?.data?.message ?? err?.data?.error ?? err?.message ?? 'Operazione non riuscita');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const quiet =
+    'inline-flex h-10 items-center justify-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-4 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+
+  return (
+    <FormCard title="Scontrino" aside={<StatusPill tone={pill.tone}>{pill.label}</StatusPill>}>
+      <div className="space-y-2.5">
+        {st === 'CONFIRMED' && proforma && (
+          <p className="text-[13px] text-[var(--ds-text-muted)]">
+            {viaPP
+              ? 'Chiuso in cassa con proforma, senza scontrino.'
+              : 'Chiuso con proforma, senza documento fiscale. Scontrino o fattura lo sostituiscono.'}
+          </p>
+        )}
+        {st === 'CONFIRMED' && invoice && (
+          <p className="text-[13px] text-[var(--ds-text-muted)]">
+            Fattura {bill.fiscal_doc_number ?? bill.fiscal_ref} inviata a SDI. Lo storno passa da una nota di credito.
+          </p>
+        )}
+        {st === 'CONFIRMED' && !proforma && !invoice && bill.fiscal_ref && (
+          <p className="text-[13px] text-[var(--ds-text-muted)]">
+            Scontrino {bill.fiscal_ref}{viaPP ? ' · emesso via Passepartout' : ''}
+          </p>
+        )}
+        {st === 'FAILED' && bill.fiscal_error && (
+          <p className="text-[13px] text-[var(--ds-critical-text)] break-words">{bill.fiscal_error}</p>
+        )}
+        {error && <p className="text-[13px] text-[var(--ds-critical-text)]">{error}</p>}
+        <div className="flex flex-wrap items-center gap-2">
+          {isPP && st !== 'CONFIRMED' && st !== 'PENDING' && bill.status === 'CLOSED' && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => run(() => billsApiService.passepartoutClose(bill.id))}
+              className={quiet}
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+              Chiudi in cassa
+            </button>
+          )}
+          {!isPP && (st == null || st === 'FAILED' || st === 'VOIDED' || nativeProforma) && bill.status === 'CLOSED' && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => run(() => billsApiService.emitFiscalDoc(bill.id))}
+              className={quiet}
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+              {st === 'FAILED' && !invoice ? 'Riprova emissione' : st === 'VOIDED' ? 'Emetti di nuovo' : 'Emetti scontrino'}
+            </button>
+          )}
+          {/* Fattura al posto dello scontrino: stesso prerequisito (nessun
+              documento fiscale vivo — la proforma nativa non conta e viene
+              superata dal server). Il cameriere sceglie il cliente nel dialog. */}
+          {!isPP && (st == null || st === 'FAILED' || st === 'VOIDED' || nativeProforma) && bill.status === 'CLOSED' && (
+            <button type="button" disabled={busy} onClick={() => setInvoiceOpen(true)} className={quiet}>
+              <FileText className="h-4 w-4" />
+              {st === 'FAILED' && invoice ? 'Riprova fattura' : 'Emetti fattura'}
+            </button>
+          )}
+          {/* Marcatura a posteriori: il conto chiuso "senza scontrino"
+              diventa proforma — scelta deliberata, non dimenticanza. */}
+          {!isPP && (st == null || st === 'VOIDED') && bill.status === 'CLOSED' && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => run(() => billsApiService.markProforma(bill.id))}
+              className={quiet}
+            >
+              Segna proforma
+            </button>
+          )}
+          {st === 'CONFIRMED' && !viaPP && !invoice && !proforma && bill.fiscal_doc_id != null && (
+            armed ? (
+              <>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => run(() => billsApiService.voidFiscalDoc(bill.id, bill.fiscal_doc_id!))}
+                  className="inline-flex h-10 items-center justify-center gap-1.5 rounded-full bg-[var(--ds-critical-solid)] px-4 text-[13px] font-semibold text-white transition-colors disabled:opacity-40"
+                >
+                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+                  Confermo l'annullo
+                </button>
+                <button type="button" disabled={busy} onClick={() => setArmed(false)} className={quiet}>
+                  Lascia stare
+                </button>
+              </>
+            ) : (
+              <button type="button" disabled={busy} onClick={() => setArmed(true)} className={quiet}>
+                <X className="h-4 w-4" />
+                Annulla scontrino
+              </button>
+            )
+          )}
+        </div>
+        {armed && (
+          <p className="text-[13px] text-[var(--ds-text-muted)]">
+            L'annullo viene trasmesso all'Agenzia delle Entrate.
+          </p>
+        )}
+      </div>
+      {invoiceOpen && (
+        <InvoiceDialog
+          bill={bill}
+          onCancel={() => setInvoiceOpen(false)}
+          onDone={() => { setInvoiceOpen(false); onChanged?.(); }}
+        />
+      )}
+    </FormCard>
   );
 };
 
@@ -325,7 +824,9 @@ export const BillDetail: React.FC<{
   busy?: boolean;
   onClose: () => void;
   onSettle?: (opts?: SettleOpts) => void;
-}> = ({ bill, busy, onClose, onSettle }) => (
+  /** Ricarica la lista dopo emissione/annullo dello scontrino. */
+  onFiscalChanged?: () => void;
+}> = ({ bill, busy, onClose, onSettle, onFiscalChanged }) => (
   <>
     <PaneHeader
       onBack={onClose}
@@ -336,6 +837,7 @@ export const BillDetail: React.FC<{
     />
     <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-5 sm:px-6 lg:px-8">
       <BillBody bill={bill} />
+      <FiscalCard bill={bill} onChanged={onFiscalChanged} />
     </div>
     {onSettle && (
       <div className="flex-shrink-0 px-4 pb-4 pt-1 sm:px-6 lg:px-8">

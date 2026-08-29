@@ -508,7 +508,91 @@ export interface AvailabilityResult {
     free_indoor: number;
     free_outdoor: number;
     alternative_shift?: Shift;
+    // Doppio turno: primo slot del turno in cui un tavolo adatto si libera
+    // (HH:MM). Presente solo a turno pieno con voice_double_seating_enabled.
+    second_seating_from?: string;
     message: string;    // Italian phrase the agent can read aloud
+}
+
+/**
+ * Interruttore doppio turno del canale voce (default spento). Stessa riga
+ * app_settings dei feature flag del server: booleano in `value`, scritto da
+ * PUT /settings/features. Solo i percorsi voce lo leggono: /prenota resta
+ * all'occupazione per intero turno.
+ */
+export async function isVoiceDoubleSeatingEnabled(tenantId: number): Promise<boolean> {
+    try {
+        const result = await queryWithRetry(
+            "SELECT value FROM app_settings WHERE tenant_id = $1 AND key = 'voice_double_seating_enabled'",
+            [tenantId]
+        );
+        if (result.rowCount === 0) return false;
+        return Boolean(result.rows[0].value);
+    } catch (err) {
+        console.error('[voice] failed to read voice_double_seating_enabled:', err);
+        return false;
+    }
+}
+
+/**
+ * Primo slot del turno in cui si libera un tavolo adatto, quando il turno è
+ * pieno e il doppio turno è attivo. Un tavolo "si libera" alla fine della sua
+ * ultima prenotazione (duration_minutes, fallback 90' pranzo / 120' cena);
+ * l'orario proposto è il primo slot della griglia di apertura ≥ quel momento,
+ * così il valore è sempre prenotabile da create_reservation. Null se nessun
+ * tavolo si libera entro l'ultimo slot.
+ */
+async function findSecondSeatingSlot(
+    tenantId: number,
+    date: string,
+    shift: Shift,
+    guests: number,
+    locationPreference?: RoomLocation
+): Promise<string | null> {
+    const cappedRooms = await getCappedRoomIds(tenantId, date, shift);
+    const params: any[] = [guests, date, shift, cappedRooms, tenantId];
+    let locationFilter = '';
+    if (locationPreference) {
+        params.push(locationPreference);
+        locationFilter = ` AND r.location = $${params.length}`;
+    }
+    // to_char su timestamptz rende l'orario nella sessione pg Europe/Rome.
+    const result = await queryWithRetry(`
+        SELECT to_char(MIN(x.free_at), 'HH24:MI') AS free_from
+        FROM (
+            SELECT MAX(res.reservation_time + make_interval(mins =>
+                       COALESCE(NULLIF(res.duration_minutes, 0),
+                                CASE WHEN res.shift = 'LUNCH' THEN 90 ELSE 120 END))) AS free_at
+            FROM tables t
+            JOIN rooms r ON t.room_id = r.id AND r.tenant_id = t.tenant_id
+            JOIN reservations res ON res.table_id = t.id
+                AND res.tenant_id = t.tenant_id
+                AND DATE(res.reservation_time) = $2
+                AND res.shift = $3
+                AND COALESCE(res.reservation_status, 'CONFIRMED') NOT IN ('CANCELLED', 'DECLINED')
+            WHERE t.tenant_id = $5
+              AND r.is_closed = false
+              AND NOT (r.id = ANY($4::int[]))
+              AND r.id NOT IN (
+                  SELECT room_id FROM room_closed_overrides WHERE date = $2 AND shift = $3 AND tenant_id = $5
+              )
+              AND t.id NOT IN (
+                  SELECT table_id FROM table_hidden_overrides WHERE date = $2 AND shift = $3 AND tenant_id = $5
+              )
+              AND t.seats >= $1
+              AND NOT EXISTS (
+                  SELECT 1 FROM table_merges tm
+                  WHERE tm.date = $2 AND tm.shift = $3 AND tm.tenant_id = $5
+                    AND (tm.primary_id = t.id OR t.id = ANY(tm.merged_ids))
+              )
+              ${locationFilter}
+            GROUP BY t.id
+        ) x
+    `, params);
+    const freeFrom = result.rows[0]?.free_from;
+    if (!freeFrom) return null;
+    const slots = await getAvailableSlots(tenantId, date, shift);
+    return slots.find(s => s >= freeFrom) ?? null;
 }
 
 /**
@@ -604,6 +688,23 @@ export async function findAvailability(tenantId: number, input: AvailabilityInpu
             free_outdoor: freeOutdoor,
             message: `Mi dispiace, ${requestedWhere} è tutto prenotato, ma ${altWhere} abbiamo posto. Le va bene?`
         };
+    }
+
+    // Turno pieno. Col doppio turno attivo, prima di ripiegare sull'altro
+    // turno proponiamo la seconda battuta nello stesso: l'orario viene dal
+    // server, mai inventato dall'agente (chiamata Ciccolini 2026-08-27).
+    if (await isVoiceDoubleSeatingEnabled(tenantId)) {
+        const secondSeating = await findSecondSeatingSlot(tenantId, date, shift, guests, location_preference);
+        if (secondSeating) {
+            return {
+                available: false,
+                free_tables_count: 0,
+                free_indoor: 0,
+                free_outdoor: 0,
+                second_seating_from: secondSeating,
+                message: `Mi dispiace, per quella fascia siamo al completo, ma dalle ${secondSeating} si libera un tavolo per ${guests}. Può andare bene?`
+            };
+        }
     }
 
     const otherShift = shift === Shift.LUNCH ? Shift.DINNER : Shift.LUNCH;
@@ -716,9 +817,10 @@ async function pickAutoAssignTable(
     date: string,
     shift: Shift,
     guests: number,
-    locationPreference: RoomLocation | undefined
+    locationPreference: RoomLocation | undefined,
+    overlapTime?: string
 ): Promise<{ id: number; name: string; room_name: string; location: RoomLocation | null } | null> {
-    const picked = await pickSelfServiceTable(tenantId, date, shift, guests, { location: locationPreference });
+    const picked = await pickSelfServiceTable(tenantId, date, shift, guests, { location: locationPreference, overlapTime });
     if (!picked) return null;
     return { id: picked.id, name: picked.name, room_name: picked.room_name, location: picked.location };
 }
@@ -746,12 +848,18 @@ export async function createVoiceReservation(
 
     // No table while a deposit is pending: assigning one would guarantee the
     // very thing the deposit exists to secure.
+    // Col doppio turno attivo l'occupazione si valuta sull'orario richiesto
+    // (reservation_time è 'YYYY-MM-DDTHH:MM:00', wall-clock Roma).
+    const overlapTime = !input.deposit_required && (await isVoiceDoubleSeatingEnabled(tenantId))
+        ? input.reservation_time.slice(11, 16)
+        : undefined;
     const assigned = input.deposit_required ? null : await pickAutoAssignTable(
         tenantId,
         reservationDate,
         input.shift,
         input.guests,
-        input.location_preference
+        input.location_preference,
+        overlapTime
     );
 
     const result = await queryWithRetry(`
@@ -792,9 +900,71 @@ export async function createVoiceReservation(
 
 export interface CancelVoiceReservationInput {
     phone: string;          // raw input — will be normalized
+    /** Nome a cui è intestata la prenotazione: fallback quando il telefono
+     *  non trova nulla (il cliente chiama da un numero diverso da quello
+     *  registrato — Tammaro 2026-08-29). */
+    customer_name?: string;
     date: string;           // YYYY-MM-DD
     time?: string;          // HH:MM, used to disambiguate when caller has >1 booking that day
     conversation_id?: string;
+}
+
+// Confronto nomi accent-insensitive: la trascrizione vocale scrive "Tàmmaro",
+// lo staff registra "Tammaro". Lato JS normalizziamo l'input (NFD + strip dei
+// diacritici); lato SQL translate() copre le accentate comuni in italiano.
+const NAME_ACCENTS_FROM = 'ÀÁÂÄàáâäÈÉÊËèéêëÌÍÎÏìíîïÒÓÔÖòóôöÙÚÛÜùúûü';
+const NAME_ACCENTS_TO = 'AAAAaaaaEEEEeeeeIIIIiiiiOOOOooooUUUUuuuu';
+const SQL_NAME_NORMALIZED = `lower(translate(customer_name, '${NAME_ACCENTS_FROM}', '${NAME_ACCENTS_TO}'))`;
+
+function normalizeNameNeedle(input: string | undefined): string {
+    return String(input ?? '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+}
+
+/**
+ * Trova le prenotazioni del giorno da modificare o cancellare: prima per
+ * telefono (ultime 10 cifre, come findCustomerByPhone), poi — solo se il
+ * telefono non ha cifre o non trova nulla — per nome. Restituisce anche le
+ * cancellate: chi chiama distingue tra attive e già annullate.
+ */
+async function findVoiceReservationMatches(
+    tenantId: number,
+    input: { phone: string; customer_name?: string; date: string; time?: string }
+): Promise<any[]> {
+    const columns = `
+        SELECT id, customer_name, reservation_time, shift, guests, table_id, phone,
+               COALESCE(reservation_status, 'CONFIRMED') AS reservation_status,
+               notes, children
+        FROM reservations
+    `;
+    const timeFilter = input.time ? ` AND to_char(reservation_time, 'HH24:MI') = $4` : '';
+    const order = ' ORDER BY reservation_time ASC';
+
+    const last10 = lastTenDigits(input.phone);
+    if (last10) {
+        const params: any[] = [last10, input.date, tenantId];
+        if (input.time) params.push(input.time);
+        const byPhone = await queryWithRetry(`${columns}
+            WHERE tenant_id = $3
+              AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
+              AND DATE(reservation_time) = $2::date${timeFilter}${order}
+        `, params);
+        if (byPhone.rows.length > 0) return byPhone.rows;
+    }
+
+    const needle = normalizeNameNeedle(input.customer_name);
+    if (!needle) return [];
+    const params: any[] = [`%${needle}%`, input.date, tenantId];
+    if (input.time) params.push(input.time);
+    const byName = await queryWithRetry(`${columns}
+        WHERE tenant_id = $3
+          AND ${SQL_NAME_NORMALIZED} LIKE $1
+          AND DATE(reservation_time) = $2::date${timeFilter}${order}
+    `, params);
+    return byName.rows;
 }
 
 export interface CancelCandidate {
@@ -832,56 +1002,24 @@ export async function cancelVoiceReservation(
     tenantId: number,
     input: CancelVoiceReservationInput
 ): Promise<CancelVoiceReservationOutput> {
-    const last10 = lastTenDigits(input.phone);
-
     // Solo prenotazioni del tenant del canale: lo stesso numero potrebbe avere
     // una cena anche in un altro ristorante, e Sofia non deve poterla toccare.
-    const params: any[] = [last10, input.date, tenantId];
-    let sql = `
-        SELECT id, customer_name, reservation_time, shift, guests
-        FROM reservations
-        WHERE tenant_id = $3
-          AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
-          AND DATE(reservation_time) = $2::date
-          AND COALESCE(reservation_status, 'CONFIRMED') <> 'CANCELLED'
-    `;
-    if (input.time) {
-        sql += ` AND to_char(reservation_time, 'HH24:MI') = $4`;
-        params.push(input.time);
-    }
-    sql += ' ORDER BY reservation_time ASC';
+    const rows = await findVoiceReservationMatches(tenantId, input);
+    const active: CancelCandidate[] = rows.filter((r: any) => r.reservation_status !== 'CANCELLED');
 
-    const matches = await queryWithRetry(sql, params);
-    const rows: CancelCandidate[] = matches.rows;
-
-    if (rows.length === 0) {
-        // Nothing active to cancel — check whether the caller is asking us to
-        // cancel something we already cancelled (common after a dashboard test
-        // or a duplicate call). Same filters as above but allowing the
-        // CANCELLED status, so we can tell the caller it's already done.
-        const cancelledParams: any[] = [last10, input.date, tenantId];
-        let cancelledSql = `
-            SELECT id, customer_name, reservation_time, shift, guests
-            FROM reservations
-            WHERE tenant_id = $3
-              AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
-              AND DATE(reservation_time) = $2::date
-              AND COALESCE(reservation_status, 'CONFIRMED') = 'CANCELLED'
-        `;
-        if (input.time) {
-            cancelledSql += ` AND to_char(reservation_time, 'HH24:MI') = $4`;
-            cancelledParams.push(input.time);
-        }
-        cancelledSql += ' ORDER BY reservation_time DESC LIMIT 1';
-        const cancelledResult = await queryWithRetry(cancelledSql, cancelledParams);
-        if (cancelledResult.rows.length > 0) {
-            return { status: 'already_cancelled', reservation: cancelledResult.rows[0] };
+    if (active.length === 0) {
+        // Nothing active to cancel — if we matched something already cancelled
+        // (common after a dashboard test or a duplicate call), tell the caller
+        // it's already done instead of "not found". Rows are ordered ASC, so
+        // the last one is the most recent — same pick as the old DESC LIMIT 1.
+        if (rows.length > 0) {
+            return { status: 'already_cancelled', reservation: rows[rows.length - 1] };
         }
         return { status: 'not_found' };
     }
-    if (rows.length > 1) return { status: 'ambiguous', candidates: rows };
+    if (active.length > 1) return { status: 'ambiguous', candidates: active };
 
-    const target = rows[0];
+    const target = active[0];
     const updated = await queryWithRetry(`
         UPDATE reservations
         SET reservation_status = 'CANCELLED'
@@ -931,6 +1069,8 @@ function romeWallClock(iso: string | Date): {
 
 export interface ModifyVoiceReservationInput {
     phone: string;              // caller's phone — identifies the reservation
+    /** Nome della prenotazione — stesso fallback di CancelVoiceReservationInput. */
+    customer_name?: string;
     date: string;               // YYYY-MM-DD — original date of the booking
     time?: string;              // HH:MM — used to disambiguate when caller has >1 booking that day
     conversation_id?: string;
@@ -979,26 +1119,8 @@ export async function modifyVoiceReservation(
     tenantId: number,
     input: ModifyVoiceReservationInput
 ): Promise<ModifyVoiceReservationOutput> {
-    const last10 = lastTenDigits(input.phone);
-
     // 1) Locate the reservation. Same rules as cancel (tenant compreso).
-    const params: any[] = [last10, input.date, tenantId];
-    let sql = `
-        SELECT id, customer_name, reservation_time, shift, guests, table_id, phone,
-               COALESCE(reservation_status, 'CONFIRMED') AS reservation_status,
-               notes, children
-        FROM reservations
-        WHERE tenant_id = $3
-          AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
-          AND DATE(reservation_time) = $2::date
-    `;
-    if (input.time) {
-        sql += ` AND to_char(reservation_time, 'HH24:MI') = $4`;
-        params.push(input.time);
-    }
-    sql += ' ORDER BY reservation_time ASC';
-    const matches = await queryWithRetry(sql, params);
-    const rows = matches.rows;
+    const rows = await findVoiceReservationMatches(tenantId, input);
 
     const active = rows.filter((r: any) => r.reservation_status !== 'CANCELLED');
     if (active.length === 0) {
@@ -1014,17 +1136,17 @@ export async function modifyVoiceReservation(
     const current = active[0];
 
     // 2) Compute the new state (merge current with overrides).
-    // reservation_time comes back from pg as a Date object; `String(Date)`
-    // formats it as "Fri Jan 15 2027 ..." (Date.prototype.toString), which
-    // is not ISO. Use toISOString() to get YYYY-MM-DDTHH:MM:SS.SSSZ then
-    // slice — Railway runs in UTC, so wall-clock and UTC coincide for the
-    // way we store reservation_time (see createVoiceReservation).
-    const iso = current.reservation_time instanceof Date
-        ? current.reservation_time.toISOString()
-        : String(current.reservation_time);
-    const curDate = iso.slice(0, 10);
-    const timeMatch = iso.match(/T(\d{2}):(\d{2})/);
-    const curTime = timeMatch ? `${timeMatch[1]}:${timeMatch[2]}` : '00:00';
+    // reservation_time comes back from pg as a Date (a UTC instant). The new
+    // reservation_time we write below is a naive `YYYY-MM-DDTHH:MM:00` string
+    // that the app's pg session (Europe/Rome) reinterprets as Rome wall-clock.
+    // So the current date/time we default to MUST also be read as Rome
+    // wall-clock — reading the UTC parts (toISOString) shifts a guests-only
+    // change back by the Rome offset (22:00 booking silently became 20:00,
+    // Vernoccoli #38950, 2026-08-25). getRomeDatePart/getRomeTimePart format
+    // the instant in Europe/Rome, which is exactly what createVoiceReservation
+    // and the dashboard store.
+    const curDate = getRomeDatePart(current.reservation_time);
+    const curTime = getRomeTimePart(current.reservation_time);
 
     const newDate = input.new_date ?? curDate;
     const newTime = input.new_time ?? curTime;
@@ -1053,16 +1175,27 @@ export async function modifyVoiceReservation(
     // 2026-08-04) and the floor plan lied until someone noticed.
     let assigned: { id: number; name: string; room_name: string | null; location: 'INDOOR' | 'OUTDOOR' | null } | null | undefined;
     if (scheduleChanged) {
+        // Se i coperti non aumentano, la capienza del tavolo attuale non va
+        // rifatta: lo staff può averci messo più persone dei posti nominali
+        // (sedia aggiunta). Il check seats >= guests la bocciava e il fallback
+        // di riassegnazione, a sala piena, negava una modifica di solo orario
+        // (Ciccolini 2026-08-27: 7 su tavolo da 6, posticipo rifiutato due
+        // volte). Con guests=1 restano attivi tutti gli altri controlli
+        // (sala aperta, occupazione, accorpamenti, banchetti).
+        const capacityGuests = newGuests <= current.guests ? 1 : newGuests;
+        // Col doppio turno attivo l'occupazione si valuta sul nuovo orario.
+        const overlapTime = (await isVoiceDoubleSeatingEnabled(tenantId)) ? newTime : undefined;
         const keepCurrentTable = current.table_id != null
             && !newLocation
-            && await isTableStillAssignable(tenantId, current.table_id, newDate, newShift, newGuests, current.id);
+            && await isTableStillAssignable(tenantId, current.table_id, newDate, newShift, capacityGuests, current.id, overlapTime);
         if (!keepCurrentTable) {
             assigned = await pickAutoAssignTable(
                 tenantId,
                 newDate,
                 newShift,
                 newGuests,
-                newLocation
+                newLocation,
+                overlapTime
             );
             if (!assigned) {
                 return { status: 'unavailable' };

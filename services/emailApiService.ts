@@ -59,6 +59,32 @@ export interface ExtractedEmailBooking {
   notes: string | null;
 }
 
+// Cache a livello modulo, stesso schema di inboxCache (messagesApiService):
+// EmailPage viene smontata a ogni cambio vista, quindi senza cache ogni
+// rientro rifaceva lista e thread da zero — spinner e mezzo secondo di rete
+// verso Railway per dati appena visti. Si mostra subito l'ultimo stato noto
+// e si rinfresca in background (stale-while-revalidate); App pre-riempie la
+// lista al login e svuota tutto al logout, perché la cache non sopravviva a
+// un cambio utente sullo stesso browser.
+const THREAD_CACHE_MAX = 30;
+export const emailCache = {
+  threads: null as EmailThreadSummary[] | null,
+  timelines: new Map<string, EmailMessage[]>(),
+  setTimeline(emailKey: string, messages: EmailMessage[]) {
+    // Ri-inserire la chiave la sposta in coda: la prima è sempre la meno recente.
+    this.timelines.delete(emailKey);
+    this.timelines.set(emailKey, messages);
+    if (this.timelines.size > THREAD_CACHE_MAX) {
+      const oldest = this.timelines.keys().next().value;
+      if (oldest !== undefined) this.timelines.delete(oldest);
+    }
+  },
+  clear() {
+    this.threads = null;
+    this.timelines.clear();
+  },
+};
+
 const getHeaders = (): HeadersInit => {
   const headers: Record<string, string> = {};
   const socketId = socketClient.getSocket()?.id;
@@ -91,6 +117,17 @@ const apiRequest = async <T>(url: string, options: RequestInit = {}): Promise<T>
 };
 
 class EmailApiService {
+  /** Pre-scalda la cache al login, così il primo ingresso in Email trova la
+   *  lista pronta invece dello spinner. Silenzioso: se fallisce, la pagina
+   *  farà comunque il suo fetch. */
+  async prefetchThreads(): Promise<void> {
+    if (emailCache.threads) return;
+    try {
+      const { threads } = await this.listThreads();
+      emailCache.threads = threads;
+    } catch { /* niente: il caricamento normale copre */ }
+  }
+
   async listThreads(): Promise<{ threads: EmailThreadSummary[] }> {
     return apiRequest(`${API_URL}/email/threads`, { headers: getHeaders() });
   }

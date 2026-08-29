@@ -1,8 +1,9 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Reservation, Table, Dish, Room, Shift, ReservationStatus, ReservationSource, TodoPriority, TodoCategory, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu } from '../types';
+import { Reservation, Table, Dish, Room, Shift, ReservationStatus, ReservationSource, TodoPriority, TodoCategory, StaffMember, StaffShift, StaffTimeOff, StaffCategory, StaffType, BanquetMenu, TableMerge, TableHiddenOverride } from '../types';
 import { ShoppingCategory, ShoppingItem } from '../services/shoppingApiService';
-import { getLowStockInventory, LowStockItem, getReservationAllergenPresets } from '../services/apiService';
+import { getLowStockInventory, LowStockItem, getReservationAllergenPresets, getTableMerges, getTableHidden } from '../services/apiService';
+import { useSocket } from '../hooks/useSocket';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 import { isSeated, getTimedReservationState, PulseDot } from './reservationState';
 import { DietaryChips } from './DietaryChips';
@@ -14,7 +15,7 @@ import { SkeletonKpiRow, SkeletonReservationCard } from './SkeletonCards';
 import { staffApiService } from '../services/staffApiService';
 import { DateNavigator } from './DateNavigator';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Sparkles, Loader2, ChevronRight, Calendar, Plus, Check, Clock, Flag, AlertTriangle, CheckCircle2, ListTodo, ShoppingCart, Coffee, ChefHat, Package, Sun, Sunset, Armchair, Trees, Mountain, Waves, TreePine, Tent, Columns3, MapPin, StickyNote, Wheat, ListChecks, Phone as PhoneIcon, Globe, Mic, MessageCircle, User as UserIcon, Users as UsersIcon, X, ArrowRight, Ban, HelpCircle, LayoutGrid, UtensilsCrossed, BarChart3 } from 'lucide-react';
+import { Wand2, Loader2, ChevronRight, Calendar, Plus, Check, Clock, Flag, AlertTriangle, CheckCircle2, ListTodo, ShoppingCart, Coffee, ChefHat, Package, Sun, Sunset, Armchair, Trees, Mountain, Waves, TreePine, Tent, Columns3, MapPin, StickyNote, Wheat, ListChecks, Phone as PhoneIcon, Globe, Mic, MessageCircle, User as UserIcon, Users as UsersIcon, X, ArrowRight, Ban, HelpCircle, LayoutGrid, UtensilsCrossed, BarChart3 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { generateAiReport } from '../services/aiMessagesApiService';
 import { useAuth } from '../contexts/AuthContext';
@@ -23,13 +24,17 @@ import { useTodos } from '../contexts/TodosContext';
 import { Loader } from './Loader';
 import { ArrivalsTimeline } from './ArrivalsTimeline';
 
+/* Tinte categoriali, non famiglie di stato: qui il colore non vuol dire
+   niente, serve solo a distinguere una categoria dall'altra. Mapparle su
+   `pending` o `critical` farebbe mentire il colore — un pallino Inventario
+   in ambra si leggerebbe "in ritardo". Vedi --ds-cat-* in index.css. */
 const CATEGORY_DOT_COLORS: Record<TodoCategory, string> = {
-  [TodoCategory.GENERAL]: 'bg-slate-400',
-  [TodoCategory.RESERVATION]: 'bg-indigo-500',
-  [TodoCategory.INVENTORY]: 'bg-amber-500',
-  [TodoCategory.STAFF]: 'bg-emerald-500',
-  [TodoCategory.MAINTENANCE]: 'bg-orange-500',
-  [TodoCategory.EVENT]: 'bg-purple-500',
+  [TodoCategory.GENERAL]:     'bg-[var(--ds-cat-1-solid)]',
+  [TodoCategory.RESERVATION]: 'bg-[var(--ds-cat-2-solid)]',
+  [TodoCategory.INVENTORY]:   'bg-[var(--ds-cat-3-solid)]',
+  [TodoCategory.STAFF]:       'bg-[var(--ds-cat-4-solid)]',
+  [TodoCategory.MAINTENANCE]: 'bg-[var(--ds-cat-5-solid)]',
+  [TodoCategory.EVENT]:       'bg-[var(--ds-cat-6-solid)]',
 };
 
 const PRIORITY_RANK: Record<TodoPriority, number> = {
@@ -39,10 +44,19 @@ const PRIORITY_RANK: Record<TodoPriority, number> = {
 };
 
 const PRIORITY_COLORS: Record<TodoPriority, string> = {
-  [TodoPriority.LOW]: 'text-slate-400',
-  [TodoPriority.MEDIUM]: 'text-amber-500',
-  [TodoPriority.HIGH]: 'text-rose-500',
+  [TodoPriority.LOW]: 'text-[var(--ds-text-muted)]',
+  [TodoPriority.MEDIUM]: 'text-[var(--ds-pending-solid)]',
+  [TodoPriority.HIGH]: 'text-[var(--ds-critical-solid)]',
 };
+
+// Unioni e nascosti di un turno, la stessa base che la mappa di Prenotazioni
+// applica da sempre (renderMapPanel in ReservationList). Senza, questa pagina
+// contava i tavoli fisici — 27 in Tettoia dove la sala ne serve 14.
+interface ShiftTableOverrides {
+  merges: TableMerge[];
+  hidden: Set<number>;
+}
+const EMPTY_OVERRIDES: ShiftTableOverrides = { merges: [], hidden: new Set() };
 
 interface DashboardProps {
   reservations: Reservation[];
@@ -253,6 +267,86 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const toDateOnly = (date: string): string => date.substring(0, 10);
   const selectedDateStr = formatLocalDate(selectedDate);
   const isToday = selectedDateStr === formatLocalDate(new Date());
+
+  // Unioni e tavoli nascosti del giorno selezionato, per turno. Caricati per
+  // entrambi i turni perché la card Stato tavoli li mostra affiancati.
+  const [lunchOverrides, setLunchOverrides] = useState<ShiftTableOverrides>(EMPTY_OVERRIDES);
+  const [dinnerOverrides, setDinnerOverrides] = useState<ShiftTableOverrides>(EMPTY_OVERRIDES);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async (shift: Shift, set: React.Dispatch<React.SetStateAction<ShiftTableOverrides>>) => {
+      try {
+        const [merges, hidden] = await Promise.all([
+          getTableMerges(selectedDateStr, shift),
+          getTableHidden(selectedDateStr, shift),
+        ]);
+        if (!cancelled) set({ merges, hidden: new Set(hidden.map(h => h.table_id)) });
+      } catch (err) {
+        console.error('Error fetching table overrides:', err);
+        if (!cancelled) set(EMPTY_OVERRIDES);
+      }
+    };
+    load(Shift.LUNCH, setLunchOverrides);
+    load(Shift.DINNER, setDinnerOverrides);
+    return () => { cancelled = true; };
+  }, [selectedDateStr]);
+
+  const { socket } = useSocket();
+
+  useEffect(() => {
+    if (!socket) return;
+    const setterFor = (shift: Shift) =>
+      shift === Shift.LUNCH ? setLunchOverrides
+      : shift === Shift.DINNER ? setDinnerOverrides
+      : null;
+    const onMergeCreated = (m: TableMerge) => {
+      if (m.date !== selectedDateStr) return;
+      const set = setterFor(m.shift);
+      if (!set) return;
+      set(prev => {
+        const existing = prev.merges.findIndex(p => p.primary_id === m.primary_id);
+        const merges = existing >= 0 ? prev.merges.map((p, i) => (i === existing ? m : p)) : [...prev.merges, m];
+        return { ...prev, merges };
+      });
+    };
+    const onMergeDeleted = (m: TableMerge) => {
+      if (m.date !== selectedDateStr) return;
+      const set = setterFor(m.shift);
+      if (!set) return;
+      set(prev => ({ ...prev, merges: prev.merges.filter(p => p.primary_id !== m.primary_id) }));
+    };
+    const onHiddenCreated = (h: TableHiddenOverride) => {
+      if (h.date !== selectedDateStr) return;
+      const set = setterFor(h.shift);
+      if (!set) return;
+      set(prev => {
+        const hidden = new Set(prev.hidden);
+        hidden.add(h.table_id);
+        return { ...prev, hidden };
+      });
+    };
+    const onHiddenDeleted = (h: TableHiddenOverride) => {
+      if (h.date !== selectedDateStr) return;
+      const set = setterFor(h.shift);
+      if (!set) return;
+      set(prev => {
+        const hidden = new Set(prev.hidden);
+        hidden.delete(h.table_id);
+        return { ...prev, hidden };
+      });
+    };
+    socket.on('tableMerge:created', onMergeCreated);
+    socket.on('tableMerge:deleted', onMergeDeleted);
+    socket.on('tableHidden:created', onHiddenCreated);
+    socket.on('tableHidden:deleted', onHiddenDeleted);
+    return () => {
+      socket.off('tableMerge:created', onMergeCreated);
+      socket.off('tableMerge:deleted', onMergeDeleted);
+      socket.off('tableHidden:created', onHiddenCreated);
+      socket.off('tableHidden:deleted', onHiddenDeleted);
+    };
+  }, [socket, selectedDateStr]);
 
   // Inline quick-add for shopping summary card
   const [newItemName, setNewItemName] = useState('');
@@ -626,7 +720,43 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
     [tables, openRoomIds]
   );
   const openTableIds = useMemo(() => new Set(openTables.map(t => t.id)), [openTables]);
-  const totalTables = openTables.length;
+
+  // Tavoli davvero in servizio per turno: un'unione conta come un tavolo solo
+  // (il secondario sparisce dentro il primario) e i nascosti del giorno/turno
+  // escono dal totale. `toServiceUnit` riporta il table_id di una prenotazione
+  // al tavolo che la rappresenta in mappa, così numeratore e denominatore
+  // parlano della stessa cosa.
+  const shiftTableStats = useMemo(() => {
+    const compute = ({ merges, hidden }: ShiftTableOverrides) => {
+      const secondaryIds = new Set<number>();
+      const primaryOf = new Map<number, number>();
+      for (const m of merges) {
+        for (const id of m.merged_ids) {
+          secondaryIds.add(Number(id));
+          primaryOf.set(Number(id), Number(m.primary_id));
+        }
+      }
+      const inServiceIds = new Set(
+        openTables
+          .filter(t => !secondaryIds.has(Number(t.id)) && !hidden.has(t.id))
+          .map(t => Number(t.id))
+      );
+      const toServiceUnit = (tableId: number | null | undefined): number | null => {
+        if (tableId == null) return null;
+        const unit = primaryOf.get(Number(tableId)) ?? Number(tableId);
+        return inServiceIds.has(unit) ? unit : null;
+      };
+      return { inServiceIds, total: inServiceIds.size, toServiceUnit, hidden };
+    };
+    return { lunch: compute(lunchOverrides), dinner: compute(dinnerOverrides) };
+  }, [openTables, lunchOverrides, dinnerOverrides]);
+
+  // Denominatore per il filtro "Giornata": i tavoli in servizio in almeno un
+  // turno. Un tavolo nascosto solo a pranzo resta nel totale del giorno.
+  const dayInServiceCount = useMemo(
+    () => new Set([...shiftTableStats.lunch.inServiceIds, ...shiftTableStats.dinner.inServiceIds]).size,
+    [shiftTableStats]
+  );
 
   // --- "Adesso in sala" — live service pulse for the hero tile ---
   // Same time-derivation engine as the floor map: seated (ARRIVED/DEPARTING),
@@ -636,6 +766,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const nowTick = useNow(60_000);
   const liveService = useMemo(() => {
     if (!isToday) return null;
+    // "Adesso" appartiene a un turno solo: prima delle 17 è pranzo, dopo è
+    // cena (stessa soglia del default del filtro). I liberi si contano sui
+    // tavoli in servizio in QUEL turno, unioni e nascosti compresi.
+    const liveStats = new Date(nowTick).getHours() < 17 ? shiftTableStats.lunch : shiftTableStats.dinner;
     let seatedGuests = 0;
     let departingCount = 0;
     const seatedTableIds = new Set<number>();
@@ -644,7 +778,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       const st = getTimedReservationState(r, nowTick);
       if (st === 'arrived' || st === 'departing') {
         seatedGuests += r.guests || 0;
-        if (r.table_id && openTableIds.has(r.table_id)) seatedTableIds.add(r.table_id);
+        const unit = liveStats.toServiceUnit(r.table_id);
+        if (unit != null) seatedTableIds.add(unit);
         if (st === 'departing') departingCount++;
       } else if (st === 'arriving') {
         arriving.push(r);
@@ -656,9 +791,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       seatedTables: seatedTableIds.size,
       departingCount,
       arriving,
-      freeTables: Math.max(0, totalTables - seatedTableIds.size),
+      serviceTables: liveStats.total,
+      freeTables: Math.max(0, liveStats.total - seatedTableIds.size),
     };
-  }, [isToday, selectedDayReservations, nowTick, openTableIds, totalTables]);
+  }, [isToday, selectedDayReservations, nowTick, shiftTableStats]);
 
   // Banchetti scheduled for the selected day, split the same way the other KPI
   // cards are. `shift` is optional on a banquet and the form lets you save
@@ -684,11 +820,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const lunchReservationsOpen = lunchReservations.filter(r => isOnOpenRoom(r.table_id));
   const dinnerReservationsOpen = dinnerReservations.filter(r => isOnOpenRoom(r.table_id));
 
+  // I table_id passano da toServiceUnit: una prenotazione su un tavolo unito
+  // conta l'unione una volta sola, e i tavoli fuori servizio non contano.
   const lunchTableIds = new Set(
-    lunchReservations.map(r => r.table_id).filter((id): id is number => id != null && openTableIds.has(id))
+    lunchReservations.map(r => shiftTableStats.lunch.toServiceUnit(r.table_id)).filter((id): id is number => id != null)
   );
   const dinnerTableIds = new Set(
-    dinnerReservations.map(r => r.table_id).filter((id): id is number => id != null && openTableIds.has(id))
+    dinnerReservations.map(r => shiftTableStats.dinner.toServiceUnit(r.table_id)).filter((id): id is number => id != null)
   );
 
   // Per-shift KPI stats (guests + tables, expected vs arrived)
@@ -699,11 +837,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
   const dinnerArrivedRes = dinnerReservations.filter(r => isSeated(r));
   const lunchArrivedGuests = lunchArrivedRes.reduce((acc, r) => acc + r.guests, 0);
   const dinnerArrivedGuests = dinnerArrivedRes.reduce((acc, r) => acc + r.guests, 0);
-  const lunchArrivedTableIds = new Set(lunchArrivedRes.map(r => r.table_id).filter(Boolean));
-  const dinnerArrivedTableIds = new Set(dinnerArrivedRes.map(r => r.table_id).filter(Boolean));
+  const lunchArrivedTableIds = new Set(
+    lunchArrivedRes.map(r => shiftTableStats.lunch.toServiceUnit(r.table_id)).filter((id): id is number => id != null)
+  );
+  const dinnerArrivedTableIds = new Set(
+    dinnerArrivedRes.map(r => shiftTableStats.dinner.toServiceUnit(r.table_id)).filter((id): id is number => id != null)
+  );
 
-  const lunchOccupancy = totalTables > 0 ? Math.round((lunchTableIds.size / totalTables) * 100) : 0;
-  const dinnerOccupancy = totalTables > 0 ? Math.round((dinnerTableIds.size / totalTables) * 100) : 0;
+  const lunchOccupancy = shiftTableStats.lunch.total > 0 ? Math.round((lunchTableIds.size / shiftTableStats.lunch.total) * 100) : 0;
+  const dinnerOccupancy = shiftTableStats.dinner.total > 0 ? Math.round((dinnerTableIds.size / shiftTableStats.dinner.total) * 100) : 0;
 
   // Rows for the arrivals timeline — the selected day, narrowed by the global
   // meal filter so it agrees with every other card on the page.
@@ -788,10 +930,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       return table ? table.room_id : null;
     };
 
-    // Room-based affluence with time slots (skip closed rooms)
+    // Room-based affluence with time slots (skip closed rooms). La capienza è
+    // per turno: i posti dei tavoli nascosti quel giorno/turno non contano —
+    // le unioni invece non la toccano, i posti fisici restano gli stessi.
     const roomTimeSlots = rooms.filter(r => !r.is_closed).map(room => {
       const roomTables = tables.filter(t => t.room_id === room.id);
-      const maxCapacity = roomTables.reduce((acc, t) => acc + t.seats, 0);
+      const capacityWithout = (hidden: Set<number>) =>
+        roomTables.reduce((acc, t) => acc + (hidden.has(t.id) ? 0 : t.seats), 0);
+      const lunchCapacity = capacityWithout(lunchOverrides.hidden);
+      const dinnerCapacity = capacityWithout(dinnerOverrides.hidden);
 
       // Lunch slots for this room — off-slot bookings get bucketed to the
       // nearest earlier canonical slot so nobody vanishes from the row.
@@ -801,7 +948,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           && bucketToSlot(getTimeFromReservation(r), LUNCH_SLOTS) === slot
         );
         const guests = reservationsAtSlot.reduce((acc, r) => acc + r.guests, 0);
-        return { time: slot, guests, percentage: maxCapacity > 0 ? Math.round((guests / maxCapacity) * 100) : 0 };
+        return { time: slot, guests, percentage: lunchCapacity > 0 ? Math.round((guests / lunchCapacity) * 100) : 0 };
       });
 
       // Dinner slots for this room
@@ -811,7 +958,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           && bucketToSlot(getTimeFromReservation(r), DINNER_SLOTS) === slot
         );
         const guests = reservationsAtSlot.reduce((acc, r) => acc + r.guests, 0);
-        return { time: slot, guests, percentage: maxCapacity > 0 ? Math.round((guests / maxCapacity) * 100) : 0 };
+        return { time: slot, guests, percentage: dinnerCapacity > 0 ? Math.round((guests / dinnerCapacity) * 100) : 0 };
       });
 
       const totalLunchGuests = lunchSlots.reduce((acc, s) => acc + s.guests, 0);
@@ -820,24 +967,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       return {
         roomId: room.id,
         roomName: room.name,
-        maxCapacity,
+        lunchCapacity,
+        dinnerCapacity,
         lunchSlots,
         dinnerSlots,
         totalLunchGuests,
         totalDinnerGuests,
-        lunchPercentage: maxCapacity > 0 ? Math.round((totalLunchGuests / maxCapacity) * 100) : 0,
-        dinnerPercentage: maxCapacity > 0 ? Math.round((totalDinnerGuests / maxCapacity) * 100) : 0
+        lunchPercentage: lunchCapacity > 0 ? Math.round((totalLunchGuests / lunchCapacity) * 100) : 0,
+        dinnerPercentage: dinnerCapacity > 0 ? Math.round((totalDinnerGuests / dinnerCapacity) * 100) : 0
       };
     });
 
-    // Total capacity for percentage calculation (skip closed rooms)
-    const totalCapacity = rooms.filter(r => !r.is_closed).reduce((acc, room) => {
-      const roomTables = tables.filter(t => t.room_id === room.id);
-      return acc + roomTables.reduce((sum, t) => sum + t.seats, 0);
-    }, 0);
+    // Total capacity per shift for percentage calculation (skip closed rooms)
+    const lunchTotalCapacity = roomTimeSlots.reduce((acc, r) => acc + r.lunchCapacity, 0);
+    const dinnerTotalCapacity = roomTimeSlots.reduce((acc, r) => acc + r.dinnerCapacity, 0);
 
-    return { roomTimeSlots, totalCapacity, LUNCH_SLOTS, DINNER_SLOTS };
-  }, [lunchReservations, dinnerReservations, rooms, tables]);
+    return { roomTimeSlots, lunchTotalCapacity, dinnerTotalCapacity, LUNCH_SLOTS, DINNER_SLOTS };
+  }, [lunchReservations, dinnerReservations, rooms, tables, lunchOverrides, dinnerOverrides]);
 
   // Calculate weekly chart data from real reservations (based on selected date's week)
   const weeklyChartData = useMemo(() => {
@@ -1061,7 +1207,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               />
               <LiveTile
                 label="Tavoli liberi"
-                value={`${liveService.freeTables}/${totalTables}`}
+                value={`${liveService.freeTables}/${liveService.serviceTables}`}
                 sub="tavoli disponibili"
               />
             </div>
@@ -1091,6 +1237,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           : (showLunch ? lunchTableIds.size : dinnerTableIds.size);
         const segSum = pick(lunchTableIds.size, dinnerTableIds.size);
         const segScale = segSum > 0 ? tablesShown / segSum : 0;
+        // Denominatore coerente col filtro: il totale del turno quando se ne
+        // guarda uno, l'unione dei tavoli in servizio sull'intera giornata.
+        const tablesInService = showLunch && showDinner
+          ? dayInServiceCount
+          : (showLunch ? shiftTableStats.lunch.total : shiftTableStats.dinner.total);
 
         // Unassigned-shift banquets belong to the whole day, so they're only in
         // scope when no shift filter is applied — that keeps the rows summing to
@@ -1125,12 +1276,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             <KpiCard title="Tavoli" icon={<LayoutGrid className="h-4 w-4" />}>
               <div className="flex items-baseline gap-2 flex-wrap">
                 <span className={headline}>{tablesShown}</span>
-                <span className={qualifier}>prenotati su {totalTables}</span>
+                <span className={qualifier}>prenotati su {tablesInService}</span>
               </div>
               <ShiftBar
                 lunch={showLunch ? lunchTableIds.size * segScale : 0}
                 dinner={showDinner ? dinnerTableIds.size * segScale : 0}
-                total={totalTables}
+                total={tablesInService}
               />
               <div className="flex flex-col gap-2.5 mt-auto">
                 {showLunch && <ShiftRow shift="lunch">{lunchTableIds.size} tavoli · {lunchArrivedTableIds.size} seduti</ShiftRow>}
@@ -1395,16 +1546,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         const showLunch = globalShiftFilter === 'ALL' || globalShiftFilter === 'LUNCH';
         const showDinner = globalShiftFilter === 'ALL' || globalShiftFilter === 'DINNER';
 
+        // Totali e occupati per turno sulla stessa base della mappa: unioni
+        // contate una volta, nascosti fuori. Il totale è per turno perché un
+        // tavolo può essere in servizio a pranzo e nascosto a cena.
         const roomStats = rooms.filter(room => !room.is_closed).map(room => {
-          const roomTableIds = new Set(tables.filter(t => t.room_id === room.id).map(t => t.id));
-          const seatedIn = (list: Reservation[]) =>
-            new Set(list.filter(r => r.table_id && roomTableIds.has(r.table_id)).map(r => r.table_id!)).size;
+          const roomTableIds = new Set(tables.filter(t => t.room_id === room.id).map(t => Number(t.id)));
+          const totalFor = (stats: typeof shiftTableStats.lunch) =>
+            [...stats.inServiceIds].filter(id => roomTableIds.has(id)).length;
+          const seatedIn = (list: Reservation[], stats: typeof shiftTableStats.lunch) =>
+            new Set(
+              list.map(r => stats.toServiceUnit(r.table_id)).filter((id): id is number => id != null && roomTableIds.has(id))
+            ).size;
           return {
             id: room.id,
             name: room.name,
-            total: roomTableIds.size,
-            lunch: seatedIn(lunchReservations),
-            dinner: seatedIn(dinnerReservations),
+            lunchTotal: totalFor(shiftTableStats.lunch),
+            dinnerTotal: totalFor(shiftTableStats.dinner),
+            lunch: seatedIn(lunchReservations, shiftTableStats.lunch),
+            dinner: seatedIn(dinnerReservations, shiftTableStats.dinner),
           };
         }).sort((a, b) => (b.lunch + b.dinner) - (a.lunch + a.dinner));
 
@@ -1413,7 +1572,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           ...(showLunch ? lunchTableIds : []),
           ...(showDinner ? dinnerTableIds : []),
         ]);
-        const dayPct = totalTables > 0 ? Math.round((busyIds.size / totalTables) * 100) : 0;
+        const tablesInService = showLunch && showDinner
+          ? dayInServiceCount
+          : (showLunch ? shiftTableStats.lunch.total : shiftTableStats.dinner.total);
+        const dayPct = tablesInService > 0 ? Math.round((busyIds.size / tablesInService) * 100) : 0;
 
         const miniBar = (value: number, total: number, shift: 'lunch' | 'dinner') => (
           <div className="flex items-center gap-2 min-w-0">
@@ -1438,7 +1600,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               <div className="min-w-0">
                 <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Stato tavoli</h2>
                 <p className="text-[13px] text-[var(--ds-text-muted)] truncate">
-                  {busyIds.size} tavoli su {totalTables} impegnati
+                  {busyIds.size} tavoli su {tablesInService} in servizio
                 </p>
               </div>
             </div>
@@ -1468,7 +1630,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               <ShiftBar
                 lunch={showLunch ? lunchTableIds.size : 0}
                 dinner={showDinner ? dinnerTableIds.size : 0}
-                total={totalTables}
+                total={tablesInService}
               />
               {/* Named anchors, not just a percentage — "Pieno" means something
                   to a host mid-service in a way that "50%" does not. */}
@@ -1491,18 +1653,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                       {room.name}
                     </span>
                     <div className="flex-1 min-w-0 flex flex-col gap-1.5">
-                      {showLunch && miniBar(room.lunch, room.total, 'lunch')}
-                      {showDinner && miniBar(room.dinner, room.total, 'dinner')}
+                      {showLunch && miniBar(room.lunch, room.lunchTotal, 'lunch')}
+                      {showDinner && miniBar(room.dinner, room.dinnerTotal, 'dinner')}
                     </div>
                     <div className="flex-shrink-0 flex flex-col gap-1.5 items-end w-12 text-[14px] font-semibold tabular-nums">
                       {showLunch && (
                         <span className={room.lunch > 0 ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-subtle)]'}>
-                          {room.lunch}/{room.total}
+                          {room.lunch}/{room.lunchTotal}
                         </span>
                       )}
                       {showDinner && (
                         <span className={room.dinner > 0 ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-subtle)]'}>
-                          {room.dinner}/{room.total}
+                          {room.dinner}/{room.dinnerTotal}
                         </span>
                       )}
                     </div>
@@ -1564,6 +1726,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             const slotsOf = (r: typeof all[number]) => isLunch ? r.lunchSlots : r.dinnerSlots;
             const totalOf = (r: typeof all[number]) => isLunch ? r.totalLunchGuests : r.totalDinnerGuests;
             const pctOf = (r: typeof all[number]) => isLunch ? r.lunchPercentage : r.dinnerPercentage;
+            const capOf = (r: typeof all[number]) => isLunch ? r.lunchCapacity : r.dinnerCapacity;
 
             const active = all.filter(r => totalOf(r) > 0);
             const idle = all.filter(r => totalOf(r) === 0);
@@ -1624,7 +1787,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                             </span>
                             <div className="min-w-0">
                               <div className="text-[14px] font-semibold text-[var(--ds-text-primary)] truncate">{room.roomName}</div>
-                              <div className="text-[12px] text-[var(--ds-text-muted)] truncate">max {room.maxCapacity} coperti</div>
+                              <div className="text-[12px] text-[var(--ds-text-muted)] truncate">max {capOf(room)} coperti</div>
                             </div>
                           </div>
                           {slotsOf(room).map(slot => (
@@ -1642,7 +1805,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                             </div>
                           ))}
                           <span className="w-[92px] flex-shrink-0 text-right text-[13px] tabular-nums text-[var(--ds-text-secondary)]">
-                            {totalOf(room)}/{room.maxCapacity} <span className="font-semibold text-[var(--ds-text-primary)]">{pctOf(room)}%</span>
+                            {totalOf(room)}/{capOf(room)} <span className="font-semibold text-[var(--ds-text-primary)]">{pctOf(room)}%</span>
                           </span>
                         </div>
                       );
@@ -1668,7 +1831,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           const lunchGuests = lunchReservations.reduce((acc, r) => acc + r.guests, 0);
           const dinnerGuests = dinnerReservations.reduce((acc, r) => acc + r.guests, 0);
           const shownGuests = (showLunch ? lunchGuests : 0) + (showDinner ? dinnerGuests : 0);
-          const shownCapacity = timeSlotAffluence.totalCapacity * ((showLunch ? 1 : 0) + (showDinner ? 1 : 0));
+          const shownCapacity = (showLunch ? timeSlotAffluence.lunchTotalCapacity : 0) + (showDinner ? timeSlotAffluence.dinnerTotalCapacity : 0);
 
           return (
             <>
@@ -1687,7 +1850,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                       <span className="truncate">Totale pranzo</span>
                     </span>
                     <span className="tabular text-[17px] font-bold text-[var(--ds-text-primary)] flex-shrink-0">
-                      {lunchGuests}<span className="text-[14px] font-normal text-[var(--ds-text-muted)]">/{timeSlotAffluence.totalCapacity}</span>
+                      {lunchGuests}<span className="text-[14px] font-normal text-[var(--ds-text-muted)]">/{timeSlotAffluence.lunchTotalCapacity}</span>
                     </span>
                   </div>
                 )}
@@ -1700,7 +1863,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                       <span className="truncate">Totale cena</span>
                     </span>
                     <span className="tabular text-[17px] font-bold text-[var(--ds-text-primary)] flex-shrink-0">
-                      {dinnerGuests}<span className="text-[14px] font-normal text-[var(--ds-text-muted)]">/{timeSlotAffluence.totalCapacity}</span>
+                      {dinnerGuests}<span className="text-[14px] font-normal text-[var(--ds-text-muted)]">/{timeSlotAffluence.dinnerTotalCapacity}</span>
                     </span>
                   </div>
                 )}
@@ -1717,17 +1880,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
         {affluenceTab === 'SETTIMANA' && (
           <>
-            <p className="tabular text-xs text-[var(--color-fg-muted)] mb-3">{weekRange}</p>
+            <p className="tabular text-xs text-[var(--ds-text-muted)] mb-3">{weekRange}</p>
             <div className="h-64 sm:h-72 w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={weeklyChartData} margin={{ top: 5, right: 5, left: -10, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="var(--color-chart-grid)" />
-                  <XAxis dataKey="name" axisLine={false} tickLine={false} stroke="var(--color-chart-axis)" tick={{ fill: 'var(--color-chart-axis)', fontSize: 11 }} />
-                  <YAxis domain={[0, 'auto']} axisLine={false} tickLine={false} stroke="var(--color-chart-axis)" tick={{ fill: 'var(--color-chart-axis)', fontSize: 11 }} width={30} />
+                  <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="var(--ds-border)" />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} stroke="var(--ds-border-strong)" tick={{ fill: 'var(--ds-text-muted)', fontSize: 11 }} />
+                  <YAxis domain={[0, 'auto']} axisLine={false} tickLine={false} stroke="var(--ds-border-strong)" tick={{ fill: 'var(--ds-text-muted)', fontSize: 11 }} width={30} />
                   <Tooltip
-                    cursor={{ fill: 'var(--color-surface-hover)' }}
+                    cursor={{ fill: 'var(--ds-surface-row)' }}
                     contentStyle={{ background: 'var(--ds-surface)', border: '1px solid var(--ds-border)', borderRadius: '12px', fontSize: '13px' }}
-                    labelStyle={{ color: 'var(--color-fg-muted)' }}
+                    labelStyle={{ color: 'var(--ds-text-muted)' }}
                     formatter={(value: number) => [`${value} ospiti`, 'Ospiti']}
                     labelFormatter={(label, payload) => {
                       if (payload && payload[0]) {
@@ -1738,7 +1901,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   />
                   <Bar
                     dataKey="guests"
-                    fill={globalShiftFilter === 'LUNCH' ? '#f59e0b' : globalShiftFilter === 'DINNER' ? '#3b82f6' : 'var(--color-chart-1)'}
+                    fill={globalShiftFilter === 'LUNCH' ? 'var(--ds-pending-solid)' : globalShiftFilter === 'DINNER' ? 'var(--ds-arriving-solid)' : 'var(--ds-action-bg)'}
                     radius={[4, 4, 0, 0]}
                   />
                 </BarChart>
@@ -2166,10 +2329,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       <div className="bg-[var(--ds-surface)] p-4 sm:p-5 rounded-[20px] shadow-[var(--ds-shadow-card)]">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2 min-w-0">
-            <Sparkles className="h-4 w-4 flex-shrink-0 text-[var(--color-fg-muted)]" aria-hidden />
+            <Wand2 className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
             <div className="min-w-0">
-              <h2 className="text-base font-semibold text-[var(--color-fg)]">Come sta andando</h2>
-              <p className="text-[13px] text-[var(--color-fg-muted)]">
+              <h2 className="text-base font-semibold text-[var(--ds-text-primary)]">Come sta andando</h2>
+              <p className="text-[13px] text-[var(--ds-text-muted)]">
                 Lettura degli ultimi 30 giorni, a confronto con i 30 precedenti.
               </p>
             </div>
@@ -2178,20 +2341,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             type="button"
             onClick={handleGenerateReport}
             disabled={reportLoading}
-            className="inline-flex h-10 flex-shrink-0 items-center gap-2 rounded-[10px] bg-[var(--color-fg)] px-4 text-[14px] font-semibold text-[var(--ds-surface)] transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-10 flex-shrink-0 items-center gap-2 rounded-[10px] bg-[var(--ds-text-primary)] px-4 text-[14px] font-semibold text-[var(--ds-surface)] transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
-            {reportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            {reportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
             {reportLoading ? 'Ci penso…' : report ? 'Rigenera' : 'Genera'}
           </button>
         </div>
 
         {reportError && (
-          <p className="mt-3 rounded-[10px] bg-[var(--ds-surface-row)] px-3 py-2 text-[13px] text-[var(--color-fg-muted)]">
+          <p className="mt-3 rounded-[10px] bg-[var(--ds-surface-row)] px-3 py-2 text-[13px] text-[var(--ds-text-muted)]">
             {reportError}
           </p>
         )}
         {report && (
-          <div className="prose prose-sm mt-4 max-w-none text-[var(--color-fg-muted)] animate-fade-in">
+          <div className="prose prose-sm mt-4 max-w-none text-[var(--ds-text-muted)] animate-fade-in">
             <ReactMarkdown>{report}</ReactMarkdown>
           </div>
         )}
@@ -2231,22 +2394,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               aria-modal="true"
               aria-label="Prenotazione da confermare"
             >
-              <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+              <div className="absolute inset-0 bg-[var(--ds-backdrop)]" />
               <div
-                className="relative w-full max-w-md bg-[var(--color-surface)] rounded-2xl shadow-[var(--shadow-overlay)] border border-[var(--color-line)] overflow-hidden"
+                className="relative w-full max-w-md bg-[var(--ds-surface)] rounded-2xl shadow-[var(--ds-shadow-raised)] border border-[var(--ds-border)] overflow-hidden"
                 onClick={e => e.stopPropagation()}
               >
-                <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-line)]">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--ds-border)]">
                   <div className="flex items-center gap-2 min-w-0">
-                    <HelpCircle className="h-4 w-4 text-amber-500 flex-shrink-0" />
-                    <h3 className="text-sm font-semibold text-[var(--color-fg)] truncate">Prenotazione da confermare</h3>
+                    <HelpCircle className="h-4 w-4 text-[var(--ds-pending-solid)] flex-shrink-0" aria-hidden />
+                    <h3 className="text-sm font-semibold text-[var(--ds-text-primary)] truncate">Prenotazione da confermare</h3>
                     <PaymentBadge reservation={res} />
                   </div>
                   <button
                     type="button"
                     onClick={closeModal}
                     disabled={closeDisabled}
-                    className="p-1 rounded-md text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)] transition-colors disabled:opacity-50"
+                    className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50"
                     aria-label="Chiudi"
                   >
                     <X className="h-4 w-4" />
@@ -2255,21 +2418,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
                 <div className="px-5 py-4 space-y-3">
                   <div>
-                    <p className="text-base font-semibold text-[var(--color-fg)]">{toTitleCase(res.customer_name) || '—'}</p>
-                    <p className="text-xs text-[var(--color-fg-muted)] mt-0.5 capitalize">{dateLabel} · {timeLabel}</p>
+                    <p className="text-base font-semibold text-[var(--ds-text-primary)]">{toTitleCase(res.customer_name) || '—'}</p>
+                    <p className="text-xs text-[var(--ds-text-muted)] mt-0.5 capitalize">{dateLabel} · {timeLabel}</p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3 text-[13px]">
-                    <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
+                    <div className="flex items-center gap-2 text-[var(--ds-text-muted)]">
                       <UsersIcon className="h-4 w-4 flex-shrink-0" />
                       <span>{res.guests || 0} {res.guests === 1 ? 'ospite' : 'ospiti'}</span>
                     </div>
-                    <div className="flex items-center gap-2 text-[var(--color-fg-muted)]">
+                    <div className="flex items-center gap-2 text-[var(--ds-text-muted)]">
                       <channel.Icon className="h-4 w-4 flex-shrink-0" />
                       <span>{channel.label}</span>
                     </div>
                     {res.phone && (
-                      <div className="flex items-center gap-2 text-[var(--color-fg-muted)] col-span-2">
+                      <div className="flex items-center gap-2 text-[var(--ds-text-muted)] col-span-2">
                         <PhoneIcon className="h-4 w-4 flex-shrink-0" />
                         <a href={`tel:${res.phone}`} className="hover:underline tabular truncate">{res.phone}</a>
                       </div>
@@ -2277,9 +2440,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   </div>
 
                   {res.notes && (
-                    <div className="border-t border-[var(--color-line)] pt-3">
-                      <div className="text-[11px] uppercase tracking-wide text-[var(--color-fg-subtle)] font-semibold mb-1">Note</div>
-                      <p className="text-[13px] text-[var(--color-fg)] whitespace-pre-wrap break-words">{res.notes}</p>
+                    <div className="border-t border-[var(--ds-border)] pt-3">
+                      <div className="text-[12px] font-semibold text-[var(--ds-text-muted)] mb-1">Note</div>
+                      <p className="text-[13px] text-[var(--ds-text-primary)] whitespace-pre-wrap break-words">{res.notes}</p>
                     </div>
                   )}
                 </div>
@@ -2289,10 +2452,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   // is still unpaid. Force an explicit "Conferma comunque"
                   // to avoid the classic "confirmed by mistake without
                   // getting paid" mishap on large groups.
-                  <div className="px-5 py-3 border-t border-amber-200 bg-amber-50 dark:border-amber-500/40 dark:bg-amber-500/10">
+                  <div className="px-5 py-3 bg-[var(--ds-pending-tint)]">
                     <div className="flex items-start gap-2 mb-3">
-                      <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
-                      <p className="text-[13px] text-amber-900 dark:text-amber-100 leading-snug">
+                      <AlertTriangle className="h-4 w-4 text-[var(--ds-pending-text)] flex-shrink-0 mt-0.5" aria-hidden />
+                      <p className="text-[13px] text-[var(--ds-pending-text)] leading-snug">
                         Il pagamento della caparra ancora non è avvenuto. Vuoi confermare la prenotazione lo stesso?
                       </p>
                     </div>
@@ -2301,7 +2464,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                         type="button"
                         onClick={() => setUnpaidDepositWarn(false)}
                         disabled={closeDisabled}
-                        className="inline-flex items-center h-9 px-3 rounded-lg text-[13px] font-medium border border-[var(--color-line)] text-[var(--color-fg)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50 transition-colors"
+                        className="inline-flex items-center h-9 px-3 rounded-lg text-[13px] font-medium border border-[var(--ds-border)] text-[var(--ds-text-primary)] bg-[var(--ds-surface)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50 transition-colors"
                       >
                         Annulla
                       </button>
@@ -2309,7 +2472,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                         type="button"
                         onClick={() => handlePendingDecision('confirm', { forceConfirm: true })}
                         disabled={closeDisabled || !onUpdateReservation}
-                        className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                        className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium bg-[var(--ds-pending-solid)] text-[var(--ds-pending-fg)] hover:opacity-90 disabled:opacity-50 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                       >
                         {pendingActionBusy === 'confirm' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
                         Conferma comunque
@@ -2317,12 +2480,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     </div>
                   </div>
                 ) : (
-                  <div className="px-5 py-3 border-t border-[var(--color-line)] bg-[var(--color-surface-2)] flex items-center justify-between gap-2 flex-wrap">
+                  <div className="px-5 py-3 border-t border-[var(--ds-border)] bg-[var(--ds-surface-row)] flex items-center justify-between gap-2 flex-wrap">
                     <button
                       type="button"
                       onClick={() => handlePendingDecision('decline')}
                       disabled={closeDisabled || !onUpdateReservation}
-                      className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium border border-rose-200 text-rose-700 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-500/40 dark:text-rose-300 dark:hover:bg-rose-500/10 transition-colors"
+                      className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] hover:opacity-90 disabled:opacity-50 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       {pendingActionBusy === 'decline' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />}
                       Rifiuta
@@ -2331,7 +2494,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                       type="button"
                       onClick={() => handlePendingDecision('confirm')}
                       disabled={closeDisabled || !onUpdateReservation}
-                      className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                      className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium bg-[var(--ds-seated-solid)] text-[var(--ds-seated-fg)] hover:opacity-90 disabled:opacity-50 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       {pendingActionBusy === 'confirm' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
                       Conferma
@@ -2340,7 +2503,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 )}
 
                 {onOpenReservationInList && (
-                  <div className="px-5 py-2 border-t border-[var(--color-line)] bg-[var(--color-surface-2)] text-center">
+                  <div className="px-5 py-2 border-t border-[var(--ds-border)] bg-[var(--ds-surface-row)] text-center">
                     <button
                       type="button"
                       onClick={() => {
@@ -2349,7 +2512,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                         setUnpaidDepositWarn(false);
                       }}
                       disabled={closeDisabled}
-                      className="inline-flex items-center gap-1 text-[12px] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] disabled:opacity-50 transition-colors"
+                      className="inline-flex items-center gap-1 text-[12px] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] disabled:opacity-50 transition-colors"
                     >
                       Modifica completa in Prenotazioni <ArrowRight className="h-3 w-3" />
                     </button>

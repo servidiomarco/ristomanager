@@ -20,6 +20,12 @@ export const courseLabel = (n: number): string => `${ordinal(n)} uscita`;
 
 export interface CartLine {
   key: string;
+  /** Chiave di idempotenza della riga, assegnata quando la riga nasce nel
+   *  carrello e stabile attraverso merge, ritocchi di quantità e ritentativi.
+   *  Generarla al momento dell'invio vanificherebbe la dedup del server: un
+   *  retry dopo un timeout porterebbe una chiave nuova e duplicherebbe la
+   *  riga in cucina. */
+  idem: string;
   dish: Dish;
   qty: number;
   course_no: number;
@@ -31,9 +37,10 @@ export interface CartLine {
 
 /** La chiave che fa collassare due tocchi sullo stesso piatto in una riga da
  *  due. Stesso piatto ma varianti diverse restano righe distinte: in cucina
- *  «al sangue» e «ben cotta» sono due piatti. */
-export const cartKey = (dishId: number, courseNo: number, modifierIds: number[]): string =>
-  `${dishId}|${courseNo}|${[...modifierIds].sort((a, b) => a - b).join(',')}`;
+ *  «al sangue» e «ben cotta» sono due piatti. La variante libera entra in
+ *  chiave per lo stesso motivo: due note diverse sono due piatti diversi. */
+export const cartKey = (dishId: number, courseNo: number, modifierIds: number[], note?: string): string =>
+  `${dishId}|${courseNo}|${[...modifierIds].sort((a, b) => a - b).join(',')}|${(note ?? '').trim().toLowerCase()}`;
 
 export const cartUnitCents = (l: CartLine): number =>
   Math.round(Number(l.dish.price) * 100) + l.modifier_delta_cents;

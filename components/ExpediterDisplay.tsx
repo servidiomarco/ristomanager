@@ -1,11 +1,12 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { BarChart3, Bell, Loader2, Play, RotateCcw, TriangleAlert, WifiOff } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { BarChart3, Bell, BellOff, Check, Loader2, Play, RotateCcw, TriangleAlert, WifiOff } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
 import { socketClient } from '../services/socketClient';
 import {
-  getExpediterBoard, fireCourse, refireCourse, callCourse, getKitchenReport,
+  getExpediterBoard, fireCourse, refireCourse, callCourse, serveCourse, unserveCourse, getKitchenReport,
   type ExpediterBoard, type ExpediterCourse, type KitchenReport,
 } from '../services/ordersApiService';
+import { chime } from '../utils/chime';
 import { SectionHeader, StatusPill, dsButton } from './ds';
 
 // ---------------------------------------------------------------------------
@@ -21,6 +22,7 @@ import { SectionHeader, StatusPill, dsButton } from './ds';
 // ---------------------------------------------------------------------------
 
 const ORDINALS = ['', '1ª', '2ª', '3ª', '4ª', '5ª', '6ª'];
+const SOUND_KEY = 'passe.sound';
 
 const mmss = (seconds: number): string => {
   const m = Math.floor(Math.max(0, seconds) / 60);
@@ -41,6 +43,21 @@ export const ExpediterDisplay: React.FC = () => {
   const [called, setCalled] = useState<Set<string>>(new Set());
   const [report, setReport] = useState<KitchenReport | null>(null);
   const [showReport, setShowReport] = useState(false);
+  // Avviso sonoro sull'uscita che diventa pronta. Nel ref oltre che nello
+  // stato: il listener socket legge il valore corrente senza risottoscriversi.
+  const [sound, setSound] = useState(() => localStorage.getItem(SOUND_KEY) !== 'off');
+  const soundRef = useRef(sound);
+  soundRef.current = sound;
+  const toggleSound = () => {
+    setSound(prev => {
+      const next = !prev;
+      localStorage.setItem(SOUND_KEY, next ? 'on' : 'off');
+      // Suona subito all'accensione: conferma la scelta e, essendo dentro un
+      // gesto dell'utente, sblocca l'AudioContext per gli avvisi futuri.
+      if (next) chime();
+      return next;
+    });
+  };
 
   const reload = useCallback(async () => {
     try {
@@ -61,10 +78,15 @@ export const ExpediterDisplay: React.FC = () => {
   useEffect(() => {
     const socket = socketClient.getSocket();
     const onChange = () => reload();
+    // Suona solo l'uscita che diventa pronta: è il momento in cui il passe
+    // deve alzare la testa e chiamare la sala; il resto è rumore.
+    const onReady = () => { if (soundRef.current) chime(); reload(); };
     socket?.on('course:queued', onChange);
     socket?.on('course:fired', onChange);
     socket?.on('course:recalled', onChange);
-    socket?.on('course:ready', onChange);
+    socket?.on('course:ready', onReady);
+    socket?.on('course:served', onChange);
+    socket?.on('course:unserved', onChange);
     socket?.on('orderItem:status', onChange);
     socket?.on('connect', onChange);
     const poll = setInterval(reload, 20_000);
@@ -72,7 +94,9 @@ export const ExpediterDisplay: React.FC = () => {
       socket?.off('course:queued', onChange);
       socket?.off('course:fired', onChange);
       socket?.off('course:recalled', onChange);
-      socket?.off('course:ready', onChange);
+      socket?.off('course:ready', onReady);
+      socket?.off('course:served', onChange);
+      socket?.off('course:unserved', onChange);
       socket?.off('orderItem:status', onChange);
       socket?.off('connect', onChange);
       clearInterval(poll);
@@ -115,6 +139,17 @@ export const ExpediterDisplay: React.FC = () => {
               <WifiOff size={13} aria-hidden /> riconnessione…
             </StatusPill>
           )}
+          {/* Icona sola, 44px, incassata sulla card come i controlli quiet:
+              il testo qui non aggiungerebbe nulla che la campana non dica. */}
+          <button
+            type="button"
+            onClick={toggleSound}
+            aria-pressed={sound}
+            aria-label={sound ? 'Disattiva l\'avviso sonoro' : 'Attiva l\'avviso sonoro'}
+            className="ml-auto inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            {sound ? <Bell size={17} aria-hidden /> : <BellOff size={17} className="text-[var(--ds-text-muted)]" aria-hidden />}
+          </button>
           <button
             type="button"
             onClick={() => {
@@ -123,7 +158,7 @@ export const ExpediterDisplay: React.FC = () => {
               if (next) getKitchenReport().then(setReport).catch(() => setReport(null));
             }}
             aria-pressed={showReport}
-            className={`ml-auto flex-shrink-0 ${dsButton.quiet}`}
+            className={`flex-shrink-0 ${dsButton.quiet}`}
           >
             <BarChart3 size={15} aria-hidden /> Statistiche
           </button>
@@ -155,6 +190,7 @@ export const ExpediterDisplay: React.FC = () => {
                     act(key, () => callCourse(c.order_id, c.course_no));
                   }}
                   onRefire={() => act(`${c.order_id}:${c.course_no}`, () => refireCourse(c.order_id, c.course_no))}
+                  onServe={() => act(`${c.order_id}:${c.course_no}`, () => serveCourse(c.order_id, c.course_no))}
                 />
               ))}
             </div>
@@ -182,6 +218,41 @@ export const ExpediterDisplay: React.FC = () => {
             </div>
           )}
         </section>
+
+        {/* Il cestino del "Servita" toccato per errore: righe smorzate, in
+            fondo, con la sola azione di riporto. Non uno storico — il server
+            tiene una finestra breve apposta. */}
+        {(board?.servite?.length ?? 0) > 0 && (
+          <section className="mt-5">
+            <SectionHeader tone="muted" meta={board!.servite.length === 1 ? '1 uscita' : `${board!.servite.length} uscite`}>
+              Servite da poco
+            </SectionHeader>
+            <div className="space-y-1.5">
+              {board!.servite.map(s => {
+                const key = `${s.order_id}:${s.course_no}`;
+                const agoS = Math.floor((now - new Date(s.served_at).getTime()) / 1000);
+                return (
+                  <div key={key} className="flex items-center gap-3 rounded-[14px] bg-[var(--ds-surface)] px-4 py-1.5 shadow-[var(--ds-shadow-card)]">
+                    <span className="text-[15px] font-semibold text-[var(--ds-text-muted)]">
+                      T{s.table_name ?? '—'}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--ds-text-muted)]">
+                      {ORDINALS[s.course_no] ?? s.course_no} uscita · servita da {mmss(agoS)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => act(key, () => unserveCourse(s.order_id, s.course_no))}
+                      disabled={busyKey === key}
+                      className={`${passeAction} bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]`}
+                    >
+                      <RotateCcw size={14} aria-hidden /> riporta
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
       </div>
     </div>
   );
@@ -197,7 +268,8 @@ const CourseRow: React.FC<{
   onFire?: () => void;
   onRefire?: () => void;
   onCall?: () => void;
-}> = ({ course: c, stations, stationLabel, busyKey, called, onFire, onRefire, onCall }) => {
+  onServe?: () => void;
+}> = ({ course: c, stations, stationLabel, busyKey, called, onFire, onRefire, onCall, onServe }) => {
   const key = `${c.order_id}:${c.course_no}`;
   const busy = busyKey === key;
   const allReady = c.status === 'READY';
@@ -228,25 +300,38 @@ const CourseRow: React.FC<{
       <div className="flex flex-shrink-0 items-center gap-3">
         {stations.map(s => {
           const st = c.stations.find(x => x.station_id === s.id);
+          // Da quando la cucina spunta i piatti uno a uno, fra "niente" e
+          // "tutto" c'è l'avanzamento: il conteggio 2/3 al posto del cerchio
+          // vuoto dice quanto manca senza chiedere niente alla vista.
+          const partial = st && !st.ready && st.ready_items > 0;
           return (
             <div key={s.id} className="flex w-14 flex-col items-center">
-              <span
-                className={`text-[22px] leading-none ${
-                  !st ? 'text-[var(--ds-border-strong)]'
-                  : st.ready ? 'text-[var(--ds-seated-solid)]'
-                  : 'text-[var(--ds-text-subtle)]'
-                }`}
-                aria-hidden
-              >
-                {!st ? '—' : st.ready ? '●' : '○'}
-              </span>
+              {partial ? (
+                <span className="text-[14px] font-semibold leading-[22px] tabular-nums text-[var(--ds-pending-text)]" aria-hidden>
+                  {st.ready_items}/{st.items}
+                </span>
+              ) : (
+                <span
+                  className={`text-[22px] leading-none ${
+                    !st ? 'text-[var(--ds-border-strong)]'
+                    : st.ready ? 'text-[var(--ds-seated-solid)]'
+                    : 'text-[var(--ds-text-subtle)]'
+                  }`}
+                  aria-hidden
+                >
+                  {!st ? '—' : st.ready ? '●' : '○'}
+                </span>
+              )}
               {/* Troncato a tre lettere, non messo in maiuscolo: la troncatura
                   è per lo spazio, il maiuscolo non aggiungeva nulla. */}
               <span className="mt-0.5 text-[11px] font-medium text-[var(--ds-text-muted)]">
                 {s.name.slice(0, 3)}
               </span>
               <span className="sr-only">
-                {s.name}: {!st ? 'non coinvolta' : st.ready ? 'pronta' : 'in corso'}
+                {s.name}: {!st ? 'non coinvolta'
+                  : st.ready ? 'pronta'
+                  : partial ? `${st.ready_items} piatti pronti su ${st.items}`
+                  : 'in corso'}
               </span>
             </div>
           );
@@ -299,6 +384,19 @@ const CourseRow: React.FC<{
             <Bell size={15} aria-hidden /> {called ? 'chiamata' : 'Chiama'}
           </button>
         )}
+        {/* Chiude il giro: l'uscita lascia il passe e la riga sparisce dal
+            monitor. Senza questo tocco le uscite pronte si accumulavano qui
+            anche dopo essere arrivate al tavolo. */}
+        {onServe && allReady && (
+          <button
+            type="button"
+            onClick={onServe}
+            disabled={busy}
+            className={`${passeAction} bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]`}
+          >
+            <Check size={15} aria-hidden /> Servita
+          </button>
+        )}
         {onFire && (
           <button
             type="button"
@@ -335,6 +433,8 @@ const KitchenStats: React.FC<{ report: KitchenReport | null }> = ({ report }) =>
         <Stat label="Delta peggiore" value={s?.delta_massimo_min != null ? `${s.delta_massimo_min}′` : '—'} />
         <Stat label="Attesa media al passe" value={report.passe?.attesa_media_min != null ? `${report.passe.attesa_media_min}′` : '—'}
               hint="fra proposta e lancio" />
+        <Stat label="Attesa al ritiro" value={report.ritiro?.attesa_media_min != null ? `${report.ritiro.attesa_media_min}′` : '—'}
+              hint="fra pronta e servita" />
       </div>
 
       <div className="overflow-x-auto">

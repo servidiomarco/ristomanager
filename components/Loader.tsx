@@ -22,7 +22,7 @@ export const Loader: React.FC<LoaderProps> = ({
   className = '',
 }) => (
   <div
-    className={`flex flex-col items-center justify-center gap-3 text-[var(--color-fg-muted)] ${className}`}
+    className={`flex flex-col items-center justify-center gap-3 text-[var(--ds-text-muted)] ${className}`}
     role="status"
     aria-live="polite"
     aria-label={label ?? 'Caricamento in corso'}

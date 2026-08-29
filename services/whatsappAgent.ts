@@ -240,7 +240,8 @@ QUANDO NON DEVI USARE GLI STRUMENTI — in questi casi rispondi al cliente che p
 - Quando ti mancano dati obbligatori: fai UNA domanda breve invece di inventarli.
 
 COME SCRIVERE:
-- Italiano, dando del tu, tono cordiale e diretto, da una a tre frasi.
+- Rispondi SEMPRE nella stessa lingua dell'ultimo messaggio del cliente: se scrive in inglese rispondi in inglese, se scrive in italiano rispondi in italiano (e così per altre lingue). In italiano dai del tu.
+- Tono cordiale e diretto, da una a tre frasi.
 - Niente formule da call center, niente firma finale.
 - Non confermare MAI che una prenotazione è stata creata, modificata o annullata: quelle azioni le esegue una persona dopo di te. Di' che stai verificando o che confermi a breve.`;
 }
@@ -316,8 +317,13 @@ export async function runAgent(ctx: AgentContext): Promise<AgentResult> {
             role: (m.direction === 'inbound' ? 'user' : 'assistant') as 'user' | 'assistant',
             content: m.body.trim(),
         }));
-    // La storia deve iniziare da un messaggio del cliente.
+    // La storia deve iniziare E finire con un messaggio del cliente: il modello
+    // rifiuta un prefill dell'assistant come ultimo turno ("The conversation
+    // must end with a user message", 400). Quando lo staff ha già risposto per
+    // ultimo si tolgono le code assistant, così si ragiona sull'ultima richiesta
+    // del cliente.
     while (messages.length && messages[0].role !== 'user') messages.shift();
+    while (messages.length && messages[messages.length - 1].role !== 'user') messages.pop();
     if (messages.length === 0) return { reply: null, proposal: null, checks, usage, reason: 'Nessun messaggio del cliente da interpretare' };
 
     const chiedi = (extra: Partial<Anthropic.MessageCreateParams> = {}) =>
@@ -410,4 +416,92 @@ export async function runAgent(ctx: AgentContext): Promise<AgentResult> {
     }
 
     return { reply: null, proposal: null, checks, usage, reason: 'Troppi passaggi senza arrivare a una risposta' };
+}
+
+// Estrae i campi di UNA prenotazione dal thread, per il bottone "Crea
+// prenotazione" della chat. A differenza di runAgent — che propone
+// create_reservation solo a valle della conferma del cliente e per una
+// richiesta nuova si limita a rispondere — qui FORZIAMO la chiamata a
+// create_reservation, così i campi tornano sempre. Non esegue nulla, non
+// scrive, non richiede le regole della casa: è pura lettura del messaggio.
+export interface ExtractedBooking {
+    customer_name?: string;
+    date?: string;   // grezzo dal modello, normalizzato dall'endpoint
+    time?: string;
+    shift?: 'LUNCH' | 'DINNER';
+    guests?: number;
+    children?: number;
+    location_preference?: 'INDOOR' | 'OUTDOOR';
+    notes?: string;
+}
+
+export async function extractBooking(input: {
+    phone: string;
+    /** Oggi in Europe/Rome (YYYY-MM-DD), per risolvere "sabato 29", "domani". */
+    todayRome: string;
+    messages: Array<{ direction: 'inbound' | 'outbound'; body: string }>;
+}): Promise<{ args: ExtractedBooking | null; usage: AgentUsage }> {
+    const apiKey = (process.env.ANTHROPIC_API_KEY || '').trim();
+    if (!apiKey) throw new AgentError('ANTHROPIC_API_KEY non configurata sul backend', 'not_configured');
+    const client = new Anthropic({ apiKey });
+    const usage: AgentUsage = { model: MODEL, promptTokens: 0, outputTokens: 0, totalTokens: 0, calls: 0 };
+
+    const messages: Anthropic.MessageParam[] = input.messages
+        .filter(m => (m.body || '').trim())
+        .slice(-15)
+        .map(m => ({
+            role: (m.direction === 'inbound' ? 'user' : 'assistant') as 'user' | 'assistant',
+            content: m.body.trim(),
+        }));
+    // Inizia e finisce con un turno del cliente: il modello rifiuta un prefill
+    // dell'assistant come ultimo messaggio (400). Se lo staff ha risposto per
+    // ultimo, si estrae comunque dall'ultima richiesta del cliente.
+    while (messages.length && messages[0].role !== 'user') messages.shift();
+    while (messages.length && messages[messages.length - 1].role !== 'user') messages.pop();
+    if (messages.length === 0) return { args: null, usage };
+
+    const system = `Estrai i dati di UNA prenotazione dai messaggi del cliente e chiama create_reservation con i campi che riesci a ricavare. Oggi è ${input.todayRome} (fuso Europe/Rome). Regole:
+- date: formato YYYY-MM-DD, risolvendo le espressioni relative ("sabato 29", "domani", "questo venerdì") rispetto a oggi.
+- time: formato HH:MM 24h. Un orario serale scritto informale come "7:30"/"7.30"/"half seven" per cena è le 19:30; "8" di sera è 20:00. A pranzo l'orario resta com'è.
+- shift: LUNCH se l'orario cade fra le 11 e le 16, altrimenti DINNER.
+- guests: numero di persone. children solo se il cliente lo indica.
+- location_preference: OUTDOOR per esterno/fuori/fiume/giardino/"level up from the river", INDOOR per interno/sala; ometti se non espresso.
+- notes: eventuali richieste particolari, testuali e brevi (es. "level up from the river").
+- customer_name: il nome del cliente se compare nel thread.
+Il telefono è ${input.phone}. Chiama SEMPRE create_reservation, anche con dati parziali; non scrivere altro testo.`;
+
+    let response: Anthropic.Message;
+    try {
+        // Niente reasoning qui: tool_choice forzato non è compatibile con
+        // l'effort, e l'estrazione è un compito diretto.
+        response = await client.messages.create({
+            model: MODEL,
+            max_tokens: MAX_TOKEN,
+            system,
+            messages,
+            tools: declarations(999),
+            tool_choice: { type: 'tool', name: 'create_reservation' },
+        } as Anthropic.MessageCreateParamsNonStreaming);
+        usage.promptTokens += response.usage.input_tokens ?? 0;
+        usage.outputTokens += response.usage.output_tokens ?? 0;
+        usage.totalTokens = usage.promptTokens + usage.outputTokens;
+        usage.calls = 1;
+    } catch (err: any) {
+        throw new AgentError(err?.message || 'Errore dal modello', 'upstream');
+    }
+
+    const call = chiamataDi(response);
+    if (!call) return { args: null, usage };
+    const a = (call.input || {}) as Record<string, any>;
+    const args: ExtractedBooking = {
+        customer_name: typeof a.customer_name === 'string' ? a.customer_name : undefined,
+        date: typeof a.date === 'string' ? a.date : undefined,
+        time: typeof a.time === 'string' ? a.time : undefined,
+        shift: a.shift === 'LUNCH' || a.shift === 'DINNER' ? a.shift : undefined,
+        guests: typeof a.guests === 'number' ? a.guests : (Number.isFinite(Number(a.guests)) ? Number(a.guests) : undefined),
+        children: typeof a.children === 'number' ? a.children : undefined,
+        location_preference: a.location_preference === 'INDOOR' || a.location_preference === 'OUTDOOR' ? a.location_preference : undefined,
+        notes: typeof a.notes === 'string' && a.notes.trim() ? a.notes.trim() : undefined,
+    };
+    return { args, usage };
 }

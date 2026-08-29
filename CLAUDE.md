@@ -111,12 +111,26 @@ Public identity fields (`business_name`, `public_phone`, `public_address`, `maps
 
 `docs/risto-design-system.md` is the specification; `index.css` is the implementation. The doc deliberately does not track migration progress — do not add status tables to it.
 
-Two token layers coexist in `index.css`:
+**The `--color-*` migration is finished.** No file in the app reads `var(--color-*)` or a remapped Tailwind palette class (`bg-indigo-600`, `text-slate-400`). The legacy `@theme` block still stands in `index.css` because Tailwind's own utilities resolve through it, but nothing of ours consumes it directly. Adding a `--color-*` or a bare palette class to a component is a regression — reach for a `--ds-*` token.
 
-- **Legacy** `--color-*` under Tailwind v4 `@theme`, remapping the old palette so unmigrated screens keep working.
-- **New** `--ds-*`, strictly additive — it overrides nothing. Around 46 component files still reference the legacy tokens; screens migrate one at a time.
+**That is narrower than "nothing is hardcoded".** Values written as literals rather than through the old palette survived it and had to be found one at a time: `bg-black/50` scrims, a bare `#ffffff` surface, raw hex in the three print sheets, and a `shadow-[var(--shadow-xl)]` naming a token that does not exist — so that shadow simply never drew. When a colour looks wrong, check whether the line names a token at all before assuming the token is wrong.
 
-A third layer lives outside `index.css` entirely: `public/prenota.html` restates the `--ds-*` values in its own `<style>` block and extends them with `--ds-public-*` (§16). It is served by the backend, is not built by Vite, and does **not** load `index.css` — so a token changed there does not reach it. Edit both, or the booking page silently keeps the old value.
+The layers, and where each one lives:
+
+| Layer | Where | For |
+|---|---|---|
+| `--ds-*` | `index.css` `:root` + `.dark` | everything in the app |
+| `--ds-cat-1…6` | same | categories, not states (§3.5) |
+| `--ds-banquet-*` | same, scoped by `.banquet-color-N` | per-event tint; resolves to `--ds-cat-1…5` |
+| `--ds-print-*` | same, **`:root` only** | the printed sheet (§17) |
+| `--tg-*` | same | floor-map table glyphs — its own values, semantics that agree with the families |
+| `--ds-public-*` | `public/prenota.html` `<style>` | the booking page (§16) |
+
+Three of those bite if you forget them — and the first two are the same trap twice:
+
+- **`public/prenota.html` restates the `--ds-*` values by hand.** It is served by the backend, is not built by Vite, and does **not** load `index.css` — a token changed here does not reach it. Edit both, or the booking page silently keeps the old value.
+- **`utils/printDocument.ts` restates the `--ds-print-*` values by hand, for the same reason.** The print sheets are not rendered inside the app document: `printHtmlDocument` writes them into a hidden iframe with `doc.write()`, and that document is new — it never loads `index.css`, so a `var(--ds-print-*)` there resolves to nothing and the colour falls back to whatever is inherited. `PRINT_TOKENS_CSS` is the copy the three sheets include; change a print token and change it in both places.
+- **`--ds-print-*` is never declared under `.dark`,** and that is the point. A themed print token would put a black page in the tray for anyone working in dark mode.
 
 Working rules that are easy to violate:
 
@@ -126,6 +140,11 @@ Working rules that are easy to violate:
 - `PascalCase` exports from `ds/` are components; the `ds`-prefixed camelCase exports (`dsButton`, `dsInput`, `dsIconButton`) are **class-name strings** for cases where the element must stay native.
 - **Tailwind extracts class names statically.** A template-built class such as `` `bg-[var(--ds-${family}-tint)]` `` never ships. Write the full literal for every branch.
 - Touch targets are 44px minimum; `useMediaQuery` picks the component *tree* (sheet vs pane) where CSS cannot.
+- **A state family means something; a category does not.** `pending` is "needs action", `critical` is "failed". For things that are merely *different from each other* — banquet events, task categories — use `--ds-cat-*` (§3.5). A category dot in `pending` amber tells the reader it is overdue.
+- **`--ds-cat-*` solids never sit behind small text.** They are dots, bars and borders; two of the six fall under AA as body text on their own tint. Text goes on `tint`.
+- **`tailwindcss-animate` is deliberately not installed.** `animate-in`, `fade-in`, `slide-in-from-*` compile to nothing — 23 of them were removed once. The app's animations are hand-written `@keyframes` in `index.css` (`slideUpSheet`, `view-in`, `tileIn`, `ds-live-sweep`); use those.
+- **Close buttons are a filled circle**, not a square: `h-9 w-9 rounded-full bg-[var(--ds-surface-row)]` with a 16px glyph, as `ModalShell` defines it.
+- **AI is marked with `Wand2` and the `arriving` family** — never `Sparkles`, which means literal sparkle (HACCP cleaning). In Messaggi the agent's proposal uses `.ds-ai-frame`, a sweeping hairline, so the card itself can stay neutral.
 
 ## Roadmap queue (pagina Roadmap, solo account admin)
 
@@ -140,6 +159,7 @@ Non eseguire task che non sono in coda (`queued`): l'approvazione dalla pagina �
 
 ## Conventions
 
+- **`docs/funzionalita-app.md` is the product feature catalogue** (source for the marketing site and the user manual). Any PR that adds, changes, or removes a user-visible feature must update the relevant section there *and* add a row to its "Registro aggiornamenti" table, in the same PR.
 - Commit messages in Italian, matching the existing log (`Riveste Prenotazioni e Reception sul nuovo design system`).
 - Comments explain *why*, and frequently name the production incident a line defends against. Preserve them when refactoring; they are the only record of several fixes.
 - The largest files (`server.ts` 18k, `ReservationList.tsx` 6.9k, `App.tsx` 2.9k) are edited in place rather than split. Locate a region by its section-banner comment before editing, and verify anchors — a mis-scoped scripted replace on files this size is difficult to recover from.

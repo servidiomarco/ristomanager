@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, AlertCircle } from 'lucide-react';
 
 /**
  * Form building blocks shared across modals. Deliberately unopinionated about
@@ -64,17 +64,33 @@ export const FormCard: React.FC<{
 /* ── Field ────────────────────────────────────────────────────────────────
    Label + control + optional hint. `required` renders the asterisk in the
    critical tone so it's visible without relying on colour alone (the label
-   text itself still reads normally). */
+   text itself still reads normally).
+
+   `error` è l'errore di validazione del singolo campo e **sostituisce** l'hint
+   (§7.2): due righe sotto un input, una che spiega e una che corregge, si
+   leggono come un blocco solo e la seconda vince comunque. L'icona non è
+   decorazione: è il secondo canale oltre al colore, per chi il rosso non lo
+   distingue.
+
+   Il messaggio prende `id="<htmlFor>-error"`: è la convenzione con cui il
+   chiamante lo aggancia all'input via `aria-describedby`, insieme a
+   `aria-invalid`. Field non può farlo da sé senza clonare il figlio, e
+   `children` qui è un nodo qualsiasi — a volte un gruppo di controlli, non un
+   input singolo. */
+export const fieldErrorId = (htmlFor?: string) => (htmlFor ? `${htmlFor}-error` : undefined);
+
 export const Field: React.FC<{
   label?: React.ReactNode;
   htmlFor?: string;
   required?: boolean;
   hint?: React.ReactNode;
+  /** Messaggio di validazione. Se presente, prende il posto di `hint`. */
+  error?: React.ReactNode;
   /** Rendered opposite the label — e.g. a computed "Tavolo libero alle 22:00". */
   aside?: React.ReactNode;
   className?: string;
   children: React.ReactNode;
-}> = ({ label, htmlFor, required, hint, aside, className = '', children }) => (
+}> = ({ label, htmlFor, required, hint, error, aside, className = '', children }) => (
   <div className={`min-w-0 ${className}`}>
     {(label || aside) && (
       <div className="mb-2 flex items-baseline justify-between gap-2">
@@ -88,7 +104,17 @@ export const Field: React.FC<{
       </div>
     )}
     {children}
-    {hint && <p className="mt-1.5 text-[13px] text-[var(--ds-text-muted)]">{hint}</p>}
+    {error ? (
+      <p
+        id={fieldErrorId(htmlFor)}
+        className="mt-2.5 flex items-start gap-1.5 text-[13px] leading-[18px] text-[var(--ds-critical-text)]"
+      >
+        <AlertCircle className="mt-px h-3.5 w-3.5 flex-shrink-0" aria-hidden />
+        <span>{error}</span>
+      </p>
+    ) : (
+      hint && <p className="mt-1.5 text-[13px] text-[var(--ds-text-muted)]">{hint}</p>
+    )}
   </div>
 );
 
@@ -103,6 +129,18 @@ export const dsSelect =
 
 export const dsTextarea =
   'w-full px-4 py-3 rounded-[16px] bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+
+/** Modificatore di stato per un controllo in errore: si appende a `dsInput`,
+ *  `dsSelect` o `dsTextarea` (`${dsInput} ${err ? dsInputError : ''}`).
+ *
+ *  È un modificatore e non una variante perché quelle tre sono stringhe usate
+ *  in una ventina di punti: trasformarle in funzioni le romperebbe tutte.
+ *
+ *  L'anello di focus resta visibile sopra questo — Tailwind emette le varianti
+ *  dopo le utility base, quindi `focus-visible:ring-[--ds-border-focus]` vince
+ *  sull'anello critico quando il campo è a fuoco. È voluto: mentre correggi,
+ *  il campo dice "sei qui", non "sei ancora sbagliato". */
+export const dsInputError = 'ring-1 ring-[var(--ds-critical-solid)]';
 
 /* ── Stepper ──────────────────────────────────────────────────────────────
    [−] value [+]. The increment is the primary action, so it carries the solid
@@ -180,11 +218,16 @@ export function SegmentedControl<T extends string>({
   equalWidth = true,
   overflow = 'fit',
   size = 'md',
+  iconOnly = false,
 }: {
   value: T;
   onChange: (next: T) => void;
   options: { value: T; label: string; icon?: React.ReactNode; badge?: number; badgeTone?: 'neutral' | 'alert' }[];
   ariaLabel: string;
+  /** L'icona porta il significato e la label va agli screen reader (più il
+   *  title). Solo quando OGNI opzione ha un'icona: su uno schermo stretto
+   *  quattro etichette troncate a "Chiam…" dicono meno di quattro glifi. */
+  iconOnly?: boolean;
   /** Equal-width segments (the default) read as a filter. Set false when the
    *  labels differ a lot in length — segments then start from their own text
    *  width and share the leftover space, so a long one isn't clipped to fit a
@@ -256,6 +299,7 @@ export function SegmentedControl<T extends string>({
             type="button"
             onClick={(e) => { onChange(opt.value); revealOnSelect(e); }}
             aria-pressed={active}
+            title={iconOnly ? opt.label : undefined}
             className={`inline-flex ${size === 'sm' ? 'h-8 text-[13px]' : 'h-9 text-[15px]'} min-w-0 ${
               scroll ? 'flex-none whitespace-nowrap' : equalWidth ? 'flex-1' : 'flex-auto'
             } items-center justify-center gap-1.5 rounded-full px-3 font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
@@ -265,7 +309,9 @@ export function SegmentedControl<T extends string>({
             }`}
           >
             {opt.icon}
-            <span className="truncate">{opt.label}</span>
+            {iconOnly
+              ? <span className="sr-only">{opt.label}</span>
+              : <span className="truncate">{opt.label}</span>}
             {/* Counts ride inside the segment rather than as a corner dot: at
                 this size a dot can't say "3" vs "99+", and the number is the
                 reason to switch channel. */}

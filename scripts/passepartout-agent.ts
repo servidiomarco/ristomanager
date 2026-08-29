@@ -26,8 +26,12 @@ import {
     getTipiPagamento,
     getSaleMenu,
     getConto,
+    getArticoliMenu,
+    inviaProduzioneComanda,
+    chiudiComandaCompleta,
     isPassepartoutConfigured,
     PassepartoutError,
+    type TipoDocumentoConto,
 } from '../services/passepartoutService.js';
 
 const SERVER_URL = (process.env.PP_AGENT_SERVER_URL || '').trim();
@@ -62,9 +66,32 @@ const handlers: Record<string, Handler> = {
         if (!Number.isFinite(id)) throw new Error('Parametro "idGestionale" non valido');
         return getConto(id);
     },
-    // NOTA: 'chiudi' (ContoComanda) volutamente NON esposto finché il
-    // rivenditore non chiarisce la finalizzazione del conto — vedi memoria
-    // di progetto: lo scontrino esce ma il conto resta sospeso.
+    invia: (p) => {
+        const id = Number(p?.idComanda);
+        if (!Number.isFinite(id)) throw new Error('Parametro "idComanda" non valido');
+        return inviaProduzioneComanda({ idComanda: id, inviaTutto: true });
+    },
+    // Catalogo articoli per l'import menu del CRM (senza immagini: il payload
+    // deve stare nel buffer del socket).
+    articoli: (p) => getArticoliMenu(typeof p?.ultimaModifica === 'string' ? p.ultimaModifica : undefined),
+    // Chiusura del conto secondo la ricetta del supporto (25/08): invio
+    // separato solo se servono righe mai inviate, ContoComanda sempre con
+    // noInvio=true, verdetto finale da GetContiGiorno. Il vecchio blocco
+    // "scontrino esce ma conto resta sospeso" era il conflitto di timeStmp
+    // dell'invio contestuale — vedi chiudiComandaCompleta.
+    chiudi: (p) => {
+        const id = Number(p?.idComanda);
+        if (!Number.isFinite(id)) throw new Error('Parametro "idComanda" non valido');
+        return chiudiComandaCompleta({
+            idComanda: id,
+            tipoPagamento: typeof p?.tipoPagamento === 'string' && p.tipoPagamento ? p.tipoPagamento : undefined,
+            tipoDocumento: typeof p?.tipoDocumento === 'string' && p.tipoDocumento
+                ? (p.tipoDocumento as TipoDocumentoConto) : undefined,
+            importoPagato: p?.importoPagato != null && Number.isFinite(Number(p.importoPagato))
+                ? Number(p.importoPagato) : undefined,
+            proforma: p?.proforma === true,
+        });
+    },
 };
 
 const socket = io(`${SERVER_URL}/pp-agent`, {

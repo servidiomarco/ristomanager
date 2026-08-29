@@ -63,12 +63,15 @@ export const useOpenBills = (
     socket?.on('bill:opened', onChange);
     socket?.on('bill:updated', onChange);
     socket?.on('bill:closed', onChange);
+    // Il badge scontrino segue l'emissione automatica post-chiusura.
+    socket?.on('fiscal:updated', onChange);
     socket?.on('connect', onChange);
     const poll = setInterval(reload, 30_000);
     return () => {
       socket?.off('bill:opened', onChange);
       socket?.off('bill:updated', onChange);
       socket?.off('bill:closed', onChange);
+      socket?.off('fiscal:updated', onChange);
       socket?.off('connect', onChange);
       clearInterval(poll);
     };

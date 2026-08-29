@@ -2,9 +2,10 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Check, Loader2, TriangleAlert, Utensils, X,
 } from 'lucide-react';
-import type { Dish, Reservation, Table, OrderWithItems, OrderItem } from '../types';
-import { ArrivalStatus, ReservationStatus } from '../types';
+import type { Dish, Reservation, Table, TableMerge, OrderWithItems, OrderItem } from '../types';
+import { ArrivalStatus, ReservationStatus, Shift } from '../types';
 import { getRomeDatePart } from '../utils/reservationTime';
+import { getTableMerges } from '../services/apiService';
 import {
   ordersApiService, getMenuCatalogue, newIdempotencyKey, closeOrder, updateOrder,
   voidItem, setOrderDiscount, transferOrder,
@@ -63,7 +64,10 @@ interface OrderPadProps {
   onImmersive?: (on: boolean) => void;
 }
 
-export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations, globalDate, globalShiftFilter, onImmersive }) => {
+export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, reservations, globalDate, globalShiftFilter, onImmersive }) => {
+  // I piatti spenti (es. articolo disattivato in cassa Passepartout) restano
+  // in anagrafica per lo storico ma non si battono più.
+  const dishes = useMemo(() => allDishes.filter(d => d.is_active !== false), [allDishes]);
   const [tableId, setTableId] = useState<number | null>(null);
   const [order, setOrder] = useState<OrderWithItems | null>(null);
   const [catalogue, setCatalogue] = useState<MenuCatalogue | null>(null);
@@ -145,15 +149,49 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
   // perché con Pranzo selezionato le prenotazioni della cena in griglia
   // leggono come coperti già arrivati.
   const selectedDateRome = getRomeDatePart(globalDate);
-  const reservationForTable = useCallback((id: number): Reservation | null =>
-    reservations.find(r =>
-      r.table_id === id
-      && getRomeDatePart(r.reservation_time) === selectedDateRome
+
+  // Unioni tavoli del giorno in griglia: la prenotazione di un'unione sta su
+  // UN tavolo del gruppo (di norma il primario), ma la comanda può essere
+  // aperta su un altro — senza il gruppo, nome e allergeni del cliente non
+  // comparivano (gemello interno del bug import Passepartout del 25/08).
+  const [tableMerges, setTableMerges] = useState<TableMerge[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const shifts: Shift[] = globalShiftFilter === 'ALL' ? [Shift.LUNCH, Shift.DINNER] : [globalShiftFilter as Shift];
+    Promise.all(shifts.map(s => getTableMerges(selectedDateRome, s)))
+      .then(results => { if (!cancelled) setTableMerges(results.flat()); })
+      .catch(() => { if (!cancelled) setTableMerges([]); });
+    return () => { cancelled = true; };
+  }, [selectedDateRome, globalShiftFilter]);
+
+  // Gruppo di unione per tavolo, per turno: `${shift}:${tableId}` → ids.
+  const mergeGroupByTable = useMemo(() => {
+    const map = new Map<string, number[]>();
+    for (const m of tableMerges) {
+      const group = [m.primary_id, ...m.merged_ids];
+      for (const id of group) map.set(`${m.shift}:${id}`, group);
+    }
+    return map;
+  }, [tableMerges]);
+
+  const reservationForTable = useCallback((id: number): Reservation | null => {
+    const isLive = (r: Reservation): boolean =>
+      getRomeDatePart(r.reservation_time) === selectedDateRome
       && (globalShiftFilter === 'ALL' || r.shift === globalShiftFilter)
       && r.reservation_status !== ReservationStatus.CANCELLED
-      && r.arrival_status !== ArrivalStatus.DEPARTED
-    ) ?? null,
-  [reservations, selectedDateRome, globalShiftFilter]);
+      && r.arrival_status !== ArrivalStatus.DEPARTED;
+    const exact = reservations.find(r => r.table_id === id && isLive(r));
+    if (exact) return exact;
+    // Nessuna prenotazione sul tavolo esatto: si cerca sugli altri tavoli
+    // della sua unione (nel turno della prenotazione stessa).
+    return reservations.find(r =>
+      r.table_id != null
+      && r.table_id !== id
+      && isLive(r)
+      && (mergeGroupByTable.get(`${r.shift}:${id}`)?.includes(r.table_id) ?? false)
+    ) ?? null;
+  },
+  [reservations, selectedDateRome, globalShiftFilter, mergeGroupByTable]);
 
   const reservation = useMemo(
     () => (tableId ? reservationForTable(tableId) : null),
@@ -244,8 +282,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
   const pushLine = useCallback((
     dish: Dish, courseNo: number, qty: number,
     modifierIds: number[], modifierLabels: string[], modifierDelta: number,
+    note?: string,
   ) => {
-    const key = cartKey(dish.id, courseNo, modifierIds);
+    const key = cartKey(dish.id, courseNo, modifierIds, note);
     setCart(prev => {
       const at = prev.findIndex(l => l.key === key);
       if (at >= 0) {
@@ -254,21 +293,26 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
         return next;
       }
       return [...prev, {
-        key, dish, qty, course_no: courseNo,
+        // La chiave di idempotenza nasce CON la riga, non all'invio: così il
+        // retry di un invio andato in timeout ripresenta la stessa chiave e
+        // il server non duplica (vedi ON CONFLICT su order_items).
+        key, idem: newIdempotencyKey(), dish, qty, course_no: courseNo,
         modifier_ids: modifierIds,
         modifier_labels: modifierLabels,
         modifier_delta_cents: modifierDelta,
+        ...(note ? { note } : {}),
       }];
     });
   }, []);
 
-  const addToCart = (dish: Dish, modifierIds: number[] = []) => {
+  const addToCart = (dish: Dish, modifierIds: number[] = [], note?: string) => {
     const all = groupsForDish(dish.id).flatMap(g => g.modifiers);
     const chosen = all.filter(m => modifierIds.includes(m.id));
     pushLine(
       dish, course, 1, modifierIds,
       chosen.map(m => m.name),
       chosen.reduce((s, m) => s + m.price_delta_cents, 0),
+      note,
     );
   };
 
@@ -333,6 +377,10 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
         course_no: l.course_no,
         modifier_ids: l.modifier_ids,
         note: l.note ?? null,
+        // Chiave per riga, stabile dalla nascita della riga: un retry dopo un
+        // timeout rimanda le stesse chiavi e il server dedup-a invece di
+        // raddoppiare la comanda in cucina.
+        idempotency_key: l.idem,
       }));
       const key = newIdempotencyKey();
       await ordersApiService.addItems(order.order.id, payload, key);
@@ -519,6 +567,30 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
     };
   }, [serviceQuery]);
 
+  // L'uscita cambia stato in cucina sotto gli occhi del cameriere: il badge
+  // ("in cucina", "pronta", "servita") si aggiorna da solo, senza aspettare
+  // il prossimo invio o una riapertura. Filtrato sulla comanda aperta: gli
+  // eventi delle altre non devono far scaricare niente.
+  const openOrderId = order?.order.id ?? null;
+  useEffect(() => {
+    const socket = socketClient.getSocket();
+    if (!socket || openOrderId == null) return;
+    const onCourse = (payload: any) => {
+      if (payload?.order_id !== openOrderId) return;
+      ordersApiService.getOrder(openOrderId).then(setOrder).catch(() => { /* al prossimo evento */ });
+    };
+    socket.on('course:fired', onCourse);
+    socket.on('course:ready', onCourse);
+    socket.on('course:served', onCourse);
+    socket.on('course:unserved', onCourse);
+    return () => {
+      socket.off('course:fired', onCourse);
+      socket.off('course:ready', onCourse);
+      socket.off('course:served', onCourse);
+      socket.off('course:unserved', onCourse);
+    };
+  }, [openOrderId]);
+
   const notices = (
     <>
       {error && <ErrorBar message={error} onDismiss={() => setError(null)} />}
@@ -544,6 +616,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
             refund_due_cents: viewBill.refund_due_cents,
             residual_cents: viewBill.residual_cents,
             open_orders: viewBill.open_orders,
+            external_ref: viewBill.external_ref,
           }}
           busy={busy}
           onClose={() => setViewBill(null)}
@@ -634,6 +707,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
       hasVariants={hasVariants}
       onAdd={onDishTap}
       onRemove={removeFromCart}
+      onLongPress={setVariantFor}
       layout={isWide ? 'grid' : 'list'}
     />
   );
@@ -761,7 +835,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes, tables, reservations
           dish={variantFor}
           groups={groupsForDish(variantFor.id)}
           onCancel={() => setVariantFor(null)}
-          onConfirm={ids => { addToCart(variantFor, ids); setVariantFor(null); }}
+          onConfirm={(ids, note) => { addToCart(variantFor, ids, note); setVariantFor(null); }}
         />
       )}
 
@@ -885,9 +959,13 @@ const VariantSheet: React.FC<{
   dish: Dish;
   groups: MenuCatalogue['modifier_groups'];
   onCancel: () => void;
-  onConfirm: (ids: number[]) => void;
+  onConfirm: (ids: number[], note?: string) => void;
 }> = ({ dish, groups, onCancel, onConfirm }) => {
   const [selected, setSelected] = useState<number[]>([]);
+  // Variante libera: quello che in cassa il cameriere scrive a mano («senza
+  // sale», «metà porzione»). Viaggia come nota di riga — KDS e comanda in
+  // cucina la stampano già sotto il piatto.
+  const [custom, setCustom] = useState('');
 
   const toggle = (groupId: number, modId: number, single: boolean) => {
     setSelected(prev => {
@@ -917,7 +995,7 @@ const VariantSheet: React.FC<{
       footer={
         <button
           type="button"
-          onClick={() => onConfirm(selected)}
+          onClick={() => onConfirm(selected, custom.trim() || undefined)}
           disabled={missing.length > 0}
           className={`w-full ${dsButton.primary}`}
         >
@@ -963,6 +1041,21 @@ const VariantSheet: React.FC<{
           </div>
         );
       })}
+
+      <label className="block">
+        <span className="mb-2 block text-[13px] font-semibold text-[var(--ds-text-muted)]">Variante libera</span>
+        <input
+          type="text"
+          value={custom}
+          onChange={e => setCustom(e.target.value)}
+          maxLength={300}
+          placeholder="Es. senza sale, metà porzione…"
+          className={dsInput}
+          // Aperta dal tocco lungo su un piatto senza varianti, la sheet ha
+          // solo questo campo: il cameriere è qui per scrivere.
+          autoFocus={groups.length === 0}
+        />
+      </label>
     </Sheet>
   );
 };

@@ -47,7 +47,20 @@ export interface Dish {
   category?: string;
   allergens?: string[];
   photo_url?: string;
+  /** Aliquota IVA di anagrafica (intero %, default 10 somministrazione).
+   *  Snapshot sulla riga alla battitura, come il prezzo. */
+  vat_rate?: number;
+  /** "pp:articolo:<id>" per i piatti sincronizzati dalla cassa Passepartout:
+   *  nome, categoria, prezzo e IVA li possiede la cassa, il sync li riallinea. */
+  external_ref?: string | null;
+  /** false = spento (es. articolo disattivato in cassa): resta in anagrafica
+   *  per lo storico, sparisce dai picker. */
+  is_active?: boolean;
 }
+
+/** Aliquote proposte dalla UI. Il server accetta 0..100: l'elenco lo cambia
+ *  la legge, non un deploy. */
+export const VAT_RATES = [0, 4, 5, 10, 22] as const;
 
 export const COMMON_ALLERGENS = [
   "Glutine", "Crostacei", "Uova", "Pesce", "Arachidi",
@@ -320,6 +333,38 @@ export interface TableBillItem {
   qty: number;
   unit_price_cents: number;
   category?: string | null;
+  /** Snapshot dell'aliquota IVA (assente sui conti pre-IVA: fallback 10). */
+  vat_rate?: number;
+}
+
+// Documento commerciale emesso via provider cloud (fase 3 fatturazione).
+// PENDING → CONFIRMED/FAILED; l'annullo porta a VOIDED. Un solo documento
+// vivo (PENDING/CONFIRMED) per conto.
+export type FiscalDocumentStatus = 'PENDING' | 'CONFIRMED' | 'FAILED' | 'VOIDED';
+export type FiscalProviderSetting = 'none' | 'openapi' | 'mock';
+
+export interface FiscalDocument {
+  id: number;
+  table_bill_id: number;
+  doc_type: 'RECEIPT' | 'PROFORMA' | 'INVOICE';
+  provider: string;
+  status: FiscalDocumentStatus;
+  provider_ref: string | null;
+  error: string | null;
+  total_cents: number;
+  attempts: number;
+  created_at: string;
+  confirmed_at: string | null;
+  voided_at: string | null;
+}
+
+/** Totali del conto per aliquota, a prezzi IVA inclusa scorporati
+ *  (net + vat = gross; Σ gross = totale conto, sconti già ripartiti). */
+export interface VatBreakdownRow {
+  rate: number;
+  gross_cents: number;
+  net_cents: number;
+  vat_cents: number;
 }
 
 export interface TableBill {
@@ -342,6 +387,74 @@ export interface TableBill {
   notes: string | null;
 }
 
+// Libro cassa del conto (Fase 1 fatturazione — vedi
+// docs/fatturazione-chiusura-conto-brainstorm.md). Una riga per movimento di
+// incasso. Le righe con table_bill_split_id valorizzato sono lo SPECCHIO di
+// una quota online PAID (method LINK_ONLINE), scritte dal webhook: servono
+// solo al report per metodo — il residuo le conta già tramite la quota.
+// Le righe senza specchio sono incassi registrati dallo staff e pesano sul
+// residuo. Storno = soft-void (voided_at), mai delete.
+export type BillPaymentMethod =
+  | 'CONTANTI'
+  | 'POS_FISICO'
+  | 'SATISPAY'
+  | 'BUONO_PASTO'   // meta può portare circuito e valore nominale vs incassato
+  | 'GIFT_CARD'
+  | 'SOSPESO'       // conto del cliente abituale, saldato fuori banda
+  | 'OMAGGIO'       // offerto dalla casa: salda il residuo senza incasso
+  | 'LINK_ONLINE';  // specchio quota pay-at-table, mai registrato a mano
+
+export interface BillPayment {
+  id: number;
+  table_bill_id: number;
+  method: BillPaymentMethod;
+  amount_cents: number;
+  table_bill_split_id: number | null;
+  meta: Record<string, unknown> | null;
+  recorded_by_user_id: number | null;
+  recorded_at: string;
+  voided_at: string | null;
+  voided_by_user_id: number | null;
+  void_reason: string | null;
+}
+
+// Riga della chiusura di cassa giornaliera: totale incassato per metodo.
+export interface CashClosureMethodRow {
+  method: BillPaymentMethod;
+  amount_cents: number;
+  movements: number;
+}
+
+// Riga per tavolo della chiusura di cassa: il conto chiuso col suo
+// documento fiscale (ultimo emesso) e gli incassi non stornati.
+export interface CashClosureBillRow {
+  id: number;
+  total_cents: number;
+  status: 'CLOSED' | 'SETTLED_PARTIAL';
+  tip_cents: number;
+  closed_at: string;
+  covers: number;
+  /** Turno del conto: lo stesso tavolo serve pranzo e cena. */
+  shift: 'LUNCH' | 'DINNER';
+  table_name: string | null;
+  customer_name: string | null;
+  fiscal_doc_type: 'RECEIPT' | 'PROFORMA' | 'INVOICE' | null;
+  fiscal_status: FiscalDocumentStatus | null;
+  fiscal_doc_number: string | null;
+  payments: { method: BillPaymentMethod; amount_cents: number }[];
+}
+
+export interface CashClosureReport {
+  date: string; // YYYY-MM-DD (giorno Europe/Rome)
+  methods: CashClosureMethodRow[];
+  total_cents: number;
+  tip_cents: number;
+  deposit_credit_cents: number; // acconti maturati sui conti chiusi nel giorno
+  bills_closed: number;
+  shortfall_cents: number; // ammanchi dei SETTLED_PARTIAL chiusi nel giorno
+  bills: CashClosureBillRow[];
+}
+
 export interface TableBillSplit {
   id: number;
   table_bill_id: number;
@@ -362,6 +475,13 @@ export interface TableBillSplit {
 export interface TableBillWithSplits {
   bill: TableBill;
   splits: TableBillSplit[];
+  // Movimenti del libro cassa (specchi LINK_ONLINE inclusi, storni inclusi
+  // con voided_at valorizzato): la UI li mostra, i totali qui sotto no.
+  payments?: BillPayment[];
+  // Incassi staff attivi (senza specchio, non stornati). NON inclusi in
+  // paid_cents (che resta la somma delle quote PAID): il residuo li scala
+  // a parte.
+  staff_paid_cents?: number;
   paid_cents: number;
   claimed_cents: number;
   // Acconto già versato sulla prenotazione portato nel conto. Già incluso in
@@ -372,6 +492,10 @@ export interface TableBillWithSplits {
   deposit_paid_cents?: number;
   refund_due_cents?: number;
   residual_cents: number;
+  /** Vuoto per i conti aperti a mano, senza dettaglio righe. */
+  vat_breakdown?: VatBreakdownRow[];
+  /** Documenti commerciali emessi per questo conto (storia inclusa). */
+  fiscal_documents?: FiscalDocument[];
 }
 
 // ============================================
@@ -436,8 +560,9 @@ export type OrderItemStatus =
 export type CourseStatus = 'PENDING' | 'QUEUED' | 'FIRED' | 'READY' | 'SERVED';
 
 // Come vengono lanciate le uscite. AUTO_ALL finché il passe non esiste,
-// AUTO_FIRST a regime, MANUAL per i banchetti.
-export type CourseFireMode = 'AUTO_ALL' | 'AUTO_FIRST' | 'MANUAL';
+// AUTO_FIRST a regime, MANUAL per i banchetti. AUTO_NEXT è il fuoco a
+// consumo: la successiva parte quando la precedente viene segnata servita.
+export type CourseFireMode = 'AUTO_ALL' | 'AUTO_FIRST' | 'AUTO_NEXT' | 'MANUAL';
 
 export interface OrderItem {
   id: number;
@@ -454,6 +579,8 @@ export interface OrderItem {
   seat_no?: number | null;
   station_id: number | null;
   status: OrderItemStatus;
+  /** Snapshot dell'aliquota IVA alla battitura (fallback 10 sui vecchi). */
+  vat_rate?: number;
   note?: string | null;
   queued_at?: string | null;
   fired_at?: string | null;
@@ -544,6 +671,7 @@ export enum ViewState {
   HACCP = 'HACCP',
   CONVERSAZIONI = 'CONVERSAZIONI',
   MESSAGGI = 'MESSAGGI',
+  CHAT_STAFF = 'CHAT_STAFF',
   EMAIL = 'EMAIL',
   NOTIFICHE = 'NOTIFICHE',
   STAFF = 'STAFF',
@@ -559,9 +687,23 @@ export enum ViewState {
   PLATFORM = 'PLATFORM'
 }
 
+// Dati di fatturazione del cliente (fase 4 fatturazione): alimentano il
+// cessionario della fattura elettronica. Denominazione a parte perché per
+// un'azienda differisce dal nome in rubrica ("Mario Rossi" vs "Rossi Srl").
+export interface CustomerBilling {
+  name?: string;
+  vat_number?: string;
+  tax_code?: string;
+  sdi_code?: string;
+  pec?: string;
+  address?: { street?: string; zip?: string; city?: string; province?: string };
+}
+
 export interface Customer {
   id: number;
   name: string;
+  /** Dati di fatturazione (null se mai compilati). */
+  billing?: CustomerBilling | null;
   phone?: string | null;
   email?: string | null;
   address?: string | null;
@@ -623,7 +765,7 @@ export interface User {
     id: number;
     slug: string;
     name: string;
-    features?: { voice: boolean; whatsapp: boolean; web_booking: boolean; pay_at_table: boolean };
+    features?: { voice: boolean; whatsapp: boolean; web_booking: boolean; pay_at_table: boolean; passepartout?: boolean };
     // true finché l'OWNER non completa il wizard di primo accesso (D1):
     // la SPA lo mostra al posto dell'app, solo all'OWNER.
     needs_onboarding?: boolean;

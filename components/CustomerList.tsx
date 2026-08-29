@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Customer, Reservation, BanquetMenu, Shift, Table, Room } from '../types';
 import { getCustomers, createCustomer, updateCustomer, deleteCustomer, getCustomerDuplicates, mergeCustomers, CustomerDuplicateGroup, getLegalSettings, getMarketingAudience } from '../services/apiService';
+import { customersCache } from '../services/customersCache';
+import { swrConfig } from '../services/configCache';
 import { useAuth } from '../contexts/AuthContext';
 import { Search, Plus, Pencil, Trash2, Phone, Mail, MapPin, BookUser, History, UtensilsCrossed, Calendar, Sun, Moon, Users as UsersIcon, Loader2, Star, Armchair, AlertTriangle, Ban, GitMerge, Download, MessageCircle, User as UserIcon, MoreVertical, ArrowLeft } from 'lucide-react';
 import { toTitleCase } from '../utils/text';
@@ -39,6 +41,16 @@ interface FormState {
   is_vip: boolean;
   is_blacklisted: boolean;
   blacklist_reason: string;
+  // Dati di fatturazione (cessionario della fattura elettronica).
+  billing_name: string;
+  billing_vat: string;
+  billing_cf: string;
+  billing_sdi: string;
+  billing_pec: string;
+  billing_street: string;
+  billing_zip: string;
+  billing_city: string;
+  billing_province: string;
 }
 
 const emptyForm: FormState = {
@@ -55,6 +67,15 @@ const emptyForm: FormState = {
   is_vip: false,
   is_blacklisted: false,
   blacklist_reason: '',
+  billing_name: '',
+  billing_vat: '',
+  billing_cf: '',
+  billing_sdi: '',
+  billing_pec: '',
+  billing_street: '',
+  billing_zip: '',
+  billing_city: '',
+  billing_province: '',
 };
 
 const customerToForm = (c: Customer): FormState => ({
@@ -72,6 +93,15 @@ const customerToForm = (c: Customer): FormState => ({
   is_vip: c.is_vip === true,
   is_blacklisted: c.is_blacklisted === true,
   blacklist_reason: c.blacklist_reason || '',
+  billing_name: c.billing?.name || '',
+  billing_vat: c.billing?.vat_number || '',
+  billing_cf: c.billing?.tax_code || '',
+  billing_sdi: c.billing?.sdi_code || '',
+  billing_pec: c.billing?.pec || '',
+  billing_street: c.billing?.address?.street || '',
+  billing_zip: c.billing?.address?.zip || '',
+  billing_city: c.billing?.address?.city || '',
+  billing_province: c.billing?.address?.province || '',
 });
 
 // Ora italiana via gli helper condivisi, come il resto dell'app. La versione
@@ -171,13 +201,17 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
   const { hasPermission } = useAuth();
   const canEdit = hasPermission('customers:full');
 
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  // Riparte dall'ultimo stato noto (cache modulo-level): la pagina viene
+  // smontata a ogni cambio vista e senza questo ogni rientro rifaceva il
+  // fetch dell'intera rubrica con lo spinner. Il fetch parte comunque e
+  // rimpiazza in silenzio (stale-while-revalidate).
+  const [customers, setCustomers] = useState<Customer[]>(() => customersCache.list ?? []);
   const [search, setSearch] = useState('');
   // When set, only customers whose name starts with this letter are shown.
   // '#' bucket = names not starting with an A-Z character. Cleared by
   // tapping the active letter again or when a search is typed.
   const [letterFilter, setLetterFilter] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(customersCache.list === null);
   const [error, setError] = useState<string | null>(null);
 
   const [formOpen, setFormOpen] = useState(false);
@@ -211,13 +245,11 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
   const [marketingEnabled, setMarketingEnabled] = useState(true);
   const [exporting, setExporting] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    getLegalSettings()
-      .then(l => { if (!cancelled) setMarketingEnabled(l.legal_mode !== 'simple'); })
-      .catch(() => { /* keep default */ });
-    return () => { cancelled = true; };
-  }, []);
+  // Stessa chiave di ReservationList: il valore in cache arriva subito, il
+  // fetch rinfresca in background (services/configCache).
+  useEffect(() => swrConfig('legalSettings', getLegalSettings, l => {
+    setMarketingEnabled(l.legal_mode !== 'simple');
+  }), []);
 
   // Pull the sanctioned marketing audience (server excludes non-consenting) and
   // download it as CSV — a concrete, consent-safe marketing flow.
@@ -252,6 +284,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
   const reloadDuplicates = async () => {
     try {
       const { groups } = await getCustomerDuplicates();
+      customersCache.duplicates = groups;
       setDuplicateGroups(groups);
     } catch {
       // Non-fatal: the duplicates badge just won't show.
@@ -261,7 +294,9 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
 
   useEffect(() => {
     if (!canEdit) return;
+    if (customersCache.duplicates) setDuplicateGroups(customersCache.duplicates);
     reloadDuplicates();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canEdit]);
 
   const duplicatesCount = useMemo(
@@ -290,13 +325,19 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
 
   useEffect(() => {
     let cancelled = false;
-    setIsLoading(true);
+    if (customersCache.list === null) setIsLoading(true);
     getCustomers()
       .then(data => { if (!cancelled) { setCustomers(data); setError(null); } })
-      .catch(err => { if (!cancelled) setError(err?.message || 'Errore caricamento clienti'); })
+      .catch(err => { if (!cancelled && customersCache.list === null) setError(err?.message || 'Errore caricamento clienti'); })
       .finally(() => { if (!cancelled) setIsLoading(false); });
     return () => { cancelled = true; };
   }, []);
+
+  // Specchia in cache ogni cambiamento (fetch, crea/modifica/elimina/unisci):
+  // il prossimo mount riparte da qui invece che dallo spinner.
+  useEffect(() => {
+    if (!isLoading && !error) customersCache.list = customers;
+  }, [customers, isLoading, error]);
 
   useEffect(() => {
     if (autoOpenNew) {
@@ -490,6 +531,19 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
         is_vip: form.is_vip,
         is_blacklisted: form.is_blacklisted,
         blacklist_reason: form.blacklist_reason.trim() || null,
+        billing: {
+          name: form.billing_name.trim(),
+          vat_number: form.billing_vat.trim(),
+          tax_code: form.billing_cf.trim(),
+          sdi_code: form.billing_sdi.trim(),
+          pec: form.billing_pec.trim(),
+          address: {
+            street: form.billing_street.trim(),
+            zip: form.billing_zip.trim(),
+            city: form.billing_city.trim(),
+            province: form.billing_province.trim(),
+          },
+        },
       };
       if (form.id) {
         const updated = await updateCustomer(form.id, payload);
@@ -1400,6 +1454,111 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
             />
           </Field>
         </div>
+
+        {/* Dati di fatturazione: alimentano il cessionario della fattura
+            elettronica dal conto. Chiusi in un details perché servono a
+            pochi clienti (le aziende) e non devono allungare la scheda di
+            tutti gli altri. */}
+        <details className="group rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+          <summary className="cursor-pointer select-none text-[14px] font-medium text-[var(--ds-text-primary)] list-none [&::-webkit-details-marker]:hidden">
+            Dati fatturazione
+            <span className="ml-2 text-[13px] font-normal text-[var(--ds-text-muted)]">
+              {form.billing_vat || form.billing_cf ? (form.billing_vat ? `P.IVA ${form.billing_vat}` : `CF ${form.billing_cf}`) : 'per la fattura elettronica'}
+            </span>
+          </summary>
+          <div className="mt-3 space-y-3">
+            <Field label="Denominazione" htmlFor="cust-bill-name">
+              <input
+                id="cust-bill-name"
+                type="text"
+                placeholder="Ragione sociale o nome e cognome"
+                value={form.billing_name}
+                onChange={e => setForm({ ...form, billing_name: e.target.value })}
+                className={dsInput}
+              />
+            </Field>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="P.IVA" htmlFor="cust-bill-vat">
+                <input
+                  id="cust-bill-vat"
+                  type="text"
+                  inputMode="numeric"
+                  value={form.billing_vat}
+                  onChange={e => setForm({ ...form, billing_vat: e.target.value })}
+                  className={`${dsInput} tabular-nums`}
+                />
+              </Field>
+              <Field label="Codice fiscale" htmlFor="cust-bill-cf">
+                <input
+                  id="cust-bill-cf"
+                  type="text"
+                  value={form.billing_cf}
+                  onChange={e => setForm({ ...form, billing_cf: e.target.value.toUpperCase() })}
+                  className={dsInput}
+                />
+              </Field>
+              <Field label="Codice SDI" htmlFor="cust-bill-sdi">
+                <input
+                  id="cust-bill-sdi"
+                  type="text"
+                  maxLength={7}
+                  value={form.billing_sdi}
+                  onChange={e => setForm({ ...form, billing_sdi: e.target.value.toUpperCase() })}
+                  className={dsInput}
+                />
+              </Field>
+              <Field label="PEC" htmlFor="cust-bill-pec">
+                <input
+                  id="cust-bill-pec"
+                  type="email"
+                  value={form.billing_pec}
+                  onChange={e => setForm({ ...form, billing_pec: e.target.value })}
+                  className={dsInput}
+                />
+              </Field>
+            </div>
+            <Field label="Indirizzo sede" htmlFor="cust-bill-street">
+              <input
+                id="cust-bill-street"
+                type="text"
+                value={form.billing_street}
+                onChange={e => setForm({ ...form, billing_street: e.target.value })}
+                className={dsInput}
+              />
+            </Field>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+              <Field label="CAP" htmlFor="cust-bill-zip">
+                <input
+                  id="cust-bill-zip"
+                  type="text"
+                  inputMode="numeric"
+                  value={form.billing_zip}
+                  onChange={e => setForm({ ...form, billing_zip: e.target.value })}
+                  className={`${dsInput} tabular-nums`}
+                />
+              </Field>
+              <Field label="Comune" htmlFor="cust-bill-city" className="sm:col-span-2">
+                <input
+                  id="cust-bill-city"
+                  type="text"
+                  value={form.billing_city}
+                  onChange={e => setForm({ ...form, billing_city: e.target.value })}
+                  className={dsInput}
+                />
+              </Field>
+              <Field label="Provincia" htmlFor="cust-bill-prov">
+                <input
+                  id="cust-bill-prov"
+                  type="text"
+                  maxLength={2}
+                  value={form.billing_province}
+                  onChange={e => setForm({ ...form, billing_province: e.target.value.toUpperCase() })}
+                  className={dsInput}
+                />
+              </Field>
+            </div>
+          </div>
+        </details>
       </div>
     </FormCard>
   ) : (
