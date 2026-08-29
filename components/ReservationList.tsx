@@ -5720,20 +5720,38 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     const tavoliCount = baseRoomTables.length;
                                     const eventiCount = banquetGroups.size;
                                     const occupatiCount = normalEntries.filter(e => e.reservation).length;
+                                    const liberiCount = normalEntries.length - occupatiCount;
                                     const guests = formData.guests || 1;
                                     // Sequential per-room color assignment so the modal matches the floor plan.
                                     const modalBanquetColorByBanquetId = buildBanquetColorClassMap([...banquetGroups.keys()]);
 
                                     return (
                                     <div key={room.id} className="mb-3 last:mb-0 rounded-[16px] bg-[var(--ds-surface-row)] p-4">
-                                        <h4 className="mb-3 text-[15px] font-semibold text-[var(--ds-text-primary)]">
-                                            {room.name}
-                                            <span className="font-normal text-[var(--ds-text-muted)]">
-                                                {' · '}{tavoliCount} {tavoliCount === 1 ? 'tavolo' : 'tavoli'}
-                                                {eventiCount > 0 ? ` · ${eventiCount} ${eventiCount === 1 ? 'evento' : 'eventi'}` : ''}
-                                                {occupatiCount > 0 ? ` · ${occupatiCount} ${occupatiCount === 1 ? 'occupato' : 'occupati'}` : ''}
-                                            </span>
-                                        </h4>
+                                        <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                                            <h4 className="min-w-0 text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                                                {room.name}
+                                                <span className="font-normal text-[var(--ds-text-muted)]">
+                                                    {' · '}{tavoliCount} {tavoliCount === 1 ? 'tavolo' : 'tavoli'}
+                                                    {eventiCount > 0 ? ` · ${eventiCount} ${eventiCount === 1 ? 'evento' : 'eventi'}` : ''}
+                                                </span>
+                                            </h4>
+                                            <div className="ml-auto flex flex-shrink-0 items-center gap-2">
+                                                <span className={`inline-flex h-8 flex-shrink-0 items-baseline gap-1.5 rounded-full border px-3 leading-8 ${
+                                                    liberiCount > 0
+                                                        ? 'border-[var(--ds-seated-solid)] bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
+                                                        : 'border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]'
+                                                }`}>
+                                                    <span className="text-[17px] font-bold tabular-nums">{liberiCount}</span>
+                                                    <span className="text-[13px] font-medium">{liberiCount === 1 ? 'libero' : 'liberi'}</span>
+                                                </span>
+                                                {occupatiCount > 0 && (
+                                                    <span className="inline-flex h-8 flex-shrink-0 items-baseline gap-1.5 rounded-full border border-[var(--ds-critical-solid)] bg-[var(--ds-critical-tint)] px-3 leading-8 text-[var(--ds-critical-text)]">
+                                                        <span className="text-[17px] font-bold tabular-nums">{occupatiCount}</span>
+                                                        <span className="text-[13px] font-medium">{occupatiCount === 1 ? 'occupato' : 'occupati'}</span>
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
 
                                         {/* Banquet / event containers — one grouped card per event,
                                             tinted with the same per-banquet color used on the floor plan. */}
