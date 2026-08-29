@@ -1515,7 +1515,7 @@ app.post('/webhook/t/:tenantToken/elevenlabs/lookup-customer', async (req, res) 
 const elevenLabsParams = (req: express.Request): Record<string, any> => {
     const body: any = req.body || {};
     const p = (body.parameters && typeof body.parameters === 'object') ? body.parameters : body;
-    return {
+    const params: Record<string, any> = {
         ...p,
         conversation_id: body.conversation_id || p.conversation_id,
         // Card #32 — la lingua rilevata da ElevenLabs può arrivare sotto nomi
@@ -1523,6 +1523,17 @@ const elevenLabsParams = (req: express.Request): Record<string, any> => {
         // normalizza e la ignora del tutto se non è nel payload.
         language: p.language ?? p.detected_language ?? p.language_code ?? body.language_code,
     };
+    // Un dynamic variable non sostituito arriva come stringa letterale
+    // ('{{system__caller_id}}'): succede quando il tool su ElevenLabs chiede
+    // il placeholder all'LLM nella descrizione invece di usare il campo
+    // dynamic_variable (Tammaro 2026-08-29: modify falliva con phone
+    // letterale e la prenotazione non veniva mai trovata). Nessun valore
+    // legittimo ha questa forma: lo scartiamo, così il tool vede il campo
+    // come assente e usa i suoi fallback.
+    for (const [k, v] of Object.entries(params)) {
+        if (typeof v === 'string' && /^\s*\{\{[^{}]*\}\}\s*$/.test(v)) delete params[k];
+    }
+    return params;
 };
 
 /** Interruttori del canale telefonico. Restituisce true se si può procedere. */
