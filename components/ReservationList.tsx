@@ -4308,6 +4308,27 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               value: `${occupiedTablesCount}/${totalTablesInRoom}`,
               label: `tavoli (${occupancyPercentage}%)`,
               hideBelow: 'md' as const,
+              // Le stesse pill del modal di scelta tavoli (PR #325), in
+              // versione compatta: il numero secco di liberi/occupati si
+              // legge senza fare la sottrazione a mente.
+              suffix: (
+                <span className="ml-1 flex flex-shrink-0 items-center gap-1.5">
+                  <span className={`inline-flex h-7 items-baseline gap-1 rounded-full border px-2.5 leading-7 ${
+                    totalTablesInRoom - occupiedTablesCount > 0
+                      ? 'border-[var(--ds-seated-solid)] bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
+                      : 'border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]'
+                  }`}>
+                    <span className="text-[15px] font-bold tabular-nums">{totalTablesInRoom - occupiedTablesCount}</span>
+                    <span className="text-[12px] font-medium">{totalTablesInRoom - occupiedTablesCount === 1 ? 'libero' : 'liberi'}</span>
+                  </span>
+                  {occupiedTablesCount > 0 && (
+                    <span className="inline-flex h-7 items-baseline gap-1 rounded-full border border-[var(--ds-critical-solid)] bg-[var(--ds-critical-tint)] px-2.5 leading-7 text-[var(--ds-critical-text)]">
+                      <span className="text-[15px] font-bold tabular-nums">{occupiedTablesCount}</span>
+                      <span className="text-[12px] font-medium">{occupiedTablesCount === 1 ? 'occupato' : 'occupati'}</span>
+                    </span>
+                  )}
+                </span>
+              ),
             },
           ]}
         />
