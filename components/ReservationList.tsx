@@ -5741,7 +5741,13 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                     const tavoliCount = baseRoomTables.length;
                                     const eventiCount = banquetGroups.size;
                                     const occupatiCount = normalEntries.filter(e => e.reservation).length;
-                                    const liberiCount = normalEntries.length - occupatiCount;
+                                    // Il tavolo selezionato nel form non è "libero": è il tuo.
+                                    // getOccupierForTableInForm esclude la prenotazione in
+                                    // modifica (giusto: deve poter tenere il suo tavolo), ma
+                                    // contarlo tra i liberi diceva "1 libero" su una sala
+                                    // piena — l'operatore lo leggeva come un tavolo disponibile.
+                                    const selectedHereCount = normalEntries.filter(e => !e.reservation && e.table.id === formData.table_id).length;
+                                    const liberiCount = normalEntries.length - occupatiCount - selectedHereCount;
                                     const guests = formData.guests || 1;
                                     // Sequential per-room color assignment so the modal matches the floor plan.
                                     const modalBanquetColorByBanquetId = buildBanquetColorClassMap([...banquetGroups.keys()]);
