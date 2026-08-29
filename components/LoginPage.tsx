@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { AlertCircle, Loader2, Eye, EyeOff, Check, CheckCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { authApiService } from '../services/authApiService';
-import { PLATFORM_NAME } from '../platform';
+import { PLATFORM_NAME, PLATFORM_TAGLINE } from '../platform';
 import { dsInput, dsInputError, dsButton, Callout, Field, fieldErrorId } from './ds';
 
 const SAVED_CREDENTIALS_KEY = 'ristocrm_saved_credentials';
@@ -229,20 +229,35 @@ export const LoginPage: React.FC = () => {
           <div className="w-full max-w-[400px]">
             {/* Il tema arriva anche qui: .dark viene applicata da localStorage
                 prima dell'accesso. Stessa coppia nero/bianco della sidebar. */}
-            <div className="flex items-center justify-center mb-18">
+            <div className="flex items-center justify-center">
               <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-8 w-auto dark:hidden" />
               <img src="/logo-sympotia-white.svg" alt={PLATFORM_NAME} className="hidden h-8 w-auto dark:block" />
             </div>
-            <h1 className="text-[26px] leading-[32px] font-semibold tracking-tight text-[var(--ds-text-primary)] text-center mb-1.5">
+            {/* La riga che dice cos'e' Sympotia, sotto il marchio. */}
+            <p className="mt-3 text-center text-[15px] leading-[22px] text-[var(--ds-text-secondary)]">
+              {PLATFORM_TAGLINE}
+            </p>
+            {/* In accesso il titolo resta solo per chi legge con lo schermo:
+                "Accedi al tuo ristorante" sopra due campi e un bottone che dice
+                Accedi non aggiungeva niente, ma una pagina senza intestazione
+                lascia chi non la vede senza sapere dove e' finito.
+                Recupero e nuova password lo tengono visibile: li' il titolo e la
+                riga sotto dicono cosa sta per succedere, e non li ripete nulla. */}
+            <h1
+              className={mode === 'login'
+                ? 'sr-only'
+                : 'mt-10 text-[26px] leading-[32px] font-semibold tracking-tight text-[var(--ds-text-primary)] text-center mb-1.5'}
+            >
               {mode === 'forgot' ? 'Recupera la password'
                 : mode === 'reset' ? 'Scegli una nuova password'
                 : 'Accedi al tuo ristorante'}
             </h1>
-            <p className="text-[15px] leading-[22px] text-[var(--ds-text-secondary)] text-center mb-8">
-              {mode === 'forgot' ? 'Ti mandiamo un link per sceglierne una nuova.'
-                : mode === 'reset' ? 'Minimo 8 caratteri.'
-                : 'Inserisci le tue credenziali per continuare.'}
-            </p>
+            {mode !== 'login' && (
+              <p className="text-[15px] leading-[22px] text-[var(--ds-text-secondary)] text-center mb-8">
+                {mode === 'forgot' ? 'Ti mandiamo un link per sceglierne una nuova.' : 'Minimo 8 caratteri.'}
+              </p>
+            )}
+            {mode === 'login' && <div className="mb-10" />}
 
             {mode === 'forgot' && (
               forgotSent ? (

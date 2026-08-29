@@ -107,7 +107,10 @@ import {
   createTableMerge,
   deleteTableMerge,
   getFeatureFlags,
+  getLegalSettings,
+  tenantLogoSrc,
 } from './services/apiService';
+import { swrConfig } from './services/configCache';
 
 // ---------------------------------------------------------------------------
 // Navigation taxonomy — single source of truth for the desktop sidebar AND the
@@ -308,6 +311,23 @@ const App: React.FC = () => {
   const { user, isAuthenticated, isLoading: authLoading, logout, canAccessView, canManageUsers, hasPermission, hasFeature, getAccessibleViews, canViewLogs, updatePreferences } = useAuth();
 
   const [view, setView] = useState<ViewState>(ViewState.DASHBOARD);
+
+  /* Il marchio del ristorante in testa alla barra: chi la tiene aperta dieci
+     ore al giorno lavora da lui, non da noi. Sympotia scende in fondo.
+
+     Arriva da `legal_config.logo_url`, lo stesso caricato da Impostazioni per
+     la pagina prenota — un logo solo, in un posto solo. `tenantLogoSrc` lo
+     rende assoluto: il CRM gira su un dominio diverso dal backend, e un path
+     relativo cercherebbe l'immagine su Vercel.
+
+     Finche' non arriva resta null e in testa si vede Sympotia: meglio il
+     marchio del prodotto per un istante che un buco che poi si riempie. */
+  const [tenantLogo, setTenantLogo] = useState<string | null>(null);
+  const [tenantName, setTenantName] = useState<string>('');
+  useEffect(() => swrConfig('legalSettings', getLegalSettings, l => {
+    setTenantLogo(l.logo_url ? tenantLogoSrc(l.logo_url) : null);
+    setTenantName(l.business_name || '');
+  }), []);
   // Una schermata che si prende tutto lo schermo sul telefono: la barra di
   // navigazione in basso sparisce, e con lei il suo spazio di rispetto. Per ora
   // la chiede solo la comanda aperta su un tavolo.
@@ -2000,7 +2020,7 @@ const App: React.FC = () => {
             non cambia fra i due stati — è sempre il pannello, non una freccia:
             resta lo stesso bersaglio nello stesso punto, e lo stato lo dicono
             aria-expanded e il title. */}
-        <div className={`flex ${sidebarCollapsed ? 'flex-col items-center gap-1 pt-4 pb-2' : 'h-16 items-center px-4'}`}>
+        <div className={`flex ${sidebarCollapsed ? 'flex-col items-center gap-1 pt-4 pb-2' : 'items-center px-4 pt-6 pb-3'}`}>
           <div className="flex items-center min-w-0">
             {/* Wordmark Sympotia a sidebar aperta; chiusa non ci sta, resta il
                 quadrato. Due img nero/bianco: il tema le scambia via CSS. */}
@@ -2009,10 +2029,23 @@ const App: React.FC = () => {
                 <ChefHat className="text-[var(--ds-action-fg)] h-5 w-5" />
               </div>
             ) : (
-              <>
-                <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-7 w-auto dark:hidden" />
-                <img src="/logo-sympotia-white.svg" alt={PLATFORM_NAME} className="hidden h-7 w-auto dark:block" />
-              </>
+              tenantLogo ? (
+                /* Su fondo scuro il logo caricato puo' sparire: ne esiste una
+                   copia sola, e quella del Vecchio Frantoio e' inchiostro nero
+                   su trasparente. Il riquadro chiaro lo tiene leggibile
+                   qualunque cosa venga caricata, senza chiedere al ristoratore
+                   due file o un PNG con lo sfondo. */
+                <img
+                  src={tenantLogo}
+                  alt={tenantName || PLATFORM_NAME}
+                  className="h-16 w-auto dark:rounded-[12px] dark:bg-white dark:p-1.5"
+                />
+              ) : (
+                <>
+                  <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-7 w-auto dark:hidden" />
+                  <img src="/logo-sympotia-white.svg" alt={PLATFORM_NAME} className="hidden h-7 w-auto dark:block" />
+                </>
+              )
             )}
           </div>
           <button
@@ -2181,6 +2214,23 @@ const App: React.FC = () => {
             </div>
           )}
         </div>
+
+        {/* Sympotia in fondo, spento: in testa ora c'e' il marchio del
+            ristorante, ma il prodotto ha comunque diritto a firmarsi. In fondo
+            e in grigio dice "questo lo fa Sympotia" senza contendere la
+            testata a chi la barra la usa tutto il giorno.
+
+            Il wordmark e' nero o bianco fisso — due SVG, non un font — quindi
+            il grigio si ottiene con l'opacita'. Sparisce a barra chiusa: a
+            76px resterebbe un mozzicone illeggibile. E sparisce anche quando
+            in testa non c'e' un logo caricato, o Sympotia comparirebbe due
+            volte nella stessa colonna. */}
+        {!sidebarCollapsed && tenantLogo && (
+          <div className="flex flex-shrink-0 items-center justify-center px-3 pb-4 pt-1">
+            <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-4 w-auto opacity-35 dark:hidden" />
+            <img src="/logo-sympotia-white.svg" alt={PLATFORM_NAME} className="hidden h-4 w-auto opacity-35 dark:block" />
+          </div>
+        )}
       </aside>
 
       {/* Main Content - Add bottom padding on mobile for bottom nav */}
@@ -2197,9 +2247,22 @@ const App: React.FC = () => {
             z-20) or the dropdown paints behind them. Mobile stays z-10 — the
             bottom-sheet backdrop (z-[29]) has to dim the header there. */}
         <header className="flex-shrink-0 h-16 md:h-[72px] m-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] z-10 md:z-30 flex items-center justify-between px-3 md:px-4">
-           <div className="flex items-center gap-2.5 lg:hidden">
-              <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-6 w-auto dark:hidden" />
-              <img src="/logo-sympotia-white.svg" alt={PLATFORM_NAME} className="hidden h-6 w-auto dark:block" />
+           {/* `pl-2` sopra al `px-3` della testata: il marchio ha aria propria
+               dentro l'immagine solo sopra e sotto, ai lati arriva al bordo, e
+               attaccato alla curva della card sembrava scivolato fuori. */}
+           <div className="flex items-center gap-2.5 pl-2 lg:hidden">
+              {tenantLogo ? (
+                <img
+                  src={tenantLogo}
+                  alt={tenantName || PLATFORM_NAME}
+                  className="h-11 w-auto dark:rounded-[10px] dark:bg-white dark:p-1"
+                />
+              ) : (
+                <>
+                  <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-6 w-auto dark:hidden" />
+                  <img src="/logo-sympotia-white.svg" alt={PLATFORM_NAME} className="hidden h-6 w-auto dark:block" />
+                </>
+              )}
            </div>
 
            {/* Desktop date/time/shift control group. Uses flex-1 (not a fixed
