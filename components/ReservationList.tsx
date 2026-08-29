@@ -4304,31 +4304,31 @@ export const ReservationList: React.FC<ReservationListProps> = ({
               onClick: () => setShowUnassignedModal(true),
               title: 'Tocca per vedere le prenotazioni senza tavolo',
             }] : []),
+            // Liberi e occupati come segmenti pieni della strip (scelta di
+            // Marco, 29/08: qui il tint marca i due numeri che si cercano al
+            // volo, non un'azione): verde quando c'è posto, rosso quando è
+            // impegnato — a zero restano neutri, un verde "0 liberi"
+            // racconterebbe il contrario del vero.
+            {
+              value: totalTablesInRoom - occupiedTablesCount,
+              label: totalTablesInRoom - occupiedTablesCount === 1 ? 'libero' : 'liberi',
+              ...(totalTablesInRoom - occupiedTablesCount > 0
+                ? { tone: 'positive' as const, tint: true }
+                : {}),
+              hideBelow: 'sm' as const,
+            },
+            {
+              value: occupiedTablesCount,
+              label: occupiedTablesCount === 1 ? 'occupato' : 'occupati',
+              ...(occupiedTablesCount > 0
+                ? { tone: 'critical' as const, tint: true }
+                : {}),
+              hideBelow: 'sm' as const,
+            },
             {
               value: `${occupiedTablesCount}/${totalTablesInRoom}`,
               label: `tavoli (${occupancyPercentage}%)`,
               hideBelow: 'md' as const,
-              // Le stesse pill del modal di scelta tavoli (PR #325), in
-              // versione compatta: il numero secco di liberi/occupati si
-              // legge senza fare la sottrazione a mente.
-              suffix: (
-                <span className="ml-1 flex flex-shrink-0 items-center gap-1.5">
-                  <span className={`inline-flex h-7 items-baseline gap-1 rounded-full border px-2.5 leading-7 ${
-                    totalTablesInRoom - occupiedTablesCount > 0
-                      ? 'border-[var(--ds-seated-solid)] bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
-                      : 'border-[var(--ds-border-strong)] bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]'
-                  }`}>
-                    <span className="text-[15px] font-bold tabular-nums">{totalTablesInRoom - occupiedTablesCount}</span>
-                    <span className="text-[12px] font-medium">{totalTablesInRoom - occupiedTablesCount === 1 ? 'libero' : 'liberi'}</span>
-                  </span>
-                  {occupiedTablesCount > 0 && (
-                    <span className="inline-flex h-7 items-baseline gap-1 rounded-full border border-[var(--ds-critical-solid)] bg-[var(--ds-critical-tint)] px-2.5 leading-7 text-[var(--ds-critical-text)]">
-                      <span className="text-[15px] font-bold tabular-nums">{occupiedTablesCount}</span>
-                      <span className="text-[12px] font-medium">{occupiedTablesCount === 1 ? 'occupato' : 'occupati'}</span>
-                    </span>
-                  )}
-                </span>
-              ),
             },
           ]}
         />
