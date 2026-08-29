@@ -101,7 +101,7 @@ semantic:
     action-bg:           "#111827"
     action-bg-hover:     "#000000"
     action-fg:           "#FFFFFF"
-    backdrop:            "rgba(11, 11, 13, 0.40)"
+    backdrop:            "rgba(11, 11, 13, 0.50)"   # heavier than dark's, deliberately — see below
 
   dark:
     canvas:              "#0B0B0D"   # [D] darkest — depth runs the other way
@@ -395,7 +395,15 @@ the structure never changes.
 | `critical` | Failed, empty, destructive | Esaurito, attività scadute, cancel |
 | `neutral` | No state | Default rows, free tables |
 
-Slots: `tint`, `tint-border`, `text`, `solid`, `solid-fg`.
+Slots: `tint`, `text`, `solid`, `solid-fg`.
+
+`tint-border` is listed against each family below but **is not implemented** — there is no
+`--ds-*-tint-border` in `index.css`. It was drawn as the hairline that would let a tinted
+pill read as a shape on the canvas, and measured against that job it does not work: at
+`arriving` it is 1.08:1 against `--ds-canvas`, where the fill it was meant to rescue is
+1.03:1. Pills take a neutral `border-strong` hairline instead (§7.4). Either build the slot
+for a purpose it can serve, or drop it from the families — do not reach for it expecting a
+border to exist.
 
 ### 3.3 Amber takes dark text
 
@@ -684,8 +692,15 @@ these only nudge it.
 
 **Input** [der] — height 44 (mobile) / 40 (desktop), `surface` fill, `border` hairline,
 `rounded.md`, 14px horizontal padding, `body` type. Placeholder `text-subtle`. Focus: 2px
-`border-focus` ring, 2px offset. Error: `critical` tint border plus message below. Disabled:
-`surface-row` fill, `text-subtle`, `cursor: not-allowed`.
+`border-focus` ring, 2px offset. Error: append **`dsInputError`** — a `critical.solid`
+hairline ring — and put the message below via `Field`'s `error`. Disabled: `surface-row`
+fill, `text-subtle`, `cursor: not-allowed`.
+
+It is a modifier appended to `dsInput` / `dsSelect` / `dsTextarea`, not a variant of them:
+those three are plain strings consumed in some two dozen places, and turning them into
+functions would break every one. The focus ring deliberately wins over the error ring while
+the control is focused — mid-correction the field should say "you are here", not "still
+wrong".
 
 **Textarea** [der] — as Input, `rounded.lg`, min-height 96px, vertical resize only.
 
@@ -705,14 +720,42 @@ fills `action-bg` with a white glyph. A circular variant is used in task lists.
 `action-bg` track. Transition at `motion.fast`. For immediate-effect settings only — never as
 a form field requiring a save.
 
-**Field** [der] — the composite wrapper: label (`label` type, `text-secondary`) → control →
-helper (`caption`, `text-muted`) or error (`caption`, `critical.text`). Error **replaces**
-helper. Wires `htmlFor`, `aria-describedby`, and `aria-invalid` automatically.
+**Field** [impl] — the composite wrapper: label (`label` type, `text-secondary`) → control →
+helper (`caption`, `text-muted`) or error (`caption`, `critical.text`, with a leading
+`AlertCircle` so the state is not carried by colour alone). Error **replaces** helper.
 
-**DatePicker / TimePicker** [der] — Popover containing a grid of day cells at `rounded.md`,
-44px minimum. Today: `border-focus` ring. Selected: `action-bg` fill. Availability may be
-shaded using the `intensity` ramp of the relevant service. Always pair with a typable text
-input — never calendar-only.
+**The caller wires the ARIA, not the component.** `Field` renders the message with
+`id={fieldErrorId(htmlFor)}` — i.e. `"<htmlFor>-error"` — and the control passes
+`aria-invalid` and `aria-describedby` itself:
+
+```tsx
+<Field htmlFor="email" error={err}>
+  <input id="email" aria-invalid={!!err} aria-describedby={err ? fieldErrorId('email') : undefined} … />
+</Field>
+```
+
+An earlier draft of this document promised automatic wiring. Doing it would mean cloning
+`children` to inject props, and `children` is not reliably a single control — the password
+field passes a wrapper holding the input *and* its reveal button, and a clone would land
+the attributes on the wrapper. The convention is explicit instead.
+
+Pair the error with `dsInputError` on the control (§7.2, Input) so the field itself carries
+the state, not just the text below it.
+
+**DatePicker** [impl] — `MonthGrid` plus `DayPicker` in `ds/Calendar.tsx`, Monday-first with
+`L M M G V S D` headers, 36px round day cells, today ringed and the selection filled. It
+models a range (`from`/`to`); a single day is the same two values. `minIso` disables days
+before a floor and hides the arrow into a month that is entirely behind it. Anchored under
+its trigger from `sm` up; below that it becomes a centred panel with its own scrim, because
+a popover hung off a control inside a scrolling modal loses half the month off-screen.
+
+**TimePicker** [impl] — not a popover: a row of slot cells, one per opening-hours slot, each
+a bar over the time and the covers already booked into it. The bar is the load — `seated`
+under 15% of the room's seats, `pending` up to 30%, `critical` above — so choosing a time
+and reading how full it already is are the same glance. Selecting is the whole control;
+there is no separate dropdown repeating the same values. A saved time that has since left
+the grid is appended rather than dropped, or opening an old booking would silently blank
+its hour.
 
 **SearchField** [obs] — pill at `rounded.full`, 44px, leading search glyph, trailing clear
 button once there is a value. **Always visible, never behind a toggle:** on a list you filter
@@ -780,7 +823,14 @@ Choosing a fill:
 - **no badge** — a count that describes the size of a collection rather than a backlog.
   Render it as a plain `text-muted` number.
 
-**StatusPill** [obs] — pill at `rounded.full`, 24px tall, `states.X.tint` fill with the
+**StatusPill** [impl] — carries a `border-strong` hairline (`ring-1 ring-inset`, so the fixed
+height is not eaten by a border). The tints are pale enough to sit at 1.03–1.07:1 of
+*luminance* against the canvas — they separate by hue, not by lightness, so in dim light or
+for a reader who discriminates colour poorly the row flattens into one grey band. The text
+clears 5.9:1 in every tone, so the hairline is not a WCAG requirement: it is definition, not
+compliance.
+
+Pill at `rounded.full`, 24px tall, `states.X.tint` fill with the
 family's `text` colour. Carries a state as words. Where the state can be changed it gains a
 leading dot and a trailing chevron and becomes a button; where it is read-only it stays a
 `<span>`. **The dot is what makes it survive a colour-blind reader**, per §4.3.
@@ -903,6 +953,14 @@ way back. A screen you can leave *only* through the tab bar never hides it.
 `card-padding`. Backdrop uses the `backdrop` token at `z.overlay`; content at `z.modal`.
 Focus trapped, Escape closes, focus returns to the trigger. At `<md` becomes a bottom sheet:
 full-width, top corners only, slide up at `motion.slow`.
+
+**The light backdrop is heavier than the dark one** — 0.50 against 0.60, which is a smaller
+gap than the raw numbers suggest and is deliberate in direction. In dark the page underneath
+is already spent and the dialog separates itself by being the only lit thing in the frame, so
+the scrim carries almost nothing. In light the page is bright and competes, and the scrim is
+the whole of the separation. Reading the two numbers as "light should be lower" is the trap:
+0.50 takes a white surface down to `#858586`, which reads as behind glass. Past that, around
+0.60 in light, the app stops looking backgrounded and starts looking switched off.
 
 **The footer stacks by default and stays in a row on request.** Below `sm` its two groups drop
 onto their own full-width rows, which is right for a footer of labelled buttons a thumb wants
@@ -1166,9 +1224,12 @@ and `prefers-reduced-motion` on first load.
 components/
   ds/                    # design system primitives (§7)
     ModalShell.tsx       # the modal frame
-    FormPrimitives.tsx   # FormCard, Field, Stepper, SegmentedControl, dsInput/Select/Textarea, dsButton
+    FormPrimitives.tsx   # FormCard, Field, fieldErrorId, Stepper, SegmentedControl,
+                         # dsInput/Select/Textarea, dsInputError, dsButton
     ListPrimitives.tsx   # SplitPane, PaneHeader, SectionHeader, StatStrip, StatusPill, CountBadge,
                          # SearchField, Avatar, Callout, EmptyState, dsIconButton, useMediaQuery
+    Calendar.tsx         # MonthGrid, DayPicker — one month grid for the whole app
+    AttachmentRow.tsx    # a queued file inside a composer
     SwipeRow.tsx         # swipe actions + first-run hint
     index.ts             # barrel export — import from './ds', never from a file
   <screen>.tsx           # domain screens, composing ds/

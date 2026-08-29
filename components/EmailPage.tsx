@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Mail, Send, Loader2, RefreshCw, CheckCircle2, Clock, AlertTriangle, ArrowRight, Check, ArrowDownLeft, ArrowUpRight, Reply, Paperclip, X as XIcon, FolderOpen } from 'lucide-react';
+import { Mail, Send, Loader2, RefreshCw, CheckCircle2, Clock, AlertTriangle, ArrowRight, Check, ArrowDownLeft, ArrowUpRight, Reply, Paperclip, FolderOpen } from 'lucide-react';
 import { Loader } from './Loader';
 import { SkeletonInboxList, SkeletonEmailThread } from './SkeletonCards';
 import {
@@ -16,7 +16,7 @@ import { toTitleCase } from '../utils/text';
 import {
   ModalShell, FormCard, Field, SearchField, Callout, SplitPane, SectionHeader,
   Avatar, EmptyState, SwipeRow, useFirstRunHint, PanePlaceholder, PaneHeader, CountBadge,
-  dsInput, dsTextarea, dsButton, dsIconButton,
+  dsInput, dsTextarea, dsButton, dsIconButton, AttachmentRow,
 } from './ds';
 
 const formatRelative = (iso: string | null): string => {
@@ -370,25 +370,19 @@ const EmailPage: React.FC = () => {
   // Chips degli allegati pronti a partire e pannello della libreria: stessi
   // pezzi nel composer di risposta e nel modal "Nuova email", quindi vivono
   // qui una volta sola.
-  const renderAttachmentChips = () => attachments.map(a => (
-    <span
+  /* Gli allegati stanno dentro la scheda del composer, sotto l'oggetto: sono
+     parte della mail che si sta scrivendo, e sopra l'oggetto sembravano
+     appartenere al thread. Nessuna anteprima — qui il file caricato ha un URL
+     solo dopo l'invio (`mediaUrl` vuole un messageId), quindi la riga porta la
+     targhetta del tipo. */
+  const renderAttachmentRows = () => attachments.map(a => (
+    <AttachmentRow
       key={a.token}
-      className="inline-flex max-w-[220px] items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] py-1 pl-3 pr-1.5 text-[13px] text-[var(--ds-text-primary)]"
-    >
-      <Paperclip className="h-3.5 w-3.5 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
-      <span className="truncate">{a.filename || a.content_type}</span>
-      <span className="flex-shrink-0 text-[12px] text-[var(--ds-text-muted)]">
-        {Math.max(1, Math.round(a.size_bytes / 1024))} KB
-      </span>
-      <button
-        type="button"
-        onClick={() => setAttachments(prev => prev.filter(x => x.token !== a.token))}
-        aria-label={`Togli ${a.filename || 'allegato'}`}
-        className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)]"
-      >
-        <XIcon className="h-3 w-3" />
-      </button>
-    </span>
+      filename={a.filename}
+      contentType={a.content_type}
+      sizeBytes={a.size_bytes}
+      onRemove={() => setAttachments(prev => prev.filter(x => x.token !== a.token))}
+    />
   ));
 
   const renderLibreria = () => (
@@ -671,9 +665,6 @@ const EmailPage: React.FC = () => {
 
               {/* Reply composer: subject and body as cards, send inside the body. */}
               <div className="flex-shrink-0 space-y-2 px-4 pb-4 pt-3 sm:px-6 lg:px-8">
-                {attachments.length > 0 && (
-                  <div className="flex flex-wrap gap-2">{renderAttachmentChips()}</div>
-                )}
                 {libreriaAperta && renderLibreria()}
                 <input
                   type="text"
@@ -683,7 +674,11 @@ const EmailPage: React.FC = () => {
                   aria-label="Oggetto"
                   className="h-11 w-full rounded-full bg-[var(--ds-surface)] px-4 text-[15px] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 />
-                <div className="flex items-end gap-2 rounded-[24px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
+                <div className="rounded-[24px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
+                  {attachments.length > 0 && (
+                    <div className="mb-2 flex flex-wrap gap-1.5">{renderAttachmentRows()}</div>
+                  )}
+                  <div className="flex items-end gap-2">
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
@@ -722,6 +717,7 @@ const EmailPage: React.FC = () => {
                   >
                     {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   </button>
+                  </div>
                 </div>
                 {sendError && (
                   <p className="px-1 text-[13px] text-[var(--ds-critical-text)]">{sendError}</p>
@@ -792,7 +788,7 @@ const EmailPage: React.FC = () => {
             <Field label="Allegati">
               <div className="space-y-2">
                 {attachments.length > 0 && (
-                  <div className="flex flex-wrap gap-2">{renderAttachmentChips()}</div>
+                  <div className="flex flex-wrap gap-1.5">{renderAttachmentRows()}</div>
                 )}
                 <div className="flex gap-2">
                   <button

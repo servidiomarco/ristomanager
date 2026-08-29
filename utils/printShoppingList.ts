@@ -1,5 +1,5 @@
 import { ShoppingCategory, ShoppingItem } from '../services/shoppingApiService';
-import { printHtmlDocument } from './printDocument';
+import { printHtmlDocument, PRINT_TOKENS_CSS } from './printDocument';
 
 const ITALIAN_DATE_OPTS: Intl.DateTimeFormatOptions = {
   weekday: 'long',
@@ -126,6 +126,7 @@ export const printShoppingList = (items: ShoppingItem[], options: PrintOptions):
 <meta charset="utf-8" />
 <title>Lista della spesa — ${escapeHtml(options.title)}</title>
 <style>
+${PRINT_TOKENS_CSS}
   * { box-sizing: border-box; }
   body {
     font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
@@ -142,14 +143,14 @@ export const printShoppingList = (items: ShoppingItem[], options: PrintOptions):
   }
   h1 { margin: 0 0 6px; font-size: 26px; color: #1e1b4b; }
   .section { color: ${accent}; font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
-  .date { color: #475569; font-size: 13px; margin-top: 4px; text-transform: capitalize; }
-  .subtitle { color: #475569; font-size: 13px; margin-top: 4px; }
+  .date { color: var(--ds-print-ink-secondary); font-size: 13px; margin-top: 4px; text-transform: capitalize; }
+  .subtitle { color: var(--ds-print-ink-secondary); font-size: 13px; margin-top: 4px; }
   .summary {
     display: inline-block;
     margin-top: 8px;
     padding: 4px 10px;
-    background: #f1f5f9;
-    color: #475569;
+    background: var(--ds-print-fill);
+    color: var(--ds-print-ink-secondary);
     border-radius: 999px;
     font-size: 12px;
     font-weight: 600;
@@ -160,15 +161,15 @@ export const printShoppingList = (items: ShoppingItem[], options: PrintOptions):
     align-items: flex-start;
     gap: 12px;
     padding: 10px 0;
-    border-bottom: 1px dashed #e2e8f0;
+    border-bottom: 1px dashed var(--ds-print-rule);
     page-break-inside: avoid;
   }
-  li.checked .name { text-decoration: line-through; color: #94a3b8; }
+  li.checked .name { text-decoration: line-through; color: var(--ds-print-ink-subtle); }
   .box {
     flex: 0 0 auto;
     width: 18px;
     height: 18px;
-    border: 2px solid #94a3b8;
+    border: 2px solid var(--ds-print-ink-subtle);
     border-radius: 4px;
     display: inline-flex;
     align-items: center;
@@ -177,16 +178,16 @@ export const printShoppingList = (items: ShoppingItem[], options: PrintOptions):
     color: #1e293b;
     margin-top: 1px;
   }
-  li.checked .box { background: #e2e8f0; border-color: #64748b; }
+  li.checked .box { background: var(--ds-print-rule); border-color: var(--ds-print-ink-muted); }
   .content { flex: 1 1 auto; min-width: 0; }
   .name { font-size: 15px; font-weight: 500; color: #1e293b; }
   .qty {
     display: inline-block;
     margin-right: 8px;
     padding: 1px 6px;
-    background: #f1f5f9;
+    background: var(--ds-print-fill);
     color: #1e293b;
-    border: 1px solid #cbd5e1;
+    border: 1px solid var(--ds-print-rule-strong);
     border-radius: 4px;
     font-size: 12px;
     font-weight: 600;
@@ -204,7 +205,7 @@ export const printShoppingList = (items: ShoppingItem[], options: PrintOptions):
     font-weight: 500;
     vertical-align: middle;
   }
-  .meta { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+  .meta { font-size: 11px; color: var(--ds-print-ink-subtle); margin-top: 2px; }
   .cat-heading {
     margin: 18px 0 6px;
     font-size: 13px;
@@ -212,12 +213,12 @@ export const printShoppingList = (items: ShoppingItem[], options: PrintOptions):
     text-transform: uppercase;
     letter-spacing: 0.08em;
   }
-  .empty { padding: 24px 0; color: #94a3b8; font-size: 14px; text-align: center; }
+  .empty { padding: 24px 0; color: var(--ds-print-ink-subtle); font-size: 14px; text-align: center; }
   footer {
     margin-top: 32px;
     padding-top: 12px;
-    border-top: 1px solid #e2e8f0;
-    color: #94a3b8;
+    border-top: 1px solid var(--ds-print-rule);
+    color: var(--ds-print-ink-subtle);
     font-size: 11px;
     text-align: center;
   }

@@ -99,6 +99,21 @@ const endOfCurrentWeek = (from: Date): string => {
 const endOfCurrentMonth = (from: Date): string =>
   formatLocalDate(new Date(from.getFullYear(), from.getMonth() + 1, 0));
 
+/* ── Quanto urge il saldo ─────────────────────────────────────────────────
+   Un banchetto nasce sempre non pagato, quindi "manca l'incasso" da solo non
+   dice niente: dipingerlo di rosso vorrebbe dire una lista rossa dal primo
+   giorno, e un rosso sempre acceso smette di essere un segnale. È il
+   calendario a decidere — la stessa idea di `getTimedReservationState`, dove
+   lo stato si carica avvicinandosi all'ora.
+
+   `pending` finché l'evento è lontano: c'è da incassare, con calma.
+   `critical` da fine settimana in giù, passati compresi (una data già scaduta
+   è <= weekEnd): sta per succedere, o è successo, e i soldi non ci sono.
+
+   Senza data non è imminente per definizione, quindi resta `pending`. */
+const isOutstandingUrgent = (menu: BanquetMenu, weekEnd: string): boolean =>
+  !!menu.event_date && menu.event_date <= weekEnd;
+
 const banquetGroupFor = (menu: BanquetMenu, today: string, weekEnd: string, monthEnd: string): BanquetGroupKey => {
   const date = menu.event_date;
   // No date yet: it is still being planned, so it belongs with what is coming
@@ -889,7 +904,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       const paid = Number(b.total_paid || 0);
       return s + Math.max(0, due - paid);
     }, 0);
-    return { count: upcoming.length, covers, outstanding };
+    // La somma è quasi sempre > 0 — ogni banchetto nasce da pagare — quindi da
+    // sola non merita il rosso. Si accende se almeno un evento entro fine
+    // settimana (o già passato) è ancora scoperto: lì sì che c'è da correre.
+    const weekEnd = endOfCurrentWeek(new Date());
+    const urgent = upcoming.some(b =>
+      Math.max(0, computeBanquetTotalDue(b) - Number(b.total_paid || 0)) > 0
+      && isOutstandingUrgent(b, weekEnd)
+    );
+    return { count: upcoming.length, covers, outstanding, urgent };
   }, [banquetMenus]);
 
   const BANQUET_SORT_OPTIONS: { value: BanquetSortBy; label: string }[] = [
@@ -954,7 +977,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               <span className="font-normal">coperti prenotati</span>
             </StatusPill>
             {canViewBanquetPrice && banquetKpis.outstanding > 0 && (
-              <StatusPill tone="pending" className="h-8 px-3">
+              <StatusPill tone={banquetKpis.urgent ? 'critical' : 'pending'} className="h-8 px-3">
                 <span className="font-semibold tabular-nums">€ {formatEuro(banquetKpis.outstanding)}</span>
                 <span className="font-normal">da incassare</span>
               </StatusPill>
@@ -1388,11 +1411,34 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 // Guard the divide: a banquet with no price yet has due = 0, and
                 // 0/0 would paint a full bar on something nobody has paid for.
                 const paidRatio = due > 0 ? Math.min(1, paid / due) : 0;
+                // Rosso solo se l'evento è entro fine settimana (o già passato).
+                const urgent = outstanding > 0 && isOutstandingUrgent(menu, endOfCurrentWeek(new Date()));
 
                 const courseCount = menu.courses && menu.courses.length > 0 ? menu.courses.length : null;
                 const dishCount = menu.courses && menu.courses.length > 0
                   ? menu.courses.reduce((sum, c) => sum + c.dish_ids.length, 0)
                   : menu.dish_ids.length;
+
+                /* Gli stessi tre numeri, due volte: la striscia da desktop li
+                   incolonna e ha ~110px a testa, la lista da mobile ha tutta la
+                   riga. Da larghi "3/5" con l'etichetta accanto sta; da stretti
+                   la frase intera si legge senza doverla decifrare. Il valore lo
+                   si calcola qui una volta, così le due rese non possono
+                   divergere. */
+                /* Le note sono tre caselle fisse — cucina, sala, mise en place —
+                   non una lista, quindi il conteggio non passa mai 3: dice su
+                   quante aree c'è qualcosa da leggere, non quanto. Il testo
+                   sta nella scheda di dettaglio e nelle stampe. */
+                const notesCount = [menu.notes_courses, menu.notes_service, menu.notes_mise_en_place]
+                  .filter(n => n?.trim()).length;
+
+                const guestsValue = menu.guests != null && Number(menu.guests) > 0 ? Number(menu.guests) : '—';
+                const priceValue = `€ ${Number(menu.price_per_person) || 0}`;
+                // Senza portate definite resta il solo conteggio dei piatti:
+                // "5 in 0 portate" sarebbe falso.
+                const dishesLong = courseCount != null
+                  ? `${dishCount} in ${courseCount} ${courseCount === 1 ? 'portata' : 'portate'}`
+                  : `${dishCount}`;
 
                 const eventDate = menu.event_date ? new Date(menu.event_date + 'T00:00') : null;
                 const isLunch = menu.shift === Shift.LUNCH;
@@ -1415,11 +1461,21 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     // Raised only while its own menu is open. Grid siblings paint
                     // in DOM order, so without this the dropdown slides under the
                     // next card instead of over it.
-                    className={`flex cursor-pointer flex-col rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] transition-shadow hover:shadow-[var(--ds-shadow-raised)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${isPast ? 'opacity-75' : ''} ${cardMenuOpenId === menu.id ? 'relative z-40' : ''}`}
+                    className={`flex cursor-pointer flex-col rounded-[20px] bg-[var(--ds-surface)] p-5 shadow-[var(--ds-shadow-card)] transition-shadow hover:shadow-[var(--ds-shadow-raised)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${isPast ? 'opacity-75' : ''} ${cardMenuOpenId === menu.id ? 'relative z-40' : ''}`}
                   >
-                      <div className="flex items-start gap-3">
-                          {/* Date tile — the thing you scan a banquet list for. */}
-                          <div className={`flex h-[76px] w-[62px] flex-shrink-0 flex-col items-center justify-center rounded-[16px] ${tileTone}`}>
+                      <div className="flex items-start gap-4">
+                          {/* Date tile — the thing you scan a banquet list for.
+                              Il turno sta in cima: è il primo filtro con cui si
+                              legge la lista (pranzo o cena), e sopra la data fa
+                              da intestazione invece che da coda.
+                              `min-h` invece di `h`: l'altezza la decide il
+                              contenuto più il padding, così le tessere restano
+                              allineate fra loro ma non strozzate. */}
+                          <div className={`flex min-h-[92px] w-[62px] flex-shrink-0 flex-col items-center justify-center rounded-[16px] px-2 py-3 ${tileTone}`}>
+                              {menu.shift && (
+                                isLunch ? <Sun className="mb-1 h-3.5 w-3.5" aria-label="Pranzo" />
+                                        : <Sunset className="mb-1 h-3.5 w-3.5" aria-label="Cena" />
+                              )}
                               {eventDate ? (
                                 <>
                                   <span className="text-[11px] font-semibold leading-none">
@@ -1431,35 +1487,68 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                   </span>
                                 </>
                               ) : (
-                                <span className="px-1 text-center text-[11px] font-medium leading-tight">Senza data</span>
-                              )}
-                              {menu.shift && (
-                                isLunch ? <Sun className="mt-1 h-3.5 w-3.5" aria-label="Pranzo" />
-                                        : <Sunset className="mt-1 h-3.5 w-3.5" aria-label="Cena" />
+                                <span className="text-center text-[11px] font-medium leading-tight">Senza data</span>
                               )}
                           </div>
 
                           <div className="min-w-0 flex-1">
                               <div className="flex items-start justify-between gap-2">
                                   <div className="min-w-0">
-                                      <h3 className="flex items-center gap-1.5 truncate text-[19px] font-semibold leading-tight tracking-[-0.01em] text-[var(--ds-text-primary)]">
-                                        <span className="truncate">{menu.name}</span>
-                                        {(menu.table_ids?.length ?? 0) > 0 && (
-                                          <BookOpen className="h-3.5 w-3.5 flex-shrink-0 text-[var(--ds-text-subtle)]" aria-label="Tavoli assegnati" />
-                                        )}
+                                      <h3 className="truncate text-[19px] font-semibold leading-tight tracking-[-0.01em] text-[var(--ds-text-primary)]">
+                                        {menu.name}
                                       </h3>
                                       {menu.description && (
-                                        <p className="mt-0.5 line-clamp-1 text-[13px] text-[var(--ds-text-muted)]">{menu.description}</p>
+                                        <p className="mt-1 hidden line-clamp-1 text-[13px] text-[var(--ds-text-muted)] sm:block">{menu.description}</p>
+                                      )}
+                                      {/* Da mobile la descrizione se ne va nel blocco
+                                          grigio, quindi qui la pill resta attaccata al
+                                          titolo; da sm segue la descrizione. Una
+                                          posizione sola che funziona in entrambi. */}
+                                      {notesCount > 0 && (
+                                        <StatusPill tone="neutral" className="mt-2 h-7 px-2.5">
+                                          <StickyNote className="h-3.5 w-3.5" aria-hidden />
+                                          {notesCount} {notesCount === 1 ? 'nota' : 'note'}
+                                        </StatusPill>
                                       )}
                                   </div>
                                   <div className="flex flex-shrink-0 items-center gap-1">
+                                      {/* Indicatore, non comando: dice che il
+                                          banchetto ha tavoli assegnati. Sta nella
+                                          fila delle azioni per stare in cerchio
+                                          come le altre, ma resta uno <span> —
+                                          niente hover, niente focus, non finisce
+                                          nella tabulazione. */}
+                                      {(menu.table_ids?.length ?? 0) > 0 && (
+                                      // Stessa base delle due accanto, `dsIconButton`
+                                      // incluso: scritto a mano restava di 36px mentre
+                                      // le altre si risolvevano diverse — fra `h-11`
+                                      // della base e `h-9` qui vince l'ordine del CSS
+                                      // generato, non quello dell'attributo. Gli hover
+                                      // sono rimessi al valore di riposo perché questo
+                                      // non è un comando.
+                                      <span
+                                          className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] shadow-none hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-muted)]`}
+                                          title="Tavoli assegnati"
+                                          aria-label="Tavoli assegnati"
+                                          role="img"
+                                      >
+                                          <BookOpen className="h-4 w-4" />
+                                      </span>
+                                      )}
                                       {canManageBanquetPayments && (
+                                      // Il cerchio è neutro come quello dei tre
+                                      // puntini — la tinta di stato era così
+                                      // pallida da non leggersi come cerchio. Lo
+                                      // stato resta sul glifo, e comunque la riga
+                                      // dell'importo e la barra lo dicono più forte.
                                       <button
                                           onClick={e => { e.stopPropagation(); setPaymentsBanquet(menu); }}
-                                          className={`${dsIconButton} h-9 w-9 shadow-none ${
+                                          className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] shadow-none ${
                                             paymentStatus === 'PAID'
-                                              ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] hover:bg-[var(--ds-seated-tint)] hover:text-[var(--ds-seated-text)]'
-                                              : 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]'
+                                              ? 'text-[var(--ds-seated-text)] hover:text-[var(--ds-seated-text)]'
+                                              : urgent
+                                                ? 'text-[var(--ds-critical-text)] hover:text-[var(--ds-critical-text)]'
+                                                : 'text-[var(--ds-pending-text)] hover:text-[var(--ds-pending-text)]'
                                           }`}
                                           title="Pagamenti"
                                       >
@@ -1526,22 +1615,22 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
                               {/* Three figures, one strip — the shape repeats on every
                                   card so the eye lands on the same spot each time. */}
-                              <div className="mt-3 flex items-stretch rounded-[16px] bg-[var(--ds-surface-row)]">
-                                  <div className="flex-1 px-3 py-2 text-center">
+                              <div className="mt-4 hidden items-stretch rounded-[16px] bg-[var(--ds-surface-row)] sm:flex">
+                                  <div className="flex-1 px-3 py-3 text-center">
                                       <div className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
-                                        {menu.guests != null && Number(menu.guests) > 0 ? Number(menu.guests) : '—'}
+                                        {guestsValue}
                                       </div>
                                       <div className="text-[11px] text-[var(--ds-text-muted)]">coperti</div>
                                   </div>
                                   {canViewBanquetPrice && (
-                                    <div className="flex-1 border-l border-[var(--ds-border)] px-3 py-2 text-center">
+                                    <div className="flex-1 border-l border-[var(--ds-border)] px-3 py-3 text-center">
                                         <div className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
-                                          € {Number(menu.price_per_person) || 0}
+                                          {priceValue}
                                         </div>
                                         <div className="text-[11px] text-[var(--ds-text-muted)]">a persona</div>
                                     </div>
                                   )}
-                                  <div className="flex-1 border-l border-[var(--ds-border)] px-3 py-2 text-center">
+                                  <div className="flex-1 border-l border-[var(--ds-border)] px-3 py-3 text-center">
                                       <div className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
                                         {courseCount != null ? `${courseCount}/${dishCount}` : dishCount}
                                       </div>
@@ -1553,28 +1642,68 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           </div>
                       </div>
 
+                      {/* Solo mobile. I numeri escono dalla colonna della tessera:
+                          rientrati di 78px (tessera piu' gap) i tre incolonnati
+                          mandavano "a persona" a capo. Fuori dalla riga prendono
+                          tutta la scheda — etichetta a sinistra, valore a destra,
+                          allineati su un bordo solo.
+
+                          La descrizione apre il blocco invece di stare sotto al
+                          titolo: li' si troncava a "Menu per...". Il filetto lo
+                          mette ogni riga e lo toglie la prima, cosi' quando la
+                          descrizione manca il bordo non resta appeso sopra
+                          "Coperti". Il padding sta sul contenitore, cosi' i
+                          filetti restano rientrati. */}
+                      <div className="mt-3 rounded-[16px] bg-[var(--ds-surface-row)] px-4 sm:hidden">
+                          {menu.description && (
+                            <p className="line-clamp-2 border-t border-[var(--ds-border)] py-3 text-[13px] text-[var(--ds-text-muted)] first:border-t-0">
+                              {menu.description}
+                            </p>
+                          )}
+                          <div className="flex items-center justify-between gap-3 border-t border-[var(--ds-border)] py-3 first:border-t-0">
+                              <span className="text-[13px] text-[var(--ds-text-muted)]">Coperti</span>
+                              <span className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">{guestsValue}</span>
+                          </div>
+                          {canViewBanquetPrice && (
+                            <div className="flex items-center justify-between gap-3 border-t border-[var(--ds-border)] py-3 first:border-t-0">
+                                <span className="text-[13px] text-[var(--ds-text-muted)]">A persona</span>
+                                <span className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">{priceValue}</span>
+                            </div>
+                          )}
+                          <div className="flex items-center justify-between gap-3 border-t border-[var(--ds-border)] py-3 first:border-t-0">
+                              <span className="text-[13px] text-[var(--ds-text-muted)]">Piatti</span>
+                              <span className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">{dishesLong}</span>
+                          </div>
+                      </div>
+
                       {/* Payment line + how far along the money is. */}
                       {canViewBanquetPrice && due > 0 && (
-                        <div className="mt-3">
-                            <div className="text-[13px]">
+                        <div className="mt-4">
+                            {/* Quanto manca a sinistra, quanto è già entrato in
+                                fondo alla riga, sopra i due capi della barra che
+                                dicono la stessa cosa. L'acconto si mostra anche a
+                                zero: "acconto € 0" è un'informazione, la sua
+                                assenza si legge come un dato che manca. A saldo
+                                fatto sparisce — non c'è più un resto da separare. */}
+                            <div className="flex items-baseline justify-between gap-3 text-[13px]">
                                 {outstanding > 0 ? (
                                   <>
-                                    <span className="font-semibold tabular-nums text-[var(--ds-critical-text)]">€ {formatEuro(outstanding)}</span>
-                                    <span className="text-[var(--ds-text-muted)]"> da incassare</span>
-                                    {paid > 0 && (
-                                      <span className="text-[var(--ds-text-muted)]"> · acconto € {formatEuro(paid)}</span>
-                                    )}
+                                    <span className="min-w-0">
+                                      <span className={`font-semibold tabular-nums ${urgent ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-pending-text)]'}`}>€ {formatEuro(outstanding)}</span>
+                                      <span className="text-[var(--ds-text-muted)]"> da incassare</span>
+                                    </span>
+                                    <span className="flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">acconto € {formatEuro(paid)}</span>
                                   </>
                                 ) : (
-                                  <>
+                                  <span className="min-w-0">
                                     <span className="font-semibold tabular-nums text-[var(--ds-seated-text)]">€ {formatEuro(due)}</span>
                                     <span className="text-[var(--ds-text-muted)]"> saldato</span>
-                                  </>
+                                  </span>
                                 )}
                             </div>
-                            <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-[var(--ds-surface-row)]">
+                            <div className="mt-2.5 h-1 w-full overflow-hidden rounded-full bg-[var(--ds-surface-row)]">
                                 <div
-                                  className={`h-full rounded-full ${outstanding > 0 ? 'bg-[var(--ds-critical-solid)]' : 'bg-[var(--ds-seated-solid)]'}`}
+                                  className={`h-full rounded-full ${outstanding <= 0 ? 'bg-[var(--ds-seated-solid)]' : urgent ? 'bg-[var(--ds-critical-solid)]' : 'bg-[var(--ds-pending-solid)]'}`}
                                   style={{ width: `${Math.round(paidRatio * 100)}%` }}
                                 />
                             </div>
@@ -1919,7 +2048,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   <button
                     type="button"
                     onClick={handleRestoreBanquetDraft}
-                    className="inline-flex h-9 items-center rounded-full bg-[var(--ds-pending-solid)] px-4 text-[13px] font-semibold text-[#ffffff] transition-opacity hover:opacity-90"
+                    // Era bianco su gold: 3.25:1, sotto AA (§3.3), con l'esadecimale
+                    // scritto a mano invece del token. Stesso primary del gemello in
+                    // ReservationList.
+                    className="inline-flex h-9 items-center rounded-full bg-[var(--ds-action-bg)] px-4 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     Riprendi
                   </button>
@@ -2888,6 +3020,7 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
             {selectedBanquets.map(menu => {
               const hasNotes = !!(menu.notes_courses?.trim() || menu.notes_service?.trim() || menu.notes_mise_en_place?.trim());
               const outstanding = Math.max(0, computeBanquetTotalDue(menu) - Number(menu.total_paid || 0));
+              const urgent = outstanding > 0 && isOutstandingUrgent(menu, endOfCurrentWeek(new Date()));
               const isLunch = menu.shift === Shift.LUNCH;
               return (
                 <div
@@ -2927,7 +3060,7 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
                         <p className="mt-1 text-[13px]">
                           {outstanding > 0 ? (
                             <>
-                              <span className="font-semibold tabular-nums text-[var(--ds-critical-text)]">€ {formatEuro(outstanding)}</span>
+                              <span className={`font-semibold tabular-nums ${urgent ? 'text-[var(--ds-critical-text)]' : 'text-[var(--ds-pending-text)]'}`}>€ {formatEuro(outstanding)}</span>
                               <span className="text-[var(--ds-text-muted)]"> da incassare</span>
                             </>
                           ) : (

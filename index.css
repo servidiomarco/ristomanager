@@ -448,10 +448,14 @@ body {
 /* ===========================================================================
    A11y
    ========================================================================= */
+/* L'anello di fuoco globale. Niente `border-radius` qui: la regola valeva per
+   ogni elemento a fuoco e ne sovrascriveva il raggio — stessa specificita' di
+   `.rounded-full`, ma emessa dopo — quindi ogni pillola e ogni bottone tondo si
+   squadravano a 6px proprio mentre li si stava usando. Serviva ad arrotondare
+   il contorno, ma il contorno segue gia' da se' il raggio dell'elemento. */
 *:focus-visible {
   outline: 2px solid var(--color-brand);
   outline-offset: 2px;
-  border-radius: 6px;
 }
 
 /* Skip link */
@@ -670,6 +674,20 @@ body {
   .ds-sheet { animation: fadeIn 160ms ease-out both; }
 }
 
+/* CommandPalette — la ricerca globale cambia forma con la larghezza, e con essa
+   l'entrata: sul telefono e' un foglio che sale dal basso, da sm in su una
+   pillola che galleggia sul velo e sale di pochi pixel. Come per `.ds-sheet`,
+   sta qui e non in una classe Tailwind perche' i due formati vogliono keyframe
+   diversi, e una stringa di classi non puo' scambiare keyframe a un
+   breakpoint. */
+.ds-palette-panel { animation: slideUpSheet 260ms cubic-bezier(0.32, 0.72, 0, 1) both; }
+@media (min-width: 640px) {
+  .ds-palette-panel { animation: tileIn 180ms cubic-bezier(0.32, 0.72, 0, 1) both; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ds-palette-panel { animation: fadeIn 160ms ease-out both; }
+}
+
 /* ===========================================================================
    Print
    ========================================================================= */
@@ -788,7 +806,12 @@ body {
   --ds-cat-5-tint: #EDF2E1;   --ds-cat-5-line: #B5C499;   --ds-cat-5-text: #43591B;   --ds-cat-5-solid: #5A7A24;   /* moss */
   --ds-cat-6-tint: #F7EBE3;   --ds-cat-6-line: #D6B4A0;   --ds-cat-6-text: #774226;   --ds-cat-6-solid: #A05A34;   /* clay */
 
-  --ds-backdrop: rgba(11, 11, 13, 0.40);
+  /* Piu' coprente del corrispettivo scuro, non meno: al buio la pagina di
+     sotto e' gia' spenta e la finestra si stacca da sola perche' e' l'unica
+     cosa chiara, mentre alla luce il fondo e' acceso e va tenuto giu'. A 0.50
+     una superficie bianca scende a #858586: si legge "dietro al vetro" senza
+     sembrare un'app spenta, come inizia a fare 0.60 in chiaro. */
+  --ds-backdrop: rgba(11, 11, 13, 0.50);
 
   --ds-shadow-card: 0 1px 2px rgba(16, 17, 25, 0.04), 0 8px 24px rgba(16, 17, 25, 0.05);
   --ds-shadow-raised: 0 4px 8px rgba(16, 17, 25, 0.06), 0 20px 48px rgba(16, 17, 25, 0.10);

@@ -19,6 +19,34 @@ const FRAME_ID = 'risto-print-frame';
 const PRINTING_CLASS = 'is-printing-frame';
 
 /**
+ * Il livello `--ds-print-*` per i fogli che si costruiscono da soli.
+ *
+ * `printHtmlDocument` scrive l'HTML in un iframe con `doc.write()`: quel
+ * documento è nuovo e non carica `index.css`, quindi le custom property
+ * dichiarate lì nel `:root` dell'app **non** ci arrivano. Un `var(--ds-print-*)`
+ * senza questo blocco non risolve e il colore torna a quello ereditato.
+ *
+ * I valori sono gli stessi di `index.css` (§17) — questa è l'unica copia, e i
+ * tre fogli la includono invece di riscrivere gli esadecimali ciascuno per
+ * conto proprio. Cambiando un valore lì, va cambiato anche qui.
+ *
+ * Come in `index.css` non esiste una variante `.dark`: il foglio esce su carta
+ * bianca qualunque tema abbia l'app aperta dietro.
+ */
+export const PRINT_TOKENS_CSS = `
+  :root {
+    --ds-print-ink: #0f172a;            /* titoli, filetti forti */
+    --ds-print-ink-secondary: #475569;  /* testo di supporto */
+    --ds-print-ink-muted: #64748b;      /* note, unita', vuoti */
+    --ds-print-ink-subtle: #94a3b8;     /* piede pagina */
+    --ds-print-rule-strong: #cbd5e1;    /* separatore di sezione */
+    --ds-print-rule: #e2e8f0;           /* filetto di riga */
+    --ds-print-fill: #f1f5f9;           /* fondo intestazione tabella */
+    --ds-print-positive: #059669;       /* "✓ arrivato" */
+  }
+`;
+
+/**
  * Smonta l'iframe di stampa. Con `frame` valorizzato non fa nulla se nel
  * frattempo è partita una stampa nuova: un timer in ritardo non deve portarsi
  * via il documento di qualcun altro.
