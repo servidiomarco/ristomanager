@@ -900,9 +900,71 @@ export async function createVoiceReservation(
 
 export interface CancelVoiceReservationInput {
     phone: string;          // raw input — will be normalized
+    /** Nome a cui è intestata la prenotazione: fallback quando il telefono
+     *  non trova nulla (il cliente chiama da un numero diverso da quello
+     *  registrato — Tammaro 2026-08-29). */
+    customer_name?: string;
     date: string;           // YYYY-MM-DD
     time?: string;          // HH:MM, used to disambiguate when caller has >1 booking that day
     conversation_id?: string;
+}
+
+// Confronto nomi accent-insensitive: la trascrizione vocale scrive "Tàmmaro",
+// lo staff registra "Tammaro". Lato JS normalizziamo l'input (NFD + strip dei
+// diacritici); lato SQL translate() copre le accentate comuni in italiano.
+const NAME_ACCENTS_FROM = 'ÀÁÂÄàáâäÈÉÊËèéêëÌÍÎÏìíîïÒÓÔÖòóôöÙÚÛÜùúûü';
+const NAME_ACCENTS_TO = 'AAAAaaaaEEEEeeeeIIIIiiiiOOOOooooUUUUuuuu';
+const SQL_NAME_NORMALIZED = `lower(translate(customer_name, '${NAME_ACCENTS_FROM}', '${NAME_ACCENTS_TO}'))`;
+
+function normalizeNameNeedle(input: string | undefined): string {
+    return String(input ?? '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+}
+
+/**
+ * Trova le prenotazioni del giorno da modificare o cancellare: prima per
+ * telefono (ultime 10 cifre, come findCustomerByPhone), poi — solo se il
+ * telefono non ha cifre o non trova nulla — per nome. Restituisce anche le
+ * cancellate: chi chiama distingue tra attive e già annullate.
+ */
+async function findVoiceReservationMatches(
+    tenantId: number,
+    input: { phone: string; customer_name?: string; date: string; time?: string }
+): Promise<any[]> {
+    const columns = `
+        SELECT id, customer_name, reservation_time, shift, guests, table_id, phone,
+               COALESCE(reservation_status, 'CONFIRMED') AS reservation_status,
+               notes, children
+        FROM reservations
+    `;
+    const timeFilter = input.time ? ` AND to_char(reservation_time, 'HH24:MI') = $4` : '';
+    const order = ' ORDER BY reservation_time ASC';
+
+    const last10 = lastTenDigits(input.phone);
+    if (last10) {
+        const params: any[] = [last10, input.date, tenantId];
+        if (input.time) params.push(input.time);
+        const byPhone = await queryWithRetry(`${columns}
+            WHERE tenant_id = $3
+              AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
+              AND DATE(reservation_time) = $2::date${timeFilter}${order}
+        `, params);
+        if (byPhone.rows.length > 0) return byPhone.rows;
+    }
+
+    const needle = normalizeNameNeedle(input.customer_name);
+    if (!needle) return [];
+    const params: any[] = [`%${needle}%`, input.date, tenantId];
+    if (input.time) params.push(input.time);
+    const byName = await queryWithRetry(`${columns}
+        WHERE tenant_id = $3
+          AND ${SQL_NAME_NORMALIZED} LIKE $1
+          AND DATE(reservation_time) = $2::date${timeFilter}${order}
+    `, params);
+    return byName.rows;
 }
 
 export interface CancelCandidate {
@@ -940,56 +1002,24 @@ export async function cancelVoiceReservation(
     tenantId: number,
     input: CancelVoiceReservationInput
 ): Promise<CancelVoiceReservationOutput> {
-    const last10 = lastTenDigits(input.phone);
-
     // Solo prenotazioni del tenant del canale: lo stesso numero potrebbe avere
     // una cena anche in un altro ristorante, e Sofia non deve poterla toccare.
-    const params: any[] = [last10, input.date, tenantId];
-    let sql = `
-        SELECT id, customer_name, reservation_time, shift, guests
-        FROM reservations
-        WHERE tenant_id = $3
-          AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
-          AND DATE(reservation_time) = $2::date
-          AND COALESCE(reservation_status, 'CONFIRMED') <> 'CANCELLED'
-    `;
-    if (input.time) {
-        sql += ` AND to_char(reservation_time, 'HH24:MI') = $4`;
-        params.push(input.time);
-    }
-    sql += ' ORDER BY reservation_time ASC';
+    const rows = await findVoiceReservationMatches(tenantId, input);
+    const active: CancelCandidate[] = rows.filter((r: any) => r.reservation_status !== 'CANCELLED');
 
-    const matches = await queryWithRetry(sql, params);
-    const rows: CancelCandidate[] = matches.rows;
-
-    if (rows.length === 0) {
-        // Nothing active to cancel — check whether the caller is asking us to
-        // cancel something we already cancelled (common after a dashboard test
-        // or a duplicate call). Same filters as above but allowing the
-        // CANCELLED status, so we can tell the caller it's already done.
-        const cancelledParams: any[] = [last10, input.date, tenantId];
-        let cancelledSql = `
-            SELECT id, customer_name, reservation_time, shift, guests
-            FROM reservations
-            WHERE tenant_id = $3
-              AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
-              AND DATE(reservation_time) = $2::date
-              AND COALESCE(reservation_status, 'CONFIRMED') = 'CANCELLED'
-        `;
-        if (input.time) {
-            cancelledSql += ` AND to_char(reservation_time, 'HH24:MI') = $4`;
-            cancelledParams.push(input.time);
-        }
-        cancelledSql += ' ORDER BY reservation_time DESC LIMIT 1';
-        const cancelledResult = await queryWithRetry(cancelledSql, cancelledParams);
-        if (cancelledResult.rows.length > 0) {
-            return { status: 'already_cancelled', reservation: cancelledResult.rows[0] };
+    if (active.length === 0) {
+        // Nothing active to cancel — if we matched something already cancelled
+        // (common after a dashboard test or a duplicate call), tell the caller
+        // it's already done instead of "not found". Rows are ordered ASC, so
+        // the last one is the most recent — same pick as the old DESC LIMIT 1.
+        if (rows.length > 0) {
+            return { status: 'already_cancelled', reservation: rows[rows.length - 1] };
         }
         return { status: 'not_found' };
     }
-    if (rows.length > 1) return { status: 'ambiguous', candidates: rows };
+    if (active.length > 1) return { status: 'ambiguous', candidates: active };
 
-    const target = rows[0];
+    const target = active[0];
     const updated = await queryWithRetry(`
         UPDATE reservations
         SET reservation_status = 'CANCELLED'
@@ -1039,6 +1069,8 @@ function romeWallClock(iso: string | Date): {
 
 export interface ModifyVoiceReservationInput {
     phone: string;              // caller's phone — identifies the reservation
+    /** Nome della prenotazione — stesso fallback di CancelVoiceReservationInput. */
+    customer_name?: string;
     date: string;               // YYYY-MM-DD — original date of the booking
     time?: string;              // HH:MM — used to disambiguate when caller has >1 booking that day
     conversation_id?: string;
@@ -1087,26 +1119,8 @@ export async function modifyVoiceReservation(
     tenantId: number,
     input: ModifyVoiceReservationInput
 ): Promise<ModifyVoiceReservationOutput> {
-    const last10 = lastTenDigits(input.phone);
-
     // 1) Locate the reservation. Same rules as cancel (tenant compreso).
-    const params: any[] = [last10, input.date, tenantId];
-    let sql = `
-        SELECT id, customer_name, reservation_time, shift, guests, table_id, phone,
-               COALESCE(reservation_status, 'CONFIRMED') AS reservation_status,
-               notes, children
-        FROM reservations
-        WHERE tenant_id = $3
-          AND right(regexp_replace(COALESCE(phone, ''), '\\D', '', 'g'), 10) = $1
-          AND DATE(reservation_time) = $2::date
-    `;
-    if (input.time) {
-        sql += ` AND to_char(reservation_time, 'HH24:MI') = $4`;
-        params.push(input.time);
-    }
-    sql += ' ORDER BY reservation_time ASC';
-    const matches = await queryWithRetry(sql, params);
-    const rows = matches.rows;
+    const rows = await findVoiceReservationMatches(tenantId, input);
 
     const active = rows.filter((r: any) => r.reservation_status !== 'CANCELLED');
     if (active.length === 0) {

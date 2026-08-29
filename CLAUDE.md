@@ -156,6 +156,7 @@ Non eseguire task che non sono in coda (`queued`): l'approvazione dalla pagina Ã
 
 ## Conventions
 
+- **`docs/funzionalita-app.md` is the product feature catalogue** (source for the marketing site and the user manual). Any PR that adds, changes, or removes a user-visible feature must update the relevant section there *and* add a row to its "Registro aggiornamenti" table, in the same PR.
 - Commit messages in Italian, matching the existing log (`Riveste Prenotazioni e Reception sul nuovo design system`).
 - Comments explain *why*, and frequently name the production incident a line defends against. Preserve them when refactoring; they are the only record of several fixes.
 - The largest files (`server.ts` 18k, `ReservationList.tsx` 6.9k, `App.tsx` 2.9k) are edited in place rather than split. Locate a region by its section-banner comment before editing, and verify anchors â€” a mis-scoped scripted replace on files this size is difficult to recover from.
