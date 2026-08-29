@@ -10654,13 +10654,22 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
         const cap = Math.min(Math.max(parseInt(limit || '5000', 10) || 5000, 1), 10000);
         // Sub-select counts past NO_SHOW reservations matching this customer's phone.
         // Phone is required on rubrica records, so this is the reliable identifier.
+        // Confronto sulle ULTIME 10 CIFRE nella forma esatta di
+        // idx_reservations_phone_last10 (COALESCE compreso): il vecchio
+        // confronto sull'intera stringa di cifre non combaciava con nessun
+        // indice e faceva una scansione completa di reservations PER OGNI
+        // cliente — 1,4 secondi di risposta con 3.300 clienti in rubrica.
+        // Le ultime 10 cifre sono la chiave telefono canonica del resto
+        // dell'app (inbox, aggancio rubrica), quindi ora i conteggi contano
+        // anche le varianti di prefisso (+39/39/0) dello stesso numero.
         const noShowSubquery = `(
             SELECT COUNT(*)::int
             FROM reservations r
             WHERE r.reservation_status = 'NO_SHOW'
               AND r.tenant_id = c.tenant_id
               AND r.phone IS NOT NULL
-              AND REGEXP_REPLACE(r.phone, '\\D', '', 'g') = REGEXP_REPLACE(c.phone, '\\D', '', 'g')
+              AND right(regexp_replace(COALESCE(r.phone, ''), '\\D', '', 'g'), 10)
+                = right(regexp_replace(COALESCE(c.phone, ''), '\\D', '', 'g'), 10)
         ) AS no_show_count`;
         if (q && q.trim()) {
             const term = `%${q.trim().toLowerCase()}%`;

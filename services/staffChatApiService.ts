@@ -38,6 +38,33 @@ export interface StaffColleague {
   role: string;
 }
 
+// Cache a livello modulo, stesso schema di inboxCache (messagesApiService):
+// StaffChatPage viene smontata a ogni cambio vista, quindi senza cache ogni
+// rientro rifaceva lista e thread da zero — spinner e mezzo secondo di rete
+// per dati appena visti. Si mostra subito l'ultimo stato noto e si rinfresca
+// in background (stale-while-revalidate); App pre-riempie la lista al login
+// e svuota tutto al logout. Le timeline cacheate sono la prima pagina (le
+// ultime 50): riaprire un thread mostra quelle subito, il "carica più
+// vecchi" resta un fetch normale.
+const TIMELINE_CACHE_MAX = 30;
+export const staffChatCache = {
+  list: null as { threads: StaffThreadSummary[]; colleagues: StaffColleague[] } | null,
+  timelines: new Map<string, StaffMessage[]>(),
+  setTimeline(threadKey: string, messages: StaffMessage[]) {
+    // Ri-inserire la chiave la sposta in coda: la prima è sempre la meno recente.
+    this.timelines.delete(threadKey);
+    this.timelines.set(threadKey, messages);
+    if (this.timelines.size > TIMELINE_CACHE_MAX) {
+      const oldest = this.timelines.keys().next().value;
+      if (oldest !== undefined) this.timelines.delete(oldest);
+    }
+  },
+  clear() {
+    this.list = null;
+    this.timelines.clear();
+  },
+};
+
 const getHeaders = (): HeadersInit => {
   const headers: Record<string, string> = {};
   const socketId = socketClient.getSocket()?.id;
@@ -72,6 +99,16 @@ const apiRequest = async <T>(url: string, options: RequestInit = {}): Promise<T>
 class StaffChatApiService {
   async listThreads(): Promise<{ threads: StaffThreadSummary[]; colleagues: StaffColleague[] }> {
     return apiRequest(`${API_URL}/staff-chat/threads`, { headers: getHeaders() });
+  }
+
+  /** Pre-scalda la cache al login, così il primo ingresso in Chat staff
+   *  trova la lista pronta invece dello spinner. Silenzioso: se fallisce,
+   *  la pagina farà comunque il suo fetch. */
+  async prefetchThreads(): Promise<void> {
+    if (staffChatCache.list) return;
+    try {
+      staffChatCache.list = await this.listThreads();
+    } catch { /* niente: il caricamento normale copre */ }
   }
 
   async getMessages(threadKey: string, before?: number): Promise<{ messages: StaffMessage[] }> {

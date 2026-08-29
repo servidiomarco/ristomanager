@@ -73,7 +73,8 @@ import { socketClient } from './services/socketClient';
 import { voiceCallsApiService, voiceCallsCache } from './services/voiceCallsApiService';
 import { messagesApiService, inboxCache } from './services/messagesApiService';
 import { clearConfigCache } from './services/configCache';
-import { staffChatApiService } from './services/staffChatApiService';
+import { staffChatApiService, staffChatCache } from './services/staffChatApiService';
+import { customersCache } from './services/customersCache';
 import { paymentsApiService } from './services/paymentsApiService';
 import { emailApiService, emailCache } from './services/emailApiService';
 import { notificationsApiService } from './services/notificationsApiService';
@@ -559,6 +560,15 @@ const App: React.FC = () => {
   // X-Socket-ID), quindi si riconta anche quando si lascia la vista.
   const [staffChatUnreadCount, setStaffChatUnreadCount] = useState(0);
   const canSeeStaffChat = canAccessView(ViewState.CHAT_STAFF);
+  // Stesso pre-riscaldamento delle altre pagine di comunicazione: la lista
+  // thread è pronta al primo ingresso e la cache muore col logout (insieme
+  // a quella della rubrica clienti, che invece non si pre-scalda: pesa di
+  // più e la pagina non è tra le prime aperte).
+  useEffect(() => {
+    if (!isAuthenticated) { staffChatCache.clear(); customersCache.clear(); return; }
+    if (!canSeeStaffChat) return;
+    staffChatApiService.prefetchThreads();
+  }, [isAuthenticated, canSeeStaffChat]);
   useEffect(() => {
     if (!isAuthenticated || !canSeeStaffChat) return;
     let cancelled = false;

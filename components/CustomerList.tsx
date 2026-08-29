@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Customer, Reservation, BanquetMenu, Shift, Table, Room } from '../types';
 import { getCustomers, createCustomer, updateCustomer, deleteCustomer, getCustomerDuplicates, mergeCustomers, CustomerDuplicateGroup, getLegalSettings, getMarketingAudience } from '../services/apiService';
+import { customersCache } from '../services/customersCache';
+import { swrConfig } from '../services/configCache';
 import { useAuth } from '../contexts/AuthContext';
 import { Search, Plus, Pencil, Trash2, Phone, Mail, MapPin, BookUser, History, UtensilsCrossed, Calendar, Sun, Moon, Users as UsersIcon, Loader2, Star, Armchair, AlertTriangle, Ban, GitMerge, Download, MessageCircle, User as UserIcon, MoreVertical, ArrowLeft } from 'lucide-react';
 import { toTitleCase } from '../utils/text';
@@ -199,13 +201,17 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
   const { hasPermission } = useAuth();
   const canEdit = hasPermission('customers:full');
 
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  // Riparte dall'ultimo stato noto (cache modulo-level): la pagina viene
+  // smontata a ogni cambio vista e senza questo ogni rientro rifaceva il
+  // fetch dell'intera rubrica con lo spinner. Il fetch parte comunque e
+  // rimpiazza in silenzio (stale-while-revalidate).
+  const [customers, setCustomers] = useState<Customer[]>(() => customersCache.list ?? []);
   const [search, setSearch] = useState('');
   // When set, only customers whose name starts with this letter are shown.
   // '#' bucket = names not starting with an A-Z character. Cleared by
   // tapping the active letter again or when a search is typed.
   const [letterFilter, setLetterFilter] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(customersCache.list === null);
   const [error, setError] = useState<string | null>(null);
 
   const [formOpen, setFormOpen] = useState(false);
@@ -239,13 +245,11 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
   const [marketingEnabled, setMarketingEnabled] = useState(true);
   const [exporting, setExporting] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    getLegalSettings()
-      .then(l => { if (!cancelled) setMarketingEnabled(l.legal_mode !== 'simple'); })
-      .catch(() => { /* keep default */ });
-    return () => { cancelled = true; };
-  }, []);
+  // Stessa chiave di ReservationList: il valore in cache arriva subito, il
+  // fetch rinfresca in background (services/configCache).
+  useEffect(() => swrConfig('legalSettings', getLegalSettings, l => {
+    setMarketingEnabled(l.legal_mode !== 'simple');
+  }), []);
 
   // Pull the sanctioned marketing audience (server excludes non-consenting) and
   // download it as CSV — a concrete, consent-safe marketing flow.
@@ -280,6 +284,7 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
   const reloadDuplicates = async () => {
     try {
       const { groups } = await getCustomerDuplicates();
+      customersCache.duplicates = groups;
       setDuplicateGroups(groups);
     } catch {
       // Non-fatal: the duplicates badge just won't show.
@@ -289,7 +294,9 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
 
   useEffect(() => {
     if (!canEdit) return;
+    if (customersCache.duplicates) setDuplicateGroups(customersCache.duplicates);
     reloadDuplicates();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canEdit]);
 
   const duplicatesCount = useMemo(
@@ -318,13 +325,19 @@ export const CustomerList: React.FC<Props> = ({ reservations, banquetMenus, tabl
 
   useEffect(() => {
     let cancelled = false;
-    setIsLoading(true);
+    if (customersCache.list === null) setIsLoading(true);
     getCustomers()
       .then(data => { if (!cancelled) { setCustomers(data); setError(null); } })
-      .catch(err => { if (!cancelled) setError(err?.message || 'Errore caricamento clienti'); })
+      .catch(err => { if (!cancelled && customersCache.list === null) setError(err?.message || 'Errore caricamento clienti'); })
       .finally(() => { if (!cancelled) setIsLoading(false); });
     return () => { cancelled = true; };
   }, []);
+
+  // Specchia in cache ogni cambiamento (fetch, crea/modifica/elimina/unisci):
+  // il prossimo mount riparte da qui invece che dallo spinner.
+  useEffect(() => {
+    if (!isLoading && !error) customersCache.list = customers;
+  }, [customers, isLoading, error]);
 
   useEffect(() => {
     if (autoOpenNew) {
