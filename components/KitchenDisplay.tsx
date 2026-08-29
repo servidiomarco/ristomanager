@@ -647,14 +647,15 @@ const CourseCard: React.FC<{
           {ORDINALS[col.course_no] ?? col.course_no} uscita
           {col.customer_name ? ` · ${col.customer_name}` : ''}
         </div>
-        {/* Comanda cambiata dopo il lancio: la pill nella famiglia pending
-            ("richiede attenzione") apre il dettaglio. 44px: si tocca con le
-            mani in pasta. */}
+        {/* Comanda cambiata dopo il lancio: rosso pieno per scelta di Marco
+            (29/08) — l'ambra tinta annegava fra venti card nel picco, e qui
+            la modifica È un'interruzione: continuare a cucinare un piatto
+            stornato è spreco. 44px: si tocca con le mani in pasta. */}
         {revisions && revisions.length > 0 && onShowRevisions && (
           <button
             type="button"
             onClick={onShowRevisions}
-            className="mt-2 flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-[12px] bg-[var(--ds-pending-tint)] px-3 text-[14px] font-semibold text-[var(--ds-pending-text)] transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="mt-2 flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-[12px] bg-[var(--ds-critical-solid)] px-3 text-[14px] font-semibold text-[var(--ds-critical-fg)] transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <Pencil size={14} aria-hidden />
             modificata{revisions.length > 1 ? ` · ${revisions.length}` : ''}
