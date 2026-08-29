@@ -169,7 +169,7 @@ const MSG = {
     invalidGuests: 'Il numero di ospiti non è valido. Può ripetermi per quante persone vuole prenotare?',
     invalidPhoneCreate: 'Non ho un numero di telefono per la prenotazione. Può dettarmelo?',
     invalidPhoneFind: 'Non ho un numero di telefono a cui associare la prenotazione. Può dettarmelo?',
-    notFound: 'Non trovo una prenotazione a questo numero per la data indicata. Può confermarmi la data esatta?',
+    notFound: 'Non trovo la prenotazione con questi dati. Può confermarmi la data e il nome a cui è registrata?',
     largeGroup: (threshold: number) =>
         `Per gruppi da ${threshold + 1} persone in su preferiamo gestire la prenotazione al telefono. Lascio un promemoria e la richiamiamo il prima possibile.`,
 };
@@ -583,10 +583,18 @@ export async function createReservation(
 export interface CancelReservationParams {
     phone?: any;
     caller_id?: any;
+    /** Nome a cui è intestata la prenotazione: fallback quando il cliente
+     *  chiama da un numero diverso da quello registrato (Tammaro 2026-08-29). */
+    customer_name?: any;
     date?: any;
     time?: any;
     conversation_id?: string;
 }
+
+/** Il primo valore che contiene almeno una cifra: un telefono senza cifre
+ *  (placeholder non sostituito, trascrizione vuota) non identifica nulla. */
+const firstUsablePhone = (...values: any[]): string =>
+    values.map((v) => String(v ?? '').trim()).find((v) => /\d/.test(v)) ?? '';
 
 export async function cancelReservation(
     tenantId: number,
@@ -597,12 +605,12 @@ export async function cancelReservation(
     const conversationId = p.conversation_id;
     const fail = (error: string, message: string): ToolOutcome => ({ body: { success: false, error, message } });
 
-    const callerIdRaw = String(p.caller_id ?? '').trim();
-    const phoneRaw = String(p.phone ?? '').trim() || callerIdRaw;
-    const phoneSource: 'customer' | 'caller_id' | 'none' = String(p.phone ?? '').trim()
-        ? 'customer' : callerIdRaw ? 'caller_id' : 'none';
+    const phoneRaw = firstUsablePhone(p.phone, p.caller_id);
+    const phoneSource: 'customer' | 'caller_id' | 'none' = /\d/.test(String(p.phone ?? ''))
+        ? 'customer' : phoneRaw ? 'caller_id' : 'none';
+    const customerName = String(p.customer_name ?? '').trim() || undefined;
 
-    if (!phoneRaw) return fail('invalid_phone', MSG.invalidPhoneFind);
+    if (!phoneRaw && !customerName) return fail('invalid_phone', MSG.invalidPhoneFind);
     const normalizedDate = d.parseFlexibleDate(p.date);
     if (!normalizedDate) {
         console.warn(`${channel.logPrefix} cancel-reservation rejected: unparseable date`, { received: p.date });
@@ -622,11 +630,12 @@ export async function cancelReservation(
 
     try {
         console.log(`${channel.logPrefix} cancel-reservation start`, {
-            phone_raw: phoneRaw, phone_source: phoneSource,
+            phone_raw: phoneRaw, phone_source: phoneSource, customer_name: customerName,
             normalized_date: normalizedDate, normalized_time: normalizedTime, conversation_id: conversationId,
         });
         const outcome = await d.cancelVoiceReservation(tenantId, {
-            phone: phoneRaw, date: normalizedDate, time: normalizedTime, conversation_id: conversationId,
+            phone: phoneRaw, customer_name: customerName,
+            date: normalizedDate, time: normalizedTime, conversation_id: conversationId,
         });
 
         if (outcome.status === 'not_found') {
@@ -754,9 +763,9 @@ export async function modifyReservation(
     const conversationId = p.conversation_id;
     const fail = (error: string, message: string): ToolOutcome => ({ body: { success: false, error, message } });
 
-    const callerIdRaw = String(p.caller_id ?? '').trim();
-    const phoneRaw = String(p.phone ?? '').trim() || callerIdRaw;
-    if (!phoneRaw) return fail('invalid_phone', MSG.invalidPhoneFind);
+    const phoneRaw = firstUsablePhone(p.phone, p.caller_id);
+    const customerName = String(p.customer_name ?? '').trim() || undefined;
+    if (!phoneRaw && !customerName) return fail('invalid_phone', MSG.invalidPhoneFind);
 
     const normalizedDate = d.parseFlexibleDate(p.date);
     if (!normalizedDate) {
@@ -814,12 +823,14 @@ export async function modifyReservation(
 
     try {
         console.log(`${channel.logPrefix} modify-reservation start`, {
-            phone_raw: phoneRaw, normalized_date: normalizedDate, normalized_time: normalizedTime,
+            phone_raw: phoneRaw, customer_name: customerName,
+            normalized_date: normalizedDate, normalized_time: normalizedTime,
             new_date: newDate, new_time: newTime, new_shift: newShift, new_guests: newGuests,
             new_location: newLocation, has_new_notes: !!newNotes, conversation_id: conversationId,
         });
         const outcome = await d.modifyVoiceReservation(tenantId, {
-            phone: phoneRaw, date: normalizedDate, time: normalizedTime, conversation_id: conversationId,
+            phone: phoneRaw, customer_name: customerName,
+            date: normalizedDate, time: normalizedTime, conversation_id: conversationId,
             new_date: newDate, new_time: newTime, new_shift: newShift, new_guests: newGuests,
             new_location_preference: newLocation, new_notes: newNotes,
         });
