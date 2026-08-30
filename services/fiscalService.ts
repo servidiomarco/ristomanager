@@ -55,6 +55,21 @@ export interface FiscalProviderDriver {
 // l'API vuole su ogni importo.
 export const centsToEuroString = (cents: number): string => (Math.round(cents) / 100).toFixed(2);
 
+// Il provider accetta solo Basic Latin + Latin-1 nei campi testo: e' il
+// pattern XSD di FatturaPA sulle Descrizioni, e l'endpoint e-receipts va
+// dritto in 500 con qualunque carattere fuori range (verificato in sandbox
+// il 29/08/2026 con em-dash ed emoji, entrambi plausibili nei nomi dei
+// piatti). Traslittera la tipografia comune, il resto diventa spazio.
+export const toLatin1 = (s: string): string => String(s)
+    .replace(/[‐-―−]/g, '-')            // trattini tipografici, en/em dash, minus
+    .replace(/[‘’‚‛]/g, "'")       // apici curvi
+    .replace(/[“”„‟]/g, '"')       // virgolette curve
+    .replace(/…/g, '...')
+    .replace(/€/g, 'EUR')                         // il simbolo euro NON e' Latin-1
+    .replace(/[^\x20-\x7E\xA0-\xFF]/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
 // Aliquota (intero %) → vat_rate_code dell'API. Lo 0 non esiste nell'enum:
 // le operazioni a IVA zero viaggiano coi codici natura N1..N6. 'N2' (non
 // soggette) è il default MENO sbagliato per un fuori-campo generico, ma la
@@ -114,7 +129,8 @@ export function buildEReceiptPayload(input: BuildEReceiptInput): EReceiptPayload
         .filter(i => Number(i.qty) > 0 && Number(i.unit_price_cents) > 0)
         .map(i => ({
             quantity: Number(i.qty).toFixed(2),
-            description: String(i.name || 'Articolo').slice(0, 1000),
+            // Un nome tutto-emoji si svuota nella traslitterazione: resta 'Articolo'.
+            description: (toLatin1(String(i.name || '')) || 'Articolo').slice(0, 1000),
             unit_price: centsToEuroString(Number(i.unit_price_cents)),
             vat_rate_code: vatRateToCode(Number(i.vat_rate ?? fallbackVat)),
         }));
@@ -202,8 +218,10 @@ export interface BuildInvoiceInput {
     description: string;      // es. "Somministrazione alimenti e bevande — tavolo 12"
 }
 
+// Ogni nodo testo passa da toLatin1 prima dell'escape: il pattern XSD vale
+// su tutti i campi liberi (Descrizione, Denominazione, Indirizzo, ...).
 const xmlEscape = (s: string): string =>
-    String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    toLatin1(String(s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
              .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 
 // FatturaPA vuole gli importi al NETTO (imponibile) con l'IVA nei riepiloghi
