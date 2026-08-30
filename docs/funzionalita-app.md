@@ -512,6 +512,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-08-30 | Funzionalità trasversali | Al rientro nell'app, se è stata deployata una versione nuova compare un avviso con "Ricarica" — la PWA sospesa non resta più sul codice vecchio. |
 | 2026-08-30 | Impostazioni | Logo in due varianti (normale + tema scuro): l'app scambia l'immagine col tema invece della piastra bianca; per il Frantoio precaricato l'artwork bianco storico. |
 | 2026-08-29 | Impostazioni | Upload del logo del ristorante nell'identità pubblica; compare sulla pagina di prenotazione online (per il Frantoio precaricato il logo storico). |
 | 2026-08-29 | Agente vocale "Sofia" | Modifica/cancellazione: se il numero del chiamante non corrisponde, Sofia ritrova la prenotazione per nome e data (accenti inclusi) o dal numero dettato. |

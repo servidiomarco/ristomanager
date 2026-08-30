@@ -1136,6 +1136,45 @@ const App: React.FC = () => {
     };
   }, [isAuthenticated]);
 
+  // Il rientro ricarica i DATI (sopra) ma mai il CODICE: la PWA di iOS
+  // riprende la sessione sospesa anche dopo giorni e le novità deployate
+  // "non arrivano" finché non si uccide l'app (successo due volte con il
+  // logo, 29-30/08). Al rientro si confronta il bundle hashato servito da
+  // index.html con quello in esecuzione: se differiscono, un toast con
+  // "Ricarica" — mai un reload automatico, che in pieno servizio butterebbe
+  // via una comanda a metà.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const runningSrc = (document.querySelector('script[type="module"][src*="/assets/"]') as HTMLScriptElement | null)?.src;
+    if (!runningSrc) return; // dev server: nessun bundle hashato da confrontare
+    let lastCheck = 0;
+    let promptedFor: string | null = null;
+    const check = async () => {
+      const now = Date.now();
+      if (now - lastCheck < 5 * 60 * 1000) return;
+      lastCheck = now;
+      try {
+        const res = await fetch('/', { cache: 'no-store' });
+        if (!res.ok) return;
+        const m = (await res.text()).match(/assets\/index-[A-Za-z0-9_-]+\.js/);
+        if (!m || runningSrc.includes(m[0]) || promptedFor === m[0]) return;
+        promptedFor = m[0];
+        addToast("C'è una versione aggiornata dell'app", 'info', {
+          duration: 15000,
+          action: { label: 'Ricarica', onClick: () => window.location.reload() },
+        });
+      } catch { /* offline: si riprova al prossimo rientro */ }
+    };
+    const onResume = () => { if (document.visibilityState === 'visible') check(); };
+    document.addEventListener('visibilitychange', onResume);
+    window.addEventListener('pageshow', onResume);
+    check();
+    return () => {
+      document.removeEventListener('visibilitychange', onResume);
+      window.removeEventListener('pageshow', onResume);
+    };
+  }, [isAuthenticated]);
+
   // Caricamento in due tempi (26/08): il boot scarica solo la finestra
   // recente (RESERVATIONS_WINDOW_DAYS indietro + tutto il futuro) e l'app
   // diventa interattiva subito; lo storico arriva in background e si fonde
