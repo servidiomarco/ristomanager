@@ -23621,20 +23621,6 @@ app.get('/menu/catalogue', authenticate, requirePermission('orders:view'), async
     }
 });
 
-app.get('/orders/:id', authenticate, requirePermission('orders:view'), async (req, res) => {
-    try {
-        if (!(await ordersEnabledGuard(req, res))) return;
-        const id = parseInt(req.params.id, 10);
-        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
-        const view = await loadOrderView(req.tenantId!, id);
-        if (!view) return res.status(404).json({ error: 'Comanda non trovata' });
-        res.json(view);
-    } catch (err: any) {
-        console.error('GET /orders/:id error:', err);
-        res.status(500).json({ error: 'Internal server error', detail: err?.message });
-    }
-});
-
 // Comanda aperta su un tavolo — l'ingresso naturale del palmare: il cameriere
 // tocca il tavolo sulla mappa, non conosce l'id della comanda.
 // Tavoli con una comanda APERTA nel servizio, in una chiamata sola.
@@ -23647,6 +23633,12 @@ app.get('/orders/:id', authenticate, requirePermission('orders:view'), async (re
 //
 // Sola lettura, nessun effetto: le due griglie possono adottarla quando
 // conviene, quella di Comande resta com'è finché non la si tocca apposta.
+//
+// PRIMA di /orders/:id, obbligatoriamente: Express dispatcha in ordine di
+// registrazione e la route parametrica catturerebbe «open» come id → 400
+// «id non valido». È il primo bug trovato alla prima esecuzione vera della
+// PR (i 5 test di orders-cassa-tavoli rossi in CI), la stessa classe del
+// caso /prenota/logo.png vs /prenota/:slug.
 app.get('/orders/open', authenticate, requirePermission('orders:view'), async (req, res) => {
     try {
         if (!(await ordersEnabledGuard(req, res))) return;
@@ -23682,6 +23674,20 @@ app.get('/orders/open', authenticate, requirePermission('orders:view'), async (r
     }
 });
 
+
+app.get('/orders/:id', authenticate, requirePermission('orders:view'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(req, res))) return;
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        const view = await loadOrderView(req.tenantId!, id);
+        if (!view) return res.status(404).json({ error: 'Comanda non trovata' });
+        res.json(view);
+    } catch (err: any) {
+        console.error('GET /orders/:id error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
 
 // Stato dei conti per la griglia comande: i tavoli del servizio selezionato
 // con un conto attivo non ancora incassato. Una chiamata sola per tutta la
