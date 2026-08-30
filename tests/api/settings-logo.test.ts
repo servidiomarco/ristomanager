@@ -11,14 +11,33 @@ describe('logo del tenant', () => {
 
     beforeAll(async () => { owner = await ownerToken(); });
 
-    it('la migration precarica il logo storico del tenant 1', async () => {
+    it('la migration precarica il logo storico del tenant 1, in entrambe le varianti', async () => {
         const legal = await api().get('/settings/legal').set(bearer(owner));
         expect(legal.status).toBe(200);
         expect(legal.body.logo_url).toBe('/prenota/logo.png');
+        expect(legal.body.logo_dark_url).toBe('/prenota/logo-dark.png');
 
         const contact = await api().get('/public/contact');
         expect(contact.status).toBe(200);
         expect(contact.body.branding.logo_url).toBe('/prenota/logo.png');
+        expect(contact.body.branding.logo_dark_url).toBe('/prenota/logo-dark.png');
+    });
+
+    it('la variante scura si carica e si rimuove senza toccare quella chiara', async () => {
+        const up = await api().post('/settings/logo').set(bearer(owner))
+            .send({ content_type: 'image/png', data: PNG, variant: 'dark' });
+        expect(up.status).toBe(201);
+        expect(up.body.variant).toBe('dark');
+
+        const legal = await api().get('/settings/legal').set(bearer(owner));
+        expect(legal.body.logo_dark_url).toBe(up.body.logo_url);
+        expect(legal.body.logo_url).toBe('/prenota/logo.png');
+
+        const del = await api().delete('/settings/logo?variant=dark').set(bearer(owner));
+        expect(del.status).toBe(200);
+        const dopo = await api().get('/settings/legal').set(bearer(owner));
+        expect(dopo.body.logo_dark_url).toBe('');
+        expect(dopo.body.logo_url).toBe('/prenota/logo.png');
     });
 
     it('upload: salva, serve i byte dal token pubblico e aggiorna la pagina prenota', async () => {
