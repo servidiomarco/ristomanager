@@ -22831,6 +22831,27 @@ app.get('/sitemap.xml', async (req, res) => {
     }
 });
 
+// Restaurant logo used by the /prenota landing page and the customer emails.
+// Served explicitly rather than via express.static to avoid exposing the whole
+// public/ folder. Two variants: default (dark artwork on transparent) and
+// -dark.png (white artwork) — the email templates swap between them via
+// prefers-color-scheme so the mark stays visible in both light and dark
+// inboxes.
+//
+// PRIMA di /prenota/:slug, obbligatoriamente: Express dispatcha in ordine di
+// registrazione e la slug-route catturerebbe logo.png come nome di ristorante
+// (404 unknown_slug). È già successo — un riordino le aveva messe sotto e i
+// loghi di email e tema scuro sono rimasti rotti in silenzio; il test in
+// prenota-slug.test.ts ora lo impedisce.
+app.get('/prenota/logo.png', (_req, res) => {
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.sendFile(path.join(process.cwd(), 'public', 'logo-vf.png'));
+});
+app.get('/prenota/logo-dark.png', (_req, res) => {
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.sendFile(path.join(process.cwd(), 'public', 'logo-vf-dark.png'));
+});
+
 app.get('/prenota', withPublicTenant(servePrenota));
 app.get('/prenota/:slug', withPublicTenant(servePrenota));
 
@@ -22950,21 +22971,6 @@ app.get(['/privacy', '/informativa-privacy', '/privacy/:slug'], async (req, res)
         console.error('GET /privacy error:', err);
         res.status(500).type('html').send('<p>Informativa temporaneamente non disponibile.</p>');
     }
-});
-
-// Restaurant logo used by the /prenota landing page and the customer emails.
-// Served explicitly rather than via express.static to avoid exposing the whole
-// public/ folder. Two variants: default (dark artwork on transparent) and
-// -dark.png (white artwork) — the email templates swap between them via
-// prefers-color-scheme so the mark stays visible in both light and dark
-// inboxes.
-app.get('/prenota/logo.png', (_req, res) => {
-    res.set('Cache-Control', 'public, max-age=86400');
-    res.sendFile(path.join(process.cwd(), 'public', 'logo-vf.png'));
-});
-app.get('/prenota/logo-dark.png', (_req, res) => {
-    res.set('Cache-Control', 'public, max-age=86400');
-    res.sendFile(path.join(process.cwd(), 'public', 'logo-vf-dark.png'));
 });
 
 // Traduzioni del widget /prenota (Card dev board #33, IT/EN). Servite

@@ -129,4 +129,15 @@ describe('prenotazioni web per tenant (slug e domini, Fase C3)', () => {
         expect(avail.status).toBe(200);
         expect(avail.body.lunch.slots).toEqual(['12:00', '12:30', '13:00']);
     });
+
+    it('i loghi /prenota/logo*.png non vengono catturati dalla slug-route', async () => {
+        // Regressione reale: un riordino delle route aveva messo /prenota/:slug
+        // prima dei loghi, che rispondevano 404 unknown_slug — email e variante
+        // scura della sidebar rotte in silenzio.
+        for (const path of ['/prenota/logo.png', '/prenota/logo-dark.png']) {
+            const res = await api().get(path);
+            expect(res.status).toBe(200);
+            expect(res.headers['content-type']).toContain('image/png');
+        }
+    });
 });
