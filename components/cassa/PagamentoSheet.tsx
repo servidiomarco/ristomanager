@@ -89,9 +89,8 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
       open
       onClose={onClose}
       title={bill?.table_name ? `Incasso · T${bill.table_name}` : 'Incasso'}
-      // Il pannello nasce a due colonne da pagina intera: in md i segmenti
-      // del documento si troncano a «Scontri…». lg è la sua taglia.
-      size="lg"
+      // Tre colonne del pannello embedded: serve tutta la larghezza utile.
+      size="fluid"
       closeOnEscape
       bodyClassName="p-4 sm:p-5"
     >
@@ -154,6 +153,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
           onSettle={settle}
           onSplit={() => setScreen('split')}
           onShowQr={() => setQrBill(bill)}
+          embedded
         />
       )}
 

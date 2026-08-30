@@ -35,10 +35,15 @@ interface PagamentoProps {
   onSettle: (opts: SettleOpts) => void;
   onSplit: () => void;
   onShowQr: () => void;
+  /** Dentro un modal (PagamentoSheet): niente testata propria — il guscio ha
+   *  già titolo e chiusura — e terza colonna su schermo largo, così l'intero
+   *  incasso sta in vista senza scroll. Default false: in CassaPage la resa
+   *  resta identica byte per byte (regola additiva del piano). */
+  embedded?: boolean;
 }
 
 export const Pagamento: React.FC<PagamentoProps> = ({
-  bill, busy, error, fiscalReady, quotaCents, onBack, onSettle, onSplit, onShowQr,
+  bill, busy, error, fiscalReady, quotaCents, onBack, onSettle, onSplit, onShowQr, embedded = false,
 }) => {
   const residual = bill.residual_cents;
   const [movements, setMovements] = useState<BillPaymentInput[]>([]);
@@ -83,8 +88,93 @@ export const Pagamento: React.FC<PagamentoProps> = ({
 
   const field = 'h-12 w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-right text-[17px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
 
+  // I due gruppi «canale» e «documento+conferma» vivono nella colonna destra
+  // in pagina, in una terza colonna dentro il modal: stessi nodi, un solo
+  // posto dove correggerli.
+  const canaleEDocumento = (
+    <>
+      {/* Il secondo gruppo: apre un canale, non registra denaro. */}
+      <h2 className={`${embedded ? '' : 'mt-5 '}text-[13px] font-semibold text-[var(--ds-text-muted)]`}>Chiedi al cliente</h2>
+      <p className="mt-1 text-[12px] text-[var(--ds-text-muted)]">
+        Il conto resta aperto: il residuo scende quando l'ospite paga.
+      </p>
+      <button
+        type="button"
+        onClick={onShowQr}
+        disabled={busy || !bill.share_token}
+        className="mt-2 inline-flex h-11 items-center gap-2 rounded-full bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+      >
+        <QrCode size={16} aria-hidden /> QR al tavolo
+      </button>
+
+      <div className="mt-5">
+        <span className="mb-1.5 block text-[13px] font-medium text-[var(--ds-text-secondary)]">
+          Documento alla chiusura
+        </span>
+        <SegmentedControl<Doc>
+          value={doc}
+          onChange={setDoc}
+          options={[
+            { value: 'Scontrino', label: 'Scontrino' },
+            { value: 'Proforma', label: 'Proforma' },
+            { value: 'Fattura', label: 'Fattura' },
+          ]}
+          ariaLabel="Documento alla chiusura"
+          equalWidth={false}
+          size="sm"
+        />
+        {doc === 'Proforma' && (
+          <p className="mt-1.5 text-[13px] text-[var(--ds-text-muted)]">
+            Il conto si chiude senza documento fiscale. Scontrino e fattura restano
+            emettibili da questo conto, anche domani.
+          </p>
+        )}
+        {doc === 'Fattura' && (
+          <p className="mt-1.5 text-[13px] text-[var(--ds-text-muted)]">
+            Il conto si chiude con proforma e la fattura si emette dal conto, dove
+            ci sono i dati del cessionario. Scontrino e fattura non coesistono.
+          </p>
+        )}
+        {doc === 'Scontrino' && !fiscalReady && (
+          <p className="mt-1.5 text-[13px] text-[var(--ds-text-muted)]">
+            Nessun provider fiscale configurato: lo scontrino non parte davvero.
+          </p>
+        )}
+      </div>
+
+      {error && <Callout tone="critical" className="mt-3">{error}</Callout>}
+
+      <p className={`mt-3 text-[13px] ${math.willSettle ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-critical-text)]'}`}>
+        {math.willSettle
+          ? `Il conto risulterà saldato${tipCents > 0 ? ` · mancia ${euro(tipCents)}` : ''}.`
+          : `Ammanco ${euro(math.shortfall)}: il conto resterà parziale.`}
+      </p>
+
+      <div className="mt-2 flex gap-2">
+        <button
+          type="button"
+          onClick={onSplit}
+          disabled={busy || residual <= 0}
+          className="inline-flex h-12 flex-shrink-0 items-center rounded-full bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
+        >
+          Dividi conto
+        </button>
+        <button
+          type="button"
+          onClick={confirm}
+          disabled={busy}
+          className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-full bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+        >
+          {busy && <Loader2 size={16} className="animate-spin" />}
+          Registra {euro(math.applied + math.recorded)} e chiudi
+        </button>
+      </div>
+    </>
+  );
+
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {!embedded && (
       <div className="mx-auto w-full max-w-[1200px] flex-shrink-0 px-4 pb-3 pt-4 lg:px-8">
         <div className="flex items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
           <button
@@ -106,8 +196,11 @@ export const Pagamento: React.FC<PagamentoProps> = ({
           </StatusPill>
         </div>
       </div>
+      )}
 
-      <div className="mx-auto grid w-full min-h-0 max-w-[1200px] flex-1 gap-4 overflow-y-auto px-4 pb-6 lg:grid-cols-2 lg:px-8">
+      <div className={embedded
+        ? 'grid w-full min-h-0 flex-1 gap-3 overflow-y-auto pb-1 lg:grid-cols-3'
+        : 'mx-auto grid w-full min-h-0 max-w-[1200px] flex-1 gap-4 overflow-y-auto px-4 pb-6 lg:grid-cols-2 lg:px-8'}>
         {/* Riepilogo */}
         <section className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
           <h2 className="text-[13px] font-semibold text-[var(--ds-text-muted)]">Riepilogo</h2>
@@ -254,83 +347,16 @@ export const Pagamento: React.FC<PagamentoProps> = ({
             </div>
           </label>
 
-          {/* Il secondo gruppo: apre un canale, non registra denaro. */}
-          <h2 className="mt-5 text-[13px] font-semibold text-[var(--ds-text-muted)]">Chiedi al cliente</h2>
-          <p className="mt-1 text-[12px] text-[var(--ds-text-muted)]">
-            Il conto resta aperto: il residuo scende quando l'ospite paga.
-          </p>
-          <button
-            type="button"
-            onClick={onShowQr}
-            disabled={busy || !bill.share_token}
-            className="mt-2 inline-flex h-11 items-center gap-2 rounded-full bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
-          >
-            <QrCode size={16} aria-hidden /> QR al tavolo
-          </button>
-
-          <div className="mt-5">
-            <span className="mb-1.5 block text-[13px] font-medium text-[var(--ds-text-secondary)]">
-              Documento alla chiusura
-            </span>
-            <SegmentedControl<Doc>
-              value={doc}
-              onChange={setDoc}
-              options={[
-                { value: 'Scontrino', label: 'Scontrino' },
-                { value: 'Proforma', label: 'Proforma' },
-                { value: 'Fattura', label: 'Fattura' },
-              ]}
-              ariaLabel="Documento alla chiusura"
-              equalWidth={false}
-              size="sm"
-            />
-            {doc === 'Proforma' && (
-              <p className="mt-1.5 text-[13px] text-[var(--ds-text-muted)]">
-                Il conto si chiude senza documento fiscale. Scontrino e fattura restano
-                emettibili da questo conto, anche domani.
-              </p>
-            )}
-            {doc === 'Fattura' && (
-              <p className="mt-1.5 text-[13px] text-[var(--ds-text-muted)]">
-                Il conto si chiude con proforma e la fattura si emette dal conto, dove
-                ci sono i dati del cessionario. Scontrino e fattura non coesistono.
-              </p>
-            )}
-            {doc === 'Scontrino' && !fiscalReady && (
-              <p className="mt-1.5 text-[13px] text-[var(--ds-text-muted)]">
-                Nessun provider fiscale configurato: lo scontrino non parte davvero.
-              </p>
-            )}
-          </div>
-
-          {error && <Callout tone="critical" className="mt-3">{error}</Callout>}
-
-          <p className={`mt-3 text-[13px] ${math.willSettle ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-critical-text)]'}`}>
-            {math.willSettle
-              ? `Il conto risulterà saldato${tipCents > 0 ? ` · mancia ${euro(tipCents)}` : ''}.`
-              : `Ammanco ${euro(math.shortfall)}: il conto resterà parziale.`}
-          </p>
-
-          <div className="mt-2 flex gap-2">
-            <button
-              type="button"
-              onClick={onSplit}
-              disabled={busy || residual <= 0}
-              className="inline-flex h-12 flex-shrink-0 items-center rounded-full bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
-            >
-              Dividi conto
-            </button>
-          <button
-            type="button"
-            onClick={confirm}
-            disabled={busy}
-            className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-full bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
-          >
-            {busy && <Loader2 size={16} className="animate-spin" />}
-            Registra {euro(math.applied + math.recorded)} e chiudi
-          </button>
-          </div>
+          {!embedded && canaleEDocumento}
         </section>
+
+        {/* Terza colonna del modal: canale e documento accanto all'incasso,
+            non sotto — l'intero pannello sta in vista senza scroll. */}
+        {embedded && (
+          <section className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+            {canaleEDocumento}
+          </section>
+        )}
       </div>
     </div>
   );
