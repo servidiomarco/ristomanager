@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator } from 'lucide-react';
 import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -18,6 +18,7 @@ import { StaffManagement } from './components/StaffManagement';
 import { CustomerList } from './components/CustomerList';
 import { Inventory } from './components/Inventory';
 import { OrderPad } from './components/OrderPad';
+import { CassaPage } from './components/cassa/CassaPage';
 import { KitchenDisplay } from './components/KitchenDisplay';
 import { ExpediterDisplay } from './components/ExpediterDisplay';
 import { ShoppingListPage } from './components/ShoppingListPage';
@@ -151,6 +152,7 @@ const NAV_ITEMS: NavItem[] = [
   { kind: 'link', label: 'Sale & Tavoli', Icon: Grid, group: 'servizio', isTab: false, view: ViewState.FLOOR_PLAN, sidebarCollapse: true },
   { kind: 'link', label: 'Menu & Banchetti', Icon: UtensilsCrossed, group: 'servizio', isTab: false, view: ViewState.MENU, sidebarCollapse: false, menuInitialTab: 'BANQUETS' },
   { kind: 'link', label: 'Comande', Icon: ClipboardList, group: 'servizio', isTab: false, view: ViewState.COMANDE, sidebarCollapse: true },
+  { kind: 'link', label: 'Cassa', Icon: Calculator, group: 'servizio', isTab: false, view: ViewState.CASSA, sidebarCollapse: true },
   { kind: 'link', label: 'Cucina', Icon: CookingPot, group: 'servizio', isTab: false, view: ViewState.CUCINA, sidebarCollapse: true },
   { kind: 'link', label: 'Passe', Icon: BellRing, group: 'servizio', isTab: false, view: ViewState.PASSE, sidebarCollapse: true },
 
@@ -197,7 +199,7 @@ const SIDEBAR_COLLAPSED_KEY = 'ristocrm_sidebar_collapsed';
 
 // Viste del modulo Sala & Cucina: oltre al permesso serve il modulo attivo
 // (flag table_orders_enabled) — spento, le voci spariscono dalla sidebar.
-const SALA_VIEWS: ViewState[] = [ViewState.COMANDE, ViewState.CUCINA, ViewState.PASSE];
+const SALA_VIEWS: ViewState[] = [ViewState.COMANDE, ViewState.CASSA, ViewState.CUCINA, ViewState.PASSE];
 
 /* ── Blocchi della pagina Impostazioni ────────────────────────────────────
    Impostazioni è tornata una voce piatta della sidebar e una pagina unica:
@@ -1933,7 +1935,8 @@ const App: React.FC = () => {
       [UserRole.MANAGER]: 'Manager',
       [UserRole.RECEPTION]: 'Reception',
       [UserRole.WAITER]: 'Cameriere',
-      [UserRole.KITCHEN]: 'Cucina'
+      [UserRole.KITCHEN]: 'Cucina',
+      [UserRole.CASSA]: 'Cassa'
     };
     return roleNames[role] || role;
   };
@@ -2860,6 +2863,12 @@ const App: React.FC = () => {
           </CardErrorBoundary>
         )}
 
+        {view === ViewState.CASSA && (
+          <CardErrorBoundary label="Cassa">
+            <CassaPage dishes={dishes} tables={tables} rooms={rooms} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} onImmersive={setImmersive} />
+          </CardErrorBoundary>
+        )}
+
         {view === ViewState.CUCINA && (
           <CardErrorBoundary label="Cucina">
             <KitchenDisplay globalDate={globalDate} globalShiftFilter={globalShiftFilter} />
@@ -2978,6 +2987,7 @@ const App: React.FC = () => {
                       [ViewState.FLOOR_PLAN]: 'Sale & Tavoli',
                       [ViewState.MENU]: 'Menu & Banchetti',
                       [ViewState.COMANDE]: 'Comande',
+                      [ViewState.CASSA]: 'Cassa',
                       [ViewState.CUCINA]: 'Cucina',
                       [ViewState.PASSE]: 'Passe',
                       [ViewState.STAFF]: 'Personale',
