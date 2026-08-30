@@ -14,7 +14,8 @@ import {
 import { BillSheet } from './pagamenti/BillSheet';
 import { PagamentoSheet } from './cassa/PagamentoSheet';
 import { useAuth } from '../contexts/AuthContext';
-import { billsApiService } from '../services/billsApiService';
+import { billsApiService, printBill } from '../services/billsApiService';
+
 import { socketClient } from '../services/socketClient';
 import type { ServiceBill } from '../services/ordersApiService';
 import {
@@ -525,6 +526,44 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
   // Chiusura in cassa dal foglio conto aperto sul tavolo. Il residuo che
   // resta è una decisione dell'operatore (SETTLED_PARTIAL), quindi dopo la
   // chiusura il tavolo torna libero.
+  // I verbi rapidi di Passepartout: «scontrino contanti/POS» è UN tocco che
+  // incassa l'importo pieno ed emette lo scontrino — il caso che copre il
+  // 90% delle chiusure. Il pannello completo resta per dividi/misto/sospeso.
+  const chiusuraRapida = async (
+    billId: number,
+    residualCents: number,
+    method: 'CONTANTI' | 'POS_FISICO',
+    cleanupTableId: number | null,
+  ) => {
+    if (busy) return;
+    setBusy(true); setError(null);
+    try {
+      await billsApiService.closeBill(billId, {
+        payments: residualCents > 0 ? [{ method, amount_cents: residualCents }] : [],
+        documento: 'Scontrino',
+      });
+      setViewBill(null);
+      setJustClosed(null);
+      if (cleanupTableId != null) {
+        setServiceBills(prev => { const n = new Map(prev); n.delete(cleanupTableId); return n; });
+      }
+      setFlash(`Conto chiuso · ${method === 'CONTANTI' ? 'contanti' : 'POS'} ${euro(residualCents)} · scontrino in emissione`);
+    } catch (err: any) {
+      setError(err?.data?.error ?? err?.message ?? 'Chiusura non riuscita');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const stampaPreconto = async (billId: number) => {
+    try {
+      await printBill(billId, 'PRECONTO');
+      setFlash('Preconto in stampa');
+    } catch (err: any) {
+      setError(err?.data?.error ?? err?.message ?? 'Stampa non riuscita');
+    }
+  };
+
   const settleViewBill = async (opts?: { cash_settled_cents?: number; tip_cents?: number }) => {
     if (!viewBill || busy) return;
     setBusy(true); setError(null);
@@ -623,21 +662,49 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
           onSettle={settleViewBill}
           footerExtra={
             <>
-              {canCassa && (
+              <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={() => { const bid = viewBill.id; setViewBill(null); setCassaBillId(bid); }}
+                  onClick={() => chiusuraRapida(viewBill.id, viewBill.residual_cents ?? viewBill.total_cents, 'CONTANTI', viewBill.table_id)}
                   disabled={busy}
-                  className={`w-full ${dsButton.primary}`}
+                  className={`flex-1 ${dsButton.primary}`}
                 >
-                  Incassa con la cassa
+                  Scontrino contanti
                 </button>
-              )}
+                <button
+                  type="button"
+                  onClick={() => chiusuraRapida(viewBill.id, viewBill.residual_cents ?? viewBill.total_cents, 'POS_FISICO', viewBill.table_id)}
+                  disabled={busy}
+                  className={`flex-1 ${dsButton.secondary}`}
+                >
+                  Scontrino POS
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => stampaPreconto(viewBill.id)}
+                  disabled={busy}
+                  className={`flex-1 ${dsButton.quiet}`}
+                >
+                  Preconto
+                </button>
+                {canCassa && (
+                  <button
+                    type="button"
+                    onClick={() => { const bid = viewBill.id; setViewBill(null); setCassaBillId(bid); }}
+                    disabled={busy}
+                    className={`flex-1 ${dsButton.quiet}`}
+                  >
+                    Incassa con la cassa
+                  </button>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => { const tid = viewBill.table_id; setViewBill(null); loadTable(tid, { forceCreate: true }); }}
                 disabled={busy}
-                className={`w-full ${dsButton.secondary}`}
+                className={`w-full ${dsButton.quiet}`}
               >
                 Nuova comanda su questo tavolo
               </button>
@@ -668,7 +735,50 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
             share_token: justClosed.share_token,
             items: justClosed.items,
           }}
+          busy={busy}
           onClose={() => setJustClosed(null)}
+          footerExtra={
+            <>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => chiusuraRapida(justClosed.id, justClosed.residual_cents ?? justClosed.total_cents, 'CONTANTI', justClosed.table_id ?? null)}
+                  disabled={busy}
+                  className={`flex-1 ${dsButton.primary}`}
+                >
+                  Scontrino contanti
+                </button>
+                <button
+                  type="button"
+                  onClick={() => chiusuraRapida(justClosed.id, justClosed.residual_cents ?? justClosed.total_cents, 'POS_FISICO', justClosed.table_id ?? null)}
+                  disabled={busy}
+                  className={`flex-1 ${dsButton.secondary}`}
+                >
+                  Scontrino POS
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => stampaPreconto(justClosed.id)}
+                  disabled={busy}
+                  className={`flex-1 ${dsButton.quiet}`}
+                >
+                  Preconto
+                </button>
+                {canCassa && (
+                  <button
+                    type="button"
+                    onClick={() => { const bid = justClosed.id; setJustClosed(null); setCassaBillId(bid); }}
+                    disabled={busy}
+                    className={`flex-1 ${dsButton.quiet}`}
+                  >
+                    Incassa con la cassa
+                  </button>
+                )}
+              </div>
+            </>
+          }
         />
       )}
     </>
