@@ -25221,6 +25221,30 @@ async function resyncBillForOrder(tenantId: number, orderId: number): Promise<{ 
     }
 }
 
+// La comanda dietro un conto. Serve alla correzione in cassa: il cliente al
+// banco contesta una portata mai ricevuta, il conto è aperto ma la comanda
+// magari è già chiusa e non compare più in /orders/open — da qui si arriva
+// alle righe (con i loro id) per stornarle, e il totale si riallinea via
+// resyncBillForOrder come per ogni storno.
+app.get('/bills/:id/order', authenticate, requirePermission('orders:view'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(req, res))) return;
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        const o = await queryWithRetry(
+            `SELECT id FROM orders WHERE table_bill_id = $1 AND tenant_id = $2 ORDER BY id DESC LIMIT 1`,
+            [id, req.tenantId!]
+        );
+        if (o.rows.length === 0) return res.status(404).json({ error: 'Nessuna comanda per questo conto' });
+        const view = await loadOrderView(req.tenantId!, o.rows[0].id);
+        if (!view) return res.status(404).json({ error: 'Comanda non trovata' });
+        res.json(view);
+    } catch (err: any) {
+        console.error('GET /bills/:id/order error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 // Coperti modificabili dopo l'apertura: per un walk-in il numero iniziale è
 // una stima dai posti del tavolo, e alimenta lo split equo del conto.
 app.patch('/orders/:id', authenticate, requirePermission('orders:take'), async (req, res) => {

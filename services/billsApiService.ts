@@ -352,6 +352,11 @@ export const getOpenBills = async (
   return apiRequest(`${API_URL}/bills/open${suffix}`, { headers: getHeaders() });
 };
 
+/** La comanda dietro un conto, con gli id delle righe: serve alla
+ *  correzione in cassa (storno di una portata contestata). */
+export const getBillOrder = async (billId: number): Promise<any> =>
+  apiRequest(`${API_URL}/bills/${billId}/order`, { headers: getHeaders() });
+
 /** Accoda la stampa del preconto sulla termica in sala. L'origin serve al
  *  server per comporre l'URL del QR: solo il client sa da che host è servita
  *  la SPA (IP in LAN, dominio in produzione). */

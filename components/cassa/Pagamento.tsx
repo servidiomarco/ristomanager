@@ -35,6 +35,9 @@ interface PagamentoProps {
   onSettle: (opts: SettleOpts) => void;
   onSplit: () => void;
   onShowQr: () => void;
+  /** Correzione del conto (storno righe contestate): se assente il verbo
+   *  non compare — in CassaPage la via resta il tavolo attivo. */
+  onEdit?: () => void;
   /** Dentro un modal (PagamentoSheet): niente testata propria — il guscio ha
    *  già titolo e chiusura — e terza colonna su schermo largo, così l'intero
    *  incasso sta in vista senza scroll. Default false: in CassaPage la resa
@@ -43,7 +46,7 @@ interface PagamentoProps {
 }
 
 export const Pagamento: React.FC<PagamentoProps> = ({
-  bill, busy, error, fiscalReady, quotaCents, onBack, onSettle, onSplit, onShowQr, embedded = false,
+  bill, busy, error, fiscalReady, quotaCents, onBack, onSettle, onSplit, onShowQr, onEdit, embedded = false,
 }) => {
   const residual = bill.residual_cents;
   const [movements, setMovements] = useState<BillPaymentInput[]>([]);
@@ -151,6 +154,16 @@ export const Pagamento: React.FC<PagamentoProps> = ({
       </p>
 
       <div className="mt-2 flex gap-2">
+        {onEdit && (
+          <button
+            type="button"
+            onClick={onEdit}
+            disabled={busy}
+            className="inline-flex h-12 flex-shrink-0 items-center rounded-full bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
+          >
+            Correggi
+          </button>
+        )}
         <button
           type="button"
           onClick={onSplit}

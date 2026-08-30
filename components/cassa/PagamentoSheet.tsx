@@ -1,5 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { billsApiService, getOpenBills, type OpenBillRow } from '../../services/billsApiService';
+import { billsApiService, getOpenBills, getBillOrder, type OpenBillRow } from '../../services/billsApiService';
+import { voidItem } from '../../services/ordersApiService';
+import type { OrderItem, OrderWithItems } from '../../types';
+import { ReasonDialog } from '../comande/ReasonDialog';
+import { isSystemLine } from '../comande/orderView';
+import { euro } from './cassaView';
 import type { SettleOpts } from '../pagamenti/BillSheet';
 import { BillSheet } from '../pagamenti/BillSheet';
 import { ModalShell } from '../ds';
@@ -28,7 +33,7 @@ interface PagamentoSheetProps {
   onBillClosed: () => void;
 }
 
-type Screen = 'payment' | 'split' | 'esito';
+type Screen = 'payment' | 'split' | 'esito' | 'correggi';
 
 export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service, onClose, onBillClosed }) => {
   const [bill, setBill] = useState<OpenBillRow | null>(null);
@@ -41,6 +46,10 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
   const [fiscalReady, setFiscalReady] = useState(false);
   const [qrBill, setQrBill] = useState<OpenBillRow | null>(null);
   const [closed, setClosed] = useState(false);
+  // Correzione del conto: la comanda dietro (con gli id delle righe) e la
+  // riga in storno. Il totale si riallinea dal server, non si tocca a mano.
+  const [editOrder, setEditOrder] = useState<OrderWithItems | null>(null);
+  const [voidTarget, setVoidTarget] = useState<OrderItem | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,6 +66,35 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
       .catch(() => {});
     return () => { cancelled = true; };
   }, [billId, service]);
+
+  const reloadBill = useCallback(async () => {
+    const r = await getOpenBills(service, { status: 'open' });
+    const row = r.bills.find(b => b.id === billId) ?? null;
+    if (row) setBill(row);
+  }, [service, billId]);
+
+  const openCorreggi = useCallback(async () => {
+    setError(null);
+    try {
+      setEditOrder(await getBillOrder(billId));
+      setScreen('correggi');
+    } catch (err: any) {
+      setError(err?.data?.error ?? err?.message ?? 'Comanda non trovata');
+    }
+  }, [billId]);
+
+  const stornaRiga = useCallback(async (item: OrderItem, reason: string) => {
+    setBusy(true); setError(null);
+    try {
+      setEditOrder(await voidItem(item.id, reason));
+      setVoidTarget(null);
+      await reloadBill();
+    } catch (err: any) {
+      setError(err?.data?.error ?? err?.message ?? 'Storno non riuscito');
+    } finally {
+      setBusy(false);
+    }
+  }, [reloadBill]);
 
   const settle = useCallback(async (opts?: SettleOpts) => {
     if (!bill) return;
@@ -136,6 +174,49 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
           }}
           onBackToQueue={onClose}
         />
+      ) : screen === 'correggi' && editOrder ? (
+        <div className="space-y-3">
+          <p className="text-[14px] text-[var(--ds-text-secondary)]">
+            Storna la portata contestata: resta in comanda come riga annullata con la
+            motivazione, e il totale del conto si riallinea da solo.
+          </p>
+          <ul className="divide-y divide-[var(--ds-border)] rounded-[16px] bg-[var(--ds-surface-row)] px-3">
+            {editOrder.items.filter(i => !isSystemLine(i)).map(i => (
+              <li key={i.id} className="flex items-center gap-3 py-2.5">
+                <span className={`min-w-0 flex-1 text-[15px] ${i.status === 'VOIDED' ? 'text-[var(--ds-text-muted)] line-through' : 'text-[var(--ds-text-primary)]'}`}>
+                  <span className="tabular-nums">{i.qty}×</span> {i.name_snapshot}
+                  {i.status === 'VOIDED' && i.void_reason ? (
+                    <span className="ml-2 text-[12px] no-underline">({i.void_reason})</span>
+                  ) : null}
+                </span>
+                <span className="flex-shrink-0 tabular-nums text-[14px] text-[var(--ds-text-secondary)]">
+                  {euro(i.unit_price_cents * i.qty)}
+                </span>
+                {i.status !== 'VOIDED' && (
+                  <button
+                    type="button"
+                    onClick={() => setVoidTarget(i)}
+                    disabled={busy}
+                    className="flex-shrink-0 rounded-full bg-[var(--ds-surface)] px-3 py-1.5 text-[13px] font-medium text-[var(--ds-critical-text)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-critical-tint)] disabled:opacity-40"
+                  >
+                    Storna
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+          <div className="flex items-center justify-between rounded-[14px] bg-[var(--ds-surface-row)] px-3.5 py-2.5">
+            <span className="text-[14px] font-semibold text-[var(--ds-text-primary)]">Residuo aggiornato</span>
+            <span className="text-[17px] font-semibold tabular-nums text-[var(--ds-text-primary)]">{euro(bill.residual_cents)}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setScreen('payment')}
+            className="inline-flex h-12 w-full items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)]"
+          >
+            Torna al pagamento
+          </button>
+        </div>
       ) : screen === 'split' ? (
         <DividiConto
           bill={bill}
@@ -154,12 +235,24 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
           onSettle={settle}
           onSplit={() => setScreen('split')}
           onShowQr={() => setQrBill(bill)}
+          onEdit={openCorreggi}
           embedded
         />
       )}
 
       {/* «Chiedi al cliente»: il QR del pay-at-table, in sola lettura — il
           saldo qui dentro passa dal pannello, non dal BillSheet. */}
+      {voidTarget && (
+        <ReasonDialog
+          title={`Storna ${voidTarget.qty}× ${voidTarget.name_snapshot}`}
+          hint="Il cliente non l'ha ricevuta: la motivazione resta sul conto e in cucina."
+          confirmLabel="Storna la riga"
+          busy={busy}
+          onCancel={() => setVoidTarget(null)}
+          onConfirm={reason => stornaRiga(voidTarget, reason)}
+        />
+      )}
+
       {qrBill && !closed && (
         <BillSheet bill={qrBill} busy={busy} onClose={() => setQrBill(null)} />
       )}
