@@ -4492,6 +4492,69 @@ app.post('/bills/:id/void', authenticate, requirePermission('payments:full'), as
     }
 });
 
+// Riapertura di un conto chiuso per errore (docs/cassa-plan.md §3.3).
+//
+// Finora un conto riapriva solo come EFFETTO COLLATERALE di uno storno di
+// incasso o del rimborso di una quota. Serviva l'atto esplicito: si è chiuso
+// il tavolo sbagliato, o è arrivato un altro giro dopo il conto.
+//
+// I movimenti restano tutti: riaprire non è annullare. Quello che torna
+// indietro è lo stato del conto, non il libro cassa.
+//
+// La guardia che conta è il documento fiscale: uno scontrino CONFERMATO è già
+// stato trasmesso all'Agenzia, e riaprirci sopra un conto vorrebbe dire
+// incassare due volte contro un documento solo. Prima si annulla il
+// documento (POST /bills/:id/fiscal-docs/:fid/void), poi si riapre.
+app.post('/bills/:id/reopen', authenticate, requirePermission('cash:void_payment'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+
+        const cur = await queryWithRetry(
+            `SELECT id, status FROM table_bills WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        if (cur.rows.length === 0) return res.status(404).json({ error: 'Conto non trovato' });
+        if (!['CLOSED', 'SETTLED_PARTIAL', 'SETTLED'].includes(cur.rows[0].status)) {
+            return res.status(409).json({ error: 'Il conto non è chiuso', status: cur.rows[0].status });
+        }
+
+        const doc = await queryWithRetry(
+            `SELECT id, doc_type FROM fiscal_documents
+              WHERE table_bill_id = $1 AND status = 'CONFIRMED' AND doc_type IN ('RECEIPT', 'INVOICE')
+              ORDER BY created_at DESC LIMIT 1`,
+            [id]
+        );
+        if (doc.rows.length > 0) {
+            return res.status(409).json({
+                error: 'Il conto ha un documento fiscale emesso: annullalo prima di riaprirlo.',
+                fiscal_doc_id: doc.rows[0].id,
+                fiscal_doc_type: doc.rows[0].doc_type,
+            });
+        }
+
+        const upd = await queryWithRetry(
+            `UPDATE table_bills
+                SET status = 'OPEN', closed_at = NULL, closed_by_user_id = NULL
+              WHERE id = $1 AND tenant_id = $2
+              RETURNING id, reservation_id, table_id, total_cents, covers, currency,
+                        items, status, share_token, opened_at, closed_at, cash_settled_cents,
+                        tip_cents, notes, external_ref`,
+            [id, req.tenantId!]
+        );
+
+        const row = upd.rows[0];
+        // Come le altre route del conto (close, void): l'evento socket e la
+        // riga stessa sono il registro — closed_at che torna NULL dice quando.
+        try { socketService?.broadcastToAll(req.tenantId!, 'bill:opened', row); } catch (_) {}
+        res.json(row);
+    } catch (err: any) {
+        console.error('POST /bills/:id/reopen error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+
 // Registra un movimento di incasso a conto ancora aperto — l'ospite che va
 // via prima e paga la sua parte in contanti al banco, il POS passato a metà
 // cena. Importo validato sotto lock contro il residuo VERO (quote CLAIMED
@@ -17135,7 +17198,7 @@ const REMINDER_HHMM_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const REMINDER_KINDS = new Set(['ONE_OFF', 'RECURRING']);
 const REMINDER_FREQUENCIES = new Set(['DAILY', 'WEEKLY', 'MONTHLY']);
 const REMINDER_WEEKDAY_CODES_SET = new Set(WEEKDAY_CODES);
-const REMINDER_VALID_ROLES = new Set(['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER', 'KITCHEN']);
+const REMINDER_VALID_ROLES = new Set(['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER', 'KITCHEN', 'CASSA']);
 
 // tenant_id escluso dal payload normalizzato: non arriva mai dal client,
 // lo aggiunge la route dal contesto autenticato (req.tenantId).
@@ -20244,7 +20307,24 @@ const ensureRlsPolicies = async (): Promise<void> => {
     `);
 };
 
-const ensurePlatformAdminRoleChecks = async (): Promise<void> => {
+// Riallinea i CHECK su users.role e role_permissions.role alla lista COMPLETA
+// dei ruoli. Serve perché createSchema (baseline congelata, db.ts) ri-esegue a
+// ogni boot le ALTER che li ricreano con la lista storica a sei ruoli, e gira
+// PRIMA delle migration — che essendo già applicate non ri-allargano niente.
+// Senza questo passaggio il primo boot dopo la creazione di un utente con un
+// ruolo nuovo farebbe fallire l'intera transazione di createSchema (la ADD
+// CONSTRAINT valida le righe esistenti), cioè il server non partirebbe.
+//
+// Le migration restano la fonte versionata di ogni allargamento
+// (platform-admin-role, ruolo-cassa); questo è il presidio che lo difende dal
+// ri-restringimento a ogni avvio.
+//
+// La guardia cerca il ruolo aggiunto PIÙ DI RECENTE: un CHECK che lo contiene
+// è stato scritto da questo stesso codice, quindi ha già la lista intera.
+// Aggiungendo un ruolo si aggiorna la lista E il nome nella guardia.
+const ROLE_CHECK_SQL_LIST = "''PLATFORM_ADMIN'', ''OWNER'', ''GENERAL_MANAGER'', ''MANAGER'', ''RECEPTION'', ''WAITER'', ''KITCHEN'', ''CASSA''";
+
+const ensureRoleChecks = async (): Promise<void> => {
     await queryWithRetry(`
         DO $$
         DECLARE c RECORD;
@@ -20255,11 +20335,11 @@ const ensurePlatformAdminRoleChecks = async (): Promise<void> => {
                  WHERE contype = 'c'
                    AND conrelid IN ('users'::regclass, 'role_permissions'::regclass)
                    AND pg_get_constraintdef(oid) ~ 'role.*''OWNER'''
-                   AND pg_get_constraintdef(oid) !~ 'PLATFORM_ADMIN'
+                   AND pg_get_constraintdef(oid) !~ 'CASSA'
             LOOP
                 EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I', c.tbl, c.conname);
                 EXECUTE format(
-                    'ALTER TABLE %s ADD CONSTRAINT %I CHECK (role IN (''PLATFORM_ADMIN'', ''OWNER'', ''GENERAL_MANAGER'', ''MANAGER'', ''RECEPTION'', ''WAITER'', ''KITCHEN''))',
+                    'ALTER TABLE %s ADD CONSTRAINT %I CHECK (role IN (${ROLE_CHECK_SQL_LIST}))',
                     c.tbl, c.conname
                 );
             END LOOP;
@@ -23557,6 +23637,52 @@ app.get('/orders/:id', authenticate, requirePermission('orders:view'), async (re
 
 // Comanda aperta su un tavolo — l'ingresso naturale del palmare: il cameriere
 // tocca il tavolo sulla mappa, non conosce l'id della comanda.
+// Tavoli con una comanda APERTA nel servizio, in una chiamata sola.
+//
+// Esisteva solo la via per tavolo (GET /tables/:id/order), e la griglia di
+// Comande la chiama in ciclo: con sessanta tavoli sono sessanta richieste a
+// ogni apertura. Cassa ne ha bisogno anche solo per il contatore «tavoli in
+// servizio» in testa alla coda, dove sessanta richieste per un numero sono
+// fuori discussione.
+//
+// Sola lettura, nessun effetto: le due griglie possono adottarla quando
+// conviene, quella di Comande resta com'è finché non la si tocca apposta.
+app.get('/orders/open', authenticate, requirePermission('orders:view'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(req, res))) return;
+        // Stessa semantica di /bills/open: `date` assente = servizio in corso,
+        // `shift` assente = TUTTI E DUE i turni del giorno. È il turno «Tutti»
+        // della barra globale, e trattarlo come «quello di adesso» farebbe
+        // sparire dal conteggio metà servizio senza dirlo.
+        const filterDate = typeof req.query?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date)
+            ? req.query.date : null;
+        const filterShift = req.query?.shift === 'LUNCH' || req.query?.shift === 'DINNER'
+            ? req.query.shift : null;
+        const now = resolveService();
+        const service = { service_date: filterDate ?? now.service_date, shift: filterShift ?? now.shift };
+
+        const rows = await queryWithRetry(
+            `SELECT o.id, o.table_id
+               FROM orders o
+              WHERE o.tenant_id = $1 AND o.status = 'OPEN'
+                AND o.service_date = $2::date
+                AND ($3::varchar IS NULL OR o.shift = $3::varchar)
+                AND o.table_id IS NOT NULL
+              ORDER BY o.id`,
+            [req.tenantId!, filterDate ?? now.service_date, filterShift]
+        );
+        res.json({
+            service,
+            table_ids: [...new Set(rows.rows.map((r: any) => Number(r.table_id)))],
+            orders: rows.rows.map((r: any) => ({ id: Number(r.id), table_id: Number(r.table_id) })),
+        });
+    } catch (err: any) {
+        console.error('GET /orders/open error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+
 // Stato dei conti per la griglia comande: i tavoli del servizio selezionato
 // con un conto attivo non ancora incassato. Una chiamata sola per tutta la
 // griglia — il cameriere deve vedere chi sta ancora per pagare, non scoprirlo
@@ -25109,6 +25235,25 @@ app.patch('/orders/:id', authenticate, requirePermission('orders:take'), async (
         if (req.body?.notes !== undefined) {
             push('notes', typeof req.body.notes === 'string' ? req.body.notes.slice(0, 500) : null);
         }
+        // Il cliente della visita, associato dopo l'apertura (Cassa, passo 3):
+        // un walk-in nasce senza nome e lo prende quando qualcuno lo chiede —
+        // per la fattura, o solo per lo storico. null lo stacca di nuovo.
+        if (req.body?.reservation_id !== undefined) {
+            const rid = req.body.reservation_id == null ? null : Number(req.body.reservation_id);
+            if (rid != null && !Number.isFinite(rid)) {
+                return res.status(400).json({ error: 'reservation_id non valido' });
+            }
+            if (rid != null) {
+                // Scopata sul tenant: una prenotazione di un altro ristorante
+                // non si aggancia a una comanda di questo.
+                const own = await queryWithRetry(
+                    `SELECT id FROM reservations WHERE id = $1 AND tenant_id = $2`,
+                    [rid, req.tenantId!]
+                );
+                if (own.rows.length === 0) return res.status(404).json({ error: 'Prenotazione non trovata' });
+            }
+            push('reservation_id', rid);
+        }
         if (sets.length === 0) return res.status(400).json({ error: 'Nessun campo da aggiornare' });
 
         vals.push(id);
@@ -26264,6 +26409,419 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
     }
 });
 
+// --- Cassa: la sessione del cassetto (docs/cassa-plan.md §3.1) --------------
+// La sessione è PER SERVIZIO, non per giornata: lo stesso cassetto passa di
+// mano fra pranzo e cena e una differenza va imputata al turno che l'ha
+// prodotta. GET /reports/cash-closure resta il report giornaliero di
+// Pagamenti, intatto.
+//
+// Un movimento appartiene al servizio in cui è stato REGISTRATO, non a quello
+// del conto: il cassetto è un oggetto fisico, e i contanti di un conto del
+// pranzo incassato a cena entrano nel cassetto della cena. È esattamente il
+// caso del conto rimasto aperto in un servizio passato.
+//
+// Espressione unica per non farla divergere fra le query — stessa regola di
+// resolveService(): sotto le 5 si è ancora nella cena di ieri, 5–16 pranzo.
+const SERVICE_OF = (col: string) => `
+    CASE WHEN EXTRACT(hour FROM (${col} AT TIME ZONE 'Europe/Rome')) < ${SERVICE_DAY_START_HOUR}
+         THEN ((${col} AT TIME ZONE 'Europe/Rome') - INTERVAL '1 day')::date
+         ELSE (${col} AT TIME ZONE 'Europe/Rome')::date END`;
+const SHIFT_OF = (col: string) => `
+    CASE WHEN EXTRACT(hour FROM (${col} AT TIME ZONE 'Europe/Rome')) BETWEEN ${SERVICE_DAY_START_HOUR} AND ${DINNER_START_HOUR - 1}
+         THEN 'LUNCH' ELSE 'DINNER' END`;
+
+// OMAGGIO e SOSPESO chiudono un conto ma non portano un euro nel cassetto:
+// stanno nel libro cassa e fuori dall'incassato, come in 8b.
+const NON_CASH_METHODS = `('OMAGGIO', 'SOSPESO')`;
+
+/** Totali del servizio + la sessione, se qualcuno l'ha aperta. La vista si
+ *  legge anche PRIMA che un fondo sia dichiarato: i numeri del turno esistono
+ *  comunque, ed è quello che la schermata mostra mentre il servizio corre. */
+async function loadCashSession(tenantId: number, service: CurrentService) {
+    const { service_date, shift } = service;
+
+    const sessionRs = await queryWithRetry(
+        `SELECT * FROM cash_sessions
+          WHERE tenant_id = $1 AND service_date = $2::date AND shift = $3`,
+        [tenantId, service_date, shift]
+    );
+    const session = sessionRs.rows[0] ?? null;
+
+    // Incassi vivi del servizio, per metodo.
+    const methodsRs = await queryWithRetry(
+        `SELECT method, SUM(amount_cents)::int AS amount_cents, COUNT(*)::int AS movements
+           FROM table_bill_payments p
+          WHERE p.tenant_id = $1 AND p.voided_at IS NULL
+            AND ${SERVICE_OF('p.recorded_at')} = $2::date
+            AND ${SHIFT_OF('p.recorded_at')} = $3
+          GROUP BY method
+          ORDER BY amount_cents DESC`,
+        [tenantId, service_date, shift]
+    );
+
+    // Storni del servizio: si contano da quando sono stati STORNATI, non da
+    // quando erano stati incassati — è il momento in cui il cassetto cambia.
+    const voidedRs = await queryWithRetry(
+        `SELECT COALESCE(SUM(amount_cents), 0)::int AS amount_cents, COUNT(*)::int AS movements
+           FROM table_bill_payments p
+          WHERE p.tenant_id = $1 AND p.voided_at IS NOT NULL
+            AND ${SERVICE_OF('p.voided_at')} = $2::date
+            AND ${SHIFT_OF('p.voided_at')} = $3`,
+        [tenantId, service_date, shift]
+    );
+
+    // Caparre portate a credito sui conti CHIUSI nel servizio: erano già state
+    // incassate alla prenotazione, quindi non entrano nell'incassato di oggi.
+    const depositsRs = await queryWithRetry(
+        `SELECT COALESCE(SUM(s.amount_cents), 0)::int AS amount_cents, COUNT(*)::int AS movements
+           FROM table_bill_splits s
+           JOIN table_bills b ON b.id = s.table_bill_id AND b.tenant_id = s.tenant_id
+          WHERE s.tenant_id = $1 AND s.kind = 'deposit' AND s.status = 'PAID'
+            AND b.closed_at IS NOT NULL
+            AND ${SERVICE_OF('b.closed_at')} = $2::date
+            AND ${SHIFT_OF('b.closed_at')} = $3`,
+        [tenantId, service_date, shift]
+    );
+
+    // Conti ancora da incassare NEL SERVIZIO: la cassa si chiude comunque, ma
+    // lo dice. Il servizio del conto arriva dalla comanda, o si deduce
+    // dall'apertura per i conti aperti a mano — stessa derivazione di
+    // /bills/open, o i due schermi direbbero numeri diversi sullo stesso turno.
+    //
+    // Il residuo sottrae anche le quote CLAIMED, come /bills/open: una quota
+    // che un ospite ha prenotato col telefono non è incassata, ma non è
+    // nemmeno esigibile in cassa finché non scade.
+    const openRs = await queryWithRetry(
+        `SELECT COUNT(*)::int AS bills,
+                COALESCE(SUM(GREATEST(0, b.total_cents - paid.paid - claimed.claimed - staff.staff)), 0)::int AS residual_cents
+           FROM table_bills b
+           LEFT JOIN LATERAL (
+               SELECT COALESCE(SUM(amount_cents), 0)::int AS paid
+                 FROM table_bill_splits s WHERE s.table_bill_id = b.id AND s.status = 'PAID'
+           ) paid ON TRUE
+           LEFT JOIN LATERAL (
+               SELECT COALESCE(SUM(amount_cents), 0)::int AS claimed
+                 FROM table_bill_splits s WHERE s.table_bill_id = b.id AND s.status = 'CLAIMED'
+           ) claimed ON TRUE
+           LEFT JOIN LATERAL (
+               SELECT COALESCE(SUM(amount_cents), 0)::int AS staff
+                 FROM table_bill_payments p
+                WHERE p.table_bill_id = b.id AND p.table_bill_split_id IS NULL AND p.voided_at IS NULL
+           ) staff ON TRUE
+          WHERE b.tenant_id = $1
+            AND b.status IN ('OPEN', 'LOCKED', 'SETTLED', 'SETTLED_PARTIAL')
+            AND COALESCE(
+                    (SELECT o.service_date FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
+                    ${SERVICE_OF('b.opened_at')}
+                ) = $2::date
+            AND COALESCE(
+                    (SELECT o.shift FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
+                    ${SHIFT_OF('b.opened_at')}
+                ) = $3`,
+        [tenantId, service_date, shift]
+    );
+
+    const rows = methodsRs.rows.map((r: any) => ({
+        method: r.method as string,
+        amount_cents: Number(r.amount_cents),
+        movements: Number(r.movements),
+    }));
+    const isCollected = (m: string) => m !== 'OMAGGIO' && m !== 'SOSPESO';
+    const sum = (pred: (m: string) => boolean) =>
+        rows.filter(r => pred(r.method)).reduce((n, r) => n + r.amount_cents, 0);
+
+    const cash_cents = sum(m => m === 'CONTANTI');
+    const opening_float_cents = Number(session?.opening_float_cents ?? 0);
+
+    return {
+        service: { service_date, shift },
+        session,
+        methods: rows.filter(r => isCollected(r.method)),
+        movements: rows.filter(r => isCollected(r.method)).reduce((n, r) => n + r.movements, 0),
+        collected_cents: sum(isCollected),
+        cash_cents,
+        // Quello che deve esserci nel cassetto. Sempre CALCOLATO, mai
+        // memorizzato: uno storno alle 23:40 lo deve muovere.
+        expected_cents: opening_float_cents + cash_cents,
+        out_of_totals: {
+            deposits_cents: Number(depositsRs.rows[0]?.amount_cents ?? 0),
+            deposits_count: Number(depositsRs.rows[0]?.movements ?? 0),
+            omaggio_cents: sum(m => m === 'OMAGGIO'),
+            sospeso_cents: sum(m => m === 'SOSPESO'),
+            voided_cents: Number(voidedRs.rows[0]?.amount_cents ?? 0),
+            voided_count: Number(voidedRs.rows[0]?.movements ?? 0),
+        },
+        open_bills: {
+            count: Number(openRs.rows[0]?.bills ?? 0),
+            residual_cents: Number(openRs.rows[0]?.residual_cents ?? 0),
+        },
+    };
+}
+
+app.get('/cash/session', authenticate, requirePermission('cash:operate'), async (req, res) => {
+    try {
+        const service = serviceFromQuery(req.query);
+        res.json(await loadCashSession(req.tenantId!, service));
+    } catch (err: any) {
+        console.error('GET /cash/session error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.post('/cash/session', authenticate, requirePermission('cash:close_session'), async (req, res) => {
+    try {
+        const service = serviceFromQuery(req.body);
+        const float = Math.round(Number(req.body?.opening_float_cents ?? 0));
+        if (!Number.isFinite(float) || float < 0) {
+            return res.status(400).json({ error: 'Fondo di apertura non valido' });
+        }
+
+        let byName = req.user?.email ?? '';
+        const u = await queryWithRetry(`SELECT full_name FROM users WHERE id = $1 AND tenant_id = $2`, [req.user?.userId ?? 0, req.tenantId!]);
+        byName = u.rows[0]?.full_name || byName;
+
+        // L'unique su (tenant, giorno, turno) fa da lock: due cassieri che
+        // aprono insieme non creano due cassetti, il secondo trova il primo.
+        const ins = await queryWithRetry(
+            `INSERT INTO cash_sessions
+                (tenant_id, service_date, shift, opening_float_cents, opened_by_user_id, opened_by_name)
+             VALUES ($1, $2::date, $3, $4, $5, $6)
+             ON CONFLICT (tenant_id, service_date, shift) DO NOTHING
+             RETURNING *`,
+            [req.tenantId!, service.service_date, service.shift, float, req.user?.userId ?? null, byName]
+        );
+        if (ins.rows.length === 0) {
+            return res.status(409).json({ error: 'La cassa di questo servizio è già aperta' });
+        }
+
+        const view = await loadCashSession(req.tenantId!, service);
+        try { socketService?.broadcastToAll(req.tenantId!, 'cash:session-opened', view.session); } catch (_) {}
+        res.status(201).json(view);
+    } catch (err: any) {
+        console.error('POST /cash/session error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Correzione del fondo: si sbaglia a digitarlo, e finché la cassa è aperta
+// non è un fatto storico. Dopo la chiusura no — lì sposterebbe una differenza
+// che qualcuno ha già firmato.
+app.patch('/cash/session/:id', authenticate, requirePermission('cash:close_session'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        const float = Math.round(Number(req.body?.opening_float_cents));
+        if (!Number.isFinite(float) || float < 0) {
+            return res.status(400).json({ error: 'Fondo di apertura non valido' });
+        }
+
+        const upd = await queryWithRetry(
+            `UPDATE cash_sessions SET opening_float_cents = $3
+              WHERE id = $1 AND tenant_id = $2 AND closed_at IS NULL
+              RETURNING *`,
+            [id, req.tenantId!, float]
+        );
+        if (upd.rows.length === 0) {
+            const cur = await queryWithRetry(`SELECT closed_at FROM cash_sessions WHERE id = $1 AND tenant_id = $2`, [id, req.tenantId!]);
+            if (cur.rows.length === 0) return res.status(404).json({ error: 'Cassa non trovata' });
+            return res.status(409).json({ error: 'La cassa è già chiusa: il fondo non si tocca più' });
+        }
+
+        const row = upd.rows[0];
+        const view = await loadCashSession(req.tenantId!, { service_date: row.service_date, shift: row.shift });
+        try { socketService?.broadcastToAll(req.tenantId!, 'cash:session-opened', view.session); } catch (_) {}
+        res.json(view);
+    } catch (err: any) {
+        console.error('PATCH /cash/session/:id error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.post('/cash/session/:id/close', authenticate, requirePermission('cash:close_session'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        const counted = Math.round(Number(req.body?.counted_cents));
+        if (!Number.isFinite(counted) || counted < 0) {
+            return res.status(400).json({ error: 'Contato non valido' });
+        }
+        const note = typeof req.body?.note === 'string' ? req.body.note.trim() : '';
+
+        const cur = await queryWithRetry(
+            `SELECT * FROM cash_sessions WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        if (cur.rows.length === 0) return res.status(404).json({ error: 'Cassa non trovata' });
+        if (cur.rows[0].closed_at) return res.status(409).json({ error: 'La cassa è già chiusa' });
+
+        const row = cur.rows[0];
+        const service = { service_date: row.service_date, shift: row.shift } as CurrentService;
+        // L'atteso si rilegge ADESSO, non si prende dal client: fra il momento
+        // in cui la schermata l'ha mostrato e questo click può essere entrato
+        // un incasso.
+        const before = await loadCashSession(req.tenantId!, service);
+        const difference = counted - before.expected_cents;
+
+        if (difference !== 0 && !note) {
+            return res.status(400).json({
+                error: 'Serve una nota sulla differenza',
+                difference_cents: difference,
+                expected_cents: before.expected_cents,
+            });
+        }
+
+        let byName = req.user?.email ?? '';
+        const u = await queryWithRetry(`SELECT full_name FROM users WHERE id = $1 AND tenant_id = $2`, [req.user?.userId ?? 0, req.tenantId!]);
+        byName = u.rows[0]?.full_name || byName;
+
+        const upd = await queryWithRetry(
+            `UPDATE cash_sessions
+                SET counted_cents = $3, difference_cents = $4, note = $5,
+                    closed_by_user_id = $6, closed_by_name = $7, closed_at = CURRENT_TIMESTAMP
+              WHERE id = $1 AND tenant_id = $2 AND closed_at IS NULL
+              RETURNING *`,
+            [id, req.tenantId!, counted, difference, note || null, req.user?.userId ?? null, byName]
+        );
+        if (upd.rows.length === 0) return res.status(409).json({ error: 'La cassa è già chiusa' });
+
+        const view = await loadCashSession(req.tenantId!, service);
+        try { socketService?.broadcastToAll(req.tenantId!, 'cash:session-closed', view.session); } catch (_) {}
+        // I conti aperti non bloccano la chiusura: restano incassabili, anche
+        // domani. La UI li mostra, la cassa si chiude lo stesso.
+        res.json(view);
+    } catch (err: any) {
+        console.error('POST /cash/session/:id/close error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+
+// Transazioni del servizio: il libro dei movimenti (docs/cassa-plan.md §3.4).
+//
+// UNIONE di due sorgenti che restano separate nel modello: il libro cassa
+// (table_bill_payments) e le caparre portate a credito sui conti del servizio.
+// Nessuna tabella nuova — una query e una schermata.
+//
+// Le caparre compaiono nella lista ma FUORI dai totali di incasso: sono già
+// state incassate alla prenotazione, e contarle di nuovo qui è il modo più
+// semplice per far quadrare la cassa su un numero falso.
+app.get('/cash/transactions', authenticate, requirePermission('cash:operate'), async (req, res) => {
+    try {
+        const service = serviceFromQuery(req.query);
+        const { service_date, shift } = service;
+
+        // Movimenti del libro cassa. Un movimento appartiene al servizio in
+        // cui è stato REGISTRATO — o STORNATO, per gli storni: è quello il
+        // momento in cui il cassetto cambia.
+        const movesRs = await queryWithRetry(
+            `SELECT p.id, p.method, p.amount_cents, p.recorded_at, p.voided_at,
+                    p.void_reason, p.table_bill_split_id IS NOT NULL AS online,
+                    p.meta,
+                    u.full_name AS recorded_by_name,
+                    vu.full_name AS voided_by_name,
+                    b.id AS bill_id, b.status AS bill_status,
+                    t.name AS table_name, r.customer_name,
+                    fd.status AS fiscal_status, fd.doc_type AS fiscal_doc_type
+               FROM table_bill_payments p
+               JOIN table_bills b ON b.id = p.table_bill_id AND b.tenant_id = p.tenant_id
+               LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
+               LEFT JOIN reservations r ON r.id = b.reservation_id AND r.tenant_id = b.tenant_id
+               LEFT JOIN users u ON u.id = p.recorded_by_user_id
+               LEFT JOIN users vu ON vu.id = p.voided_by_user_id
+               LEFT JOIN LATERAL (
+                   SELECT status, doc_type FROM fiscal_documents
+                    WHERE table_bill_id = b.id ORDER BY created_at DESC LIMIT 1
+               ) fd ON TRUE
+              WHERE p.tenant_id = $1
+                AND ${SERVICE_OF('COALESCE(p.voided_at, p.recorded_at)')} = $2::date
+                AND ${SHIFT_OF('COALESCE(p.voided_at, p.recorded_at)')} = $3
+              ORDER BY COALESCE(p.voided_at, p.recorded_at) DESC
+              LIMIT 500`,
+            [req.tenantId!, service_date, shift]
+        );
+
+        // Caparre a credito sui conti CHIUSI nel servizio: stessa regola della
+        // sessione di cassa, o i due schermi direbbero numeri diversi.
+        const depositsRs = await queryWithRetry(
+            `SELECT s.id, s.amount_cents, s.paid_at,
+                    b.id AS bill_id, t.name AS table_name, r.customer_name
+               FROM table_bill_splits s
+               JOIN table_bills b ON b.id = s.table_bill_id AND b.tenant_id = s.tenant_id
+               LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
+               LEFT JOIN reservations r ON r.id = b.reservation_id AND r.tenant_id = b.tenant_id
+              WHERE s.tenant_id = $1 AND s.kind = 'deposit' AND s.status = 'PAID'
+                AND b.closed_at IS NOT NULL
+                AND ${SERVICE_OF('b.closed_at')} = $2::date
+                AND ${SHIFT_OF('b.closed_at')} = $3
+              ORDER BY b.closed_at DESC
+              LIMIT 200`,
+            [req.tenantId!, service_date, shift]
+        );
+
+        const movements = [
+            ...movesRs.rows.map((m: any) => ({
+                id: `p${m.id}`,
+                source: 'bill' as const,
+                at: m.voided_at ?? m.recorded_at,
+                method: m.method as string,
+                amount_cents: Number(m.amount_cents),
+                voided: m.voided_at != null,
+                void_reason: m.void_reason ?? null,
+                voided_by_name: m.voided_by_name ?? null,
+                recorded_by_name: m.recorded_by_name ?? null,
+                online: m.online === true,
+                bill_id: Number(m.bill_id),
+                bill_status: m.bill_status as string,
+                table_name: m.table_name ?? null,
+                customer_name: m.customer_name ?? null,
+                fiscal_status: m.fiscal_status ?? null,
+                fiscal_doc_type: m.fiscal_doc_type ?? null,
+                meta: m.meta ?? null,
+            })),
+            ...depositsRs.rows.map((d: any) => ({
+                id: `d${d.id}`,
+                source: 'deposit' as const,
+                at: d.paid_at,
+                method: 'CAPARRA',
+                amount_cents: Number(d.amount_cents),
+                voided: false,
+                void_reason: null,
+                voided_by_name: null,
+                recorded_by_name: null,
+                online: true,
+                bill_id: Number(d.bill_id),
+                bill_status: 'CLOSED',
+                table_name: d.table_name ?? null,
+                customer_name: d.customer_name ?? null,
+                fiscal_status: null,
+                fiscal_doc_type: null,
+                meta: null,
+            })),
+        ].sort((a, b) => String(b.at).localeCompare(String(a.at)));
+
+        const live = movements.filter(m => m.source === 'bill' && !m.voided);
+        const isCollected = (m: string) => m !== 'OMAGGIO' && m !== 'SOSPESO';
+        const sum = (rows: typeof movements) => rows.reduce((n, m) => n + m.amount_cents, 0);
+
+        res.json({
+            service,
+            movements,
+            totals: {
+                movements: live.filter(m => isCollected(m.method)).length,
+                collected_cents: sum(live.filter(m => isCollected(m.method))),
+                voided_cents: sum(movements.filter(m => m.voided)),
+                omaggio_cents: sum(live.filter(m => m.method === 'OMAGGIO')),
+                sospeso_cents: sum(live.filter(m => m.method === 'SOSPESO')),
+                deposits_cents: sum(movements.filter(m => m.source === 'deposit')),
+            },
+        });
+    } catch (err: any) {
+        console.error('GET /cash/transactions error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+
 // --- Stampa preconti (Ditron PRP-300 via agente locale) ---------------------
 // Il backend può stare in cloud, la termica sta in sala: in mezzo c'è una
 // coda a DB. Il palmare accoda (POST /print-jobs), l'agente sulla LAN del
@@ -27075,11 +27633,11 @@ const startServer = async () => {
                     }
                     // Dopo le migration, sempre: createSchema qui sopra ha
                     // appena ristretto i CHECK sui ruoli alla lista storica
-                    // (vedi ensurePlatformAdminRoleChecks per il perché).
+                    // (vedi ensureRoleChecks per il perché).
                     try {
-                        await ensurePlatformAdminRoleChecks();
+                        await ensureRoleChecks();
                     } catch (roleErr) {
-                        console.error('❌ Re-assert CHECK ruoli (PLATFORM_ADMIN) fallito:', roleErr);
+                        console.error('❌ Re-assert CHECK ruoli fallito:', roleErr);
                     }
                     // Dopo createSchema E le migration, sempre: la baseline
                     // congelata ricrea policy con la formula vecchia (vedi

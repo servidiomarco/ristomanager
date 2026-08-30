@@ -110,6 +110,16 @@ class BillsApiService {
     });
   }
 
+  /** Riapre un conto chiuso per errore: i movimenti restano, torna lo stato.
+   *  409 se il conto porta un documento fiscale confermato — quello va
+   *  annullato prima, o si incasserebbe due volte contro un solo scontrino. */
+  async reopenBill(billId: number): Promise<TableBill> {
+    return apiRequest<TableBill>(`${API_URL}/bills/${billId}/reopen`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+  }
+
   /** Registra un incasso a conto ancora aperto (contanti/POS a metà servizio). */
   async recordPayment(billId: number, payload: BillPaymentInput): Promise<TableBillWithSplits> {
     return apiRequest<TableBillWithSplits>(`${API_URL}/bills/${billId}/payments`, {

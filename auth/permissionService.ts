@@ -21,6 +21,7 @@ export const ALL_PERMISSIONS: { feature: string; permissions: Permission[] }[] =
   { feature: 'Conversazioni', permissions: ['voice_calls:view'] },
   { feature: 'Pagamenti', permissions: ['payments:view', 'payments:full'] },
   { feature: 'Comande e Cucina', permissions: ['orders:view', 'orders:take', 'orders:kds', 'orders:expedite', 'orders:void'] },
+  { feature: 'Cassa', permissions: ['cash:operate', 'cash:void_payment', 'cash:close_partial', 'cash:close_session'] },
   { feature: 'Chat staff', permissions: ['staffchat:use'] }
 ];
 
@@ -42,7 +43,7 @@ const CACHE_TTL = 5 * 60 * 1000;       // 5 min between proactive refreshes
 const REFRESH_BACKOFF_MS = 5_000;      // after a failed refresh, wait 5s before retrying
 
 const emptyRoleMap = (): Record<string, Permission[]> => ({
-  OWNER: [], GENERAL_MANAGER: [], MANAGER: [], RECEPTION: [], WAITER: [], KITCHEN: []
+  OWNER: [], GENERAL_MANAGER: [], MANAGER: [], RECEPTION: [], WAITER: [], KITCHEN: [], CASSA: []
 });
 
 const totalPermissionsIn = (snap: Record<string, Permission[]>): number =>

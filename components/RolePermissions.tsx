@@ -20,7 +20,8 @@ const ROLE_LABELS: Record<string, string> = {
   MANAGER: 'Manager',
   RECEPTION: 'Reception',
   WAITER: 'Cameriere',
-  KITCHEN: 'Cucina'
+  KITCHEN: 'Cucina',
+  CASSA: 'Cassa'
 };
 
 const PERMISSION_LABELS: Record<string, string> = {

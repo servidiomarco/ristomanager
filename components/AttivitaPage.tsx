@@ -71,6 +71,7 @@ const TEAM_LABELS: Record<UserRole, string> = {
   [UserRole.RECEPTION]: 'Reception',
   [UserRole.WAITER]: 'Camerieri',
   [UserRole.KITCHEN]: 'Cucina',
+  [UserRole.CASSA]: 'Cassa',
 };
 
 // Mirrors auth/permissions.ts role hierarchy.
@@ -82,6 +83,7 @@ const ROLE_RANK: Record<UserRole, number> = {
   [UserRole.RECEPTION]: 1,
   [UserRole.WAITER]: 1,
   [UserRole.KITCHEN]: 1,
+  [UserRole.CASSA]: 1,
 };
 const canAssignToRole = (actorRole: UserRole | undefined, targetRole: UserRole): boolean => {
   if (!actorRole) return false;
