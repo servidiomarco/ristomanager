@@ -12,6 +12,8 @@ import {
   type MenuCatalogue, type NewOrderItem, type CloseOrderResult,
 } from '../services/ordersApiService';
 import { BillSheet } from './pagamenti/BillSheet';
+import { PagamentoSheet } from './cassa/PagamentoSheet';
+import { useAuth } from '../contexts/AuthContext';
 import { billsApiService } from '../services/billsApiService';
 import { socketClient } from '../services/socketClient';
 import type { ServiceBill } from '../services/ordersApiService';
@@ -53,6 +55,9 @@ import {
 // ---------------------------------------------------------------------------
 
 interface OrderPadProps {
+  /** Tavolo da aprire subito (arrivando da Cassa · «Apri in Comande»). */
+  initialTableId?: number | null;
+  onInitialTableConsumed?: () => void;
   dishes: Dish[];
   tables: Table[];
   reservations: Reservation[];
@@ -66,7 +71,7 @@ interface OrderPadProps {
   onImmersive?: (on: boolean) => void;
 }
 
-export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, reservations, globalDate, globalShiftFilter, onImmersive }) => {
+export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, reservations, globalDate, globalShiftFilter, onImmersive, initialTableId, onInitialTableConsumed }) => {
   // I piatti spenti (es. articolo disattivato in cassa Passepartout) restano
   // in anagrafica per lo storico ma non si battono più.
   const dishes = useMemo(() => allDishes.filter(d => d.is_active !== false), [allDishes]);
@@ -99,6 +104,11 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
   // non una comanda nuova.
   const [serviceBills, setServiceBills] = useState<Map<number, ServiceBill>>(new Map());
   const [viewBill, setViewBill] = useState<ServiceBill | null>(null);
+  // Il pannello di incasso della Cassa, per chi ha il permesso: un solo
+  // motore di pagamento, due punti d'ingresso (banco e tavolo).
+  const [cassaBillId, setCassaBillId] = useState<number | null>(null);
+  const { hasPermission } = useAuth();
+  const canCassa = hasPermission('cash:operate');
   const billTables = useMemo(() => new Set(serviceBills.keys()), [serviceBills]);
 
   const isWide = useMediaQuery('(min-width: 1024px)');
@@ -189,6 +199,13 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
     shift: globalShiftFilter === 'ALL' ? undefined : globalShiftFilter,
   }), [selectedDateRome, globalShiftFilter]);
   const isTodayRome = selectedDateRome === getRomeDatePart(new Date());
+
+  useEffect(() => {
+    if (initialTableId == null) return;
+    loadTable(initialTableId);
+    onInitialTableConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTableId]);
 
   const loadTable = useCallback(async (id: number, opts?: { forceCreate?: boolean }) => {
     setBusy(true); setError(null);
@@ -605,15 +622,40 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
           onClose={() => setViewBill(null)}
           onSettle={settleViewBill}
           footerExtra={
-            <button
-              type="button"
-              onClick={() => { const tid = viewBill.table_id; setViewBill(null); loadTable(tid, { forceCreate: true }); }}
-              disabled={busy}
-              className={`w-full ${dsButton.secondary}`}
-            >
-              Nuova comanda su questo tavolo
-            </button>
+            <>
+              {canCassa && (
+                <button
+                  type="button"
+                  onClick={() => { const bid = viewBill.id; setViewBill(null); setCassaBillId(bid); }}
+                  disabled={busy}
+                  className={`w-full ${dsButton.primary}`}
+                >
+                  Incassa con la cassa
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => { const tid = viewBill.table_id; setViewBill(null); loadTable(tid, { forceCreate: true }); }}
+                disabled={busy}
+                className={`w-full ${dsButton.secondary}`}
+              >
+                Nuova comanda su questo tavolo
+              </button>
+            </>
           }
+        />
+      )}
+      {cassaBillId != null && (
+        <PagamentoSheet
+          billId={cassaBillId}
+          service={{ service_date: serviceQuery.date, shift: serviceQuery.shift }}
+          onClose={() => setCassaBillId(null)}
+          onBillClosed={async () => {
+            try {
+              const res = await ordersApiService.getTablesBillsStatus(serviceQuery);
+              setServiceBills(new Map(res.bills.map(b => [b.table_id, b])));
+            } catch { /* al prossimo focus la griglia si riallinea da sola */ }
+          }}
         />
       )}
       {justClosed && (
@@ -644,7 +686,17 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
           onQuery={setGridQuery}
           busy={busy}
           onPick={loadTable}
-          notice={(error || flash) ? <div className="flex flex-col gap-2">{notices}</div> : undefined}
+          notice={(error || flash || serviceBills.size > 0) ? (
+            <div className="flex flex-col gap-2">
+              {notices}
+              {serviceBills.size > 0 && (
+                <span className="inline-flex h-8 w-fit items-baseline gap-1.5 rounded-full border border-[var(--ds-pending-solid)] bg-[var(--ds-pending-tint)] px-3 leading-8 text-[var(--ds-pending-text)]">
+                  <span className="text-[15px] font-bold tabular-nums">{serviceBills.size}</span>
+                  <span className="text-[13px] font-medium">{serviceBills.size === 1 ? 'conto da incassare' : 'conti da incassare'}</span>
+                </span>
+              )}
+            </div>
+          ) : undefined}
         />
         {billSheets}
       </>

@@ -654,6 +654,9 @@ const App: React.FC = () => {
   // la vista monta.
   const [pendingStaffChatThread, setPendingStaffChatThread] = useState<string | null>(null);
 
+  // Cassa · «Apri in Comande»: il tavolo da aprire appena la vista monta.
+  const [pendingComandeTableId, setPendingComandeTableId] = useState<number | null>(null);
+
   // Email and Notifiche unread badges — poll on view change + on focus, no
   // socket wiring for now (both endpoints are cheap).
   const [emailUnreadCount, setEmailUnreadCount] = useState(0);
@@ -2859,13 +2862,13 @@ const App: React.FC = () => {
 
         {view === ViewState.COMANDE && (
           <CardErrorBoundary label="Comande">
-            <OrderPad dishes={dishes} tables={tables} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} onImmersive={setImmersive} />
+            <OrderPad dishes={dishes} tables={tables} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} onImmersive={setImmersive} initialTableId={pendingComandeTableId} onInitialTableConsumed={() => setPendingComandeTableId(null)} />
           </CardErrorBoundary>
         )}
 
         {view === ViewState.CASSA && (
           <CardErrorBoundary label="Cassa">
-            <CassaPage dishes={dishes} tables={tables} rooms={rooms} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} onImmersive={setImmersive} />
+            <CassaPage dishes={dishes} tables={tables} rooms={rooms} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} onImmersive={setImmersive} onOpenInComande={(tableId) => { setPendingComandeTableId(tableId); setView(ViewState.COMANDE); }} />
           </CardErrorBoundary>
         )}
 

@@ -56,12 +56,14 @@ interface CassaPageProps {
   globalShiftFilter: 'ALL' | 'LUNCH' | 'DINNER';
   /** Dentro un tavolo il telefono serve tutto alla cassa. */
   onImmersive?: (on: boolean) => void;
+  /** Apre Comande sul tavolo: uscite e lanci restano di là (scorciatoia). */
+  onOpenInComande?: (tableId: number) => void;
 }
 
 type Screen = 'queue' | 'tables' | 'table' | 'payment' | 'split' | 'esito' | 'transazioni' | 'cassetto';
 
 export const CassaPage: React.FC<CassaPageProps> = ({
-  dishes: allDishes, tables, rooms, reservations, globalDate, globalShiftFilter, onImmersive,
+  dishes: allDishes, tables, rooms, reservations, globalDate, globalShiftFilter, onImmersive, onOpenInComande,
 }) => {
   const [screen, setScreen] = useState<Screen>('queue');
   const [roomId, setRoomId] = useState<string>('ALL');
@@ -653,6 +655,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
           onDiscount={() => setDiscountOpen(true)}
           onCustomer={() => setCustomerOpen(true)}
           onGoToPayment={goToPayment}
+          onOpenInComande={onOpenInComande && tableId != null ? () => onOpenInComande(tableId) : undefined}
         />
       ) : (
         <SelezionaTavolo

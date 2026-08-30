@@ -52,6 +52,8 @@ interface TavoloAttivoProps {
   onCustomer: () => void;
   /** Manda in cucina le bozze e va al pagamento; senza bozze va e basta. */
   onGoToPayment: () => void;
+  /** Il lavoro di uscite e lanci resta di Comande: scorciatoia, non copia. */
+  onOpenInComande?: () => void;
 }
 
 const Row: React.FC<{
@@ -89,7 +91,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
   tableName, reservation, order, cart, dishes, categories, category, onCategory,
   query, onQuery, hasVariants, busy, error, serviceLabel, onBack,
   onAddDish, onRemoveDish, onVariants, onCartQty, onVoidItem, onCovers,
-  onDiscount, onCustomer, onGoToPayment,
+  onDiscount, onCustomer, onGoToPayment, onOpenInComande,
 }) => {
   const isWide = useMediaQuery('(min-width: 1024px)');
   const [comandaOpen, setComandaOpen] = useState(false);
@@ -257,6 +259,17 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
         >
           Sconto conto
         </button>
+
+        {onOpenInComande && (
+          <button
+            type="button"
+            onClick={onOpenInComande}
+            disabled={busy}
+            className="inline-flex h-9 items-center rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+          >
+            Apri in Comande
+          </button>
+        )}
 
         {error && <Callout tone="critical">{error}</Callout>}
 
