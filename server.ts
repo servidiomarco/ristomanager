@@ -4291,6 +4291,15 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
         }
         const notes = typeof req.body?.notes === 'string' ? req.body.notes.slice(0, 500) : null;
 
+        // Codice lotteria degli scontrini (8 alfanumerici AdE), dettato dal
+        // cliente in cassa: viaggia col conto e finisce nel documento
+        // commerciale all'emissione. Vuoto = niente lotteria, non un errore.
+        const lotteryRaw = typeof req.body?.lottery_code === 'string' ? req.body.lottery_code.trim().toUpperCase() : '';
+        if (lotteryRaw && !/^[A-Z0-9]{8}$/.test(lotteryRaw)) {
+            return res.status(400).json({ error: 'lottery_code_invalid', message: 'Il codice lotteria sono 8 lettere o cifre' });
+        }
+        const lotteryCode = lotteryRaw || null;
+
         // Need the current total + sums to decide between CLOSED and
         // SETTLED_PARTIAL and to sanity-check the caller's values. Fetch
         // under a lock so a webhook-triggered PAID→SETTLED promotion can't
@@ -4389,13 +4398,14 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
                      ),
                      tip_cents = $4,
                      notes = COALESCE($5, notes),
+                     lottery_code = COALESCE($7, lottery_code),
                      share_token = NULL
                  WHERE id = $1 AND tenant_id = $6
                  RETURNING id, reservation_id, table_id, total_cents, covers, currency,
                            items, status, share_token, opened_at, closed_at,
                            opened_by_user_id, closed_by_user_id, external_ref,
                            cash_settled_cents, tip_cents, notes`,
-                [id, finalStatus, req.user?.userId ?? null, Math.round(tipCents), notesForDb, req.tenantId!]
+                [id, finalStatus, req.user?.userId ?? null, Math.round(tipCents), notesForDb, req.tenantId!, lotteryCode]
             );
             updatedRow = upd.rows[0];
             await client.query('COMMIT');
@@ -4942,7 +4952,7 @@ async function emitFiscalDocForBill(tenantId: number, billId: number, userId: nu
     if (!fiscalId) return { skipped: 'missing_vat_number' };
 
     const billRs = await queryWithRetry(
-        `SELECT id, total_cents, items, status, external_ref FROM table_bills WHERE id = $1 AND tenant_id = $2`,
+        `SELECT id, total_cents, items, status, external_ref, lottery_code FROM table_bills WHERE id = $1 AND tenant_id = $2`,
         [billId, tenantId]
     );
     const bill = billRs.rows[0];
@@ -5011,6 +5021,7 @@ async function emitFiscalDocForBill(tenantId: number, billId: number, userId: nu
         payments: paymentsRs.rows,
         depositCreditCents: depositRs.rows[0].s,
         fallbackVatRate: (await getFiscalVatMap(tenantId)).fallback,
+        lotteryCode: bill.lottery_code ?? null,
     });
 
     // Claim atomico del tentativo: emissione automatica (post-chiusura) e
@@ -5178,6 +5189,20 @@ app.post('/bills/:id/fiscal-docs', authenticate, requirePermission('payments:ful
     try {
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid bill id' });
+
+        // Codice lotteria arrivato col retry manuale (conto chiuso senza, o
+        // cliente che lo porge dopo): si salva sul conto PRIMA di emettere,
+        // così emitFiscalDocForBill lo trova come in chiusura.
+        const lotteryRaw = typeof req.body?.lottery_code === 'string' ? req.body.lottery_code.trim().toUpperCase() : '';
+        if (lotteryRaw) {
+            if (!/^[A-Z0-9]{8}$/.test(lotteryRaw)) {
+                return res.status(400).json({ error: 'lottery_code_invalid', message: 'Il codice lotteria sono 8 lettere o cifre' });
+            }
+            await queryWithRetry(
+                `UPDATE table_bills SET lottery_code = $1 WHERE id = $2 AND tenant_id = $3`,
+                [lotteryRaw, id, req.tenantId!]
+            );
+        }
 
         // documento: 'Proforma' → niente emissione: si registra (anche a
         // posteriori) il segnaposto sul conto chiuso senza documento. Serve

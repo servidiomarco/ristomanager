@@ -29,6 +29,8 @@ export interface CloseBillPayload {
   cash_settled_cents?: number;
   tip_cents?: number;
   notes?: string;
+  /** Codice lotteria del cliente (8 alfanumerici): va nel documento commerciale. */
+  lottery_code?: string;
   /** Conti nativi: 'Proforma' = chiusura deliberata senza documento fiscale
    *  (registrata come segnaposto PROFORMA, sostituibile da scontrino o
    *  fattura emessi dopo). Assente o 'Scontrino' → emissione automatica. */

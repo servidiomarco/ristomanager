@@ -279,7 +279,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 
 ## Fiscalità: scontrino, fattura elettronica, proforma
 
-- **Scontrino elettronico** (documento commerciale) emesso via provider (Openapi.com) direttamente dal conto; se la trasmissione fallisce **il servizio non si ferma**: il conto si chiude comunque e il documento si ritenta dopo.
+- **Scontrino elettronico** (documento commerciale) emesso via provider (Openapi.com) direttamente dal conto; se la trasmissione fallisce **il servizio non si ferma**: il conto si chiude comunque e il documento si ritenta dopo. **Lotteria degli scontrini**: il codice del cliente si inserisce in chiusura conto (o al retry, se lo porge dopo) e viaggia nel documento.
 - **Fattura elettronica SDI** dal conto: dati di fatturazione presi dalla scheda cliente (denominazione, P.IVA, CF, codice SDI, PEC), XML FatturaPA generato e trasmesso. Nel dialog, il **lookup P.IVA** riempie denominazione, sede, codice SDI e PEC dai registri camerali (una lente accanto al campo).
 - **Esiti SDI in tempo reale**: se l'Agenzia scarta una fattura anche giorni dopo l'invio, il webhook del provider la segna in errore sul conto (con il motivo) e si riemette da lì; consegna e deposito nel cassetto fiscale restano esiti validi senza rumore.
 - **Proforma** quando lo scontrino non è previsto; annullo del documento fiscale come atto separato (il conto non si tocca).
@@ -514,6 +514,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-08-30 | Fiscalità | Lotteria degli scontrini: campo per il codice del cliente in chiusura conto (e al retry), trasmesso nel documento commerciale. |
 | 2026-08-30 | Fiscalità | Lookup P.IVA nel dialog fattura (denominazione, sede, SDI, PEC dai registri camerali) e webhook esiti SDI: la fattura scartata si segna in errore da sola, col motivo. |
 | 2026-08-30 | Fiscalità | Copia dello scontrino per il cliente: stampa sulla termica di sala e copia digitale via QR (pagina pubblica del documento, valida anche dopo mesi). |
 | 2026-08-29 | Impostazioni | Upload del logo del ristorante nell'identità pubblica; compare sulla pagina di prenotazione online (per il Frantoio precaricato il logo storico). |

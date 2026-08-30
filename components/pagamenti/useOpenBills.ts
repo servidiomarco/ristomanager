@@ -77,7 +77,7 @@ export const useOpenBills = (
     };
   }, [reload]);
 
-  const closeBill = useCallback(async (bill: OpenBillRow, opts?: { cash_settled_cents?: number; tip_cents?: number }) => {
+  const closeBill = useCallback(async (bill: OpenBillRow, opts?: Parameters<typeof billsApiService.closeBill>[1]) => {
     setClosingId(bill.id);
     setError(null);
     try {

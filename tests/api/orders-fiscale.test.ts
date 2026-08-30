@@ -412,4 +412,49 @@ describe('webhook esiti openapi', () => {
         expect(unknownRef.status).toBe(200);
         expect(unknownRef.body.ignored).toBe('unknown_ref');
     });
+
+    // Lotteria degli scontrini: il codice dettato in cassa viaggia sul conto
+    // e finisce nel payload trasmesso; arriva anche col retry manuale per il
+    // cliente che lo porge a documento già mancato.
+    it('il codice lotteria della chiusura finisce nel documento', async () => {
+        const room = await api().post('/rooms').set(bearer(token)).send({ name: 'Sala Lotteria', width: 800, height: 600 });
+        const table = await api().post('/tables').set(bearer(token)).send({
+            name: 'LOTTO1', shape: 'SQUARE', seats: 4, x: 100, y: 700, room_id: room.body.id, status: 'FREE',
+        });
+        const bill = await api().post(`/tables/${table.body.id}/bill`).set(bearer(token)).send({ total_cents: 2500, covers: 2 });
+        const billId = bill.body.bill.id as number;
+
+        const badCode = await api().post(`/bills/${billId}/close`).set(bearer(token)).send({
+            payments: [{ method: 'POS_FISICO', amount_cents: 2500 }], lottery_code: 'corto',
+        });
+        expect(badCode.status).toBe(400);
+        expect(badCode.body.error).toBe('lottery_code_invalid');
+
+        const close = await api().post(`/bills/${billId}/close`).set(bearer(token)).send({
+            payments: [{ method: 'POS_FISICO', amount_cents: 2500 }], lottery_code: 'abc123xy',
+        });
+        expect(close.status).toBe(200);
+        let res: any = null;
+        for (let i = 0; i < 20; i++) {
+            res = await api().post(`/bills/${billId}/fiscal-docs`).set(bearer(token)).send({});
+            if (res.status === 200 && res.body?.doc?.status === 'CONFIRMED') break;
+            await new Promise(r => setTimeout(r, 150));
+        }
+        expect(res.body.doc.status).toBe('CONFIRMED');
+        expect(res.body.request.lottery_code).toBe('ABC123XY'); // normalizzato maiuscolo
+    });
+
+    it('il codice lotteria arriva anche col retry manuale', async () => {
+        const { billId, ref } = await closedBillWithDoc('LOTTO2', 1500);
+        // Documento già emesso senza codice: si annulla e si riemette col
+        // codice — il percorso reale del "scusi, ho il codice lotteria".
+        const docs = await fiscalRow(billId);
+        const voided = await api().post(`/bills/${billId}/fiscal-docs/${docs.fiscal_doc_id}/void`).set(bearer(token)).send({});
+        expect(voided.status).toBe(200);
+        expect(ref).toBeTruthy();
+
+        const emit = await api().post(`/bills/${billId}/fiscal-docs`).set(bearer(token)).send({ lottery_code: 'ZZ99AA11' });
+        expect(emit.status).toBe(200);
+        expect(emit.body.request.lottery_code).toBe('ZZ99AA11');
+    });
 });

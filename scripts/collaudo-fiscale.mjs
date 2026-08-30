@@ -29,11 +29,15 @@ for (const line of envText.split('\n')) {
 const BASE = (process.env.OPENAPI_INVOICE_BASE_URL || 'https://test.invoice.openapi.com').replace(/\/$/, '');
 const TOKEN = process.env.OPENAPI_INVOICE_TOKEN;
 if (!TOKEN) { console.error('OPENAPI_INVOICE_TOKEN mancante in .env'); process.exit(1); }
-if (!BASE.includes('test.')) {
-    console.error(`ATTENZIONE: base URL non-sandbox (${BASE}). Questo script è solo per il collaudo: rifiuto.`);
+// Emissioni e annulli solo in sandbox. L'unica eccezione è 'webhook':
+// registrare il callback nella configurazione di PRODUZIONE è proprio il suo
+// scopo (runbook docs/go-live-fiscale.md, passo 3) e non emette nulla.
+const cmdArg = process.argv[2];
+if (!BASE.includes('test.') && cmdArg !== 'webhook') {
+    console.error(`ATTENZIONE: base URL non-sandbox (${BASE}). Solo il comando 'webhook' è ammesso fuori dalla sandbox.`);
     process.exit(1);
 }
-console.log(`Sandbox: ${BASE}\n`);
+console.log(`${BASE.includes('test.') ? 'Sandbox' : 'PRODUZIONE'}: ${BASE}\n`);
 
 // P.IVA della IT-configuration sandbox già creata su console.openapi.com
 // ("ristomanager sandbox", e_receipts + customer_invoice attivi). La sandbox

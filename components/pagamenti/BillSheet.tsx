@@ -19,6 +19,9 @@ export type SettleOpts = {
   /** Conti nativi: 'Proforma' = chiusura deliberata senza documento fiscale
    *  (scontrino o fattura emettibili dopo, dal conto). */
   documento?: 'Scontrino' | 'Proforma';
+  /** Codice lotteria degli scontrini dettato dal cliente (8 alfanumerici):
+   *  finisce nel documento commerciale all'emissione. */
+  lottery_code?: string;
 };
 
 /** Metodi registrabili in cassa, nell'ordine in cui si usano davvero. */
@@ -100,6 +103,11 @@ export const SettleDialog: React.FC<{
   // oppure la proforma (la routine della cassa, nessun documento fiscale).
   const isPP = /^pp:comanda:/.test(String(bill.external_ref ?? ''));
   const [ppDoc, setPpDoc] = useState<'Scontrino' | 'Proforma'>('Scontrino');
+  // Codice lotteria dettato dal cliente: solo conti nativi con scontrino
+  // (sui conti Passepartout lo gestisce la cassa). 8 alfanumerici AdE.
+  const [lottery, setLottery] = useState('');
+  const lotteryClean = lottery.trim().toUpperCase();
+  const lotteryValid = lotteryClean === '' || /^[A-Z0-9]{8}$/.test(lotteryClean);
   // Conti nativi: la scelta c'è SEMPRE. Con un provider fiscale attivo
   // "Scontrino" emette davvero; senza, resta la dichiarazione d'intento —
   // ma "Proforma" marca comunque il conto come chiuso senza documento DI
@@ -131,6 +139,7 @@ export const SettleDialog: React.FC<{
       payments: [...movements, ...pending],
       tip_cents: tipCents,
       ...(isPP ? { passepartout_documento: ppDoc } : { documento: ppDoc }),
+      ...(!isPP && ppDoc === 'Scontrino' && lotteryClean ? { lottery_code: lotteryClean } : {}),
     });
   };
 
@@ -248,6 +257,26 @@ export const SettleDialog: React.FC<{
                     : 'Nessun documento adesso: scontrino o fattura si emettono dopo, dal conto.'}
                 </p>
               )}
+              {!isPP && ppDoc === 'Scontrino' && (
+                <label className="mt-2.5 block">
+                  <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Codice lotteria <span className="font-normal text-[var(--ds-text-muted)]">(facoltativo)</span></span>
+                  <input
+                    type="text"
+                    maxLength={8}
+                    autoCapitalize="characters"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    placeholder="8 caratteri"
+                    value={lottery}
+                    onChange={e => setLottery(e.target.value)}
+                    disabled={busy}
+                    className={`${field} !text-left uppercase tracking-widest`}
+                  />
+                  {!lotteryValid && (
+                    <span className="mt-1 block text-[13px] text-[var(--ds-critical-text)]">Il codice sono 8 lettere o cifre</span>
+                  )}
+                </label>
+              )}
             </div>
           )}
 
@@ -270,7 +299,7 @@ export const SettleDialog: React.FC<{
           <button
             type="button"
             onClick={confirm}
-            disabled={busy}
+            disabled={busy || !lotteryValid}
             className="inline-flex items-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-5 py-2 text-[14px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" />}
