@@ -3,7 +3,7 @@ import {
   Check, Loader2, TriangleAlert, Utensils, X,
 } from 'lucide-react';
 import type { Dish, Reservation, Table, TableMerge, OrderWithItems, OrderItem } from '../types';
-import { ArrivalStatus, ReservationStatus, Shift } from '../types';
+import { Shift } from '../types';
 import { getRomeDatePart } from '../utils/reservationTime';
 import { getTableMerges } from '../services/apiService';
 import {
@@ -16,7 +16,7 @@ import { billsApiService } from '../services/billsApiService';
 import { socketClient } from '../services/socketClient';
 import type { ServiceBill } from '../services/ordersApiService';
 import {
-  ModalShell, Sheet, Callout, SectionHeader, SegmentedControl, useMediaQuery,
+  ModalShell, Sheet, Callout, SectionHeader, useMediaQuery,
   dsInput, dsButton,
 } from './ds';
 import { TableGrid } from './comande/TableGrid';
@@ -25,7 +25,9 @@ import { DishBrowser } from './comande/DishBrowser';
 import { CourseChips } from './comande/CourseChips';
 import { CourseColumn, CourseList, SendFooter } from './comande/CourseColumn';
 import { ComandaSheet } from './comande/ComandaSheet';
-import { buildRows, type TableFilter } from './comande/tablesView';
+import { ReasonDialog } from './comande/ReasonDialog';
+import { DiscountDialog } from './comande/DiscountDialog';
+import { buildRows, buildMergeGroups, makeReservationForTable, type TableFilter } from './comande/tablesView';
 import {
   MAX_COURSES, cartForCourse, cartKey, cartSum, courseLabel, euro,
   isSent, isSystemLine, rowCount,
@@ -165,33 +167,14 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
   }, [selectedDateRome, globalShiftFilter]);
 
   // Gruppo di unione per tavolo, per turno: `${shift}:${tableId}` → ids.
-  const mergeGroupByTable = useMemo(() => {
-    const map = new Map<string, number[]>();
-    for (const m of tableMerges) {
-      const group = [m.primary_id, ...m.merged_ids];
-      for (const id of group) map.set(`${m.shift}:${id}`, group);
-    }
-    return map;
-  }, [tableMerges]);
+  const mergeGroupByTable = useMemo(() => buildMergeGroups(tableMerges), [tableMerges]);
 
-  const reservationForTable = useCallback((id: number): Reservation | null => {
-    const isLive = (r: Reservation): boolean =>
-      getRomeDatePart(r.reservation_time) === selectedDateRome
-      && (globalShiftFilter === 'ALL' || r.shift === globalShiftFilter)
-      && r.reservation_status !== ReservationStatus.CANCELLED
-      && r.arrival_status !== ArrivalStatus.DEPARTED;
-    const exact = reservations.find(r => r.table_id === id && isLive(r));
-    if (exact) return exact;
-    // Nessuna prenotazione sul tavolo esatto: si cerca sugli altri tavoli
-    // della sua unione (nel turno della prenotazione stessa).
-    return reservations.find(r =>
-      r.table_id != null
-      && r.table_id !== id
-      && isLive(r)
-      && (mergeGroupByTable.get(`${r.shift}:${id}`)?.includes(r.table_id) ?? false)
-    ) ?? null;
-  },
-  [reservations, selectedDateRome, globalShiftFilter, mergeGroupByTable]);
+  // La regola sta in tablesView: Cassa fa la stessa domanda sugli stessi
+  // tavoli, e due copie divergerebbero al primo caso di unione.
+  const reservationForTable = useMemo(
+    () => makeReservationForTable(reservations, selectedDateRome, globalShiftFilter, mergeGroupByTable),
+    [reservations, selectedDateRome, globalShiftFilter, mergeGroupByTable]
+  );
 
   const reservation = useMemo(
     () => (tableId ? reservationForTable(tableId) : null),
@@ -1057,138 +1040,5 @@ const VariantSheet: React.FC<{
         />
       </label>
     </Sheet>
-  );
-};
-
-// Dialogo con motivazione obbligatoria. Usato per gli storni: senza un motivo
-// scritto, a fine mese lo scarto è un ammanco che nessuno sa spiegare.
-const ReasonDialog: React.FC<{
-  title: string;
-  hint: string;
-  confirmLabel: string;
-  busy: boolean;
-  onCancel: () => void;
-  onConfirm: (reason: string) => void;
-}> = ({ title, hint, confirmLabel, busy, onCancel, onConfirm }) => {
-  const [reason, setReason] = useState('');
-  const PRESETS = ['Errore di battitura', 'Cliente ha cambiato idea', 'Piatto non riuscito', 'Ingrediente finito'];
-  return (
-    <ModalShell
-      open
-      onClose={onCancel}
-      title={title}
-      subtitle={hint}
-      size="sm"
-      closeOnEscape
-      bodyClassName="space-y-3 p-5 sm:p-6"
-      footer={
-        <button
-          type="button"
-          onClick={() => onConfirm(reason.trim())}
-          disabled={busy || reason.trim().length < 3}
-          className={dsButton.critical}
-        >
-          {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-          {confirmLabel}
-        </button>
-      }
-    >
-      <div className="flex flex-wrap gap-2">
-        {PRESETS.map(pr => (
-          <button
-            key={pr}
-            type="button"
-            onClick={() => setReason(pr)}
-            aria-pressed={reason === pr}
-            className={`inline-flex h-11 items-center rounded-full px-3.5 text-[14px] font-medium transition-colors ${
-              reason === pr
-                ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
-                : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
-            }`}
-          >
-            {pr}
-          </button>
-        ))}
-      </div>
-      <input
-        value={reason}
-        onChange={e => setReason(e.target.value)}
-        autoFocus
-        placeholder="Motivazione"
-        aria-label="Motivazione"
-        className={dsInput}
-      />
-    </ModalShell>
-  );
-};
-
-const DiscountDialog: React.FC<{
-  currentReason: string | null;
-  hasDiscount: boolean;
-  busy: boolean;
-  onCancel: () => void;
-  onClear: () => void;
-  onConfirm: (p: { discount_type: 'PERCENT' | 'AMOUNT'; discount_value: number; reason: string }) => void;
-}> = ({ currentReason, hasDiscount, busy, onCancel, onClear, onConfirm }) => {
-  const [type, setType] = useState<'PERCENT' | 'AMOUNT'>('PERCENT');
-  const [value, setValue] = useState('');
-  const [reason, setReason] = useState(currentReason ?? '');
-  const num = Number(value.replace(',', '.'));
-  const valid = Number.isFinite(num) && num > 0 && (type !== 'PERCENT' || num <= 100) && reason.trim().length >= 3;
-
-  return (
-    <ModalShell
-      open
-      onClose={onCancel}
-      title="Sconto sulla comanda"
-      subtitle="Resta a registro con il tuo nome: serve a spiegare la differenza a fine servizio."
-      size="sm"
-      closeOnEscape
-      bodyClassName="space-y-3 p-5 sm:p-6"
-      footerStart={
-        hasDiscount ? (
-          <button type="button" onClick={onClear} disabled={busy} className={dsButton.quiet}>
-            Rimuovi
-          </button>
-        ) : undefined
-      }
-      footer={
-        <button
-          type="button"
-          onClick={() => onConfirm({ discount_type: type, discount_value: num, reason: reason.trim() })}
-          disabled={busy || !valid}
-          className={dsButton.primary}
-        >
-          {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-          Applica
-        </button>
-      }
-    >
-      <SegmentedControl<'PERCENT' | 'AMOUNT'>
-        value={type}
-        onChange={setType}
-        ariaLabel="Tipo di sconto"
-        options={[
-          { value: 'PERCENT', label: 'Percentuale' },
-          { value: 'AMOUNT', label: 'Importo €' },
-        ]}
-      />
-      <input
-        value={value}
-        onChange={e => setValue(e.target.value)}
-        inputMode="decimal"
-        autoFocus
-        placeholder={type === 'PERCENT' ? '10' : '5,00'}
-        aria-label={type === 'PERCENT' ? 'Percentuale di sconto' : 'Importo dello sconto'}
-        className={dsInput}
-      />
-      <input
-        value={reason}
-        onChange={e => setReason(e.target.value)}
-        placeholder="Motivazione (obbligatoria)"
-        aria-label="Motivazione dello sconto"
-        className={dsInput}
-      />
-    </ModalShell>
   );
 };

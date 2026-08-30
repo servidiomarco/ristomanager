@@ -7,6 +7,7 @@ import { getCustomers } from '../../services/apiService';
 import type { Customer } from '../../types';
 import { FormCard, PaneHeader, Sheet, StatusPill } from '../ds';
 import { formatEuro } from './paymentsView';
+import { METHODS, methodLabel, eurToCents, settleMath, settlePayments, nextAmountText } from './settleView';
 import { getRomeTimePart } from '../../utils/reservationTime';
 
 /** Chiusura conto: i movimenti di incasso (metodo + importo) e la mancia.
@@ -21,24 +22,6 @@ export type SettleOpts = {
   documento?: 'Scontrino' | 'Proforma';
 };
 
-/** Metodi registrabili in cassa, nell'ordine in cui si usano davvero. */
-const METHODS: { value: BillPaymentInput['method']; label: string }[] = [
-  { value: 'CONTANTI', label: 'Contanti' },
-  { value: 'POS_FISICO', label: 'POS' },
-  { value: 'SATISPAY', label: 'Satispay' },
-  { value: 'BUONO_PASTO', label: 'Buoni pasto' },
-  { value: 'GIFT_CARD', label: 'Gift card' },
-  { value: 'SOSPESO', label: 'Sospeso' },
-  { value: 'OMAGGIO', label: 'Omaggio' },
-];
-const methodLabel = (m: string) =>
-  m === 'LINK_ONLINE' ? 'Online' : METHODS.find(x => x.value === m)?.label ?? m;
-
-// Parsing tollerante dell'importo digitato: "12,50" / "12.50" / "12" → cents.
-const eurToCents = (s: string): number => {
-  const n = parseFloat(String(s).replace(/[^\d.,]/g, '').replace(',', '.'));
-  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : 0;
-};
 
 /* ── Il conto di un tavolo ────────────────────────────────────────────────
    The QR is the point of this panel: the guest frames it and pays their share.
@@ -105,30 +88,21 @@ export const SettleDialog: React.FC<{
   // ma "Proforma" marca comunque il conto come chiuso senza documento DI
   // PROPOSITO, che in lista è tutt'altra cosa di "senza scontrino".
   const showDocChoice = true;
-  const recorded = movements.reduce((n, m) => n + m.amount_cents, 0);
-  const remaining = Math.max(0, residual - recorded);
   const [amount, setAmount] = useState(residual > 0 ? (residual / 100).toFixed(2) : '0');
   const [tip, setTip] = useState('');
-  const amountCents = eurToCents(amount);
   const tipCents = eurToCents(tip);
-  // Contanti sopra il dovuto = resto da rendere: a libro va solo il dovuto.
-  const applied = Math.min(amountCents, remaining);
-  const change = method === 'CONTANTI' ? Math.max(0, amountCents - remaining) : 0;
-  const shortfall = Math.max(0, remaining - applied);
-  const willSettle = shortfall === 0;
+  const { remaining, applied, change, shortfall, willSettle } = settleMath(residual, movements, method, amount);
 
   const addMovement = () => {
     if (applied <= 0) return;
     setMovements(prev => [...prev, { method, amount_cents: applied }]);
-    const next = Math.max(0, remaining - applied);
-    setAmount(next > 0 ? (next / 100).toFixed(2) : '0');
+    setAmount(nextAmountText(Math.max(0, remaining - applied)));
   };
 
   const confirm = () => {
-    // L'importo ancora nel campo è un movimento non ancora aggiunto: vale.
-    const pending = applied > 0 ? [{ method, amount_cents: applied }] : [];
     onConfirm({
-      payments: [...movements, ...pending],
+      // L'importo ancora nel campo è un movimento non ancora aggiunto: vale.
+      payments: settlePayments(movements, method, applied),
       tip_cents: tipCents,
       ...(isPP ? { passepartout_documento: ppDoc } : { documento: ppDoc }),
     });

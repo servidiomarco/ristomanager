@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { Loader2, UtensilsCrossed } from 'lucide-react';
-import { getRomeTimePart } from '../../utils/reservationTime';
-import { EmptyState, SearchField, SectionHeader, SegmentedControl } from '../ds';
+import { EmptyState, SearchField, SegmentedControl } from '../ds';
 import {
-  TABLE_CAPTION, TABLE_GROUPS, TABLE_TILE, countByState, matchesQuery,
+  TABLE_GROUPS, countByState, matchesQuery,
   type TableFilter, type TableRow,
 } from './tablesView';
+import { TableTiles } from './TableTiles';
 
 interface TableGridProps {
   rows: TableRow[];
@@ -126,45 +126,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
           </EmptyState>
         </div>
       ) : (
-        TABLE_GROUPS.map(group => {
-          const group_rows = visible.filter(r => r.state === group.state);
-          if (group_rows.length === 0) return null;
-          return (
-            <section key={group.state} className="mt-4 first:mt-0">
-              <SectionHeader tone={group.tone} meta={String(group_rows.length)}>
-                {group.label}
-              </SectionHeader>
-              <div className="mt-2 grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-7 xl:grid-cols-9">
-                {group_rows.map(({ table, state, reservation }) => (
-                  <button
-                    key={table.id}
-                    type="button"
-                    onClick={() => onPick(table.id)}
-                    disabled={busy}
-                    className={`flex aspect-square flex-col items-center justify-center gap-0.5 rounded-[20px] p-1 shadow-[var(--ds-shadow-card)] transition-shadow disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${TABLE_TILE[state]}`}
-                  >
-                    <span className="text-[24px] font-semibold tracking-[-0.02em] text-[var(--ds-text-primary)]">
-                      {table.name}
-                    </span>
-                    <span className="text-[12px] tabular-nums text-[var(--ds-text-muted)]">
-                      {table.seats} cop.
-                    </span>
-                    {group.caption && (
-                      <span className={`text-[11px] font-semibold ${TABLE_CAPTION[state]}`}>
-                        {group.caption}
-                      </span>
-                    )}
-                    {state === 'booked' && reservation && (
-                      <span className={`max-w-full truncate px-1 text-[11px] font-medium ${TABLE_CAPTION.booked}`}>
-                        {getRomeTimePart(reservation.reservation_time)} · {reservation.customer_name}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </section>
-          );
-        })
+        <TableTiles rows={visible} onPick={onPick} busy={busy} />
       )}
 
       {busy && (
