@@ -1362,6 +1362,7 @@ export interface LegalSettings {
   public_address: string;
   maps_url: string;
   logo_url: string;
+  logo_dark_url: string;
   data_processors: string;
   retention_customer: string;
   retention_calls: string;
@@ -1393,19 +1394,22 @@ export const updateLegalSettings = async (
 
 // Logo del ristorante (pagina prenota). L'upload passa da una route sua:
 // legal_config tiene solo il path, i byte stanno in outbound_media.
+export type TenantLogoVariant = 'light' | 'dark';
+
 export const uploadTenantLogo = async (
   contentType: string,
   base64Data: string,
+  variant: TenantLogoVariant = 'light',
 ): Promise<{ logo_url: string }> => {
   return apiRequest<{ logo_url: string }>(`${API_URL}/settings/logo`, {
     method: 'POST',
     headers: getHeaders(),
-    body: JSON.stringify({ content_type: contentType, data: base64Data }),
+    body: JSON.stringify({ content_type: contentType, data: base64Data, variant }),
   });
 };
 
-export const removeTenantLogo = async (): Promise<{ ok: true }> => {
-  return apiRequest<{ ok: true }>(`${API_URL}/settings/logo`, {
+export const removeTenantLogo = async (variant: TenantLogoVariant = 'light'): Promise<{ ok: true }> => {
+  return apiRequest<{ ok: true }>(`${API_URL}/settings/logo?variant=${variant}`, {
     method: 'DELETE',
     headers: getHeaders(false),
   });

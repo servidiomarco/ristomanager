@@ -15352,7 +15352,8 @@ type BusinessIdentity = {
     address: string;    // indirizzo del locale, come etichetta leggibile
     mapsUrl: string;
     websiteUrl: string;
-    logoUrl: string;    // path del logo per la pagina prenota ('' = nessun logo)
+    logoUrl: string;     // path del logo per la pagina prenota ('' = nessun logo)
+    logoDarkUrl: string; // variante per tema scuro ('' = ripiego sulla piastra)
 };
 
 const IDENTITY_FALLBACK: BusinessIdentity = {
@@ -15369,6 +15370,7 @@ const IDENTITY_FALLBACK: BusinessIdentity = {
     // in faccia ai SUOI clienti. Il logo VF arriva dalla migration sul
     // legal_config del tenant 1, non da qui.
     logoUrl: '',
+    logoDarkUrl: '',
 };
 
 // Cache per tenant: ogni ristorante ha la propria identità pubblica.
@@ -15407,6 +15409,7 @@ async function refreshBusinessIdentity(tenantId: number): Promise<void> {
             mapsUrl: s(legal.maps_url) || IDENTITY_FALLBACK.mapsUrl,
             websiteUrl: s(legal.website_url) || IDENTITY_FALLBACK.websiteUrl,
             logoUrl: s(legal.logo_url) || IDENTITY_FALLBACK.logoUrl,
+            logoDarkUrl: s(legal.logo_dark_url) || IDENTITY_FALLBACK.logoDarkUrl,
         },
         refreshedAt: Date.now(),
     });
@@ -19295,6 +19298,9 @@ const LEGAL_STRING_FIELDS = [
                            // dalle route /settings/logo: /public/media/<token>
                            // dopo un upload, o un asset statico (es. il
                            // /prenota/logo.png storico del Frantoio).
+    'logo_dark_url',       // Variante per tema scuro (artwork chiaro), come
+                           // le email con logo.png/logo-dark.png. Facoltativa:
+                           // senza, il CRM ripiega sulla piastra chiara.
     'data_processors',     // Elenco responsabili/fornitori (testo multiriga)
     'retention_customer',  // Conservazione dati cliente (es. "24 mesi")
     'retention_calls',     // Conservazione registrazioni chiamate (es. "6 mesi")
@@ -19413,9 +19419,15 @@ app.put('/settings/legal', authenticate, requirePermission('settings:full'), asy
 // Niente SVG: servito same-origin col content-type salvato, un SVG con
 // script dentro sarebbe XSS sull'origine del backend.
 const LOGO_MEDIA_RE = /^\/public\/media\/([A-Za-z0-9_-]{20,64})$/;
-const setLegalLogoUrl = async (tenantId: number, logoUrl: string): Promise<void> => {
+// Due varianti, come le email: 'light' è il logo normale, 'dark' l'artwork
+// chiaro per il tema scuro.
+const LOGO_VARIANT_FIELDS = { light: 'logo_url', dark: 'logo_dark_url' } as const;
+type LogoVariant = keyof typeof LOGO_VARIANT_FIELDS;
+const logoVariantFrom = (raw: unknown): LogoVariant => (raw === 'dark' ? 'dark' : 'light');
+
+const setLegalLogoUrl = async (tenantId: number, variant: LogoVariant, logoUrl: string): Promise<void> => {
     const current = await getLegalConfig(tenantId);
-    const next = { ...current, logo_url: logoUrl };
+    const next = { ...current, [LOGO_VARIANT_FIELDS[variant]]: logoUrl };
     await queryWithRetry(
         `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
          VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
@@ -19447,17 +19459,18 @@ app.post('/settings/logo', authenticate, requirePermission('settings:full'), asy
         if (buf.length > 2 * 1024 * 1024) {
             return res.status(413).json({ error: 'File troppo grande: massimo 2 MB' });
         }
-        const previous = String((await getLegalConfig(req.tenantId!)).logo_url || '');
+        const variant = logoVariantFrom(req.body?.variant);
+        const previous = String((await getLegalConfig(req.tenantId!))[LOGO_VARIANT_FIELDS[variant]] || '');
         const token = crypto.randomBytes(32).toString('base64url');
         await queryWithRetry(
             `INSERT INTO outbound_media (tenant_id, token, content_type, filename, bytes, size_bytes, created_by_user_id)
              VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [req.tenantId!, token, contentType, 'logo', buf, buf.length, req.user?.userId ?? null]
+            [req.tenantId!, token, contentType, variant === 'dark' ? 'logo-dark' : 'logo', buf, buf.length, req.user?.userId ?? null]
         );
         const logoUrl = `/public/media/${token}`;
-        await setLegalLogoUrl(req.tenantId!, logoUrl);
+        await setLegalLogoUrl(req.tenantId!, variant, logoUrl);
         await deleteLogoMedia(req.tenantId!, previous);
-        res.status(201).json({ logo_url: logoUrl });
+        res.status(201).json({ logo_url: logoUrl, variant });
     } catch (err: any) {
         console.error('POST /settings/logo error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
@@ -19466,8 +19479,9 @@ app.post('/settings/logo', authenticate, requirePermission('settings:full'), asy
 
 app.delete('/settings/logo', authenticate, requirePermission('settings:full'), async (req: any, res) => {
     try {
-        const previous = String((await getLegalConfig(req.tenantId!)).logo_url || '');
-        await setLegalLogoUrl(req.tenantId!, '');
+        const variant = logoVariantFrom(req.query?.variant);
+        const previous = String((await getLegalConfig(req.tenantId!))[LOGO_VARIANT_FIELDS[variant]] || '');
+        await setLegalLogoUrl(req.tenantId!, variant, '');
         await deleteLogoMedia(req.tenantId!, previous);
         res.json({ ok: true });
     } catch (err: any) {
@@ -22250,6 +22264,7 @@ const handlePublicContact = async (tenantId: number, _req: express.Request, res:
             // La pagina prenota nasconde l'immagine se manca: nessun logo
             // rotto per i tenant che non l'hanno caricato.
             logo_url: identity.logoUrl || null,
+            logo_dark_url: identity.logoDarkUrl || null,
         },
         voice_agent_id: (process.env.ELEVENLABS_AGENT_ID || '').trim(),
     });

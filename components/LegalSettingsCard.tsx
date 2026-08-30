@@ -4,7 +4,7 @@ import {
   ShieldCheck, Megaphone, Upload, X,
 } from 'lucide-react';
 import { Loader } from './Loader';
-import { getLegalSettings, updateLegalSettings, uploadTenantLogo, removeTenantLogo, tenantLogoSrc, type LegalSettings } from '../services/apiService';
+import { getLegalSettings, updateLegalSettings, uploadTenantLogo, removeTenantLogo, tenantLogoSrc, type LegalSettings, type TenantLogoVariant } from '../services/apiService';
 import { useAuth } from '../contexts/AuthContext';
 
 interface Props {
@@ -16,7 +16,7 @@ const EMPTY: LegalSettings = {
   company_name: '', company_address: '', vat_number: '', fiscal_code: '',
   privacy_email: '', privacy_phone: '', dpo_name: '', dpo_contact: '',
   website_url: '', app_name: 'RistoManager', voice_business_name: '',
-  business_name: '', business_tagline: '', public_phone: '', public_whatsapp: '', public_address: '', maps_url: '', logo_url: '',
+  business_name: '', business_tagline: '', public_phone: '', public_whatsapp: '', public_address: '', maps_url: '', logo_url: '', logo_dark_url: '',
   data_processors: '', retention_customer: '', retention_calls: '',
   retention_marketing: '', extra_eu_note: '', governing_law: '', last_updated: '',
   uses_analytics_cookies: false, records_calls: true, ask_health_consent: true,
@@ -250,8 +250,11 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
   const [copied, setCopied] = useState(false);
   const [logoBusy, setLogoBusy] = useState(false);
   const logoInputRef = useRef<HTMLInputElement | null>(null);
+  const logoDarkInputRef = useRef<HTMLInputElement | null>(null);
 
-  const handleLogoPick = async (files: FileList | null) => {
+  const logoField = (variant: TenantLogoVariant): 'logo_url' | 'logo_dark_url' => (variant === 'dark' ? 'logo_dark_url' : 'logo_url');
+
+  const handleLogoPick = async (variant: TenantLogoVariant, files: FileList | null) => {
     const file = files?.[0];
     if (!file || !canEdit) return;
     if (!/^image\/(png|jpeg|webp)$/.test(file.type)) {
@@ -261,23 +264,24 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
     setLogoBusy(true);
     try {
       const { contentType, data: b64 } = await readLogoFile(file);
-      const { logo_url } = await uploadTenantLogo(contentType, b64);
-      setData(d => ({ ...d, logo_url }));
+      const { logo_url } = await uploadTenantLogo(contentType, b64, variant);
+      setData(d => ({ ...d, [logoField(variant)]: logo_url }));
       showToast('Logo caricato', 'success');
     } catch (err: any) {
       showToast(err?.message || 'Caricamento del logo non riuscito', 'error');
     } finally {
       setLogoBusy(false);
-      if (logoInputRef.current) logoInputRef.current.value = '';
+      const ref = variant === 'dark' ? logoDarkInputRef : logoInputRef;
+      if (ref.current) ref.current.value = '';
     }
   };
 
-  const handleLogoRemove = async () => {
+  const handleLogoRemove = async (variant: TenantLogoVariant) => {
     if (!canEdit) return;
     setLogoBusy(true);
     try {
-      await removeTenantLogo();
-      setData(d => ({ ...d, logo_url: '' }));
+      await removeTenantLogo(variant);
+      setData(d => ({ ...d, [logoField(variant)]: '' }));
       showToast('Logo rimosso', 'success');
     } catch (err: any) {
       showToast(err?.message || 'Rimozione non riuscita', 'error');
@@ -444,7 +448,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                     Salvataggio immediato (route sua), non passa dal Salva. */}
                 <div className="mt-4">
                   <span className="mb-1.5 block text-[13px] font-medium text-[var(--ds-text-secondary)]">
-                    Logo (pagina di prenotazione online)
+                    Logo (pagina di prenotazione online e testata dell'app)
                   </span>
                   <div className="flex flex-wrap items-center gap-3">
                     {data.logo_url ? (
@@ -465,7 +469,7 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                           type="file"
                           accept="image/png,image/jpeg,image/webp"
                           hidden
-                          onChange={e => handleLogoPick(e.target.files)}
+                          onChange={e => handleLogoPick('light', e.target.files)}
                         />
                         <button
                           type="button"
@@ -479,7 +483,60 @@ export const LegalSettingsCard: React.FC<Props> = ({ showToast }) => {
                         {data.logo_url && (
                           <button
                             type="button"
-                            onClick={handleLogoRemove}
+                            onClick={() => handleLogoRemove('light')}
+                            disabled={logoBusy}
+                            className="inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
+                          >
+                            <X className="h-4 w-4" /> Rimuovi
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Variante per tema scuro: l'app scambia le due immagini col
+                    tema, come le email (logo.png/logo-dark.png). Senza questa
+                    resta la piastra chiara sotto il logo normale. Anteprima
+                    su fondo scuro: la si giudica dove verrà usata. */}
+                <div className="mt-4">
+                  <span className="mb-1.5 block text-[13px] font-medium text-[var(--ds-text-secondary)]">
+                    Logo per tema scuro (facoltativo)
+                  </span>
+                  <div className="flex flex-wrap items-center gap-3">
+                    {data.logo_dark_url ? (
+                      <img
+                        src={tenantLogoSrc(data.logo_dark_url)}
+                        alt="Logo per tema scuro"
+                        className="h-12 w-auto max-w-[220px] rounded-[8px] bg-[var(--ds-action-bg)] object-contain p-1.5"
+                      />
+                    ) : (
+                      <span className="flex h-12 items-center rounded-[8px] bg-[var(--ds-action-bg)] px-3 text-[13px] text-[var(--ds-action-fg)] opacity-80">
+                        Nessuna variante
+                      </span>
+                    )}
+                    {canEdit && (
+                      <>
+                        <input
+                          ref={logoDarkInputRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          hidden
+                          onChange={e => handleLogoPick('dark', e.target.files)}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => logoDarkInputRef.current?.click()}
+                          disabled={logoBusy}
+                          className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--ds-border)] px-3 text-[13px] font-medium text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
+                        >
+                          {logoBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                          {data.logo_dark_url ? 'Sostituisci' : 'Carica variante'}
+                        </button>
+                        {data.logo_dark_url && (
+                          <button
+                            type="button"
+                            onClick={() => handleLogoRemove('dark')}
                             disabled={logoBusy}
                             className="inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:opacity-50"
                           >

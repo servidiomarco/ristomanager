@@ -323,9 +323,11 @@ const App: React.FC = () => {
      Finche' non arriva resta null e in testa si vede Sympotia: meglio il
      marchio del prodotto per un istante che un buco che poi si riempie. */
   const [tenantLogo, setTenantLogo] = useState<string | null>(null);
+  const [tenantLogoDark, setTenantLogoDark] = useState<string | null>(null);
   const [tenantName, setTenantName] = useState<string>('');
   useEffect(() => swrConfig('legalSettings', getLegalSettings, l => {
     setTenantLogo(l.logo_url ? tenantLogoSrc(l.logo_url) : null);
+    setTenantLogoDark(l.logo_dark_url ? tenantLogoSrc(l.logo_dark_url) : null);
     setTenantName(l.business_name || '');
   }), []);
   // L'URL del logo arriva subito (cache config), ma l'immagine e' un download
@@ -336,7 +338,12 @@ const App: React.FC = () => {
   // lampeggiare il nome sopra un logo gia' visibile.
   const [tenantLogoReady, setTenantLogoReady] = useState(false);
   const [tenantLogoFailed, setTenantLogoFailed] = useState(false);
+  // La variante scura che non scarica non deve lasciare un buco in dark:
+  // si torna alla piastra chiara sotto il logo normale.
+  const [tenantLogoDarkFailed, setTenantLogoDarkFailed] = useState(false);
+  const darkLogoUsable = !!tenantLogoDark && !tenantLogoDarkFailed;
   useEffect(() => { setTenantLogoReady(false); setTenantLogoFailed(false); }, [tenantLogo]);
+  useEffect(() => { setTenantLogoDarkFailed(false); }, [tenantLogoDark]);
   // Una schermata che si prende tutto lo schermo sul telefono: la barra di
   // navigazione in basso sparisce, e con lei il suo spazio di rispetto. Per ora
   // la chiede solo la comanda aperta su un tavolo.
@@ -2050,13 +2057,29 @@ const App: React.FC = () => {
                    se il download fallisce — al suo posto c'e' il nome del
                    ristorante. */
                 <>
+                  {/* Con la variante scura caricata il tema scambia le due
+                      immagini, come le email (logo.png/logo-dark.png): niente
+                      piastra. La piastra bianca resta il ripiego per i logo
+                      a inchiostro scuro senza variante. */}
                   <img
                     src={tenantLogo}
                     alt={tenantName || PLATFORM_NAME}
                     onLoad={() => setTenantLogoReady(true)}
                     onError={() => setTenantLogoFailed(true)}
-                    className={`h-16 w-auto dark:rounded-[12px] dark:bg-white dark:p-1.5 ${tenantLogoReady && !tenantLogoFailed ? '' : 'hidden'}`}
+                    className={
+                      darkLogoUsable
+                        ? `h-16 w-auto dark:hidden ${tenantLogoReady && !tenantLogoFailed ? '' : 'hidden'}`
+                        : `h-16 w-auto dark:rounded-[12px] dark:bg-white dark:p-1.5 ${tenantLogoReady && !tenantLogoFailed ? '' : 'hidden'}`
+                    }
                   />
+                  {darkLogoUsable && (
+                    <img
+                      src={tenantLogoDark}
+                      alt={tenantName || PLATFORM_NAME}
+                      onError={() => setTenantLogoDarkFailed(true)}
+                      className={`hidden h-16 w-auto ${tenantLogoReady && !tenantLogoFailed ? 'dark:block' : ''}`}
+                    />
+                  )}
                   {!(tenantLogoReady && !tenantLogoFailed) && (
                     tenantName ? (
                       <span className="min-w-0 truncate text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
@@ -2282,11 +2305,18 @@ const App: React.FC = () => {
                attaccato alla curva della card sembrava scivolato fuori. */}
            <div className="flex items-center gap-2.5 pl-2 lg:hidden">
               {tenantLogo ? (
-                <img
-                  src={tenantLogo}
-                  alt={tenantName || PLATFORM_NAME}
-                  className="h-11 w-auto dark:rounded-[10px] dark:bg-white dark:p-1"
-                />
+                darkLogoUsable ? (
+                  <>
+                    <img src={tenantLogo} alt={tenantName || PLATFORM_NAME} className="h-11 w-auto dark:hidden" />
+                    <img src={tenantLogoDark} alt={tenantName || PLATFORM_NAME} className="hidden h-11 w-auto dark:block" />
+                  </>
+                ) : (
+                  <img
+                    src={tenantLogo}
+                    alt={tenantName || PLATFORM_NAME}
+                    className="h-11 w-auto dark:rounded-[10px] dark:bg-white dark:p-1"
+                  />
+                )
               ) : (
                 <>
                   <img src="/logo-sympotia-black.svg" alt={PLATFORM_NAME} className="h-6 w-auto dark:hidden" />
