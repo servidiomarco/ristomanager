@@ -94,7 +94,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
   const canaleEDocumento = (
     <>
       {/* Il secondo gruppo: apre un canale, non registra denaro. */}
-      <h2 className={`${embedded ? '' : 'mt-5 '}text-[13px] font-semibold text-[var(--ds-text-muted)]`}>Chiedi al cliente</h2>
+      <h2 className="mt-5 text-[13px] font-semibold text-[var(--ds-text-muted)]">Chiedi al cliente</h2>
       <p className="mt-1 text-[12px] text-[var(--ds-text-muted)]">
         Il conto resta aperto: il residuo scende quando l'ospite paga.
       </p>
@@ -199,7 +199,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
       )}
 
       <div className={embedded
-        ? 'grid w-full min-h-0 flex-1 gap-3 overflow-y-auto pb-1 lg:grid-cols-3'
+        ? 'grid w-full min-h-0 flex-1 gap-3 overflow-y-auto pb-1 lg:grid-cols-2'
         : 'mx-auto grid w-full min-h-0 max-w-[1200px] flex-1 gap-4 overflow-y-auto px-4 pb-6 lg:grid-cols-2 lg:px-8'}>
         {/* Riepilogo */}
         <section className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
@@ -347,16 +347,8 @@ export const Pagamento: React.FC<PagamentoProps> = ({
             </div>
           </label>
 
-          {!embedded && canaleEDocumento}
+          {canaleEDocumento}
         </section>
-
-        {/* Terza colonna del modal: canale e documento accanto all'incasso,
-            non sotto — l'intero pannello sta in vista senza scroll. */}
-        {embedded && (
-          <section className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
-            {canaleEDocumento}
-          </section>
-        )}
       </div>
     </div>
   );

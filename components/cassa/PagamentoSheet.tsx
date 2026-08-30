@@ -89,8 +89,9 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
       open
       onClose={onClose}
       title={bill?.table_name ? `Incasso · T${bill.table_name}` : 'Incasso'}
-      // Tre colonne del pannello embedded: serve tutta la larghezza utile.
-      size="fluid"
+      // Due colonne (scelta di Marco, 30/08: le tre a tutta larghezza erano
+      // dispersive): lg le fa respirare senza occupare l'intero schermo.
+      size="lg"
       closeOnEscape
       bodyClassName="p-4 sm:p-5"
     >
