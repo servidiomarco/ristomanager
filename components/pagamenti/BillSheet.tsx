@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { QRCodeSVG } from 'qrcode.react';
-import { Check, Copy, FileText, Loader2, Printer, QrCode, X, Banknote } from 'lucide-react';
+import { Check, Copy, FileText, Loader2, Printer, QrCode, Search, X, Banknote } from 'lucide-react';
 import { billsApiService, printBill, type BillPaymentInput, type OpenBillRow } from '../../services/billsApiService';
 import { getCustomers } from '../../services/apiService';
 import type { Customer } from '../../types';
@@ -493,6 +493,36 @@ const InvoiceDialog: React.FC<{
     name: '', vat_number: '', tax_code: '', sdi_code: '', pec: '',
     street: '', zip: '', city: '', province: '',
   });
+  // Lookup camerale: P.IVA → denominazione, sede, SDI, PEC. Riempie i campi
+  // al tap esplicito; quello che il cameriere corregge dopo vince comunque.
+  const [lookupBusy, setLookupBusy] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+
+  const lookup = async () => {
+    const piva = buyer.vat_number.replace(/\s/g, '');
+    if (!/^\d{11}$/.test(piva)) { setLookupError('La P.IVA sono 11 cifre'); return; }
+    setLookupBusy(true);
+    setLookupError(null);
+    try {
+      const c = await billsApiService.companyLookup(piva);
+      setBuyer(prev => ({
+        ...prev,
+        name: c.name || prev.name,
+        vat_number: c.vat_number || prev.vat_number,
+        tax_code: c.tax_code || prev.tax_code,
+        sdi_code: c.sdi_code || prev.sdi_code,
+        pec: c.pec || prev.pec,
+        street: c.address.street || prev.street,
+        zip: c.address.zip || prev.zip,
+        city: c.address.city || prev.city,
+        province: c.address.province || prev.province,
+      }));
+    } catch (err: any) {
+      setLookupError(err?.data?.message ?? err?.message ?? 'Ricerca non riuscita');
+    } finally {
+      setLookupBusy(false);
+    }
+  };
 
   // Ricerca in rubrica con debounce: il cameriere digita tre lettere, non
   // scorre cinquecento nomi.
@@ -595,7 +625,19 @@ const InvoiceDialog: React.FC<{
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
               <span className={label}>P.IVA</span>
-              <input type="text" inputMode="numeric" value={buyer.vat_number} onChange={set('vat_number')} disabled={busy} className={`${field} tabular-nums`} />
+              <div className="flex gap-1.5">
+                <input type="text" inputMode="numeric" value={buyer.vat_number} onChange={set('vat_number')} disabled={busy} className={`${field} tabular-nums`} />
+                {/* Lookup camerale: riempie denominazione, sede, SDI e PEC. */}
+                <button
+                  type="button"
+                  onClick={lookup}
+                  disabled={busy || lookupBusy}
+                  aria-label="Cerca i dati aziendali dalla P.IVA"
+                  className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                >
+                  {lookupBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                </button>
+              </div>
             </label>
             <label className="block">
               <span className={label}>Codice fiscale</span>
@@ -610,6 +652,7 @@ const InvoiceDialog: React.FC<{
               <input type="email" value={buyer.pec} onChange={set('pec')} disabled={busy} className={field} />
             </label>
           </div>
+          {lookupError && <p className="text-[13px] text-[var(--ds-critical-text)]">{lookupError}</p>}
           <label className="block">
             <span className={label}>Indirizzo</span>
             <input type="text" value={buyer.street} onChange={set('street')} disabled={busy} className={field} />
@@ -662,6 +705,24 @@ export const FiscalCard: React.FC<{
   const [armed, setArmed] = useState(false);
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Copia digitale: l'URL /r/:token arriva dal server alla prima richiesta e
+  // apre lo sheet col QR. Fuori da run() perché mostrare il QR non deve
+  // ricaricare il conto.
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareBusy, setShareBusy] = useState(false);
+
+  const showShareQr = async () => {
+    setShareBusy(true);
+    setError(null);
+    try {
+      const { url } = await billsApiService.fiscalDocShareUrl(bill.id, bill.fiscal_doc_id!);
+      setShareUrl(url);
+    } catch (err: any) {
+      setError(err?.data?.message ?? err?.message ?? 'Copia digitale non disponibile');
+    } finally {
+      setShareBusy(false);
+    }
+  };
 
   // Solo un conto CLOSED (saldato per intero) emette; la card compare anche
   // quando un documento esiste già, qualunque sia lo stato del conto.
@@ -775,6 +836,28 @@ export const FiscalCard: React.FC<{
               Segna proforma
             </button>
           )}
+          {/* Copia per il cliente: cartacea sulla termica (diritto su
+              richiesta) o digitale via QR — stessa pagina /r/:token che
+              finisce anche in coda alla copia stampata. */}
+          {st === 'CONFIRMED' && !viaPP && !invoice && !proforma && (
+            <>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => run(() => printBill(bill.id, 'SCONTRINO'))}
+                className={quiet}
+              >
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                Stampa copia
+              </button>
+              {bill.fiscal_doc_id != null && (
+                <button type="button" disabled={shareBusy} onClick={showShareQr} className={quiet}>
+                  {shareBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
+                  Copia digitale
+                </button>
+              )}
+            </>
+          )}
           {st === 'CONFIRMED' && !viaPP && !invoice && !proforma && bill.fiscal_doc_id != null && (
             armed ? (
               <>
@@ -804,6 +887,28 @@ export const FiscalCard: React.FC<{
             L'annullo viene trasmesso all'Agenzia delle Entrate.
           </p>
         )}
+        {/* Il QR entra da destra come ogni dettaglio (Sheet), non inline: la
+            card resta compatta e il codice ha lo spazio per essere inquadrato. */}
+        <Sheet
+          open={shareUrl != null}
+          onClose={() => setShareUrl(null)}
+          title="Copia digitale"
+          subtitle={bill.fiscal_ref ? `Scontrino ${bill.fiscal_ref}` : undefined}
+          ariaLabel="Copia digitale dello scontrino"
+          bodyClassName="p-5 sm:p-6"
+        >
+          {shareUrl && (
+            <div className="flex flex-col items-center gap-3 rounded-2xl bg-[var(--ds-surface)] p-6">
+              {/* Fondo bianco fisso: il QR va letto dalla fotocamera anche in dark. */}
+              <div className="rounded-xl bg-white p-4">
+                <QRCodeSVG value={shareUrl} size={240} />
+              </div>
+              <p className="text-center text-[13px] text-[var(--ds-text-muted)]">
+                Fai inquadrare al cliente
+              </p>
+            </div>
+          )}
+        </Sheet>
       </div>
       {invoiceOpen && (
         <InvoiceDialog

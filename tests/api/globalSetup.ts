@@ -93,6 +93,9 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
             // Gate degli endpoint /admin/tenants (Fase D1): senza questo i
             // test di provisioning riceverebbero solo 503.
             PLATFORM_ADMIN_TOKEN: 'test-platform-token',
+            // Coda di stampa: il legacy token fa da alias del tenant 1, così
+            // i test possono ritirare i job e verificarne il payload.
+            PRINT_AGENT_TOKEN: 'test-print-agent-token',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
     });

@@ -221,4 +221,15 @@ describe('fatture elettroniche', () => {
         expect(invoiced.body.doc.doc_type).toBe('INVOICE');
         expect(invoiced.body.doc.doc_number).toMatch(/^3\/\d{4}$/);
     });
+
+    // Lookup P.IVA (dialog fattura): qui solo i rami che non dipendono dal
+    // servizio esterno — validazione e autenticazione. La chiamata vera
+    // all'API Imprese si collauda a mano (serve lo scope sul token).
+    it('il lookup P.IVA valida l\'input e richiede il login', async () => {
+        const anon = await api().get('/company-lookup/12485671007');
+        expect(anon.status).toBe(401);
+        const bad = await api().get('/company-lookup/IT12345').set(bearer(token));
+        expect(bad.status).toBe(400);
+        expect(bad.body.error).toBe('piva_invalid');
+    });
 });

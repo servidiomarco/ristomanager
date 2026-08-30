@@ -5277,6 +5277,200 @@ app.post('/bills/:id/fiscal-docs/:fid/void', authenticate, requirePermission('pa
     }
 });
 
+// --- Copia del documento commerciale (cartacea e digitale) -------------------
+// Col binario "soluzione software" il punto di emissione siamo noi: Openapi
+// trasmette all'AdE ma non produce né PDF né QR — la copia per il cliente
+// (diritto alla cartacea gratuita su richiesta; consegna digitale ammessa)
+// la genera l'app da fiscal_documents. Lo share_token è la capability della
+// pagina pubblica /r/:token, coniato pigramente alla prima richiesta di
+// copia così i documenti storici non restano fuori.
+
+async function ensureFiscalShareToken(tenantId: number, docId: number): Promise<string> {
+    const cur = await queryWithRetry(
+        `SELECT share_token FROM fiscal_documents WHERE id = $1 AND tenant_id = $2`,
+        [docId, tenantId]
+    );
+    const existing = cur.rows[0]?.share_token;
+    if (existing) return existing;
+    const token = crypto.randomBytes(24).toString('base64url');
+    // Corsa fra due richieste di copia: vince il primo UPDATE, l'altro
+    // rilegge — mai due token per lo stesso documento.
+    const upd = await queryWithRetry(
+        `UPDATE fiscal_documents SET share_token = $3
+         WHERE id = $1 AND tenant_id = $2 AND share_token IS NULL
+         RETURNING share_token`,
+        [docId, tenantId, token]
+    );
+    if (upd.rows[0]?.share_token) return upd.rows[0].share_token;
+    const again = await queryWithRetry(
+        `SELECT share_token FROM fiscal_documents WHERE id = $1 AND tenant_id = $2`,
+        [docId, tenantId]
+    );
+    return again.rows[0].share_token;
+}
+
+// La pagina pubblica è servita dal BACKEND (documento autonomo, non SPA):
+// l'URL si compone dall'host della richiesta corrente — in LAN è l'IP
+// dell'API, in produzione il dominio Railway. trust proxy è già attivo.
+const receiptPublicUrl = (req: any, token: string): string =>
+    `${req.protocol}://${req.get('host')}/r/${token}`;
+
+// URL della copia digitale per il QR a schermo (BillSheet). Solo scontrini
+// confermati: la copia di un documento mai emesso non esiste.
+app.post('/bills/:id/fiscal-docs/:fid/share', authenticate, requirePermission('orders:take'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        const fid = parseInt(req.params.fid, 10);
+        if (!Number.isFinite(id) || !Number.isFinite(fid)) return res.status(400).json({ error: 'Invalid id' });
+        const docRs = await queryWithRetry(
+            `SELECT id, status, doc_type, provider FROM fiscal_documents
+             WHERE id = $1 AND table_bill_id = $2 AND tenant_id = $3`,
+            [fid, id, req.tenantId!]
+        );
+        const doc = docRs.rows[0];
+        if (!doc) return res.status(404).json({ error: 'Documento non trovato' });
+        if (doc.status !== 'CONFIRMED' || doc.doc_type !== 'RECEIPT' || doc.provider === 'passepartout') {
+            return res.status(409).json({ error: 'La copia esiste solo per uno scontrino confermato emesso dal CRM' });
+        }
+        const token = await ensureFiscalShareToken(req.tenantId!, fid);
+        res.json({ url: receiptPublicUrl(req, token) });
+    } catch (err: any) {
+        console.error('POST /bills/:id/fiscal-docs/:fid/share error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// --- Lookup P.IVA (API Imprese di Openapi) -----------------------------------
+// Il cameriere digita la P.IVA nel dialog fattura e i campi si riempiono:
+// GET /base/{piva} porta denominazione, sede e codice destinatario SDI in una
+// chiamata sola; la PEC si chiede a parte solo se l'SDI manca (ogni chiamata
+// costa, in produzione). Token con scope imprese via OPENAPI_COMPANY_TOKEN
+// (fallback sul token invoice: se non ha lo scope l'errore lo dice chiaro).
+// Base sandbox di default: la produzione è una scelta esplicita, come per il
+// driver fiscale.
+const companyLookupCache = new Map<string, { data: any; refreshedAt: number }>();
+const COMPANY_LOOKUP_TTL_MS = 24 * 60 * 60 * 1000; // i dati camerali non cambiano in serata; il doppio tap non paga due volte
+
+app.get('/company-lookup/:piva', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const piva = String(req.params.piva || '').replace(/\s/g, '');
+        if (!/^\d{11}$/.test(piva)) return res.status(400).json({ error: 'piva_invalid', message: 'La P.IVA sono 11 cifre' });
+
+        const cached = companyLookupCache.get(piva);
+        if (cached && Date.now() - cached.refreshedAt <= COMPANY_LOOKUP_TTL_MS) return res.json(cached.data);
+
+        const token = process.env.OPENAPI_COMPANY_TOKEN || process.env.OPENAPI_INVOICE_TOKEN;
+        if (!token) return res.status(503).json({ error: 'not_configured', message: 'Lookup P.IVA non configurato (OPENAPI_COMPANY_TOKEN)' });
+        const base = (process.env.OPENAPI_COMPANY_BASE_URL || 'https://test.imprese.openapi.it').replace(/\/$/, '');
+        const get = async (path: string) => {
+            const r = await fetch(`${base}${path}`, { headers: { 'Authorization': `Bearer ${token}` } });
+            const j: any = await r.json().catch(() => null);
+            return { status: r.status, json: j };
+        };
+
+        const baseRes = await get(`/base/${piva}`);
+        if (baseRes.status === 401 || baseRes.status === 403) {
+            return res.status(503).json({ error: 'not_configured', message: 'Il token Openapi non ha lo scope Imprese: aggiungilo da console.openapi.com o imposta OPENAPI_COMPANY_TOKEN' });
+        }
+        if (baseRes.status === 404 || baseRes.json?.data == null) {
+            return res.status(404).json({ error: 'not_found', message: 'P.IVA non trovata' });
+        }
+        if (baseRes.status >= 400) {
+            return res.status(502).json({ error: 'lookup_failed', message: String(baseRes.json?.message ?? `HTTP ${baseRes.status}`).slice(0, 200) });
+        }
+        const d = baseRes.json.data;
+
+        let pec: string | null = null;
+        if (!d.codice_destinatario) {
+            const pecRes = await get(`/pec/${piva}`);
+            const p = pecRes.json?.data;
+            pec = typeof p?.pec === 'string' ? p.pec : (Array.isArray(p?.pec) ? p.pec[0] : null);
+        }
+
+        const street = [d.toponimo, d.via ?? d.indirizzo, d.civico].filter(Boolean).join(' ').trim();
+        const out = {
+            name: d.denominazione ?? '',
+            vat_number: d.piva ?? piva,
+            tax_code: d.cf ?? '',
+            sdi_code: d.codice_destinatario ?? '',
+            pec: pec ?? '',
+            address: {
+                street,
+                zip: d.cap ?? '',
+                city: d.comune ?? '',
+                province: d.provincia ?? '',
+            },
+        };
+        if (companyLookupCache.size > 500) companyLookupCache.clear();
+        companyLookupCache.set(piva, { data: out, refreshedAt: Date.now() });
+        res.json(out);
+    } catch (err: any) {
+        console.error('GET /company-lookup error:', err?.message);
+        res.status(502).json({ error: 'lookup_failed', message: 'Servizio non raggiungibile' });
+    }
+});
+
+// --- Webhook esiti Openapi ---------------------------------------------------
+// SDI può scartare una fattura GIORNI dopo l'invio: senza questo callback il
+// documento resterebbe CONFIRMED per sempre su una fattura che fiscalmente
+// non esiste. L'URL va registrato nella IT-configuration del provider
+// (api_configurations, eventi customer-invoice / receipt / receipt-error,
+// method JSON) — lo script scripts/collaudo-fiscale.mjs lo fa in sandbox, in
+// produzione si fa una volta da console o via PATCH.
+//
+// Mappatura: REJECTED o state ERROR → FAILED (l'UI ha già il ramo errore con
+// "Riprova"); tutto il resto (DELIVERED, ACCEPTED, NOT_DELIVERED = in
+// cassetto fiscale, TERMS_EXPIRED = decorrenza termini) è un esito valido:
+// il documento resta CONFIRMED e la risposta si aggiorna. Sempre 200 in
+// uscita: un errore nostro non deve far ritentare Openapi all'infinito.
+app.post('/webhook/t/:tenantToken/openapi-fiscale', express.urlencoded({ extended: false }), async (req, res) => {
+    const tenantId = await resolveWebhookTenantOr404(req, res);
+    if (tenantId == null) return;
+    try {
+        // method JSON → l'entità è il body; method POST → JSON incodato nel
+        // campo 'data' (default del sistema di callback Openapi).
+        let entity: any = req.body;
+        if (entity && typeof entity.data === 'string') {
+            try { entity = JSON.parse(entity.data); } catch (_) { /* resta com'è */ }
+        }
+        if (entity?.data && typeof entity.data === 'object') entity = entity.data;
+        const ref = entity?.id ?? entity?.uuid;
+        if (!ref) return res.json({ ok: true, ignored: 'no_id' });
+
+        // 'mock' incluso: i test API esercitano questo stesso percorso; fuori
+        // restano i documenti di cassa (passepartout) e i segnaposto (crm).
+        const docRs = await queryWithRetry(
+            `SELECT id, table_bill_id, doc_type, status FROM fiscal_documents
+             WHERE provider_ref = $1 AND tenant_id = $2 AND provider IN ('openapi', 'mock')`,
+            [String(ref), tenantId]
+        );
+        const doc = docRs.rows[0];
+        if (!doc) return res.json({ ok: true, ignored: 'unknown_ref' });
+
+        const sdiStatus = String(entity?.details?.sdi_status ?? '').toUpperCase();
+        const state = String(entity?.state ?? entity?.status ?? '').toUpperCase();
+        const failed = sdiStatus === 'REJECTED' || state === 'ERROR' || state === 'FAILED';
+        // Un documento VOIDED resta VOIDED qualunque cosa dica il callback:
+        // l'annullo è un atto nostro, l'esito arrivato dopo è storia vecchia.
+        const upd = await queryWithRetry(
+            `UPDATE fiscal_documents
+             SET response = $2::jsonb,
+                 status = CASE WHEN status = 'VOIDED' THEN status WHEN $3 THEN 'FAILED' ELSE status END,
+                 error = CASE WHEN $3 THEN $4 ELSE error END
+             WHERE id = $1
+             RETURNING ${FISCAL_DOC_COLUMNS}`,
+            [doc.id, JSON.stringify({ data: entity }), failed,
+             failed ? `SDI: ${sdiStatus || state}${entity?.details?.sdi_message ? ` — ${String(entity.details.sdi_message).slice(0, 500)}` : ''}` : null]
+        );
+        try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: doc.table_bill_id, doc: upd.rows[0] }); } catch (_) {}
+        if (failed) console.warn(`[fiscal] webhook: documento ${doc.id} (conto ${doc.table_bill_id}) segnato FAILED da ${sdiStatus || state}`);
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('POST /webhook/openapi-fiscale error:', err?.message);
+        res.json({ ok: true, ignored: 'error' });
+    }
+});
+
 // Emissione fattura elettronica (SDI) su un conto CHIUSO o su una singola
 // quota PAGATA (l'azienda al tavolo misto che paga la sua parte con
 // fattura). Il cessionario arriva dalla rubrica (customers.billing) o
@@ -5824,6 +6018,105 @@ app.get('/pay/:token/qr.png', publicPayLimiter, async (req, res) => runAsPlatfor
         res.send(png);
     } catch (err: any) {
         console.error('GET /pay/:token/qr.png error:', err);
+        res.status(500).send('Internal server error');
+    }
+}));
+
+// GET /r/:token — copia digitale del documento commerciale, raggiunta dal QR
+// (stampato sulla copia cartacea o mostrato a schermo). Documento HTML
+// autonomo servito dal backend, NON una pagina della SPA: si apre su
+// qualunque telefono, si stampa dal browser, e non dipende dai deploy del
+// frontend. Come /pay/:token: token opaco = capability, runAsPlatform per
+// saltare il contesto tenant che qui non esiste ancora.
+app.get('/r/:token', publicPayLimiter, async (req, res) => runAsPlatform(async () => {
+    try {
+        const token = String(req.params.token || '');
+        if (!token || token.length < 20) return res.status(404).send('Documento non trovato');
+
+        const rs = await queryWithRetry(
+            `SELECT id, tenant_id, status, doc_type, provider, provider_ref, total_cents,
+                    request, response, confirmed_at, voided_at
+             FROM fiscal_documents WHERE share_token = $1`,
+            [token]
+        );
+        const doc = rs.rows[0];
+        if (!doc || doc.doc_type !== 'RECEIPT') return res.status(404).send('Documento non trovato');
+
+        const seller = await getFiscalSellerSetting(doc.tenant_id);
+        const vatNumber = await getFiscalVatNumber(doc.tenant_id);
+        const esc = (s: any) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        const euro = (s: any) => `${String(s ?? '0.00').replace('.', ',')} €`;
+
+        // Il payload trasmesso (request) è la verità sulle righe; numero e
+        // data del documento stanno nella risposta del provider.
+        const reqPayload = doc.request ?? {};
+        const respData = doc.response?.data ?? {};
+        const items: any[] = Array.isArray(reqPayload.items) ? reqPayload.items : [];
+        const docNumber = respData.document_number ?? doc.provider_ref ?? '—';
+        const docDateIso = respData.document_date ?? doc.confirmed_at;
+        const docDate = docDateIso
+            ? `${getRomeDatePart(new Date(docDateIso)).split('-').reverse().join('/')} ${getRomeTimePart(new Date(docDateIso))}`
+            : '—';
+
+        // Riepilogo IVA dal payload: lordo per aliquota (gli importi del
+        // documento commerciale sono IVA inclusa).
+        const byVat = new Map<string, number>();
+        for (const i of items) {
+            const gross = Math.round(parseFloat(i.unit_price) * 100) * Number(i.quantity ? parseFloat(i.quantity) : 1);
+            byVat.set(i.vat_rate_code, (byVat.get(i.vat_rate_code) ?? 0) + gross);
+        }
+        const vatLabel = (code: string) => /^\d/.test(code) ? `IVA ${code.replace('.', ',')}%` : `Natura ${code}`;
+
+        const pagamenti: [string, string][] = [];
+        const pay = (label: string, v: any) => { if (v && parseFloat(v) > 0) pagamenti.push([label, v]); };
+        pay('Contanti', reqPayload.cash_payment_amount);
+        pay('Pagamento elettronico', reqPayload.electronic_payment_amount);
+        pay('Buoni pasto', reqPayload.ticket_restaurant_payment_amount);
+        pay('Non riscosso', reqPayload.services_uncollected_amount);
+
+        const voided = doc.status === 'VOIDED';
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('Cache-Control', 'private, no-store');
+        res.send(`<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Documento commerciale ${esc(docNumber)}</title>
+<style>
+  body{margin:0;background:#e8e6e1;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#1a1a1a;-webkit-print-color-adjust:exact}
+  .slip{max-width:420px;margin:24px auto;background:#fffdf8;padding:28px 22px;box-shadow:0 2px 12px rgba(0,0,0,.12)}
+  h1{font-size:15px;text-align:center;margin:0 0 2px;font-weight:700}
+  .sub{text-align:center;font-size:12px;margin:0 0 14px;color:#555}
+  .rule{border:0;border-top:1px dashed #999;margin:12px 0}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  td{padding:2px 0;vertical-align:top}
+  td.r{text-align:right;white-space:nowrap}
+  .tot td{font-weight:700;font-size:15px;padding-top:8px}
+  .muted{color:#555;font-size:12px}
+  .void{background:#b3261e;color:#fff;text-align:center;font-weight:700;padding:8px;margin:-28px -22px 16px;font-size:14px;letter-spacing:.06em}
+  @media print{body{background:#fff}.slip{box-shadow:none;margin:0;max-width:none}}
+</style></head><body>
+<div class="slip">
+  ${voided ? '<div class="void">documento annullato</div>' : ''}
+  <h1>${esc(seller.business_name || 'Esercizio commerciale')}</h1>
+  <p class="sub">${esc([seller.address?.street, seller.address?.zip, seller.address?.city, seller.address?.province].filter(Boolean).join(' — '))}<br>P.IVA ${esc(vatNumber || reqPayload.fiscal_id || '')}</p>
+  <p class="sub" style="font-weight:700;color:#1a1a1a">documento commerciale<br>di vendita o prestazione</p>
+  <hr class="rule">
+  <table>
+    ${items.map(i => `<tr><td>${esc(parseFloat(i.quantity).toString())} x ${esc(i.description)}<br><span class="muted">${esc(vatLabel(String(i.vat_rate_code)))}</span></td><td class="r">${esc(euro((Math.round(parseFloat(i.unit_price) * 100) * parseFloat(i.quantity) / 100).toFixed(2)))}</td></tr>`).join('')}
+    ${reqPayload.discount && parseFloat(reqPayload.discount) > 0 ? `<tr><td>Sconto</td><td class="r">−${esc(euro(reqPayload.discount))}</td></tr>` : ''}
+    <tr class="tot"><td>TOTALE</td><td class="r">${esc(euro((doc.total_cents / 100).toFixed(2)))}</td></tr>
+  </table>
+  <hr class="rule">
+  <table>
+    ${pagamenti.map(([l, v]) => `<tr><td>${esc(l)}</td><td class="r">${esc(euro(v))}</td></tr>`).join('')}
+    ${[...byVat.entries()].map(([code, gross]) => `<tr><td class="muted">${esc(vatLabel(code))}</td><td class="r muted">${esc(euro((gross / 100).toFixed(2)))}</td></tr>`).join('')}
+  </table>
+  <hr class="rule">
+  <p class="muted" style="text-align:center">Documento n. ${esc(docNumber)}<br>${esc(docDate)}${voided && doc.voided_at ? `<br>annullato il ${esc(getRomeDatePart(new Date(doc.voided_at)).split('-').reverse().join('/'))}` : ''}</p>
+</div>
+</body></html>`);
+    } catch (err: any) {
+        console.error('GET /r/:token error:', err);
         res.status(500).send('Internal server error');
     }
 }));
@@ -20144,6 +20437,7 @@ app.get('/settings/webhook-info', authenticate, requirePermission('settings:full
                 twilio_whatsapp_status: `${webhookBase}/twilio-whatsapp-status`,
                 vonage_inbound: `${webhookBase}/vonage-inbound`,
                 resend_inbound: `${webhookBase}/resend-inbound`,
+                openapi_fiscale: `${webhookBase}/openapi-fiscale`,
             } : null,
         });
     } catch (err) {
@@ -26297,6 +26591,74 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
         );
         if (b.rows.length === 0) return res.status(404).json({ error: 'Conto non trovato' });
         const bill = b.rows[0];
+
+        // Copia cartacea del documento commerciale: percorso a parte perché
+        // la verità non è il conto ma il documento EMESSO (fiscal_documents.
+        // request è il payload trasmesso all'AdE, response porta numero e
+        // data). Il QR in coda punta alla copia digitale /r/:token — stessa
+        // pagina del bottone QR in BillSheet.
+        if (req.body?.kind === 'SCONTRINO') {
+            const docRs = await queryWithRetry(
+                `SELECT id, status, doc_type, provider, provider_ref, total_cents, request, response, confirmed_at
+                 FROM fiscal_documents
+                 WHERE table_bill_id = $1 AND tenant_id = $2 AND status = 'CONFIRMED'
+                   AND doc_type = 'RECEIPT' AND table_bill_split_id IS NULL
+                 ORDER BY id DESC LIMIT 1`,
+                [billId, req.tenantId!]
+            );
+            const doc = docRs.rows[0];
+            if (!doc) return res.status(409).json({ error: 'no_receipt', message: 'Nessuno scontrino confermato su questo conto' });
+            if (doc.provider === 'passepartout') {
+                return res.status(409).json({ error: 'via_passepartout', message: 'Scontrino emesso dalla cassa: la copia si stampa dal registratore' });
+            }
+
+            const reqPayload = doc.request ?? {};
+            const respData = doc.response?.data ?? {};
+            const fdItems: any[] = Array.isArray(reqPayload.items) ? reqPayload.items : [];
+            const itemCents = (i: any) => Math.round(parseFloat(i.unit_price) * 100) * parseFloat(i.quantity);
+            const byVat = new Map<string, number>();
+            for (const i of fdItems) byVat.set(String(i.vat_rate_code), (byVat.get(String(i.vat_rate_code)) ?? 0) + itemCents(i));
+            const toCents = (v: any) => Math.round(parseFloat(v || '0') * 100);
+            const payments: [string, number][] = ([
+                ['Contanti', toCents(reqPayload.cash_payment_amount)],
+                ['Elettronico', toCents(reqPayload.electronic_payment_amount)],
+                ['Buoni pasto', toCents(reqPayload.ticket_restaurant_payment_amount)],
+                ['Non riscosso', toCents(reqPayload.services_uncollected_amount)],
+            ] as [string, number][]).filter(([, c]) => c > 0);
+
+            const docDateIso = respData.document_date ?? doc.confirmed_at;
+            const seller = await getFiscalSellerSetting(req.tenantId!);
+            const shareToken = await ensureFiscalShareToken(req.tenantId!, doc.id);
+            const routes = await getPrintRoutes(req.tenantId!);
+            const printer = /^[a-z0-9_-]{1,30}$/i.test(String(req.body?.printer ?? ''))
+                ? String(req.body.printer) : (routes.preconto ?? 'preconti');
+            const ins = await queryWithRetry(
+                `INSERT INTO print_jobs (tenant_id, kind, payload, printer, created_by_user_id)
+                 VALUES ($1, 'SCONTRINO', $2, $3, $4) RETURNING id`,
+                [req.tenantId!, JSON.stringify({
+                    business_name: seller.business_name ?? null,
+                    address_line: [seller.address?.street, seller.address?.zip, seller.address?.city, seller.address?.province].filter(Boolean).join(' - ') || null,
+                    vat_number: await getFiscalVatNumber(req.tenantId!) || reqPayload.fiscal_id || null,
+                    table_name: bill.table_name ?? null,
+                    doc_number: respData.document_number ?? doc.provider_ref,
+                    doc_datetime: docDateIso
+                        ? `${getRomeDatePart(new Date(docDateIso)).split('-').reverse().join('/')} ${getRomeTimePart(new Date(docDateIso))}`
+                        : null,
+                    items: fdItems.map(i => ({
+                        qty: parseFloat(i.quantity),
+                        name: String(i.description),
+                        total_cents: itemCents(i),
+                        vat_code: String(i.vat_rate_code),
+                    })),
+                    discount_cents: toCents(reqPayload.discount),
+                    total_cents: doc.total_cents,
+                    payments,
+                    vat_breakdown: [...byVat.entries()].map(([code, gross_cents]) => ({ code, gross_cents })),
+                    share_url: receiptPublicUrl(req, shareToken),
+                }), printer, req.user?.userId ?? null]
+            );
+            return res.status(201).json({ id: ins.rows[0].id, status: 'PENDING' });
+        }
 
         // L'origin per l'URL nel QR arriva dal client: è l'unico che sa da che
         // host è servita la SPA (in LAN è un IP, in prod il dominio). Il path

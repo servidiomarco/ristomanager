@@ -188,6 +188,70 @@ function renderQr(p) {
   return Buffer.from(bytes);
 }
 
+// Copia cartacea del documento commerciale già emesso (diritto del cliente
+// su richiesta — la trasmissione all'AdE l'ha fatta il provider, questa è
+// la resa leggibile). Layout da scontrino: intestazione esercente, righe,
+// riepilogo IVA, pagamenti, numero e data del documento, QR alla copia
+// digitale. Tutti i dati arrivano pronti dal payload: l'agente non calcola.
+function renderScontrino(p) {
+  const bytes = [];
+  const push = (...b) => bytes.push(...b);
+  const text = s => push(...Buffer.from(s.replace('…', '.'), 'latin1'));
+  const vatLabel = c => (/^\d/.test(c) ? `IVA ${c.replace('.', ',')}%` : `Natura ${c}`);
+
+  push(ESC, 0x40);
+  push(ESC, 0x74, 16);
+  push(ESC, 0x47, 1);        // doppia battuta (PRP-300 slavata)
+  push(ESC, 0x61, 1);        // center
+  push(ESC, 0x45, 1);
+  text(`${p.business_name ?? 'ESERCIZIO COMMERCIALE'}\n`);
+  push(ESC, 0x45, 0);
+  if (p.address_line) text(`${p.address_line}\n`);
+  if (p.vat_number) text(`P.IVA ${p.vat_number}\n`);
+  text('\n');
+  push(GS, 0x21, 0x01);      // double height
+  text('DOCUMENTO COMMERCIALE\n');
+  push(GS, 0x21, 0x00);
+  text('di vendita o prestazione\n');
+  text('-'.repeat(COLS) + '\n');
+  push(ESC, 0x61, 0);        // left
+
+  for (const i of p.items ?? []) {
+    text(row(`${i.qty}x ${i.name}`, euro(i.total_cents)));
+    text(`   ${vatLabel(String(i.vat_code ?? ''))}\n`);
+  }
+  if ((p.discount_cents ?? 0) > 0) text(row('Sconto', '-' + euro(p.discount_cents)));
+  text('-'.repeat(COLS) + '\n');
+  push(ESC, 0x45, 1);
+  push(GS, 0x21, 0x01);
+  text(row('TOTALE EUR', euro(p.total_cents)));
+  push(GS, 0x21, 0x00);
+  push(ESC, 0x45, 0);
+  for (const [label, cents] of p.payments ?? []) text(row(label, euro(cents)));
+  if ((p.vat_breakdown ?? []).length > 0) {
+    text('-'.repeat(COLS) + '\n');
+    for (const v of p.vat_breakdown) text(row(vatLabel(String(v.code)), euro(v.gross_cents)));
+  }
+  text('-'.repeat(COLS) + '\n');
+  push(ESC, 0x61, 1);
+  if (p.doc_number) text(`Documento n. ${p.doc_number}\n`);
+  if (p.doc_datetime) text(`${p.doc_datetime}\n`);
+
+  if (p.share_url) {
+    const data = Buffer.from(p.share_url, 'latin1');
+    push(GS, 0x28, 0x6b, 4, 0, 49, 65, 50, 0);   // QR model 2
+    push(GS, 0x28, 0x6b, 3, 0, 49, 67, 8);       // module size 8
+    push(GS, 0x28, 0x6b, 3, 0, 49, 69, 51);      // error correction H
+    const len = data.length + 3;
+    push(GS, 0x28, 0x6b, len & 0xff, len >> 8, 49, 80, 48, ...data);
+    push(GS, 0x28, 0x6b, 3, 0, 49, 81, 48);      // print
+    text('\ninquadra per la copia digitale\n');
+  }
+  text('\n\n');
+  push(GS, 0x56, 0x42, 0x00);
+  return Buffer.from(bytes);
+}
+
 // Comanda di partita: cosa preparare, niente prezzi. Caratteri grandi e
 // quantità in evidenza — si legge da in piedi, col vapore in mezzo.
 function renderComanda(p) {
@@ -279,6 +343,7 @@ async function drainPrinter(name, dest, jobs) {
     try {
       rendered = job.kind === 'PRECONTO' ? renderPreconto(job.payload)
                : job.kind === 'QR' ? renderQr(job.payload)
+               : job.kind === 'SCONTRINO' ? renderScontrino(job.payload)
                : job.kind === 'COMANDA' ? renderComanda(job.payload)
                : job.kind === 'TEST' ? renderTest(job.payload)
                : null;

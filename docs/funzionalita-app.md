@@ -280,8 +280,10 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 ## Fiscalità: scontrino, fattura elettronica, proforma
 
 - **Scontrino elettronico** (documento commerciale) emesso via provider (Openapi.com) direttamente dal conto; se la trasmissione fallisce **il servizio non si ferma**: il conto si chiude comunque e il documento si ritenta dopo.
-- **Fattura elettronica SDI** dal conto: dati di fatturazione presi dalla scheda cliente (denominazione, P.IVA, CF, codice SDI, PEC), XML FatturaPA generato e trasmesso.
+- **Fattura elettronica SDI** dal conto: dati di fatturazione presi dalla scheda cliente (denominazione, P.IVA, CF, codice SDI, PEC), XML FatturaPA generato e trasmesso. Nel dialog, il **lookup P.IVA** riempie denominazione, sede, codice SDI e PEC dai registri camerali (una lente accanto al campo).
+- **Esiti SDI in tempo reale**: se l'Agenzia scarta una fattura anche giorni dopo l'invio, il webhook del provider la segna in errore sul conto (con il motivo) e si riemette da lì; consegna e deposito nel cassetto fiscale restano esiti validi senza rumore.
 - **Proforma** quando lo scontrino non è previsto; annullo del documento fiscale come atto separato (il conto non si tocca).
+- **Copia per il cliente** dello scontrino emesso: **cartacea** sulla termica di sala ("Stampa copia" dal conto — diritto del cliente su richiesta) e **digitale** via QR ("Copia digitale" mostra il codice a schermo; lo stesso QR è stampato sulla copia cartacea). Il QR apre la pagina pubblica del documento — righe, IVA, pagamenti, numero e data — leggibile e stampabile da qualunque telefono; se il documento viene annullato la pagina lo dice.
 - Configurazione: dati esercente, provider, **mappa aliquote IVA** (l'aliquota vive sul piatto; riepilogo IVA per aliquota anche sul preconto stampato), numerazione fatture per anno.
 
 ---
@@ -512,6 +514,8 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-08-30 | Fiscalità | Lookup P.IVA nel dialog fattura (denominazione, sede, SDI, PEC dai registri camerali) e webhook esiti SDI: la fattura scartata si segna in errore da sola, col motivo. |
+| 2026-08-30 | Fiscalità | Copia dello scontrino per il cliente: stampa sulla termica di sala e copia digitale via QR (pagina pubblica del documento, valida anche dopo mesi). |
 | 2026-08-29 | Impostazioni | Upload del logo del ristorante nell'identità pubblica; compare sulla pagina di prenotazione online (per il Frantoio precaricato il logo storico). |
 | 2026-08-29 | Agente vocale "Sofia" | Modifica/cancellazione: se il numero del chiamante non corrisponde, Sofia ritrova la prenotazione per nome e data (accenti inclusi) o dal numero dettato. |
 | 2026-08-29 | Prenotazioni | Nella riga dei totali della mappa: sezioni "liberi" (fondo verde) e "occupati" (fondo rosso) per la sala mostrata. |

@@ -163,6 +163,24 @@ class BillsApiService {
     });
   }
 
+  /** URL della copia digitale dello scontrino (pagina pubblica /r/:token,
+   *  servita dal backend). Conia il token alla prima richiesta. */
+  async fiscalDocShareUrl(billId: number, docId: number): Promise<{ url: string }> {
+    return apiRequest(`${API_URL}/bills/${billId}/fiscal-docs/${docId}/share`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+  }
+
+  /** Dati azienda da P.IVA (API Imprese Openapi): denominazione, sede,
+   *  codice SDI, PEC. Per precompilare il dialog fattura. */
+  async companyLookup(piva: string): Promise<{
+    name: string; vat_number: string; tax_code: string; sdi_code: string; pec: string;
+    address: { street: string; zip: string; city: string; province: string };
+  }> {
+    return apiRequest(`${API_URL}/company-lookup/${encodeURIComponent(piva)}`, { headers: getHeaders() });
+  }
+
   /** Ritenta la chiusura in cassa di un conto Passepartout già chiuso
    *  (scontrino dall'RT + tavolo liberato sul gestionale). */
   async passepartoutClose(billId: number): Promise<{ id_comanda: number; esito: unknown }> {
@@ -347,7 +365,7 @@ export const getOpenBills = async (
  *  la SPA (IP in LAN, dominio in produzione). */
 export const printBill = async (
   billId: number,
-  kind: 'PRECONTO' | 'QR' = 'PRECONTO',
+  kind: 'PRECONTO' | 'QR' | 'SCONTRINO' = 'PRECONTO',
 ): Promise<{ id: number; status: string }> =>
   apiRequest<{ id: number; status: string }>(`${API_URL}/print-jobs`, {
     method: 'POST',
