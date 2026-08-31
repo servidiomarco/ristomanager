@@ -7,7 +7,7 @@ import { Shift } from '../types';
 import { getRomeDatePart } from '../utils/reservationTime';
 import { getTableMerges } from '../services/apiService';
 import {
-  ordersApiService, getMenuCatalogue, newIdempotencyKey, closeOrder, updateOrder,
+  ordersApiService, getMenuCatalogue, newIdempotencyKey, closeOrder, updateOrder, fireCourse,
   voidItem, setOrderDiscount, transferOrder,
   type MenuCatalogue, type NewOrderItem, type CloseOrderResult,
 } from '../services/ordersApiService';
@@ -531,6 +531,22 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
     } finally { setBusy(false); }
   };
 
+  // Il cameriere batte i tempi: «Chiama» lancia in cucina l'uscita proposta
+  // quando il tavolo è pronto, senza passare dal passe.
+  const fire = async (courseNo: number) => {
+    if (!order || busy) return;
+    setBusy(true); setError(null);
+    try {
+      await fireCourse(order.order.id, courseNo);
+      setOrder(await ordersApiService.getOrder(order.order.id));
+      setFlash(`${courseLabel(courseNo)} chiamata in cucina`);
+    } catch (err: any) {
+      setError(err?.data?.error ?? err?.message ?? 'Lancio non riuscito');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const recall = async (courseNo: number) => {
     if (!order || busy) return;
     setBusy(true); setError(null);
@@ -872,6 +888,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
     onBump: bumpCart, onDrop: dropLine,
     onVoid: (i: OrderItem) => setVoidTarget(i),
     onRecall: recall,
+    onFire: fire,
   };
 
   const browser = (
@@ -1103,6 +1120,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
         onDrop={dropLine}
         onVoid={i => setVoidTarget(i)}
         onRecall={recall}
+        onFire={fire}
         onSend={() => submit('course')}
         onSendAll={() => submit('all')}
         onRepeat={repeatLine}

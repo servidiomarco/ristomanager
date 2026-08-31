@@ -28,13 +28,17 @@ interface CourseListProps {
   /** Una riga già in cucina non si cancella: si storna, con motivazione. */
   onVoid: (item: OrderItem) => void;
   onRecall: (courseNo: number) => void;
+  /** Lancia in cucina un'uscita proposta (QUEUED): il verbo del cameriere
+   *  nei ristoranti dove i tempi li batte la sala, non il passe. Assente =
+   *  il bottone non compare (il lancio resta del passe). */
+  onFire?: (courseNo: number) => void;
 }
 
 const stepper =
   'inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 export const CourseList: React.FC<CourseListProps> = ({
-  order, cart, course, onCourse, busy, onBump, onDrop, onVoid, onRecall,
+  order, cart, course, onCourse, busy, onBump, onDrop, onVoid, onRecall, onFire,
 }) => (
   <div className="flex flex-col gap-2">
     {Array.from({ length: MAX_COURSES }, (_, i) => i + 1).map(n => {
@@ -78,15 +82,28 @@ export const CourseList: React.FC<CourseListProps> = ({
             </button>
             {sent && <StatusPill tone={badge.tone}>{badge.text}</StatusPill>}
             {status === 'QUEUED' && (
-              <button
-                type="button"
-                onClick={() => onRecall(n)}
-                disabled={busy}
-                title="Richiama: torna in bozza"
-                className="flex-shrink-0 text-[13px] font-medium text-[var(--ds-text-muted)] underline decoration-dotted transition-opacity hover:opacity-70 disabled:opacity-40"
-              >
-                richiama
-              </button>
+              <>
+                {onFire && (
+                  <button
+                    type="button"
+                    onClick={() => onFire(n)}
+                    disabled={busy}
+                    title="Lancia l'uscita in cucina adesso"
+                    className="flex-shrink-0 rounded-full bg-[var(--ds-action-bg)] px-3.5 py-1.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+                  >
+                    Chiama
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => onRecall(n)}
+                  disabled={busy}
+                  title="Richiama: torna in bozza"
+                  className="flex-shrink-0 text-[13px] font-medium text-[var(--ds-text-muted)] underline decoration-dotted transition-opacity hover:opacity-70 disabled:opacity-40"
+                >
+                  richiama
+                </button>
+              </>
             )}
           </div>
 

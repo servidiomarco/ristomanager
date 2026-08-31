@@ -24585,7 +24585,10 @@ app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), as
 
 // Lancia un'uscita proposta: QUEUED → SENT, con il calcolo dello
 // station_start_at per ogni partita. La sala propone, il passe decide quando.
-app.post('/orders/:id/courses/:n/fire', authenticate, requirePermission('orders:expedite'), async (req, res) => {
+// requireAny con orders:take (scelta del Frantoio, 31/08): in molte sale i
+// tempi delle uscite li batte il CAMERIERE, non il passe — stesso precedente
+// del «riporta» qui sotto. Chi non lo vuole tiene i camerieri sull'auto-fire.
+app.post('/orders/:id/courses/:n/fire', authenticate, requireAnyPermission('orders:expedite', 'orders:take'), async (req, res) => {
     const client = await pool.connect();
     try {
         if (!(await ordersEnabledGuard(req, res))) { client.release(); return; }
