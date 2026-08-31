@@ -109,14 +109,16 @@ export const SettleDialog: React.FC<{
   };
 
   const field =
-    'h-11 w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-right text-[15px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
+    'h-12 w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-right text-[17px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
 
   return createPortal(
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[var(--ds-backdrop)] p-4" onClick={busy ? undefined : onCancel}>
-      <div className="w-full max-w-sm overflow-hidden rounded-2xl bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]" onClick={e => e.stopPropagation()}>
+      {/* max-w-lg e corpi pieni: questo dialogo si usa al banco col cliente
+          davanti — a max-w-sm i numeri si leggevano da vicino e basta. */}
+      <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]" onClick={e => e.stopPropagation()}>
         <div className="border-b border-[var(--ds-border)] p-5">
-          <h3 className="text-[16px] font-semibold text-[var(--ds-text-primary)]">Chiudi conto in cassa</h3>
-          <p className="mt-1 text-[13px] text-[var(--ds-text-muted)]">Tavolo {bill.table_name ?? '—'} · totale {euro(bill.total_cents)}</p>
+          <h3 className="text-[18px] font-semibold text-[var(--ds-text-primary)]">Chiudi conto in cassa</h3>
+          <p className="mt-1 text-[14px] text-[var(--ds-text-muted)]">Tavolo {bill.table_name ?? '—'} · totale {euro(bill.total_cents)}</p>
         </div>
         <div className="space-y-3 p-5">
           <dl className="space-y-1.5 text-[14px]">
@@ -125,8 +127,9 @@ export const SettleDialog: React.FC<{
                 <dt>Già pagato</dt><dd className="tabular-nums">{euro(alreadyPaid)}</dd>
               </div>
             )}
-            <div className="flex justify-between font-medium text-[var(--ds-text-primary)]">
-              <dt>Residuo da incassare</dt><dd className="tabular-nums">{euro(remaining)}</dd>
+            <div className="flex items-baseline justify-between font-medium text-[var(--ds-text-primary)]">
+              <dt className="text-[15px]">Residuo da incassare</dt>
+              <dd className="text-[28px] font-semibold tabular-nums tracking-[-0.02em]">{euro(remaining)}</dd>
             </div>
           </dl>
 
@@ -161,7 +164,7 @@ export const SettleDialog: React.FC<{
                     type="button"
                     onClick={() => setMethod(m.value)}
                     disabled={busy}
-                    className={`rounded-full px-3 py-1.5 text-[13px] font-medium transition-colors disabled:opacity-40 ${
+                    className={`inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium transition-colors disabled:opacity-40 ${
                       method === m.value
                         ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                         : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
@@ -184,13 +187,13 @@ export const SettleDialog: React.FC<{
                   type="button"
                   onClick={addMovement}
                   disabled={busy || applied <= 0 || applied >= remaining}
-                  className="h-11 rounded-xl bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40"
+                  className="h-12 rounded-xl bg-[var(--ds-surface-row)] px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40"
                 >
                   Aggiungi
                 </button>
               </div>
               {change > 0 && (
-                <p className="text-[13px] text-[var(--ds-text-secondary)]">Resto {euro(change)}</p>
+                <p className="text-[16px] font-semibold text-[var(--ds-text-primary)]">Resto <span className="tabular-nums">{euro(change)}</span></p>
               )}
             </>
           )}
@@ -205,7 +208,7 @@ export const SettleDialog: React.FC<{
                     type="button"
                     onClick={() => setPpDoc(d)}
                     disabled={busy}
-                    className={`rounded-full px-3 py-1.5 text-[13px] font-medium transition-colors disabled:opacity-40 ${
+                    className={`inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium transition-colors disabled:opacity-40 ${
                       ppDoc === d
                         ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                         : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
@@ -233,19 +236,19 @@ export const SettleDialog: React.FC<{
             </div>
           </label>
 
-          <p className={`text-[13px] ${willSettle ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-critical-text)]'}`}>
+          <p className={`text-[14px] ${willSettle ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-critical-text)]'}`}>
             {willSettle
               ? `Il conto risulterà saldato${tipCents > 0 ? ` · mancia ${euro(tipCents)}` : ''}.`
               : `Ammanco ${euro(shortfall)}: il conto resterà parziale.`}
           </p>
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-4 py-3">
-          <button type="button" onClick={onCancel} disabled={busy} className="rounded-full px-4 py-2 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-hover)] disabled:opacity-40">Annulla</button>
+          <button type="button" onClick={onCancel} disabled={busy} className="inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-hover)] disabled:opacity-40">Annulla</button>
           <button
             type="button"
             onClick={confirm}
             disabled={busy}
-            className="inline-flex items-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-5 py-2 text-[14px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+            className="inline-flex h-11 items-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-6 text-[15px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" />}
             Chiudi conto
@@ -605,12 +608,12 @@ const InvoiceDialog: React.FC<{
           {error && <p className="text-[13px] text-[var(--ds-critical-text)]">{error}</p>}
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-4 py-3">
-          <button type="button" onClick={onCancel} disabled={busy} className="rounded-full px-4 py-2 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-hover)] disabled:opacity-40">Annulla</button>
+          <button type="button" onClick={onCancel} disabled={busy} className="inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-hover)] disabled:opacity-40">Annulla</button>
           <button
             type="button"
             onClick={submit}
             disabled={busy || !buyer.name.trim()}
-            className="inline-flex items-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-5 py-2 text-[14px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+            className="inline-flex h-11 items-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-6 text-[15px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" />}
             Invia a SDI
