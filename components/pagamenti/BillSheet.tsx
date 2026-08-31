@@ -82,7 +82,7 @@ export const SettleDialog: React.FC<{
   // Conto del gestionale: la chiusura in cassa può emettere lo scontrino
   // oppure la proforma (la routine della cassa, nessun documento fiscale).
   const isPP = /^pp:comanda:/.test(String(bill.external_ref ?? ''));
-  const [ppDoc, setPpDoc] = useState<'Scontrino' | 'Proforma'>('Scontrino');
+  const [ppDoc, setPpDoc] = useState<'Scontrino' | 'Proforma' | 'Fattura'>('Scontrino');
   // Conti nativi: la scelta c'è SEMPRE. Con un provider fiscale attivo
   // "Scontrino" emette davvero; senza, resta la dichiarazione d'intento —
   // ma "Proforma" marca comunque il conto come chiuso senza documento DI
@@ -104,7 +104,12 @@ export const SettleDialog: React.FC<{
       // L'importo ancora nel campo è un movimento non ancora aggiunto: vale.
       payments: settlePayments(movements, method, applied),
       tip_cents: tipCents,
-      ...(isPP ? { passepartout_documento: ppDoc } : { documento: ppDoc }),
+      // «Fattura» chiude comunque con proforma: il documento si emette poi
+      // dal conto, dove ci sono i dati del cessionario (come nel pannello
+      // cassa). Sui conti Passepartout la scelta resta Scontrino/Proforma.
+      ...(isPP
+        ? { passepartout_documento: ppDoc === 'Fattura' ? 'Proforma' : ppDoc }
+        : { documento: ppDoc === 'Scontrino' ? 'Scontrino' : 'Proforma' }),
     });
   };
 
@@ -202,7 +207,7 @@ export const SettleDialog: React.FC<{
             <div>
               <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{isPP ? 'Documento in cassa' : 'Documento fiscale'}</span>
               <div className="flex gap-1.5">
-                {(['Scontrino', 'Proforma'] as const).map(d => (
+                {((isPP ? ['Scontrino', 'Proforma'] : ['Scontrino', 'Proforma', 'Fattura']) as ('Scontrino' | 'Proforma' | 'Fattura')[]).map(d => (
                   <button
                     key={d}
                     type="button"
@@ -223,6 +228,12 @@ export const SettleDialog: React.FC<{
                   {isPP
                     ? 'Niente scontrino: in cassa esce la proforma.'
                     : 'Nessun documento adesso: scontrino o fattura si emettono dopo, dal conto.'}
+                </p>
+              )}
+              {ppDoc === 'Fattura' && (
+                <p className="mt-1.5 text-[13px] text-[var(--ds-text-muted)]">
+                  Il conto si chiude con proforma e la fattura si emette dal conto, dove
+                  ci sono i dati del cessionario. Scontrino e fattura non coesistono.
                 </p>
               )}
             </div>
