@@ -11,7 +11,7 @@ import {
   voidItem, setOrderDiscount, transferOrder,
   type MenuCatalogue, type NewOrderItem, type CloseOrderResult,
 } from '../services/ordersApiService';
-import { BillSheet } from './pagamenti/BillSheet';
+import { BillSheet, InvoiceDialog } from './pagamenti/BillSheet';
 import { PagamentoSheet } from './cassa/PagamentoSheet';
 import { useAuth } from '../contexts/AuthContext';
 import { billsApiService, printBill } from '../services/billsApiService';
@@ -108,6 +108,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
   // Il pannello di incasso della Cassa, per chi ha il permesso: un solo
   // motore di pagamento, due punti d'ingresso (banco e tavolo).
   const [cassaBillId, setCassaBillId] = useState<number | null>(null);
+  // Chiusura con intento «Fattura»: il conto chiude con proforma e questo
+  // apre subito l'emissione, precompilata col cliente della visita.
+  const [invoiceFor, setInvoiceFor] = useState<(ServiceBill & { initialQuery?: string }) | null>(null);
   const { hasPermission } = useAuth();
   const canCassa = hasPermission('cash:operate');
   const billTables = useMemo(() => new Set(serviceBills.keys()), [serviceBills]);
@@ -564,12 +567,18 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
     }
   };
 
-  const settleViewBill = async (opts?: { cash_settled_cents?: number; tip_cents?: number }) => {
+  const settleViewBill = async (opts?: { cash_settled_cents?: number; tip_cents?: number }, meta?: { invoiceIntent?: boolean }) => {
     if (!viewBill || busy) return;
     setBusy(true); setError(null);
     try {
       await billsApiService.closeBill(viewBill.id, opts);
       setServiceBills(prev => { const n = new Map(prev); n.delete(viewBill.table_id); return n; });
+      if (meta?.invoiceIntent) {
+        setInvoiceFor({
+          ...viewBill,
+          initialQuery: reservationForTable(viewBill.table_id)?.customer_name ?? undefined,
+        });
+      }
       setViewBill(null);
       setFlash('Conto chiuso in cassa');
     } catch (err: any) {
@@ -710,6 +719,14 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
               </button>
             </>
           }
+        />
+      )}
+      {invoiceFor && (
+        <InvoiceDialog
+          bill={invoiceFor}
+          initialQuery={invoiceFor.initialQuery}
+          onCancel={() => { setInvoiceFor(null); setFlash('Conto chiuso, da fatturare: la fattura resta emettibile dal conto.'); }}
+          onDone={() => { setInvoiceFor(null); setFlash('Fattura emessa'); }}
         />
       )}
       {cassaBillId != null && (

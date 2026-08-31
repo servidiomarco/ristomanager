@@ -32,7 +32,7 @@ interface PagamentoProps {
   /** Importo scelto in «Dividi conto»: precompila il campo. */
   quotaCents: number | null;
   onBack: () => void;
-  onSettle: (opts: SettleOpts) => void;
+  onSettle: (opts: SettleOpts, meta?: { invoiceIntent?: boolean }) => void;
   onSplit: () => void;
   onShowQr: () => void;
   /** Correzione del conto (storno righe contestate): se assente il verbo
@@ -86,7 +86,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
       // «Fattura» chiude comunque senza scontrino: il documento si emette poi
       // dal conto, dove ci sono i dati del cessionario.
       documento: doc === 'Scontrino' ? 'Scontrino' : 'Proforma',
-    });
+    }, { invoiceIntent: doc === 'Fattura' });
   };
 
   const field = 'h-12 w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-right text-[17px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';

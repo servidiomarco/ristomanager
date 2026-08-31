@@ -6,7 +6,7 @@ import { ReasonDialog } from '../comande/ReasonDialog';
 import { isSystemLine } from '../comande/orderView';
 import { euro } from './cassaView';
 import type { SettleOpts } from '../pagamenti/BillSheet';
-import { BillSheet } from '../pagamenti/BillSheet';
+import { BillSheet, InvoiceDialog } from '../pagamenti/BillSheet';
 import { ModalShell } from '../ds';
 import { Loader } from '../Loader';
 import { Pagamento } from './Pagamento';
@@ -50,6 +50,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
   // riga in storno. Il totale si riallinea dal server, non si tocca a mano.
   const [editOrder, setEditOrder] = useState<OrderWithItems | null>(null);
   const [voidTarget, setVoidTarget] = useState<OrderItem | null>(null);
+  const [invoiceOpen, setInvoiceOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,7 +97,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
     }
   }, [reloadBill]);
 
-  const settle = useCallback(async (opts?: SettleOpts) => {
+  const settle = useCallback(async (opts?: SettleOpts, meta?: { invoiceIntent?: boolean }) => {
     if (!bill) return;
     setBusy(true);
     setError(null);
@@ -115,6 +116,9 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
       );
       setEsito({ kind, bill: row ?? { ...bill, closed_at: result.closed_at } });
       setScreen('esito');
+      // Intento «Fattura»: niente strada a metà — l'emissione si apre da
+      // sola, precompilata col cliente della visita se c'è.
+      if (meta?.invoiceIntent) setInvoiceOpen(true);
     } catch (err: any) {
       setError(err?.data?.error ?? err?.message ?? 'Chiusura non riuscita');
     } finally {
@@ -163,9 +167,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
             catch (err: any) { setError(err?.data?.error ?? err?.message ?? 'Emissione non riuscita'); }
             finally { setBusy(false); }
           }}
-          onIssueInvoice={() => {
-            setError('La fattura si emette dal conto, in Pagamenti: servono i dati del cliente.');
-          }}
+          onIssueInvoice={() => setInvoiceOpen(true)}
           onReopen={async () => {
             setBusy(true);
             try { await billsApiService.reopenBill(esito.bill.id); onBillClosed(); onClose(); }
@@ -242,6 +244,15 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
 
       {/* «Chiedi al cliente»: il QR del pay-at-table, in sola lettura — il
           saldo qui dentro passa dal pannello, non dal BillSheet. */}
+      {invoiceOpen && (esito?.bill ?? bill) && (
+        <InvoiceDialog
+          bill={(esito?.bill ?? bill)!}
+          initialQuery={(esito?.bill ?? bill)!.customer_name ?? undefined}
+          onCancel={() => setInvoiceOpen(false)}
+          onDone={() => { setInvoiceOpen(false); onClose(); }}
+        />
+      )}
+
       {voidTarget && (
         <ReasonDialog
           title={`Storna ${voidTarget.qty}× ${voidTarget.name_snapshot}`}

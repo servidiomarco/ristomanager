@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { Check, Copy, FileText, Loader2, Printer, QrCode, X, Banknote } from 'lucide-react';
@@ -73,7 +73,10 @@ export const SettleDialog: React.FC<{
   bill: BillLike;
   busy?: boolean;
   onCancel: () => void;
-  onConfirm: (opts: SettleOpts) => void;
+  /** meta.invoiceIntent: l'operatore ha scelto «Fattura» — il conto chiude
+   *  con proforma (i due documenti non coesistono) e il chiamante apre
+   *  SUBITO l'emissione, invece di lasciare l'utente a metà strada. */
+  onConfirm: (opts: SettleOpts, meta?: { invoiceIntent?: boolean }) => void;
 }> = ({ bill, busy, onCancel, onConfirm }) => {
   const residual = bill.residual_cents ?? bill.total_cents;
   const alreadyPaid = Math.max(0, bill.total_cents - residual);
@@ -110,7 +113,7 @@ export const SettleDialog: React.FC<{
       ...(isPP
         ? { passepartout_documento: ppDoc === 'Fattura' ? 'Proforma' : ppDoc }
         : { documento: ppDoc === 'Scontrino' ? 'Scontrino' : 'Proforma' }),
-    });
+    }, { invoiceIntent: !isPP && ppDoc === 'Fattura' });
   };
 
   const field =
@@ -275,7 +278,7 @@ export const SettleDialog: React.FC<{
 const SettleButton: React.FC<{
   bill: BillLike;
   busy?: boolean;
-  onSettle: (opts?: SettleOpts) => void;
+  onSettle: (opts?: SettleOpts, meta?: { invoiceIntent?: boolean }) => void;
 }> = ({ bill, busy, onSettle }) => {
   const [open, setOpen] = useState(false);
   return (
@@ -294,7 +297,7 @@ const SettleButton: React.FC<{
           bill={bill}
           busy={busy}
           onCancel={() => setOpen(false)}
-          onConfirm={(opts) => { onSettle(opts); setOpen(false); }}
+          onConfirm={(opts, meta) => { onSettle(opts, meta); setOpen(false); }}
         />
       )}
     </>
@@ -467,16 +470,21 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
    (i dati di fatturazione stanno sul cliente) e ogni campo resta
    correggibile al volo: quello che si digita qui vince, ma NON riscrive
    l'anagrafica — il tavolo aspetta, la rubrica si sistema dopo. */
-const InvoiceDialog: React.FC<{
+export const InvoiceDialog: React.FC<{
   bill: BillLike;
   onCancel: () => void;
   onDone: () => void;
-}> = ({ bill, onCancel, onDone }) => {
+  /** Cliente della visita: precompila la ricerca e, se la rubrica risponde
+   *  un solo nome, lo seleziona da sé coi suoi dati di fatturazione. */
+  initialQuery?: string;
+}> = ({ bill, onCancel, onDone, initialQuery }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialQuery ?? '');
   const [results, setResults] = useState<Customer[]>([]);
   const [customerId, setCustomerId] = useState<number | null>(null);
+  // Auto-selezione solo sul prefill iniziale, mai mentre l'utente digita.
+  const autoPickRef = useRef(Boolean(initialQuery));
   const [buyer, setBuyer] = useState({
     name: '', vat_number: '', tax_code: '', sdi_code: '', pec: '',
     street: '', zip: '', city: '', province: '',
@@ -488,7 +496,14 @@ const InvoiceDialog: React.FC<{
     if (!query.trim() || customerId != null) { setResults([]); return; }
     const t = setTimeout(() => {
       getCustomers(query.trim())
-        .then(rows => setResults(rows.slice(0, 5)))
+        .then(rows => {
+          const top = rows.slice(0, 5);
+          if (autoPickRef.current) {
+            autoPickRef.current = false;
+            if (top.length === 1) { pick(top[0]); return; }
+          }
+          setResults(top);
+        })
         .catch(() => setResults([]));
     }, 300);
     return () => clearTimeout(t);
@@ -811,7 +826,7 @@ export const BillDetail: React.FC<{
   bill: BillLike;
   busy?: boolean;
   onClose: () => void;
-  onSettle?: (opts?: SettleOpts) => void;
+  onSettle?: (opts?: SettleOpts, meta?: { invoiceIntent?: boolean }) => void;
   /** Ricarica la lista dopo emissione/annullo dello scontrino. */
   onFiscalChanged?: () => void;
 }> = ({ bill, busy, onClose, onSettle, onFiscalChanged }) => (
@@ -840,7 +855,7 @@ export const BillSheet: React.FC<{
   bill: BillLike;
   busy?: boolean;
   onClose: () => void;
-  onSettle?: (opts?: SettleOpts) => void;
+  onSettle?: (opts?: SettleOpts, meta?: { invoiceIntent?: boolean }) => void;
   /** Azione aggiuntiva in coda al footer (es. "nuova comanda" dal palmare). */
   footerExtra?: React.ReactNode;
 }> = ({ bill, busy, onClose, onSettle, footerExtra }) => (
