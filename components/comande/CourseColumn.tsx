@@ -6,6 +6,7 @@ import {
   COURSE_BADGE, MAX_COURSES, cartForCourse, cartSum, cartUnitCents, courseLabel,
   courseStatus, euro, isSent, itemsForCourse, rowCount, rowCountLabel,
   type CartLine,
+  isSystemLine,
 } from './orderView';
 
 // ---------------------------------------------------------------------------
@@ -293,6 +294,14 @@ export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, .
   const { order, cart, course } = list;
   const courseLines = cartForCourse(cart, course);
   const rows = rowCount(order, cart);
+  // Le righe rimaste in bozza SUL SERVER (uscita tornata in bozza, invio
+  // interrotto) contano come «da inviare»: senza, il footer resta a zero e
+  // l'uscita è irrecuperabile dal palmare (successo al tavolo 40).
+  const isServerDraft = (i: OrderItem) => i.status === 'DRAFT' && !isSystemLine(i);
+  const serverCourseQty = order.items.reduce((s, i) => s + (isServerDraft(i) && i.course_no === course ? i.qty : 0), 0);
+  const serverCourseTotal = order.items.reduce((s, i) => s + (isServerDraft(i) && i.course_no === course ? i.qty * i.unit_price_cents : 0), 0);
+  const serverAllQty = order.items.reduce((s, i) => s + (isServerDraft(i) ? i.qty : 0), 0);
+  const serverAllTotal = order.items.reduce((s, i) => s + (isServerDraft(i) ? i.qty * i.unit_price_cents : 0), 0);
   return (
     <div className="flex min-h-0 flex-col overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
       <header className="flex flex-shrink-0 items-center gap-2 border-b border-[var(--ds-border)] px-4 py-3">
@@ -309,10 +318,10 @@ export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, .
       <div className="flex-shrink-0 border-t border-[var(--ds-border)] p-3">
         <SendFooter
           course={course}
-          courseCount={courseLines.reduce((s, l) => s + l.qty, 0)}
-          courseTotal={cartSum(courseLines)}
-          allCount={cart.reduce((s, l) => s + l.qty, 0)}
-          allTotal={cartSum(cart)}
+          courseCount={courseLines.reduce((s, l) => s + l.qty, 0) + serverCourseQty}
+          courseTotal={cartSum(courseLines) + serverCourseTotal}
+          allCount={cart.reduce((s, l) => s + l.qty, 0) + serverAllQty}
+          allTotal={cartSum(cart) + serverAllTotal}
           busy={list.busy}
           onSend={onSend}
           onSendAll={onSendAll}
