@@ -246,8 +246,16 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
       setTableId(id);
       setOpenTables(prev => new Set(prev).add(id));
       // La bozza lasciata uscendo dal tavolo torna com'era: le righe non
-      // inviate non spariscono più.
-      setCart(restoreCartDraft(view.order.id, allDishes.filter(d => d.is_active !== false)));
+      // inviate non spariscono più. E lo DICE: una bozza muta sembra
+      // un'uscita già lavorata (successo al tavolo 11, «ma il passe la dà
+      // servita») — il ripristino si annuncia, così si controlla prima di
+      // inviare o si butta col cestino.
+      const bozza = restoreCartDraft(view.order.id, allDishes.filter(d => d.is_active !== false));
+      setCart(bozza);
+      if (bozza.length > 0) {
+        const n = bozza.reduce((sum, l) => sum + l.qty, 0);
+        setFlash(`${n} piatt${n === 1 ? 'o' : 'i'} non inviat${n === 1 ? 'o' : 'i'} dall'ultima volta: bozza ripristinata, non è in cucina.`);
+      }
       setDishQuery('');
       // Nuova uscita = quella dopo l'ultima già mandata, così il cameriere
       // non deve ricordarsi a che punto era.
