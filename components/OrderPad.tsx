@@ -35,6 +35,7 @@ import {
   MAX_COURSES, cartForCourse, cartKey, cartSum, courseLabel, euro,
   isSent, isSystemLine, rowCount,
   type CartLine, type RepeatLine,
+  saveCartDraft, restoreCartDraft, dropCartDraft,
 } from './comande/orderView';
 
 // ---------------------------------------------------------------------------
@@ -244,7 +245,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
       setOrder(view);
       setTableId(id);
       setOpenTables(prev => new Set(prev).add(id));
-      setCart([]);
+      // La bozza lasciata uscendo dal tavolo torna com'era: le righe non
+      // inviate non spariscono più.
+      setCart(restoreCartDraft(view.order.id, allDishes.filter(d => d.is_active !== false)));
       setDishQuery('');
       // Nuova uscita = quella dopo l'ultima già mandata, così il cameriere
       // non deve ricordarsi a che punto era.
@@ -369,6 +372,12 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
   // 'course' manda solo l'uscita in composizione, 'all' tutto quello che è in
   // bozza. Sono due gesti diversi: il primo è il ritmo del servizio, il
   // secondo è «il tavolo ha finito di ordinare».
+  // Ogni variazione del carrello riscrive la bozza; carrello vuoto = bozza
+  // rimossa. Così l'invio (che riduce il carrello) la svuota senza codice.
+  useEffect(() => {
+    if (order) saveCartDraft(order.order.id, cart);
+  }, [cart, order]);
+
   const submit = async (scope: 'course' | 'all') => {
     if (!order || busy) return;
     const lines = scope === 'course' ? courseLines : cart;
@@ -435,6 +444,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
     setBusy(true); setError(null);
     try {
       const res = await closeOrder(order.order.id, discardPending);
+      dropCartDraft(order.order.id);
       setClosing(false);
       if (res.bill) setJustClosed(res.bill);
       else setFlash('Comanda chiusa: non c\'era nulla da pagare');
