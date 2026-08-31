@@ -389,7 +389,12 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
   const submit = async (scope: 'course' | 'all') => {
     if (!order || busy) return;
     const lines = scope === 'course' ? courseLines : cart;
-    if (lines.length === 0) return;
+    // Righe rimaste in bozza SUL SERVER (uscita richiamata, invio interrotto):
+    // l'Invia deve poterle rimandare anche a carrello vuoto, o l'uscita resta
+    // irrecuperabile dal palmare (successo al tavolo 40).
+    const serverDrafts = order.items.some(i =>
+      i.status === 'DRAFT' && !isSystemLine(i) && (scope === 'all' || i.course_no === course));
+    if (lines.length === 0 && !serverDrafts) return;
     setBusy(true); setError(null);
     try {
       const payload: NewOrderItem[] = lines.map(l => ({
@@ -404,7 +409,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
         idempotency_key: l.idem,
       }));
       const key = newIdempotencyKey();
-      await ordersApiService.addItems(order.order.id, payload, key);
+      if (payload.length > 0) await ordersApiService.addItems(order.order.id, payload, key);
       const sent = await ordersApiService.send(
         order.order.id, scope === 'course' ? course : undefined, key,
       );
@@ -1092,12 +1097,19 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
           l'ombra e la taglia con una linea netta (regola 10). */}
       <div className="flex-shrink-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
         <div className="rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-raised)]">
+          {/* Le righe rimaste in bozza SUL SERVER (uscita richiamata, invio
+              interrotto) contano come «da inviare»: senza, l'Invia resta
+              spento e l'uscita è irrecuperabile dal palmare. */}
           <SendFooter
             course={course}
-            courseCount={courseLines.reduce((s, l) => s + l.qty, 0)}
-            courseTotal={cartSum(courseLines)}
-            allCount={cart.reduce((s, l) => s + l.qty, 0)}
-            allTotal={cartTotal}
+            courseCount={courseLines.reduce((s, l) => s + l.qty, 0)
+              + (order?.items.reduce((s, i) => s + (i.status === 'DRAFT' && !isSystemLine(i) && i.course_no === course ? i.qty : 0), 0) ?? 0)}
+            courseTotal={cartSum(courseLines)
+              + (order?.items.reduce((s, i) => s + (i.status === 'DRAFT' && !isSystemLine(i) && i.course_no === course ? i.unit_price_cents * i.qty : 0), 0) ?? 0)}
+            allCount={cart.reduce((s, l) => s + l.qty, 0)
+              + (order?.items.reduce((s, i) => s + (i.status === 'DRAFT' && !isSystemLine(i) ? i.qty : 0), 0) ?? 0)}
+            allTotal={cartTotal
+              + (order?.items.reduce((s, i) => s + (i.status === 'DRAFT' && !isSystemLine(i) ? i.unit_price_cents * i.qty : 0), 0) ?? 0)}
             busy={busy}
             onSend={() => submit('course')}
             onSendAll={() => submit('all')}

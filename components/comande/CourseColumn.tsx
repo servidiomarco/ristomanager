@@ -81,6 +81,9 @@ export const CourseList: React.FC<CourseListProps> = ({
               {courseLabel(n)}
             </button>
             {sent && <StatusPill tone={badge.tone}>{badge.text}</StatusPill>}
+            {!sent && serverRows.length > 0 && (
+              <StatusPill tone="pending">da inviare</StatusPill>
+            )}
             {status === 'QUEUED' && (
               <>
                 {onFire && (
@@ -94,14 +97,17 @@ export const CourseList: React.FC<CourseListProps> = ({
                     Chiama
                   </button>
                 )}
+                {/* Mai più «richiama» accanto a «Chiama»: quasi la stessa
+                    parola, significato opposto — un tocco sbagliato ha
+                    riportato in bozza un'uscita che si credeva lanciata. */}
                 <button
                   type="button"
                   onClick={() => onRecall(n)}
                   disabled={busy}
-                  title="Richiama: torna in bozza"
+                  title="Annulla la proposta: l'uscita torna in bozza, la cucina non la vede"
                   className="flex-shrink-0 text-[13px] font-medium text-[var(--ds-text-muted)] underline decoration-dotted transition-opacity hover:opacity-70 disabled:opacity-40"
                 >
-                  richiama
+                  torna in bozza
                 </button>
               </>
             )}
