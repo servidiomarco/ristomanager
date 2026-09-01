@@ -254,9 +254,6 @@ export interface KdsQueue {
   courses: KdsCourseState[];
   /** Presente solo col filtro partita; vuoto sul monitor senza partita. */
   others?: KdsOtherItem[];
-  /** La prossima uscita ancora in coda (QUEUED) di ogni comanda in vista:
-   *  col passe spento la chiama la cucina, dalla card. */
-  queued_next?: { order_id: number; course_no: number }[];
 }
 
 export const getKdsQueue = async (stationId: number | null): Promise<KdsQueue> =>
@@ -391,6 +388,13 @@ export const serveCourse = async (orderId: number, courseNo: number): Promise<un
 /** Il ripensamento del servito: l'uscita torna pronta al passe. */
 export const unserveCourse = async (orderId: number, courseNo: number): Promise<unknown> =>
   apiRequest(`${API_URL}/orders/${orderId}/courses/${courseNo}/unserve`, {
+    method: 'POST', headers: getHeaders(),
+  });
+
+/** La campanella della cucina: avvisa la sala che l'uscita è pronta al
+ *  ritiro (annuncio nel canale sala della chat staff). Non muove lo stato. */
+export const callWaiterForCourse = async (orderId: number, courseNo: number): Promise<unknown> =>
+  apiRequest(`${API_URL}/orders/${orderId}/courses/${courseNo}/call-waiter`, {
     method: 'POST', headers: getHeaders(),
   });
 
