@@ -3,20 +3,23 @@ import {
   Check, Loader2, TriangleAlert, Utensils, X,
 } from 'lucide-react';
 import type { Dish, Reservation, Table, TableMerge, OrderWithItems, OrderItem } from '../types';
-import { ArrivalStatus, ReservationStatus, Shift } from '../types';
+import { Shift } from '../types';
 import { getRomeDatePart } from '../utils/reservationTime';
 import { getTableMerges } from '../services/apiService';
 import {
-  ordersApiService, getMenuCatalogue, newIdempotencyKey, closeOrder, updateOrder,
+  ordersApiService, getMenuCatalogue, newIdempotencyKey, closeOrder, updateOrder, fireCourse,
   voidItem, setOrderDiscount, transferOrder,
   type MenuCatalogue, type NewOrderItem, type CloseOrderResult,
 } from '../services/ordersApiService';
-import { BillSheet } from './pagamenti/BillSheet';
-import { billsApiService } from '../services/billsApiService';
+import { BillSheet, InvoiceDialog } from './pagamenti/BillSheet';
+import { PagamentoSheet } from './cassa/PagamentoSheet';
+import { useAuth } from '../contexts/AuthContext';
+import { billsApiService, printBill } from '../services/billsApiService';
+
 import { socketClient } from '../services/socketClient';
 import type { ServiceBill } from '../services/ordersApiService';
 import {
-  ModalShell, Sheet, Callout, SectionHeader, SegmentedControl, useMediaQuery,
+  ModalShell, Sheet, Callout, SectionHeader, useMediaQuery,
   dsInput, dsButton,
 } from './ds';
 import { TableGrid } from './comande/TableGrid';
@@ -25,11 +28,14 @@ import { DishBrowser } from './comande/DishBrowser';
 import { CourseChips } from './comande/CourseChips';
 import { CourseColumn, CourseList, SendFooter } from './comande/CourseColumn';
 import { ComandaSheet } from './comande/ComandaSheet';
-import { buildRows, type TableFilter } from './comande/tablesView';
+import { ReasonDialog } from './comande/ReasonDialog';
+import { DiscountDialog } from './comande/DiscountDialog';
+import { buildRows, buildMergeGroups, makeReservationForTable, type TableFilter } from './comande/tablesView';
 import {
   MAX_COURSES, cartForCourse, cartKey, cartSum, courseLabel, euro,
   isSent, isSystemLine, rowCount,
   type CartLine, type RepeatLine,
+  saveCartDraft, restoreCartDraft, dropCartDraft,
 } from './comande/orderView';
 
 // ---------------------------------------------------------------------------
@@ -51,6 +57,9 @@ import {
 // ---------------------------------------------------------------------------
 
 interface OrderPadProps {
+  /** Tavolo da aprire subito (arrivando da Cassa · «Apri in Comande»). */
+  initialTableId?: number | null;
+  onInitialTableConsumed?: () => void;
   dishes: Dish[];
   tables: Table[];
   reservations: Reservation[];
@@ -64,7 +73,7 @@ interface OrderPadProps {
   onImmersive?: (on: boolean) => void;
 }
 
-export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, reservations, globalDate, globalShiftFilter, onImmersive }) => {
+export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, reservations, globalDate, globalShiftFilter, onImmersive, initialTableId, onInitialTableConsumed }) => {
   // I piatti spenti (es. articolo disattivato in cassa Passepartout) restano
   // in anagrafica per lo storico ma non si battono più.
   const dishes = useMemo(() => allDishes.filter(d => d.is_active !== false), [allDishes]);
@@ -97,6 +106,14 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
   // non una comanda nuova.
   const [serviceBills, setServiceBills] = useState<Map<number, ServiceBill>>(new Map());
   const [viewBill, setViewBill] = useState<ServiceBill | null>(null);
+  // Il pannello di incasso della Cassa, per chi ha il permesso: un solo
+  // motore di pagamento, due punti d'ingresso (banco e tavolo).
+  const [cassaBillId, setCassaBillId] = useState<number | null>(null);
+  // Chiusura con intento «Fattura»: il conto chiude con proforma e questo
+  // apre subito l'emissione, precompilata col cliente della visita.
+  const [invoiceFor, setInvoiceFor] = useState<(ServiceBill & { initialQuery?: string }) | null>(null);
+  const { hasPermission } = useAuth();
+  const canCassa = hasPermission('cash:operate');
   const billTables = useMemo(() => new Set(serviceBills.keys()), [serviceBills]);
 
   const isWide = useMediaQuery('(min-width: 1024px)');
@@ -165,33 +182,14 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
   }, [selectedDateRome, globalShiftFilter]);
 
   // Gruppo di unione per tavolo, per turno: `${shift}:${tableId}` → ids.
-  const mergeGroupByTable = useMemo(() => {
-    const map = new Map<string, number[]>();
-    for (const m of tableMerges) {
-      const group = [m.primary_id, ...m.merged_ids];
-      for (const id of group) map.set(`${m.shift}:${id}`, group);
-    }
-    return map;
-  }, [tableMerges]);
+  const mergeGroupByTable = useMemo(() => buildMergeGroups(tableMerges), [tableMerges]);
 
-  const reservationForTable = useCallback((id: number): Reservation | null => {
-    const isLive = (r: Reservation): boolean =>
-      getRomeDatePart(r.reservation_time) === selectedDateRome
-      && (globalShiftFilter === 'ALL' || r.shift === globalShiftFilter)
-      && r.reservation_status !== ReservationStatus.CANCELLED
-      && r.arrival_status !== ArrivalStatus.DEPARTED;
-    const exact = reservations.find(r => r.table_id === id && isLive(r));
-    if (exact) return exact;
-    // Nessuna prenotazione sul tavolo esatto: si cerca sugli altri tavoli
-    // della sua unione (nel turno della prenotazione stessa).
-    return reservations.find(r =>
-      r.table_id != null
-      && r.table_id !== id
-      && isLive(r)
-      && (mergeGroupByTable.get(`${r.shift}:${id}`)?.includes(r.table_id) ?? false)
-    ) ?? null;
-  },
-  [reservations, selectedDateRome, globalShiftFilter, mergeGroupByTable]);
+  // La regola sta in tablesView: Cassa fa la stessa domanda sugli stessi
+  // tavoli, e due copie divergerebbero al primo caso di unione.
+  const reservationForTable = useMemo(
+    () => makeReservationForTable(reservations, selectedDateRome, globalShiftFilter, mergeGroupByTable),
+    [reservations, selectedDateRome, globalShiftFilter, mergeGroupByTable]
+  );
 
   const reservation = useMemo(
     () => (tableId ? reservationForTable(tableId) : null),
@@ -206,6 +204,13 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
     shift: globalShiftFilter === 'ALL' ? undefined : globalShiftFilter,
   }), [selectedDateRome, globalShiftFilter]);
   const isTodayRome = selectedDateRome === getRomeDatePart(new Date());
+
+  useEffect(() => {
+    if (initialTableId == null) return;
+    loadTable(initialTableId);
+    onInitialTableConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTableId]);
 
   const loadTable = useCallback(async (id: number, opts?: { forceCreate?: boolean }) => {
     setBusy(true); setError(null);
@@ -240,7 +245,17 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
       setOrder(view);
       setTableId(id);
       setOpenTables(prev => new Set(prev).add(id));
-      setCart([]);
+      // La bozza lasciata uscendo dal tavolo torna com'era: le righe non
+      // inviate non spariscono più. E lo DICE: una bozza muta sembra
+      // un'uscita già lavorata (successo al tavolo 11, «ma il passe la dà
+      // servita») — il ripristino si annuncia, così si controlla prima di
+      // inviare o si butta col cestino.
+      const bozza = restoreCartDraft(view.order.id, allDishes.filter(d => d.is_active !== false));
+      setCart(bozza);
+      if (bozza.length > 0) {
+        const n = bozza.reduce((sum, l) => sum + l.qty, 0);
+        setFlash(`${n} piatt${n === 1 ? 'o' : 'i'} non inviat${n === 1 ? 'o' : 'i'} dall'ultima volta: bozza ripristinata, non è in cucina.`);
+      }
       setDishQuery('');
       // Nuova uscita = quella dopo l'ultima già mandata, così il cameriere
       // non deve ricordarsi a che punto era.
@@ -365,10 +380,21 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
   // 'course' manda solo l'uscita in composizione, 'all' tutto quello che è in
   // bozza. Sono due gesti diversi: il primo è il ritmo del servizio, il
   // secondo è «il tavolo ha finito di ordinare».
+  // Ogni variazione del carrello riscrive la bozza; carrello vuoto = bozza
+  // rimossa. Così l'invio (che riduce il carrello) la svuota senza codice.
+  useEffect(() => {
+    if (order) saveCartDraft(order.order.id, cart);
+  }, [cart, order]);
+
   const submit = async (scope: 'course' | 'all') => {
     if (!order || busy) return;
     const lines = scope === 'course' ? courseLines : cart;
-    if (lines.length === 0) return;
+    // Righe rimaste in bozza SUL SERVER (uscita richiamata, invio interrotto):
+    // l'Invia deve poterle rimandare anche a carrello vuoto, o l'uscita resta
+    // irrecuperabile dal palmare (successo al tavolo 40).
+    const serverDrafts = order.items.some(i =>
+      i.status === 'DRAFT' && !isSystemLine(i) && (scope === 'all' || i.course_no === course));
+    if (lines.length === 0 && !serverDrafts) return;
     setBusy(true); setError(null);
     try {
       const payload: NewOrderItem[] = lines.map(l => ({
@@ -383,7 +409,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
         idempotency_key: l.idem,
       }));
       const key = newIdempotencyKey();
-      await ordersApiService.addItems(order.order.id, payload, key);
+      if (payload.length > 0) await ordersApiService.addItems(order.order.id, payload, key);
       const sent = await ordersApiService.send(
         order.order.id, scope === 'course' ? course : undefined, key,
       );
@@ -431,6 +457,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
     setBusy(true); setError(null);
     try {
       const res = await closeOrder(order.order.id, discardPending);
+      dropCartDraft(order.order.id);
       setClosing(false);
       if (res.bill) setJustClosed(res.bill);
       else setFlash('Comanda chiusa: non c\'era nulla da pagare');
@@ -509,6 +536,22 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
     } finally { setBusy(false); }
   };
 
+  // Il cameriere batte i tempi: «Chiama» lancia in cucina l'uscita proposta
+  // quando il tavolo è pronto, senza passare dal passe.
+  const fire = async (courseNo: number) => {
+    if (!order || busy) return;
+    setBusy(true); setError(null);
+    try {
+      await fireCourse(order.order.id, courseNo);
+      setOrder(await ordersApiService.getOrder(order.order.id));
+      setFlash(`${courseLabel(courseNo)} chiamata in cucina`);
+    } catch (err: any) {
+      setError(err?.data?.error ?? err?.message ?? 'Lancio non riuscito');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const recall = async (courseNo: number) => {
     if (!order || busy) return;
     setBusy(true); setError(null);
@@ -525,12 +568,56 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
   // Chiusura in cassa dal foglio conto aperto sul tavolo. Il residuo che
   // resta è una decisione dell'operatore (SETTLED_PARTIAL), quindi dopo la
   // chiusura il tavolo torna libero.
-  const settleViewBill = async (opts?: { cash_settled_cents?: number; tip_cents?: number }) => {
+  // I verbi rapidi di Passepartout: «scontrino contanti/POS» è UN tocco che
+  // incassa l'importo pieno ed emette lo scontrino — il caso che copre il
+  // 90% delle chiusure. Il pannello completo resta per dividi/misto/sospeso.
+  const chiusuraRapida = async (
+    billId: number,
+    residualCents: number,
+    method: 'CONTANTI' | 'POS_FISICO',
+    cleanupTableId: number | null,
+  ) => {
+    if (busy) return;
+    setBusy(true); setError(null);
+    try {
+      await billsApiService.closeBill(billId, {
+        payments: residualCents > 0 ? [{ method, amount_cents: residualCents }] : [],
+        documento: 'Scontrino',
+      });
+      setViewBill(null);
+      setJustClosed(null);
+      if (cleanupTableId != null) {
+        setServiceBills(prev => { const n = new Map(prev); n.delete(cleanupTableId); return n; });
+      }
+      setFlash(`Conto chiuso · ${method === 'CONTANTI' ? 'contanti' : 'POS'} ${euro(residualCents)} · scontrino in emissione`);
+    } catch (err: any) {
+      setError(err?.data?.error ?? err?.message ?? 'Chiusura non riuscita');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const stampaPreconto = async (billId: number) => {
+    try {
+      await printBill(billId, 'PRECONTO');
+      setFlash('Preconto in stampa');
+    } catch (err: any) {
+      setError(err?.data?.error ?? err?.message ?? 'Stampa non riuscita');
+    }
+  };
+
+  const settleViewBill = async (opts?: { cash_settled_cents?: number; tip_cents?: number }, meta?: { invoiceIntent?: boolean }) => {
     if (!viewBill || busy) return;
     setBusy(true); setError(null);
     try {
       await billsApiService.closeBill(viewBill.id, opts);
       setServiceBills(prev => { const n = new Map(prev); n.delete(viewBill.table_id); return n; });
+      if (meta?.invoiceIntent) {
+        setInvoiceFor({
+          ...viewBill,
+          initialQuery: reservationForTable(viewBill.table_id)?.customer_name ?? undefined,
+        });
+      }
       setViewBill(null);
       setFlash('Conto chiuso in cassa');
     } catch (err: any) {
@@ -622,15 +709,76 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
           onClose={() => setViewBill(null)}
           onSettle={settleViewBill}
           footerExtra={
-            <button
-              type="button"
-              onClick={() => { const tid = viewBill.table_id; setViewBill(null); loadTable(tid, { forceCreate: true }); }}
-              disabled={busy}
-              className={`w-full ${dsButton.secondary}`}
-            >
-              Nuova comanda su questo tavolo
-            </button>
+            <>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => chiusuraRapida(viewBill.id, viewBill.residual_cents ?? viewBill.total_cents, 'CONTANTI', viewBill.table_id)}
+                  disabled={busy}
+                  className={`flex-1 ${dsButton.primary}`}
+                >
+                  Scontrino contanti
+                </button>
+                <button
+                  type="button"
+                  onClick={() => chiusuraRapida(viewBill.id, viewBill.residual_cents ?? viewBill.total_cents, 'POS_FISICO', viewBill.table_id)}
+                  disabled={busy}
+                  className={`flex-1 ${dsButton.secondary}`}
+                >
+                  Scontrino POS
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => stampaPreconto(viewBill.id)}
+                  disabled={busy}
+                  className={`flex-1 ${dsButton.quiet}`}
+                >
+                  Preconto
+                </button>
+                {canCassa && (
+                  <button
+                    type="button"
+                    onClick={() => { const bid = viewBill.id; setViewBill(null); setCassaBillId(bid); }}
+                    disabled={busy}
+                    className={`flex-1 ${dsButton.quiet}`}
+                  >
+                    Incassa con la cassa
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => { const tid = viewBill.table_id; setViewBill(null); loadTable(tid, { forceCreate: true }); }}
+                disabled={busy}
+                className={`w-full ${dsButton.quiet}`}
+              >
+                Nuova comanda su questo tavolo
+              </button>
+            </>
           }
+        />
+      )}
+      {invoiceFor && (
+        <InvoiceDialog
+          bill={invoiceFor}
+          initialQuery={invoiceFor.initialQuery}
+          onCancel={() => { setInvoiceFor(null); setFlash('Conto chiuso, da fatturare: la fattura resta emettibile dal conto.'); }}
+          onDone={() => { setInvoiceFor(null); setFlash('Fattura emessa'); }}
+        />
+      )}
+      {cassaBillId != null && (
+        <PagamentoSheet
+          billId={cassaBillId}
+          service={{ service_date: serviceQuery.date, shift: serviceQuery.shift }}
+          onClose={() => setCassaBillId(null)}
+          onBillClosed={async () => {
+            try {
+              const res = await ordersApiService.getTablesBillsStatus(serviceQuery);
+              setServiceBills(new Map(res.bills.map(b => [b.table_id, b])));
+            } catch { /* al prossimo focus la griglia si riallinea da sola */ }
+          }}
         />
       )}
       {justClosed && (
@@ -643,7 +791,50 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
             share_token: justClosed.share_token,
             items: justClosed.items,
           }}
+          busy={busy}
           onClose={() => setJustClosed(null)}
+          footerExtra={
+            <>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => chiusuraRapida(justClosed.id, justClosed.residual_cents ?? justClosed.total_cents, 'CONTANTI', justClosed.table_id ?? null)}
+                  disabled={busy}
+                  className={`flex-1 ${dsButton.primary}`}
+                >
+                  Scontrino contanti
+                </button>
+                <button
+                  type="button"
+                  onClick={() => chiusuraRapida(justClosed.id, justClosed.residual_cents ?? justClosed.total_cents, 'POS_FISICO', justClosed.table_id ?? null)}
+                  disabled={busy}
+                  className={`flex-1 ${dsButton.secondary}`}
+                >
+                  Scontrino POS
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => stampaPreconto(justClosed.id)}
+                  disabled={busy}
+                  className={`flex-1 ${dsButton.quiet}`}
+                >
+                  Preconto
+                </button>
+                {canCassa && (
+                  <button
+                    type="button"
+                    onClick={() => { const bid = justClosed.id; setJustClosed(null); setCassaBillId(bid); }}
+                    disabled={busy}
+                    className={`flex-1 ${dsButton.quiet}`}
+                  >
+                    Incassa con la cassa
+                  </button>
+                )}
+              </div>
+            </>
+          }
         />
       )}
     </>
@@ -661,7 +852,17 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
           onQuery={setGridQuery}
           busy={busy}
           onPick={loadTable}
-          notice={(error || flash) ? <div className="flex flex-col gap-2">{notices}</div> : undefined}
+          notice={(error || flash || serviceBills.size > 0) ? (
+            <div className="flex flex-col gap-2">
+              {notices}
+              {serviceBills.size > 0 && (
+                <span className="inline-flex h-8 w-fit items-baseline gap-1.5 rounded-full border border-[var(--ds-pending-solid)] bg-[var(--ds-pending-tint)] px-3 leading-8 text-[var(--ds-pending-text)]">
+                  <span className="text-[15px] font-bold tabular-nums">{serviceBills.size}</span>
+                  <span className="text-[13px] font-medium">{serviceBills.size === 1 ? 'conto da incassare' : 'conti da incassare'}</span>
+                </span>
+              )}
+            </div>
+          ) : undefined}
         />
         {billSheets}
       </>
@@ -692,6 +893,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
     onBump: bumpCart, onDrop: dropLine,
     onVoid: (i: OrderItem) => setVoidTarget(i),
     onRecall: recall,
+    onFire: fire,
   };
 
   const browser = (
@@ -895,12 +1097,19 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
           l'ombra e la taglia con una linea netta (regola 10). */}
       <div className="flex-shrink-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
         <div className="rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-raised)]">
+          {/* Le righe rimaste in bozza SUL SERVER (uscita richiamata, invio
+              interrotto) contano come «da inviare»: senza, l'Invia resta
+              spento e l'uscita è irrecuperabile dal palmare. */}
           <SendFooter
             course={course}
-            courseCount={courseLines.reduce((s, l) => s + l.qty, 0)}
-            courseTotal={cartSum(courseLines)}
-            allCount={cart.reduce((s, l) => s + l.qty, 0)}
-            allTotal={cartTotal}
+            courseCount={courseLines.reduce((s, l) => s + l.qty, 0)
+              + (order?.items.reduce((s, i) => s + (i.status === 'DRAFT' && !isSystemLine(i) && i.course_no === course ? i.qty : 0), 0) ?? 0)}
+            courseTotal={cartSum(courseLines)
+              + (order?.items.reduce((s, i) => s + (i.status === 'DRAFT' && !isSystemLine(i) && i.course_no === course ? i.unit_price_cents * i.qty : 0), 0) ?? 0)}
+            allCount={cart.reduce((s, l) => s + l.qty, 0)
+              + (order?.items.reduce((s, i) => s + (i.status === 'DRAFT' && !isSystemLine(i) ? i.qty : 0), 0) ?? 0)}
+            allTotal={cartTotal
+              + (order?.items.reduce((s, i) => s + (i.status === 'DRAFT' && !isSystemLine(i) ? i.unit_price_cents * i.qty : 0), 0) ?? 0)}
             busy={busy}
             onSend={() => submit('course')}
             onSendAll={() => submit('all')}
@@ -923,6 +1132,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
         onDrop={dropLine}
         onVoid={i => setVoidTarget(i)}
         onRecall={recall}
+        onFire={fire}
         onSend={() => submit('course')}
         onSendAll={() => submit('all')}
         onRepeat={repeatLine}
@@ -1057,138 +1267,5 @@ const VariantSheet: React.FC<{
         />
       </label>
     </Sheet>
-  );
-};
-
-// Dialogo con motivazione obbligatoria. Usato per gli storni: senza un motivo
-// scritto, a fine mese lo scarto è un ammanco che nessuno sa spiegare.
-const ReasonDialog: React.FC<{
-  title: string;
-  hint: string;
-  confirmLabel: string;
-  busy: boolean;
-  onCancel: () => void;
-  onConfirm: (reason: string) => void;
-}> = ({ title, hint, confirmLabel, busy, onCancel, onConfirm }) => {
-  const [reason, setReason] = useState('');
-  const PRESETS = ['Errore di battitura', 'Cliente ha cambiato idea', 'Piatto non riuscito', 'Ingrediente finito'];
-  return (
-    <ModalShell
-      open
-      onClose={onCancel}
-      title={title}
-      subtitle={hint}
-      size="sm"
-      closeOnEscape
-      bodyClassName="space-y-3 p-5 sm:p-6"
-      footer={
-        <button
-          type="button"
-          onClick={() => onConfirm(reason.trim())}
-          disabled={busy || reason.trim().length < 3}
-          className={dsButton.critical}
-        >
-          {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-          {confirmLabel}
-        </button>
-      }
-    >
-      <div className="flex flex-wrap gap-2">
-        {PRESETS.map(pr => (
-          <button
-            key={pr}
-            type="button"
-            onClick={() => setReason(pr)}
-            aria-pressed={reason === pr}
-            className={`inline-flex h-11 items-center rounded-full px-3.5 text-[14px] font-medium transition-colors ${
-              reason === pr
-                ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
-                : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
-            }`}
-          >
-            {pr}
-          </button>
-        ))}
-      </div>
-      <input
-        value={reason}
-        onChange={e => setReason(e.target.value)}
-        autoFocus
-        placeholder="Motivazione"
-        aria-label="Motivazione"
-        className={dsInput}
-      />
-    </ModalShell>
-  );
-};
-
-const DiscountDialog: React.FC<{
-  currentReason: string | null;
-  hasDiscount: boolean;
-  busy: boolean;
-  onCancel: () => void;
-  onClear: () => void;
-  onConfirm: (p: { discount_type: 'PERCENT' | 'AMOUNT'; discount_value: number; reason: string }) => void;
-}> = ({ currentReason, hasDiscount, busy, onCancel, onClear, onConfirm }) => {
-  const [type, setType] = useState<'PERCENT' | 'AMOUNT'>('PERCENT');
-  const [value, setValue] = useState('');
-  const [reason, setReason] = useState(currentReason ?? '');
-  const num = Number(value.replace(',', '.'));
-  const valid = Number.isFinite(num) && num > 0 && (type !== 'PERCENT' || num <= 100) && reason.trim().length >= 3;
-
-  return (
-    <ModalShell
-      open
-      onClose={onCancel}
-      title="Sconto sulla comanda"
-      subtitle="Resta a registro con il tuo nome: serve a spiegare la differenza a fine servizio."
-      size="sm"
-      closeOnEscape
-      bodyClassName="space-y-3 p-5 sm:p-6"
-      footerStart={
-        hasDiscount ? (
-          <button type="button" onClick={onClear} disabled={busy} className={dsButton.quiet}>
-            Rimuovi
-          </button>
-        ) : undefined
-      }
-      footer={
-        <button
-          type="button"
-          onClick={() => onConfirm({ discount_type: type, discount_value: num, reason: reason.trim() })}
-          disabled={busy || !valid}
-          className={dsButton.primary}
-        >
-          {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-          Applica
-        </button>
-      }
-    >
-      <SegmentedControl<'PERCENT' | 'AMOUNT'>
-        value={type}
-        onChange={setType}
-        ariaLabel="Tipo di sconto"
-        options={[
-          { value: 'PERCENT', label: 'Percentuale' },
-          { value: 'AMOUNT', label: 'Importo €' },
-        ]}
-      />
-      <input
-        value={value}
-        onChange={e => setValue(e.target.value)}
-        inputMode="decimal"
-        autoFocus
-        placeholder={type === 'PERCENT' ? '10' : '5,00'}
-        aria-label={type === 'PERCENT' ? 'Percentuale di sconto' : 'Importo dello sconto'}
-        className={dsInput}
-      />
-      <input
-        value={reason}
-        onChange={e => setReason(e.target.value)}
-        placeholder="Motivazione (obbligatoria)"
-        aria-label="Motivazione dello sconto"
-        className={dsInput}
-      />
-    </ModalShell>
   );
 };

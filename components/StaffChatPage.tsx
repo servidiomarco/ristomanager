@@ -30,6 +30,7 @@ const ROLE_LABELS: Record<string, string> = {
   RECEPTION: 'Reception',
   WAITER: 'Sala',
   KITCHEN: 'Cucina',
+  CASSA: 'Cassa',
 };
 
 const formatRelative = (iso: string | null): string => {

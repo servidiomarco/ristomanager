@@ -236,7 +236,10 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 **Comande (palmare cameriere)**
 - Griglia tavoli del servizio con stato comanda; catalogo piatti per categoria con ricerca; uso a una mano, su telefono la comanda vive in uno sheet dietro il totale.
 - **Uscite/portate**: ogni riga si assegna a un'uscita; varianti libere per riga ("senza sale, metà porzione…"), quantità, coperti ±1.
-- Le righe restano sul palmare finché non si preme **Invia** (una sola trasmissione, robusta anche con rete instabile).
+- Le righe restano sul palmare finché non si preme **Invia** (una sola trasmissione, robusta anche con rete instabile); le righe non inviate **sopravvivono all'uscita dal tavolo** come bozza locale, e al ritorno un avviso dichiara che non sono in cucina.
+- **Il cameriere batte i tempi**: sull'uscita proposta il bottone **Chiama** la lancia in cucina dal palmare — per le sale dove le uscite le chiama chi è al tavolo, non il passe. "Torna in bozza" annulla una proposta, e l'uscita si rimanda anche dopo.
+- **Chiusura a un tocco** sul conto del tavolo: **Scontrino contanti** e **Scontrino POS** incassano l'importo pieno ed emettono il documento in un gesto; **Preconto** stampa in sala; "Incassa con la cassa" apre il pannello completo (dividi, misto, sospeso, mancia) per chi ha il permesso di cassa.
+- Scegliendo **Fattura** alla chiusura, il conto chiude senza scontrino e **l'emissione si apre subito**, precompilata col cliente della visita e i suoi dati di fatturazione.
 - Azioni: **storno riga inviata** con motivazione obbligatoria, richiama in bozza, **trasferimento su altro tavolo**, sconto (importo o percentuale con motivazione), segnalazioni "Piatto non riuscito" / "Ingrediente finito", chiusura comanda con apertura conto.
 
 **Cucina (KDS)**
@@ -247,6 +250,13 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 **Passe (expediter)**
 - Vista di sincronia delle uscite: **Chiama** un'uscita quando la sala è pronta, ricalcola i tempi di partenza, quattro modalità di lancio (tutte automatiche, solo la prima, a consumo — la successiva parte quando la precedente è servita —, manuale).
 - Metriche di servizio: attesa media al passe e al ritiro, delta di sincronia tra partite, scarti.
+
+**Cassa (banco del cassiere)**
+- Modulo dedicato sotto Servizio: **coda dei conti del servizio** con contatore tavoli, tavolo attivo con comanda, cliente della visita, incasso e chiusura fiscale in un'unica vista.
+- **Sessione di cassa** per servizio: fondo iniziale, movimenti, contato a fine turno con differenza e nota obbligatoria; transazioni del servizio consultabili.
+- Pannello di incasso completo: più metodi sullo stesso conto (contanti, POS, Satispay, buoni pasto, gift card, sospeso, omaggio), resto calcolato, mancia, dividi conto, QR pay-at-table, scelta del documento (scontrino / proforma / fattura).
+- **Correggi conto**: se il cliente contesta una portata mai ricevuta, dal pagamento si apre l'elenco righe e si storna quella sbagliata con motivazione — il totale si riallinea da solo, anche a comanda già chiusa.
+- Ruolo dedicato **CASSA** e permessi `cash:*`; "Apri in Comande" porta al tavolo per lavorare uscite e lanci.
 
 **Regole di dominio**
 - La **giornata di servizio** inizia alle 5:00 e il turno cambia alle 17:00: la cena che finisce all'una di notte resta del giorno giusto.
@@ -512,6 +522,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-01 | Comande, Cucina e Passe | Nuovo modulo Cassa (coda conti, sessione, incasso, correggi conto); in Comande: chiusura a un tocco (scontrino contanti/POS, preconto), bottone Chiama per le uscite, bozza locale delle righe non inviate, fattura con emissione immediata. |
 | 2026-08-30 | Funzionalità trasversali | Al rientro nell'app, se è stata deployata una versione nuova compare un avviso con "Ricarica" — la PWA sospesa non resta più sul codice vecchio. |
 | 2026-08-30 | Impostazioni | Logo in due varianti (normale + tema scuro): l'app scambia l'immagine col tema invece della piastra bianca; per il Frantoio precaricato l'artwork bianco storico. |
 | 2026-08-29 | Impostazioni | Upload del logo del ristorante nell'identità pubblica; compare sulla pagina di prenotazione online (per il Frantoio precaricato il logo storico). |

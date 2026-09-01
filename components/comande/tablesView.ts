@@ -1,4 +1,6 @@
-import type { Reservation, Table } from '../../types';
+import type { Reservation, Table, TableMerge } from '../../types';
+import { ArrivalStatus, ReservationStatus } from '../../types';
+import { getRomeDatePart } from '../../utils/reservationTime';
 import type { SectionTone } from '../ds';
 
 // ---------------------------------------------------------------------------
@@ -74,6 +76,50 @@ export const compareTableNames = (a: string, b: string): number => {
   if (aNum && bNum && na !== nb) return na - nb;
   if (aNum !== bNum) return aNum ? -1 : 1;
   return a.localeCompare(b, 'it');
+};
+
+/* ── Chi è seduto a un tavolo ─────────────────────────────────────────────
+   Estratte da OrderPad quando Cassa ha avuto bisogno della stessa risposta
+   (docs/cassa-plan.md §8). È la parte che si sbaglia facilmente: un tavolo
+   unito non ha una prenotazione sua, ce l'ha il capofila dell'unione, e
+   cercarla solo sul tavolo esatto lascia metà sala senza nome.
+
+   Funzioni pure: la fetch resta di chi possiede la schermata. */
+
+/** Gruppo di unione per tavolo e turno: `${shift}:${tableId}` → tutti gli id
+ *  del gruppo (capofila compreso). */
+export const buildMergeGroups = (merges: TableMerge[]): Map<string, number[]> => {
+  const map = new Map<string, number[]>();
+  for (const m of merges) {
+    const group = [m.primary_id, ...m.merged_ids];
+    for (const id of group) map.set(`${m.shift}:${id}`, group);
+  }
+  return map;
+};
+
+/** La prenotazione viva su un tavolo, unioni comprese. `shiftFilter` 'ALL'
+ *  non filtra: è il turno «Tutti» della barra globale. */
+export const makeReservationForTable = (
+  reservations: Reservation[],
+  dateRome: string,
+  shiftFilter: 'ALL' | 'LUNCH' | 'DINNER',
+  mergeGroups: Map<string, number[]>,
+) => (id: number): Reservation | null => {
+  const isLive = (r: Reservation): boolean =>
+    getRomeDatePart(r.reservation_time) === dateRome
+    && (shiftFilter === 'ALL' || r.shift === shiftFilter)
+    && r.reservation_status !== ReservationStatus.CANCELLED
+    && r.arrival_status !== ArrivalStatus.DEPARTED;
+  const exact = reservations.find(r => r.table_id === id && isLive(r));
+  if (exact) return exact;
+  // Nessuna prenotazione sul tavolo esatto: si cerca sugli altri tavoli
+  // della sua unione (nel turno della prenotazione stessa).
+  return reservations.find(r =>
+    r.table_id != null
+    && r.table_id !== id
+    && isLive(r)
+    && (mergeGroups.get(`${r.shift}:${id}`)?.includes(r.table_id) ?? false)
+  ) ?? null;
 };
 
 export const buildRows = (

@@ -455,6 +455,94 @@ export interface CashClosureReport {
   bills: CashClosureBillRow[];
 }
 
+// ============================================
+// CASSA — la sessione del cassetto (docs/cassa-plan.md §3.1)
+// ============================================
+// Il cassetto di UN SERVIZIO, non di una giornata: lo stesso cassetto passa di
+// mano fra pranzo e cena. CashClosureReport qui sopra resta il report
+// giornaliero di Pagamenti, ed è un'altra cosa.
+
+export interface CashSession {
+  id: number;
+  service_date: string; // YYYY-MM-DD (giorno di servizio Europe/Rome)
+  shift: 'LUNCH' | 'DINNER';
+  opening_float_cents: number;
+  opened_by_user_id: number | null;
+  opened_by_name: string;
+  opened_at: string;
+  counted_cents: number | null;
+  /** Contato − atteso al momento della chiusura. Negativa = ammanco.
+   *  Memorizzata: è la fotografia di quando si è contato il cassetto, e uno
+   *  storno successivo non deve riscriverla. */
+  difference_cents: number | null;
+  note: string | null;
+  closed_by_user_id: number | null;
+  closed_by_name: string | null;
+  closed_at: string | null;
+}
+
+/** Un movimento del libro dei movimenti del servizio (GET /cash/transactions).
+ *  `source` dice da dove viene: 'bill' è il libro cassa, 'deposit' è una
+ *  caparra portata a credito — che si mostra ma NON entra negli incassi. */
+export interface CashMovement {
+  id: string;
+  source: 'bill' | 'deposit';
+  at: string;
+  /** BillPaymentMethod, più 'CAPARRA' per le caparre. */
+  method: string;
+  amount_cents: number;
+  voided: boolean;
+  void_reason: string | null;
+  voided_by_name: string | null;
+  recorded_by_name: string | null;
+  online: boolean;
+  bill_id: number;
+  bill_status: string;
+  table_name: string | null;
+  customer_name: string | null;
+  fiscal_status: FiscalDocumentStatus | null;
+  fiscal_doc_type: 'RECEIPT' | 'PROFORMA' | 'INVOICE' | null;
+  meta: Record<string, unknown> | null;
+}
+
+export interface CashTransactionsView {
+  service: { service_date: string; shift: 'LUNCH' | 'DINNER' };
+  movements: CashMovement[];
+  totals: {
+    movements: number;
+    collected_cents: number;
+    voided_cents: number;
+    omaggio_cents: number;
+    sospeso_cents: number;
+    deposits_cents: number;
+  };
+}
+
+/** Risposta di GET /cash/session. I totali ci sono anche a sessione mai
+ *  aperta (`session: null`): i numeri del turno esistono comunque. */
+export interface CashSessionView {
+  service: { service_date: string; shift: 'LUNCH' | 'DINNER' };
+  session: CashSession | null;
+  /** Incassi vivi del servizio per metodo, omaggio e sospeso esclusi. */
+  methods: { method: BillPaymentMethod; amount_cents: number; movements: number }[];
+  movements: number;
+  collected_cents: number;
+  cash_cents: number;
+  /** Fondo + contanti del servizio. Sempre ricalcolato, mai memorizzato. */
+  expected_cents: number;
+  /** Quello che il conto ha mosso senza portare denaro nel cassetto. */
+  out_of_totals: {
+    deposits_cents: number;
+    deposits_count: number;
+    omaggio_cents: number;
+    sospeso_cents: number;
+    voided_cents: number;
+    voided_count: number;
+  };
+  /** Conti del servizio ancora da incassare: la cassa si chiude comunque. */
+  open_bills: { count: number; residual_cents: number };
+}
+
 export interface TableBillSplit {
   id: number;
   table_bill_id: number;
@@ -662,6 +750,7 @@ export enum ViewState {
   FLOOR_PLAN = 'FLOOR_PLAN',
   MENU = 'MENU',
   COMANDE = 'COMANDE',
+  CASSA = 'CASSA',
   CUCINA = 'CUCINA',
   PASSE = 'PASSE',
   RESERVATIONS = 'RESERVATIONS',
@@ -741,7 +830,11 @@ export enum UserRole {
   MANAGER = 'MANAGER',
   RECEPTION = 'RECEPTION',
   WAITER = 'WAITER',
-  KITCHEN = 'KITCHEN'
+  KITCHEN = 'KITCHEN',
+  // Cassiere (docs/cassa-plan.md). Sta accanto a WAITER, non sopra: batte
+  // comande e incassa, ma la chiusura del cassetto e l'ammanco restano ai
+  // ruoli di direzione — sono le due cose che il titolare vuole separare.
+  CASSA = 'CASSA'
 }
 
 export interface User {

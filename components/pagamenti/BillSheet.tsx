@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { Check, Copy, FileText, Loader2, Printer, QrCode, X, Banknote } from 'lucide-react';
@@ -7,6 +7,7 @@ import { getCustomers } from '../../services/apiService';
 import type { Customer } from '../../types';
 import { FormCard, PaneHeader, Sheet, StatusPill } from '../ds';
 import { formatEuro } from './paymentsView';
+import { METHODS, methodLabel, eurToCents, settleMath, settlePayments, nextAmountText } from './settleView';
 import { getRomeTimePart } from '../../utils/reservationTime';
 
 /** Chiusura conto: i movimenti di incasso (metodo + importo) e la mancia.
@@ -21,24 +22,6 @@ export type SettleOpts = {
   documento?: 'Scontrino' | 'Proforma';
 };
 
-/** Metodi registrabili in cassa, nell'ordine in cui si usano davvero. */
-const METHODS: { value: BillPaymentInput['method']; label: string }[] = [
-  { value: 'CONTANTI', label: 'Contanti' },
-  { value: 'POS_FISICO', label: 'POS' },
-  { value: 'SATISPAY', label: 'Satispay' },
-  { value: 'BUONO_PASTO', label: 'Buoni pasto' },
-  { value: 'GIFT_CARD', label: 'Gift card' },
-  { value: 'SOSPESO', label: 'Sospeso' },
-  { value: 'OMAGGIO', label: 'Omaggio' },
-];
-const methodLabel = (m: string) =>
-  m === 'LINK_ONLINE' ? 'Online' : METHODS.find(x => x.value === m)?.label ?? m;
-
-// Parsing tollerante dell'importo digitato: "12,50" / "12.50" / "12" → cents.
-const eurToCents = (s: string): number => {
-  const n = parseFloat(String(s).replace(/[^\d.,]/g, '').replace(',', '.'));
-  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : 0;
-};
 
 /* ── Il conto di un tavolo ────────────────────────────────────────────────
    The QR is the point of this panel: the guest frames it and pays their share.
@@ -90,7 +73,10 @@ export const SettleDialog: React.FC<{
   bill: BillLike;
   busy?: boolean;
   onCancel: () => void;
-  onConfirm: (opts: SettleOpts) => void;
+  /** meta.invoiceIntent: l'operatore ha scelto «Fattura» — il conto chiude
+   *  con proforma (i due documenti non coesistono) e il chiamante apre
+   *  SUBITO l'emissione, invece di lasciare l'utente a metà strada. */
+  onConfirm: (opts: SettleOpts, meta?: { invoiceIntent?: boolean }) => void;
 }> = ({ bill, busy, onCancel, onConfirm }) => {
   const residual = bill.residual_cents ?? bill.total_cents;
   const alreadyPaid = Math.max(0, bill.total_cents - residual);
@@ -99,50 +85,48 @@ export const SettleDialog: React.FC<{
   // Conto del gestionale: la chiusura in cassa può emettere lo scontrino
   // oppure la proforma (la routine della cassa, nessun documento fiscale).
   const isPP = /^pp:comanda:/.test(String(bill.external_ref ?? ''));
-  const [ppDoc, setPpDoc] = useState<'Scontrino' | 'Proforma'>('Scontrino');
+  const [ppDoc, setPpDoc] = useState<'Scontrino' | 'Proforma' | 'Fattura'>('Scontrino');
   // Conti nativi: la scelta c'è SEMPRE. Con un provider fiscale attivo
   // "Scontrino" emette davvero; senza, resta la dichiarazione d'intento —
   // ma "Proforma" marca comunque il conto come chiuso senza documento DI
   // PROPOSITO, che in lista è tutt'altra cosa di "senza scontrino".
   const showDocChoice = true;
-  const recorded = movements.reduce((n, m) => n + m.amount_cents, 0);
-  const remaining = Math.max(0, residual - recorded);
   const [amount, setAmount] = useState(residual > 0 ? (residual / 100).toFixed(2) : '0');
   const [tip, setTip] = useState('');
-  const amountCents = eurToCents(amount);
   const tipCents = eurToCents(tip);
-  // Contanti sopra il dovuto = resto da rendere: a libro va solo il dovuto.
-  const applied = Math.min(amountCents, remaining);
-  const change = method === 'CONTANTI' ? Math.max(0, amountCents - remaining) : 0;
-  const shortfall = Math.max(0, remaining - applied);
-  const willSettle = shortfall === 0;
+  const { remaining, applied, change, shortfall, willSettle } = settleMath(residual, movements, method, amount);
 
   const addMovement = () => {
     if (applied <= 0) return;
     setMovements(prev => [...prev, { method, amount_cents: applied }]);
-    const next = Math.max(0, remaining - applied);
-    setAmount(next > 0 ? (next / 100).toFixed(2) : '0');
+    setAmount(nextAmountText(Math.max(0, remaining - applied)));
   };
 
   const confirm = () => {
-    // L'importo ancora nel campo è un movimento non ancora aggiunto: vale.
-    const pending = applied > 0 ? [{ method, amount_cents: applied }] : [];
     onConfirm({
-      payments: [...movements, ...pending],
+      // L'importo ancora nel campo è un movimento non ancora aggiunto: vale.
+      payments: settlePayments(movements, method, applied),
       tip_cents: tipCents,
-      ...(isPP ? { passepartout_documento: ppDoc } : { documento: ppDoc }),
-    });
+      // «Fattura» chiude comunque con proforma: il documento si emette poi
+      // dal conto, dove ci sono i dati del cessionario (come nel pannello
+      // cassa). Sui conti Passepartout la scelta resta Scontrino/Proforma.
+      ...(isPP
+        ? { passepartout_documento: ppDoc === 'Fattura' ? 'Proforma' : ppDoc }
+        : { documento: ppDoc === 'Scontrino' ? 'Scontrino' : 'Proforma' }),
+    }, { invoiceIntent: !isPP && ppDoc === 'Fattura' });
   };
 
   const field =
-    'h-11 w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-right text-[15px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
+    'h-12 w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-right text-[17px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
 
   return createPortal(
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-[var(--ds-backdrop)] p-4" onClick={busy ? undefined : onCancel}>
-      <div className="w-full max-w-sm overflow-hidden rounded-2xl bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]" onClick={e => e.stopPropagation()}>
+      {/* max-w-lg e corpi pieni: questo dialogo si usa al banco col cliente
+          davanti — a max-w-sm i numeri si leggevano da vicino e basta. */}
+      <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]" onClick={e => e.stopPropagation()}>
         <div className="border-b border-[var(--ds-border)] p-5">
-          <h3 className="text-[16px] font-semibold text-[var(--ds-text-primary)]">Chiudi conto in cassa</h3>
-          <p className="mt-1 text-[13px] text-[var(--ds-text-muted)]">Tavolo {bill.table_name ?? '—'} · totale {euro(bill.total_cents)}</p>
+          <h3 className="text-[18px] font-semibold text-[var(--ds-text-primary)]">Chiudi conto in cassa</h3>
+          <p className="mt-1 text-[14px] text-[var(--ds-text-muted)]">Tavolo {bill.table_name ?? '—'} · totale {euro(bill.total_cents)}</p>
         </div>
         <div className="space-y-3 p-5">
           <dl className="space-y-1.5 text-[14px]">
@@ -151,8 +135,9 @@ export const SettleDialog: React.FC<{
                 <dt>Già pagato</dt><dd className="tabular-nums">{euro(alreadyPaid)}</dd>
               </div>
             )}
-            <div className="flex justify-between font-medium text-[var(--ds-text-primary)]">
-              <dt>Residuo da incassare</dt><dd className="tabular-nums">{euro(remaining)}</dd>
+            <div className="flex items-baseline justify-between font-medium text-[var(--ds-text-primary)]">
+              <dt className="text-[15px]">Residuo da incassare</dt>
+              <dd className="text-[28px] font-semibold tabular-nums tracking-[-0.02em]">{euro(remaining)}</dd>
             </div>
           </dl>
 
@@ -187,7 +172,7 @@ export const SettleDialog: React.FC<{
                     type="button"
                     onClick={() => setMethod(m.value)}
                     disabled={busy}
-                    className={`rounded-full px-3 py-1.5 text-[13px] font-medium transition-colors disabled:opacity-40 ${
+                    className={`inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium transition-colors disabled:opacity-40 ${
                       method === m.value
                         ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                         : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
@@ -210,13 +195,13 @@ export const SettleDialog: React.FC<{
                   type="button"
                   onClick={addMovement}
                   disabled={busy || applied <= 0 || applied >= remaining}
-                  className="h-11 rounded-xl bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40"
+                  className="h-12 rounded-xl bg-[var(--ds-surface-row)] px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)] disabled:opacity-40"
                 >
                   Aggiungi
                 </button>
               </div>
               {change > 0 && (
-                <p className="text-[13px] text-[var(--ds-text-secondary)]">Resto {euro(change)}</p>
+                <p className="text-[16px] font-semibold text-[var(--ds-text-primary)]">Resto <span className="tabular-nums">{euro(change)}</span></p>
               )}
             </>
           )}
@@ -225,13 +210,13 @@ export const SettleDialog: React.FC<{
             <div>
               <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{isPP ? 'Documento in cassa' : 'Documento fiscale'}</span>
               <div className="flex gap-1.5">
-                {(['Scontrino', 'Proforma'] as const).map(d => (
+                {((isPP ? ['Scontrino', 'Proforma'] : ['Scontrino', 'Proforma', 'Fattura']) as ('Scontrino' | 'Proforma' | 'Fattura')[]).map(d => (
                   <button
                     key={d}
                     type="button"
                     onClick={() => setPpDoc(d)}
                     disabled={busy}
-                    className={`rounded-full px-3 py-1.5 text-[13px] font-medium transition-colors disabled:opacity-40 ${
+                    className={`inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium transition-colors disabled:opacity-40 ${
                       ppDoc === d
                         ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                         : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
@@ -248,6 +233,12 @@ export const SettleDialog: React.FC<{
                     : 'Nessun documento adesso: scontrino o fattura si emettono dopo, dal conto.'}
                 </p>
               )}
+              {ppDoc === 'Fattura' && (
+                <p className="mt-1.5 text-[13px] text-[var(--ds-text-muted)]">
+                  Il conto si chiude con proforma e la fattura si emette dal conto, dove
+                  ci sono i dati del cessionario. Scontrino e fattura non coesistono.
+                </p>
+              )}
             </div>
           )}
 
@@ -259,19 +250,19 @@ export const SettleDialog: React.FC<{
             </div>
           </label>
 
-          <p className={`text-[13px] ${willSettle ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-critical-text)]'}`}>
+          <p className={`text-[14px] ${willSettle ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-critical-text)]'}`}>
             {willSettle
               ? `Il conto risulterà saldato${tipCents > 0 ? ` · mancia ${euro(tipCents)}` : ''}.`
               : `Ammanco ${euro(shortfall)}: il conto resterà parziale.`}
           </p>
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-4 py-3">
-          <button type="button" onClick={onCancel} disabled={busy} className="rounded-full px-4 py-2 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-hover)] disabled:opacity-40">Annulla</button>
+          <button type="button" onClick={onCancel} disabled={busy} className="inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-hover)] disabled:opacity-40">Annulla</button>
           <button
             type="button"
             onClick={confirm}
             disabled={busy}
-            className="inline-flex items-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-5 py-2 text-[14px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+            className="inline-flex h-11 items-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-6 text-[15px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" />}
             Chiudi conto
@@ -287,7 +278,7 @@ export const SettleDialog: React.FC<{
 const SettleButton: React.FC<{
   bill: BillLike;
   busy?: boolean;
-  onSettle: (opts?: SettleOpts) => void;
+  onSettle: (opts?: SettleOpts, meta?: { invoiceIntent?: boolean }) => void;
 }> = ({ bill, busy, onSettle }) => {
   const [open, setOpen] = useState(false);
   return (
@@ -306,7 +297,7 @@ const SettleButton: React.FC<{
           bill={bill}
           busy={busy}
           onCancel={() => setOpen(false)}
-          onConfirm={(opts) => { onSettle(opts); setOpen(false); }}
+          onConfirm={(opts, meta) => { onSettle(opts, meta); setOpen(false); }}
         />
       )}
     </>
@@ -479,16 +470,21 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
    (i dati di fatturazione stanno sul cliente) e ogni campo resta
    correggibile al volo: quello che si digita qui vince, ma NON riscrive
    l'anagrafica — il tavolo aspetta, la rubrica si sistema dopo. */
-const InvoiceDialog: React.FC<{
+export const InvoiceDialog: React.FC<{
   bill: BillLike;
   onCancel: () => void;
   onDone: () => void;
-}> = ({ bill, onCancel, onDone }) => {
+  /** Cliente della visita: precompila la ricerca e, se la rubrica risponde
+   *  un solo nome, lo seleziona da sé coi suoi dati di fatturazione. */
+  initialQuery?: string;
+}> = ({ bill, onCancel, onDone, initialQuery }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialQuery ?? '');
   const [results, setResults] = useState<Customer[]>([]);
   const [customerId, setCustomerId] = useState<number | null>(null);
+  // Auto-selezione solo sul prefill iniziale, mai mentre l'utente digita.
+  const autoPickRef = useRef(Boolean(initialQuery));
   const [buyer, setBuyer] = useState({
     name: '', vat_number: '', tax_code: '', sdi_code: '', pec: '',
     street: '', zip: '', city: '', province: '',
@@ -500,7 +496,14 @@ const InvoiceDialog: React.FC<{
     if (!query.trim() || customerId != null) { setResults([]); return; }
     const t = setTimeout(() => {
       getCustomers(query.trim())
-        .then(rows => setResults(rows.slice(0, 5)))
+        .then(rows => {
+          const top = rows.slice(0, 5);
+          if (autoPickRef.current) {
+            autoPickRef.current = false;
+            if (top.length === 1) { pick(top[0]); return; }
+          }
+          setResults(top);
+        })
         .catch(() => setResults([]));
     }, 300);
     return () => clearTimeout(t);
@@ -631,12 +634,12 @@ const InvoiceDialog: React.FC<{
           {error && <p className="text-[13px] text-[var(--ds-critical-text)]">{error}</p>}
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-4 py-3">
-          <button type="button" onClick={onCancel} disabled={busy} className="rounded-full px-4 py-2 text-[14px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-hover)] disabled:opacity-40">Annulla</button>
+          <button type="button" onClick={onCancel} disabled={busy} className="inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-hover)] disabled:opacity-40">Annulla</button>
           <button
             type="button"
             onClick={submit}
             disabled={busy || !buyer.name.trim()}
-            className="inline-flex items-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-5 py-2 text-[14px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+            className="inline-flex h-11 items-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-6 text-[15px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" />}
             Invia a SDI
@@ -823,7 +826,7 @@ export const BillDetail: React.FC<{
   bill: BillLike;
   busy?: boolean;
   onClose: () => void;
-  onSettle?: (opts?: SettleOpts) => void;
+  onSettle?: (opts?: SettleOpts, meta?: { invoiceIntent?: boolean }) => void;
   /** Ricarica la lista dopo emissione/annullo dello scontrino. */
   onFiscalChanged?: () => void;
 }> = ({ bill, busy, onClose, onSettle, onFiscalChanged }) => (
@@ -852,7 +855,7 @@ export const BillSheet: React.FC<{
   bill: BillLike;
   busy?: boolean;
   onClose: () => void;
-  onSettle?: (opts?: SettleOpts) => void;
+  onSettle?: (opts?: SettleOpts, meta?: { invoiceIntent?: boolean }) => void;
   /** Azione aggiuntiva in coda al footer (es. "nuova comanda" dal palmare). */
   footerExtra?: React.ReactNode;
 }> = ({ bill, busy, onClose, onSettle, footerExtra }) => (

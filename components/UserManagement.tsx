@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { UserPlus, Edit2, Trash2, Check, AlertCircle, Loader2, User as UserIcon, Shield, ChefHat, Utensils, Headset } from 'lucide-react';
+import { UserPlus, Edit2, Trash2, Check, AlertCircle, Loader2, User as UserIcon, Shield, ChefHat, Utensils, Headset, Calculator } from 'lucide-react';
 import { User, UserRole } from '../types';
 import { authApiService } from '../services/authApiService';
 import { useAuth } from '../contexts/AuthContext';
@@ -29,6 +29,7 @@ const ROLE_NAMES: Record<UserRole, string> = {
   [UserRole.RECEPTION]: 'Reception',
   [UserRole.WAITER]: 'Cameriere',
   [UserRole.KITCHEN]: 'Cucina',
+  [UserRole.CASSA]: 'Cassa',
 };
 
 const ROLE_ICONS: Record<UserRole, React.ComponentType<{ className?: string }>> = {
@@ -39,6 +40,7 @@ const ROLE_ICONS: Record<UserRole, React.ComponentType<{ className?: string }>> 
   [UserRole.RECEPTION]: Headset,
   [UserRole.WAITER]: Utensils,
   [UserRole.KITCHEN]: ChefHat,
+  [UserRole.CASSA]: Calculator,
 };
 
 /* Il ruolo si legge dall'etichetta, non da una tinta per ruolo. Le famiglie di

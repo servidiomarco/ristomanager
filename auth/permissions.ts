@@ -40,6 +40,15 @@ export type Permission =
   | 'orders:kds'
   | 'orders:expedite'
   | 'orders:void'
+  // Cassa (docs/cassa-plan.md). Quattro permessi invece di allargare
+  // payments:full: incassare, stornare un incasso, chiudere in ammanco e
+  // chiudere il cassetto sono autorizzazioni diverse, ed è esattamente la
+  // separazione che il titolare vuole poter fare fra chi sta in cassa e chi
+  // risponde della giornata.
+  | 'cash:operate'
+  | 'cash:void_payment'
+  | 'cash:close_partial'
+  | 'cash:close_session'
   // Chat interna dello staff (docs/chat-staff-plan.md). Un solo permesso:
   // chi ce l'ha legge e scrive nei canali del suo ruolo e nei DM — cosa
   // vede lo decide la membership per ruolo in services/staffChat.ts.
@@ -86,6 +95,10 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'orders:kds',
     'orders:expedite',
     'orders:void',
+    'cash:operate',
+    'cash:void_payment',
+    'cash:close_partial',
+    'cash:close_session',
     'staffchat:use'
   ],
   [UserRole.OWNER]: [
@@ -123,6 +136,10 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'orders:kds',
     'orders:expedite',
     'orders:void',
+    'cash:operate',
+    'cash:void_payment',
+    'cash:close_partial',
+    'cash:close_session',
     'staffchat:use'
   ],
   [UserRole.GENERAL_MANAGER]: [
@@ -155,6 +172,10 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'orders:kds',
     'orders:expedite',
     'orders:void',
+    'cash:operate',
+    'cash:void_payment',
+    'cash:close_partial',
+    'cash:close_session',
     'staffchat:use'
   ],
   [UserRole.MANAGER]: [
@@ -182,6 +203,10 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'orders:take',
     'orders:expedite',
     'orders:void',
+    'cash:operate',
+    'cash:void_payment',
+    'cash:close_partial',
+    'cash:close_session',
     'staffchat:use'
   ],
   [UserRole.RECEPTION]: [
@@ -220,6 +245,27 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'orders:kds',
     'orders:expedite',
     'staffchat:use'
+  ],
+  // Il cassiere. `orders:void` c'è perché senza non si storna una riga né si
+  // applica lo sconto conto — le due correzioni che in cassa si fanno di
+  // continuo. Non ci sono `cash:close_partial` né `cash:close_session`:
+  // chiudere in ammanco e contare il cassetto rispondono al titolare.
+  // `payments:view` gli dà lo storico del conto senza aprirgli Pagamenti,
+  // che resta il registro sul periodo.
+  [UserRole.CASSA]: [
+    'dashboard:view',
+    'floorplan:view',
+    'reservations:view',
+    'customers:view',
+    'customers:full',
+    'reception:view',
+    'payments:view',
+    'orders:view',
+    'orders:take',
+    'orders:void',
+    'cash:operate',
+    'cash:void_payment',
+    'staffchat:use'
   ]
 };
 
@@ -229,6 +275,7 @@ const VIEW_PERMISSIONS: Record<ViewState, Permission[]> = {
   [ViewState.FLOOR_PLAN]: ['floorplan:view'],
   [ViewState.MENU]: ['menu:view'],
   [ViewState.COMANDE]: ['orders:take'],
+  [ViewState.CASSA]: ['cash:operate'],
   [ViewState.CUCINA]: ['orders:kds'],
   [ViewState.PASSE]: ['orders:expedite'],
   [ViewState.RESERVATIONS]: ['reservations:view'],
@@ -334,6 +381,7 @@ const ROLE_RANK: Record<UserRole, number> = {
   [UserRole.RECEPTION]: 1,
   [UserRole.WAITER]: 1,
   [UserRole.KITCHEN]: 1,
+  [UserRole.CASSA]: 1,
 };
 
 export const canAssignToRole = (actorRole: UserRole, targetRole: UserRole): boolean => {

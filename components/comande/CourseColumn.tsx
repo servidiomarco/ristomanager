@@ -6,6 +6,7 @@ import {
   COURSE_BADGE, MAX_COURSES, cartForCourse, cartSum, cartUnitCents, courseLabel,
   courseStatus, euro, isSent, itemsForCourse, rowCount, rowCountLabel,
   type CartLine,
+  isSystemLine,
 } from './orderView';
 
 // ---------------------------------------------------------------------------
@@ -28,13 +29,17 @@ interface CourseListProps {
   /** Una riga già in cucina non si cancella: si storna, con motivazione. */
   onVoid: (item: OrderItem) => void;
   onRecall: (courseNo: number) => void;
+  /** Lancia in cucina un'uscita proposta (QUEUED): il verbo del cameriere
+   *  nei ristoranti dove i tempi li batte la sala, non il passe. Assente =
+   *  il bottone non compare (il lancio resta del passe). */
+  onFire?: (courseNo: number) => void;
 }
 
 const stepper =
   'inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 export const CourseList: React.FC<CourseListProps> = ({
-  order, cart, course, onCourse, busy, onBump, onDrop, onVoid, onRecall,
+  order, cart, course, onCourse, busy, onBump, onDrop, onVoid, onRecall, onFire,
 }) => (
   <div className="flex flex-col gap-2">
     {Array.from({ length: MAX_COURSES }, (_, i) => i + 1).map(n => {
@@ -77,16 +82,35 @@ export const CourseList: React.FC<CourseListProps> = ({
               {courseLabel(n)}
             </button>
             {sent && <StatusPill tone={badge.tone}>{badge.text}</StatusPill>}
+            {!sent && serverRows.length > 0 && (
+              <StatusPill tone="pending">da inviare</StatusPill>
+            )}
             {status === 'QUEUED' && (
-              <button
-                type="button"
-                onClick={() => onRecall(n)}
-                disabled={busy}
-                title="Richiama: torna in bozza"
-                className="flex-shrink-0 text-[13px] font-medium text-[var(--ds-text-muted)] underline decoration-dotted transition-opacity hover:opacity-70 disabled:opacity-40"
-              >
-                richiama
-              </button>
+              <>
+                {onFire && (
+                  <button
+                    type="button"
+                    onClick={() => onFire(n)}
+                    disabled={busy}
+                    title="Lancia l'uscita in cucina adesso"
+                    className="flex-shrink-0 rounded-full bg-[var(--ds-action-bg)] px-3.5 py-1.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+                  >
+                    Chiama
+                  </button>
+                )}
+                {/* Mai più «richiama» accanto a «Chiama»: quasi la stessa
+                    parola, significato opposto — un tocco sbagliato ha
+                    riportato in bozza un'uscita che si credeva lanciata. */}
+                <button
+                  type="button"
+                  onClick={() => onRecall(n)}
+                  disabled={busy}
+                  title="Annulla la proposta: l'uscita torna in bozza, la cucina non la vede"
+                  className="flex-shrink-0 text-[13px] font-medium text-[var(--ds-text-muted)] underline decoration-dotted transition-opacity hover:opacity-70 disabled:opacity-40"
+                >
+                  torna in bozza
+                </button>
+              </>
             )}
           </div>
 
@@ -270,6 +294,14 @@ export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, .
   const { order, cart, course } = list;
   const courseLines = cartForCourse(cart, course);
   const rows = rowCount(order, cart);
+  // Le righe rimaste in bozza SUL SERVER (uscita tornata in bozza, invio
+  // interrotto) contano come «da inviare»: senza, il footer resta a zero e
+  // l'uscita è irrecuperabile dal palmare (successo al tavolo 40).
+  const isServerDraft = (i: OrderItem) => i.status === 'DRAFT' && !isSystemLine(i);
+  const serverCourseQty = order.items.reduce((s, i) => s + (isServerDraft(i) && i.course_no === course ? i.qty : 0), 0);
+  const serverCourseTotal = order.items.reduce((s, i) => s + (isServerDraft(i) && i.course_no === course ? i.qty * i.unit_price_cents : 0), 0);
+  const serverAllQty = order.items.reduce((s, i) => s + (isServerDraft(i) ? i.qty : 0), 0);
+  const serverAllTotal = order.items.reduce((s, i) => s + (isServerDraft(i) ? i.qty * i.unit_price_cents : 0), 0);
   return (
     <div className="flex min-h-0 flex-col overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
       <header className="flex flex-shrink-0 items-center gap-2 border-b border-[var(--ds-border)] px-4 py-3">
@@ -286,10 +318,10 @@ export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, .
       <div className="flex-shrink-0 border-t border-[var(--ds-border)] p-3">
         <SendFooter
           course={course}
-          courseCount={courseLines.reduce((s, l) => s + l.qty, 0)}
-          courseTotal={cartSum(courseLines)}
-          allCount={cart.reduce((s, l) => s + l.qty, 0)}
-          allTotal={cartSum(cart)}
+          courseCount={courseLines.reduce((s, l) => s + l.qty, 0) + serverCourseQty}
+          courseTotal={cartSum(courseLines) + serverCourseTotal}
+          allCount={cart.reduce((s, l) => s + l.qty, 0) + serverAllQty}
+          allTotal={cartSum(cart) + serverAllTotal}
           busy={list.busy}
           onSend={onSend}
           onSendAll={onSendAll}

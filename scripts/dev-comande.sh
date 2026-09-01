@@ -83,29 +83,31 @@ PASSWORD_HASH=$(node -e "process.stdout.write(require('bcryptjs').hashSync(proce
 psql "$DATABASE_URL" -q -v ON_ERROR_STOP=1 \
      -v email="'$LOGIN_EMAIL'" -v hash="'$PASSWORD_HASH'" <<'SQL'
 -- Utente di collaudo (OWNER: vede tutto)
-INSERT INTO users (email, password_hash, full_name, role, is_active)
-VALUES (:email, :hash, 'Collaudo Comande', 'OWNER', true)
+-- tenant_id esplicito ovunque: dal drop del DEFAULT 1 (#202) gli INSERT
+-- senza tenant muoiono di NOT NULL, e questo seed era rimasto indietro.
+INSERT INTO users (tenant_id, email, password_hash, full_name, role, is_active)
+VALUES (1, :email, :hash, 'Collaudo Comande', 'OWNER', true)
 ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, is_active = true;
 
 -- Sala e tavoli
-INSERT INTO rooms (id, name, width, height) VALUES (1, 'Sala', 900, 700)
+INSERT INTO rooms (tenant_id, id, name, width, height) VALUES (1, 1, 'Sala', 900, 700)
 ON CONFLICT (id) DO NOTHING;
-INSERT INTO tables (id, name, shape, seats, x, y, room_id, status) VALUES
-    (11, '11', 'SQUARE',    2,  60,  60, 1, 'FREE'),
-    (12, '12', 'RECTANGLE', 4, 220,  60, 1, 'FREE'),
-    (13, '13', 'CIRCLE',    6, 380,  60, 1, 'FREE')
+INSERT INTO tables (tenant_id, id, name, shape, seats, x, y, room_id, status) VALUES
+    (1, 11, '11', 'SQUARE',    2,  60,  60, 1, 'FREE'),
+    (1, 12, '12', 'RECTANGLE', 4, 220,  60, 1, 'FREE'),
+    (1, 13, '13', 'CIRCLE',    6, 380,  60, 1, 'FREE')
 ON CONFLICT (id) DO NOTHING;
 SELECT setval('tables_id_seq', GREATEST((SELECT MAX(id) FROM tables), 1));
 SELECT setval('rooms_id_seq',  GREATEST((SELECT MAX(id) FROM rooms), 1));
 
 -- Piatti in tre categorie
-INSERT INTO dishes (name, price, category) VALUES
-    ('Tagliere di salumi', 14.00, 'Antipasti'),
-    ('Bruschette',          8.00, 'Antipasti'),
-    ('Cacio e pepe',       12.50, 'Primi'),
-    ('Amatriciana',        13.00, 'Primi'),
-    ('Tagliata di manzo',  22.90, 'Secondi'),
-    ('Costata',            28.00, 'Secondi')
+INSERT INTO dishes (tenant_id, name, price, category) VALUES
+    (1, 'Tagliere di salumi', 14.00, 'Antipasti'),
+    (1, 'Bruschette',          8.00, 'Antipasti'),
+    (1, 'Cacio e pepe',       12.50, 'Primi'),
+    (1, 'Amatriciana',        13.00, 'Primi'),
+    (1, 'Tagliata di manzo',  22.90, 'Secondi'),
+    (1, 'Costata',            28.00, 'Secondi')
 ON CONFLICT DO NOTHING;
 
 -- Partite e tempi: senza prep_minutes lo scaglionamento non ha dati e
@@ -118,41 +120,41 @@ UPDATE dishes SET station_id = (SELECT id FROM stations WHERE name = 'Griglia'),
  WHERE category = 'Secondi' AND station_id IS NULL;
 
 -- Prezzi nel listino di default per i piatti che non ce l'hanno
-INSERT INTO dish_prices (dish_id, price_list_id, price_cents)
-SELECT d.id, (SELECT id FROM menu_price_lists WHERE is_default), ROUND(d.price * 100)::int
+INSERT INTO dish_prices (tenant_id, dish_id, price_list_id, price_cents)
+SELECT 1, d.id, (SELECT id FROM menu_price_lists WHERE is_default), ROUND(d.price * 100)::int
 FROM dishes d
 ON CONFLICT (dish_id, price_list_id) DO NOTHING;
 
 -- Varianti sulla carne: un gruppo obbligatorio (cottura) e uno libero
-INSERT INTO modifier_groups (name, min_select, max_select, sort_order)
-SELECT 'Cottura', 1, 1, 1
+INSERT INTO modifier_groups (tenant_id, name, min_select, max_select, sort_order)
+SELECT 1, 'Cottura', 1, 1, 1
 WHERE NOT EXISTS (SELECT 1 FROM modifier_groups WHERE name = 'Cottura');
-INSERT INTO modifier_groups (name, min_select, max_select, sort_order)
-SELECT 'Aggiunte', 0, 3, 2
+INSERT INTO modifier_groups (tenant_id, name, min_select, max_select, sort_order)
+SELECT 1, 'Aggiunte', 0, 3, 2
 WHERE NOT EXISTS (SELECT 1 FROM modifier_groups WHERE name = 'Aggiunte');
 
-INSERT INTO modifiers (group_id, name, price_delta_cents, sort_order)
-SELECT g.id, v.name, v.delta, v.ord
+INSERT INTO modifiers (tenant_id, group_id, name, price_delta_cents, sort_order)
+SELECT 1, g.id, v.name, v.delta, v.ord
 FROM modifier_groups g
 JOIN (VALUES ('Al sangue', 0, 1), ('Media', 0, 2), ('Ben cotta', 0, 3)) AS v(name, delta, ord) ON TRUE
 WHERE g.name = 'Cottura'
   AND NOT EXISTS (SELECT 1 FROM modifiers m WHERE m.group_id = g.id AND m.name = v.name);
 
-INSERT INTO modifiers (group_id, name, price_delta_cents, sort_order)
-SELECT g.id, v.name, v.delta, v.ord
+INSERT INTO modifiers (tenant_id, group_id, name, price_delta_cents, sort_order)
+SELECT 1, g.id, v.name, v.delta, v.ord
 FROM modifier_groups g
 JOIN (VALUES ('Con burrata', 250, 1), ('Senza sale', 0, 2)) AS v(name, delta, ord) ON TRUE
 WHERE g.name = 'Aggiunte'
   AND NOT EXISTS (SELECT 1 FROM modifiers m WHERE m.group_id = g.id AND m.name = v.name);
 
-INSERT INTO dish_modifier_groups (dish_id, group_id)
-SELECT d.id, g.id FROM dishes d, modifier_groups g
+INSERT INTO dish_modifier_groups (tenant_id, dish_id, group_id)
+SELECT 1, d.id, g.id FROM dishes d, modifier_groups g
 WHERE d.category = 'Secondi' AND g.name IN ('Cottura', 'Aggiunte')
 ON CONFLICT DO NOTHING;
 
 -- Una prenotazione su un tavolo, per vedere nome e allergeni in testata
-INSERT INTO reservations (customer_name, reservation_time, shift, guests, table_id, payment_status, reservation_status, arrival_status)
-SELECT 'Famiglia Rossi', CURRENT_DATE + TIME '20:30', 'DINNER', 4, 12, 'PENDING', 'CONFIRMED', 'ARRIVED'
+INSERT INTO reservations (tenant_id, customer_name, reservation_time, shift, guests, table_id, payment_status, reservation_status, arrival_status)
+SELECT 1, 'Famiglia Rossi', CURRENT_DATE + TIME '20:30', 'DINNER', 4, 12, 'PENDING', 'CONFIRMED', 'ARRIVED'
 WHERE NOT EXISTS (SELECT 1 FROM reservations WHERE customer_name = 'Famiglia Rossi' AND table_id = 12);
 
 -- Modulo acceso, prima uscita che parte da sola

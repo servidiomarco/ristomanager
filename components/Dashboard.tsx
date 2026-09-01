@@ -1067,6 +1067,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           RECEPTION: 'Reception',
           WAITER: 'Cameriere',
           KITCHEN: 'Cucina',
+          CASSA: 'Cassa',
         };
         const emailPrefix = user?.email?.split('@')[0];
         const capitalizedEmail = emailPrefix

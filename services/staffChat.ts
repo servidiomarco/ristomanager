@@ -13,8 +13,11 @@ export type StaffChannel = (typeof STAFF_CHANNELS)[number];
 const MANAGEMENT: UserRole[] = [UserRole.OWNER, UserRole.GENERAL_MANAGER, UserRole.MANAGER];
 
 const CHANNEL_ROLES: Record<StaffChannel, UserRole[]> = {
-    generale: [...MANAGEMENT, UserRole.RECEPTION, UserRole.WAITER, UserRole.KITCHEN],
-    sala: [...MANAGEMENT, UserRole.WAITER],
+    generale: [...MANAGEMENT, UserRole.RECEPTION, UserRole.WAITER, UserRole.KITCHEN, UserRole.CASSA],
+    // La cassa sta in sala: «tavolo 12 chiede il conto» è esattamente il
+    // messaggio che deve raggiungerla. Senza questa riga un utente CASSA
+    // avrebbe staffchat:use e nessun canale, cioè una chat vuota.
+    sala: [...MANAGEMENT, UserRole.WAITER, UserRole.CASSA],
     cucina: [...MANAGEMENT, UserRole.KITCHEN],
     reception: [...MANAGEMENT, UserRole.RECEPTION],
 };

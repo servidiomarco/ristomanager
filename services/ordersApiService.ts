@@ -188,6 +188,22 @@ export const getMenuCatalogue = async (): Promise<MenuCatalogue> =>
 
 // --- Monitor di partita ------------------------------------------------------
 
+/** Tavoli con una comanda aperta nel servizio, in una chiamata sola.
+ *  `shift` assente = entrambi i turni del giorno, come /bills/open. */
+export const getOpenOrderTables = async (
+  service?: { date?: string; shift?: 'LUNCH' | 'DINNER' },
+): Promise<{
+  service: { service_date: string; shift: 'LUNCH' | 'DINNER' };
+  table_ids: number[];
+  orders: { id: number; table_id: number }[];
+}> => {
+  const params = new URLSearchParams();
+  if (service?.date) params.set('date', service.date);
+  if (service?.shift) params.set('shift', service.shift);
+  const qs = params.toString();
+  return apiRequest(`${API_URL}/orders/open${qs ? `?${qs}` : ''}`, { headers: getHeaders() });
+};
+
 export interface KdsItem {
   id: number;
   order_id: number;
@@ -376,7 +392,7 @@ export const closeOrder = async (orderId: number, discardPending = false): Promi
 
 export const updateOrder = async (
   orderId: number,
-  payload: { covers?: number; notes?: string | null },
+  payload: { covers?: number; notes?: string | null; reservation_id?: number | null },
 ): Promise<OrderWithItems> =>
   apiRequest<OrderWithItems>(`${API_URL}/orders/${orderId}`, {
     method: 'PATCH',

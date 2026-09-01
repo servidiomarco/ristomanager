@@ -110,6 +110,16 @@ class BillsApiService {
     });
   }
 
+  /** Riapre un conto chiuso per errore: i movimenti restano, torna lo stato.
+   *  409 se il conto porta un documento fiscale confermato — quello va
+   *  annullato prima, o si incasserebbe due volte contro un solo scontrino. */
+  async reopenBill(billId: number): Promise<TableBill> {
+    return apiRequest<TableBill>(`${API_URL}/bills/${billId}/reopen`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+  }
+
   /** Registra un incasso a conto ancora aperto (contanti/POS a metà servizio). */
   async recordPayment(billId: number, payload: BillPaymentInput): Promise<TableBillWithSplits> {
     return apiRequest<TableBillWithSplits>(`${API_URL}/bills/${billId}/payments`, {
@@ -341,6 +351,11 @@ export const getOpenBills = async (
   const suffix = qs.toString() ? `?${qs.toString()}` : '';
   return apiRequest(`${API_URL}/bills/open${suffix}`, { headers: getHeaders() });
 };
+
+/** La comanda dietro un conto, con gli id delle righe: serve alla
+ *  correzione in cassa (storno di una portata contestata). */
+export const getBillOrder = async (billId: number): Promise<any> =>
+  apiRequest(`${API_URL}/bills/${billId}/order`, { headers: getHeaders() });
 
 /** Accoda la stampa del preconto sulla termica in sala. L'origin serve al
  *  server per comporre l'URL del QR: solo il client sa da che host è servita

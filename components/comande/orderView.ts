@@ -188,3 +188,57 @@ export const groupByCategory = (
     .sort((a, b) => (order.get(a[0]) ?? 999) - (order.get(b[0]) ?? 999))
     .map(([category, ls]) => ({ category, lines: ls }));
 };
+
+/* ── Bozza locale del carrello ────────────────────────────────────────────
+   Le righe non inviate vivono solo sul palmare (il modello è «una sola
+   trasmissione»): uscire dal tavolo le buttava via. La bozza le parcheggia
+   in localStorage per comanda e la riapertura le ripresenta; si svuota da
+   sola con l'invio (il carrello si riduce e la si riscrive) e si scarta
+   alla chiusura della comanda. Il piatto si risolve di nuovo dall'anagrafica
+   al ripristino: una riga di un piatto disattivato nel frattempo cade. */
+
+const CART_DRAFT_PREFIX = 'comande.bozza.';
+const CART_DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
+
+type CartDraftLine = Omit<CartLine, 'dish'> & { dish_id: number };
+
+export const saveCartDraft = (orderId: number, cart: CartLine[]): void => {
+  try {
+    const key = CART_DRAFT_PREFIX + orderId;
+    if (cart.length === 0) { localStorage.removeItem(key); return; }
+    const lines: CartDraftLine[] = cart.map(({ dish, ...rest }) => ({ ...rest, dish_id: dish.id }));
+    localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), lines }));
+  } catch { /* storage pieno o negato: la bozza è un di più */ }
+};
+
+export const restoreCartDraft = (orderId: number, dishes: Dish[]): CartLine[] => {
+  try {
+    // Pulizia contestuale: le bozze di comande di ieri non servono a nessuno.
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (!k?.startsWith(CART_DRAFT_PREFIX)) continue;
+      try {
+        const parsed = JSON.parse(localStorage.getItem(k) ?? '');
+        if (!parsed?.savedAt || Date.now() - parsed.savedAt > CART_DRAFT_TTL_MS) localStorage.removeItem(k);
+      } catch { localStorage.removeItem(k); }
+    }
+    const raw = localStorage.getItem(CART_DRAFT_PREFIX + orderId);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed?.lines)) return [];
+    const byId = new Map(dishes.map(d => [d.id, d]));
+    return parsed.lines.flatMap((l: CartDraftLine) => {
+      const dish = byId.get(l.dish_id);
+      if (!dish) return [];
+      const { dish_id, ...rest } = l;
+      return [{ ...rest, dish }];
+    });
+  } catch {
+    return [];
+  }
+};
+
+export const dropCartDraft = (orderId: number): void => {
+  try { localStorage.removeItem(CART_DRAFT_PREFIX + orderId); } catch { /* niente */ }
+};
+
