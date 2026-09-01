@@ -65,7 +65,11 @@ export const ChiusuraCassa: React.FC<{
   openCount?: number;
   openResidualCents?: number;
   onOpenCassa?: () => void;
-}> = ({ date, shift, openCount = 0, openResidualCents = 0, onOpenCassa }) => {
+  /** Un tocco sulla riga apre la scheda del conto chiuso nel pannello: è lì
+   *  che vive lo scontrino elettronico (emetti, riprova, annulla). */
+  selectedId?: number | null;
+  onSelectBill?: (id: number) => void;
+}> = ({ date, shift, openCount = 0, openResidualCents = 0, onOpenCassa, selectedId, onSelectBill }) => {
   const [report, setReport] = useState<CashClosureReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [docFilter, setDocFilter] = useState<DocFilter>('all');
@@ -235,30 +239,48 @@ export const ChiusuraCassa: React.FC<{
                     </p>
                   )}
                   <ul>
-                    {section.rows.map(b => (
-                      <li
-                        key={b.id}
-                        className="flex flex-col gap-1 py-2.5 [&+li]:border-t [&+li]:border-[var(--ds-border)]"
-                      >
-                        <div className="flex items-baseline justify-between gap-2">
-                          <span className="min-w-0 truncate text-[14px] font-medium text-[var(--ds-text-primary)]">
-                            Tav. {b.table_name ?? '—'}
-                            {b.customer_name && <span className="ml-1.5 font-normal text-[var(--ds-text-muted)]">{b.customer_name}</span>}
-                          </span>
-                          <span className={`flex-shrink-0 text-[14px] font-semibold tabular-nums ${b.status === 'SETTLED_PARTIAL' ? 'text-[var(--ds-pending-text)]' : 'text-[var(--ds-text-primary)]'}`}>
-                            {formatEuro(b.total_cents)}
-                          </span>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-[var(--ds-text-muted)] tabular-nums">
-                          {docPill(b)}
-                          {b.status === 'SETTLED_PARTIAL' && <StatusPill tone="pending">parziale</StatusPill>}
-                          {b.payments.map((p, i) => (
-                            <span key={i}>{(METHOD_LABELS[p.method] ?? p.method).toLowerCase()} {formatEuro(p.amount_cents)}</span>
-                          ))}
-                          {b.tip_cents > 0 && <span className="text-[var(--ds-seated-text)]">mancia {formatEuro(b.tip_cents)}</span>}
-                        </div>
-                      </li>
-                    ))}
+                    {section.rows.map(b => {
+                      const body = (
+                        <>
+                          <div className="flex items-baseline justify-between gap-2">
+                            <span className="min-w-0 truncate text-[14px] font-medium text-[var(--ds-text-primary)]">
+                              Tav. {b.table_name ?? '—'}
+                              {b.customer_name && <span className="ml-1.5 font-normal text-[var(--ds-text-muted)]">{b.customer_name}</span>}
+                            </span>
+                            <span className={`flex-shrink-0 text-[14px] font-semibold tabular-nums ${b.status === 'SETTLED_PARTIAL' ? 'text-[var(--ds-pending-text)]' : 'text-[var(--ds-text-primary)]'}`}>
+                              {formatEuro(b.total_cents)}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-[var(--ds-text-muted)] tabular-nums">
+                            {docPill(b)}
+                            {b.status === 'SETTLED_PARTIAL' && <StatusPill tone="pending">parziale</StatusPill>}
+                            {b.payments.map((p, i) => (
+                              <span key={i}>{(METHOD_LABELS[p.method] ?? p.method).toLowerCase()} {formatEuro(p.amount_cents)}</span>
+                            ))}
+                            {b.tip_cents > 0 && <span className="text-[var(--ds-seated-text)]">mancia {formatEuro(b.tip_cents)}</span>}
+                          </div>
+                        </>
+                      );
+                      return (
+                        <li key={b.id} className="[&+li]:border-t [&+li]:border-[var(--ds-border)]">
+                          {onSelectBill ? (
+                            <button
+                              type="button"
+                              onClick={() => onSelectBill(b.id)}
+                              className={`-mx-2 flex w-[calc(100%+16px)] flex-col gap-1 rounded-[12px] px-2 py-2.5 text-left transition-colors ${
+                                selectedId === b.id
+                                  ? 'bg-[var(--ds-surface-row)]'
+                                  : 'hover:bg-[var(--ds-surface-row)]'
+                              } focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]`}
+                            >
+                              {body}
+                            </button>
+                          ) : (
+                            <div className="flex flex-col gap-1 py-2.5">{body}</div>
+                          )}
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               ))}

@@ -286,6 +286,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 **Chiusura di cassa (tab "Chiusura" in Pagamenti)**
 - Report giornaliero per **metodo di pagamento** (Contanti, Online, Satispay, Buoni pasto, Gift card, Omaggio, Sospeso) e per **documento** (Scontrino, Fattura, Proforma, Senza documento), più mance, acconti maturati e ammanchi. Filtro per turno; storni esclusi dai totali. Consultabile per qualunque data passata col datepicker della barra in alto.
 - Se sul giorno restano conti con un residuo, il report li conta e li rimanda alla Cassa ("Apri la Cassa"); il KPI **Residuo conti** in testa alla pagina dice quanto manca all'appello.
+- Un tocco su un conto chiuso apre la sua **scheda** nel pannello, con lo **scontrino elettronico**: emetti su un conto senza documento, riprova un'emissione fallita, annulla, passa a fattura.
 
 ---
 
@@ -524,6 +525,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-01 | Pagamenti, conto al tavolo e cassa | Nel report di chiusura un tocco sul conto apre la sua scheda con lo scontrino elettronico (emetti/riprova/annulla) — l'azione era rimasta orfana col ritiro del tab "Conti aperti". |
 | 2026-09-01 | Pagamenti, conto al tavolo e cassa | Riordino Cassa/Pagamenti: ritirato il tab "Conti aperti" (si incassa solo dalla Cassa), il tab "Cassa" si chiama "Chiusura", e le due pagine si rimandano a vicenda (conti da incassare → Cassa; cassetto chiuso → chiusura del giorno). |
 | 2026-09-01 | Comande, Cucina e Passe | Le griglie tavoli di Comande e Cassa mostrano i tavoli uniti come una tessera sola («11+12», coperti sommati); il tocco apre il tavolo giusto dell'unione. |
 | 2026-09-01 | Comande, Cucina e Passe | Nuovo modulo Cassa (coda conti, sessione, incasso, correggi conto); in Comande: chiusura a un tocco (scontrino contanti/POS, preconto), bottone Chiama per le uscite, bozza locale delle righe non inviate, fattura con emissione immediata. |
