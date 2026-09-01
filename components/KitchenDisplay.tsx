@@ -470,7 +470,9 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-4 pb-4">
+      {/* pt-1: l'anello di stato delle card sporge 2px fuori dal riquadro, e
+          senza un filo di padding l'overflow nascosto ne mangiava il lato alto. */}
+      <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-4 pb-4 pt-1">
         {todo.length === 0 && upcoming.length === 0 ? (
           <EmptyState icon={Check}>Nessuna comanda in coda.</EmptyState>
         ) : (
