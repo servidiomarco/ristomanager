@@ -12,6 +12,7 @@ import {
 } from './ds';
 import { ChiusuraCassa } from './pagamenti/ChiusuraCassa';
 import { LinkDiPagamento, type StatusFilter } from './pagamenti/LinkDiPagamento';
+import { BillDetail } from './pagamenti/BillSheet';
 import { PaymentDetail } from './pagamenti/PaymentDetail';
 import { PeriodPicker, type Period } from './pagamenti/PeriodPicker';
 import { formatEuro } from './pagamenti/paymentsView';
@@ -104,6 +105,13 @@ const PagamentiPage: React.FC<{
   // I conti aperti non hanno più una lista qui, ma restano due numeri della
   // pagina: il KPI «Residuo conti» e il rimando alla Cassa dentro il report.
   const openBills = useOpenBills(serviceFilter, 'open');
+
+  // I chiusi invece una scheda ce l'hanno ancora: dalla riga del report si
+  // apre il conto nel pannello, ed è lì che vive lo scontrino elettronico
+  // (emetti su un conto senza documento, riprova un fallito, annulla). La
+  // riga del report da sola non basta — non porta righe né token QR.
+  const closedBills = useOpenBills(serviceFilter, 'closed');
+  const [selectedClosureBillId, setSelectedClosureBillId] = useState<number | null>(null);
 
   // The closure tab only exists with pay-at-table on. null = flag not known
   // yet, so the tab bar doesn't flash a section that is about to disappear.
@@ -239,9 +247,13 @@ const PagamentiPage: React.FC<{
     () => items.find(p => p.id === selectedPaymentId) ?? null,
     [items, selectedPaymentId],
   );
+  const selectedClosureBill = useMemo(
+    () => closedBills.bills.find(b => b.id === selectedClosureBillId) ?? null,
+    [closedBills.bills, selectedClosureBillId],
+  );
 
   const showingCassa = tab === 'CASSA' && billsAvailable;
-  const detailOpen = showingCassa ? false : selectedPayment !== null;
+  const detailOpen = showingCassa ? selectedClosureBill !== null : selectedPayment !== null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -327,6 +339,8 @@ const PagamentiPage: React.FC<{
                 openCount={collectable.length}
                 openResidualCents={serviceResidual}
                 onOpenCassa={onOpenCassa}
+                selectedId={selectedClosureBillId}
+                onSelectBill={setSelectedClosureBillId}
               />
             ) : (
               <>
@@ -353,7 +367,22 @@ const PagamentiPage: React.FC<{
           }
           detail={
             showingCassa ? (
-              <PanePlaceholder icon={Receipt}>I totali seguono il giorno scelto in alto</PanePlaceholder>
+              selectedClosureBill ? (
+                <BillDetail
+                  key={selectedClosureBill.id}
+                  bill={selectedClosureBill}
+                  busy={closedBills.closingId === selectedClosureBill.id}
+                  onClose={() => setSelectedClosureBillId(null)}
+                  // Un CLOSED/VOIDED non si richiude; il SETTLED_PARTIAL sì —
+                  // si completa con gli incassi mancanti.
+                  onSettle={selectedClosureBill.status === 'CLOSED' || selectedClosureBill.status === 'VOIDED'
+                    ? undefined
+                    : (opts) => closedBills.closeBill(selectedClosureBill, opts)}
+                  onFiscalChanged={closedBills.reload}
+                />
+              ) : (
+                <PanePlaceholder icon={Receipt}>Tocca un conto per lo scontrino elettronico</PanePlaceholder>
+              )
             ) : selectedPayment ? (
               <PaymentDetail
                 key={selectedPayment.id}
