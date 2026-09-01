@@ -296,6 +296,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 - **Scontrino digitale per l'ospite**: appena il documento è confermato, l'esito di chiusura (e la scheda del conto) mostra un **QR** — il cliente lo inquadra e ha lo scontrino sul telefono, su una pagina pubblica salvabile e stampabile, senza login. Accanto, **"Stampa copia"** manda la copia di cortesia (non fiscale, con lo stesso QR) alla stampante termica.
 - **Fattura elettronica SDI** dal conto: dati di fatturazione presi dalla scheda cliente (denominazione, P.IVA, CF, codice SDI, PEC), XML FatturaPA generato e trasmesso.
 - **Proforma** quando lo scontrino non è previsto; annullo del documento fiscale come atto separato (il conto non si tocca).
+- **Nota di credito (TD04)**: una fattura trasmessa a SDI non si annulla — si storna dalla scheda del conto con "Nota di credito" (doppio tap di conferma). Storno totale: stesso importo e stesso cessionario, numero dalla stessa numerazione annuale, riferimento alla fattura stornata. A storno fatto la fattura risulta annullata, la nota resta a registro per sempre, e il conto torna libero di emettere scontrino o fattura corretta.
 - Configurazione: dati esercente, provider, **mappa aliquote IVA** (l'aliquota vive sul piatto; riepilogo IVA per aliquota anche sul preconto stampato), numerazione fatture per anno.
 
 ---
@@ -526,6 +527,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-01 | Fiscalità | Nota di credito TD04 dalla scheda del conto: storna una fattura inviata a SDI (storno totale, stessa numerazione, riferimento alla fattura); il conto torna libero di riemettere scontrino o fattura corretta. |
 | 2026-09-01 | Fiscalità | Scontrino digitale: QR sull'esito di chiusura e sulla scheda del conto (pagina pubblica per l'ospite, senza login) + copia di cortesia sulla termica; il numero del documento Openapi ora è salvato e mostrato. |
 | 2026-09-01 | Pagamenti, conto al tavolo e cassa | Nel report di chiusura un tocco sul conto apre la sua scheda con lo scontrino elettronico (emetti/riprova/annulla) — l'azione era rimasta orfana col ritiro del tab "Conti aperti". |
 | 2026-09-01 | Pagamenti, conto al tavolo e cassa | Riordino Cassa/Pagamenti: ritirato il tab "Conti aperti" (si incassa solo dalla Cassa), il tab "Cassa" si chiama "Chiusura", e le due pagine si rimandano a vicenda (conti da incassare → Cassa; cassetto chiuso → chiusura del giorno). |

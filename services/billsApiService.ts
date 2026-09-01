@@ -173,6 +173,16 @@ class BillsApiService {
     });
   }
 
+  /** Storna una fattura con nota di credito TD04 (storno totale): la
+   *  fattura passa VOIDED, la nota resta a registro per sempre, e il conto
+   *  torna libero di riemettere scontrino o fattura corretta. */
+  async issueCreditNote(billId: number, docId: number): Promise<{ doc: FiscalDocument; voided_invoice: FiscalDocument }> {
+    return apiRequest(`${API_URL}/bills/${billId}/fiscal-docs/${docId}/credit-note`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+  }
+
   /** Ritenta la chiusura in cassa di un conto Passepartout già chiuso
    *  (scontrino dall'RT + tavolo liberato sul gestionale). */
   async passepartoutClose(billId: number): Promise<{ id_comanda: number; esito: unknown }> {
@@ -298,14 +308,16 @@ export interface OpenBillRow {
   fiscal_provider?: string | null;
   /** Numero del documento (provider_ref: numero scontrino RT o id Openapi). */
   fiscal_ref?: string | null;
-  /** RECEIPT = scontrino; PROFORMA = chiusura "paga dopo", conto a sospeso in cassa. */
-  fiscal_doc_type?: 'RECEIPT' | 'PROFORMA' | 'INVOICE' | null;
+  /** RECEIPT = scontrino; PROFORMA = chiusura "paga dopo"; CREDIT_NOTE = fattura stornata. */
+  fiscal_doc_type?: 'RECEIPT' | 'PROFORMA' | 'INVOICE' | 'CREDIT_NOTE' | null;
   /** Numero del documento: fattura nostra (numerazione annuale) o numero
    *  del documento commerciale Openapi ("0005-0005"). */
   fiscal_doc_number?: string | null;
   /** Capability dello scontrino digitale: /scontrino/<token> lo mostra
    *  all'ospite senza login. Presente su ogni documento nativo. */
   fiscal_public_token?: string | null;
+  /** Per una nota di credito: l'id della fattura stornata (serve al retry). */
+  fiscal_related_doc_id?: number | null;
   /** "pp:comanda:<id>" quando il conto nasce da una comanda Passepartout. */
   external_ref?: string | null;
   /** Movimenti vivi del libro cassa: come è stato pagato il conto. */

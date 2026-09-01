@@ -41,7 +41,7 @@ const euro = (cents: number) => formatEuro(cents);
 
 type BillLike =
   Pick<OpenBillRow, 'id' | 'table_name' | 'total_cents' | 'covers' | 'share_token' | 'items'>
-  & Partial<Pick<OpenBillRow, 'paid_cents' | 'residual_cents' | 'open_orders' | 'deposit_credit_cents' | 'deposit_paid_cents' | 'refund_due_cents' | 'cash_settled_cents' | 'status' | 'fiscal_status' | 'fiscal_doc_id' | 'fiscal_error' | 'fiscal_provider' | 'fiscal_ref' | 'fiscal_doc_type' | 'fiscal_doc_number' | 'fiscal_public_token' | 'external_ref' | 'payments'>>;
+  & Partial<Pick<OpenBillRow, 'paid_cents' | 'residual_cents' | 'open_orders' | 'deposit_credit_cents' | 'deposit_paid_cents' | 'refund_due_cents' | 'cash_settled_cents' | 'status' | 'fiscal_status' | 'fiscal_doc_id' | 'fiscal_error' | 'fiscal_provider' | 'fiscal_ref' | 'fiscal_doc_type' | 'fiscal_doc_number' | 'fiscal_public_token' | 'fiscal_related_doc_id' | 'external_ref' | 'payments'>>;
 
 const isSettled = (bill: BillLike) => bill.residual_cents === 0;
 
@@ -678,15 +678,25 @@ export const FiscalCard: React.FC<{
   const viaPP = bill.fiscal_provider === 'passepartout';
   const proforma = bill.fiscal_doc_type === 'PROFORMA';
   const invoice = bill.fiscal_doc_type === 'INVOICE';
+  const creditNote = bill.fiscal_doc_type === 'CREDIT_NOTE';
   // La proforma nativa è un segnaposto sostituibile: scontrino e fattura
   // restano emettibili e la superano da soli lato server.
   const nativeProforma = proforma && !viaPP && st === 'CONFIRMED';
+  // Il posto del documento vivo è libero: si può (ri)emettere. La nota di
+  // credito CONFIRMED non lo occupa (atto contabile, non documento vivo);
+  // una nota FAILED invece lo blocca — la fattura sotto è ancora valida.
+  const slotFree = bill.status === 'CLOSED' && (
+    st == null || st === 'VOIDED' || nativeProforma
+    || (st === 'FAILED' && !creditNote)
+    || (st === 'CONFIRMED' && creditNote)
+  );
   const pill =
-    st === 'CONFIRMED' && proforma ? { tone: 'neutral' as const, label: 'proforma' }
+    st === 'CONFIRMED' && creditNote ? { tone: 'neutral' as const, label: 'stornata con nota di credito' }
+    : st === 'CONFIRMED' && proforma ? { tone: 'neutral' as const, label: 'proforma' }
     : st === 'CONFIRMED' && invoice ? { tone: 'positive' as const, label: 'fattura emessa' }
     : st === 'CONFIRMED' ? { tone: 'positive' as const, label: viaPP ? 'emesso in cassa' : 'emesso' }
     : st === 'PENDING' ? { tone: 'pending' as const, label: 'in emissione' }
-    : st === 'FAILED' ? { tone: 'critical' as const, label: invoice ? 'errore fattura' : 'errore' }
+    : st === 'FAILED' ? { tone: 'critical' as const, label: creditNote ? 'errore nota di credito' : invoice ? 'errore fattura' : 'errore' }
     : st === 'VOIDED' ? { tone: 'neutral' as const, label: 'annullato' }
     : isPP ? { tone: 'pending' as const, label: 'da chiudere in cassa' }
     : { tone: 'neutral' as const, label: 'non emesso' };
@@ -724,6 +734,16 @@ export const FiscalCard: React.FC<{
         {st === 'CONFIRMED' && invoice && (
           <p className="text-[13px] text-[var(--ds-text-muted)]">
             Fattura {bill.fiscal_doc_number ?? bill.fiscal_ref} inviata a SDI. Lo storno passa da una nota di credito.
+          </p>
+        )}
+        {st === 'CONFIRMED' && creditNote && (
+          <p className="text-[13px] text-[var(--ds-text-muted)]">
+            Nota di credito {bill.fiscal_doc_number ?? bill.fiscal_ref} a registro: la fattura è stornata. Scontrino e fattura restano emettibili.
+          </p>
+        )}
+        {st === 'FAILED' && creditNote && (
+          <p className="text-[13px] text-[var(--ds-text-muted)]">
+            La nota di credito non è partita: la fattura resta valida.
           </p>
         )}
         {st === 'CONFIRMED' && !proforma && !invoice && (bill.fiscal_doc_number || bill.fiscal_ref) && (
@@ -776,7 +796,7 @@ export const FiscalCard: React.FC<{
               Chiudi in cassa
             </button>
           )}
-          {!isPP && (st == null || st === 'FAILED' || st === 'VOIDED' || nativeProforma) && bill.status === 'CLOSED' && (
+          {!isPP && slotFree && (
             <button
               type="button"
               disabled={busy}
@@ -790,15 +810,29 @@ export const FiscalCard: React.FC<{
           {/* Fattura al posto dello scontrino: stesso prerequisito (nessun
               documento fiscale vivo — la proforma nativa non conta e viene
               superata dal server). Il cameriere sceglie il cliente nel dialog. */}
-          {!isPP && (st == null || st === 'FAILED' || st === 'VOIDED' || nativeProforma) && bill.status === 'CLOSED' && (
+          {!isPP && slotFree && (
             <button type="button" disabled={busy} onClick={() => setInvoiceOpen(true)} className={quiet}>
               <FileText className="h-4 w-4" />
               {st === 'FAILED' && invoice ? 'Riprova fattura' : 'Emetti fattura'}
             </button>
           )}
+          {/* La nota fallita si ritenta sulla STESSA fattura (related_doc_id):
+              i bottoni di emissione qui sopra tacciono perché il documento
+              vivo, la fattura, c'è ancora. */}
+          {!isPP && st === 'FAILED' && creditNote && bill.fiscal_related_doc_id != null && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => run(() => billsApiService.issueCreditNote(bill.id, bill.fiscal_related_doc_id!))}
+              className={quiet}
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+              Riprova nota di credito
+            </button>
+          )}
           {/* Marcatura a posteriori: il conto chiuso "senza scontrino"
               diventa proforma — scelta deliberata, non dimenticanza. */}
-          {!isPP && (st == null || st === 'VOIDED') && bill.status === 'CLOSED' && (
+          {!isPP && (st == null || st === 'VOIDED' || (st === 'CONFIRMED' && creditNote)) && bill.status === 'CLOSED' && (
             <button
               type="button"
               disabled={busy}
@@ -808,7 +842,7 @@ export const FiscalCard: React.FC<{
               Segna proforma
             </button>
           )}
-          {st === 'CONFIRMED' && !viaPP && !invoice && !proforma && bill.fiscal_doc_id != null && (
+          {st === 'CONFIRMED' && !viaPP && !invoice && !proforma && !creditNote && bill.fiscal_doc_id != null && (
             armed ? (
               <>
                 <button
@@ -831,10 +865,37 @@ export const FiscalCard: React.FC<{
               </button>
             )
           )}
+          {/* Lo storno della fattura: stesso doppio tap dell'annullo — è un
+              atto fiscale che parte verso SDI, non un undo. */}
+          {st === 'CONFIRMED' && !viaPP && invoice && bill.fiscal_doc_id != null && (
+            armed ? (
+              <>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => run(() => billsApiService.issueCreditNote(bill.id, bill.fiscal_doc_id!))}
+                  className="inline-flex h-10 items-center justify-center gap-1.5 rounded-full bg-[var(--ds-critical-solid)] px-4 text-[13px] font-semibold text-white transition-colors disabled:opacity-40"
+                >
+                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+                  Confermo lo storno
+                </button>
+                <button type="button" disabled={busy} onClick={() => setArmed(false)} className={quiet}>
+                  Lascia stare
+                </button>
+              </>
+            ) : (
+              <button type="button" disabled={busy} onClick={() => setArmed(true)} className={quiet}>
+                <FileText className="h-4 w-4" />
+                Nota di credito
+              </button>
+            )
+          )}
         </div>
         {armed && (
           <p className="text-[13px] text-[var(--ds-text-muted)]">
-            L'annullo viene trasmesso all'Agenzia delle Entrate.
+            {invoice
+              ? 'La nota di credito viene trasmessa a SDI con lo stesso importo della fattura.'
+              : "L'annullo viene trasmesso all'Agenzia delle Entrate."}
           </p>
         )}
       </div>

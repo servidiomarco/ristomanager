@@ -3455,7 +3455,7 @@ async function chiudiComandaPassepartoutPerBill(
                     `INSERT INTO fiscal_documents
                         (tenant_id, table_bill_id, doc_type, provider, status, provider_ref, response, total_cents, confirmed_at)
                      VALUES ($1, $2, $6, 'passepartout', 'CONFIRMED', $3, $4::jsonb, $5, CURRENT_TIMESTAMP)
-                     ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') AND table_bill_split_id IS NULL DO NOTHING
+                     ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') AND table_bill_split_id IS NULL AND doc_type <> 'CREDIT_NOTE' DO NOTHING
                      RETURNING ${FISCAL_DOC_COLUMNS}`,
                     [tenantId, billId, esito.numeroScontrino || null, JSON.stringify(esito),
                      billRs.rows[0].total_cents, proforma ? 'PROFORMA' : 'RECEIPT']
@@ -4975,7 +4975,7 @@ async function registerNativeProforma(tenantId: number, billId: number, userId: 
     const ins = await queryWithRetry(
         `INSERT INTO fiscal_documents (tenant_id, table_bill_id, doc_type, provider, status, total_cents, created_by_user_id, confirmed_at)
          VALUES ($1, $2, 'PROFORMA', 'crm', 'CONFIRMED', $3, $4, CURRENT_TIMESTAMP)
-         ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') AND table_bill_split_id IS NULL DO NOTHING
+         ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') AND table_bill_split_id IS NULL AND doc_type <> 'CREDIT_NOTE' DO NOTHING
          RETURNING ${FISCAL_DOC_COLUMNS}`,
         [tenantId, billId, bill.total_cents, userId]
     );
@@ -5043,7 +5043,7 @@ async function emitFiscalDocForBill(tenantId: number, billId: number, userId: nu
         // vedi migration fattura-elettronica che ha sdoppiato l'indice).
         `INSERT INTO fiscal_documents (tenant_id, table_bill_id, provider, fiscal_id_snapshot, total_cents, created_by_user_id, public_token)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
-         ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') AND table_bill_split_id IS NULL DO NOTHING
+         ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') AND table_bill_split_id IS NULL AND doc_type <> 'CREDIT_NOTE' DO NOTHING
          RETURNING ${FISCAL_DOC_COLUMNS}`,
         [tenantId, billId, providerName, fiscalId, bill.total_cents, userId, newFiscalPublicToken()]
     );
@@ -5052,6 +5052,7 @@ async function emitFiscalDocForBill(tenantId: number, billId: number, userId: nu
         const existing = await queryWithRetry(
             `SELECT ${FISCAL_DOC_COLUMNS} FROM fiscal_documents
              WHERE table_bill_id = $1 AND tenant_id = $2 AND status IN ('PENDING', 'CONFIRMED')
+               AND doc_type <> 'CREDIT_NOTE'
              LIMIT 1`,
             [billId, tenantId]
         );
@@ -5317,6 +5318,9 @@ app.post('/bills/:id/fiscal-docs/:fid/void', authenticate, requirePermission('pa
         if (doc.doc_type === 'INVOICE') {
             return res.status(409).json({ error: 'Una fattura inviata a SDI si storna con nota di credito, non si annulla da qui' });
         }
+        if (doc.doc_type === 'CREDIT_NOTE') {
+            return res.status(409).json({ error: 'Una nota di credito è un atto contabile definitivo: non si annulla' });
+        }
         // Documento emesso dall'RT di cassa alla chiusura Passepartout: il
         // reso/annullo è un'operazione del registratore, non c'è un provider
         // cloud da chiamare.
@@ -5348,6 +5352,146 @@ app.post('/bills/:id/fiscal-docs/:fid/void', authenticate, requirePermission('pa
     } catch (err: any) {
         console.error('POST /bills/:id/fiscal-docs/:fid/void error:', err);
         res.status(502).json({ error: 'Annullo non riuscito', detail: err?.message });
+    }
+});
+
+// Storno di una fattura con nota di credito TD04 (storno TOTALE: stessi
+// importi, stesso cessionario, tipo documento a dare il segno). La nota
+// prende un numero dalla stessa numerazione annuale delle fatture e viaggia
+// sullo stesso canale SDI del provider. A conferma avvenuta la fattura passa
+// VOIDED e la nota resta CONFIRMED per sempre — fuori dall'indice "one live
+// per bill" (predicato doc_type <> 'CREDIT_NOTE'), così il conto torna
+// libero di riemettere scontrino o fattura corretta.
+app.post('/bills/:id/fiscal-docs/:fid/credit-note', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        const fid = parseInt(req.params.fid, 10);
+        if (!Number.isFinite(id) || !Number.isFinite(fid)) return res.status(400).json({ error: 'Invalid id' });
+
+        const docRs = await queryWithRetry(
+            `SELECT ${FISCAL_DOC_COLUMNS}, request FROM fiscal_documents
+             WHERE id = $1 AND table_bill_id = $2 AND tenant_id = $3`,
+            [fid, id, req.tenantId!]
+        );
+        const doc = docRs.rows[0];
+        if (!doc) return res.status(404).json({ error: 'Documento non trovato' });
+        if (doc.doc_type !== 'INVOICE') return res.status(409).json({ error: 'La nota di credito storna una fattura' });
+        if (doc.status !== 'CONFIRMED') return res.status(409).json({ error: `Solo una fattura confermata si storna (stato ${doc.status})` });
+        if (doc.provider === 'passepartout') {
+            return res.status(409).json({ error: 'Documento del gestionale: lo storno passa dalla cassa Passepartout' });
+        }
+        const buyer = doc.request?.buyer;
+        if (!buyer?.name) {
+            return res.status(409).json({ error: 'La fattura non ha il cessionario registrato: nota di credito non componibile' });
+        }
+        const sellerRes = await resolveFiscalSeller(req.tenantId!);
+        if ('missing' in sellerRes) {
+            return res.status(409).json({ error: `Dati del cedente incompleti: manca ${sellerRes.missing.join(', ')}`, reason: 'missing_seller' });
+        }
+
+        // Stessa scomposizione IVA della fattura: righe del conto
+        // riproporzionate sull'importo del documento stornato.
+        const billRs = await queryWithRetry(
+            `SELECT items, total_cents, external_ref FROM table_bills WHERE id = $1 AND tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        if (!billRs.rows[0]) return res.status(404).json({ error: 'Conto non trovato' });
+        const vatRows = vatBreakdownFromItems(Array.isArray(billRs.rows[0].items) ? billRs.rows[0].items : null, doc.total_cents);
+        if (vatRows.length === 0) {
+            vatRows.push({ rate: 10, gross_cents: doc.total_cents, net_cents: Math.round(doc.total_cents / 1.1), vat_cents: doc.total_cents - Math.round(doc.total_cents / 1.1) });
+        }
+
+        // Claim sul doppio submit, come per lo scontrino: vince chi bumpa
+        // attempts per primo, l'altro esce senza chiamare il provider.
+        const claim = await queryWithRetry(
+            `UPDATE fiscal_documents SET attempts = attempts + 1
+             WHERE id = $1 AND status = 'CONFIRMED' AND attempts = $2
+             RETURNING id`,
+            [fid, doc.attempts]
+        );
+        if ((claim.rowCount ?? 0) === 0) return res.status(409).json({ error: 'Storno già in corso', reason: 'in_progress' });
+
+        const year = Number(getRomeDatePart(new Date()).slice(0, 4));
+        const docNumber = await nextInvoiceNumber(req.tenantId!, year);
+        const docDate = getRomeDatePart(new Date());
+        const xml = buildFatturaPaXml({
+            seller: sellerRes.seller,
+            buyer,
+            doc_number: docNumber,
+            doc_date: docDate,
+            vat_rows: vatRows,
+            total_gross_cents: doc.total_cents,
+            description: `Storno fattura ${doc.doc_number ?? ''}`.trim(),
+            doc_type: 'TD04',
+            related: { number: String(doc.doc_number ?? ''), date: getRomeDatePart(doc.confirmed_at) },
+        });
+
+        let providerRef: string; let raw: any;
+        try {
+            const driver = getFiscalDriver(doc.provider);
+            const result = await driver.issueInvoice(xml);
+            providerRef = result.provider_ref; raw = result.raw ?? null;
+        } catch (err: any) {
+            // Il numero è bruciato ma va a registro col suo FAILED: un buco
+            // di numerazione senza traccia è un problema legale, uno col suo
+            // motivo scritto è una nota a verbale.
+            const failIns = await queryWithRetry(
+                `INSERT INTO fiscal_documents (tenant_id, table_bill_id, doc_type, doc_number, provider, fiscal_id_snapshot, status, total_cents, created_by_user_id, request, error, related_doc_id, attempts)
+                 VALUES ($1, $2, 'CREDIT_NOTE', $3, $4, $5, 'FAILED', $6, $7, $8::jsonb, $9, $10, 1)
+                 RETURNING ${FISCAL_DOC_COLUMNS}`,
+                [req.tenantId!, id, docNumber, doc.provider, sellerRes.seller.vat_number, doc.total_cents,
+                 req.user?.userId ?? null, JSON.stringify({ xml, buyer }), String(err?.message ?? err).slice(0, 1000), fid]
+            );
+            try { socketService?.broadcastToAll(req.tenantId!, 'fiscal:updated', { bill_id: id, doc: failIns.rows[0] }); } catch (_) {}
+            return res.status(502).json({ error: 'Nota di credito non emessa', detail: err?.message, doc: failIns.rows[0] });
+        }
+
+        // Provider ok: fattura VOIDED e nota CONFIRMED nella stessa
+        // transazione — mai l'una senza l'altra a registro.
+        const client = await pool.connect();
+        let voidedInvoice: any; let creditNote: any;
+        try {
+            await client.query('BEGIN');
+            const upd = await client.query(
+                `UPDATE fiscal_documents SET status = 'VOIDED', voided_at = CURRENT_TIMESTAMP
+                 WHERE id = $1 AND tenant_id = $2 RETURNING ${FISCAL_DOC_COLUMNS}`,
+                [fid, req.tenantId!]
+            );
+            voidedInvoice = upd.rows[0];
+            const ins = await client.query(
+                `INSERT INTO fiscal_documents (tenant_id, table_bill_id, doc_type, doc_number, provider, fiscal_id_snapshot, status, provider_ref, response, total_cents, created_by_user_id, request, related_doc_id, confirmed_at, attempts)
+                 VALUES ($1, $2, 'CREDIT_NOTE', $3, $4, $5, 'CONFIRMED', $6, $7::jsonb, $8, $9, $10::jsonb, $11, CURRENT_TIMESTAMP, 1)
+                 RETURNING ${FISCAL_DOC_COLUMNS}`,
+                [req.tenantId!, id, docNumber, doc.provider, sellerRes.seller.vat_number, providerRef,
+                 JSON.stringify(raw), doc.total_cents, req.user?.userId ?? null, JSON.stringify({ xml, buyer }), fid]
+            );
+            creditNote = ins.rows[0];
+            await client.query('COMMIT');
+        } catch (err) {
+            await client.query('ROLLBACK').catch(() => {});
+            throw err;
+        } finally {
+            client.release();
+        }
+
+        try {
+            socketService?.broadcastToAll(req.tenantId!, 'fiscal:updated', { bill_id: id, doc: voidedInvoice });
+            socketService?.broadcastToAll(req.tenantId!, 'fiscal:updated', { bill_id: id, doc: creditNote });
+        } catch (_) {}
+
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!,
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.CREATE, ResourceType.RESERVATION,
+                undefined,
+                `Nota di credito ${docNumber} emessa: stornata fattura ${doc.doc_number} (conto #${id})`
+            );
+        }
+        res.status(201).json({ doc: creditNote, voided_invoice: voidedInvoice });
+    } catch (err: any) {
+        console.error('POST /bills/:id/fiscal-docs/:fid/credit-note error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });
 
@@ -5428,7 +5572,9 @@ app.post('/bills/:id/invoices', authenticate, requirePermission('payments:full')
         // La proforma nativa non è un documento fiscale e non blocca: esce
         // dalle guardie qui e viene superata (VOID) prima dell'inserimento.
         const proformaLive = liveDocs.rows.some((d: any) => d.doc_type === 'PROFORMA');
-        liveDocs.rows = liveDocs.rows.filter((d: any) => d.doc_type !== 'PROFORMA');
+        // La nota di credito resta CONFIRMED per sempre come atto contabile:
+        // non è un documento vivo e non blocca la fattura corretta.
+        liveDocs.rows = liveDocs.rows.filter((d: any) => d.doc_type !== 'PROFORMA' && d.doc_type !== 'CREDIT_NOTE');
         const liveReceipt = liveDocs.rows.find((d: any) => d.doc_type === 'RECEIPT');
         if (liveReceipt) {
             return res.status(409).json({
@@ -26419,7 +26565,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                     fd.status AS fiscal_status, fd.id AS fiscal_doc_id, fd.error AS fiscal_error,
                     fd.provider AS fiscal_provider, fd.provider_ref AS fiscal_ref,
                     fd.doc_type AS fiscal_doc_type, fd.doc_number AS fiscal_doc_number,
-                    fd.public_token AS fiscal_public_token,
+                    fd.public_token AS fiscal_public_token, fd.related_doc_id AS fiscal_related_doc_id,
                     -- Come è stato pagato: i movimenti vivi del libro cassa
                     -- (incassi staff + specchi delle quote online), per la
                     -- sezione Pagamenti del conto senza una fetch per riga.
@@ -26435,7 +26581,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
              LEFT JOIN reservations r ON r.id = b.reservation_id AND r.tenant_id = b.tenant_id
              LEFT JOIN table_bill_splits s ON s.table_bill_id = b.id
              LEFT JOIN LATERAL (
-                 SELECT id, status, error, provider, provider_ref, doc_type, doc_number, public_token FROM fiscal_documents
+                 SELECT id, status, error, provider, provider_ref, doc_type, doc_number, public_token, related_doc_id FROM fiscal_documents
                  WHERE table_bill_id = b.id ORDER BY created_at DESC LIMIT 1
              ) fd ON TRUE
              WHERE b.status = ANY($3::varchar[])
@@ -26449,7 +26595,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                         (SELECT o.shift FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
                         CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
                              THEN 'LUNCH' ELSE 'DINNER' END) = $2::varchar)
-             GROUP BY b.id, t.name, r.customer_name, fd.id, fd.status, fd.error, fd.provider, fd.provider_ref, fd.doc_type, fd.doc_number, fd.public_token
+             GROUP BY b.id, t.name, r.customer_name, fd.id, fd.status, fd.error, fd.provider, fd.provider_ref, fd.doc_type, fd.doc_number, fd.public_token, fd.related_doc_id
              ORDER BY b.closed_at DESC NULLS LAST, b.opened_at DESC`,
             [filterDate, filterShift, statuses, req.tenantId!]
         );

@@ -346,7 +346,7 @@ export type FiscalProviderSetting = 'none' | 'openapi' | 'mock';
 export interface FiscalDocument {
   id: number;
   table_bill_id: number;
-  doc_type: 'RECEIPT' | 'PROFORMA' | 'INVOICE';
+  doc_type: 'RECEIPT' | 'PROFORMA' | 'INVOICE' | 'CREDIT_NOTE';
   provider: string;
   status: FiscalDocumentStatus;
   provider_ref: string | null;
@@ -438,7 +438,7 @@ export interface CashClosureBillRow {
   shift: 'LUNCH' | 'DINNER';
   table_name: string | null;
   customer_name: string | null;
-  fiscal_doc_type: 'RECEIPT' | 'PROFORMA' | 'INVOICE' | null;
+  fiscal_doc_type: 'RECEIPT' | 'PROFORMA' | 'INVOICE' | 'CREDIT_NOTE' | null;
   fiscal_status: FiscalDocumentStatus | null;
   fiscal_doc_number: string | null;
   fiscal_public_token: string | null;
@@ -502,7 +502,7 @@ export interface CashMovement {
   table_name: string | null;
   customer_name: string | null;
   fiscal_status: FiscalDocumentStatus | null;
-  fiscal_doc_type: 'RECEIPT' | 'PROFORMA' | 'INVOICE' | null;
+  fiscal_doc_type: 'RECEIPT' | 'PROFORMA' | 'INVOICE' | 'CREDIT_NOTE' | null;
   meta: Record<string, unknown> | null;
 }
 

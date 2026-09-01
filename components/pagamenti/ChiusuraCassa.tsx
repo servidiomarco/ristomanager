@@ -29,11 +29,14 @@ const METHOD_LABELS: Record<string, string> = {
 // Tipo di chiusura del conto, derivato dall'ultimo documento fiscale.
 // 'none' copre sia il mai emesso sia il fallito/annullato: per il filtro
 // contano tutti come "senza documento" — sono i conti da sistemare.
-type DocFilter = 'all' | 'receipt' | 'invoice' | 'proforma' | 'none';
+type DocFilter = 'all' | 'receipt' | 'invoice' | 'credit_note' | 'proforma' | 'none';
 
 const docKind = (b: CashClosureBillRow): Exclude<DocFilter, 'all'> => {
   if (b.fiscal_status !== 'CONFIRMED') return 'none';
   if (b.fiscal_doc_type === 'INVOICE') return 'invoice';
+  // Fattura stornata: la nota resta l'ultimo documento del conto, e nel
+  // riscontro serale il conto va rivisto — non è né fatturato né scoperto.
+  if (b.fiscal_doc_type === 'CREDIT_NOTE') return 'credit_note';
   if (b.fiscal_doc_type === 'PROFORMA') return 'proforma';
   return 'receipt';
 };
@@ -42,6 +45,7 @@ const DOC_FILTERS: { value: DocFilter; label: string }[] = [
   { value: 'all', label: 'Tutti' },
   { value: 'receipt', label: 'Scontrino' },
   { value: 'invoice', label: 'Fattura' },
+  { value: 'credit_note', label: 'Nota di credito' },
   { value: 'proforma', label: 'Proforma' },
   { value: 'none', label: 'Senza documento' },
 ];
@@ -50,6 +54,7 @@ const docPill = (b: CashClosureBillRow) => {
   const kind = docKind(b);
   if (kind === 'receipt') return <StatusPill tone="positive">scontrino</StatusPill>;
   if (kind === 'invoice') return <StatusPill tone="positive">fattura {b.fiscal_doc_number ?? ''}</StatusPill>;
+  if (kind === 'credit_note') return <StatusPill tone="neutral">nota di credito {b.fiscal_doc_number ?? ''}</StatusPill>;
   if (kind === 'proforma') return <StatusPill tone="neutral">proforma</StatusPill>;
   if (b.fiscal_status === 'FAILED') return <StatusPill tone="critical">errore emissione</StatusPill>;
   return <StatusPill tone="neutral">senza documento</StatusPill>;
@@ -109,7 +114,7 @@ export const ChiusuraCassa: React.FC<{
     return shift ? all.filter(b => b.shift === shift) : all;
   }, [report, shift]);
   const counts = useMemo(() => {
-    const c: Record<Exclude<DocFilter, 'all'>, number> = { receipt: 0, invoice: 0, proforma: 0, none: 0 };
+    const c: Record<Exclude<DocFilter, 'all'>, number> = { receipt: 0, invoice: 0, credit_note: 0, proforma: 0, none: 0 };
     bills.forEach(b => { c[docKind(b)] += 1; });
     return c;
   }, [bills]);
