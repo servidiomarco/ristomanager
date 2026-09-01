@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, BellOff, Check, ChevronRight, Loader2, MessagesSquare, Pencil, Play, TriangleAlert, WifiOff } from 'lucide-react';
+import { Bell, BellOff, BellRing, Check, ChevronRight, Loader2, MessagesSquare, Pencil, Play, TriangleAlert, WifiOff } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
 import { useAuth } from '../contexts/AuthContext';
 import { socketClient } from '../services/socketClient';
@@ -7,6 +7,7 @@ import { staffChatApiService } from '../services/staffChatApiService';
 import { channelThreadKey, staffMessagePreview, type StaffMessage } from '../services/staffChat';
 import {
   getKdsQueue, getKdsServed, setKdsItemStatus, getMenuCatalogue, getKdsRevisions, ackKdsRevision,
+  fireCourse, serveCourse,
   type KdsItem, type KdsCourseState, type KdsOtherItem, type KdsServedCourse, type MenuCatalogue, type OrderRevision,
 } from '../services/ordersApiService';
 import { getKitchenServiceSummary, type KitchenServiceSummary } from '../services/apiService';
@@ -72,11 +73,18 @@ interface Column {
   waitingOthers: boolean;
   /** Le righe delle altre partite sulla stessa uscita (sola lettura). */
   others: KdsOtherItem[];
+  /** La prossima uscita in coda della stessa comanda, se c'è: col passe
+   *  spento la chiama la cucina da qui. Valorizzata solo sull'ULTIMA card
+   *  della comanda, o la campanella comparirebbe su tutte. */
+  callNext: number | null;
 }
 
 interface KitchenDisplayProps {
   globalDate?: Date;
   globalShiftFilter?: 'ALL' | 'LUNCH' | 'DINNER';
+  /** Passe spento (Impostazioni → Sala e cucina): chiama e servito passano
+   *  alle card di questo monitor. */
+  passeEnabled?: boolean;
 }
 
 // Turno "corrente" quando l'utente non ne ha scelto uno esplicito: prima delle
@@ -85,7 +93,7 @@ const DINNER_START_HOUR = 17;
 const inferShift = (d: Date): 'LUNCH' | 'DINNER' =>
   d.getHours() < DINNER_START_HOUR ? 'LUNCH' : 'DINNER';
 
-export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, globalShiftFilter }) => {
+export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, globalShiftFilter, passeEnabled = true }) => {
   const now = useNow(15_000);
   const [stationId, setStationId] = useState<number | null>(() => {
     const saved = localStorage.getItem(STATION_KEY);
@@ -97,6 +105,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   const [items, setItems] = useState<KdsItem[]>([]);
   const [courses, setCourses] = useState<KdsCourseState[]>([]);
   const [others, setOthers] = useState<KdsOtherItem[]>([]);
+  const [queuedNext, setQueuedNext] = useState<{ order_id: number; course_no: number }[]>([]);
   // «In lavorazione» è il lavoro; «Consegnate» è consultazione («il 12 dice
   // che manca il piatto: l'abbiamo mandato?») — sola lettura, mai un posto
   // dove le card si annidano prima del servito.
@@ -226,6 +235,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
       setItems(q.items);
       setCourses(q.courses);
       setOthers(q.others ?? []);
+      setQueuedNext(q.queued_next ?? []);
       setRevisions(rev.revisions);
       setOffline(false);
     } catch {
@@ -314,6 +324,19 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
     setPicking(false);
   };
 
+  // Col passe spento questi due gesti vivono sulle card: la campanella
+  // chiama la prossima uscita in coda della comanda, la spunta segna
+  // servita quella pronta (via dal monitor → Consegnate).
+  const callNextCourse = async (col: Column) => {
+    if (col.callNext == null) return;
+    try { await fireCourse(col.order_id, col.callNext); } catch { /* il reload dice il vero */ }
+    reload();
+  };
+  const serveColumn = async (col: Column) => {
+    try { await serveCourse(col.order_id, col.course_no); } catch { /* 409 se nel frattempo non è più tutta pronta */ }
+    reload();
+  };
+
   const advance = async (item: KdsItem, status: 'PREPARING' | 'READY') => {
     // Aggiornamento ottimistico: in cucina il ritardo di mezzo secondo fra il
     // tocco e la reazione fa ripremere il tasto.
@@ -346,16 +369,26 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           // L'uscita aspetta anche altre partite oltre alla mia?
           waitingOthers: !!st && st.waiting_station_ids.some(s => s !== stationId),
           others: others.filter(o => o.order_id === it.order_id && o.course_no === it.course_no),
+          callNext: null,
         });
       }
       map.get(key)!.items.push(it);
     }
-    return [...map.values()].sort((a, b) => {
+    const list = [...map.values()].sort((a, b) => {
       const ta = a.items[0]?.station_start_at ?? a.firedAt ?? '';
       const tb = b.items[0]?.station_start_at ?? b.firedAt ?? '';
       return ta.localeCompare(tb);
     });
-  }, [items, courses, others, stationId]);
+    // La campanella sta sull'ULTIMA card della comanda: la stessa coda su
+    // tre card sarebbero tre bottoni per lo stesso gesto.
+    const maxCourse = new Map<number, number>();
+    for (const c of list) maxCourse.set(c.order_id, Math.max(maxCourse.get(c.order_id) ?? 0, c.course_no));
+    for (const c of list) {
+      const qn = queuedNext.find(q => q.order_id === c.order_id);
+      c.callNext = qn && maxCourse.get(c.order_id) === c.course_no ? qn.course_no : null;
+    }
+    return list;
+  }, [items, courses, others, queuedNext, stationId]);
 
   useEffect(() => {
     courseKeysRef.current = new Set(columns.map(c => c.key));
@@ -590,6 +623,8 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                 stationId={stationId}
                 stationNames={stationNames}
                 onAdvance={advance}
+                onCallNext={passeEnabled ? undefined : callNextCourse}
+                onServeCourse={passeEnabled ? undefined : serveColumn}
                 revisions={revisionsByKey.get(col.key)}
                 onShowRevisions={() => setRevisionsModalKey(col.key)}
               />
@@ -717,9 +752,13 @@ const CourseCard: React.FC<{
   stationId: number | null;
   onAdvance: (item: KdsItem, status: 'PREPARING' | 'READY') => void;
   stationNames?: Map<number, string>;
+  /** Presenti solo col passe spento: chiama la prossima uscita in coda e
+   *  segna servita quella pronta, dalla card. */
+  onCallNext?: (col: Column) => void;
+  onServeCourse?: (col: Column) => void;
   revisions?: OrderRevision[];
   onShowRevisions?: () => void;
-}> = ({ col, now, onAdvance, stationNames, revisions, onShowRevisions }) => {
+}> = ({ col, now, onAdvance, stationNames, onCallNext, onServeCourse, revisions, onShowRevisions }) => {
   const start = col.items[0]?.station_start_at ?? col.firedAt;
   const elapsed = minutesSince(start, now);
   const allReady = col.items.every(i => i.status === 'READY');
@@ -903,9 +942,9 @@ const CourseCard: React.FC<{
         </div>
       )}
 
-      <div className="p-2">
+      <div className="flex items-center gap-2 p-2">
         {allReady ? (
-          <div className="py-2 text-center text-[14px] font-semibold text-[var(--ds-seated-text)]">
+          <div className="min-w-0 flex-1 py-2 text-center text-[14px] font-semibold text-[var(--ds-seated-text)]">
             {col.waitingOthers ? `pronto · attende le altre partite (${readySince}′)` : 'pronto'}
           </div>
         ) : (
@@ -916,9 +955,35 @@ const CourseCard: React.FC<{
           <button
             type="button"
             onClick={() => col.items.filter(i => i.status !== 'READY').forEach(i => onAdvance(i, 'READY'))}
-            className="w-full rounded-[16px] bg-[var(--ds-action-bg)] py-3.5 text-[17px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="min-w-0 flex-1 rounded-[16px] bg-[var(--ds-action-bg)] py-3.5 text-[17px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             Tutto pronto
+          </button>
+        )}
+        {/* Col passe spento i suoi due verbi stanno qui, come icone: la
+            campanella chiama la prossima uscita in coda della comanda, la
+            spunta segna servita quella pronta (via dal monitor → Consegnate).
+            Nome per esteso nel title e nell'aria-label. */}
+        {onCallNext && col.callNext != null && (
+          <button
+            type="button"
+            onClick={() => onCallNext(col)}
+            title={`Chiama la ${ORDINALS[col.callNext] ?? col.callNext} uscita in cucina`}
+            aria-label={`Chiama la ${ORDINALS[col.callNext] ?? col.callNext} uscita in cucina`}
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            <BellRing size={18} aria-hidden />
+          </button>
+        )}
+        {onServeCourse && allReady && (
+          <button
+            type="button"
+            onClick={() => onServeCourse(col)}
+            title="Segna l'uscita servita"
+            aria-label="Segna l'uscita servita"
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-seated-solid)] text-white transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            <Check size={18} aria-hidden />
           </button>
         )}
       </div>

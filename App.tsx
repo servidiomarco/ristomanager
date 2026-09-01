@@ -2876,7 +2876,7 @@ const App: React.FC = () => {
 
         {view === ViewState.COMANDE && (
           <CardErrorBoundary label="Comande">
-            <OrderPad dishes={dishes} tables={tables} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} onImmersive={setImmersive} initialTableId={pendingComandeTableId} onInitialTableConsumed={() => setPendingComandeTableId(null)} passeEnabled={passeEnabled} />
+            <OrderPad dishes={dishes} tables={tables} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} onImmersive={setImmersive} initialTableId={pendingComandeTableId} onInitialTableConsumed={() => setPendingComandeTableId(null)} />
           </CardErrorBoundary>
         )}
 
@@ -2888,7 +2888,7 @@ const App: React.FC = () => {
 
         {view === ViewState.CUCINA && (
           <CardErrorBoundary label="Cucina">
-            <KitchenDisplay globalDate={globalDate} globalShiftFilter={globalShiftFilter} />
+            <KitchenDisplay globalDate={globalDate} globalShiftFilter={globalShiftFilter} passeEnabled={passeEnabled} />
           </CardErrorBoundary>
         )}
 
