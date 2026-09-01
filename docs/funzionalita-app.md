@@ -522,6 +522,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-01 | Comande, Cucina e Passe | Le griglie tavoli di Comande e Cassa mostrano i tavoli uniti come una tessera sola («11+12», coperti sommati); il tocco apre il tavolo giusto dell'unione. |
 | 2026-09-01 | Comande, Cucina e Passe | Nuovo modulo Cassa (coda conti, sessione, incasso, correggi conto); in Comande: chiusura a un tocco (scontrino contanti/POS, preconto), bottone Chiama per le uscite, bozza locale delle righe non inviate, fattura con emissione immediata. |
 | 2026-08-30 | Funzionalità trasversali | Al rientro nell'app, se è stata deployata una versione nuova compare un avviso con "Ricarica" — la PWA sospesa non resta più sul codice vecchio. |
 | 2026-08-30 | Impostazioni | Logo in due varianti (normale + tema scuro): l'app scambia l'immagine col tema invece della piastra bianca; per il Frantoio precaricato l'artwork bianco storico. |

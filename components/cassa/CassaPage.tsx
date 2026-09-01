@@ -230,8 +230,8 @@ export const CassaPage: React.FC<CassaPageProps> = ({
 
   const billTables = useMemo(() => new Set(serviceBills.keys()), [serviceBills]);
   const rows = useMemo(
-    () => buildRows(tables, openTables, billTables, reservationForTable),
-    [tables, openTables, billTables, reservationForTable]
+    () => buildRows(tables, openTables, billTables, reservationForTable, mergeGroups, globalShiftFilter),
+    [tables, openTables, billTables, reservationForTable, mergeGroups, globalShiftFilter]
   );
 
   const inService = useMemo(

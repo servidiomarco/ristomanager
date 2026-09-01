@@ -22,6 +22,12 @@ export interface TableRow {
   table: Table;
   state: TableState;
   reservation: Reservation | null;
+  /** Unione per il turno: etichetta «11+12», coperti sommati, e il tavolo
+   *  giusto da aprire (quello con la comanda o il conto, se c'è; sennò il
+   *  capofila). Assenti sul tavolo singolo. */
+  groupLabel?: string;
+  groupSeats?: number;
+  pickId?: number;
 }
 
 export type TableFilter = 'ALL' | TableState;
@@ -127,20 +133,50 @@ export const buildRows = (
   openTables: Set<number>,
   billTables: Set<number>,
   reservationForTable: (id: number) => Reservation | null,
-): TableRow[] =>
-  tables
-    .map(table => {
-      const reservation = reservationForTable(table.id);
+  // I tavoli uniti per il turno sono UN tavolo per chi serve: senza questi
+  // due argomenti la griglia mostrava la stessa prenotazione su due tessere
+  // (regola del progetto: ogni superficie applica le unioni).
+  mergeGroups?: Map<string, number[]>,
+  shiftFilter?: 'ALL' | 'LUNCH' | 'DINNER',
+): TableRow[] => {
+  const byId = new Map(tables.map(t => [t.id, t]));
+  const groupFor = (id: number): number[] | null => {
+    if (!mergeGroups) return null;
+    if (shiftFilter && shiftFilter !== 'ALL') return mergeGroups.get(`${shiftFilter}:${id}`) ?? null;
+    // Turno «Tutti»: si prende l'unione di uno dei due turni. Lo stesso
+    // tavolo unito diversamente a pranzo e a cena nello stesso giorno è un
+    // caso limite che qui si accetta.
+    return mergeGroups.get(`LUNCH:${id}`) ?? mergeGroups.get(`DINNER:${id}`) ?? null;
+  };
+  return tables
+    .flatMap(table => {
+      const group = groupFor(table.id);
+      // I gregari dell'unione vivono dentro la tessera del capofila.
+      if (group && table.id !== group[0] && byId.has(group[0])) return [];
+      const members = group
+        ? group.map(id => byId.get(id)).filter((t): t is Table => t != null)
+        : [table];
+      const reservation = members.map(m => reservationForTable(m.id)).find(r => r != null) ?? null;
+      const orderOn = members.find(m => openTables.has(m.id));
+      const billOn = members.find(m => billTables.has(m.id));
       // Una comanda aperta batte il conto: se il tavolo ha ricominciato a
       // ordinare, il conto vecchio non è più la cosa da fare.
       const state: TableState =
-        openTables.has(table.id) ? 'order'
-        : billTables.has(table.id) ? 'bill'
+        orderOn ? 'order'
+        : billOn ? 'bill'
         : reservation ? 'booked'
         : 'free';
-      return { table, state, reservation };
+      const row: TableRow = { table, state, reservation };
+      if (members.length > 1) {
+        row.groupLabel = members.map(m => m.name).sort(compareTableNames).join('+');
+        row.groupSeats = members.reduce((sum, m) => sum + m.seats, 0);
+        // Si apre il tavolo che ha già la comanda o il conto, mai un doppione.
+        row.pickId = orderOn?.id ?? billOn?.id ?? table.id;
+      }
+      return [row];
     })
-    .sort((a, b) => compareTableNames(a.table.name, b.table.name));
+    .sort((a, b) => compareTableNames(a.groupLabel ?? a.table.name, b.groupLabel ?? b.table.name));
+};
 
 export const countByState = (rows: TableRow[]): Record<TableState, number> => {
   const out: Record<TableState, number> = { bill: 0, order: 0, booked: 0, free: 0 };
@@ -153,6 +189,7 @@ export const countByState = (rows: TableRow[]): Record<TableState, number> => {
 export const matchesQuery = (row: TableRow, query: string): boolean => {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  if (row.table.name.toLowerCase().includes(q)) return true;
+  // groupLabel compreso: «109» deve trovare la tessera «108+109».
+  if ((row.groupLabel ?? row.table.name).toLowerCase().includes(q)) return true;
   return (row.reservation?.customer_name ?? '').toLowerCase().includes(q);
 };
