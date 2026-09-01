@@ -1156,17 +1156,21 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       </button>
                     );
                   })}
-                  {canEdit && (
-                    <button
-                      type="button"
-                      onClick={() => setCatsOpen(true)}
-                      className={`${DISH_FILTER_BASE} ${DISH_FILTER_OFF} inline-flex items-center gap-1.5`}
-                      title="Ordina e accendi/spegni le categorie"
-                    >
-                      <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden /> Categorie
-                    </button>
-                  )}
                 </div>
+              )}
+              {/* Azione, non filtro: sta fuori dalla fila di pill e usa lo
+                  stesso vestito di "Importa da cassa", così non si confonde
+                  con una categoria in più. */}
+              {canEdit && dishCategories.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setCatsOpen(true)}
+                  title="Ordina e accendi/spegni le categorie"
+                  className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 self-start rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] md:self-center"
+                >
+                  <SlidersHorizontal className="h-4 w-4" aria-hidden />
+                  Categorie
+                </button>
               )}
               <span className="text-[13px] text-[var(--ds-text-muted)] md:flex-shrink-0 md:self-center">
                 {dishes.length} piatti · {dishes.filter(d => d.allergens.length > 0).length} con allergeni · {dishes.filter(d => !d.photo_url).length} senza foto
