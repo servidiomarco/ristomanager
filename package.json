@@ -24,6 +24,7 @@
     "@types/pg": "^8.15.6",
     "@types/socket.io": "^3.0.1",
     "@types/web-push": "^3.6.4",
+    "acme-client": "^5.4.0",
     "bcryptjs": "^3.0.3",
     "compression": "^1.8.1",
     "cors": "^2.8.5",

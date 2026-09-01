@@ -7,7 +7,7 @@ import {
   setCategoryStation,
   getSalaProfiles, createSalaProfile, updateSalaProfile,
   activateSalaProfile, detachSalaProfile, deleteSalaProfile,
-  updatePrintRoutes, updateSalaNodeSettings,
+  updatePrintRoutes, updateSalaNodeSettings, provisionSalaNodeCert,
   type SalaConfig, type FireMode, type SalaProfile,
 } from '../services/salaApiService';
 import { useAuth } from '../contexts/AuthContext';
@@ -44,6 +44,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
   // gestore sta digitando.
   const [nodeDraft, setNodeDraft] = useState({ domain: '', lan_ip: '', port: '443' });
   const nodeDraftSeeded = useRef(false);
+  const [certBusy, setCertBusy] = useState(false);
 
   const showToastRef = useRef(showToast);
   useEffect(() => { showToastRef.current = showToast; });
@@ -472,6 +473,33 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                     } translate-y-0.5`}
                   />
                 </button>
+              </div>
+              <div className="flex items-center gap-3 px-3 py-2">
+                <div className="flex-1 min-w-0 text-[13px]">
+                  <span className="font-medium text-[var(--ds-text-primary)]">Certificato TLS</span>
+                  <span className="text-[12px] text-[var(--ds-text-muted)] ml-2">
+                    {config.sala_node.cert_expires_at
+                      ? `scade il ${new Date(config.sala_node.cert_expires_at).toLocaleDateString('it-IT')}`
+                      : 'non ancora emesso'}
+                  </span>
+                </div>
+                {canEdit && (
+                  <button type="button" disabled={saving || certBusy || !config.sala_node.domain}
+                    title={!config.sala_node.domain ? 'Prima configura il dominio del nodo' : undefined}
+                    onClick={async () => {
+                      setCertBusy(true);
+                      try {
+                        const r = await provisionSalaNodeCert();
+                        showToast(`Certificato emesso per ${r.domain}`, 'success');
+                        await reload();
+                      } catch (err: any) {
+                        showToast(err?.message || 'Emissione non riuscita', 'error');
+                      } finally { setCertBusy(false); }
+                    }}
+                    className="text-[12px] px-2 py-1 rounded-md border border-[var(--ds-border)] disabled:opacity-50">
+                    {certBusy ? 'emissione… (circa un minuto)' : config.sala_node.cert_expires_at ? 'rinnova' : 'emetti certificato'}
+                  </button>
+                )}
               </div>
               {canEdit && (
                 <div className="flex flex-wrap items-center gap-2 px-3 py-2">

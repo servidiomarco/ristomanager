@@ -54,6 +54,7 @@ import {
     PassepartoutBridgeError,
 } from './services/passepartoutBridge.js';
 import { setupSalaNodeBridge, getSalaNodeStatus } from './services/salaNodeBridge.js';
+import { provisionSalaNodeCert, startSalaNodeCertRenewal, isSalaNodeTlsConfigured, SalaNodeTlsError } from './services/salaNodeTls.js';
 import type { PassepartoutComanda, EsitoChiusuraComanda, PassepartoutArticolo } from './services/passepartoutService.js';
 import { MENU_LANGS, isMenuTranslationConfigured, translateMenuEntries } from './services/menuTranslationService.js';
 import { Shift, PaymentStatus, UserRole } from './types.js';
@@ -27237,6 +27238,26 @@ app.put('/sala-node/settings', authenticate, requirePermission('settings:full'),
     }
 });
 
+// Emissione/rinnovo manuale del certificato TLS del nodo (primo giro dal
+// bottone in card; poi ci pensa il rinnovo giornaliero). Sincrona e lenta:
+// la validazione DNS-01 prende decine di secondi.
+app.post('/sala-node/provision-cert', authenticate, requirePermission('settings:full'), async (req, res) => {
+    if (!isSalaNodeTlsConfigured()) {
+        return res.status(503).json({ error: 'tls_not_configured' });
+    }
+    try {
+        const result = await provisionSalaNodeCert(req.tenantId!);
+        res.json(result);
+    } catch (err: any) {
+        if (err instanceof SalaNodeTlsError) {
+            const status = err.code === 'no_domain' ? 400 : 502;
+            return res.status(status).json({ error: err.code, message: err.message });
+        }
+        console.error('POST /sala-node/provision-cert error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.get('/sala/config', authenticate, async (req, res) => {
     try {
         const [fireMode, stations, printers, jobs, printRoutes, categories, catMap] = await Promise.all([
@@ -27262,12 +27283,22 @@ app.get('/sala/config', authenticate, async (req, res) => {
             },
             // Stato del nodo di sala, speculare ad agent: la card Impostazioni
             // mostra da UN punto solo se il nodo è vivo e quanti client serve.
-            sala_node: {
-                enabled: await getFeatureFlag(req.tenantId!, 'sala_node_enabled', false)
-                    && await isFeatureEnabledForTenant(req.tenantId!, 'sala_node'),
-                ...(await getSalaNodeSettings(req.tenantId!)),
-                ...getSalaNodeStatus(req.tenantId!),
-            },
+            sala_node: await (async () => {
+                const settings = await getSalaNodeSettings(req.tenantId!);
+                const cert = settings.domain
+                    ? await queryWithRetry(
+                        `SELECT expires_at FROM sala_node_certs WHERE tenant_id = $1 AND domain = $2`,
+                        [req.tenantId!, settings.domain]
+                    )
+                    : { rows: [] as any[] };
+                return {
+                    enabled: await getFeatureFlag(req.tenantId!, 'sala_node_enabled', false)
+                        && await isFeatureEnabledForTenant(req.tenantId!, 'sala_node'),
+                    ...settings,
+                    ...getSalaNodeStatus(req.tenantId!),
+                    cert_expires_at: cert.rows[0]?.expires_at ?? null,
+                };
+            })(),
             pending_jobs: jobCount('PENDING'),
             failed_jobs: jobCount('FAILED'),
         });
@@ -27838,6 +27869,10 @@ const startServer = async () => {
                             socketService?.broadcastToAll(tenantId, 'order:updated', view.order);
                         });
                         startOutboxDispatcher();
+                        // Rinnovo certificati del nodo di sala: parte solo a
+                        // migration riuscite (la sua tabella deve esistere) e
+                        // solo se Cloudflare è configurato.
+                        startSalaNodeCertRenewal();
                     } catch (migErr) {
                         console.error('❌ Database migrations failed:', migErr);
                     }
