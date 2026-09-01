@@ -3,6 +3,7 @@ import { Server as HTTPServer } from 'http';
 import type { Reservation, Table, Room, Dish, BanquetMenu, UserRole, TableMerge, TableHiddenOverride, RoomClosedOverride } from '../types.js';
 import { AuthService, TokenPayload } from '../auth/authService.js';
 import { isAllowedOrigin } from './corsAllowlist.js';
+import { mirrorToSalaNode } from './salaNodeBridge.js';
 
 // Extended socket type with user data
 interface AuthenticatedSocket extends Socket {
@@ -131,21 +132,36 @@ export class SocketService {
     return `tenant:${tenantId}`;
   }
 
+  // Punto di emissione unico: ogni broadcast di dominio passa da qui, così
+  // il nodo di sala (salaNodeBridge) riceve lo specchio di OGNI evento con i
+  // nomi-room già composti e li rigioca identici ai client in LAN. Un metodo
+  // broadcast che emette con io.to() diretto è un evento che in modalità
+  // ibrida non arriva mai in cucina: non aggiungerne.
+  private emitTo(tenantId: number, rooms: string[], event: string, data: any, excludeSocketId?: string) {
+    if (rooms.length === 0) return;
+    if (excludeSocketId) {
+      this.io.to(rooms).except(excludeSocketId).emit(event, data);
+    } else {
+      this.io.to(rooms).emit(event, data);
+    }
+    mirrorToSalaNode(tenantId, rooms, event, data, excludeSocketId);
+  }
+
   // Reservation broadcast methods - emit to ALL clients of the tenant,
   // sender INCLUDED (duplicate prevention on client side): the server-side
   // row is authoritative, so the originating client gets it back too.
   broadcastReservationCreated(tenantId: number, reservation: Reservation, _excludeSocketId?: string) {
-    this.io.to(this.tenantRoom(tenantId)).emit('reservation:created', reservation);
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)],'reservation:created', reservation);
     console.log(`Broadcasting reservation:created for ${reservation.customer_name} (tenant ${tenantId})`);
   }
 
   broadcastReservationUpdated(tenantId: number, reservation: Reservation, _excludeSocketId?: string) {
-    this.io.to(this.tenantRoom(tenantId)).emit('reservation:updated', reservation);
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)],'reservation:updated', reservation);
     console.log(`Broadcasting reservation:updated for ${reservation.customer_name} (tenant ${tenantId})`);
   }
 
   broadcastReservationDeleted(tenantId: number, id: number, _excludeSocketId?: string) {
-    this.io.to(this.tenantRoom(tenantId)).emit('reservation:deleted', id);
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)],'reservation:deleted', id);
     console.log(`Broadcasting reservation:deleted for ID ${id} (tenant ${tenantId})`);
   }
 
@@ -155,123 +171,109 @@ export class SocketService {
   // did that edit elsewhere and shouldn't get "Prenotazione aggiornata" spam,
   // one per affected booking.
   broadcastReservationSynced(tenantId: number, reservation: Reservation) {
-    this.io.to(this.tenantRoom(tenantId)).emit('reservation:synced', reservation);
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)],'reservation:synced', reservation);
   }
 
   // Table broadcast methods
   broadcastTableCreated(tenantId: number, table: Table, excludeSocketId?: string) {
     // Broadcast to all tenant clients except the originating socket
-    if (excludeSocketId) {
-      this.io.to(this.tenantRoom(tenantId)).except(excludeSocketId).emit('table:created', table);
-    } else {
-      this.io.to(this.tenantRoom(tenantId)).emit('table:created', table);
-    }
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)], 'table:created', table, excludeSocketId);
     console.log(`Broadcasting table:created for ${table.name} (tenant ${tenantId})`);
   }
 
   broadcastTableUpdated(tenantId: number, table: Table, excludeSocketId?: string) {
-    // Broadcast to all tenant clients except the originating socket
-    if (excludeSocketId) {
-      this.io.to(this.tenantRoom(tenantId)).except(excludeSocketId).emit('table:updated', table);
-      this.io.to(`tenant:${tenantId}:room:${table.room_id}`).except(excludeSocketId).emit('table:updated', table);
-    } else {
-      this.io.to(this.tenantRoom(tenantId)).emit('table:updated', table);
-      this.io.to(`tenant:${tenantId}:room:${table.room_id}`).emit('table:updated', table);
-    }
+    // Broadcast to all tenant clients except the originating socket.
+    // Due emissioni distinte (non un unico to([a, b])) di proposito: chi è
+    // iscritto anche alla room della sala riceve l'evento due volte, com'è
+    // sempre stato — i listener client sono idempotenti per contratto.
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)], 'table:updated', table, excludeSocketId);
+    this.emitTo(tenantId, [`tenant:${tenantId}:room:${table.room_id}`], 'table:updated', table, excludeSocketId);
     console.log(`Broadcasting table:updated for ${table.name} (tenant ${tenantId})`);
   }
 
   broadcastTableDeleted(tenantId: number, id: number) {
-    this.io.to(this.tenantRoom(tenantId)).emit('table:deleted', id);
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)],'table:deleted', id);
     console.log(`Broadcasting table:deleted for ID ${id} (tenant ${tenantId})`);
   }
 
   // Per-shift table merge events
   broadcastTableMergeCreated(tenantId: number, merge: TableMerge, excludeSocketId?: string) {
-    if (excludeSocketId) {
-      this.io.to(this.tenantRoom(tenantId)).except(excludeSocketId).emit('tableMerge:created', merge);
-    } else {
-      this.io.to(this.tenantRoom(tenantId)).emit('tableMerge:created', merge);
-    }
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)], 'tableMerge:created', merge, excludeSocketId);
     console.log(`Broadcasting tableMerge:created for ${merge.date} ${merge.shift} primary=${merge.primary_id} (tenant ${tenantId})`);
   }
 
   broadcastTableMergeDeleted(tenantId: number, merge: TableMerge, excludeSocketId?: string) {
-    if (excludeSocketId) {
-      this.io.to(this.tenantRoom(tenantId)).except(excludeSocketId).emit('tableMerge:deleted', merge);
-    } else {
-      this.io.to(this.tenantRoom(tenantId)).emit('tableMerge:deleted', merge);
-    }
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)], 'tableMerge:deleted', merge, excludeSocketId);
     console.log(`Broadcasting tableMerge:deleted for ${merge.date} ${merge.shift} primary=${merge.primary_id} (tenant ${tenantId})`);
   }
 
   // Per-shift hidden table events
   broadcastTableHiddenCreated(tenantId: number, hidden: TableHiddenOverride) {
-    this.io.to(this.tenantRoom(tenantId)).emit('tableHidden:created', hidden);
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)],'tableHidden:created', hidden);
     console.log(`Broadcasting tableHidden:created for ${hidden.date} ${hidden.shift} table=${hidden.table_id} (tenant ${tenantId})`);
   }
 
   broadcastTableHiddenDeleted(tenantId: number, hidden: TableHiddenOverride) {
-    this.io.to(this.tenantRoom(tenantId)).emit('tableHidden:deleted', hidden);
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)],'tableHidden:deleted', hidden);
     console.log(`Broadcasting tableHidden:deleted for ${hidden.date} ${hidden.shift} table=${hidden.table_id} (tenant ${tenantId})`);
   }
 
   // Per-shift room closure events
   broadcastRoomClosedCreated(tenantId: number, closed: RoomClosedOverride) {
-    this.io.to(this.tenantRoom(tenantId)).emit('roomClosed:created', closed);
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)],'roomClosed:created', closed);
     console.log(`Broadcasting roomClosed:created for ${closed.date} ${closed.shift} room=${closed.room_id} (tenant ${tenantId})`);
   }
 
   broadcastRoomClosedDeleted(tenantId: number, closed: RoomClosedOverride) {
-    this.io.to(this.tenantRoom(tenantId)).emit('roomClosed:deleted', closed);
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)],'roomClosed:deleted', closed);
     console.log(`Broadcasting roomClosed:deleted for ${closed.date} ${closed.shift} room=${closed.room_id} (tenant ${tenantId})`);
   }
 
   // Room broadcast methods
   broadcastRoomCreated(tenantId: number, room: Room) {
-    this.io.to(this.tenantRoom(tenantId)).emit('room:created', room);
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)],'room:created', room);
     console.log(`Broadcasting room:created for ${room.name} (tenant ${tenantId})`);
   }
 
   broadcastRoomUpdated(tenantId: number, room: Room) {
-    this.io.to(this.tenantRoom(tenantId)).emit('room:updated', room);
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)],'room:updated', room);
     console.log(`Broadcasting room:updated for ${room.name} (tenant ${tenantId})`);
   }
 
   broadcastRoomDeleted(tenantId: number, id: number) {
-    this.io.to(this.tenantRoom(tenantId)).emit('room:deleted', id);
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)],'room:deleted', id);
     console.log(`Broadcasting room:deleted for ID ${id} (tenant ${tenantId})`);
   }
 
   // Dish broadcast methods
   broadcastDishCreated(tenantId: number, dish: Dish) {
-    this.io.to(this.tenantRoom(tenantId)).emit('dish:created', dish);
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)],'dish:created', dish);
     console.log(`Broadcasting dish:created for ${dish.name} (tenant ${tenantId})`);
   }
 
   broadcastDishUpdated(tenantId: number, dish: Dish) {
-    this.io.to(this.tenantRoom(tenantId)).emit('dish:updated', dish);
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)],'dish:updated', dish);
     console.log(`Broadcasting dish:updated for ${dish.name} (tenant ${tenantId})`);
   }
 
   broadcastDishDeleted(tenantId: number, id: number) {
-    this.io.to(this.tenantRoom(tenantId)).emit('dish:deleted', id);
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)],'dish:deleted', id);
     console.log(`Broadcasting dish:deleted for ID ${id} (tenant ${tenantId})`);
   }
 
   // Banquet Menu broadcast methods
   broadcastBanquetCreated(tenantId: number, menu: BanquetMenu) {
-    this.io.to(this.tenantRoom(tenantId)).emit('banquet:created', menu);
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)],'banquet:created', menu);
     console.log(`Broadcasting banquet:created for ${menu.name} (tenant ${tenantId})`);
   }
 
   broadcastBanquetUpdated(tenantId: number, menu: BanquetMenu) {
-    this.io.to(this.tenantRoom(tenantId)).emit('banquet:updated', menu);
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)],'banquet:updated', menu);
     console.log(`Broadcasting banquet:updated for ${menu.name} (tenant ${tenantId})`);
   }
 
   broadcastBanquetDeleted(tenantId: number, id: number) {
-    this.io.to(this.tenantRoom(tenantId)).emit('banquet:deleted', id);
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)],'banquet:deleted', id);
     console.log(`Broadcasting banquet:deleted for ID ${id} (tenant ${tenantId})`);
   }
 
@@ -283,7 +285,7 @@ export class SocketService {
     const room = stationId == null
       ? `tenant:${tenantId}:station:none`
       : `tenant:${tenantId}:station:${stationId}`;
-    this.io.to(room).emit(event, data);
+    this.emitTo(tenantId, [room], event, data);
   }
 
   // Chat staff — emissione mirata sulle room per utente / per ruolo (vedi
@@ -291,23 +293,13 @@ export class SocketService {
   // più room, quindi passare mittente e destinatario insieme è sicuro.
   broadcastToUsers(tenantId: number, userIds: number[], event: string, data: any, excludeSocketId?: string) {
     const rooms = userIds.map(id => `tenant:${tenantId}:user:${id}`);
-    if (rooms.length === 0) return;
-    if (excludeSocketId) {
-      this.io.to(rooms).except(excludeSocketId).emit(event, data);
-    } else {
-      this.io.to(rooms).emit(event, data);
-    }
+    this.emitTo(tenantId, rooms, event, data, excludeSocketId);
   }
 
   // Il nome evita la collisione con pushService.sendToRoles.
   broadcastToRolesRoom(tenantId: number, roles: string[], event: string, data: any, excludeSocketId?: string) {
     const rooms = roles.map(role => `tenant:${tenantId}:role:${role}`);
-    if (rooms.length === 0) return;
-    if (excludeSocketId) {
-      this.io.to(rooms).except(excludeSocketId).emit(event, data);
-    } else {
-      this.io.to(rooms).emit(event, data);
-    }
+    this.emitTo(tenantId, rooms, event, data, excludeSocketId);
   }
 
   broadcastToAll(tenantId: number, event: string, data: any, excludeSocketId?: string) {
@@ -316,11 +308,7 @@ export class SocketService {
     // Fase B5: "all" significa tutti i client del tenant, non tutti i socket.
     // L'excludeSocketId (header X-Socket-ID) torna onorato: chi ha originato
     // la scrittura ha già aggiornato il proprio stato in locale.
-    if (excludeSocketId) {
-      this.io.to(this.tenantRoom(tenantId)).except(excludeSocketId).emit(event, data);
-    } else {
-      this.io.to(this.tenantRoom(tenantId)).emit(event, data);
-    }
+    this.emitTo(tenantId, [this.tenantRoom(tenantId)], event, data, excludeSocketId);
   }
 
   // Get Socket.IO instance (for advanced usage if needed)

@@ -35,6 +35,16 @@ export interface AuthTokens {
 }
 
 export class AuthService {
+  // Il segreto di firma dei token d'accesso, per il provisioning del nodo di
+  // sala (/sala-node/credentials): il nodo verifica i JWT dei client LAN in
+  // locale, e deve farlo con LO STESSO segreto — un fallback duplicato
+  // altrove può divergere in silenzio. Rischio noto e accettato per la
+  // tappa 3 (hardware del fornitore, un solo tenant); il fix strutturale è
+  // RS256 con la sola chiave pubblica sul nodo (tappa 4).
+  static getAccessTokenSecret(): string {
+    return JWT_SECRET;
+  }
+
   // Hash password using bcrypt
   static async hashPassword(password: string): Promise<string> {
     const salt = await bcrypt.genSalt(12);

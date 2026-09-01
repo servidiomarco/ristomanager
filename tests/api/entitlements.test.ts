@@ -9,7 +9,7 @@ import { api, ownerToken, bearer } from './helpers';
 // l'endpoint scarta gli slot già passati e il test dipenderebbe dall'orologio.
 const DATA_FUTURA = '2027-03-10';
 
-const TUTTO_ATTIVO = { voice: true, whatsapp: true, web_booking: true, pay_at_table: true, passepartout: true };
+const TUTTO_ATTIVO = { voice: true, whatsapp: true, web_booking: true, pay_at_table: true, passepartout: true, sala_node: true };
 
 describe('entitlements (tenant_features)', () => {
     // Qualunque cosa succeda nei test, il tenant 1 torna com'era: i file di
