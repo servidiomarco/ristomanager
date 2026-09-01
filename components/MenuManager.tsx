@@ -1048,7 +1048,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               <div className="mb-4">
                 <Callout tone={importError ? 'critical' : 'positive'}>
                   {importError
-                    ?? `Menu allineato alla cassa: ${importEsito!.creati} nuovi, ${importEsito!.aggiornati} aggiornati, ${importEsito!.disattivati} disattivati${importEsito!.gruppi_varianti ? `, ${importEsito!.gruppi_varianti} gruppi varianti` : ''}.`}
+                    ?? `Menu allineato alla cassa: ${importEsito!.creati} nuovi, ${importEsito!.aggiornati} aggiornati, ${importEsito!.disattivati} disattivati${importEsito!.eliminati ? `, ${importEsito!.eliminati} rimossi` : ''}${importEsito!.gruppi_varianti ? `, ${importEsito!.gruppi_varianti} gruppi varianti` : ''}.`}
                 </Callout>
               </div>
             )}

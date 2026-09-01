@@ -3520,10 +3520,15 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
         // incluse) prima che l'agente lo riduca agli ~85KB che viaggiano qui.
         const articoli = await callPassepartout<PassepartoutArticolo[]>('articoli', {}, 150_000);
         // Solo le voci di menu vere: le varianti di battitura, il coperto e
-        // gli acconti non sono piatti.
+        // gli acconti non sono piatti. E solo le voci ACCESE: in Passepartout
+        // un articolo o una categoria con storico non si può eliminare, si
+        // disattiva — quelle voci "mute" non sono menu e non devono diventare
+        // righe del CRM. Un articolo già importato che poi viene spento in
+        // cassa esce da `refs` e lo spegne (o elimina) il consuntivo in fondo.
         const IMPORTABILI = new Set(['Semplice', 'Generico']);
         const validi = articoli.filter(a => a && Number.isFinite(Number(a.idGestionale))
-            && IMPORTABILI.has(String(a.tipo)) && String(a.descrizione ?? '').trim() !== '');
+            && IMPORTABILI.has(String(a.tipo)) && String(a.descrizione ?? '').trim() !== ''
+            && a.attivo === true && a.categoriaAttiva !== false);
 
         // Varianti: nel gestionale sono articoli (tipo Variante) referenziati
         // per Codice dagli articoli veri e dalle categorie. Qui diventano
@@ -3632,6 +3637,22 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
                    AND is_active AND NOT (external_ref = ANY($2::text[]))`,
                 [req.tenantId!, refs]
             );
+            // I piatti pp spenti che il CRM non ha mai toccato spariscono del
+            // tutto: sono le voci mute della cassa (o articoli rimossi) che
+            // qui non hanno né storico comande né contenuti propri, e in
+            // gestione menu sarebbero solo rumore. Chi ha ordini, foto,
+            // descrizione, allergeni o traduzioni resta — spento — perché
+            // eliminarlo butterebbe via lavoro del CRM.
+            const del = await client.query(
+                `DELETE FROM dishes d
+                 WHERE d.tenant_id = $1 AND d.external_ref LIKE 'pp:articolo:%'
+                   AND NOT d.is_active AND NOT (d.external_ref = ANY($2::text[]))
+                   AND NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.dish_id = d.id)
+                   AND COALESCE(d.description, '') = '' AND d.photo_url IS NULL
+                   AND COALESCE(array_length(d.allergens, 1), 0) = 0
+                   AND d.translations IS NULL`,
+                [req.tenantId!, refs]
+            );
             // Gruppi pp rimasti senza piatti: si eliminano (CASCADE sui membri).
             await client.query(
                 `DELETE FROM modifier_groups g
@@ -3639,7 +3660,7 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
                    AND NOT EXISTS (SELECT 1 FROM dish_modifier_groups l WHERE l.group_id = g.id)`,
                 [req.tenantId!]
             );
-            return { creati, aggiornati, disattivati: off.rowCount ?? 0, gruppi_varianti: groupCache.size };
+            return { creati, aggiornati, disattivati: off.rowCount ?? 0, eliminati: del.rowCount ?? 0, gruppi_varianti: groupCache.size };
         });
 
         // Un evento solo, non centinaia di dish:updated: i client ricaricano
@@ -3649,7 +3670,7 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
             LogService.logActivity(
                 req.tenantId!, req.user.userId, req.user.email, req.user.email,
                 ActivityAction.UPDATE, ResourceType.DISH, undefined,
-                `Menu importato dalla cassa: ${esito.creati} nuovi, ${esito.aggiornati} aggiornati, ${esito.disattivati} disattivati`
+                `Menu importato dalla cassa: ${esito.creati} nuovi, ${esito.aggiornati} aggiornati, ${esito.disattivati} disattivati, ${esito.eliminati} eliminati`
             ).catch(() => {});
         }
         res.json({ totale_cassa: articoli.length, importabili: validi.length, ...esito });

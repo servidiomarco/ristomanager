@@ -413,6 +413,8 @@ export interface MenuImportResult {
   creati: number;
   aggiornati: number;
   disattivati: number;
+  /** Piatti pp spenti in cassa e mai usati nel CRM, rimossi del tutto. */
+  eliminati?: number;
   /** Gruppi varianti sincronizzati (set distinti di varianti della cassa). */
   gruppi_varianti?: number;
 }

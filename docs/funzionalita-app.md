@@ -309,7 +309,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 
 Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 
-- **Import del menu** dal catalogo articoli della cassa, varianti comprese.
+- **Import del menu** dal catalogo articoli della cassa, varianti comprese. Le voci disattivate in cassa (articoli e categorie "muti", tenuti lì solo per lo storico) non entrano nel menu del CRM; se erano già state importate, il sync le rimuove.
 - Anteprima della comanda attiva su un tavolo della cassa e **importazione del conto** nel CRM.
 - **Chiusura del conto in cassa dal CRM**: scontrino e saldo partono verso il gestionale; ritentabile se la cassa era irraggiungibile.
 - Collegamento sicuro cloud↔ristorante tramite un piccolo agente installato sulla LAN (nessuna porta aperta verso l'esterno), con stato di connessione visibile.
@@ -531,6 +531,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-01 | Integrazione cassa Passepartout | L'import del menu salta le voci disattivate in cassa (articoli e categorie tenuti per lo storico) e rimuove quelle importate in passato, se mai usate nel CRM. |
 | 2026-09-01 | Comande, Cucina e Passe | Col toggle Passe spento le icone chiama/servito stanno sulle card del monitor cucina (campanella = prossima uscita in coda, spunta = servita), non sulla comanda, che torna com'era. |
 | 2026-09-01 | Comande, Cucina e Passe | Toggle "Passe" in Impostazioni → Sala e cucina: spento, la pagina Passe sparisce e i verbi chiama/servito passano alla cucina — i tempi si battono senza expediter. |
 | 2026-09-01 | Prenotazioni | Mappa tavoli a tutto schermo: icona "ingrandisci" in alto a sinistra della mappa, uscita con la stessa icona o con Esc. |

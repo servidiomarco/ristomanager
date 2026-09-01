@@ -322,6 +322,10 @@ export interface PassepartoutArticolo {
     tipo: string | null;
     categoria: string | null;
     categoriaPadre: string | null;
+    /** false se la categoria (o la sua padre) è disattivata in cassa: in
+     *  Passepartout le voci con storico non si eliminano, si spengono — e
+     *  quelle non sono menu. Default true se il campo manca nel contratto. */
+    categoriaAttiva: boolean;
     /** Codici delle varianti attaccate all'ARTICOLO (es. "Ghiaccio"): sono i
      *  Codice di altri articoli del catalogo di tipo Variante. */
     varianti: string[];
@@ -359,6 +363,10 @@ export async function getArticoliMenu(ultimaModifica?: string): Promise<Passepar
             if (id == null) return null;
             const cat = a.Categoria && !isNil(a.Categoria) ? a.Categoria : null;
             const padre = cat?.Padre && !isNil(cat.Padre) ? cat.Padre : null;
+            // IsAttivo sulla categoria: presente solo su alcune installazioni,
+            // e un campo assente NON significa categoria spenta — default true.
+            const catAttiva = (c: Record<string, any> | null): boolean =>
+                c == null || c.IsAttivo == null ? true : asBoolean(c.IsAttivo);
             // AliquotaIVA è un contratto ("10%" nel Codice, "10.00" in
             // Percentuale) ma su qualche installazione arriva come stringa:
             // si prova Percentuale, poi il numero dentro la stringa.
@@ -378,6 +386,7 @@ export async function getArticoliMenu(ultimaModifica?: string): Promise<Passepar
                 categoriaPadre: padre ? asString(padre.Descrizione) : null,
                 varianti: codici(a.Varianti),
                 categoriaVarianti: codici(cat?.Varianti),
+                categoriaAttiva: catAttiva(cat) && catAttiva(padre),
             } satisfies PassepartoutArticolo;
         })
         .filter((a): a is PassepartoutArticolo => a != null);
