@@ -135,6 +135,28 @@ describe('documenti fiscali', () => {
         expect(again.body.doc.id).toBe(confirmedDocId);
     });
 
+    it('lo scontrino digitale si legge dal token pubblico, senza login', async () => {
+        const doc = await api().post(`/bills/${billId}/fiscal-docs`).set(bearer(token)).send({});
+        expect(doc.status).toBe(200);
+        const publicToken = String(doc.body.doc.public_token ?? '');
+        expect(publicToken.length).toBeGreaterThanOrEqual(32);
+
+        // Nessun bearer: il token È la capability, come /pay/:token.
+        const page = await api().get(`/scontrino/${publicToken}`);
+        expect(page.status).toBe(200);
+        expect(page.body.receipt.status).toBe('CONFIRMED');
+        expect(page.body.receipt.total_cents).toBe(5000);
+        expect(page.body.receipt.items).toEqual([
+            { description: 'Consumazione', quantity: 1, unit_price_cents: 5000, vat_rate_code: '10.00' },
+        ]);
+        expect(page.body.receipt.cash_cents).toBe(3000);
+        expect(page.body.receipt.electronic_cents).toBe(2000);
+        expect(page.body.business.vat_number).toBe('11122211133');
+
+        const missing = await api().get(`/scontrino/${'0'.repeat(64)}`);
+        expect(missing.status).toBe(404);
+    });
+
     it('l\'annullo porta a VOIDED e libera il posto per un nuovo documento', async () => {
         const voided = await api().post(`/bills/${billId}/fiscal-docs/${confirmedDocId}/void`).set(bearer(token)).send({});
         expect(voided.status).toBe(200);

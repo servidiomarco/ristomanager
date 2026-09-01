@@ -41,7 +41,7 @@ const euro = (cents: number) => formatEuro(cents);
 
 type BillLike =
   Pick<OpenBillRow, 'id' | 'table_name' | 'total_cents' | 'covers' | 'share_token' | 'items'>
-  & Partial<Pick<OpenBillRow, 'paid_cents' | 'residual_cents' | 'open_orders' | 'deposit_credit_cents' | 'deposit_paid_cents' | 'refund_due_cents' | 'cash_settled_cents' | 'status' | 'fiscal_status' | 'fiscal_doc_id' | 'fiscal_error' | 'fiscal_provider' | 'fiscal_ref' | 'fiscal_doc_type' | 'fiscal_doc_number' | 'external_ref' | 'payments'>>;
+  & Partial<Pick<OpenBillRow, 'paid_cents' | 'residual_cents' | 'open_orders' | 'deposit_credit_cents' | 'deposit_paid_cents' | 'refund_due_cents' | 'cash_settled_cents' | 'status' | 'fiscal_status' | 'fiscal_doc_id' | 'fiscal_error' | 'fiscal_provider' | 'fiscal_ref' | 'fiscal_doc_type' | 'fiscal_doc_number' | 'fiscal_public_token' | 'external_ref' | 'payments'>>;
 
 const isSettled = (bill: BillLike) => bill.residual_cents === 0;
 
@@ -665,6 +665,7 @@ export const FiscalCard: React.FC<{
   const [armed, setArmed] = useState(false);
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [printedFlash, setPrintedFlash] = useState(false);
 
   // Solo un conto CLOSED (saldato per intero) emette; la card compare anche
   // quando un documento esiste già, qualunque sia lo stato del conto.
@@ -725,10 +726,39 @@ export const FiscalCard: React.FC<{
             Fattura {bill.fiscal_doc_number ?? bill.fiscal_ref} inviata a SDI. Lo storno passa da una nota di credito.
           </p>
         )}
-        {st === 'CONFIRMED' && !proforma && !invoice && bill.fiscal_ref && (
+        {st === 'CONFIRMED' && !proforma && !invoice && (bill.fiscal_doc_number || bill.fiscal_ref) && (
           <p className="text-[13px] text-[var(--ds-text-muted)]">
-            Scontrino {bill.fiscal_ref}{viaPP ? ' · emesso via Passepartout' : ''}
+            Scontrino {bill.fiscal_doc_number ?? bill.fiscal_ref}{viaPP ? ' · emesso via Passepartout' : ''}
           </p>
+        )}
+        {/* Il documento emesso si consegna: QR per l'ospite (pagina pubblica
+            /scontrino/<token>, sopravvive alla serata) e copia di cortesia
+            sulla termica. Solo per i nativi: quello Passepartout esce
+            dall'RT di cassa, di carta ce n'è già una. */}
+        {st === 'CONFIRMED' && !proforma && !invoice && !viaPP && bill.fiscal_public_token && (
+          <div className="flex items-center gap-4 rounded-[14px] bg-[var(--ds-surface-row)] p-3">
+            <div className="rounded-[10px] bg-white p-2" aria-hidden>
+              <QRCodeSVG value={`${window.location.origin}/scontrino/${bill.fiscal_public_token}`} size={96} level="M" />
+            </div>
+            <div className="min-w-0 space-y-2">
+              <p className="text-[13px] leading-snug text-[var(--ds-text-secondary)]">
+                L'ospite lo inquadra e ha lo scontrino digitale sul telefono.
+              </p>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => run(async () => {
+                  await printBill(bill.id, 'SCONTRINO');
+                  setPrintedFlash(true);
+                  setTimeout(() => setPrintedFlash(false), 4000);
+                })}
+                className={quiet}
+              >
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                {printedFlash ? 'Copia in stampa' : 'Stampa copia'}
+              </button>
+            </div>
+          </div>
         )}
         {st === 'FAILED' && bill.fiscal_error && (
           <p className="text-[13px] text-[var(--ds-critical-text)] break-words">{bill.fiscal_error}</p>

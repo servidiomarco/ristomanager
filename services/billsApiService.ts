@@ -300,8 +300,12 @@ export interface OpenBillRow {
   fiscal_ref?: string | null;
   /** RECEIPT = scontrino; PROFORMA = chiusura "paga dopo", conto a sospeso in cassa. */
   fiscal_doc_type?: 'RECEIPT' | 'PROFORMA' | 'INVOICE' | null;
-  /** Numero fattura nostro (numerazione annuale), solo per doc INVOICE. */
+  /** Numero del documento: fattura nostra (numerazione annuale) o numero
+   *  del documento commerciale Openapi ("0005-0005"). */
   fiscal_doc_number?: string | null;
+  /** Capability dello scontrino digitale: /scontrino/<token> lo mostra
+   *  all'ospite senza login. Presente su ogni documento nativo. */
+  fiscal_public_token?: string | null;
   /** "pp:comanda:<id>" quando il conto nasce da una comanda Passepartout. */
   external_ref?: string | null;
   /** Movimenti vivi del libro cassa: come è stato pagato il conto. */
@@ -362,7 +366,7 @@ export const getBillOrder = async (billId: number): Promise<any> =>
  *  la SPA (IP in LAN, dominio in produzione). */
 export const printBill = async (
   billId: number,
-  kind: 'PRECONTO' | 'QR' = 'PRECONTO',
+  kind: 'PRECONTO' | 'QR' | 'SCONTRINO' = 'PRECONTO',
 ): Promise<{ id: number; status: string }> =>
   apiRequest<{ id: number; status: string }>(`${API_URL}/print-jobs`, {
     method: 'POST',

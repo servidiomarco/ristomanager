@@ -441,6 +441,7 @@ export interface CashClosureBillRow {
   fiscal_doc_type: 'RECEIPT' | 'PROFORMA' | 'INVOICE' | null;
   fiscal_status: FiscalDocumentStatus | null;
   fiscal_doc_number: string | null;
+  fiscal_public_token: string | null;
   payments: { method: BillPaymentMethod; amount_cents: number }[];
 }
 

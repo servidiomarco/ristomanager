@@ -150,6 +150,78 @@ function renderPreconto(p) {
   return Buffer.from(bytes);
 }
 
+// Copia di cortesia del documento commerciale gia' emesso via provider
+// cloud: intestazione dell'esercizio, righe come le ha ricevute il provider,
+// numero e data del documento, QR verso lo scontrino digitale. NON e' il
+// documento fiscale (quello e' il corrispettivo telematico trasmesso): lo
+// dice l'ultima riga, sempre.
+function renderScontrino(p) {
+  const bytes = [];
+  const push = (...b) => bytes.push(...b);
+  const text = s => push(...Buffer.from(s.replace(/…/g, '.'), 'latin1'));
+  const euroStr = s => String(s ?? '0.00').replace('.', ',');
+
+  push(ESC, 0x40);
+  push(ESC, 0x74, 16);
+  push(ESC, 0x47, 1);
+  push(ESC, 0x61, 1);        // center
+  push(ESC, 0x45, 1);
+  text(`${(p.business_name ?? '').toUpperCase()}\n`);
+  push(ESC, 0x45, 0);
+  if (p.business_address) text(`${p.business_address}\n`);
+  if (p.vat_number) text(`P.IVA ${p.vat_number}\n`);
+  text('-'.repeat(COLS) + '\n');
+  text('COPIA DOCUMENTO COMMERCIALE\n');
+  text('di vendita o prestazione\n');
+  text('-'.repeat(COLS) + '\n');
+  push(ESC, 0x61, 0);        // left
+
+  push(GS, 0x21, 0x01);      // double height come il preconto
+  for (const i of p.items ?? []) {
+    const qty = parseFloat(String(i.quantity ?? '1')) || 1;
+    const unit = Math.round((parseFloat(String(i.unit_price ?? '0')) || 0) * 100);
+    text(row(`${qty}x ${i.description ?? ''}`, euro(unit * qty)));
+  }
+  push(GS, 0x21, 0x00);
+  text('-'.repeat(COLS) + '\n');
+  push(ESC, 0x45, 1);
+  push(GS, 0x21, 0x01);
+  text(row('TOTALE EUR', euro(p.total_cents ?? 0)));
+  push(GS, 0x21, 0x00);
+  push(ESC, 0x45, 0);
+  if (parseFloat(String(p.cash_payment_amount ?? '0')) > 0) text(row('Contanti', euroStr(p.cash_payment_amount)));
+  if (parseFloat(String(p.electronic_payment_amount ?? '0')) > 0) text(row('Elettronico', euroStr(p.electronic_payment_amount)));
+  if (parseFloat(String(p.ticket_restaurant_payment_amount ?? '0')) > 0) text(row('Buoni pasto', euroStr(p.ticket_restaurant_payment_amount)));
+  text('\n');
+  if (p.doc_number) text(`Documento n. ${p.doc_number}\n`);
+  if (p.document_date) {
+    const d = new Date(p.document_date);
+    if (!Number.isNaN(d.getTime())) {
+      const pad = n => String(n).padStart(2, '0');
+      text(`del ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}\n`);
+    }
+  }
+  if (p.table_name) text(`Tavolo ${p.table_name}\n`);
+
+  if (p.receipt_url) {
+    push(ESC, 0x61, 1);
+    text('\n');
+    const data = Buffer.from(p.receipt_url, 'latin1');
+    push(GS, 0x28, 0x6b, 4, 0, 49, 65, 50, 0);   // QR model 2
+    push(GS, 0x28, 0x6b, 3, 0, 49, 67, 8);       // module size 8 (v. preconto)
+    push(GS, 0x28, 0x6b, 3, 0, 49, 69, 51);      // error correction H
+    const len = data.length + 3;
+    push(GS, 0x28, 0x6b, len & 0xff, len >> 8, 49, 80, 48, ...data);
+    push(GS, 0x28, 0x6b, 3, 0, 49, 81, 48);      // print
+    text('\ninquadra per lo scontrino digitale\n');
+  }
+
+  push(ESC, 0x61, 1);
+  text('\ncopia di cortesia - non fiscale\n\n\n');
+  push(GS, 0x56, 0x42, 0x00); // taglio parziale
+  return Buffer.from(bytes);
+}
+
 // Foglietto solo-QR da appoggiare al tavolo: niente righe, niente prezzi di
 // dettaglio — il codice grande, il totale e basta. Il preconto completo resta
 // il documento da consegnare in mano.
@@ -278,6 +350,7 @@ async function drainPrinter(name, dest, jobs) {
     let rendered;
     try {
       rendered = job.kind === 'PRECONTO' ? renderPreconto(job.payload)
+               : job.kind === 'SCONTRINO' ? renderScontrino(job.payload)
                : job.kind === 'QR' ? renderQr(job.payload)
                : job.kind === 'COMANDA' ? renderComanda(job.payload)
                : job.kind === 'TEST' ? renderTest(job.payload)

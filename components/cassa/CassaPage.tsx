@@ -10,7 +10,7 @@ import {
   updateOrder, voidItem, closeOrder, setOrderDiscount,
   type MenuCatalogue, type NewOrderItem, type ServiceBill,
 } from '../../services/ordersApiService';
-import { billsApiService, getOpenBills, type OpenBillRow } from '../../services/billsApiService';
+import { billsApiService, getOpenBills, printBill, type OpenBillRow } from '../../services/billsApiService';
 import { cashApiService } from '../../services/cashApiService';
 import { socketClient } from '../../services/socketClient';
 import { useOpenBills } from '../pagamenti/useOpenBills';
@@ -93,6 +93,35 @@ export const CassaPage: React.FC<CassaPageProps> = ({
   // L'importo scelto in «Dividi conto»: precompila il pannello di incasso.
   const [quotaCents, setQuotaCents] = useState<number | null>(null);
   const [esito, setEsito] = useState<{ kind: Esito; bill: OpenBillRow } | null>(null);
+
+  // L'emissione dello scontrino è asincrona: l'esito si apre spesso col
+  // documento ancora PENDING. Quando la conferma arriva via socket, i campi
+  // fiscali della schermata si aggiornano da soli — è il momento in cui
+  // compare il QR per l'ospite, col cliente ancora davanti alla cassa.
+  useEffect(() => {
+    const socket = socketClient.getSocket();
+    if (!socket) return;
+    const onFiscal = (p: any) => {
+      const doc = p?.doc;
+      if (!doc || !p?.bill_id) return;
+      setEsito(prev => prev && prev.bill.id === p.bill_id
+        ? {
+            ...prev,
+            bill: {
+              ...prev.bill,
+              fiscal_status: doc.status ?? prev.bill.fiscal_status,
+              fiscal_doc_type: doc.doc_type ?? prev.bill.fiscal_doc_type,
+              fiscal_doc_number: doc.doc_number ?? prev.bill.fiscal_doc_number,
+              fiscal_ref: doc.provider_ref ?? prev.bill.fiscal_ref,
+              fiscal_provider: doc.provider ?? prev.bill.fiscal_provider,
+              fiscal_public_token: doc.public_token ?? prev.bill.fiscal_public_token,
+            },
+          }
+        : prev);
+    };
+    socket.on('fiscal:updated', onFiscal);
+    return () => { socket.off('fiscal:updated', onFiscal); };
+  }, []);
   const [tx, setTx] = useState<CashTransactionsView | null>(null);
   const [customerOpen, setCustomerOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -573,7 +602,16 @@ export const CassaPage: React.FC<CassaPageProps> = ({
           totalCents={esito.bill.total_cents}
           tableName={esito.bill.table_name}
           closedAt={esito.bill.closed_at ?? null}
-          docNumber={esito.bill.fiscal_ref ?? esito.bill.fiscal_doc_number ?? null}
+          docNumber={esito.bill.fiscal_doc_number ?? esito.bill.fiscal_ref ?? null}
+          receiptToken={esito.bill.fiscal_status === 'CONFIRMED'
+            && esito.bill.fiscal_doc_type === 'RECEIPT'
+            && esito.bill.fiscal_provider !== 'passepartout'
+            ? esito.bill.fiscal_public_token ?? null : null}
+          onPrintReceipt={async () => {
+            setError(null);
+            try { await printBill(esito.bill.id, 'SCONTRINO'); }
+            catch (err: any) { setError(err?.data?.message ?? err?.data?.error ?? err?.message ?? 'Stampa non riuscita'); }
+          }}
           busy={busyBillId != null}
           onRetryDocument={async () => {
             setBusyBillId(esito.bill.id);

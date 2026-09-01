@@ -293,6 +293,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 ## Fiscalità: scontrino, fattura elettronica, proforma
 
 - **Scontrino elettronico** (documento commerciale) emesso via provider (Openapi.com) direttamente dal conto; se la trasmissione fallisce **il servizio non si ferma**: il conto si chiude comunque e il documento si ritenta dopo.
+- **Scontrino digitale per l'ospite**: appena il documento è confermato, l'esito di chiusura (e la scheda del conto) mostra un **QR** — il cliente lo inquadra e ha lo scontrino sul telefono, su una pagina pubblica salvabile e stampabile, senza login. Accanto, **"Stampa copia"** manda la copia di cortesia (non fiscale, con lo stesso QR) alla stampante termica.
 - **Fattura elettronica SDI** dal conto: dati di fatturazione presi dalla scheda cliente (denominazione, P.IVA, CF, codice SDI, PEC), XML FatturaPA generato e trasmesso.
 - **Proforma** quando lo scontrino non è previsto; annullo del documento fiscale come atto separato (il conto non si tocca).
 - Configurazione: dati esercente, provider, **mappa aliquote IVA** (l'aliquota vive sul piatto; riepilogo IVA per aliquota anche sul preconto stampato), numerazione fatture per anno.
@@ -525,6 +526,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-01 | Fiscalità | Scontrino digitale: QR sull'esito di chiusura e sulla scheda del conto (pagina pubblica per l'ospite, senza login) + copia di cortesia sulla termica; il numero del documento Openapi ora è salvato e mostrato. |
 | 2026-09-01 | Pagamenti, conto al tavolo e cassa | Nel report di chiusura un tocco sul conto apre la sua scheda con lo scontrino elettronico (emetti/riprova/annulla) — l'azione era rimasta orfana col ritiro del tab "Conti aperti". |
 | 2026-09-01 | Pagamenti, conto al tavolo e cassa | Riordino Cassa/Pagamenti: ritirato il tab "Conti aperti" (si incassa solo dalla Cassa), il tab "Cassa" si chiama "Chiusura", e le due pagine si rimandano a vicenda (conti da incassare → Cassa; cassetto chiuso → chiusura del giorno). |
 | 2026-09-01 | Comande, Cucina e Passe | Le griglie tavoli di Comande e Cassa mostrano i tavoli uniti come una tessera sola («11+12», coperti sommati); il tocco apre il tavolo giusto dell'unione. |
