@@ -71,6 +71,7 @@ import { useAppBadge } from './hooks/useAppBadge';
 import { useScrollFade } from './hooks/useScrollFade';
 import { offlineQueue } from './services/offlineQueue';
 import { socketClient } from './services/socketClient';
+import { refreshNodeConfig, onRoutingChange } from './services/apiRouting';
 import { voiceCallsApiService, voiceCallsCache } from './services/voiceCallsApiService';
 import { messagesApiService, inboxCache } from './services/messagesApiService';
 import { clearConfigCache } from './services/configCache';
@@ -388,11 +389,19 @@ const App: React.FC = () => {
     getFeatureFlags()
       .then(f => { if (!cancelled) setTableOrdersEnabled(f.table_orders_enabled === true); })
       .catch(() => { /* flag non leggibile: le voci restano nascoste */ });
+    // Modalità ibrida: la config del nodo di sala si rilegge insieme ai flag,
+    // e a ogni cambio di routing il socket si riattacca dalla parte giusta.
+    refreshNodeConfig();
+    const unsubRouting = onRoutingChange(() => socketClient.reconnectWithToken());
 
     const onFlags = (flags: any) => {
       if (flags && typeof flags.table_orders_enabled === 'boolean') {
         setTableOrdersEnabled(flags.table_orders_enabled);
       }
+      // Il flip dell'interruttore ibrido arriva da qui (features:updated):
+      // si rilegge la config — se il routing cambia, onRoutingChange sopra
+      // riattacca il socket, senza aspettare un reload.
+      refreshNodeConfig();
     };
     let attachedSocket: ReturnType<typeof socketClient.getSocket> = null;
     const attach = (s: ReturnType<typeof socketClient.getSocket>) => {
@@ -406,6 +415,7 @@ const App: React.FC = () => {
     return () => {
       cancelled = true;
       unsubSocket();
+      unsubRouting();
       if (attachedSocket) attachedSocket.off('features:updated', onFlags);
     };
   }, [isAuthenticated]);

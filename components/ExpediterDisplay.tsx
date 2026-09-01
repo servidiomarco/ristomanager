@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { BarChart3, Bell, BellOff, Check, Loader2, Play, RotateCcw, TriangleAlert, WifiOff } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
+import { useSalaNodeStale, formatStaleAsOf } from '../hooks/useSalaNodeStale';
 import { socketClient } from '../services/socketClient';
 import {
   getExpediterBoard, fireCourse, refireCourse, callCourse, serveCourse, unserveCourse, getKitchenReport,
@@ -39,6 +40,7 @@ export const ExpediterDisplay: React.FC = () => {
   const [board, setBoard] = useState<ExpediterBoard | null>(null);
   const [loading, setLoading] = useState(true);
   const [offline, setOffline] = useState(false);
+  const nodeStale = useSalaNodeStale();
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [called, setCalled] = useState<Set<string>>(new Set());
   const [report, setReport] = useState<KitchenReport | null>(null);
@@ -89,6 +91,8 @@ export const ExpediterDisplay: React.FC = () => {
     socket?.on('course:unserved', onChange);
     socket?.on('orderItem:status', onChange);
     socket?.on('connect', onChange);
+    // Modalità ibrida: cache del nodo svuotata al riaggancio del cloud.
+    socket?.on('sala:resync', onChange);
     const poll = setInterval(reload, 20_000);
     return () => {
       socket?.off('course:queued', onChange);
@@ -99,6 +103,7 @@ export const ExpediterDisplay: React.FC = () => {
       socket?.off('course:unserved', onChange);
       socket?.off('orderItem:status', onChange);
       socket?.off('connect', onChange);
+      socket?.off('sala:resync', onChange);
       clearInterval(poll);
     };
   }, [reload]);
@@ -134,11 +139,18 @@ export const ExpediterDisplay: React.FC = () => {
           <span className="text-[15px] text-[var(--ds-text-muted)] tabular-nums">
             {inCorso.length} in corso · {inAttesa.length} da lanciare
           </span>
-          {offline && (
+          {offline ? (
             <StatusPill tone="pending">
               <WifiOff size={13} aria-hidden /> riconnessione…
             </StatusPill>
-          )}
+          ) : nodeStale.stale ? (
+            /* Vivo via nodo di sala, cloud giù: il passe lavora sull'ultima
+               copia buona e deve saperlo. */
+            <StatusPill tone="pending">
+              <WifiOff size={13} aria-hidden />
+              {nodeStale.asOf ? `dati fermi alle ${formatStaleAsOf(nodeStale.asOf)}` : 'dati fermi'} — cloud non raggiungibile
+            </StatusPill>
+          ) : null}
           {/* Icona sola, 44px, incassata sulla card come i controlli quiet:
               il testo qui non aggiungerebbe nulla che la campana non dica. */}
           <button

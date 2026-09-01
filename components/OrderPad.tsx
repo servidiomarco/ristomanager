@@ -14,6 +14,7 @@ import {
 import { BillSheet, InvoiceDialog } from './pagamenti/BillSheet';
 import { PagamentoSheet } from './cassa/PagamentoSheet';
 import { useAuth } from '../contexts/AuthContext';
+import { useSalaNodeStale } from '../hooks/useSalaNodeStale';
 import { billsApiService, printBill } from '../services/billsApiService';
 
 import { socketClient } from '../services/socketClient';
@@ -87,6 +88,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
+  const nodeStale = useSalaNodeStale();
   const [variantFor, setVariantFor] = useState<Dish | null>(null);
   const [closing, setClosing] = useState(false);
   const [voidTarget, setVoidTarget] = useState<OrderItem | null>(null);
@@ -428,7 +430,12 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
         : 'Proposta al passe — in attesa di lancio'
       );
     } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Invio non riuscito');
+      // Modalità ibrida a cloud giù: gli schermi restano vivi via nodo, ma
+      // le scritture vanno al cloud — dire "invio non riuscito" non basta,
+      // il cameriere deve sapere che la cucina NON ha visto niente.
+      setError(err instanceof TypeError && nodeStale.stale
+        ? 'Linea giù: comanda non inviata, la cucina non la vede. Riprova quando torna.'
+        : err?.data?.error ?? err?.message ?? 'Invio non riuscito');
     } finally {
       setBusy(false);
     }
@@ -648,9 +655,12 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
     };
     socket.on('bill:updated', refresh);
     socket.on('bill:closed', refresh);
+    // Modalità ibrida: al riaggancio del cloud lo stato conti si rilegge.
+    socket.on('sala:resync', refresh);
     return () => {
       socket.off('bill:updated', refresh);
       socket.off('bill:closed', refresh);
+      socket.off('sala:resync', refresh);
     };
   }, [serviceQuery]);
 

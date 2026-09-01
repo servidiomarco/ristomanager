@@ -89,6 +89,9 @@ const main = async () => {
                 ...(origin ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : {}),
                 'Access-Control-Allow-Methods': 'GET, OPTIONS',
                 'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+                // Senza expose la SPA (cross-origin) non può leggere il
+                // marchio staleness e il banner "dati fermi" non esisterebbe.
+                'Access-Control-Expose-Headers': 'X-Sala-Node, X-Sala-Node-Age',
                 'Access-Control-Max-Age': '600',
             };
         },

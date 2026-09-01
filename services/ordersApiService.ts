@@ -2,6 +2,7 @@ import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
 import type { OrderWithItems } from '../types';
 import { buildApiError } from './apiError';
+import { routedGetUrl, cloudFallbackUrl, noteRoutedResponse } from './apiRouting';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
@@ -53,7 +54,19 @@ const getHeaders = (idempotencyKey?: string): HeadersInit => {
 };
 
 const fetchWithAuth = async (url: string, options: RequestInit = {}, retried = false): Promise<Response> => {
-  const response = await fetch(url, options);
+  let response: Response;
+  try {
+    response = await fetch(url, options);
+  } catch (err) {
+    // Modalità ibrida: se l'URL era del nodo di sala e il nodo non risponde,
+    // si ritenta subito sul cloud (e il circuito resta aperto 30s). Un
+    // errore verso il cloud invece si propaga com'è: è un'assenza di rete
+    // vera, non un guasto del nodo.
+    const cloudUrl = cloudFallbackUrl(url);
+    if (!cloudUrl) throw err;
+    return fetchWithAuth(cloudUrl, options, retried);
+  }
+  noteRoutedResponse(url, response);
   if (response.status === 401 && !retried) {
     const refreshed = await authApiService.refreshToken();
     if (refreshed) {
@@ -94,7 +107,7 @@ class OrdersApiService {
     if (service?.shift) params.set('shift', service.shift);
     const qs = params.toString();
     try {
-      return await apiRequest<OrderWithItems>(`${API_URL}/tables/${tableId}/order${qs ? `?${qs}` : ''}`, {
+      return await apiRequest<OrderWithItems>(routedGetUrl(`/tables/${tableId}/order${qs ? `?${qs}` : ''}`), {
         headers: getHeaders(),
       });
     } catch (err: any) {
@@ -119,7 +132,7 @@ class OrdersApiService {
   }
 
   async getOrder(orderId: number): Promise<OrderWithItems> {
-    return apiRequest<OrderWithItems>(`${API_URL}/orders/${orderId}`, { headers: getHeaders() });
+    return apiRequest<OrderWithItems>(routedGetUrl(`/orders/${orderId}`), { headers: getHeaders() });
   }
 
   async openOrder(payload: OpenOrderPayload, idempotencyKey?: string): Promise<OrderWithItems> {
@@ -184,7 +197,7 @@ export interface MenuCatalogue {
 }
 
 export const getMenuCatalogue = async (): Promise<MenuCatalogue> =>
-  apiRequest<MenuCatalogue>(`${API_URL}/menu/catalogue`, { headers: getHeaders() });
+  apiRequest<MenuCatalogue>(routedGetUrl('/menu/catalogue'), { headers: getHeaders() });
 
 // --- Monitor di partita ------------------------------------------------------
 
@@ -201,7 +214,7 @@ export const getOpenOrderTables = async (
   if (service?.date) params.set('date', service.date);
   if (service?.shift) params.set('shift', service.shift);
   const qs = params.toString();
-  return apiRequest(`${API_URL}/orders/open${qs ? `?${qs}` : ''}`, { headers: getHeaders() });
+  return apiRequest(routedGetUrl(`/orders/open${qs ? `?${qs}` : ''}`), { headers: getHeaders() });
 };
 
 export interface KdsItem {
@@ -241,7 +254,7 @@ export interface KdsQueue {
 
 export const getKdsQueue = async (stationId: number | null): Promise<KdsQueue> =>
   apiRequest<KdsQueue>(
-    `${API_URL}/kds/queue${stationId != null ? `?station_id=${stationId}` : ''}`,
+    routedGetUrl(`/kds/queue${stationId != null ? `?station_id=${stationId}` : ''}`),
     { headers: getHeaders() },
   );
 
@@ -262,7 +275,7 @@ export interface OrderRevision {
 
 export const getKdsRevisions = async (stationId: number | null): Promise<{ revisions: OrderRevision[] }> =>
   apiRequest(
-    `${API_URL}/kds/revisions${stationId != null ? `?station=${stationId}` : ''}`,
+    routedGetUrl(`/kds/revisions${stationId != null ? `?station=${stationId}` : ''}`),
     { headers: getHeaders() },
   );
 
@@ -327,7 +340,7 @@ export interface ExpediterBoard {
 }
 
 export const getExpediterBoard = async (): Promise<ExpediterBoard> =>
-  apiRequest<ExpediterBoard>(`${API_URL}/kds/expediter`, { headers: getHeaders() });
+  apiRequest<ExpediterBoard>(routedGetUrl('/kds/expediter'), { headers: getHeaders() });
 
 export const fireCourse = async (orderId: number, courseNo: number): Promise<unknown> =>
   apiRequest(`${API_URL}/orders/${orderId}/courses/${courseNo}/fire`, {

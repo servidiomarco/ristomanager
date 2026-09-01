@@ -66,6 +66,8 @@ export const useOpenBills = (
     // Il badge scontrino segue l'emissione automatica post-chiusura.
     socket?.on('fiscal:updated', onChange);
     socket?.on('connect', onChange);
+    // Modalità ibrida: cache del nodo svuotata al riaggancio del cloud.
+    socket?.on('sala:resync', onChange);
     const poll = setInterval(reload, 30_000);
     return () => {
       socket?.off('bill:opened', onChange);
@@ -73,6 +75,7 @@ export const useOpenBills = (
       socket?.off('bill:closed', onChange);
       socket?.off('fiscal:updated', onChange);
       socket?.off('connect', onChange);
+      socket?.off('sala:resync', onChange);
       clearInterval(poll);
     };
   }, [reload]);
