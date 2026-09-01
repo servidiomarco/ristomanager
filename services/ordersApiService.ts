@@ -181,6 +181,9 @@ export interface MenuCatalogue {
     modifiers: { id: number; group_id: number; name: string; price_delta_cents: number }[];
   }[];
   dish_modifier_groups: { dish_id: number; group_id: number }[];
+  /** Preferenze delle categorie decise in Menu: ordine (sort) e accensione.
+   *  Categoria assente = accesa, in coda. */
+  category_prefs?: Record<string, { enabled: boolean; sort: number }>;
 }
 
 export const getMenuCatalogue = async (): Promise<MenuCatalogue> =>

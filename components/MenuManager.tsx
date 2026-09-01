@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, VAT_RATES, Customer, Table, TableMerge, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
-import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages } from 'lucide-react';
+import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, SlidersHorizontal } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { getRomeDatePart } from '../utils/reservationTime';
 import { printBanquet } from '../utils/printBanquet';
@@ -11,7 +11,7 @@ import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BanquetPaymentsModal } from './BanquetPaymentsModal';
 import { DishDetailModal } from './DishDetailModal';
 import { CustomerPickerModal } from './CustomerPickerModal';
-import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, type MenuImportResult, type MenuTranslateResult } from '../services/apiService';
+import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, type MenuImportResult, type MenuTranslateResult, type MenuCategory } from '../services/apiService';
 import { billsApiService } from '../services/billsApiService';
 import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '../contexts/AuthContext';
@@ -202,6 +202,60 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [importing, setImporting] = useState(false);
   const [importEsito, setImportEsito] = useState<MenuImportResult | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+
+  // Categorie del menu: accensione e ordine si decidono qui e valgono anche
+  // per il palmare comande e il menu digitale. Il rifetch segue l'anagrafica
+  // piatti (socket, import cassa), così i conteggi non restano indietro.
+  const [menuCats, setMenuCats] = useState<MenuCategory[] | null>(null);
+  const [catsOpen, setCatsOpen] = useState(false);
+  const [catsBusy, setCatsBusy] = useState(false);
+  const [togglingDishId, setTogglingDishId] = useState<number | null>(null);
+  const [reorderBusy, setReorderBusy] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    getMenuCategories().then(c => { if (!cancelled) setMenuCats(c); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [dishes]);
+
+  const handleToggleDish = async (dish: Dish) => {
+    setTogglingDishId(dish.id);
+    try {
+      // La riga aggiornata torna dal socket (dish:updated → App): qui non
+      // c'è stato locale da tenere allineato.
+      await setDishEnabled(dish.id, dish.crm_enabled === false);
+    } catch { /* la riga resta com'era: nessun falso ok */ }
+    finally { setTogglingDishId(null); }
+  };
+
+  // Sposta un piatto su/giù dentro la SUA categoria intera (non la lista
+  // filtrata dalla ricerca): l'ordine è del menu, non della vista.
+  const handleMoveDish = async (dish: Dish, dir: -1 | 1) => {
+    const cat = (dish.category ?? '').trim();
+    const group = dishes.filter(d => (d.category ?? '').trim() === cat);
+    const idx = group.findIndex(d => d.id === dish.id);
+    const j = idx + dir;
+    if (idx < 0 || j < 0 || j >= group.length) return;
+    const ids = group.map(d => d.id);
+    [ids[idx], ids[j]] = [ids[j], ids[idx]];
+    setReorderBusy(true);
+    try { await saveDishOrder(ids); } catch { /* ordine invariato */ }
+    finally { setReorderBusy(false); }
+  };
+
+  // Le modifiche alle categorie salvano subito (come gli altri interruttori
+  // dell'app): l'ordine dell'array È l'ordine del menu.
+  const applyMenuCats = async (next: MenuCategory[]) => {
+    const prev = menuCats;
+    setMenuCats(next);
+    setCatsBusy(true);
+    try {
+      await saveMenuCategories(next.map(c => ({ name: c.name, enabled: c.enabled })));
+    } catch {
+      setMenuCats(prev);
+    } finally {
+      setCatsBusy(false);
+    }
+  };
 
   const handleImportCassa = async () => {
     if (importing) return;
@@ -776,12 +830,21 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   };
 
   const dishCategories = useMemo(() => {
-    const order = ['antipasti', 'primi', 'secondi', 'contorni', 'dolci'];
-    const set = new Set<string>();
+    const present = new Set<string>();
     for (const d of dishes) {
-      if (d.category && d.category.trim()) set.add(d.category.trim());
+      if (d.category && d.category.trim()) present.add(d.category.trim());
     }
-    return Array.from(set).sort((a, b) => {
+    // Con le preferenze caricate comanda l'ordine scelto in "Categorie";
+    // le categorie nuove (non ancora ordinate) vanno in coda, alfabetiche.
+    if (menuCats) {
+      const known = menuCats.map(c => c.name).filter(n => present.has(n));
+      const extra = [...present].filter(n => !menuCats.some(c => c.name === n))
+        .sort((a, b) => a.localeCompare(b, 'it'));
+      return [...known, ...extra];
+    }
+    // Prima del fetch: l'ordine di portata classico di sempre.
+    const order = ['antipasti', 'primi', 'secondi', 'contorni', 'dolci'];
+    return Array.from(present).sort((a, b) => {
       const ai = order.indexOf(a.toLowerCase());
       const bi = order.indexOf(b.toLowerCase());
       if (ai !== -1 && bi !== -1) return ai - bi;
@@ -789,7 +852,12 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       if (bi !== -1) return 1;
       return a.localeCompare(b, 'it');
     });
-  }, [dishes]);
+  }, [dishes, menuCats]);
+
+  const disabledCategories = useMemo(
+    () => new Set((menuCats ?? []).filter(c => !c.enabled).map(c => c.name)),
+    [menuCats]
+  );
 
   // Unioni tavoli attive per la data+turno scelti nel form: un tavolo
   // occupato occupa l'intera unione (stessa regola del controllo server),
@@ -924,12 +992,22 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     { value: 'guests-desc', label: 'Coperti (più → meno)' },
   ];
 
+  // Le righe arrivano già ordinate per (categoria, posizione, nome); qui si
+  // riordinano solo i GRUPPI secondo l'ordine scelto in "Categorie" — il
+  // sort è stabile, l'ordine dentro la categoria non si tocca.
+  const categoryIndex = useMemo(
+    () => new Map(dishCategories.map((c, i) => [c, i])),
+    [dishCategories]
+  );
   const filteredDishes = dishes.filter(d => {
     const matchesSearch = d.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       d.category.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = !categoryFilter || d.category === categoryFilter;
     return matchesSearch && matchesCategory;
-  });
+  }).sort((a, b) =>
+    (categoryIndex.get((a.category ?? '').trim()) ?? Number.MAX_SAFE_INTEGER)
+    - (categoryIndex.get((b.category ?? '').trim()) ?? Number.MAX_SAFE_INTEGER)
+  );
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
@@ -1065,17 +1143,29 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   {dishCategories.map(cat => {
                     const count = dishes.filter(d => d.category === cat).length;
                     const isActive = categoryFilter === cat;
+                    const isOff = disabledCategories.has(cat);
                     return (
                       <button
                         key={cat}
                         type="button"
                         onClick={() => setCategoryFilter(isActive ? null : cat)}
-                        className={`${DISH_FILTER_BASE} ${isActive ? DISH_FILTER_ON : DISH_FILTER_OFF}`}
+                        title={isOff ? `${cat} — spenta: non compare su comande e menu digitale` : undefined}
+                        className={`${DISH_FILTER_BASE} ${isActive ? DISH_FILTER_ON : DISH_FILTER_OFF} ${isOff && !isActive ? 'opacity-50 line-through' : ''}`}
                       >
                         {cat} <span className="tabular-nums opacity-70">{count}</span>
                       </button>
                     );
                   })}
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => setCatsOpen(true)}
+                      className={`${DISH_FILTER_BASE} ${DISH_FILTER_OFF} inline-flex items-center gap-1.5`}
+                      title="Ordina e accendi/spegni le categorie"
+                    >
+                      <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden /> Categorie
+                    </button>
+                  )}
                 </div>
               )}
               <span className="text-[13px] text-[var(--ds-text-muted)] md:flex-shrink-0 md:self-center">
@@ -1103,12 +1193,21 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             onClick={() => setViewDish(isSelected ? null : dish)}
                             className={`flex flex-col overflow-hidden rounded-[20px] bg-[var(--ds-surface)] text-left shadow-[var(--ds-shadow-card)] transition-shadow hover:shadow-[var(--ds-shadow-raised)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                               isSelected ? 'ring-2 ring-[var(--ds-text-primary)]' : ''
-                            } ${dish.is_active === false ? 'opacity-60' : ''}`}
+                            } ${dish.is_active === false || dish.crm_enabled === false ? 'opacity-60' : ''}`}
                           >
                             <div className="relative">
-                              {dish.is_active === false && (
-                                <span className="absolute bottom-2 left-2 z-10 rounded-full bg-[var(--ds-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--ds-critical-text)]">
-                                  spento in cassa
+                              {(dish.is_active === false || dish.crm_enabled === false) && (
+                                <span className="absolute bottom-2 left-2 z-10 flex gap-1">
+                                  {dish.is_active === false && (
+                                    <span className="rounded-full bg-[var(--ds-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--ds-critical-text)]">
+                                      spento in cassa
+                                    </span>
+                                  )}
+                                  {dish.crm_enabled === false && (
+                                    <span className="rounded-full bg-[var(--ds-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--ds-text-secondary)]">
+                                      spento
+                                    </span>
+                                  )}
                                 </span>
                               )}
                               {dish.photo_url ? (
@@ -1147,6 +1246,20 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                 </span>
                                 {canEdit && (
                                   <span className="flex items-center gap-1">
+                                    <span
+                                      role="switch"
+                                      tabIndex={0}
+                                      aria-checked={dish.crm_enabled !== false}
+                                      aria-label={`${dish.crm_enabled !== false ? 'Spegni' : 'Accendi'} ${dish.name} nel menu`}
+                                      onClick={e => { e.stopPropagation(); if (togglingDishId !== dish.id) handleToggleDish(dish); }}
+                                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); if (togglingDishId !== dish.id) handleToggleDish(dish); } }}
+                                      className={`relative mr-1 inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                                        dish.crm_enabled !== false ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
+                                      } ${togglingDishId === dish.id ? 'opacity-50' : ''}`}
+                                    >
+                                      <span aria-hidden="true"
+                                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${dish.crm_enabled !== false ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
+                                    </span>
                                     <span
                                       role="button"
                                       tabIndex={0}
@@ -1200,10 +1313,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                 <ImageIcon className="h-4 w-4 text-[var(--ds-text-subtle)]" aria-hidden />
                               </div>
                             )}
-                            <div className={`min-w-0 flex-1 ${dish.is_active === false ? 'opacity-60' : ''}`}>
+                            <div className={`min-w-0 flex-1 ${dish.is_active === false || dish.crm_enabled === false ? 'opacity-60' : ''}`}>
                               <div className="flex items-center gap-2">
                                 <span className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">{dish.name}</span>
                                 {dish.is_active === false && <StatusPill tone="critical">spento in cassa</StatusPill>}
+                                {dish.crm_enabled === false && <StatusPill tone="neutral">spento</StatusPill>}
                               </div>
                               <div className="truncate text-[13px] text-[var(--ds-text-muted)]">
                                 {[dish.category, dish.description].filter(Boolean).join(' · ')}
@@ -1221,6 +1335,46 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             </span>
                             {canEdit && (
                               <span className="flex flex-shrink-0 items-center gap-1">
+                                {/* Ordine dentro la categoria: le frecce muovono
+                                    nel menu intero, non nella vista filtrata. */}
+                                <span className="hidden items-center sm:flex">
+                                  <span
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-disabled={reorderBusy}
+                                    onClick={e => { e.stopPropagation(); if (!reorderBusy) handleMoveDish(dish, -1); }}
+                                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); if (!reorderBusy) handleMoveDish(dish, -1); } }}
+                                    className={`${dsIconButton} h-9 w-7 bg-transparent shadow-none ${reorderBusy ? 'opacity-40' : ''}`}
+                                    title="Sposta su"
+                                  >
+                                    <ChevronUp className="h-4 w-4" />
+                                  </span>
+                                  <span
+                                    role="button"
+                                    tabIndex={0}
+                                    aria-disabled={reorderBusy}
+                                    onClick={e => { e.stopPropagation(); if (!reorderBusy) handleMoveDish(dish, 1); }}
+                                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); if (!reorderBusy) handleMoveDish(dish, 1); } }}
+                                    className={`${dsIconButton} h-9 w-7 bg-transparent shadow-none ${reorderBusy ? 'opacity-40' : ''}`}
+                                    title="Sposta giù"
+                                  >
+                                    <ChevronDown className="h-4 w-4" />
+                                  </span>
+                                </span>
+                                <span
+                                  role="switch"
+                                  tabIndex={0}
+                                  aria-checked={dish.crm_enabled !== false}
+                                  aria-label={`${dish.crm_enabled !== false ? 'Spegni' : 'Accendi'} ${dish.name} nel menu`}
+                                  onClick={e => { e.stopPropagation(); if (togglingDishId !== dish.id) handleToggleDish(dish); }}
+                                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); if (togglingDishId !== dish.id) handleToggleDish(dish); } }}
+                                  className={`relative mx-1 inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                                    dish.crm_enabled !== false ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
+                                  } ${togglingDishId === dish.id ? 'opacity-50' : ''}`}
+                                >
+                                  <span aria-hidden="true"
+                                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${dish.crm_enabled !== false ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
+                                </span>
                                 <span
                                   role="button"
                                   tabIndex={0}
@@ -2800,6 +2954,73 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           banquet={paymentsBanquet}
           onClose={() => setPaymentsBanquet(null)}
         />
+      )}
+
+      {/* Categorie: accensione e ordine. Ogni azione salva subito — l'ordine
+          della lista È l'ordine del menu, su comande e menu digitale. */}
+      {catsOpen && menuCats && (
+        <ModalShell
+          open={catsOpen}
+          onClose={() => setCatsOpen(false)}
+          title="Categorie"
+          subtitle="L'ordine e le categorie spente valgono anche su comande e menu digitale"
+          size="sm"
+          bodyClassName="p-2"
+        >
+          <div className="divide-y divide-[var(--ds-border)]">
+            {menuCats.map((cat, i) => (
+              <div key={cat.name} className={`flex items-center gap-2 px-3 py-2.5 ${cat.enabled ? '' : 'opacity-60'}`}>
+                <div className="flex flex-shrink-0 items-center">
+                  <button
+                    type="button"
+                    disabled={catsBusy || i === 0}
+                    onClick={() => {
+                      const next = [...menuCats];
+                      [next[i - 1], next[i]] = [next[i], next[i - 1]];
+                      applyMenuCats(next);
+                    }}
+                    className={`${dsIconButton} h-9 w-8 bg-transparent shadow-none disabled:opacity-30`}
+                    title="Sposta su"
+                  >
+                    <ChevronUp className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={catsBusy || i === menuCats.length - 1}
+                    onClick={() => {
+                      const next = [...menuCats];
+                      [next[i], next[i + 1]] = [next[i + 1], next[i]];
+                      applyMenuCats(next);
+                    }}
+                    className={`${dsIconButton} h-9 w-8 bg-transparent shadow-none disabled:opacity-30`}
+                    title="Sposta giù"
+                  >
+                    <ChevronDown className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[14px] font-medium text-[var(--ds-text-primary)]">{cat.name}</div>
+                  <div className="text-[12px] tabular-nums text-[var(--ds-text-muted)]">{cat.dishes} {cat.dishes === 1 ? 'piatto' : 'piatti'}</div>
+                </div>
+                <button
+                  type="button" role="switch" aria-checked={cat.enabled}
+                  aria-label={`${cat.enabled ? 'Spegni' : 'Accendi'} ${cat.name}`}
+                  disabled={catsBusy}
+                  onClick={() => {
+                    const next = menuCats.map((c, j) => j === i ? { ...c, enabled: !c.enabled } : c);
+                    applyMenuCats(next);
+                  }}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50 ${
+                    cat.enabled ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
+                  }`}
+                >
+                  <span aria-hidden="true"
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${cat.enabled ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </ModalShell>
       )}
 
       {/* Only when the inline panel cannot show — otherwise the same dish would

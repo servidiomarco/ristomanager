@@ -210,6 +210,8 @@ Il colpo d'occhio del "adesso", sempre sulla giornata corrente.
 
 **Piatti alla carta**
 - Anagrafica completa: categorie (Antipasti, Primi, Secondi, Contorni, Dolci, Bevande, Altro), nome, descrizione, prezzo, **aliquota IVA**, foto (con ridimensionamento automatico), **allergeni**, visibilità sul menu digitale. Viste griglia ed elenco.
+- **Piatti e categorie accendibili e spegnibili con un interruttore**: un piatto spento resta in anagrafica ma sparisce dal palmare comande e dal menu digitale; una categoria spenta nasconde tutti i suoi piatti. Separato dallo stato che arriva dalla cassa ("spento in cassa").
+- **Ordinamento libero**: frecce su/giù sui piatti (dentro la categoria) e sulle categorie (modale "Categorie"); l'ordine scelto vale in tutta l'app — gestione menu, palmare comande e menu digitale.
 - **Traduzione automatica del menu** in inglese, francese e tedesco (AI): i nomi delle specialità restano riconoscibili, si traducono solo le voci mancanti.
 - Import e sincronizzazione dal catalogo della cassa Passepartout (per chi ha l'integrazione).
 
@@ -531,6 +533,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-01 | Menu & Banchetti | Piatti e categorie con interruttore acceso/spento e ordinamento libero (frecce e modale "Categorie"); scelte rispettate da palmare comande e menu digitale. |
 | 2026-09-01 | Comande, Cucina e Passe | Campanella del monitor cucina ridefinita: avvisa la sala che l'uscita è pronta (annuncio nel canale sala, con push) invece di chiamare l'uscita successiva — i tempi del servizio restano ai camerieri. |
 | 2026-09-01 | Comande, Cucina e Passe | Col toggle Passe spento le icone stanno sulle card del monitor cucina, non sulla comanda, che torna com'era. |
 | 2026-09-01 | Integrazione cassa Passepartout | L'import del menu salta le voci disattivate in cassa (articoli e categorie tenuti per lo storico) e rimuove quelle importate in passato, se mai usate nel CRM. |

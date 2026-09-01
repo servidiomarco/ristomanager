@@ -432,6 +432,50 @@ export const importMenuPassepartout = async (): Promise<MenuImportResult> => {
 /** URL pubblico del menu digitale (pagina servita dal backend, come /prenota). */
 export const digitalMenuUrl = (): string => `${API_URL}/menu`;
 
+/** Categoria del menu con stato e ordine (le preferenze vivono sul server,
+ *  le categorie restano stringhe libere sui piatti). */
+export interface MenuCategory {
+  name: string;
+  dishes: number;
+  enabled: boolean;
+}
+
+export const getMenuCategories = async (): Promise<MenuCategory[]> => {
+  const r = await apiRequest<{ categories: MenuCategory[] }>(`${API_URL}/menu/categories`, {
+    headers: getHeaders(false),
+  });
+  return r.categories;
+};
+
+/** Salva stato e ordine delle categorie: l'ordine dell'array È l'ordine del
+ *  menu. Il server broadcasta 'dish:synced'. */
+export const saveMenuCategories = async (categories: { name: string; enabled: boolean }[]): Promise<void> => {
+  await apiRequest<{ ok: true }>(`${API_URL}/menu/categories`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify({ categories }),
+  });
+};
+
+/** Ordina i piatti di una categoria: l'array di id È l'ordine. */
+export const saveDishOrder = async (dishIds: number[]): Promise<void> => {
+  await apiRequest<{ ok: true }>(`${API_URL}/menu/dish-order`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify({ dish_ids: dishIds }),
+  });
+};
+
+/** Accende/spegne un piatto lato CRM (crm_enabled), senza toccare il resto
+ *  dell'anagrafica né i campi che appartengono alla cassa. */
+export const setDishEnabled = async (id: number, enabled: boolean): Promise<Dish> => {
+  return apiRequest<Dish>(`${API_URL}/dishes/${id}/enabled`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify({ enabled }),
+  });
+};
+
 export interface MenuTranslateResult {
   tradotte: number;
   lingue: string[];

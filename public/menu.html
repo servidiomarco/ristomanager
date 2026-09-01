@@ -216,7 +216,14 @@ footer { text-align: center; color: var(--ds-text-subtle); font-size: 12px; padd
         if (!dati) return;
         var perCat = {};
         dati.piatti.forEach(function (p) { (perCat[p.category] = perCat[p.category] || []).push(p); });
+        /* Prima le categorie ordinate a mano nel CRM (categorie_ordine),
+           poi le altre con l'euristica delle portate. */
+        var ordineCRM = dati.categorie_ordine || [];
         var cats = Object.keys(perCat).sort(function (a, b) {
+            var ia = ordineCRM.indexOf(a), ib = ordineCRM.indexOf(b);
+            if (ia !== -1 && ib !== -1) return ia - ib;
+            if (ia !== -1) return -1;
+            if (ib !== -1) return 1;
             var d = pesoCategoria(a) - pesoCategoria(b);
             return d !== 0 ? d : a.localeCompare(b);
         });
