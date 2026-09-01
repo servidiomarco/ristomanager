@@ -7,7 +7,7 @@ import { staffChatApiService } from '../services/staffChatApiService';
 import { channelThreadKey, staffMessagePreview, type StaffMessage } from '../services/staffChat';
 import {
   getKdsQueue, getKdsServed, setKdsItemStatus, getMenuCatalogue, getKdsRevisions, ackKdsRevision,
-  fireCourse, serveCourse,
+  callWaiterForCourse, serveCourse,
   type KdsItem, type KdsCourseState, type KdsOtherItem, type KdsServedCourse, type MenuCatalogue, type OrderRevision,
 } from '../services/ordersApiService';
 import { getKitchenServiceSummary, type KitchenServiceSummary } from '../services/apiService';
@@ -73,10 +73,6 @@ interface Column {
   waitingOthers: boolean;
   /** Le righe delle altre partite sulla stessa uscita (sola lettura). */
   others: KdsOtherItem[];
-  /** La prossima uscita in coda della stessa comanda, se c'è: col passe
-   *  spento la chiama la cucina da qui. Valorizzata solo sull'ULTIMA card
-   *  della comanda, o la campanella comparirebbe su tutte. */
-  callNext: number | null;
 }
 
 interface KitchenDisplayProps {
@@ -105,7 +101,6 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   const [items, setItems] = useState<KdsItem[]>([]);
   const [courses, setCourses] = useState<KdsCourseState[]>([]);
   const [others, setOthers] = useState<KdsOtherItem[]>([]);
-  const [queuedNext, setQueuedNext] = useState<{ order_id: number; course_no: number }[]>([]);
   // «In lavorazione» è il lavoro; «Consegnate» è consultazione («il 12 dice
   // che manca il piatto: l'abbiamo mandato?») — sola lettura, mai un posto
   // dove le card si annidano prima del servito.
@@ -235,7 +230,6 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
       setItems(q.items);
       setCourses(q.courses);
       setOthers(q.others ?? []);
-      setQueuedNext(q.queued_next ?? []);
       setRevisions(rev.revisions);
       setOffline(false);
     } catch {
@@ -324,13 +318,19 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
     setPicking(false);
   };
 
-  // Col passe spento questi due gesti vivono sulle card: la campanella
-  // chiama la prossima uscita in coda della comanda, la spunta segna
-  // servita quella pronta (via dal monitor → Consegnate).
-  const callNextCourse = async (col: Column) => {
-    if (col.callNext == null) return;
-    try { await fireCourse(col.order_id, col.callNext); } catch { /* il reload dice il vero */ }
-    reload();
+  // Col passe spento questi due gesti vivono sulle card pronte: la campanella
+  // AVVISA la sala che l'uscita è al passe (annuncio nel canale sala — non
+  // muove lo stato: i tempi del servizio restano ai camerieri), la spunta
+  // segna servita l'uscita (via dal monitor → Consegnate).
+  const [waiterCalled, setWaiterCalled] = useState<Set<string>>(new Set());
+  const callWaiter = async (col: Column) => {
+    setWaiterCalled(prev => new Set(prev).add(col.key));
+    try {
+      await callWaiterForCourse(col.order_id, col.course_no);
+    } catch {
+      // Fallito: la campanella torna attiva, l'avviso non è mai partito.
+      setWaiterCalled(prev => { const n = new Set(prev); n.delete(col.key); return n; });
+    }
   };
   const serveColumn = async (col: Column) => {
     try { await serveCourse(col.order_id, col.course_no); } catch { /* 409 se nel frattempo non è più tutta pronta */ }
@@ -369,26 +369,16 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           // L'uscita aspetta anche altre partite oltre alla mia?
           waitingOthers: !!st && st.waiting_station_ids.some(s => s !== stationId),
           others: others.filter(o => o.order_id === it.order_id && o.course_no === it.course_no),
-          callNext: null,
         });
       }
       map.get(key)!.items.push(it);
     }
-    const list = [...map.values()].sort((a, b) => {
+    return [...map.values()].sort((a, b) => {
       const ta = a.items[0]?.station_start_at ?? a.firedAt ?? '';
       const tb = b.items[0]?.station_start_at ?? b.firedAt ?? '';
       return ta.localeCompare(tb);
     });
-    // La campanella sta sull'ULTIMA card della comanda: la stessa coda su
-    // tre card sarebbero tre bottoni per lo stesso gesto.
-    const maxCourse = new Map<number, number>();
-    for (const c of list) maxCourse.set(c.order_id, Math.max(maxCourse.get(c.order_id) ?? 0, c.course_no));
-    for (const c of list) {
-      const qn = queuedNext.find(q => q.order_id === c.order_id);
-      c.callNext = qn && maxCourse.get(c.order_id) === c.course_no ? qn.course_no : null;
-    }
-    return list;
-  }, [items, courses, others, queuedNext, stationId]);
+  }, [items, courses, others, stationId]);
 
   useEffect(() => {
     courseKeysRef.current = new Set(columns.map(c => c.key));
@@ -623,7 +613,8 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                 stationId={stationId}
                 stationNames={stationNames}
                 onAdvance={advance}
-                onCallNext={passeEnabled ? undefined : callNextCourse}
+                onCallWaiter={passeEnabled ? undefined : callWaiter}
+                waiterCalled={waiterCalled.has(col.key)}
                 onServeCourse={passeEnabled ? undefined : serveColumn}
                 revisions={revisionsByKey.get(col.key)}
                 onShowRevisions={() => setRevisionsModalKey(col.key)}
@@ -752,13 +743,14 @@ const CourseCard: React.FC<{
   stationId: number | null;
   onAdvance: (item: KdsItem, status: 'PREPARING' | 'READY') => void;
   stationNames?: Map<number, string>;
-  /** Presenti solo col passe spento: chiama la prossima uscita in coda e
-   *  segna servita quella pronta, dalla card. */
-  onCallNext?: (col: Column) => void;
+  /** Presenti solo col passe spento: la campanella avvisa la sala che
+   *  l'uscita è pronta (non muove lo stato), la spunta la segna servita. */
+  onCallWaiter?: (col: Column) => void;
+  waiterCalled?: boolean;
   onServeCourse?: (col: Column) => void;
   revisions?: OrderRevision[];
   onShowRevisions?: () => void;
-}> = ({ col, now, onAdvance, stationNames, onCallNext, onServeCourse, revisions, onShowRevisions }) => {
+}> = ({ col, now, onAdvance, stationNames, onCallWaiter, waiterCalled, onServeCourse, revisions, onShowRevisions }) => {
   const start = col.items[0]?.station_start_at ?? col.firedAt;
   const elapsed = minutesSince(start, now);
   const allReady = col.items.every(i => i.status === 'READY');
@@ -960,22 +952,31 @@ const CourseCard: React.FC<{
             Tutto pronto
           </button>
         )}
-        {/* Col passe spento i suoi due verbi stanno qui, come icone: la
-            campanella chiama la prossima uscita in coda della comanda, la
-            spunta segna servita quella pronta (via dal monitor → Consegnate).
+        {/* Col passe spento i due gesti dell'uscita pronta stanno qui, come
+            icone: la campanella AVVISA la sala che l'uscita è al passe
+            (annuncio nel canale sala — non muove lo stato, i tempi del
+            servizio restano ai camerieri), la spunta la segna servita.
             Nome per esteso nel title e nell'aria-label. */}
-        {onCallNext && col.callNext != null && (
+        {/* Solo a uscita pronta PER INTERO: finché waitingOthers è vero le
+            altre partite stanno ancora cucinando — avvisare la sala o servire
+            adesso spaccherebbe l'uscita. */}
+        {onCallWaiter && allReady && !col.waitingOthers && (
           <button
             type="button"
-            onClick={() => onCallNext(col)}
-            title={`Chiama la ${ORDINALS[col.callNext] ?? col.callNext} uscita in cucina`}
-            aria-label={`Chiama la ${ORDINALS[col.callNext] ?? col.callNext} uscita in cucina`}
-            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            onClick={() => onCallWaiter(col)}
+            disabled={waiterCalled}
+            title={waiterCalled ? 'Sala avvisata' : "Avvisa la sala: l'uscita è pronta al ritiro"}
+            aria-label={waiterCalled ? 'Sala avvisata' : "Avvisa la sala: l'uscita è pronta al ritiro"}
+            className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+              waiterCalled
+                ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)]'
+                : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]'
+            }`}
           >
             <BellRing size={18} aria-hidden />
           </button>
         )}
-        {onServeCourse && allReady && (
+        {onServeCourse && allReady && !col.waitingOthers && (
           <button
             type="button"
             onClick={() => onServeCourse(col)}

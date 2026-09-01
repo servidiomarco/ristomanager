@@ -252,7 +252,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 
 **Passe (expediter)**
 - Vista di sincronia delle uscite: **Chiama** un'uscita quando la sala è pronta, ricalcola i tempi di partenza, quattro modalità di lancio (tutte automatiche, solo la prima, a consumo — la successiva parte quando la precedente è servita —, manuale).
-- **Il passe si può spegnere** (Impostazioni → Sala e cucina → Passe) nei ristoranti senza expediter: la pagina sparisce dal menu e i suoi verbi passano alle **card del monitor cucina** come icone — la **campanella** chiama la prossima uscita in coda della comanda, la **spunta** segna servita l'uscita pronta (la card lascia il monitor e finisce in Consegnate). Il «Chiama» del cameriere sulla comanda resta comunque.
+- **Il passe si può spegnere** (Impostazioni → Sala e cucina → Passe) nei ristoranti senza expediter. I **tempi restano alla sala**: il cameriere chiama le uscite col «Chiama» sulla comanda. Sulla **card pronta per intero** del monitor cucina compaiono due icone: la **campanella** avvisa la sala che l'uscita è al passe (un annuncio nel canale sala della chat staff — «Tavolo 40 · 2ª uscita pronta al ritiro» — con badge e notifica push, senza toccare lo stato), la **spunta** la segna servita (la card lascia il monitor e finisce in Consegnate).
 - Metriche di servizio: attesa media al passe e al ritiro, delta di sincronia tra partite, scarti.
 
 **Cassa (banco del cassiere)**
@@ -531,8 +531,9 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-01 | Comande, Cucina e Passe | Campanella del monitor cucina ridefinita: avvisa la sala che l'uscita è pronta (annuncio nel canale sala, con push) invece di chiamare l'uscita successiva — i tempi del servizio restano ai camerieri. |
+| 2026-09-01 | Comande, Cucina e Passe | Col toggle Passe spento le icone stanno sulle card del monitor cucina, non sulla comanda, che torna com'era. |
 | 2026-09-01 | Integrazione cassa Passepartout | L'import del menu salta le voci disattivate in cassa (articoli e categorie tenuti per lo storico) e rimuove quelle importate in passato, se mai usate nel CRM. |
-| 2026-09-01 | Comande, Cucina e Passe | Col toggle Passe spento le icone chiama/servito stanno sulle card del monitor cucina (campanella = prossima uscita in coda, spunta = servita), non sulla comanda, che torna com'era. |
 | 2026-09-01 | Comande, Cucina e Passe | Toggle "Passe" in Impostazioni → Sala e cucina: spento, la pagina Passe sparisce e i verbi chiama/servito passano alla cucina — i tempi si battono senza expediter. |
 | 2026-09-01 | Prenotazioni | Mappa tavoli a tutto schermo: icona "ingrandisci" in alto a sinistra della mappa, uscita con la stessa icona o con Esc. |
 | 2026-09-01 | Comande, Cucina e Passe | KDS: piede di card con lo stato delle altre partite della stessa uscita (pallini + espansione in sola lettura) e schermo "Consegnate" con le uscite servite del servizio. |
