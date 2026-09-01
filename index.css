@@ -688,6 +688,14 @@ body {
   .ds-palette-panel { animation: fadeIn 160ms ease-out both; }
 }
 
+/* Ricerca piatti in comanda — pillola sul velo a ogni larghezza (dietro deve
+   restare visibile la comanda), quindi l'entrata e' sempre quella della
+   pillola, mai il foglio dal basso. */
+.ds-veil-panel { animation: tileIn 180ms cubic-bezier(0.32, 0.72, 0, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .ds-veil-panel { animation: fadeIn 160ms ease-out both; }
+}
+
 /* ===========================================================================
    Print
    ========================================================================= */

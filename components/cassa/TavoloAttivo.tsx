@@ -294,7 +294,9 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Testata */}
-      <div className="mx-auto w-full max-w-[1600px] flex-shrink-0 px-4 pb-3 pt-4 lg:px-8">
+      {/* Sotto lg la testata dell'app è nascosta (immersive): questa scheda è
+          la prima in cima e il padding rispetta il notch dove c'è. */}
+      <div className="mx-auto w-full max-w-[1600px] flex-shrink-0 px-4 pb-3 pt-[max(1rem,env(safe-area-inset-top))] lg:px-8">
         <div className="flex items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
           <button
             type="button"

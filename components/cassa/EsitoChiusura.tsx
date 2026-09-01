@@ -1,8 +1,9 @@
 import React from 'react';
-import { Loader2, Printer } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import type { TableBill } from '../../types';
 import { StatusPill } from '../ds';
+import { StampaCopiaButton } from '../pagamenti/StampaCopiaButton';
 import { euro } from './cassaView';
 import { getRomeTimePart } from '../../utils/reservationTime';
 
@@ -36,7 +37,9 @@ interface EsitoChiusuraProps {
    *  (/scontrino/<token>) compare direttamente nell'esito — è il momento in
    *  cui il cliente è ancora davanti alla cassa. */
   receiptToken?: string | null;
-  onPrintReceipt?: () => void;
+  /** Promessa vera, non fire-and-forget: l'esito (spunta o errore) lo mostra
+   *  il bottone stesso, addosso al gesto. */
+  onPrintReceipt?: () => Promise<unknown>;
   busy: boolean;
   onRetryDocument: () => void;
   /** Rinuncia al documento: il conto resta chiuso, senza fiscale. */
@@ -99,14 +102,7 @@ export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
                 L'ospite lo inquadra e ha lo scontrino digitale sul telefono.
               </p>
               {onPrintReceipt && (
-                <button
-                  type="button"
-                  onClick={onPrintReceipt}
-                  disabled={busy}
-                  className="inline-flex h-11 items-center gap-1.5 rounded-full bg-[var(--ds-surface)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
-                >
-                  <Printer size={15} aria-hidden /> Stampa copia
-                </button>
+                <StampaCopiaButton onPrint={onPrintReceipt} variant="outline" />
               )}
             </div>
           </div>

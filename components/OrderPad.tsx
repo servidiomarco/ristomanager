@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Check, Loader2, Printer, TriangleAlert, Utensils, X,
+  Check, Loader2, TriangleAlert, Utensils, X,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import type { Dish, Reservation, Table, TableMerge, OrderWithItems, OrderItem } from '../types';
@@ -13,6 +13,7 @@ import {
   type MenuCatalogue, type NewOrderItem, type CloseOrderResult,
 } from '../services/ordersApiService';
 import { BillSheet, InvoiceDialog } from './pagamenti/BillSheet';
+import { StampaCopiaButton } from './pagamenti/StampaCopiaButton';
 import { PagamentoSheet } from './cassa/PagamentoSheet';
 import { useAuth } from '../contexts/AuthContext';
 import { billsApiService, printBill } from '../services/billsApiService';
@@ -26,6 +27,7 @@ import {
 import { TableGrid } from './comande/TableGrid';
 import { OrderTopBar } from './comande/OrderTopBar';
 import { DishBrowser } from './comande/DishBrowser';
+import { DishSearchSheet } from './comande/DishSearchSheet';
 import { CourseChips } from './comande/CourseChips';
 import { CourseColumn, CourseList, SendFooter } from './comande/CourseColumn';
 import { ComandaSheet } from './comande/ComandaSheet';
@@ -91,6 +93,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
   const [course, setCourse] = useState(1);
   const [category, setCategory] = useState<string | null>(null);
   const [dishQuery, setDishQuery] = useState('');
+  // La ricerca piatti del palmare: si apre dalla lente nella testata del
+  // tavolo e vive sul velo, quindi lo stato sta qui e non nel browser.
+  const [dishSearchOpen, setDishSearchOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
@@ -856,16 +861,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
                   <p className="text-[13px] leading-snug text-[var(--ds-text-secondary)]">
                     L'ospite lo inquadra e ha lo scontrino digitale sul telefono.
                   </p>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try { await printBill(scontrinoEsito.billId, 'SCONTRINO'); setFlash('Copia in stampa'); }
-                      catch (err: any) { setError(err?.data?.message ?? err?.data?.error ?? err?.message ?? 'Stampa non riuscita'); }
-                    }}
-                    className="inline-flex h-11 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
-                  >
-                    <Printer size={15} aria-hidden /> Stampa copia
-                  </button>
+                  {/* Esito sul bottone, non in un flash di pagina: il flash
+                      resta dietro questo modal e nessuno lo vede. */}
+                  <StampaCopiaButton onPrint={() => printBill(scontrinoEsito.billId, 'SCONTRINO')} />
                 </div>
               </div>
             </div>
@@ -1019,6 +1017,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
       onRemove={removeFromCart}
       onLongPress={setVariantFor}
       layout={isWide ? 'grid' : 'list'}
+      // Sul palmare la ricerca sta nella testata del tavolo (lente), non qui.
+      showSearch={false}
     />
   );
 
@@ -1034,6 +1034,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
       billDisabled={displayTotal === 0 && rows === 0}
       clearDisabled={cart.length === 0}
       wide={isWide}
+      onSearch={isWide ? undefined : () => setDishSearchOpen(true)}
       onBack={() => { setTableId(null); setOrder(null); setCart([]); setComandaOpen(false); }}
       onCovers={changeCovers}
       onBill={() => setClosing(true)}
@@ -1181,7 +1182,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
 
   // ---------------- palmare: la comanda sta dietro il totale ----------------
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[var(--ds-canvas)] px-4 pt-3">
+    // Senza la testata dell'app (immersive), la scheda del tavolo è la prima
+    // cosa in cima: il padding rispetta il notch dove c'è.
+    <div className="flex h-full min-h-0 flex-col bg-[var(--ds-canvas)] px-4 pt-[max(0.75rem,env(safe-area-inset-top))]">
       <div className="flex-shrink-0">{topBar}</div>
 
       <div className="mt-4 flex-shrink-0">
@@ -1225,6 +1228,15 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
           />
         </div>
       </div>
+
+      <DishSearchSheet
+        open={dishSearchOpen}
+        dishes={dishes}
+        qtyInCourse={qtyInCourse}
+        hasVariants={hasVariants}
+        onAdd={onDishTap}
+        onClose={() => setDishSearchOpen(false)}
+      />
 
       <ComandaSheet
         open={comandaOpen}
