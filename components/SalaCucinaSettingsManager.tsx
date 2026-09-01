@@ -221,8 +221,8 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
               <div className="text-[13px] font-medium text-[var(--ds-text-primary)]">Postazione passe</div>
               <p className="text-[12px] text-[var(--ds-text-muted)] leading-snug mt-0.5">
                 Attiva: lanci e serviti passano dalla pagina Passe (expediter).
-                Disattivata: la pagina sparisce dal menu e i camerieri chiamano
-                e segnano servito dalla comanda, con le icone sull'uscita.
+                Disattivata: la pagina sparisce dal menu e le icone chiama e
+                servito compaiono sulle card del monitor cucina.
               </p>
             </div>
             <button
@@ -230,7 +230,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
               aria-label={`${flags.passe_enabled !== false ? 'Disattiva' : 'Attiva'} il passe`}
               onClick={() => act(
                 async () => { setFlags(await updateFeatureFlags({ passe_enabled: flags.passe_enabled === false })); },
-                `Passe: ${flags.passe_enabled === false ? 'attivo' : 'disattivato — chiama e servito passano alla comanda'}`
+                `Passe: ${flags.passe_enabled === false ? 'attivo' : 'disattivato — chiama e servito passano al monitor cucina'}`
               )}
               disabled={!canEdit || saving}
               className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50 ${

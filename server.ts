@@ -24596,7 +24596,21 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
             };
         });
 
-        res.json({ station_id: stationId, ...service, items: rows.rows, courses, others });
+        // La prossima uscita ancora in coda (QUEUED) di ogni comanda in
+        // vista: col passe spento la chiama la cucina, dalla card.
+        const orderIds = [...new Set(rows.rows.map((r: any) => r.order_id))];
+        let queuedNext: any[] = [];
+        if (orderIds.length > 0) {
+            const qn = await queryWithRetry(
+                `SELECT order_id, MIN(course_no)::int AS course_no FROM order_items
+                 WHERE order_id = ANY($1::int[]) AND status = 'QUEUED' AND tenant_id = $2
+                 GROUP BY order_id`,
+                [orderIds, req.tenantId!]
+            );
+            queuedNext = qn.rows;
+        }
+
+        res.json({ station_id: stationId, ...service, items: rows.rows, courses, others, queued_next: queuedNext });
     } catch (err: any) {
         console.error('GET /kds/queue error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
@@ -24883,7 +24897,9 @@ app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), as
 // requireAny con orders:take (scelta del Frantoio, 31/08): in molte sale i
 // tempi delle uscite li batte il CAMERIERE, non il passe — stesso precedente
 // del «riporta» qui sotto. Chi non lo vuole tiene i camerieri sull'auto-fire.
-app.post('/orders/:id/courses/:n/fire', authenticate, requireAnyPermission('orders:expedite', 'orders:take'), async (req, res) => {
+// orders:kds incluso: col passe spento è la cucina a chiamare la prossima
+// uscita, direttamente dalla card del monitor.
+app.post('/orders/:id/courses/:n/fire', authenticate, requireAnyPermission('orders:expedite', 'orders:take', 'orders:kds'), async (req, res) => {
     const client = await pool.connect();
     try {
         if (!(await ordersEnabledGuard(req, res))) { client.release(); return; }
@@ -25059,7 +25075,9 @@ app.post('/orders/:id/courses/:n/call', authenticate, requirePermission('orders:
 // moriva a READY e il monitor accumulava uscite verdi già portate al tavolo;
 // con served_at diventa anche misurabile il tempo reale sotto la lampada.
 // Permessi in alternativa: la segna il passe (expedite) o la sala (take).
-app.post('/orders/:id/courses/:n/serve', authenticate, requireAnyPermission('orders:expedite', 'orders:take'), async (req, res) => {
+// orders:kds incluso: col passe spento il servito lo segna la cucina dalla
+// card pronta del monitor.
+app.post('/orders/:id/courses/:n/serve', authenticate, requireAnyPermission('orders:expedite', 'orders:take', 'orders:kds'), async (req, res) => {
     const client = await pool.connect();
     try {
         if (!(await ordersEnabledGuard(req, res))) { client.release(); return; }

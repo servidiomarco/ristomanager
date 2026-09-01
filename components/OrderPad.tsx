@@ -8,7 +8,7 @@ import { Shift } from '../types';
 import { getRomeDatePart } from '../utils/reservationTime';
 import { getTableMerges } from '../services/apiService';
 import {
-  ordersApiService, getMenuCatalogue, newIdempotencyKey, closeOrder, updateOrder, fireCourse, serveCourse,
+  ordersApiService, getMenuCatalogue, newIdempotencyKey, closeOrder, updateOrder, fireCourse,
   voidItem, setOrderDiscount, transferOrder,
   type MenuCatalogue, type NewOrderItem, type CloseOrderResult,
 } from '../services/ordersApiService';
@@ -72,12 +72,9 @@ interface OrderPadProps {
   /** Chiede alla chrome dell'app di togliersi di mezzo: dentro un tavolo il
    *  telefono serve tutto alla comanda. */
   onImmersive?: (on: boolean) => void;
-  /** Passe spento (Impostazioni → Sala e cucina): il «servito» passa alla
-   *  comanda del cameriere — compare l'icona sulle uscite pronte. */
-  passeEnabled?: boolean;
 }
 
-export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, reservations, globalDate, globalShiftFilter, onImmersive, initialTableId, onInitialTableConsumed, passeEnabled = true }) => {
+export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, reservations, globalDate, globalShiftFilter, onImmersive, initialTableId, onInitialTableConsumed }) => {
   // I piatti spenti (es. articolo disattivato in cassa Passepartout) restano
   // in anagrafica per lo storico ma non si battono più.
   const dishes = useMemo(() => allDishes.filter(d => d.is_active !== false), [allDishes]);
@@ -556,22 +553,6 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
     }
   };
 
-  // Col passe spento è il cameriere a chiudere il giro: «servito» sull'uscita
-  // pronta libera la card dal monitor di cucina e la manda nelle Consegnate.
-  const serve = async (courseNo: number) => {
-    if (!order || busy) return;
-    setBusy(true); setError(null);
-    try {
-      await serveCourse(order.order.id, courseNo);
-      setOrder(await ordersApiService.getOrder(order.order.id));
-      setFlash(`${courseLabel(courseNo)} servita`);
-    } catch (err: any) {
-      setError(err?.data?.error ?? err?.message ?? 'Servito non registrato');
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const recall = async (courseNo: number) => {
     if (!order || busy) return;
     setBusy(true); setError(null);
@@ -1004,8 +985,6 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
     onVoid: (i: OrderItem) => setVoidTarget(i),
     onRecall: recall,
     onFire: fire,
-    // Col passe attivo il servito resta un suo gesto: qui niente bottone.
-    onServe: passeEnabled ? undefined : serve,
   };
 
   const browser = (
@@ -1245,7 +1224,6 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
         onVoid={i => setVoidTarget(i)}
         onRecall={recall}
         onFire={fire}
-        onServe={passeEnabled ? undefined : serve}
         onSend={() => submit('course')}
         onSendAll={() => submit('all')}
         onRepeat={repeatLine}
