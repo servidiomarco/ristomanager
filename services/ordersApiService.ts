@@ -233,15 +233,45 @@ export interface KdsCourseState {
   waiting_station_ids: (number | null)[];
 }
 
+/** Riga di un'ALTRA partita sulla stessa uscita: sola lettura, per il
+ *  pacing («quanto manca alla griglia prima che io cali la pasta?»). */
+export interface KdsOtherItem {
+  id: number;
+  order_id: number;
+  course_no: number;
+  station_id: number | null;
+  name_snapshot: string;
+  qty: number;
+  status: 'SENT' | 'PREPARING' | 'READY';
+}
+
 export interface KdsQueue {
   station_id: number | null;
   items: KdsItem[];
   courses: KdsCourseState[];
+  /** Presente solo col filtro partita; vuoto sul monitor senza partita. */
+  others?: KdsOtherItem[];
 }
 
 export const getKdsQueue = async (stationId: number | null): Promise<KdsQueue> =>
   apiRequest<KdsQueue>(
     `${API_URL}/kds/queue${stationId != null ? `?station_id=${stationId}` : ''}`,
+    { headers: getHeaders() },
+  );
+
+/** Uscita servita, per lo schermo «Consegnate» (consultazione). */
+export interface KdsServedCourse {
+  order_id: number;
+  course_no: number;
+  table_name: string | null;
+  customer_name: string | null;
+  served_at: string;
+  items: { name: string; qty: number }[];
+}
+
+export const getKdsServed = async (stationId: number | null): Promise<{ courses: KdsServedCourse[] }> =>
+  apiRequest<{ courses: KdsServedCourse[] }>(
+    `${API_URL}/kds/served${stationId != null ? `?station_id=${stationId}` : ''}`,
     { headers: getHeaders() },
   );
 
