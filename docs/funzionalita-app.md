@@ -533,6 +533,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-01 | Comande, Cucina e Passe | «Stampa copia» dice l'esito addosso al bottone: rotellina durante l'invio, spunta verde «Copia in stampa», errore scritto lì sotto — nell'esito di chiusura del palmare e della cassa. |
 | 2026-09-01 | Comande, Cucina e Passe | Tavolo aperto a tutto schermo sul palmare: la barra dell'app sparisce e in cima resta la scheda del tavolo; la ricerca piatti sta nella lente della testata e si apre sul velo trasparente della ricerca globale, coi risultati che si aggiungono al tocco. |
 | 2026-09-01 | Menu & Banchetti | Piatti e categorie con interruttore acceso/spento e ordinamento libero (frecce e modale "Categorie"); scelte rispettate da palmare comande e menu digitale. |
 | 2026-09-01 | Comande, Cucina e Passe | Campanella del monitor cucina ridefinita: avvisa la sala che l'uscita è pronta (annuncio nel canale sala, con push) invece di chiamare l'uscita successiva — i tempi del servizio restano ai camerieri. |

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Check, Loader2, Printer, TriangleAlert, Utensils, X,
+  Check, Loader2, TriangleAlert, Utensils, X,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import type { Dish, Reservation, Table, TableMerge, OrderWithItems, OrderItem } from '../types';
@@ -13,6 +13,7 @@ import {
   type MenuCatalogue, type NewOrderItem, type CloseOrderResult,
 } from '../services/ordersApiService';
 import { BillSheet, InvoiceDialog } from './pagamenti/BillSheet';
+import { StampaCopiaButton } from './pagamenti/StampaCopiaButton';
 import { PagamentoSheet } from './cassa/PagamentoSheet';
 import { useAuth } from '../contexts/AuthContext';
 import { billsApiService, printBill } from '../services/billsApiService';
@@ -860,16 +861,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
                   <p className="text-[13px] leading-snug text-[var(--ds-text-secondary)]">
                     L'ospite lo inquadra e ha lo scontrino digitale sul telefono.
                   </p>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try { await printBill(scontrinoEsito.billId, 'SCONTRINO'); setFlash('Copia in stampa'); }
-                      catch (err: any) { setError(err?.data?.message ?? err?.data?.error ?? err?.message ?? 'Stampa non riuscita'); }
-                    }}
-                    className="inline-flex h-11 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
-                  >
-                    <Printer size={15} aria-hidden /> Stampa copia
-                  </button>
+                  {/* Esito sul bottone, non in un flash di pagina: il flash
+                      resta dietro questo modal e nessuno lo vede. */}
+                  <StampaCopiaButton onPrint={() => printBill(scontrinoEsito.billId, 'SCONTRINO')} />
                 </div>
               </div>
             </div>

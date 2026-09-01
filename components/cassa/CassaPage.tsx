@@ -607,11 +607,9 @@ export const CassaPage: React.FC<CassaPageProps> = ({
             && esito.bill.fiscal_doc_type === 'RECEIPT'
             && esito.bill.fiscal_provider !== 'passepartout'
             ? esito.bill.fiscal_public_token ?? null : null}
-          onPrintReceipt={async () => {
-            setError(null);
-            try { await printBill(esito.bill.id, 'SCONTRINO'); }
-            catch (err: any) { setError(err?.data?.message ?? err?.data?.error ?? err?.message ?? 'Stampa non riuscita'); }
-          }}
+          // Niente try/catch: successo ed errore li mostra il bottone stesso,
+          // vicino al dito — l'errore di pagina qui non si vede.
+          onPrintReceipt={() => printBill(esito.bill.id, 'SCONTRINO')}
           busy={busyBillId != null}
           onRetryDocument={async () => {
             setBusyBillId(esito.bill.id);
