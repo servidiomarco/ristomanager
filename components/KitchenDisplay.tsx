@@ -240,6 +240,10 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   // Un monitor che perde eventi durante un blip di rete e resta indietro è
   // peggio di nessun monitor: alla riconnessione si rilegge tutta la coda,
   // e c'è comunque un ricarico periodico come rete di sicurezza.
+  // Le uscite a schermo: filtra gli eventi delle altre partite, così un
+  // monitor non ricarica per ogni riga avanzata in tutta la cucina.
+  const courseKeysRef = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     const socket = socketClient.getSocket();
     if (!socket) return;
@@ -258,6 +262,19 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
     socket.on('course:unserved', onChange);
     socket.on('orderItem:voided', onChange);
     socket.on('connect', onChange);
+    // L'avanzamento di un'ALTRA partita: kds:item viaggia solo nella stanza
+    // della partita della riga, quindi il piede «altre partite» e l'«attende
+    // le altre» restavano fermi fino al poll dei 60s (visto dal vivo: i Primi
+    // segnano pronto e gli Antipasti leggono ancora «in coda»). Questi due
+    // eventi girano già broadcast: si ricarica solo se l'uscita è a schermo.
+    const onSibling = (p: any) => {
+      if (p?.order_id == null) return;
+      // La mia partita è già coperta da kds:item: qui interessano gli altri.
+      if (p.station_id !== undefined && p.station_id === stationId) return;
+      if (courseKeysRef.current.has(`${p.order_id}:${p.course_no}`)) reload();
+    };
+    socket.on('orderItem:status', onSibling);
+    socket.on('course:ready', onSibling);
     // Revisione nuova: suona come una comanda — è un cambio di piano, non
     // rumore di fondo. station_ids NULL = riguarda tutti gli schermi.
     const onRevised = (r: OrderRevision) => {
@@ -281,6 +298,8 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
       socket.off('course:unserved', onChange);
       socket.off('orderItem:voided', onChange);
       socket.off('connect', onChange);
+      socket.off('orderItem:status', onSibling);
+      socket.off('course:ready', onSibling);
       socket.off('order:revised', onRevised);
       socket.off('order:revision-acked', onRevisionAcked);
       clearInterval(poll);
@@ -337,6 +356,10 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
       return ta.localeCompare(tb);
     });
   }, [items, courses, others, stationId]);
+
+  useEffect(() => {
+    courseKeysRef.current = new Set(columns.map(c => c.key));
+  }, [columns]);
 
   // La lista delle consegnate si carica solo quando la si guarda: è
   // consultazione, non deve pesare sul monitor che lavora.
