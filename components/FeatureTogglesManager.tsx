@@ -199,6 +199,8 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
         ai_messages_enabled: { title: 'Messaggi con AI', on: 'attivi', off: 'disattivati' },
         // Idem: gestito dal QR modal della pagina Menu.
         digital_menu_enabled: { title: 'Menu digitale', on: 'attivo', off: 'disattivato' },
+        // Idem: gestito dalla sezione Sala e cucina.
+        passe_enabled: { title: 'Passe', on: 'attivo', off: 'disattivato' },
     };
 
     const toggle = async (key: FlagKey) => {
