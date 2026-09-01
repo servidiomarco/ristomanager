@@ -182,7 +182,9 @@ done
 curl -fsS "http://localhost:$API_PORT/health" >/dev/null 2>&1 || die "Il backend non risponde. Guarda le righe [api] qui sopra."
 
 say "Avvio frontend (porta $WEB_PORT)"
-VITE_API_URL="http://localhost:$API_PORT" npx vite --port "$WEB_PORT" --host 2>&1 | sed 's/^/[web] /' &
+# LAN_HOST=<ip del Mac> per collaudare dai tablet in rete: la SPA deve
+# chiamare l'API su QUESTO host, non sul localhost del tablet.
+VITE_API_URL="http://${LAN_HOST:-localhost}:$API_PORT" npx vite --port "$WEB_PORT" --host 2>&1 | sed 's/^/[web] /' &
 
 sleep 3
 cat <<BANNER
