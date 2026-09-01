@@ -56,6 +56,12 @@ export interface Dish {
   /** false = spento (es. articolo disattivato in cassa): resta in anagrafica
    *  per lo storico, sparisce dai picker. */
   is_active?: boolean;
+  /** Interruttore del ristoratore, distinto da is_active che appartiene alla
+   *  cassa: il piatto è proponibile solo se entrambi sono veri. */
+  crm_enabled?: boolean;
+  /** Posizione dentro la categoria (dall'ordinamento in Menu). NULL = mai
+   *  ordinato a mano: in coda, alfabetico. */
+  sort_order?: number | null;
 }
 
 /** Aliquote proposte dalla UI. Il server accetta 0..100: l'elenco lo cambia

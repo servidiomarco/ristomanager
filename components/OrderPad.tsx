@@ -75,12 +75,18 @@ interface OrderPadProps {
 }
 
 export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, reservations, globalDate, globalShiftFilter, onImmersive, initialTableId, onInitialTableConsumed }) => {
-  // I piatti spenti (es. articolo disattivato in cassa Passepartout) restano
-  // in anagrafica per lo storico ma non si battono più.
-  const dishes = useMemo(() => allDishes.filter(d => d.is_active !== false), [allDishes]);
+  const [catalogue, setCatalogue] = useState<MenuCatalogue | null>(null);
+  // I piatti spenti restano in anagrafica per lo storico ma non si battono
+  // più. Tre interruttori: is_active della cassa (articolo disattivato in
+  // Passepartout), crm_enabled del ristoratore (toggle nella pagina Menu) e
+  // la categoria spenta, che nasconde i suoi piatti anche dalla ricerca.
+  const dishes = useMemo(() => {
+    const prefs = catalogue?.category_prefs ?? {};
+    return allDishes.filter(d => d.is_active !== false && d.crm_enabled !== false
+      && (!d.category || prefs[d.category]?.enabled !== false));
+  }, [allDishes, catalogue]);
   const [tableId, setTableId] = useState<number | null>(null);
   const [order, setOrder] = useState<OrderWithItems | null>(null);
-  const [catalogue, setCatalogue] = useState<MenuCatalogue | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [course, setCourse] = useState(1);
   const [category, setCategory] = useState<string | null>(null);
@@ -138,11 +144,22 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
     return () => onImmersive?.(false);
   }, [inPad, onImmersive]);
 
+  // Le chip categoria seguono l'ordine scelto nella pagina Menu (preferenze
+  // dal catalogo); le categorie spente lì spariscono qui con tutti i loro
+  // piatti. Senza preferenza: accesa, in coda, alfabetica.
   const categories = useMemo(() => {
+    const prefs = catalogue?.category_prefs ?? {};
     const seen = new Set<string>();
-    for (const d of dishes) if (d.category) seen.add(d.category);
-    return [...seen].sort();
-  }, [dishes]);
+    for (const d of dishes) {
+      if (d.category && prefs[d.category]?.enabled !== false) seen.add(d.category);
+    }
+    return [...seen].sort((a, b) => {
+      const sa = prefs[a]?.sort ?? Number.MAX_SAFE_INTEGER;
+      const sb = prefs[b]?.sort ?? Number.MAX_SAFE_INTEGER;
+      if (sa !== sb) return sa - sb;
+      return a.localeCompare(b, 'it');
+    });
+  }, [dishes, catalogue]);
 
   useEffect(() => {
     if (category === null && categories.length > 0) setCategory(categories[0]);
@@ -251,7 +268,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
       // un'uscita già lavorata (successo al tavolo 11, «ma il passe la dà
       // servita») — il ripristino si annuncia, così si controlla prima di
       // inviare o si butta col cestino.
-      const bozza = restoreCartDraft(view.order.id, allDishes.filter(d => d.is_active !== false));
+      const bozza = restoreCartDraft(view.order.id, dishes);
       setCart(bozza);
       if (bozza.length > 0) {
         const n = bozza.reduce((sum, l) => sum + l.qty, 0);
@@ -267,7 +284,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
     } finally {
       setBusy(false);
     }
-  }, [reservationForTable, tables, serviceQuery, isTodayRome, serviceBills]);
+  }, [reservationForTable, tables, serviceQuery, isTodayRome, serviceBills, dishes]);
 
   // Segna quali tavoli hanno già una comanda aperta NEL SERVIZIO SELEZIONATO,
   // così il cameriere sceglie consapevolmente invece di scoprirlo dopo — e

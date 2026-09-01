@@ -3650,7 +3650,7 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
                    AND NOT EXISTS (SELECT 1 FROM order_items oi WHERE oi.dish_id = d.id)
                    AND COALESCE(d.description, '') = '' AND d.photo_url IS NULL
                    AND COALESCE(array_length(d.allergens, 1), 0) = 0
-                   AND d.translations IS NULL`,
+                   AND d.translations IS NULL AND d.crm_enabled`,
                 [req.tenantId!, refs]
             );
             // Gruppi pp rimasti senza piatti: si eliminano (CASCADE sui membri).
@@ -3711,6 +3711,150 @@ async function saveMenuCategoryTranslations(tenantId: number, map: Record<string
         [tenantId, MENU_CAT_TRANSLATIONS_KEY, JSON.stringify(map)]
     );
 }
+
+// Preferenze delle categorie del menu (accese/spente, ordine). Le categorie
+// sono stringhe libere sui piatti, non righe: come per le traduzioni, le
+// preferenze vivono in un blob per tenant. Una categoria senza preferenza è
+// accesa e va in coda — così le categorie nuove (a mano o dal sync cassa)
+// compaiono senza bisogno di un passaggio in più.
+const MENU_CAT_PREFS_KEY = 'menu_category_prefs';
+type MenuCategoryPref = { enabled: boolean; sort: number };
+
+async function getMenuCategoryPrefs(tenantId: number): Promise<Record<string, MenuCategoryPref>> {
+    const rs = await queryWithRetry(
+        `SELECT text_value FROM app_settings WHERE tenant_id = $1 AND key = $2`,
+        [tenantId, MENU_CAT_PREFS_KEY]
+    );
+    try {
+        return rs.rows[0]?.text_value ? JSON.parse(rs.rows[0].text_value) : {};
+    } catch {
+        return {};
+    }
+}
+
+// Comparatore condiviso fra CRM, palmare e menu pubblico: prima le categorie
+// ordinate a mano, poi le altre in alfabetico. Un solo posto decide, così le
+// tre superfici non possono raccontare tre menu diversi.
+function sortCategoriesByPrefs(names: string[], prefs: Record<string, MenuCategoryPref>): string[] {
+    return [...names].sort((a, b) => {
+        const sa = prefs[a]?.sort ?? Number.MAX_SAFE_INTEGER;
+        const sb = prefs[b]?.sort ?? Number.MAX_SAFE_INTEGER;
+        if (sa !== sb) return sa - sb;
+        return a.localeCompare(b, 'it');
+    });
+}
+
+// Elenco categorie per la pagina Menu: quelle presenti sui piatti, con stato
+// e ordine dalle preferenze. Solo authenticate: sono i nomi delle portate.
+app.get('/menu/categories', authenticate, async (req, res) => {
+    try {
+        const [rows, prefs] = await Promise.all([
+            queryWithRetry(
+                `SELECT category, COUNT(*)::int AS dishes FROM dishes
+                 WHERE tenant_id = $1 AND COALESCE(category, '') <> ''
+                 GROUP BY category`,
+                [req.tenantId!]
+            ),
+            getMenuCategoryPrefs(req.tenantId!),
+        ]);
+        const byName = new Map<string, number>(rows.rows.map((r: any) => [String(r.category), r.dishes]));
+        const ordered = sortCategoriesByPrefs([...byName.keys()], prefs);
+        res.json({
+            categories: ordered.map(name => ({
+                name,
+                dishes: byName.get(name) ?? 0,
+                enabled: prefs[name]?.enabled !== false,
+            })),
+        });
+    } catch (err: any) {
+        console.error('GET /menu/categories error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Salva stato e ordine delle categorie: l'ordine dell'array È l'ordine del
+// menu. Le preferenze di categorie non più presenti sui piatti si scartano
+// qui, così il blob non accumula fantasmi.
+app.put('/menu/categories', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const input = req.body?.categories;
+        if (!Array.isArray(input) || input.some((c: any) => typeof c?.name !== 'string' || c.name.trim() === '')) {
+            return res.status(400).json({ error: 'categories deve essere una lista di { name, enabled }' });
+        }
+        const prefs: Record<string, MenuCategoryPref> = {};
+        input.forEach((c: any, i: number) => {
+            prefs[c.name.trim()] = { enabled: c.enabled !== false, sort: i };
+        });
+        await queryWithRetry(
+            `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (tenant_id, key) DO UPDATE
+               SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+            [req.tenantId!, MENU_CAT_PREFS_KEY, JSON.stringify(prefs)]
+        );
+        // Stesso evento del sync cassa: i client ricaricano l'anagrafica
+        // intera invece di rincorrere il dettaglio di cosa è cambiato.
+        try { socketService?.broadcastToAll(req.tenantId!, 'dish:synced', { categorie: input.length }); } catch (_) {}
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('PUT /menu/categories error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Ordine dei piatti dentro una categoria: l'array di id È l'ordine. Il
+// client manda i piatti della categoria come li vuole; qui si scrive solo
+// sort_order, tutto il resto resta com'è (compresi i campi della cassa).
+app.put('/menu/dish-order', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const ids = req.body?.dish_ids;
+        if (!Array.isArray(ids) || ids.length === 0 || ids.some((n: any) => !Number.isInteger(n))) {
+            return res.status(400).json({ error: 'dish_ids deve essere una lista di id' });
+        }
+        await queryWithRetry(
+            `UPDATE dishes d SET sort_order = x.ord - 1
+             FROM unnest($2::int[]) WITH ORDINALITY AS x(id, ord)
+             WHERE d.id = x.id AND d.tenant_id = $1`,
+            [req.tenantId!, ids]
+        );
+        try { socketService?.broadcastToAll(req.tenantId!, 'dish:synced', { riordinati: ids.length }); } catch (_) {}
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('PUT /menu/dish-order error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Interruttore del piatto lato CRM. Volutamente separato dal PUT /dishes/:id
+// che riscrive l'anagrafica intera: qui si tocca solo crm_enabled, così il
+// toggle non può mai riportare indietro nome o prezzo appena sincronizzati
+// dalla cassa.
+app.put('/dishes/:id/enabled', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: 'id non valido' });
+        const enabled = req.body?.enabled;
+        if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled deve essere true o false' });
+        const rs = await queryWithRetry(
+            `UPDATE dishes SET crm_enabled = $1 WHERE id = $2 AND tenant_id = $3 RETURNING *`,
+            [enabled, id, req.tenantId!]
+        );
+        const dish = rs.rows[0];
+        if (!dish) return res.status(404).json({ error: 'Dish not found' });
+        if (socketService) socketService.broadcastDishUpdated(req.tenantId!, dish);
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.DISH, id, dish.name,
+                { crm_enabled: enabled }
+            ).catch(() => {});
+        }
+        res.json(dish);
+    } catch (err: any) {
+        console.error('PUT /dishes/:id/enabled error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
 
 // Traduce in batch le voci mancanti (piatti attivi + categorie) nelle lingue
 // del menu. Idempotente: ritradurre non tocca ciò che è già tradotto — per
@@ -3778,17 +3922,26 @@ const handlePublicMenu = async (tenantId: number, _req: express.Request, res: ex
     if (!(await getFeatureFlag(tenantId, 'digital_menu_enabled', false))) {
         return res.status(503).json({ error: 'menu_disabled' });
     }
+    // Doppio interruttore: is_active è della cassa, crm_enabled del
+    // ristoratore — il menu pubblico mostra solo ciò che entrambi accendono.
     const dishesRs = await queryWithRetry(
         `SELECT name, description, price, category, allergens, photo_url, translations
-         FROM dishes WHERE tenant_id = $1 AND is_active
-         ORDER BY category, name`,
+         FROM dishes WHERE tenant_id = $1 AND is_active AND crm_enabled
+         ORDER BY category, sort_order NULLS LAST, name`,
         [tenantId]
     );
+    const prefs = await getMenuCategoryPrefs(tenantId);
+    const rows = dishesRs.rows.filter((d: any) => prefs[String(d.category || 'Altro')]?.enabled !== false);
+    // L'ordine scelto nel CRM, solo per le categorie effettivamente presenti:
+    // la pagina lo usa per prime e tiene la sua euristica per le altre.
+    const present = [...new Set(rows.map((d: any) => String(d.category || 'Altro')))] as string[];
+    const categorieOrdine = sortCategoriesByPrefs(present, prefs).filter(name => prefs[name] != null);
     res.json({
         restaurant: businessIdentity(tenantId).name,
         lingue: ['it', ...MENU_LANGS],
         categorie: await getMenuCategoryTranslations(tenantId),
-        piatti: dishesRs.rows.map((d: any) => ({
+        categorie_ordine: categorieOrdine,
+        piatti: rows.map((d: any) => ({
             name: d.name,
             description: d.description || null,
             price: Number(d.price),
@@ -9889,7 +10042,14 @@ app.delete('/rooms/:id', authenticate, requirePermission('floorplan:full'), asyn
 // Dishes - require authentication
 app.get('/dishes', authenticate, async (req, res) => {
     try {
-        const result = await queryWithRetry('SELECT * FROM dishes WHERE tenant_id = $1 ORDER BY category, name', [req.tenantId!]);
+        // Dentro la categoria comanda sort_order (l'ordine scelto in Menu);
+        // i piatti mai ordinati a mano vanno in coda, alfabetici. L'ordine
+        // DELLE categorie invece lo applica il client con le preferenze di
+        // /menu/categories: qui le righe restano solo raggruppate.
+        const result = await queryWithRetry(
+            'SELECT * FROM dishes WHERE tenant_id = $1 ORDER BY category, sort_order NULLS LAST, name',
+            [req.tenantId!]
+        );
         res.json(result.rows);
     } catch (err) {
         console.error(err);
@@ -23843,12 +24003,13 @@ app.post('/orders', authenticate, requirePermission('orders:take'), async (req, 
 // Sta sotto /menu e non sotto /orders per non collidere con /orders/:id.
 app.get('/menu/catalogue', authenticate, requirePermission('orders:view'), async (req, res) => {
     try {
-        const [lists, stations, groups, mods, links] = await Promise.all([
+        const [lists, stations, groups, mods, links, catPrefs] = await Promise.all([
             queryWithRetry(`SELECT id, name, is_default, is_active, sort_order FROM menu_price_lists WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
             queryWithRetry(`SELECT id, name, color, sort_order, is_active FROM stations WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
             queryWithRetry(`SELECT id, name, min_select, max_select, sort_order FROM modifier_groups WHERE tenant_id = $1 ORDER BY sort_order, id`, [req.tenantId!]),
             queryWithRetry(`SELECT id, group_id, name, price_delta_cents, is_active, sort_order FROM modifiers WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
             queryWithRetry(`SELECT dish_id, group_id FROM dish_modifier_groups WHERE tenant_id = $1`, [req.tenantId!]),
+            getMenuCategoryPrefs(req.tenantId!),
         ]);
         res.json({
             price_lists: lists.rows,
@@ -23858,6 +24019,9 @@ app.get('/menu/catalogue', authenticate, requirePermission('orders:view'), async
                 modifiers: mods.rows.filter((m: any) => m.group_id === g.id),
             })),
             dish_modifier_groups: links.rows,
+            // Ordine e accensione delle categorie decisi in Menu: il palmare
+            // li applica alle chip e nasconde le categorie spente.
+            category_prefs: catPrefs,
         });
     } catch (err: any) {
         console.error('GET /menu/catalogue error:', err);
