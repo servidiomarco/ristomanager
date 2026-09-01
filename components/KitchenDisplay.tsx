@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bell, BellOff, Check, ChevronRight, Loader2, MessagesSquare, Pencil, Play, TriangleAlert, WifiOff } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
+import { useSalaNodeStale, formatStaleAsOf } from '../hooks/useSalaNodeStale';
 import { useAuth } from '../contexts/AuthContext';
 import { socketClient } from '../services/socketClient';
 import { staffChatApiService } from '../services/staffChatApiService';
@@ -101,6 +102,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   const [revisionsModalKey, setRevisionsModalKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [offline, setOffline] = useState(false);
+  const nodeStale = useSalaNodeStale();
   const [picking, setPicking] = useState(false);
   // Riepilogo del servizio (aggregato lato server dalle note strutturate +
   // dalle dietary_notes clienti). Aggiornato all'apertura e ogni 60s: cambia
@@ -263,6 +265,9 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
     };
     socket.on('order:revised', onRevised);
     socket.on('order:revision-acked', onRevisionAcked);
+    // Modalità ibrida: il nodo ha riagganciato il cloud dopo un buco — la
+    // cache è stata svuotata, si rilegge tutto (come su connect).
+    socket.on('sala:resync', onChange);
 
     const poll = setInterval(reload, 60_000);
     return () => {
@@ -274,6 +279,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
       socket.off('connect', onChange);
       socket.off('order:revised', onRevised);
       socket.off('order:revision-acked', onRevisionAcked);
+      socket.off('sala:resync', onChange);
       clearInterval(poll);
       if (stationId != null) socketClient.unsubscribeFromStation(stationId);
     };
@@ -393,11 +399,19 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           <span className="flex-shrink-0 text-[15px] text-[var(--ds-text-muted)] tabular-nums">
             {todo.length} in lavorazione
           </span>
-          {offline && (
+          {offline ? (
             <StatusPill tone="pending">
               <WifiOff size={13} aria-hidden /> riconnessione…
             </StatusPill>
-          )}
+          ) : nodeStale.stale ? (
+            /* Terzo stato della modalità ibrida: lo schermo è vivo (il nodo
+               risponde) ma il cloud no — la coda mostrata è ferma all'ultima
+               copia buona. La sala deve saperlo, non scoprirlo. */
+            <StatusPill tone="pending">
+              <WifiOff size={13} aria-hidden />
+              {nodeStale.asOf ? `dati fermi alle ${formatStaleAsOf(nodeStale.asOf)}` : 'dati fermi'} — cloud non raggiungibile
+            </StatusPill>
+          ) : null}
           {/* Icona sola, 44px, incassata sulla card come i controlli quiet:
               il testo qui non aggiungerebbe nulla che la campana non dica. */}
           <button

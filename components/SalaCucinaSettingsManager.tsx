@@ -7,7 +7,7 @@ import {
   setCategoryStation,
   getSalaProfiles, createSalaProfile, updateSalaProfile,
   activateSalaProfile, detachSalaProfile, deleteSalaProfile,
-  updatePrintRoutes,
+  updatePrintRoutes, updateSalaNodeSettings,
   type SalaConfig, type FireMode, type SalaProfile,
 } from '../services/salaApiService';
 import { useAuth } from '../contexts/AuthContext';
@@ -26,7 +26,7 @@ const FIRE_MODE_LABELS: { value: FireMode; title: string; hint: string }[] = [
 ];
 
 export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
-  const { hasPermission } = useAuth();
+  const { hasPermission, hasFeature } = useAuth();
   const canEdit = hasPermission('settings:full');
 
   const [flags, setFlags] = useState<FeatureFlags | null>(null);
@@ -39,6 +39,11 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
   const [profiles, setProfiles] = useState<SalaProfile[]>([]);
   const [activeProfile, setActiveProfile] = useState<string | null>(null);
   const [newProfile, setNewProfile] = useState('');
+  // Bozza della config del nodo di sala: seminata UNA volta dal primo
+  // /sala/config — il polling da 10s non deve sovrascrivere quello che il
+  // gestore sta digitando.
+  const [nodeDraft, setNodeDraft] = useState({ domain: '', lan_ip: '', port: '443' });
+  const nodeDraftSeeded = useRef(false);
 
   const showToastRef = useRef(showToast);
   useEffect(() => { showToastRef.current = showToast; });
@@ -58,6 +63,16 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
   }, []);
 
   useEffect(() => { reload(); }, [reload]);
+
+  useEffect(() => {
+    if (!config || nodeDraftSeeded.current) return;
+    nodeDraftSeeded.current = true;
+    setNodeDraft({
+      domain: config.sala_node?.domain ?? '',
+      lan_ip: config.sala_node?.lan_ip ?? '',
+      port: String(config.sala_node?.port ?? 443),
+    });
+  }, [config]);
 
   // Lo stato dell'agente invecchia da solo: finché il pannello è aperto lo
   // ricontrolliamo, così "online" non è mai una foto vecchia di dieci minuti.
@@ -410,6 +425,82 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
             Le comande delle partite si instradano qui sopra, centro per centro. Qui scegli dove escono i documenti del conto al tavolo.
           </p>
         </section>
+
+        {/* ---- Nodo di sala (modalità ibrida) ---- */}
+        {hasFeature('sala_node') && (
+          <section>
+            <div className="flex items-center justify-between mb-2">
+              <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)]">
+                Nodo di sala
+              </h5>
+              <span className={`text-[12px] flex items-center gap-1.5 ${config.sala_node.online ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-critical-text)]'}`}>
+                {config.sala_node.online ? <Wifi size={13} /> : <WifiOff size={13} />}
+                {config.sala_node.online
+                  ? 'nodo online'
+                  : config.sala_node.last_seen_seconds != null
+                    ? `nodo offline da ${config.sala_node.last_seen_seconds}s`
+                    : 'nodo mai visto'}
+                {config.sala_node.online && config.sala_node.clients != null && ` · ${config.sala_node.clients} dispositivi`}
+              </span>
+            </div>
+            <div className="rounded-md border border-[var(--ds-border)] divide-y divide-[var(--ds-border)]">
+              <div className="flex items-center gap-3 px-3 py-2.5">
+                <div className="flex-1 min-w-0">
+                  <span className="text-[13px] font-medium text-[var(--ds-text-primary)]">Modalità ibrida</span>
+                  <p className="text-[12px] text-[var(--ds-text-muted)]">
+                    Comande, cucina e passe passano dal nodo sulla rete del locale: gli schermi restano vivi anche a linea caduta.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={flags.sala_node_enabled === true}
+                  disabled={!canEdit || saving || !config.sala_node.domain}
+                  title={!config.sala_node.domain ? 'Prima configura il dominio del nodo' : undefined}
+                  onClick={() => act(
+                    async () => { setFlags(await updateFeatureFlags({ sala_node_enabled: flags.sala_node_enabled !== true })); },
+                    `Modalità ibrida: ${flags.sala_node_enabled !== true ? 'attiva' : 'disattivata'}`
+                  )}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] disabled:opacity-50 disabled:cursor-not-allowed ${
+                    flags.sala_node_enabled ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
+                  }`}
+                >
+                  <span
+                    aria-hidden="true"
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${
+                      flags.sala_node_enabled ? 'translate-x-5' : 'translate-x-0.5'
+                    } translate-y-0.5`}
+                  />
+                </button>
+              </div>
+              {canEdit && (
+                <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+                  <input value={nodeDraft.domain} onChange={e => setNodeDraft(v => ({ ...v, domain: e.target.value }))}
+                    placeholder="dominio (es. sala.vecchiofrantoio.sympotia.com)" className="w-72 text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
+                  <input value={nodeDraft.lan_ip} onChange={e => setNodeDraft(v => ({ ...v, lan_ip: e.target.value }))}
+                    placeholder="IP LAN (es. 192.168.1.60)" className="w-40 text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
+                  <input value={nodeDraft.port} onChange={e => setNodeDraft(v => ({ ...v, port: e.target.value }))}
+                    placeholder="porta" className="w-20 text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5" />
+                  <button type="button" disabled={saving}
+                    onClick={() => act(
+                      () => updateSalaNodeSettings({
+                        domain: nodeDraft.domain.trim() || null,
+                        lan_ip: nodeDraft.lan_ip.trim() || null,
+                        port: Number(nodeDraft.port) || 443,
+                      }),
+                      'Configurazione del nodo salvata'
+                    )}
+                    className="text-[13px] px-2.5 py-1.5 rounded-md border border-[var(--ds-border)] disabled:opacity-50">
+                    Salva
+                  </button>
+                </div>
+              )}
+            </div>
+            <p className="text-[12px] text-[var(--ds-text-muted)] mt-1.5">
+              Il dominio punta all'IP del nodo in LAN; certificato e credenziali li distribuisce il cloud. Le scritture passano sempre dal cloud.
+            </p>
+          </section>
+        )}
 
         {/* ---- Fiscale (Fase 2) ---- */}
         <section>

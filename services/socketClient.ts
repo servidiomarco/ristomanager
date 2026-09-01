@@ -1,7 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-
-// Use environment variable or default to production URL
-const SOCKET_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
+import { serviceSocketUrl, isNodeUrl, noteNodeFailure } from './apiRouting';
 
 // Token storage key (must match authApiService)
 const ACCESS_TOKEN_KEY = 'ristomanager_access_token';
@@ -43,9 +41,13 @@ class SocketClient {
       return this.socket;
     }
 
-    console.log(`📡 Connecting to Socket.IO server at ${SOCKET_URL}`);
+    // Modalità ibrida: il socket vive sul nodo di sala quando è attivo, sul
+    // cloud altrimenti. Deciso a ogni connect, così un reconnectWithToken
+    // dopo un cambio di routing atterra dalla parte giusta.
+    const socketUrl = serviceSocketUrl();
+    console.log(`📡 Connecting to Socket.IO server at ${socketUrl}`);
 
-    this.socket = io(SOCKET_URL, {
+    this.socket = io(socketUrl, {
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -98,6 +100,14 @@ class SocketClient {
       // Log only every 5 attempts to avoid console flooding during long outages
       if (this.reconnectAttempts <= 3 || this.reconnectAttempts % 5 === 0) {
         console.error(`❌ Connection error (attempt ${this.reconnectAttempts}):`, error.message);
+      }
+      // Il NODO non risponde da 5 tentativi: circuito aperto e si riconnette
+      // al cloud («il downgrade è il failover»). Verso il cloud invece si
+      // insiste all'infinito, com'è sempre stato: non c'è un piano B.
+      const uri = (this.socket?.io as any)?.uri as string | undefined;
+      if (this.reconnectAttempts >= 5 && uri && isNodeUrl(uri)) {
+        noteNodeFailure();
+        this.reconnectWithToken();
       }
     });
 

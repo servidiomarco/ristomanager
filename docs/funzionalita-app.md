@@ -24,25 +24,26 @@
 12. [Pagamenti, conto al tavolo e cassa](#pagamenti-conto-al-tavolo-e-cassa)
 13. [Fiscalità: scontrino, fattura elettronica, proforma](#fiscalità-scontrino-fattura-elettronica-proforma)
 14. [Integrazione cassa Passepartout](#integrazione-cassa-passepartout)
-15. [Stampa termica e print agent](#stampa-termica-e-print-agent)
-16. [Messaggi: WhatsApp e SMS](#messaggi-whatsapp-e-sms)
-17. [Email](#email)
-18. [Chat staff](#chat-staff)
-19. [Notifiche](#notifiche)
-20. [Clienti (CRM / rubrica)](#clienti-crm--rubrica)
-21. [Attività / to-do](#attività--to-do)
-22. [Personale (turni e presenze)](#personale-turni-e-presenze)
-23. [Inventario](#inventario)
-24. [Lista della spesa e fornitori](#lista-della-spesa-e-fornitori)
-25. [HACCP](#haccp)
-26. [Funzioni AI](#funzioni-ai)
-27. [Impostazioni](#impostazioni)
-28. [Utenti, ruoli e permessi](#utenti-ruoli-e-permessi)
-29. [Privacy e GDPR](#privacy-e-gdpr)
-30. [Piattaforma SaaS: multi-tenant, moduli e abbonamenti](#piattaforma-saas-multi-tenant-moduli-e-abbonamenti)
-31. [Funzionalità trasversali](#funzionalità-trasversali)
-32. [Integrazioni esterne](#integrazioni-esterne)
-33. [Registro aggiornamenti](#registro-aggiornamenti)
+15. [Nodo di sala (modalità ibrida)](#nodo-di-sala-modalità-ibrida)
+16. [Stampa termica e print agent](#stampa-termica-e-print-agent)
+17. [Messaggi: WhatsApp e SMS](#messaggi-whatsapp-e-sms)
+18. [Email](#email)
+19. [Chat staff](#chat-staff)
+20. [Notifiche](#notifiche)
+21. [Clienti (CRM / rubrica)](#clienti-crm--rubrica)
+22. [Attività / to-do](#attività--to-do)
+23. [Personale (turni e presenze)](#personale-turni-e-presenze)
+24. [Inventario](#inventario)
+25. [Lista della spesa e fornitori](#lista-della-spesa-e-fornitori)
+26. [HACCP](#haccp)
+27. [Funzioni AI](#funzioni-ai)
+28. [Impostazioni](#impostazioni)
+29. [Utenti, ruoli e permessi](#utenti-ruoli-e-permessi)
+30. [Privacy e GDPR](#privacy-e-gdpr)
+31. [Piattaforma SaaS: multi-tenant, moduli e abbonamenti](#piattaforma-saas-multi-tenant-moduli-e-abbonamenti)
+32. [Funzionalità trasversali](#funzionalità-trasversali)
+33. [Integrazioni esterne](#integrazioni-esterne)
+34. [Registro aggiornamenti](#registro-aggiornamenti)
 
 ---
 
@@ -307,6 +308,15 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 
 ---
 
+## Nodo di sala (modalità ibrida)
+
+- **Un piccolo server sulla rete del locale** (add-on, hardware fornito) che fa da ripetitore per comande, cucina, passe e conti aperti: gli schermi parlano col nodo, il nodo col cloud.
+- **Se cade la linea internet il servizio non si ferma**: i monitor restano vivi sull'ultima copia buona, con un avviso "dati fermi alle HH:MM" — la sala sa di essere in modalità isola. Al ritorno della linea tutto si riallinea da solo.
+- Le **scritture** (nuove comande, incassi) passano sempre dal cloud: a linea caduta il palmare lo dice chiaramente, e il rinvio è sicuro (nessun piatto duplicato).
+- Si attiva e disattiva da **Impostazioni → Sala & Cucina → Nodo di sala** (interruttore, dominio e IP del nodo, stato online e dispositivi collegati). Certificato e credenziali li distribuisce il cloud: il nodo si installa e si dimentica.
+
+---
+
 ## Stampa termica e print agent
 
 - **Stampanti termiche di rete** censite dalle Impostazioni (nome, IP, porta); un **agente di stampa** sulla rete del ristorante ritira i lavori dal cloud — aggiungere una stampante diventa effettivo in pochi secondi, e lo stato online/offline dell'agente è visibile in Impostazioni.
@@ -522,6 +532,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-01 | Nodo di sala (modalità ibrida) | Nuovo modulo (add-on): un nodo sulla rete del locale fa da ripetitore per comande/cucina/passe — a linea caduta gli schermi restano vivi con l'avviso "dati fermi"; toggle e stato in Impostazioni → Sala & Cucina. |
 | 2026-09-01 | Comande, Cucina e Passe | Le griglie tavoli di Comande e Cassa mostrano i tavoli uniti come una tessera sola («11+12», coperti sommati); il tocco apre il tavolo giusto dell'unione. |
 | 2026-09-01 | Comande, Cucina e Passe | Nuovo modulo Cassa (coda conti, sessione, incasso, correggi conto); in Comande: chiusura a un tocco (scontrino contanti/POS, preconto), bottone Chiama per le uscite, bozza locale delle righe non inviate, fattura con emissione immediata. |
 | 2026-08-30 | Funzionalità trasversali | Al rientro nell'app, se è stata deployata una versione nuova compare un avviso con "Ricarica" — la PWA sospesa non resta più sul codice vecchio. |

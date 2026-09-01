@@ -2,6 +2,7 @@ import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
 import type { BillPaymentMethod, CashClosureReport, CustomerBilling, FiscalDocument, FiscalProviderSetting, TableBill, TableBillWithSplits } from '../types';
 import { buildApiError } from './apiError';
+import { routedGetUrl, cloudFallbackUrl, noteRoutedResponse } from './apiRouting';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
@@ -52,7 +53,17 @@ const getHeaders = (): HeadersInit => {
 };
 
 const fetchWithAuth = async (url: string, options: RequestInit = {}, retried = false): Promise<Response> => {
-  const response = await fetch(url, options);
+  let response: Response;
+  try {
+    response = await fetch(url, options);
+  } catch (err) {
+    // Nodo di sala non raggiungibile → retry immediato sul cloud (vedi
+    // apiRouting); errori verso il cloud si propagano com'è sempre stato.
+    const cloudUrl = cloudFallbackUrl(url);
+    if (!cloudUrl) throw err;
+    return fetchWithAuth(cloudUrl, options, retried);
+  }
+  noteRoutedResponse(url, response);
   if (response.status === 401 && !retried) {
     const refreshed = await authApiService.refreshToken();
     if (refreshed) {
@@ -349,7 +360,7 @@ export const getOpenBills = async (
   if (service?.shift) qs.set('shift', service.shift);
   if (opts?.status === 'closed') qs.set('status', 'closed');
   const suffix = qs.toString() ? `?${qs.toString()}` : '';
-  return apiRequest(`${API_URL}/bills/open${suffix}`, { headers: getHeaders() });
+  return apiRequest(routedGetUrl(`/bills/open${suffix}`), { headers: getHeaders() });
 };
 
 /** La comanda dietro un conto, con gli id delle righe: serve alla
