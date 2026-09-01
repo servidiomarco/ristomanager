@@ -96,6 +96,14 @@ export const isAllowedOrigin = async (origin: string | undefined): Promise<boole
     // Sviluppo locale, qualunque porta.
     if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
 
+    // Rete privata (RFC 1918), solo FUORI produzione: il collaudo in sala si
+    // apre dai tablet sull'IP del Mac, e il futuro nodo locale della modalità
+    // ibrida vive proprio qui. In produzione (Railway) resta chiuso.
+    if (process.env.NODE_ENV !== 'production'
+        && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(hostname)) {
+        return true;
+    }
+
     // Deploy preview: suffix match sul dominio, NON `includes()` — un
     // "vercel.app.attacker.com" non deve passare.
     if (hostname === 'vercel.app' || hostname.endsWith('.vercel.app')) return true;

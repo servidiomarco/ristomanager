@@ -32,6 +32,11 @@ RUN ls -la dist/auth/
 # Production stage
 FROM node:22-alpine
 
+# Esplicito, non implicito: due guardie del codice leggono NODE_ENV — il
+# driver fiscale mock («mai in produzione») e la CORS per le reti private
+# (solo sviluppo/collaudo) — e senza questa riga erano entrambe inerti.
+ENV NODE_ENV=production
+
 WORKDIR /app
 
 # Copy package files

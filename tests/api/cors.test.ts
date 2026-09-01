@@ -37,6 +37,13 @@ describe('cors', () => {
         expect(res.headers['access-control-allow-origin']).toBeUndefined();
     });
 
+    it('rete privata consentita fuori produzione (collaudo in sala dai tablet)', async () => {
+        // In produzione (NODE_ENV=production, dal Dockerfile) resta chiusa:
+        // qui il server di test gira senza, come lo stack di collaudo.
+        const res = await api().get('/health').set('Origin', 'http://192.168.1.26:5199');
+        expect(res.headers['access-control-allow-origin']).toBe('http://192.168.1.26:5199');
+    });
+
     it('localhost è consentito su qualunque porta (sviluppo)', async () => {
         const res = await api().get('/health').set('Origin', 'http://localhost:5173');
         expect(res.headers['access-control-allow-origin']).toBe('http://localhost:5173');
