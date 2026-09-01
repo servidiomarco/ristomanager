@@ -114,6 +114,7 @@ La sezione centrale del CRM: elenco, mappa tavoli e scheda prenotazione in un'un
 **Mappa tavoli integrata**
 - Stato tavoli per sala con misuratore di occupazione, assegnazione con un tocco, **unione e divisione tavoli**, tavoli nascosti per turno, auto-assegnazione.
 - **Riga dei totali del servizio** sopra la mappa: coperti, prenotazioni, senza tavolo, **tavoli liberi** (su fondo verde) e **occupati** (su fondo rosso) della sala mostrata, percentuale di occupazione.
+- **Mappa a tutto schermo**: un tocco sull'icona in alto a sinistra della mappa e la sala occupa l'intero schermo (si esce con la stessa icona o con Esc).
 
 **Stampa**
 - Stampa della lista prenotazioni del servizio, raggruppata per orario o per tavolo, con filtro sala/turno e inclusione dei banchetti del giorno.
@@ -529,6 +530,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-01 | Prenotazioni | Mappa tavoli a tutto schermo: icona "ingrandisci" in alto a sinistra della mappa, uscita con la stessa icona o con Esc. |
 | 2026-09-01 | Comande, Cucina e Passe | KDS: piede di card con lo stato delle altre partite della stessa uscita (pallini + espansione in sola lettura) e schermo "Consegnate" con le uscite servite del servizio. |
 | 2026-09-01 | Fiscalità | Nota di credito TD04 dalla scheda del conto: storna una fattura inviata a SDI (storno totale, stessa numerazione, riferimento alla fattura); il conto torna libero di riemettere scontrino o fattura corretta. |
 | 2026-09-01 | Fiscalità | Scontrino digitale: QR sull'esito di chiusura e sulla scheda del conto (pagina pubblica per l'ospite, senza login) + copia di cortesia sulla termica; il numero del documento Openapi ora è salvato e mostrato. |

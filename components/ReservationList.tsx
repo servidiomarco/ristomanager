@@ -10,7 +10,7 @@ import { BillFigures, billStateLabel } from './prenotazione/BillFigures';
 import { PaymentRequestRow } from './prenotazione/PaymentRequestRow';
 import { MessaggiPanel } from './prenotazione/MessaggiPanel';
 import { Reservation, PaymentStatus, BanquetMenu, Table, TableStatus, Shift, Room, TableShape, ArrivalStatus, ReservationStatus, ReservationSource, TableMerge, TableHiddenOverride, RoomClosedOverride, Customer, PaymentRequest, TableBillWithSplits, TableBill, NoteSelection, TableAssignmentSuggestion } from '../types';
-import { Banknote, Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, ListFilter, Map as MapIcon, List, MessageCircle, Mail, Armchair, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode } from 'lucide-react';
+import { Banknote, Calendar, CreditCard, Clock, AlertCircle, Plus, Users, X, Trash2, Edit2, Wand2, Sun, Moon, Sunset, MapPin, ListFilter, Map as MapIcon, List, MessageCircle, Mail, Armchair, BellRing, CheckSquare, Square, UserCheck, UserX, Combine, Scissors, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, AlertTriangle, AlertOctagon, StickyNote, Mic, Loader2, Info, ArrowUpDown, RotateCcw, Printer, Eye, EyeOff, BookUser, BookOpen, MoreHorizontal, Ban, Globe, Phone, Send, Star, Copy, ExternalLink, SlidersHorizontal, DoorClosed, CornerDownLeft, ArrowDownLeft, ArrowUpRight, Reply, Receipt, QrCode, Maximize2, Minimize2 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { sendWhatsAppConfirmation, sendEmailConfirmation, sendCustomEmail, getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, getCustomers, getReservationNotePresets, getReservationAllergenPresets, getPaymentRequests, createPaymentRequest, revokePaymentRequest, getReservationMessages, sendReservationReminder, OutboundMessage, getLegalSettings, getFeatureFlags, getOpeningHours, OpeningHoursRow, getActivePaymentProvider, getChannelSettings, RoomOccupancyCap, getTableAssignmentSuggestions, confirmTableAssignmentSuggestion, dismissTableAssignmentSuggestion } from '../services/apiService';
 import { billsApiService, printBill } from '../services/billsApiService';
@@ -849,6 +849,16 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const [unhideAllConfirm, setUnhideAllConfirm] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isLegendOpen, setIsLegendOpen] = useState(false);
+  // Mappa a tutto schermo: il pannello mappa diventa un overlay fixed che
+  // copre anche la colonna prenotazioni e la sidebar. Resta sotto i modali
+  // (z-50+), così assegnazioni e modifiche aperte dai tavoli si vedono sopra.
+  const [isMapFullscreen, setIsMapFullscreen] = useState(false);
+  useEffect(() => {
+    if (!isMapFullscreen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsMapFullscreen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isMapFullscreen]);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [showSortModal, setShowSortModal] = useState(false);
   // Mobile-only: sheet with per-shift channel toggles (voice + web). The
@@ -4216,7 +4226,9 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       ? Math.max(0, (mapCanvasSize.height - extentHeight * scale) / 2) : 0;
 
     return (
-      <div className="flex h-full min-h-0 flex-col gap-3 px-4 pb-4 pt-4 sm:px-6 lg:px-8">
+      <div className={`flex min-h-0 flex-col gap-3 px-4 pb-4 pt-4 sm:px-6 lg:px-8 ${
+        isMapFullscreen ? 'fixed inset-0 z-40 bg-[var(--ds-canvas)]' : 'h-full'
+      }`}>
         {/* Which room you're looking at. A scope switch, not a filter: the
             active room takes the solid fill so "you are here" reads before the
             names do. */}
@@ -4469,8 +4481,14 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
             {/* Hidden tables live on the floor they're hidden from, so the
                 toggle sits on the floor too rather than in the header. */}
-            {hiddenTableIds.size > 0 && (
-              <div className="absolute left-4 top-4 z-10 select-none">
+            <div className="absolute left-4 top-4 z-10 flex select-none items-center gap-2">
+              <button type="button" onClick={() => setIsMapFullscreen(v => !v)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                title={isMapFullscreen ? 'Riduci la mappa (Esc)' : 'Mappa a tutto schermo'}
+                aria-label={isMapFullscreen ? 'Riduci la mappa' : 'Mappa a tutto schermo'}>
+                {isMapFullscreen ? <Minimize2 size={16} aria-hidden /> : <Maximize2 size={16} aria-hidden />}
+              </button>
+              {hiddenTableIds.size > 0 && (
                 <button type="button" onClick={() => setShowHidden(v => !v)}
                   aria-pressed={showHidden}
                   className={`inline-flex h-9 items-center gap-2 rounded-full px-3.5 text-[13px] font-medium shadow-[var(--ds-shadow-card)] transition-colors ${
@@ -4483,8 +4501,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                   <span className="tabular-nums">{hiddenTableIds.size}</span>
                   <span>{hiddenTableIds.size === 1 ? 'nascosto' : 'nascosti'}</span>
                 </button>
-              </div>
-            )}
+              )}
+            </div>
             <div style={{ width: extentWidth, height: extentHeight, transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})`, transformOrigin: 'top left', position: 'relative' }}>
               {/* Banquet hulls (behind tables) — tinted per banquet so two
                   events in the same room are visually distinct. */}
