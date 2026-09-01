@@ -381,17 +381,27 @@ const App: React.FC = () => {
   // sidebar. Si aggiorna in tempo reale via socket quando qualcuno tocca
   // l'interruttore in Impostazioni.
   const [tableOrdersEnabled, setTableOrdersEnabled] = useState<boolean | null>(null);
+  // Passe attivo (default true): spento, la pagina Passe sparisce dal menu e
+  // i verbi chiama/servito passano alla comanda del cameriere.
+  const [passeEnabled, setPasseEnabled] = useState<boolean>(true);
 
   useEffect(() => {
     if (!isAuthenticated) { setTableOrdersEnabled(null); return; }
     let cancelled = false;
     getFeatureFlags()
-      .then(f => { if (!cancelled) setTableOrdersEnabled(f.table_orders_enabled === true); })
+      .then(f => {
+        if (cancelled) return;
+        setTableOrdersEnabled(f.table_orders_enabled === true);
+        setPasseEnabled(f.passe_enabled !== false);
+      })
       .catch(() => { /* flag non leggibile: le voci restano nascoste */ });
 
     const onFlags = (flags: any) => {
       if (flags && typeof flags.table_orders_enabled === 'boolean') {
         setTableOrdersEnabled(flags.table_orders_enabled);
+      }
+      if (flags && typeof flags.passe_enabled === 'boolean') {
+        setPasseEnabled(flags.passe_enabled);
       }
     };
     let attachedSocket: ReturnType<typeof socketClient.getSocket> = null;
@@ -416,7 +426,10 @@ const App: React.FC = () => {
     // Solo a flag noto: al boot è null e un deep-link su Cucina/Passe non
     // deve rimbalzare in Dashboard prima che la risposta arrivi.
     if (tableOrdersEnabled === false && SALA_VIEWS.includes(view)) setView(ViewState.DASHBOARD);
-  }, [tableOrdersEnabled, view]);
+    // Passe spento mentre lo si sta guardando: si finisce in Comande, dove i
+    // suoi verbi sono appena migrati.
+    if (!passeEnabled && view === ViewState.PASSE) setView(ViewState.COMANDE);
+  }, [tableOrdersEnabled, passeEnabled, view]);
   const [menuInitialTab, setMenuInitialTab] = useState<'DISHES' | 'BANQUETS'>('BANQUETS');
   const [autoOpenNewReservation, setAutoOpenNewReservation] = useState(false);
   const [newReservationKind, setNewReservationKind] = useState<'standard' | 'walkin'>('standard');
@@ -1951,6 +1964,7 @@ const App: React.FC = () => {
     if (item.kind === 'theme') return true;
     if (item.requiresUserManagement) return canManageUsers();
     if (item.view !== undefined && SALA_VIEWS.includes(item.view) && tableOrdersEnabled !== true) return false;
+    if (item.view === ViewState.PASSE && !passeEnabled) return false;
     return item.view !== undefined && canAccessView(item.view);
   };
 
@@ -2862,7 +2876,7 @@ const App: React.FC = () => {
 
         {view === ViewState.COMANDE && (
           <CardErrorBoundary label="Comande">
-            <OrderPad dishes={dishes} tables={tables} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} onImmersive={setImmersive} initialTableId={pendingComandeTableId} onInitialTableConsumed={() => setPendingComandeTableId(null)} />
+            <OrderPad dishes={dishes} tables={tables} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} onImmersive={setImmersive} initialTableId={pendingComandeTableId} onInitialTableConsumed={() => setPendingComandeTableId(null)} passeEnabled={passeEnabled} />
           </CardErrorBoundary>
         )}
 
