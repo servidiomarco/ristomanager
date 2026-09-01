@@ -1,5 +1,5 @@
 import React from 'react';
-import { Ban, BellRing, Check, ChevronUp, Loader2, Minus, Plus, Send, SendHorizontal, Trash2 } from 'lucide-react';
+import { Ban, ChevronUp, Loader2, Minus, Plus, Send, SendHorizontal, Trash2 } from 'lucide-react';
 import type { OrderItem, OrderWithItems } from '../../types';
 import { StatusPill } from '../ds';
 import {
@@ -33,16 +33,13 @@ interface CourseListProps {
    *  nei ristoranti dove i tempi li batte la sala, non il passe. Assente =
    *  il bottone non compare (il lancio resta del passe). */
   onFire?: (courseNo: number) => void;
-  /** Segna servita un'uscita tutta pronta. Presente solo col passe spento
-   *  (Impostazioni → Sala e cucina): col passe attivo è un suo gesto. */
-  onServe?: (courseNo: number) => void;
 }
 
 const stepper =
   'inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 export const CourseList: React.FC<CourseListProps> = ({
-  order, cart, course, onCourse, busy, onBump, onDrop, onVoid, onRecall, onFire, onServe,
+  order, cart, course, onCourse, busy, onBump, onDrop, onVoid, onRecall, onFire,
 }) => (
   <div className="flex flex-col gap-2">
     {Array.from({ length: MAX_COURSES }, (_, i) => i + 1).map(n => {
@@ -88,22 +85,6 @@ export const CourseList: React.FC<CourseListProps> = ({
             {!sent && serverRows.length > 0 && (
               <StatusPill tone="pending">da inviare</StatusPill>
             )}
-            {/* Uscita tutta pronta e passe spento: il cameriere chiude il
-                giro da qui — la card lascia il monitor di cucina e finisce
-                nelle Consegnate. Icona sola ma con nome accessibile: sulla
-                riga stretta della testata il testo non ci sta. */}
-            {status === 'READY' && onServe && (
-              <button
-                type="button"
-                onClick={() => onServe(n)}
-                disabled={busy}
-                title="Segna l'uscita servita al tavolo"
-                aria-label={`Segna servita: ${courseLabel(n)}`}
-                className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-seated-solid)] text-white transition-colors hover:brightness-95 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-              >
-                <Check size={18} aria-hidden />
-              </button>
-            )}
             {status === 'QUEUED' && (
               <>
                 {onFire && (
@@ -111,11 +92,10 @@ export const CourseList: React.FC<CourseListProps> = ({
                     type="button"
                     onClick={() => onFire(n)}
                     disabled={busy}
-                    title="Chiama: lancia l'uscita in cucina adesso"
-                    aria-label={`Chiama in cucina: ${courseLabel(n)}`}
-                    className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    title="Lancia l'uscita in cucina adesso"
+                    className="flex-shrink-0 rounded-full bg-[var(--ds-action-bg)] px-3.5 py-1.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
                   >
-                    <BellRing size={18} aria-hidden />
+                    Chiama
                   </button>
                 )}
                 {/* Mai più «richiama» accanto a «Chiama»: quasi la stessa

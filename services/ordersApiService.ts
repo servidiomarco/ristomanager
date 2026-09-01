@@ -251,6 +251,9 @@ export interface KdsQueue {
   courses: KdsCourseState[];
   /** Presente solo col filtro partita; vuoto sul monitor senza partita. */
   others?: KdsOtherItem[];
+  /** La prossima uscita ancora in coda (QUEUED) di ogni comanda in vista:
+   *  col passe spento la chiama la cucina, dalla card. */
+  queued_next?: { order_id: number; course_no: number }[];
 }
 
 export const getKdsQueue = async (stationId: number | null): Promise<KdsQueue> =>

@@ -252,7 +252,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 
 **Passe (expediter)**
 - Vista di sincronia delle uscite: **Chiama** un'uscita quando la sala è pronta, ricalcola i tempi di partenza, quattro modalità di lancio (tutte automatiche, solo la prima, a consumo — la successiva parte quando la precedente è servita —, manuale).
-- **Il passe si può spegnere** (Impostazioni → Sala e cucina → Passe) nei ristoranti dove i tempi li battono i camerieri: la pagina sparisce dal menu e sulla comanda compaiono le **icone chiama** (campanella, sull'uscita proposta) **e servito** (spunta, sull'uscita tutta pronta) — il cameriere lancia e chiude il giro senza expediter.
+- **Il passe si può spegnere** (Impostazioni → Sala e cucina → Passe) nei ristoranti senza expediter: la pagina sparisce dal menu e i suoi verbi passano alle **card del monitor cucina** come icone — la **campanella** chiama la prossima uscita in coda della comanda, la **spunta** segna servita l'uscita pronta (la card lascia il monitor e finisce in Consegnate). Il «Chiama» del cameriere sulla comanda resta comunque.
 - Metriche di servizio: attesa media al passe e al ritiro, delta di sincronia tra partite, scarti.
 
 **Cassa (banco del cassiere)**
@@ -531,7 +531,8 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
-| 2026-09-01 | Comande, Cucina e Passe | Toggle "Passe" in Impostazioni → Sala e cucina: spento, la pagina Passe sparisce e la comanda mostra le icone chiama (campanella) e servito (spunta) sulle uscite — i camerieri battono i tempi senza expediter. |
+| 2026-09-01 | Comande, Cucina e Passe | Col toggle Passe spento le icone chiama/servito stanno sulle card del monitor cucina (campanella = prossima uscita in coda, spunta = servita), non sulla comanda, che torna com'era. |
+| 2026-09-01 | Comande, Cucina e Passe | Toggle "Passe" in Impostazioni → Sala e cucina: spento, la pagina Passe sparisce e i verbi chiama/servito passano alla cucina — i tempi si battono senza expediter. |
 | 2026-09-01 | Prenotazioni | Mappa tavoli a tutto schermo: icona "ingrandisci" in alto a sinistra della mappa, uscita con la stessa icona o con Esc. |
 | 2026-09-01 | Comande, Cucina e Passe | KDS: piede di card con lo stato delle altre partite della stessa uscita (pallini + espansione in sola lettura) e schermo "Consegnate" con le uscite servite del servizio. |
 | 2026-09-01 | Fiscalità | Nota di credito TD04 dalla scheda del conto: storna una fattura inviata a SDI (storno totale, stessa numerazione, riferimento alla fattura); il conto torna libero di riemettere scontrino o fattura corretta. |
