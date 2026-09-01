@@ -889,6 +889,8 @@ export interface FeatureFlags {
   ai_messages_enabled: boolean;
   /** Menu digitale pubblico (QR al tavolo). Gestito dal QR modal della pagina Menu. */
   digital_menu_enabled: boolean;
+  /** Modalità ibrida: comande/cucina servite dal nodo di sala sulla LAN. */
+  sala_node_enabled: boolean;
 }
 
 export const getFeatureFlags = async (): Promise<FeatureFlags> => {
@@ -1481,8 +1483,8 @@ export const completeOnboarding = async (): Promise<void> => {
 // Autenticate col JWT PLATFORM_ADMIN via il normale bearer di getHeaders():
 // il server prova prima il JWT, l'env token resta per gli script.
 
-export type AdminTenantFeature = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table' | 'passepartout';
-export const ADMIN_TENANT_FEATURES: AdminTenantFeature[] = ['voice', 'whatsapp', 'web_booking', 'pay_at_table', 'passepartout'];
+export type AdminTenantFeature = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table' | 'passepartout' | 'sala_node';
+export const ADMIN_TENANT_FEATURES: AdminTenantFeature[] = ['voice', 'whatsapp', 'web_booking', 'pay_at_table', 'passepartout', 'sala_node'];
 
 export interface AdminTenant {
   id: number;

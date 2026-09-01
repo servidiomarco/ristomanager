@@ -62,6 +62,8 @@ function priceToFeature(): Map<string, TenantFeature> {
         pay_at_table: process.env.STRIPE_PRICE_PAY_AT_TABLE,
         // Integrazione cassa: per ora non è a listino Stripe (accesa a mano).
         passepartout: process.env.STRIPE_PRICE_PASSEPARTOUT,
+        // Nodo di sala: hardware in comodato, non a listino Stripe (a mano).
+        sala_node: process.env.STRIPE_PRICE_SALA_NODE,
     };
     const map = new Map<string, TenantFeature>();
     for (const feature of TENANT_FEATURES) {

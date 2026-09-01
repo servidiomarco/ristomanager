@@ -50,7 +50,8 @@ const DEV_BOARD_ADMIN_EMAIL = 'admin@ristomanager.com';
 // 'passepartout' fa eccezione al fail-open di hasFeature: è un'integrazione
 // venduta a UN ristorante (chi ha la cassa Passepartout), non un canale
 // storico — un payload vecchio senza la chiave non deve accenderla per tutti.
-export type TenantFeatureKey = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table' | 'passepartout';
+// 'sala_node' segue la stessa regola: add-on con hardware dietro, fail-closed.
+export type TenantFeatureKey = 'voice' | 'whatsapp' | 'web_booking' | 'pay_at_table' | 'passepartout' | 'sala_node';
 const VIEW_FEATURES: Partial<Record<ViewState, TenantFeatureKey>> = {
   [ViewState.CONVERSAZIONI]: 'voice',
   [ViewState.MESSAGGI]: 'whatsapp',
@@ -170,9 +171,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const hasFeature = useCallback((feature: TenantFeatureKey): boolean => {
     const features = user?.tenant?.features as Record<string, boolean | undefined> | undefined;
-    // Add-on venduto a un solo ristorante: acceso solo se il payload lo dice
-    // — il fail-open qui sotto vale per i canali storici, non per questo.
+    // Add-on venduti, non canali storici: accesi solo se il payload lo dice
+    // — il fail-open qui sotto vale per i canali storici, non per questi.
     if (feature === 'passepartout') return features?.passepartout === true;
+    if (feature === 'sala_node') return features?.sala_node === true;
     if (!features) return true;
     return features[feature] !== false;
   }, [user]);

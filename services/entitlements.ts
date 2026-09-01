@@ -14,11 +14,14 @@ import { queryWithRetry } from '../db.js';
 // 'passepartout' = integrazione col gestionale di cassa (import menu,
 // chiusura conti): la vende solo chi ha Passepartout in sala — oggi il
 // Vecchio Frantoio (tenant 1, acceso dalla migration import-menu-passepartout).
-export const TENANT_FEATURES = ['voice', 'whatsapp', 'web_booking', 'pay_at_table', 'passepartout'] as const;
+// 'sala_node' = nodo di sala (relay + cache sulla LAN, hardware in comodato):
+// add-on con hardware dietro, fail-closed come 'passepartout' — acceso per il
+// tenant 1 dalla migration nodo-di-sala.
+export const TENANT_FEATURES = ['voice', 'whatsapp', 'web_booking', 'pay_at_table', 'passepartout', 'sala_node'] as const;
 export type TenantFeature = (typeof TENANT_FEATURES)[number];
 export type TenantFeatureMap = Record<TenantFeature, boolean>;
 
-const ALL_DISABLED: TenantFeatureMap = { voice: false, whatsapp: false, web_booking: false, pay_at_table: false, passepartout: false };
+const ALL_DISABLED: TenantFeatureMap = { voice: false, whatsapp: false, web_booking: false, pay_at_table: false, passepartout: false, sala_node: false };
 
 // Cache per tenant con TTL breve, stesso schema di identityCache
 // (businessIdentity in server.ts): gli entitlement si leggono su ogni

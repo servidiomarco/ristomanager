@@ -28,6 +28,9 @@ dist-ssr
 .claude/
 
 .env
+# Qualunque variante locale/backup dei file env: contengono segreti veri
+# (un .env.local.bak-produzione è finito in staging una volta).
+.env.*
 *.pptx
 
 backups/

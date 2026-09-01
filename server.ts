@@ -53,6 +53,7 @@ import {
     comandaToBillPayload,
     PassepartoutBridgeError,
 } from './services/passepartoutBridge.js';
+import { setupSalaNodeBridge, getSalaNodeStatus } from './services/salaNodeBridge.js';
 import type { PassepartoutComanda, EsitoChiusuraComanda, PassepartoutArticolo } from './services/passepartoutService.js';
 import { MENU_LANGS, isMenuTranslationConfigured, translateMenuEntries } from './services/menuTranslationService.js';
 import { Shift, PaymentStatus, UserRole } from './types.js';
@@ -148,7 +149,7 @@ import {
     listBookableRooms,
     getCappedRoomIds,
 } from './services/roomOccupancyService.js';
-import { isAllowedOrigin } from './services/corsAllowlist.js';
+import { isAllowedOrigin, allowedOriginHostnamesForTenant } from './services/corsAllowlist.js';
 import {
     getBookingChannelPolicy,
     saveBookingChannelPolicy,
@@ -298,7 +299,7 @@ const tenantTokenCache = new Map<string, { tenantId: number; refreshedAt: number
 const TENANT_TOKEN_TTL_MS = 60_000;
 
 async function resolveTenantByTokenColumn(
-    column: 'webhook_token' | 'print_agent_token',
+    column: 'webhook_token' | 'print_agent_token' | 'sala_node_token',
     token: string
 ): Promise<number | null> {
     // Forma dei token generati (hex di gen_random_bytes): tutto il resto si
@@ -18712,8 +18713,8 @@ app.post('/voice-calls/sync', authenticate, requireFeature('voice'), voiceCallsA
 // directly — the endpoints they gate are low-volume (a handful per minute
 // at most), so caching isn't worth the complexity.
 
-type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'digital_menu_enabled';
-const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'voice_double_seating_enabled', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'digital_menu_enabled'];
+type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'digital_menu_enabled' | 'sala_node_enabled';
+const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'voice_double_seating_enabled', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'digital_menu_enabled', 'sala_node_enabled'];
 
 async function getFeatureFlag(tenantId: number, key: FeatureFlagKey, fallback: boolean): Promise<boolean> {
     try {
@@ -18749,6 +18750,10 @@ const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, boolean> = {
     // Spento finché il gestore non scrive le regole della casa: senza base di
     // conoscenza il modello non avrebbe da cosa rispondere.
     ai_messages_enabled: false,
+    // Off by default: la modalità ibrida si accende dalla card Nodo di sala
+    // quando il nodo è installato e raggiungibile; accesa senza nodo i client
+    // farebbero probe a vuoto a ogni avvio.
+    sala_node_enabled: false,
 };
 
 app.get('/settings/features', authenticate, async (req, res) => {
@@ -18767,6 +18772,11 @@ app.get('/settings/features', authenticate, async (req, res) => {
         // conoscere gli entitlement una per una.
         if (!(await isFeatureEnabledForTenant(req.tenantId!, 'pay_at_table'))) {
             flags.pay_at_table_enabled = false;
+        }
+        // Stessa regola per il nodo di sala: senza l'add-on venduto la
+        // modalità ibrida non esiste, qualunque cosa dica app_settings.
+        if (!(await isFeatureEnabledForTenant(req.tenantId!, 'sala_node'))) {
+            flags.sala_node_enabled = false;
         }
         res.json(flags);
     } catch (err) {
@@ -20191,11 +20201,12 @@ app.put('/settings/entitlements', authenticate, requirePermission('settings:full
 app.get('/settings/webhook-info', authenticate, requirePermission('settings:full'), async (req, res) => {
     try {
         const r = await queryWithRetry(
-            'SELECT webhook_token, print_agent_token, slug FROM tenants WHERE id = $1',
+            'SELECT webhook_token, print_agent_token, sala_node_token, slug FROM tenants WHERE id = $1',
             [req.tenantId!]
         );
         const webhookToken: string | null = r.rows[0]?.webhook_token ?? null;
         const printAgentToken: string | null = r.rows[0]?.print_agent_token ?? null;
+        const salaNodeToken: string | null = r.rows[0]?.sala_node_token ?? null;
         const tenantSlug: string | null = r.rows[0]?.slug ?? null;
         // Domini custom del tenant (Fase C3): mostrati accanto all'URL di
         // prenotazione così chi configura il DNS vede cosa punta già qui.
@@ -20211,6 +20222,7 @@ app.get('/settings/webhook-info', authenticate, requirePermission('settings:full
         res.json({
             webhook_token: webhookToken,
             print_agent_token: printAgentToken,
+            sala_node_token: salaNodeToken,
             webhook_base_url: webhookBase,
             booking_url: tenantSlug ? `${base}/prenota/${tenantSlug}` : null,
             domains: domainsRes.rows,
@@ -27073,6 +27085,158 @@ async function getPrintRoutes(tenantId: number): Promise<Record<PrintRouteFn, st
     return { preconto: val(PRINT_ROUTE_KEYS.preconto), qr: val(PRINT_ROUTE_KEYS.qr) };
 }
 
+// --- Nodo di sala (tappa 3 ibrido: relay + cache sulla LAN) -----------------
+// Il nodo è un processo sul PC di sala, non un utente: si autentica col
+// token per-tenant (tenants.sala_node_token) come l'agente di stampa. Il
+// canale eventi è il namespace Socket.IO /sala-node (salaNodeBridge); questi
+// endpoint HTTP servono il provisioning (credenziali, certificato TLS) e la
+// configurazione lato client (URL del nodo + interruttore).
+
+const salaNodeAuth = async (req: any, res: any, next: any) => {
+    const provided = String(req.headers['x-sala-node-token'] ?? '');
+    if (!provided) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+    const tenantId = await resolveTenantByTokenColumn('sala_node_token', provided);
+    if (tenantId == null) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+    req.salaNodeTenantId = tenantId;
+    // next() DENTRO il contesto tenant: con app.rls_strict acceso una query
+    // fuori contesto vede zero righe (stessa lezione del print agent, 21/08).
+    return runWithTenantContext(req.salaNodeTenantId, () => next());
+};
+
+// Chiavi app_settings della configurazione nodo (testo/int, non boolean:
+// l'interruttore vive in /settings/features come sala_node_enabled).
+const SALA_NODE_DOMAIN_KEY = 'sala_node_domain';
+const SALA_NODE_LAN_IP_KEY = 'sala_node_lan_ip';
+const SALA_NODE_PORT_KEY = 'sala_node_port';
+
+async function getSalaNodeSettings(tenantId: number): Promise<{ domain: string | null; lan_ip: string | null; port: number }> {
+    const rs = await queryWithRetry(
+        `SELECT key, text_value, int_value FROM app_settings WHERE tenant_id = $1 AND key = ANY($2)`,
+        [tenantId, [SALA_NODE_DOMAIN_KEY, SALA_NODE_LAN_IP_KEY, SALA_NODE_PORT_KEY]]
+    );
+    const byKey = new Map(rs.rows.map((r: any) => [r.key, r]));
+    const domain = byKey.get(SALA_NODE_DOMAIN_KEY)?.text_value || null;
+    const lanIp = byKey.get(SALA_NODE_LAN_IP_KEY)?.text_value || null;
+    const rawPort = Number(byKey.get(SALA_NODE_PORT_KEY)?.int_value);
+    return {
+        domain,
+        lan_ip: lanIp,
+        port: Number.isInteger(rawPort) && rawPort > 0 && rawPort <= 65535 ? rawPort : 443,
+    };
+}
+
+function salaNodeUrl(settings: { domain: string | null; port: number }): string | null {
+    if (!settings.domain) return null;
+    return settings.port === 443 ? `https://${settings.domain}` : `https://${settings.domain}:${settings.port}`;
+}
+
+// Bootstrap del nodo: segreto JWT (per verificare i client in locale, anche
+// a linea caduta), allowlist CORS del tenant e certificato TLS. Il nodo la
+// chiama all'avvio e ogni 12h; l'ultima copia la tiene su disco, così un
+// riavvio durante un outage riparte comunque.
+app.get('/sala-node/credentials', salaNodeAuth, async (req: any, res) => {
+    try {
+        const tenantId = req.salaNodeTenantId as number;
+        const settings = await getSalaNodeSettings(tenantId);
+        const [origins, certRs] = await Promise.all([
+            allowedOriginHostnamesForTenant(tenantId),
+            settings.domain
+                ? queryWithRetry(
+                    `SELECT cert_pem, key_pem, expires_at FROM sala_node_certs WHERE tenant_id = $1 AND domain = $2`,
+                    [tenantId, settings.domain]
+                )
+                : Promise.resolve({ rows: [] as any[] }),
+        ]);
+        const cert = certRs.rows[0] ?? null;
+        res.json({
+            tenant_id: tenantId,
+            domain: settings.domain,
+            port: settings.port,
+            jwt_secret: AuthService.getAccessTokenSecret(),
+            allowed_origins: origins,
+            cert: cert
+                ? { cert_pem: cert.cert_pem, key_pem: cert.key_pem, expires_at: cert.expires_at }
+                : null,
+        });
+    } catch (err: any) {
+        console.error('GET /sala-node/credentials error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Configurazione per la SPA: dove sta il nodo e se la modalità ibrida è
+// accesa. enabled = flag operativo AND entitlement AND dominio configurato —
+// il client non deve conoscere le tre condizioni una per una.
+app.get('/sala-node/client-config', authenticate, async (req, res) => {
+    try {
+        const [flag, entitled, settings] = await Promise.all([
+            getFeatureFlag(req.tenantId!, 'sala_node_enabled', false),
+            isFeatureEnabledForTenant(req.tenantId!, 'sala_node'),
+            getSalaNodeSettings(req.tenantId!),
+        ]);
+        const nodeUrl = salaNodeUrl(settings);
+        res.json({
+            enabled: Boolean(flag && entitled && nodeUrl),
+            node_url: nodeUrl,
+        });
+    } catch (err: any) {
+        console.error('GET /sala-node/client-config error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Dominio, IP LAN e porta del nodo, dalla card Impostazioni → Nodo di sala.
+// Sentinella "campo presente nel body": assente = non toccare, null/'' =
+// azzera (come /sala/print-routes).
+app.put('/sala-node/settings', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const body = req.body ?? {};
+        const upserts: Array<{ key: string; text: string | null; int: number | null }> = [];
+        if ('domain' in body) {
+            const raw = body.domain == null ? '' : String(body.domain).trim().toLowerCase();
+            if (raw && !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(raw)) {
+                return res.status(400).json({ error: 'invalid_domain' });
+            }
+            upserts.push({ key: SALA_NODE_DOMAIN_KEY, text: raw || null, int: null });
+        }
+        if ('lan_ip' in body) {
+            const raw = body.lan_ip == null ? '' : String(body.lan_ip).trim();
+            if (raw && !/^\d{1,3}(\.\d{1,3}){3}$/.test(raw)) {
+                return res.status(400).json({ error: 'invalid_lan_ip' });
+            }
+            upserts.push({ key: SALA_NODE_LAN_IP_KEY, text: raw || null, int: null });
+        }
+        if ('port' in body) {
+            const raw = body.port == null ? 443 : Number(body.port);
+            if (!Number.isInteger(raw) || raw <= 0 || raw > 65535) {
+                return res.status(400).json({ error: 'invalid_port' });
+            }
+            upserts.push({ key: SALA_NODE_PORT_KEY, text: null, int: raw });
+        }
+        if (upserts.length === 0) {
+            return res.status(400).json({ error: 'no_updates' });
+        }
+        for (const u of upserts) {
+            await queryWithRetry(
+                `INSERT INTO app_settings (tenant_id, key, text_value, int_value, updated_at)
+                 VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+                 ON CONFLICT (tenant_id, key) DO UPDATE
+                   SET text_value = EXCLUDED.text_value, int_value = EXCLUDED.int_value, updated_at = CURRENT_TIMESTAMP`,
+                [req.tenantId!, u.key, u.text, u.int]
+            );
+        }
+        const settings = await getSalaNodeSettings(req.tenantId!);
+        res.json({ ...settings, node_url: salaNodeUrl(settings) });
+    } catch (err: any) {
+        console.error('PUT /sala-node/settings error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.get('/sala/config', authenticate, async (req, res) => {
     try {
         const [fireMode, stations, printers, jobs, printRoutes, categories, catMap] = await Promise.all([
@@ -27095,6 +27259,14 @@ app.get('/sala/config', authenticate, async (req, res) => {
             agent: {
                 online: printAgentLastSeen != null && Date.now() - printAgentLastSeen < 30_000,
                 last_seen_seconds: printAgentLastSeen != null ? Math.round((Date.now() - printAgentLastSeen) / 1000) : null,
+            },
+            // Stato del nodo di sala, speculare ad agent: la card Impostazioni
+            // mostra da UN punto solo se il nodo è vivo e quanti client serve.
+            sala_node: {
+                enabled: await getFeatureFlag(req.tenantId!, 'sala_node_enabled', false)
+                    && await isFeatureEnabledForTenant(req.tenantId!, 'sala_node'),
+                ...(await getSalaNodeSettings(req.tenantId!)),
+                ...getSalaNodeStatus(req.tenantId!),
             },
             pending_jobs: jobCount('PENDING'),
             failed_jobs: jobCount('FAILED'),
@@ -27624,6 +27796,11 @@ const startServer = async () => {
                     setupPassepartoutBridge(socketService.getIO());
                     console.log('✅ Passepartout agent bridge attivo su /pp-agent');
                 }
+                // Sempre attivo (a differenza del pp-agent non dipende da un
+                // env): il token è per-tenant a DB, e senza nodo collegato il
+                // mirror costa una lookup su una Map vuota.
+                setupSalaNodeBridge(socketService.getIO(), (token) => resolveTenantByTokenColumn('sala_node_token', token));
+                console.log('✅ Nodo di sala: bridge attivo su /sala-node');
             } catch (socketError) {
                 console.error('Socket.IO initialization failed:', socketError);
             }
