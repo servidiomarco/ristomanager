@@ -200,6 +200,12 @@ export interface BuildInvoiceInput {
     vat_rows: InvoiceVatRow[];
     total_gross_cents: number;
     description: string;      // es. "Somministrazione alimenti e bevande — tavolo 12"
+    /** TD01 fattura (default) | TD04 nota di credito. In FatturaPA gli
+     *  importi della TD04 restano POSITIVI: è il tipo documento a dare
+     *  il segno, non un meno davanti alle cifre. */
+    doc_type?: 'TD01' | 'TD04';
+    /** La fattura stornata (obbligatoria per la TD04): DatiFattureCollegate. */
+    related?: { number: string; date: string };
 }
 
 const xmlEscape = (s: string): string =>
@@ -286,12 +292,16 @@ export function buildFatturaPaXml(input: BuildInvoiceInput): string {
   <FatturaElettronicaBody>
     <DatiGenerali>
       <DatiGeneraliDocumento>
-        <TipoDocumento>TD01</TipoDocumento>
+        <TipoDocumento>${input.doc_type ?? 'TD01'}</TipoDocumento>
         <Divisa>EUR</Divisa>
         <Data>${xmlEscape(input.doc_date)}</Data>
         <Numero>${xmlEscape(input.doc_number)}</Numero>
         <ImportoTotaleDocumento>${euro(input.total_gross_cents)}</ImportoTotaleDocumento>
       </DatiGeneraliDocumento>
+      ${input.related ? `<DatiFattureCollegate>
+        <IdDocumento>${xmlEscape(input.related.number)}</IdDocumento>
+        <Data>${xmlEscape(input.related.date)}</Data>
+      </DatiFattureCollegate>` : ''}
     </DatiGenerali>
     <DatiBeniServizi>${linee}${riepiloghi}
     </DatiBeniServizi>

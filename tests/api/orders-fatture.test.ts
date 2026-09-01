@@ -127,6 +127,33 @@ describe('fatture elettroniche', () => {
         expect(voidBlocked.body.error).toMatch(/nota di credito/);
     });
 
+    it('la nota di credito storna la fattura e libera il conto', async () => {
+        const bills = await api().get('/bills/open?status=closed').set(bearer(token));
+        const row = bills.body.bills.find((b: any) => b.id === billId);
+        expect(row.fiscal_doc_type).toBe('INVOICE');
+
+        const storno = await api().post(`/bills/${billId}/fiscal-docs/${row.fiscal_doc_id}/credit-note`).set(bearer(token)).send({});
+        expect(storno.status).toBe(201);
+        expect(storno.body.doc.doc_type).toBe('CREDIT_NOTE');
+        expect(storno.body.doc.status).toBe('CONFIRMED');
+        expect(storno.body.doc.total_cents).toBe(10000);
+        // Stessa numerazione annuale delle fatture: la 1/anno era la fattura.
+        expect(storno.body.doc.doc_number).toMatch(/^2\/\d{4}$/);
+        expect(storno.body.voided_invoice.status).toBe('VOIDED');
+
+        // La nota è un atto contabile definitivo: né annullo né secondo storno.
+        const voidCn = await api().post(`/bills/${billId}/fiscal-docs/${storno.body.doc.id}/void`).set(bearer(token)).send({});
+        expect(voidCn.status).toBe(409);
+        const again = await api().post(`/bills/${billId}/fiscal-docs/${row.fiscal_doc_id}/credit-note`).set(bearer(token)).send({});
+        expect(again.status).toBe(409);
+
+        // Il posto del documento vivo è di nuovo libero: lo scontrino parte.
+        const reissue = await api().post(`/bills/${billId}/fiscal-docs`).set(bearer(token)).send({});
+        expect(reissue.status).toBe(200);
+        expect(reissue.body.doc.doc_type).toBe('RECEIPT');
+        expect(reissue.body.doc.status).toBe('CONFIRMED');
+    });
+
     it('dati del cliente incompleti → 400 con l\'elenco di cosa manca', async () => {
         const otherBill = await openBill('FATT2', 5000);
         const close = await api().post(`/bills/${otherBill}/close`).set(bearer(token)).send({
@@ -174,7 +201,8 @@ describe('fatture elettroniche', () => {
         });
         expect(invoiced.status).toBe(201);
         expect(invoiced.body.doc.total_cents).toBe(4000);
-        expect(invoiced.body.doc.doc_number).toMatch(/^2\/\d{4}$/);
+        // 1 la fattura del test sopra, 2 la sua nota di credito.
+        expect(invoiced.body.doc.doc_number).toMatch(/^3\/\d{4}$/);
 
         // Chiusura del resto in contanti: lo scontrino automatico NON deve
         // partire (c'è la fattura sulla quota — doppio binario vietato)...
@@ -219,6 +247,6 @@ describe('fatture elettroniche', () => {
         });
         expect(invoiced.status).toBe(201);
         expect(invoiced.body.doc.doc_type).toBe('INVOICE');
-        expect(invoiced.body.doc.doc_number).toMatch(/^3\/\d{4}$/);
+        expect(invoiced.body.doc.doc_number).toMatch(/^4\/\d{4}$/);
     });
 });
