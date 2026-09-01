@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "build:server": "tsc -p tsconfig.server.json",
     "start:server": "node --loader ts-node/esm server.ts",
+    "start:sala-node": "node --loader ts-node/esm sala-node/index.ts",
     "start": "node dist/server.js",
     "start:prod": "node dist/server.js",
     "test": "npm run build:server && vitest run",

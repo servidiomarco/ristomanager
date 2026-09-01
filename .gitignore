@@ -31,6 +31,10 @@ dist-ssr
 # Qualunque variante locale/backup dei file env: contengono segreti veri
 # (un .env.local.bak-produzione è finito in staging una volta).
 .env.*
+
+# Stato del nodo di sala: credenziali (segreto JWT, chiave TLS) persistite
+# dal processo — mai nel repo.
+sala-node/state/
 *.pptx
 
 backups/
