@@ -55,6 +55,7 @@ export interface SalaConfig {
     connected_at: string | null;
     clients: number | null;
     cache_entries: number | null;
+    cert_expires_at: string | null;
   };
   pending_jobs: number;
   failed_jobs: number;
@@ -117,6 +118,11 @@ export const updateSalaNodeSettings = (payload: SalaNodeSettingsPayload): Promis
     headers: getHeaders(),
     body: JSON.stringify(payload),
   });
+
+/** Emissione/rinnovo del certificato TLS del nodo: lenta (validazione DNS),
+ *  chi la chiama mostri un'attesa onesta. */
+export const provisionSalaNodeCert = (): Promise<{ domain: string; expires_at: string }> =>
+  apiRequest(`${API_URL}/sala-node/provision-cert`, { method: 'POST', headers: getHeaders() });
 
 /** Campo assente = non toccare; null = torna al default 'preconti'. */
 export const updatePrintRoutes = (routes: Partial<SalaPrintRoutes>): Promise<{ ok: true; print_routes: SalaPrintRoutes }> =>

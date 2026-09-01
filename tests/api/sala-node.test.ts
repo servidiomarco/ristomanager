@@ -124,3 +124,19 @@ describe('nodo di sala — fondazioni cloud', () => {
         expect(res.body.sala_node.clients).toBeNull();
     });
 });
+
+// PR 4 — provisioning TLS. Nell'ambiente di test Cloudflare non è
+// configurato: si verifica il contratto degli errori, non l'emissione.
+describe('nodo di sala — certificato TLS', () => {
+    it('provision-cert richiede autenticazione e permesso', async () => {
+        const anon = await api().post('/sala-node/provision-cert');
+        expect(anon.status).toBe(401);
+    });
+
+    it('senza CLOUDFLARE_API_TOKEN risponde 503 tls_not_configured', async () => {
+        const owner = await ownerToken();
+        const res = await api().post('/sala-node/provision-cert').set(bearer(owner));
+        expect(res.status).toBe(503);
+        expect(res.body.error).toBe('tls_not_configured');
+    });
+});
