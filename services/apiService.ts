@@ -891,6 +891,9 @@ export interface FeatureFlags {
   ai_messages_enabled: boolean;
   /** Menu digitale pubblico (QR al tavolo). Gestito dal QR modal della pagina Menu. */
   digital_menu_enabled: boolean;
+  /** Postazione passe. Spenta: la pagina Passe sparisce e i verbi
+   *  chiama/servito passano alla comanda del cameriere. */
+  passe_enabled: boolean;
 }
 
 export const getFeatureFlags = async (): Promise<FeatureFlags> => {

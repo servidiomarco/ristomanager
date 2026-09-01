@@ -252,6 +252,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 
 **Passe (expediter)**
 - Vista di sincronia delle uscite: **Chiama** un'uscita quando la sala è pronta, ricalcola i tempi di partenza, quattro modalità di lancio (tutte automatiche, solo la prima, a consumo — la successiva parte quando la precedente è servita —, manuale).
+- **Il passe si può spegnere** (Impostazioni → Sala e cucina → Passe) nei ristoranti dove i tempi li battono i camerieri: la pagina sparisce dal menu e sulla comanda compaiono le **icone chiama** (campanella, sull'uscita proposta) **e servito** (spunta, sull'uscita tutta pronta) — il cameriere lancia e chiude il giro senza expediter.
 - Metriche di servizio: attesa media al passe e al ritiro, delta di sincronia tra partite, scarti.
 
 **Cassa (banco del cassiere)**
@@ -531,6 +532,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 | Data | Sezione | Modifica |
 |---|---|---|
 | 2026-09-01 | Integrazione cassa Passepartout | L'import del menu salta le voci disattivate in cassa (articoli e categorie tenuti per lo storico) e rimuove quelle importate in passato, se mai usate nel CRM. |
+| 2026-09-01 | Comande, Cucina e Passe | Toggle "Passe" in Impostazioni → Sala e cucina: spento, la pagina Passe sparisce e la comanda mostra le icone chiama (campanella) e servito (spunta) sulle uscite — i camerieri battono i tempi senza expediter. |
 | 2026-09-01 | Prenotazioni | Mappa tavoli a tutto schermo: icona "ingrandisci" in alto a sinistra della mappa, uscita con la stessa icona o con Esc. |
 | 2026-09-01 | Comande, Cucina e Passe | KDS: piede di card con lo stato delle altre partite della stessa uscita (pallini + espansione in sola lettura) e schermo "Consegnate" con le uscite servite del servizio. |
 | 2026-09-01 | Fiscalità | Nota di credito TD04 dalla scheda del conto: storna una fattura inviata a SDI (storno totale, stessa numerazione, riferimento alla fattura); il conto torna libero di riemettere scontrino o fattura corretta. |

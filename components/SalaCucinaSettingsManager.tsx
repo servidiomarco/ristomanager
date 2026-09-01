@@ -211,6 +211,38 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
           </div>
         </section>
 
+        {/* ---- Passe ---- */}
+        <section>
+          <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2">
+            Passe
+          </h5>
+          <div className="flex items-start justify-between gap-3 rounded-md border border-[var(--ds-border)] px-3 py-2.5">
+            <div className="min-w-0">
+              <div className="text-[13px] font-medium text-[var(--ds-text-primary)]">Postazione passe</div>
+              <p className="text-[12px] text-[var(--ds-text-muted)] leading-snug mt-0.5">
+                Attiva: lanci e serviti passano dalla pagina Passe (expediter).
+                Disattivata: la pagina sparisce dal menu e i camerieri chiamano
+                e segnano servito dalla comanda, con le icone sull'uscita.
+              </p>
+            </div>
+            <button
+              type="button" role="switch" aria-checked={flags.passe_enabled !== false}
+              aria-label={`${flags.passe_enabled !== false ? 'Disattiva' : 'Attiva'} il passe`}
+              onClick={() => act(
+                async () => { setFlags(await updateFeatureFlags({ passe_enabled: flags.passe_enabled === false })); },
+                `Passe: ${flags.passe_enabled === false ? 'attivo' : 'disattivato — chiama e servito passano alla comanda'}`
+              )}
+              disabled={!canEdit || saving}
+              className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50 ${
+                flags.passe_enabled !== false ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-surface-row)] border border-[var(--ds-border)]'
+              }`}
+            >
+              <span aria-hidden="true"
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${flags.passe_enabled !== false ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
+            </button>
+          </div>
+        </section>
+
         {/* ---- Partite ---- */}
         <section>
           <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2">
