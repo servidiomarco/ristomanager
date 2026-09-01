@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Check, Loader2, TriangleAlert, Utensils, X,
+  Check, Loader2, Printer, TriangleAlert, Utensils, X,
 } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import type { Dish, Reservation, Table, TableMerge, OrderWithItems, OrderItem } from '../types';
 import { Shift } from '../types';
 import { getRomeDatePart } from '../utils/reservationTime';
@@ -589,13 +590,48 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
       if (cleanupTableId != null) {
         setServiceBills(prev => { const n = new Map(prev); n.delete(cleanupTableId); return n; });
       }
-      setFlash(`Conto chiuso · ${method === 'CONTANTI' ? 'contanti' : 'POS'} ${euro(residualCents)} · scontrino in emissione`);
+      // Non un flash: il cliente è davanti al cameriere e lo scontrino va
+      // consegnato ADESSO — il modal aspetta la conferma e mostra il QR.
+      setScontrinoEsito({ billId, amountLabel: `${method === 'CONTANTI' ? 'contanti' : 'POS'} ${euro(residualCents)}`, token: null, docNumber: null, failed: null });
     } catch (err: any) {
       setError(err?.data?.error ?? err?.message ?? 'Chiusura non riuscita');
     } finally {
       setBusy(false);
     }
   };
+
+  // L'emissione è asincrona: il modal si apre "in emissione…" e si riempie
+  // quando la conferma arriva via socket. Il poll dopo qualche secondo copre
+  // l'evento perso (ricomparsa dello stesso doc via POST idempotente).
+  const [scontrinoEsito, setScontrinoEsito] = useState<{
+    billId: number; amountLabel: string | null;
+    token: string | null; docNumber: string | null; failed: string | null;
+  } | null>(null);
+  useEffect(() => {
+    if (!scontrinoEsito || scontrinoEsito.token || scontrinoEsito.failed) return;
+    const apply = (doc: any) => {
+      if (!doc) return;
+      setScontrinoEsito(prev => prev && prev.billId === (doc.table_bill_id ?? prev.billId)
+        ? doc.status === 'CONFIRMED' && doc.doc_type === 'RECEIPT'
+          ? { ...prev, token: doc.public_token ?? null, docNumber: doc.doc_number ?? doc.provider_ref ?? null }
+          : doc.status === 'FAILED'
+            ? { ...prev, failed: 'Lo scontrino non è partito: si ritenta dal conto, in Pagamenti.' }
+            : prev
+        : prev);
+    };
+    const onFiscal = (p: any) => { if (p?.bill_id === scontrinoEsito.billId) apply(p?.doc); };
+    const socket = socketClient.getSocket();
+    socket?.on('fiscal:updated', onFiscal);
+    // Il POST è idempotente (ritorna il CONFIRMED esistente, 409 se l'altra
+    // emissione è in volo): si ritenta finché il modal è aperto — copre sia
+    // l'evento perso sia la conferma arrivata prima che il modal esistesse.
+    const poll = setInterval(() => {
+      billsApiService.emitFiscalDoc(scontrinoEsito.billId)
+        .then((r: any) => apply(r?.doc))
+        .catch(() => { /* in_progress: il prossimo giro o il socket */ });
+    }, 2500);
+    return () => { socket?.off('fiscal:updated', onFiscal); clearInterval(poll); };
+  }, [scontrinoEsito]);
 
   const stampaPreconto = async (billId: number) => {
     try {
@@ -619,7 +655,11 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
         });
       }
       setViewBill(null);
-      setFlash('Conto chiuso in cassa');
+      if ((opts as any)?.documento === 'Scontrino') {
+        setScontrinoEsito({ billId: viewBill.id, amountLabel: null, token: null, docNumber: null, failed: null });
+      } else {
+        setFlash('Conto chiuso in cassa');
+      }
     } catch (err: any) {
       setError(err?.data?.error ?? err?.message ?? 'Chiusura non riuscita');
     } finally {
@@ -767,6 +807,57 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
           onCancel={() => { setInvoiceFor(null); setFlash('Conto chiuso, da fatturare: la fattura resta emettibile dal conto.'); }}
           onDone={() => { setInvoiceFor(null); setFlash('Fattura emessa'); }}
         />
+      )}
+      {scontrinoEsito && (
+        <ModalShell
+          open
+          onClose={() => setScontrinoEsito(null)}
+          title="Conto chiuso"
+          subtitle={scontrinoEsito.amountLabel ?? undefined}
+          size="sm"
+          bodyClassName="p-4"
+          footer={
+            <button type="button" onClick={() => setScontrinoEsito(null)} className={dsButton.primary}>
+              Fatto
+            </button>
+          }
+        >
+          {scontrinoEsito.failed ? (
+            <Callout tone="critical" icon={TriangleAlert}>{scontrinoEsito.failed}</Callout>
+          ) : scontrinoEsito.token ? (
+            <div className="rounded-[16px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+              {scontrinoEsito.docNumber && (
+                <p className="mb-3 text-[14px] font-medium text-[var(--ds-text-primary)]">
+                  Scontrino n. {scontrinoEsito.docNumber}
+                </p>
+              )}
+              <div className="flex items-center gap-4">
+                <div className="rounded-[10px] bg-white p-2" aria-hidden>
+                  <QRCodeSVG value={`${window.location.origin}/scontrino/${scontrinoEsito.token}`} size={112} level="M" />
+                </div>
+                <div className="min-w-0 space-y-2">
+                  <p className="text-[13px] leading-snug text-[var(--ds-text-secondary)]">
+                    L'ospite lo inquadra e ha lo scontrino digitale sul telefono.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try { await printBill(scontrinoEsito.billId, 'SCONTRINO'); setFlash('Copia in stampa'); }
+                      catch (err: any) { setError(err?.data?.message ?? err?.data?.error ?? err?.message ?? 'Stampa non riuscita'); }
+                    }}
+                    className="inline-flex h-11 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
+                  >
+                    <Printer size={15} aria-hidden /> Stampa copia
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2.5 rounded-[16px] bg-[var(--ds-surface)] p-4 text-[14px] text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)]">
+              <Loader2 size={16} className="animate-spin" aria-hidden /> Scontrino in emissione…
+            </div>
+          )}
+        </ModalShell>
       )}
       {cassaBillId != null && (
         <PagamentoSheet
