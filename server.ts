@@ -24596,21 +24596,7 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
             };
         });
 
-        // La prossima uscita ancora in coda (QUEUED) di ogni comanda in
-        // vista: col passe spento la chiama la cucina, dalla card.
-        const orderIds = [...new Set(rows.rows.map((r: any) => r.order_id))];
-        let queuedNext: any[] = [];
-        if (orderIds.length > 0) {
-            const qn = await queryWithRetry(
-                `SELECT order_id, MIN(course_no)::int AS course_no FROM order_items
-                 WHERE order_id = ANY($1::int[]) AND status = 'QUEUED' AND tenant_id = $2
-                 GROUP BY order_id`,
-                [orderIds, req.tenantId!]
-            );
-            queuedNext = qn.rows;
-        }
-
-        res.json({ station_id: stationId, ...service, items: rows.rows, courses, others, queued_next: queuedNext });
+        res.json({ station_id: stationId, ...service, items: rows.rows, courses, others });
     } catch (err: any) {
         console.error('GET /kds/queue error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
@@ -24653,6 +24639,64 @@ app.get('/kds/served', authenticate, requirePermission('orders:kds'), async (req
     } catch (err: any) {
         console.error('GET /kds/served error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// La campanella del monitor cucina: «l'uscita è pronta, venite a ritirarla».
+// NON muove lo stato della comanda — i tempi del servizio restano alla sala —
+// recapita un annuncio nel canale sala della chat staff, con striscia, badge
+// e push della meccanica esistente. La cucina non è membro del canale (non ne
+// legge il traffico): per questo il messaggio si inserisce qui server-side
+// invece di passare da POST /staff-chat/messages, che la respingerebbe.
+app.post('/orders/:id/courses/:n/call-waiter', authenticate, requireAnyPermission('orders:kds', 'orders:expedite'), async (req: any, res) => {
+    try {
+        if (!(await ordersEnabledGuard(req, res))) return;
+        const id = parseInt(req.params.id, 10);
+        const n = parseInt(req.params.n, 10);
+        if (!Number.isFinite(id) || !Number.isFinite(n)) return res.status(400).json({ error: 'id non valido' });
+
+        const rowsRs = await queryWithRetry(
+            `SELECT oi.status, o.table_id, t.name AS table_name
+             FROM order_items oi
+             JOIN orders o ON o.id = oi.order_id
+             LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
+             WHERE oi.order_id = $1 AND oi.course_no = $2 AND oi.status <> 'VOIDED' AND o.tenant_id = $3`,
+            [id, n, req.tenantId!]
+        );
+        if (rowsRs.rows.length === 0) return res.status(404).json({ error: 'Uscita non trovata' });
+        if (rowsRs.rows.some((r: any) => r.status !== 'READY')) {
+            return res.status(409).json({ error: 'Si avvisa la sala a uscita tutta pronta' });
+        }
+        const tableName = rowsRs.rows[0].table_name;
+        const tableId = rowsRs.rows[0].table_id;
+
+        const me = await queryWithRetry(`SELECT full_name FROM users WHERE tenant_id = $1 AND id = $2`, [req.tenantId!, req.user.userId]);
+        const senderName = me.rows[0]?.full_name || req.user.email;
+        const body = `${tableName ? `Tavolo ${tableName}` : `Comanda #${id}`} · ${n}ª uscita pronta al ritiro`;
+
+        const ins = await queryWithRetry(
+            `INSERT INTO staff_messages
+                (tenant_id, kind, channel, sender_user_id, sender_name, sender_role, body, linked_table_id)
+             VALUES ($1, 'channel', 'sala', $2, $3, $4, $5, $6)
+             RETURNING ${STAFF_MSG_FIELDS}`,
+            [req.tenantId!, req.user.userId, senderName, String(req.user.role), body, tableId]
+        );
+        const message = ins.rows[0];
+        const socketId = req.headers['x-socket-id'] as string;
+        socketService?.broadcastToRolesRoom(req.tenantId!, rolesForChannel('sala').map(String), 'staffchat:message', message, socketId);
+        pushSendToRoles(req.tenantId!, rolesForChannel('sala').map(String), {
+            url: `/?staffchat=${encodeURIComponent(channelThreadKey('sala'))}`,
+            tag: `staffchat:${channelThreadKey('sala')}`,
+            category: 'staff',
+            persist: false,
+            title: `${senderName} · sala`,
+            body,
+        }, { excludeUserId: req.user.userId }).catch(err => console.error('Push (uscita pronta) failed:', err));
+
+        res.status(201).json({ ok: true, message });
+    } catch (err: any) {
+        console.error('POST /orders/:id/courses/:n/call-waiter error:', err);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
@@ -24897,9 +24941,10 @@ app.get('/kds/expediter', authenticate, requirePermission('orders:expedite'), as
 // requireAny con orders:take (scelta del Frantoio, 31/08): in molte sale i
 // tempi delle uscite li batte il CAMERIERE, non il passe — stesso precedente
 // del «riporta» qui sotto. Chi non lo vuole tiene i camerieri sull'auto-fire.
-// orders:kds incluso: col passe spento è la cucina a chiamare la prossima
-// uscita, direttamente dalla card del monitor.
-app.post('/orders/:id/courses/:n/fire', authenticate, requireAnyPermission('orders:expedite', 'orders:take', 'orders:kds'), async (req, res) => {
+// Niente orders:kds qui, di proposito: i tempi del servizio li batte la
+// sala (o il passe), mai la cucina — due mani sullo stesso volante non si
+// capisce chi guida (deciso con Marco l'1/09).
+app.post('/orders/:id/courses/:n/fire', authenticate, requireAnyPermission('orders:expedite', 'orders:take'), async (req, res) => {
     const client = await pool.connect();
     try {
         if (!(await ordersEnabledGuard(req, res))) { client.release(); return; }
