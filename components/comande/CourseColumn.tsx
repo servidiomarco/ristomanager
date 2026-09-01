@@ -234,27 +234,46 @@ interface SendFooterProps {
 export const SendFooter: React.FC<SendFooterProps> = ({
   course, courseCount, courseTotal, allCount, allTotal, busy, onSend, onSendAll, onExpand,
 }) => (
-  <div className="flex flex-col gap-2">
+  <div className="flex flex-col gap-1.5">
+    {/* Sul palmare la comanda è un foglio ripiegato qui sotto, e lo dice la
+        maniglia — la stessa dei fogli aperti. Ad aprirla è lei più tutta la
+        zona del totale: la sola freccetta era un bersaglio da 14px per
+        un'azione che si fa col pollice a fine giro. */}
+    {onExpand && (
+      <button
+        type="button"
+        onClick={onExpand}
+        aria-label="Apri la comanda"
+        className="-mt-1.5 flex justify-center rounded-full py-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+      >
+        <span className="h-1 w-9 rounded-full bg-[var(--ds-border-strong)]" aria-hidden />
+      </button>
+    )}
     <div className="flex items-center gap-3">
-      <div className="min-w-0 flex-1">
-        {onExpand ? (
-          <button
-            type="button"
-            onClick={onExpand}
-            className="flex max-w-full items-center gap-1 truncate text-[13px] text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-          >
-            {courseLabel(course)} · da inviare
-            <ChevronUp size={14} aria-hidden />
-          </button>
-        ) : (
+      {onExpand ? (
+        <button
+          type="button"
+          onClick={onExpand}
+          className="-my-1.5 -ml-1.5 min-w-0 flex-1 rounded-[14px] p-1.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] active:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        >
+          <span className="flex items-center gap-1.5 text-[13px] text-[var(--ds-text-muted)]">
+            <span className="truncate">{courseLabel(course)} · da inviare</span>
+            <ChevronUp size={15} className="flex-shrink-0" aria-hidden />
+          </span>
+          <span className="block text-[22px] font-semibold tabular-nums tracking-[-0.015em] text-[var(--ds-text-primary)]">
+            {euro(courseTotal)}
+          </span>
+        </button>
+      ) : (
+        <div className="min-w-0 flex-1">
           <div className="truncate text-[13px] text-[var(--ds-text-muted)]">
             Da inviare · {courseLabel(course)}
           </div>
-        )}
-        <div className="text-[22px] font-semibold tabular-nums tracking-[-0.015em] text-[var(--ds-text-primary)]">
-          {euro(courseTotal)}
+          <div className="text-[22px] font-semibold tabular-nums tracking-[-0.015em] text-[var(--ds-text-primary)]">
+            {euro(courseTotal)}
+          </div>
         </div>
-      </div>
+      )}
       {/* Non «INVIA»: il maiuscolo non aggiunge peso che il corpo e il
           grassetto non diano già, e si legge peggio (§5.2). */}
       <button

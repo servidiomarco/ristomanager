@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ArrowLeft, ArrowRightLeft, MoreVertical, Minus, Percent, Plus, Receipt, Trash2, Users,
+  ArrowLeft, ArrowRightLeft, MoreVertical, Minus, Percent, Plus, Receipt, Search, Trash2, Users,
 } from 'lucide-react';
 import { Sheet, StatusPill } from '../ds';
 import { euro, rowCountLabel } from './orderView';
@@ -24,6 +24,9 @@ interface OrderTopBarProps {
   billDisabled: boolean;
   clearDisabled: boolean;
   wide: boolean;
+  /** Apre la ricerca piatti sul velo. Solo palmare: su schermo largo la
+   *  ricerca sta inline nel menu, un secondo punto d'ingresso confonderebbe. */
+  onSearch?: () => void;
   onBack: () => void;
   onCovers: (delta: number) => void;
   onBill: () => void;
@@ -38,7 +41,7 @@ const stepper =
 export const OrderTopBar: React.FC<OrderTopBarProps> = ({
   tableName, guestName, totalCents, rows, covers, sentCourses, busy,
   billDisabled, clearDisabled, wide,
-  onBack, onCovers, onBill, onDiscount, onTransfer, onClearDrafts,
+  onSearch, onBack, onCovers, onBill, onDiscount, onTransfer, onClearDrafts,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -255,6 +258,18 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
               {rows === 0 ? 'nessuna riga' : `${rowCountLabel(rows)} · ${euro(totalCents)}`}
             </div>
           </div>
+          {/* La lente accanto ai puntini, stessa forma incassata: la ricerca
+              piatti non occupa più una riga del menu. */}
+          {onSearch && (
+            <button
+              type="button"
+              onClick={onSearch}
+              aria-label="Cerca un piatto"
+              className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              <Search size={20} aria-hidden />
+            </button>
+          )}
           {menuTrigger}
         </div>
 

@@ -237,7 +237,7 @@ Il colpo d'occhio del "adesso", sempre sulla giornata corrente.
 Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si attiva dalle Impostazioni.
 
 **Comande (palmare cameriere)**
-- Griglia tavoli del servizio con stato comanda; catalogo piatti per categoria con ricerca; uso a una mano, su telefono la comanda vive in uno sheet dietro il totale.
+- Griglia tavoli del servizio con stato comanda; catalogo piatti per categoria con ricerca; uso a una mano, su telefono la comanda vive in uno sheet dietro il totale. Aprendo un tavolo su telefono il pad prende tutto lo schermo (la barra dell'app si toglie di mezzo, in cima resta la scheda del tavolo con la freccia indietro); la ricerca piatti si apre dalla lente nella testata del tavolo, sul velo trasparente come la ricerca globale, e i risultati si aggiungono con un tocco senza perdere di vista la comanda.
 - **Uscite/portate**: ogni riga si assegna a un'uscita; varianti libere per riga ("senza sale, metà porzione…"), quantità, coperti ±1.
 - Le righe restano sul palmare finché non si preme **Invia** (una sola trasmissione, robusta anche con rete instabile); le righe non inviate **sopravvivono all'uscita dal tavolo** come bozza locale, e al ritorno un avviso dichiara che non sono in cucina.
 - **Il cameriere batte i tempi**: sull'uscita proposta il bottone **Chiama** la lancia in cucina dal palmare — per le sale dove le uscite le chiama chi è al tavolo, non il passe. "Torna in bozza" annulla una proposta, e l'uscita si rimanda anche dopo.
@@ -533,6 +533,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-01 | Comande, Cucina e Passe | Tavolo aperto a tutto schermo sul palmare: la barra dell'app sparisce e in cima resta la scheda del tavolo; la ricerca piatti sta nella lente della testata e si apre sul velo trasparente della ricerca globale, coi risultati che si aggiungono al tocco. |
 | 2026-09-01 | Menu & Banchetti | Piatti e categorie con interruttore acceso/spento e ordinamento libero (frecce e modale "Categorie"); scelte rispettate da palmare comande e menu digitale. |
 | 2026-09-01 | Comande, Cucina e Passe | Campanella del monitor cucina ridefinita: avvisa la sala che l'uscita è pronta (annuncio nel canale sala, con push) invece di chiamare l'uscita successiva — i tempi del servizio restano ai camerieri. |
 | 2026-09-01 | Comande, Cucina e Passe | Col toggle Passe spento le icone stanno sulle card del monitor cucina, non sulla comanda, che torna com'era. |

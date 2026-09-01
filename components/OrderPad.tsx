@@ -26,6 +26,7 @@ import {
 import { TableGrid } from './comande/TableGrid';
 import { OrderTopBar } from './comande/OrderTopBar';
 import { DishBrowser } from './comande/DishBrowser';
+import { DishSearchSheet } from './comande/DishSearchSheet';
 import { CourseChips } from './comande/CourseChips';
 import { CourseColumn, CourseList, SendFooter } from './comande/CourseColumn';
 import { ComandaSheet } from './comande/ComandaSheet';
@@ -91,6 +92,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
   const [course, setCourse] = useState(1);
   const [category, setCategory] = useState<string | null>(null);
   const [dishQuery, setDishQuery] = useState('');
+  // La ricerca piatti del palmare: si apre dalla lente nella testata del
+  // tavolo e vive sul velo, quindi lo stato sta qui e non nel browser.
+  const [dishSearchOpen, setDishSearchOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
@@ -1019,6 +1023,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
       onRemove={removeFromCart}
       onLongPress={setVariantFor}
       layout={isWide ? 'grid' : 'list'}
+      // Sul palmare la ricerca sta nella testata del tavolo (lente), non qui.
+      showSearch={false}
     />
   );
 
@@ -1034,6 +1040,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
       billDisabled={displayTotal === 0 && rows === 0}
       clearDisabled={cart.length === 0}
       wide={isWide}
+      onSearch={isWide ? undefined : () => setDishSearchOpen(true)}
       onBack={() => { setTableId(null); setOrder(null); setCart([]); setComandaOpen(false); }}
       onCovers={changeCovers}
       onBill={() => setClosing(true)}
@@ -1181,7 +1188,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
 
   // ---------------- palmare: la comanda sta dietro il totale ----------------
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[var(--ds-canvas)] px-4 pt-3">
+    // Senza la testata dell'app (immersive), la scheda del tavolo è la prima
+    // cosa in cima: il padding rispetta il notch dove c'è.
+    <div className="flex h-full min-h-0 flex-col bg-[var(--ds-canvas)] px-4 pt-[max(0.75rem,env(safe-area-inset-top))]">
       <div className="flex-shrink-0">{topBar}</div>
 
       <div className="mt-4 flex-shrink-0">
@@ -1225,6 +1234,15 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
           />
         </div>
       </div>
+
+      <DishSearchSheet
+        open={dishSearchOpen}
+        dishes={dishes}
+        qtyInCourse={qtyInCourse}
+        hasVariants={hasVariants}
+        onAdd={onDishTap}
+        onClose={() => setDishSearchOpen(false)}
+      />
 
       <ComandaSheet
         open={comandaOpen}

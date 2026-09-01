@@ -1,13 +1,19 @@
-import React, { useMemo, useRef } from 'react';
-import { ChevronDown, Minus, Plus, Trash2 } from 'lucide-react';
+import React, { useMemo, useRef, useState } from 'react';
+import { ChevronDown, Minus, Plus, Search, Trash2 } from 'lucide-react';
 import type { Dish } from '../../types';
 import { SearchField } from '../ds';
 import { euro } from './orderView';
+import { DishSearchSheet } from './DishSearchSheet';
 
 // ---------------------------------------------------------------------------
-// Il menu, da toccare. Ricerca sempre in vista, categorie in una pista che
+// Il menu, da toccare. Ricerca sempre a portata, categorie in una pista che
 // scorre, e i piatti dell'uscita in composizione contati sul piatto stesso —
 // così si sa di averlo già messo senza guardare dall'altra parte.
+//
+// Sul palmare la pillola di ricerca non è un campo ma un bottone: apre lo
+// stesso foglio della ricerca globale (velo e trasparenza compresi), dove la
+// tastiera non spinge in giro la pagina. Su desktop il campo resta inline —
+// c'è spazio, e la tastiera è fisica.
 // ---------------------------------------------------------------------------
 
 interface DishBrowserProps {
@@ -31,13 +37,18 @@ interface DishBrowserProps {
   onLongPress: (dish: Dish) => void;
   /** 'grid' affianca la comanda su desktop, 'list' sta sotto il pollice. */
   layout: 'grid' | 'list';
+  /** false quando la ricerca vive altrove (la lente nella testata del tavolo):
+   *  qui non compare la pillola e le categorie salgono di una riga. */
+  showSearch?: boolean;
 }
 
 export const DishBrowser: React.FC<DishBrowserProps> = ({
   dishes, categories, category, onCategory, query, onQuery,
   qtyInCourse, markedCategories, hasVariants, onAdd, onRemove, onLongPress, layout,
+  showSearch = true,
 }) => {
   const q = query.trim().toLowerCase();
+  const [searchOpen, setSearchOpen] = useState(false);
 
   // Tocco lungo con ref (non closure): un re-render a metà pressione — il
   // carrello ne provoca di continuo — non deve lasciare timer orfani che
@@ -122,13 +133,41 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     // più: sono tre decisioni diverse in fila, e a 12px si leggono come una
     // fascia sola di controlli.
     <div className={`flex min-h-0 flex-1 flex-col ${layout === 'list' ? 'gap-4' : 'gap-3'}`}>
-      <SearchField
-        value={query}
-        onChange={onQuery}
-        placeholder="Cerca un piatto"
-        ariaLabel="Cerca un piatto"
-        className="flex-shrink-0"
-      />
+      {layout === 'list' ? (
+        showSearch && (
+          <>
+            {/* Stessa pelle di SearchField, ma è un bottone: il testo muto e
+                la lente dicono «ricerca», il velo fa il resto. */}
+            <button
+              type="button"
+              onClick={() => setSearchOpen(true)}
+              className="relative h-11 w-full flex-shrink-0 rounded-full bg-[var(--ds-surface)] pl-11 pr-4 text-left text-[15px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)] transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              <Search
+                className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ds-text-muted)]"
+                aria-hidden
+              />
+              Cerca un piatto
+            </button>
+            <DishSearchSheet
+              open={searchOpen}
+              dishes={dishes}
+              qtyInCourse={qtyInCourse}
+              hasVariants={hasVariants}
+              onAdd={onAdd}
+              onClose={() => setSearchOpen(false)}
+            />
+          </>
+        )
+      ) : (
+        <SearchField
+          value={query}
+          onChange={onQuery}
+          placeholder="Cerca un piatto"
+          ariaLabel="Cerca un piatto"
+          className="flex-shrink-0"
+        />
+      )}
       {chips}
 
       {/* Lo scorrimento verticale ritaglia anche in orizzontale, quindi le
