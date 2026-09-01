@@ -4786,6 +4786,7 @@ app.get('/reports/cash-closure', authenticate, requirePermission('payments:view'
                              THEN 'LUNCH' ELSE 'DINNER' END
                     ) AS shift,
                     fd.doc_type AS fiscal_doc_type, fd.status AS fiscal_status, fd.doc_number AS fiscal_doc_number,
+                    fd.public_token AS fiscal_public_token,
                     COALESCE((SELECT jsonb_agg(jsonb_build_object('method', p.method, 'amount_cents', p.amount_cents) ORDER BY p.recorded_at)
                               FROM table_bill_payments p
                               WHERE p.table_bill_id = b.id AND p.voided_at IS NULL), '[]'::jsonb) AS payments
@@ -4793,7 +4794,7 @@ app.get('/reports/cash-closure', authenticate, requirePermission('payments:view'
              LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
              LEFT JOIN reservations r ON r.id = b.reservation_id AND r.tenant_id = b.tenant_id
              LEFT JOIN LATERAL (
-                 SELECT doc_type, status, doc_number FROM fiscal_documents
+                 SELECT doc_type, status, doc_number, public_token FROM fiscal_documents
                  WHERE table_bill_id = b.id ORDER BY created_at DESC LIMIT 1
              ) fd ON TRUE
              WHERE b.tenant_id = $1 AND b.status IN ('CLOSED', 'SETTLED_PARTIAL')
@@ -4952,7 +4953,12 @@ async function nextInvoiceNumber(tenantId: number, year: number): Promise<string
 }
 
 const FISCAL_DOC_COLUMNS = `id, table_bill_id, table_bill_split_id, doc_type, doc_number, provider, fiscal_id_snapshot, status,
-    provider_ref, error, total_cents, attempts, created_by_user_id, created_at, confirmed_at, voided_at`;
+    provider_ref, error, total_cents, attempts, created_by_user_id, created_at, confirmed_at, voided_at, public_token`;
+
+// Il token che l'ospite riceve nel QR: una capability sul singolo documento,
+// come lo share_token del conto (che però muore alla chiusura — questo no,
+// lo scontrino si mostra anche il giorno dopo).
+const newFiscalPublicToken = () => crypto.randomBytes(32).toString('hex');
 
 // Chiusura proforma di un conto NATIVO (fuori Passepartout): nessun
 // documento fiscale, ma la scelta resta scritta come riga PROFORMA
@@ -5035,11 +5041,11 @@ async function emitFiscalDocForBill(tenantId: number, billId: number, userId: nu
     let ins = await queryWithRetry(
         // Arbitro sull'indice a livello conto (predicato con split IS NULL,
         // vedi migration fattura-elettronica che ha sdoppiato l'indice).
-        `INSERT INTO fiscal_documents (tenant_id, table_bill_id, provider, fiscal_id_snapshot, total_cents, created_by_user_id)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO fiscal_documents (tenant_id, table_bill_id, provider, fiscal_id_snapshot, total_cents, created_by_user_id, public_token)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') AND table_bill_split_id IS NULL DO NOTHING
          RETURNING ${FISCAL_DOC_COLUMNS}`,
-        [tenantId, billId, providerName, fiscalId, bill.total_cents, userId]
+        [tenantId, billId, providerName, fiscalId, bill.total_cents, userId, newFiscalPublicToken()]
     );
     let doc = ins.rows[0] ?? null;
     if (!doc) {
@@ -5095,13 +5101,18 @@ async function emitFiscalDocForBill(tenantId: number, billId: number, userId: nu
     try {
         const driver = getFiscalDriver(providerName);
         const result = await driver.issueEReceipt(payload);
+        // Il numero del documento commerciale (es. "0005-0005") Openapi lo
+        // mette solo nel corpo della risposta: senza estrarlo qui la colonna
+        // doc_number restava NULL e l'esito diceva "emesso" senza numero.
+        const docNumber = String((result.raw as any)?.data?.document_number ?? '') || null;
         const upd = await queryWithRetry(
             `UPDATE fiscal_documents
              SET status = 'CONFIRMED', provider_ref = $2, response = $3::jsonb,
+                 doc_number = COALESCE($4, doc_number),
                  confirmed_at = CURRENT_TIMESTAMP, error = NULL
              WHERE id = $1
              RETURNING ${FISCAL_DOC_COLUMNS}`,
-            [doc.id, result.provider_ref, JSON.stringify(result.raw ?? null)]
+            [doc.id, result.provider_ref, JSON.stringify(result.raw ?? null), docNumber]
         );
         finalRow = upd.rows[0];
     } catch (err: any) {
@@ -5902,6 +5913,66 @@ app.get('/pay/:token/qr.png', publicPayLimiter, async (req, res) => runAsPlatfor
 // claims (two guests scanning at the same instant). The trigger from PR 1
 // is the ultimate authority — if it fires we surface a 409 with the
 // current max_allowed.
+// Lo scontrino digitale dell'ospite: il QR sull'esito di chiusura porta la
+// SPA su /scontrino/<token>, che legge questo JSON. Il token è la capability
+// (256 bit, mai riusato): mostra SOLO quel documento, senza login — lo stesso
+// schema dello share_token del conto, ma sopravvive alla chiusura perché lo
+// scontrino si mostra anche il giorno dopo. Lookup globale e runAsPlatform
+// come le altre route per token: è la riga trovata a dire il tenant.
+app.get('/scontrino/:token', publicPayLimiter, async (req, res) => runAsPlatform(async () => {
+    try {
+        const token = String(req.params.token || '');
+        if (!token || token.length < 32) return res.status(404).json({ error: 'Not found' });
+        const rs = await queryWithRetry(
+            // Solo scontrini nativi: quelli Passepartout li stampa l'RT di
+            // cassa e la riga qui non ha il dettaglio (request NULL) — la
+            // pagina mostrerebbe un documento vuoto.
+            `SELECT fd.tenant_id, fd.status, fd.doc_number, fd.total_cents,
+                    fd.fiscal_id_snapshot, fd.request, fd.response, fd.confirmed_at, fd.voided_at,
+                    t.name AS table_name
+             FROM fiscal_documents fd
+             JOIN table_bills b ON b.id = fd.table_bill_id AND b.tenant_id = fd.tenant_id
+             LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
+             WHERE fd.public_token = $1 AND fd.doc_type = 'RECEIPT'
+               AND fd.provider <> 'passepartout' AND fd.status IN ('CONFIRMED', 'VOIDED')`,
+            [token]
+        );
+        const doc = rs.rows[0];
+        if (!doc) return res.status(404).json({ error: 'Not found' });
+        const identity = businessIdentity(doc.tenant_id);
+        const payload = doc.request ?? {};
+        const respData = doc.response?.data ?? {};
+        const euroToCents = (s: unknown): number => Math.round((parseFloat(String(s ?? '0')) || 0) * 100);
+        res.json({
+            business: {
+                name: identity.name,
+                address: identity.address || null,
+                vat_number: doc.fiscal_id_snapshot ?? null,
+            },
+            receipt: {
+                status: doc.status,
+                doc_number: doc.doc_number ?? respData.document_number ?? null,
+                document_date: respData.document_date ?? doc.confirmed_at,
+                voided_at: doc.voided_at,
+                table_name: doc.table_name ?? null,
+                total_cents: doc.total_cents,
+                items: (Array.isArray(payload.items) ? payload.items : []).map((i: any) => ({
+                    description: String(i.description ?? ''),
+                    quantity: parseFloat(String(i.quantity ?? '1')) || 1,
+                    unit_price_cents: euroToCents(i.unit_price),
+                    vat_rate_code: String(i.vat_rate_code ?? ''),
+                })),
+                cash_cents: euroToCents(payload.cash_payment_amount),
+                electronic_cents: euroToCents(payload.electronic_payment_amount),
+                ticket_cents: euroToCents(payload.ticket_restaurant_payment_amount),
+            },
+        });
+    } catch (err: any) {
+        console.error('GET /scontrino/:token error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}));
+
 app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (req, res) => runAsPlatform(async () => {
     const client = await pool.connect();
     try {
@@ -26348,6 +26419,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                     fd.status AS fiscal_status, fd.id AS fiscal_doc_id, fd.error AS fiscal_error,
                     fd.provider AS fiscal_provider, fd.provider_ref AS fiscal_ref,
                     fd.doc_type AS fiscal_doc_type, fd.doc_number AS fiscal_doc_number,
+                    fd.public_token AS fiscal_public_token,
                     -- Come è stato pagato: i movimenti vivi del libro cassa
                     -- (incassi staff + specchi delle quote online), per la
                     -- sezione Pagamenti del conto senza una fetch per riga.
@@ -26363,7 +26435,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
              LEFT JOIN reservations r ON r.id = b.reservation_id AND r.tenant_id = b.tenant_id
              LEFT JOIN table_bill_splits s ON s.table_bill_id = b.id
              LEFT JOIN LATERAL (
-                 SELECT id, status, error, provider, provider_ref, doc_type, doc_number FROM fiscal_documents
+                 SELECT id, status, error, provider, provider_ref, doc_type, doc_number, public_token FROM fiscal_documents
                  WHERE table_bill_id = b.id ORDER BY created_at DESC LIMIT 1
              ) fd ON TRUE
              WHERE b.status = ANY($3::varchar[])
@@ -26377,7 +26449,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
                         (SELECT o.shift FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
                         CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
                              THEN 'LUNCH' ELSE 'DINNER' END) = $2::varchar)
-             GROUP BY b.id, t.name, r.customer_name, fd.id, fd.status, fd.error, fd.provider, fd.provider_ref, fd.doc_type, fd.doc_number
+             GROUP BY b.id, t.name, r.customer_name, fd.id, fd.status, fd.error, fd.provider, fd.provider_ref, fd.doc_type, fd.doc_number, fd.public_token
              ORDER BY b.closed_at DESC NULLS LAST, b.opened_at DESC`,
             [filterDate, filterShift, statuses, req.tenantId!]
         );
@@ -26917,6 +26989,50 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
         const rawOrigin = typeof req.body?.origin === 'string' ? req.body.origin : '';
         const origin = /^https?:\/\/[a-z0-9.\-:\[\]]+$/i.test(rawOrigin) ? rawOrigin : null;
         const shareUrl = bill.share_token && origin ? `${origin}/pay/${bill.share_token}` : null;
+
+        // 'SCONTRINO': la copia di cortesia del documento commerciale già
+        // emesso — intestazione, righe dal payload dell'emissione (è ciò che
+        // il provider ha davvero ricevuto, non lo stato attuale del conto),
+        // numero e data, e il QR che porta l'ospite su /scontrino/<token>.
+        if (req.body?.kind === 'SCONTRINO') {
+            const fdRs = await queryWithRetry(
+                `SELECT doc_number, public_token, fiscal_id_snapshot, provider, request, response, confirmed_at, total_cents
+                 FROM fiscal_documents
+                 WHERE table_bill_id = $1 AND tenant_id = $2 AND doc_type = 'RECEIPT' AND status = 'CONFIRMED'
+                 ORDER BY created_at DESC LIMIT 1`,
+                [bill.id, req.tenantId!]
+            );
+            const fd = fdRs.rows[0];
+            if (!fd || fd.provider === 'passepartout') {
+                return res.status(409).json({ error: 'receipt_unavailable', message: 'Nessuno scontrino emesso su questo conto' });
+            }
+            const identity = businessIdentity(req.tenantId!);
+            const reqPayload = fd.request ?? {};
+            const respData = fd.response?.data ?? {};
+            const printRoutes = await getPrintRoutes(req.tenantId!);
+            const receiptPrinter = /^[a-z0-9_-]{1,30}$/i.test(String(req.body?.printer ?? ''))
+                ? String(req.body.printer) : (printRoutes.preconto ?? 'preconti');
+            const ins = await queryWithRetry(
+                `INSERT INTO print_jobs (tenant_id, kind, payload, printer, created_by_user_id)
+                 VALUES ($1, 'SCONTRINO', $2, $3, $4) RETURNING id`,
+                [req.tenantId!, JSON.stringify({
+                    bill_id: bill.id,
+                    table_name: bill.table_name ?? null,
+                    business_name: identity.name,
+                    business_address: identity.address || null,
+                    vat_number: fd.fiscal_id_snapshot ?? null,
+                    doc_number: fd.doc_number ?? respData.document_number ?? null,
+                    document_date: respData.document_date ?? fd.confirmed_at,
+                    total_cents: fd.total_cents,
+                    items: Array.isArray(reqPayload.items) ? reqPayload.items : [],
+                    cash_payment_amount: reqPayload.cash_payment_amount ?? '0.00',
+                    electronic_payment_amount: reqPayload.electronic_payment_amount ?? '0.00',
+                    ticket_restaurant_payment_amount: reqPayload.ticket_restaurant_payment_amount ?? '0.00',
+                    receipt_url: fd.public_token && origin ? `${origin}/scontrino/${fd.public_token}` : null,
+                }), receiptPrinter, req.user?.userId ?? null]
+            );
+            return res.status(201).json({ id: ins.rows[0].id, status: 'PENDING' });
+        }
 
         const items = (Array.isArray(bill.items) ? bill.items : []).map((i: any) => ({
             name: String(i.name ?? ''),

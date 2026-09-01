@@ -5,6 +5,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import { ShoppingProvider } from './contexts/ShoppingContext';
 import { TodosProvider } from './contexts/TodosContext';
 import { PublicPayPageEntry } from './components/PublicPayPage';
+import { PublicReceiptPage } from './components/PublicReceiptPage';
 import I18nProvider from './i18n/I18nProvider';
 import './index.css';
 
@@ -19,6 +20,9 @@ const root = ReactDOM.createRoot(rootElement);
 // hitting the QR link don't trigger the login redirect. Everything else
 // still goes through the standard authenticated app shell.
 const isPublicPayRoute = /^\/pay\//.test(window.location.pathname);
+// Scontrino digitale: stessa famiglia di /pay — l'ospite arriva dal QR
+// sull'esito di chiusura, niente login.
+const isPublicReceiptRoute = /^\/scontrino\//.test(window.location.pathname);
 
 root.render(
   <React.StrictMode>
@@ -26,6 +30,8 @@ root.render(
       <I18nProvider>
         <PublicPayPageEntry />
       </I18nProvider>
+    ) : isPublicReceiptRoute ? (
+      <PublicReceiptPage />
     ) : (
       <AuthProvider>
         <ShoppingProvider>

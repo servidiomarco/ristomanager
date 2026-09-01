@@ -1,5 +1,6 @@
 import React from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Printer } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import type { TableBill } from '../../types';
 import { StatusPill } from '../ds';
 import { euro } from './cassaView';
@@ -31,6 +32,11 @@ interface EsitoChiusuraProps {
   tableName: string | null;
   closedAt: string | null;
   docNumber: string | null;
+  /** Presente quando lo scontrino nativo è CONFIRMED: il QR per l'ospite
+   *  (/scontrino/<token>) compare direttamente nell'esito — è il momento in
+   *  cui il cliente è ancora davanti alla cassa. */
+  receiptToken?: string | null;
+  onPrintReceipt?: () => void;
   busy: boolean;
   onRetryDocument: () => void;
   /** Rinuncia al documento: il conto resta chiuso, senza fiscale. */
@@ -48,7 +54,7 @@ const HEAD: Record<Esito, { label: string; tone: 'positive' | 'pending' | 'neutr
 };
 
 export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
-  esito, totalCents, tableName, closedAt, docNumber, busy,
+  esito, totalCents, tableName, closedAt, docNumber, receiptToken, onPrintReceipt, busy,
   onRetryDocument, onMarkProforma, onIssueReceipt, onIssueInvoice, onReopen, onBackToQueue,
 }) => {
   const head = HEAD[esito];
@@ -80,6 +86,31 @@ export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
         </div>
 
         <p className="mt-3 text-[14px] leading-relaxed text-[var(--ds-text-secondary)]">{body}</p>
+
+        {/* Lo scontrino si consegna adesso, col cliente ancora davanti: QR
+            da inquadrare col telefono, o copia di cortesia dalla termica. */}
+        {esito === 'saldato' && receiptToken && (
+          <div className="mt-4 flex items-center gap-4 rounded-[16px] bg-[var(--ds-surface-row)] p-3.5">
+            <div className="rounded-[10px] bg-white p-2" aria-hidden>
+              <QRCodeSVG value={`${window.location.origin}/scontrino/${receiptToken}`} size={104} level="M" />
+            </div>
+            <div className="min-w-0 space-y-2">
+              <p className="text-[13px] leading-snug text-[var(--ds-text-secondary)]">
+                L'ospite lo inquadra e ha lo scontrino digitale sul telefono.
+              </p>
+              {onPrintReceipt && (
+                <button
+                  type="button"
+                  onClick={onPrintReceipt}
+                  disabled={busy}
+                  className="inline-flex h-11 items-center gap-1.5 rounded-full bg-[var(--ds-surface)] px-4 text-[14px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+                >
+                  <Printer size={15} aria-hidden /> Stampa copia
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="mt-5 flex flex-wrap gap-2 border-t border-[var(--ds-border)] pt-4">
           {secondary.map(a => (
