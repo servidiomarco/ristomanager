@@ -845,7 +845,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
     return (
       <>
         <TableGrid
-          rows={buildRows(tables, openTables, billTables, reservationForTable)}
+          rows={buildRows(tables, openTables, billTables, reservationForTable, mergeGroupByTable, globalShiftFilter)}
           filter={gridFilter}
           onFilter={setGridFilter}
           query={gridQuery}

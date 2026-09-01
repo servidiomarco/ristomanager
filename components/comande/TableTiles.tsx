@@ -26,12 +26,13 @@ interface TableTilesProps {
 }
 
 /** Il meta di Comande: quanti coperti, in che stato, e per chi è tenuto. */
-export const defaultTableMeta = ({ table, state, reservation }: TableRow): React.ReactNode => {
+export const defaultTableMeta = (row: TableRow): React.ReactNode => {
+  const { table, state, reservation } = row;
   const caption = TABLE_GROUPS.find(g => g.state === state)?.caption;
   return (
     <>
       <span className="text-[12px] tabular-nums text-[var(--ds-text-muted)]">
-        {table.seats} cop.
+        {row.groupSeats ?? table.seats} cop.
       </span>
       {caption && (
         <span className={`text-[11px] font-semibold ${TABLE_CAPTION[state]}`}>
@@ -64,12 +65,12 @@ export const TableTiles: React.FC<TableTilesProps> = ({
               <button
                 key={row.table.id}
                 type="button"
-                onClick={() => onPick(row.table.id)}
+                onClick={() => onPick(row.pickId ?? row.table.id)}
                 disabled={busy}
                 className={`flex aspect-square flex-col items-center justify-center gap-0.5 rounded-[20px] p-1 shadow-[var(--ds-shadow-card)] transition-shadow disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${TABLE_TILE[row.state]}`}
               >
-                <span className="text-[24px] font-semibold tracking-[-0.02em] text-[var(--ds-text-primary)]">
-                  {row.table.name}
+                <span className={`${row.groupLabel ? 'text-[18px]' : 'text-[24px]'} max-w-full truncate font-semibold tracking-[-0.02em] text-[var(--ds-text-primary)]`}>
+                  {row.groupLabel ?? row.table.name}
                 </span>
                 {renderMeta(row)}
               </button>
