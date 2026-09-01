@@ -58,12 +58,14 @@ interface CassaPageProps {
   onImmersive?: (on: boolean) => void;
   /** Apre Comande sul tavolo: uscite e lanci restano di là (scorciatoia). */
   onOpenInComande?: (tableId: number) => void;
+  /** Apre Pagamenti · Chiusura: il riscontro per documento vive di là. */
+  onOpenPagamenti?: () => void;
 }
 
 type Screen = 'queue' | 'tables' | 'table' | 'payment' | 'split' | 'esito' | 'transazioni' | 'cassetto';
 
 export const CassaPage: React.FC<CassaPageProps> = ({
-  dishes: allDishes, tables, rooms, reservations, globalDate, globalShiftFilter, onImmersive, onOpenInComande,
+  dishes: allDishes, tables, rooms, reservations, globalDate, globalShiftFilter, onImmersive, onOpenInComande, onOpenPagamenti,
 }) => {
   const [screen, setScreen] = useState<Screen>('queue');
   const [roomId, setRoomId] = useState<string>('ALL');
@@ -535,6 +537,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
           error={error}
           busy={busyBillId != null}
           canClose={canCloseSession}
+          onOpenGiornale={onOpenPagamenti}
           onBack={backToQueue}
           onOpen={async cents => {
             setBusyBillId(-1); setError(null);

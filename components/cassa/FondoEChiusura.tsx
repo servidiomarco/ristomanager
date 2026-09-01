@@ -30,6 +30,9 @@ interface FondoEChiusuraProps {
   onUpdateFloat: (floatCents: number) => void;
   onClose: (countedCents: number, note: string) => void;
   onPrint: () => void;
+  /** Il riscontro per documento (scontrini/fatture/proforma) sta in
+   *  Pagamenti · Chiusura: da qui ci si arriva, non lo si duplica. */
+  onOpenGiornale?: () => void;
 }
 
 const toCents = (s: string): number => {
@@ -40,7 +43,7 @@ const toCents = (s: string): number => {
 const field = 'h-12 w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-right text-[17px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
 
 export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
-  view, loading, error, busy, canClose, onBack, onOpen, onUpdateFloat, onClose, onPrint,
+  view, loading, error, busy, canClose, onBack, onOpen, onUpdateFloat, onClose, onPrint, onOpenGiornale,
 }) => {
   const session = view?.session ?? null;
   const closed = session?.closed_at != null;
@@ -263,6 +266,15 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                 <p className="text-[13px] text-[var(--ds-text-muted)]">
                   Chiusa da {session!.closed_by_name} alle {getRomeTimePart(session!.closed_at!)}.
                 </p>
+                {onOpenGiornale && (
+                  <button
+                    type="button"
+                    onClick={onOpenGiornale}
+                    className="inline-flex min-h-[44px] items-center text-[14px] font-semibold text-[var(--ds-text-primary)] underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    Chiusura del giorno in Pagamenti
+                  </button>
+                )}
               </div>
             ) : session && canClose ? (
               <div className="mt-4 space-y-3">

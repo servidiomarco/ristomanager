@@ -11,33 +11,28 @@ import {
   Callout, PanePlaceholder, SearchField, SegmentedControl, SplitPane,
 } from './ds';
 import { ChiusuraCassa } from './pagamenti/ChiusuraCassa';
-import { ContiAperti } from './pagamenti/ContiAperti';
 import { LinkDiPagamento, type StatusFilter } from './pagamenti/LinkDiPagamento';
-import { BillDetail } from './pagamenti/BillSheet';
 import { PaymentDetail } from './pagamenti/PaymentDetail';
 import { PeriodPicker, type Period } from './pagamenti/PeriodPicker';
 import { formatEuro } from './pagamenti/paymentsView';
 import { useOpenBills } from './pagamenti/useOpenBills';
 
 /* ── Pagamenti ────────────────────────────────────────────────────────────
-   Two things the restaurant calls "pagamenti": the bills open on tables right
-   now, and the payment links sent to customers. They answer different
-   questions on different clocks — one is the service happening this minute,
-   the other is a ledger over a period — so they get a tab each rather than a
-   shared scroll where the second always started below the fold.
+   Il libro, non il banco: la Cassa è dove si incassa durante il servizio,
+   questa pagina è dove si rilegge — la chiusura di una data qualunque e i
+   link di pagamento su un periodo. Il tab «Conti aperti» che viveva qui è
+   stato ritirato quando la pagina Cassa ne ha rifatto il mestiere per
+   intero (verbi rapidi, dividi, correggi, fattura): due posti per chiudere
+   un conto erano due flussi da tenere allineati per sempre. La lettura
+   «chiusi» non è sparita — sta nel report di chiusura, tavolo per tavolo —
+   e i conti ancora da incassare compaiono lì come rimando alla Cassa.
 
    List and detail sit side by side, the same shape Prenotazioni and the three
-   Comunicazioni channels use. Working a service means going down a column of
-   near-identical rows, and as a sheet every one of them covered the list you
-   were working through: you opened a bill, read it, dismissed it, and had to
-   find your place again. The pane leaves the list standing.
+   Comunicazioni channels use. Below md the pane is a full-screen sheet —
+   SplitPane does that itself.
 
-   Below md the pane is a full-screen sheet — SplitPane does that itself — so
-   on a phone this is the behaviour it always had.
-
-   Their date scopes stay independent, exactly as they already were: Conti
-   aperti follows the current service the server reports, Link follows the
-   period filter. */
+   Date scopes stay independent: Chiusura follows the topbar date, Link
+   follows the period filter. */
 
 const KPI_LABELS = {
   incassato: 'Incassato',
@@ -69,8 +64,11 @@ const Kpi: React.FC<{ label: string; value: string; tone?: 'positive' | 'pending
 const PagamentiPage: React.FC<{
   globalDate?: Date;
   globalShiftFilter?: 'ALL' | 'LUNCH' | 'DINNER';
-}> = ({ globalDate, globalShiftFilter }) => {
-  const [tab, setTab] = useState<'BILLS' | 'LINKS' | 'CASSA'>('BILLS');
+  /** Presente solo se chi guarda può entrare in Cassa: il rimando ai conti
+   *  da incassare diventa un bottone, altrimenti resta una riga di stato. */
+  onOpenCassa?: () => void;
+}> = ({ globalDate, globalShiftFilter, onOpenCassa }) => {
+  const [tab, setTab] = useState<'CASSA' | 'LINKS'>('CASSA');
 
   // La lista "Conti aperti" segue datepicker + toggle turno della topbar: mostra
   // solo i conti di quel giorno/turno (turno "Tutti" = entrambi). Senza data la
@@ -99,19 +97,16 @@ const PagamentiPage: React.FC<{
   const [period, setPeriod] = useState<Period>({ from: '', to: '' });
   const [periodOpen, setPeriodOpen] = useState(false);
 
-  // One selection per tab, kept while you switch: the two lists are different
-  // jobs and coming back to a tab should find it where you left it. Both are
-  // ids, not rows — the row objects are replaced on every refetch, and holding
-  // one would pin the pane to a stale copy.
-  const [selectedBillId, setSelectedBillId] = useState<number | null>(null);
+  // An id, not a row — the row objects are replaced on every refetch, and
+  // holding one would pin the pane to a stale copy.
   const [selectedPaymentId, setSelectedPaymentId] = useState<number | null>(null);
 
-  // Aperti (da incassare) vs chiusi (rivedere gli incassi del servizio).
-  const [billStatus, setBillStatus] = useState<'open' | 'closed'>('open');
-  const openBills = useOpenBills(serviceFilter, billStatus);
+  // I conti aperti non hanno più una lista qui, ma restano due numeri della
+  // pagina: il KPI «Residuo conti» e il rimando alla Cassa dentro il report.
+  const openBills = useOpenBills(serviceFilter, 'open');
 
-  // The bills tab only exists with pay-at-table on. null = flag not known yet,
-  // so the tab bar doesn't flash a section that is about to disappear.
+  // The closure tab only exists with pay-at-table on. null = flag not known
+  // yet, so the tab bar doesn't flash a section that is about to disappear.
   const [payAtTableEnabled, setPayAtTableEnabled] = useState<boolean | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -211,11 +206,15 @@ const PagamentiPage: React.FC<{
     return acc;
   }, [items]);
 
-  // Every bill, not the filtered subset: the header figure is "what this
-  // service still owes", and it must not fall as you type a search.
-  const serviceResidual = useMemo(
-    () => openBills.bills.reduce((sum, b) => sum + Math.max(0, b.residual_cents), 0),
+  // Solo i conti su cui c'è ancora da incassare: il KPI e il rimando alla
+  // Cassa parlano dello stesso insieme, e devono dire lo stesso numero.
+  const collectable = useMemo(
+    () => openBills.bills.filter(b => b.residual_cents > 0),
     [openBills.bills],
+  );
+  const serviceResidual = useMemo(
+    () => collectable.reduce((sum, b) => sum + b.residual_cents, 0),
+    [collectable],
   );
 
   // The span the loaded results actually cover. With no period filter set there
@@ -234,21 +233,15 @@ const PagamentiPage: React.FC<{
     return min && max ? { from: min, to: max } : null;
   }, [items]);
 
-  // Derived, never stored: a closed bill leaves the list and the pane empties
-  // with it, and a refetched payment carries its new status into the pane
-  // without anyone re-selecting it.
-  const selectedBill = useMemo(
-    () => openBills.bills.find(b => b.id === selectedBillId) ?? null,
-    [openBills.bills, selectedBillId],
-  );
+  // Derived, never stored: a refetched payment carries its new status into
+  // the pane without anyone re-selecting it.
   const selectedPayment = useMemo(
     () => items.find(p => p.id === selectedPaymentId) ?? null,
     [items, selectedPaymentId],
   );
 
-  const showingBills = tab === 'BILLS' && billsAvailable;
   const showingCassa = tab === 'CASSA' && billsAvailable;
-  const detailOpen = showingCassa ? false : showingBills ? selectedBill !== null : selectedPayment !== null;
+  const detailOpen = showingCassa ? false : selectedPayment !== null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -302,29 +295,17 @@ const PagamentiPage: React.FC<{
             // search is even searching.
             <div className="space-y-3">
               {billsAvailable && (
-                <SegmentedControl<'BILLS' | 'LINKS' | 'CASSA'>
+                // «Chiusura», non «Cassa»: un tab che porta il nome di
+                // un'altra pagina è metà della confusione che questo giro
+                // di riordino ha tolto.
+                <SegmentedControl<'CASSA' | 'LINKS'>
                   value={tab}
                   onChange={setTab}
                   ariaLabel="Sezione pagamenti"
                   equalWidth
                   options={[
-                    { value: 'BILLS', label: 'Conti aperti', badge: openBills.bills.length || undefined },
+                    { value: 'CASSA', label: 'Chiusura' },
                     { value: 'LINKS', label: 'Link', badge: total || undefined },
-                    { value: 'CASSA', label: 'Cassa' },
-                  ]}
-                />
-              )}
-              {/* Aperti (da incassare adesso) vs chiusi (rivedere gli incassi
-                  del giorno/turno selezionato in alto). */}
-              {showingBills && (
-                <SegmentedControl<'open' | 'closed'>
-                  value={billStatus}
-                  onChange={setBillStatus}
-                  ariaLabel="Aperti o chiusi"
-                  equalWidth
-                  options={[
-                    { value: 'open', label: 'Da incassare' },
-                    { value: 'closed', label: 'Chiusi' },
                   ]}
                 />
               )}
@@ -332,7 +313,7 @@ const PagamentiPage: React.FC<{
                 <SearchField
                   value={search}
                   onChange={setSearch}
-                  placeholder={showingBills ? 'Cerca tavolo o cliente…' : 'Cerca cliente, telefono, ordine…'}
+                  placeholder="Cerca cliente, telefono, ordine…"
                   ariaLabel="Cerca"
                 />
               )}
@@ -340,20 +321,12 @@ const PagamentiPage: React.FC<{
           }
           list={
             showingCassa ? (
-              <ChiusuraCassa date={serviceFilter?.service_date} shift={serviceFilter?.shift} />
-            ) : showingBills ? (
-              <ContiAperti
-                bills={openBills.bills}
-                stale={openBills.stale}
-                service={openBills.service}
-                loading={openBills.loading}
-                error={openBills.error}
-                closingId={openBills.closingId}
-                onCloseBill={openBills.closeBill}
-                selectedId={selectedBillId}
-                onSelect={(b) => setSelectedBillId(b.id)}
-                query={search}
-                closedView={billStatus === 'closed'}
+              <ChiusuraCassa
+                date={serviceFilter?.service_date}
+                shift={serviceFilter?.shift}
+                openCount={collectable.length}
+                openResidualCents={serviceResidual}
+                onOpenCassa={onOpenCassa}
               />
             ) : (
               <>
@@ -381,24 +354,6 @@ const PagamentiPage: React.FC<{
           detail={
             showingCassa ? (
               <PanePlaceholder icon={Receipt}>I totali seguono il giorno scelto in alto</PanePlaceholder>
-            ) : showingBills ? (
-              selectedBill ? (
-                <BillDetail
-                  key={selectedBill.id}
-                  bill={selectedBill}
-                  busy={openBills.closingId === selectedBill.id}
-                  onClose={() => setSelectedBillId(null)}
-                  // Un CLOSED/VOIDED non si richiude: il bottone resta solo
-                  // sugli incassabili (il SETTLED_PARTIAL sì — si può
-                  // completare con gli incassi mancanti).
-                  onSettle={selectedBill.status === 'CLOSED' || selectedBill.status === 'VOIDED'
-                    ? undefined
-                    : (opts) => openBills.closeBill(selectedBill, opts)}
-                  onFiscalChanged={openBills.reload}
-                />
-              ) : (
-                <PanePlaceholder icon={Receipt}>Seleziona un conto dalla lista</PanePlaceholder>
-              )
             ) : selectedPayment ? (
               <PaymentDetail
                 key={selectedPayment.id}

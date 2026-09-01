@@ -2868,7 +2868,7 @@ const App: React.FC = () => {
 
         {view === ViewState.CASSA && (
           <CardErrorBoundary label="Cassa">
-            <CassaPage dishes={dishes} tables={tables} rooms={rooms} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} onImmersive={setImmersive} onOpenInComande={(tableId) => { setPendingComandeTableId(tableId); setView(ViewState.COMANDE); }} />
+            <CassaPage dishes={dishes} tables={tables} rooms={rooms} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} onImmersive={setImmersive} onOpenInComande={(tableId) => { setPendingComandeTableId(tableId); setView(ViewState.COMANDE); }} onOpenPagamenti={canAccessView(ViewState.PAGAMENTI) ? () => setView(ViewState.PAGAMENTI) : undefined} />
           </CardErrorBoundary>
         )}
 
@@ -2885,7 +2885,7 @@ const App: React.FC = () => {
         )}
 
         {view === ViewState.PAGAMENTI && (
-          <PagamentiPage globalDate={globalDate} globalShiftFilter={globalShiftFilter} />
+          <PagamentiPage globalDate={globalDate} globalShiftFilter={globalShiftFilter} onOpenCassa={canAccessView(ViewState.CASSA) ? () => setView(ViewState.CASSA) : undefined} />
         )}
 
         {view === ViewState.DEVELOPMENT && (

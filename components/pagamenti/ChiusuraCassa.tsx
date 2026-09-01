@@ -60,7 +60,12 @@ export const ChiusuraCassa: React.FC<{
   /** Turno dalla topbar: filtra la lista dei conti (i totali per metodo
    *  restano dell'intera giornata — è la cassa che si conta a fine serata). */
   shift?: 'LUNCH' | 'DINNER';
-}> = ({ date, shift }) => {
+  /** Conti con ancora un residuo: qui sono solo un rimando — si incassano
+   *  in Cassa, non da questa pagina. */
+  openCount?: number;
+  openResidualCents?: number;
+  onOpenCassa?: () => void;
+}> = ({ date, shift, openCount = 0, openResidualCents = 0, onOpenCassa }) => {
   const [report, setReport] = useState<CashClosureReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [docFilter, setDocFilter] = useState<DocFilter>('all');
@@ -124,6 +129,28 @@ export const ChiusuraCassa: React.FC<{
 
   return (
     <div className="space-y-3">
+      {/* Il residuo vive qui come rimando, non come lista: da quando il tab
+          «Conti aperti» è stato ritirato, incassare si fa solo in Cassa. */}
+      {openCount > 0 && (
+        <Callout tone="pending" icon={AlertCircle}>
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+            <span>
+              {openCount === 1 ? '1 conto ancora da incassare' : `${openCount} conti ancora da incassare`}
+              {' · '}{formatEuro(openResidualCents)}
+            </span>
+            {onOpenCassa && (
+              <button
+                type="button"
+                onClick={onOpenCassa}
+                className="inline-flex min-h-[44px] items-center font-semibold underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              >
+                Apri la Cassa
+              </button>
+            )}
+          </div>
+        </Callout>
+      )}
+
       <FormCard title={`Incassi del ${report.date.split('-').reverse().join('/')}`}>
         {hasMovements ? (
           <dl className="space-y-1.5 text-[14px]">
