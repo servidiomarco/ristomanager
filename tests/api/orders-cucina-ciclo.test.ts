@@ -329,4 +329,58 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         const di_nuovo = await api().post(`/orders/${orderId}/courses/1/serve`).set(bearer(token)).send({});
         expect(di_nuovo.status).toBe(200);
     });
+
+    it('il monitor di partita vede le altre partite dell\'uscita, e il servito finisce in Consegnate', async () => {
+        // Due partite vere: SECONDI → Griglia, CONTORNI → Fritti. La comanda
+        // ha un piatto per parte sulla stessa uscita.
+        const griglia = await api().post('/sala/stations').set(bearer(token)).send({ name: 'Griglia Ciclo' });
+        expect(griglia.status).toBe(201);
+        const fritti = await api().post('/sala/stations').set(bearer(token)).send({ name: 'Fritti Ciclo' });
+        expect(fritti.status).toBe(201);
+        expect((await api().put('/sala/category-stations').set(bearer(token)).send({ category: 'SECONDI', station_id: griglia.body.id })).status).toBe(200);
+        expect((await api().put('/sala/category-stations').set(bearer(token)).send({ category: 'CONTORNI', station_id: fritti.body.id })).status).toBe(200);
+        const patate = await api().post('/dishes').set(bearer(token)).send({
+            name: 'Patate Ciclo', description: null, price: 5, category: 'CONTORNI', allergens: null,
+        });
+        expect(patate.status).toBe(201);
+
+        await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'AUTO_ALL' });
+        const orderId = await nuovaComanda();
+        await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [
+                { dish_id: piatto1, qty: 1, course_no: 1 },
+                { dish_id: patate.body.id, qty: 2, course_no: 1 },
+            ],
+        });
+        await api().post(`/orders/${orderId}/send`).set(bearer(token)).send({});
+
+        // La coda della Griglia porta SOLO la sua riga, ma sa dei fritti.
+        const queue = await api().get(`/kds/queue?station_id=${griglia.body.id}`).set(bearer(token));
+        expect(queue.status).toBe(200);
+        const mine = queue.body.items.filter((i: any) => i.order_id === orderId);
+        expect(mine.length).toBe(1);
+        expect(mine[0].name_snapshot).toBe('Tagliata Collaudo');
+        const other = (queue.body.others ?? []).filter((o: any) => o.order_id === orderId);
+        expect(other.length).toBe(1);
+        expect(other[0].station_id).toBe(fritti.body.id);
+        expect(other[0].name_snapshot).toBe('Patate Ciclo');
+        expect(other[0].qty).toBe(2);
+        expect(other[0].status).toBe('SENT');
+
+        // Tutta pronta e servita: l'uscita compare nelle Consegnate della
+        // Griglia, con le SUE righe e il suo orario.
+        const view = await api().get(`/orders/${orderId}`).set(bearer(token));
+        for (const i of righe(view.body)) {
+            await api().post(`/kds/items/${i.id}/status`).set(bearer(token)).send({ status: 'READY' });
+        }
+        const servita = await api().post(`/orders/${orderId}/courses/1/serve`).set(bearer(token)).send({});
+        expect(servita.status).toBe(200);
+
+        const served = await api().get(`/kds/served?station_id=${griglia.body.id}`).set(bearer(token));
+        expect(served.status).toBe(200);
+        const row = served.body.courses.find((c: any) => c.order_id === orderId);
+        expect(row).toBeTruthy();
+        expect(row.served_at).toBeTruthy();
+        expect(row.items).toEqual([{ name: 'Tagliata Collaudo', qty: 1 }]);
+    });
 });

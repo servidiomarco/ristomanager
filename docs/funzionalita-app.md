@@ -245,6 +245,8 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 **Cucina (KDS)**
 - Coda comande **per partita** (es. Pizzeria, Primi…), con avanzamento riga Inviato → In preparazione → Pronto, note del piatto, colonna "In arrivo", filtro turno. Ogni monitor si sottoscrive alla propria partita.
 - **Modifiche dopo il lancio in evidenza**: storno di una riga inviata, piatti aggiunti a un'uscita già lanciata, "riporta" e trasferimento di tavolo accendono sulla card la pill rossa **"modificata"** — il tocco mostra cosa è cambiato, chi e quando (con la motivazione dello storno); **Ok** spegne l'avviso su tutti gli schermi. Suona come una comanda nuova.
+- **Le altre partite della stessa uscita** in piede di card: un pallino colorato per partita (in coda / in lavorazione / pronta) con nome e numero di piatti — la pasta sa quanto manca alla griglia prima di calare. Un tocco espande le loro righe in sola lettura; mai mischiate con le proprie, che si toccano per segnare pronto.
+- **Consegnate**: accanto a "In lavorazione" c'è l'archivio delle uscite servite del servizio (tavolo, uscita, orario, piatti della propria partita) — la risposta a "il 12 dice che manca il piatto: l'abbiamo mandato?". Sola consultazione: la card lascia il monitor solo al servito, mai al pronto.
 - I messaggi del canale **Cucina** della chat staff compaiono come **striscia sul monitor** (con la campana delle comande): "finito il branzino" arriva senza aprire la chat.
 
 **Passe (expediter)**
@@ -527,6 +529,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-01 | Comande, Cucina e Passe | KDS: piede di card con lo stato delle altre partite della stessa uscita (pallini + espansione in sola lettura) e schermo "Consegnate" con le uscite servite del servizio. |
 | 2026-09-01 | Fiscalità | Nota di credito TD04 dalla scheda del conto: storna una fattura inviata a SDI (storno totale, stessa numerazione, riferimento alla fattura); il conto torna libero di riemettere scontrino o fattura corretta. |
 | 2026-09-01 | Fiscalità | Scontrino digitale: QR sull'esito di chiusura e sulla scheda del conto (pagina pubblica per l'ospite, senza login) + copia di cortesia sulla termica; il numero del documento Openapi ora è salvato e mostrato. |
 | 2026-09-01 | Pagamenti, conto al tavolo e cassa | Nel report di chiusura un tocco sul conto apre la sua scheda con lo scontrino elettronico (emetti/riprova/annulla) — l'azione era rimasta orfana col ritiro del tab "Conti aperti". |

@@ -24529,7 +24529,7 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
         let siblings: any[] = [];
         if (keys.length > 0) {
             const sib = await queryWithRetry(
-                `SELECT order_id, course_no, status, ready_at, station_id
+                `SELECT id, order_id, course_no, status, ready_at, station_id, name_snapshot, qty
                  FROM order_items
                  WHERE status <> 'VOIDED'
                    AND tenant_id = $2
@@ -24541,6 +24541,18 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
             );
             siblings = sib.rows;
         }
+
+        // Le righe delle ALTRE partite sulla stessa uscita: il piede di card
+        // che risponde a "quanto manca alla griglia prima che io cali la
+        // pasta?". Solo col filtro partita — il monitor senza partita vede
+        // già tutto — e senza le servite, che non sono più lavoro di nessuno.
+        const others = stationId == null ? [] : siblings
+            .filter((s: any) => s.station_id !== stationId && s.status !== 'SERVED')
+            .map((s: any) => ({
+                id: s.id, order_id: s.order_id, course_no: s.course_no,
+                station_id: s.station_id, name_snapshot: s.name_snapshot,
+                qty: s.qty, status: s.status,
+            }));
 
         const courses = keys.map(k => {
             const [orderId, courseNo] = k.split(':').map(Number);
@@ -24557,9 +24569,48 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
             };
         });
 
-        res.json({ station_id: stationId, ...service, items: rows.rows, courses });
+        res.json({ station_id: stationId, ...service, items: rows.rows, courses, others });
     } catch (err: any) {
         console.error('GET /kds/queue error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Le uscite servite del servizio in corso, per lo schermo «Consegnate» del
+// monitor di partita: consultazione, non lavoro — «il 12 dice che manca il
+// piatto: l'abbiamo mandato?». Righe della SOLA partita richiesta, uscita
+// per uscita, dalla più recente. Cap difensivo: un servizio pieno sta
+// comodo, e la domanda riguarda sempre gli ultimi minuti.
+app.get('/kds/served', authenticate, requirePermission('orders:kds'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(req, res))) return;
+        const raw = req.query.station_id;
+        const stationId = raw != null && raw !== '' ? Number(raw) : null;
+        if (raw != null && raw !== '' && !Number.isFinite(stationId)) {
+            return res.status(400).json({ error: 'station_id non valido' });
+        }
+        const service = serviceFromQuery(req.query);
+        const rows = await queryWithRetry(
+            `SELECT oi.order_id, oi.course_no, t.name AS table_name, r.customer_name,
+                    MAX(oi.served_at) AS served_at,
+                    jsonb_agg(jsonb_build_object('name', oi.name_snapshot, 'qty', oi.qty) ORDER BY oi.id) AS items
+             FROM order_items oi
+             JOIN orders o ON o.id = oi.order_id
+             LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
+             LEFT JOIN reservations r ON r.id = o.reservation_id AND r.tenant_id = o.tenant_id
+             WHERE oi.status = 'SERVED' AND oi.served_at IS NOT NULL
+               AND o.tenant_id = $4
+               AND o.service_date = $2 AND o.shift = $3
+               AND ($1::int IS NULL OR oi.station_id = $1)
+               AND ($1::int IS NOT NULL OR oi.station_id IS NULL)
+             GROUP BY oi.order_id, oi.course_no, t.name, r.customer_name
+             ORDER BY MAX(oi.served_at) DESC
+             LIMIT 100`,
+            [stationId, service.service_date, service.shift, req.tenantId!]
+        );
+        res.json({ station_id: stationId, ...service, courses: rows.rows });
+    } catch (err: any) {
+        console.error('GET /kds/served error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });

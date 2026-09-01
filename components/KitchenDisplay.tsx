@@ -6,13 +6,13 @@ import { socketClient } from '../services/socketClient';
 import { staffChatApiService } from '../services/staffChatApiService';
 import { channelThreadKey, staffMessagePreview, type StaffMessage } from '../services/staffChat';
 import {
-  getKdsQueue, setKdsItemStatus, getMenuCatalogue, getKdsRevisions, ackKdsRevision,
-  type KdsItem, type KdsCourseState, type MenuCatalogue, type OrderRevision,
+  getKdsQueue, getKdsServed, setKdsItemStatus, getMenuCatalogue, getKdsRevisions, ackKdsRevision,
+  type KdsItem, type KdsCourseState, type KdsOtherItem, type KdsServedCourse, type MenuCatalogue, type OrderRevision,
 } from '../services/ordersApiService';
 import { getKitchenServiceSummary, type KitchenServiceSummary } from '../services/apiService';
-import { getRomeDatePart } from '../utils/reservationTime';
+import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 import { chime } from '../utils/chime';
-import { ModalShell, EmptyState, StatusPill, dsButton } from './ds';
+import { ModalShell, EmptyState, SegmentedControl, StatusPill, dsButton } from './ds';
 
 // ---------------------------------------------------------------------------
 // Monitor di partita — una istanza per postazione (Antipasti, Primi, Griglia).
@@ -70,6 +70,8 @@ interface Column {
   items: KdsItem[];
   firedAt: string | null;
   waitingOthers: boolean;
+  /** Le righe delle altre partite sulla stessa uscita (sola lettura). */
+  others: KdsOtherItem[];
 }
 
 interface KitchenDisplayProps {
@@ -94,6 +96,12 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   const [catalogue, setCatalogue] = useState<MenuCatalogue | null>(null);
   const [items, setItems] = useState<KdsItem[]>([]);
   const [courses, setCourses] = useState<KdsCourseState[]>([]);
+  const [others, setOthers] = useState<KdsOtherItem[]>([]);
+  // «In lavorazione» è il lavoro; «Consegnate» è consultazione («il 12 dice
+  // che manca il piatto: l'abbiamo mandato?») — sola lettura, mai un posto
+  // dove le card si annidano prima del servito.
+  const [view, setView] = useState<'lavoro' | 'consegnate'>('lavoro');
+  const [served, setServed] = useState<KdsServedCourse[]>([]);
   // Revisioni aperte: modifiche a comande già lanciate (storno, aggiunta,
   // riporta, trasferimento). La card mostra "modificata", il tocco apre il
   // dettaglio, Ok le spegne per tutti gli schermi.
@@ -217,6 +225,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
       ]);
       setItems(q.items);
       setCourses(q.courses);
+      setOthers(q.others ?? []);
       setRevisions(rev.revisions);
       setOffline(false);
     } catch {
@@ -317,6 +326,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           firedAt: it.fired_at,
           // L'uscita aspetta anche altre partite oltre alla mia?
           waitingOthers: !!st && st.waiting_station_ids.some(s => s !== stationId),
+          others: others.filter(o => o.order_id === it.order_id && o.course_no === it.course_no),
         });
       }
       map.get(key)!.items.push(it);
@@ -326,7 +336,35 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
       const tb = b.items[0]?.station_start_at ?? b.firedAt ?? '';
       return ta.localeCompare(tb);
     });
-  }, [items, courses, stationId]);
+  }, [items, courses, others, stationId]);
+
+  // La lista delle consegnate si carica solo quando la si guarda: è
+  // consultazione, non deve pesare sul monitor che lavora.
+  useEffect(() => {
+    if (view !== 'consegnate') return;
+    let cancelled = false;
+    const load = () => {
+      getKdsServed(stationId)
+        .then(r => { if (!cancelled) setServed(r.courses); })
+        .catch(() => {});
+    };
+    load();
+    const socket = socketClient.getSocket();
+    socket?.on('course:served', load);
+    socket?.on('course:unserved', load);
+    const t = setInterval(load, 60_000);
+    return () => {
+      cancelled = true;
+      socket?.off('course:served', load);
+      socket?.off('course:unserved', load);
+      clearInterval(t);
+    };
+  }, [view, stationId]);
+
+  const stationNames = useMemo(
+    () => new Map((catalogue?.stations ?? []).map(s => [s.id, s.name])),
+    [catalogue],
+  );
 
   // "In arrivo" = lanciata ma la mia partita non deve ancora iniziare.
   const isUpcoming = (col: Column): boolean =>
@@ -390,9 +428,19 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           <h1 className="min-w-0 truncate text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
             {stationName}
           </h1>
-          <span className="flex-shrink-0 text-[15px] text-[var(--ds-text-muted)] tabular-nums">
-            {todo.length} in lavorazione
-          </span>
+          {/* Il contatore è entrato nel tab: dice la stessa cosa di prima e
+              in più apre l'archivio del servito. */}
+          <div className="flex-shrink-0">
+            <SegmentedControl<'lavoro' | 'consegnate'>
+              value={view}
+              onChange={setView}
+              ariaLabel="In lavorazione o consegnate"
+              options={[
+                { value: 'lavoro', label: 'In lavorazione', badge: todo.length || undefined },
+                { value: 'consegnate', label: 'Consegnate' },
+              ]}
+            />
+          </div>
           {offline && (
             <StatusPill tone="pending">
               <WifiOff size={13} aria-hidden /> riconnessione…
@@ -470,8 +518,42 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
         </div>
       )}
 
-      {/* pt-1: l'anello di stato delle card sporge 2px fuori dal riquadro, e
-          senza un filo di padding l'overflow nascosto ne mangiava il lato alto. */}
+      {view === 'consegnate' ? (
+        // Consultazione, non lavoro: righe verticali, sola lettura, la più
+        // recente in alto — la domanda riguarda sempre gli ultimi minuti.
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-1">
+          {served.length === 0 ? (
+            <EmptyState icon={Check}>Nessuna uscita servita in questo servizio.</EmptyState>
+          ) : (
+            <div className="mx-auto max-w-[640px] space-y-2">
+              {served.map(c => (
+                <div
+                  key={`${c.order_id}:${c.course_no}`}
+                  className="rounded-[16px] bg-[var(--ds-surface)] px-4 py-3 shadow-[var(--ds-shadow-card)]"
+                >
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-[16px] font-semibold text-[var(--ds-text-primary)]">
+                      T{c.table_name ?? '—'}
+                    </span>
+                    <span className="text-[13px] text-[var(--ds-text-muted)]">
+                      {ORDINALS[c.course_no] ?? c.course_no} uscita
+                      {c.customer_name ? ` · ${c.customer_name}` : ''}
+                    </span>
+                    <span className="ml-auto text-[14px] tabular-nums text-[var(--ds-text-secondary)]">
+                      servita {getRomeTimePart(c.served_at)}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-[14px] text-[var(--ds-text-secondary)]">
+                    {c.items.map(i => `${i.qty}× ${i.name}`).join(' · ')}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+      /* pt-1: l'anello di stato delle card sporge 2px fuori dal riquadro, e
+          senza un filo di padding l'overflow nascosto ne mangiava il lato alto. */
       <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-4 pb-4 pt-1">
         {todo.length === 0 && upcoming.length === 0 ? (
           <EmptyState icon={Check}>Nessuna comanda in coda.</EmptyState>
@@ -483,6 +565,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                 col={col}
                 now={now}
                 stationId={stationId}
+                stationNames={stationNames}
                 onAdvance={advance}
                 revisions={revisionsByKey.get(col.key)}
                 onShowRevisions={() => setRevisionsModalKey(col.key)}
@@ -491,8 +574,9 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           </div>
         )}
       </div>
+      )}
 
-      {upcoming.length > 0 && (
+      {view === 'lavoro' && upcoming.length > 0 && (
         <div className="flex-shrink-0 px-4 pb-4">
           <div className="mb-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">In arrivo</div>
           <div className="flex gap-3 overflow-x-auto pb-1">
@@ -609,12 +693,27 @@ const CourseCard: React.FC<{
   now: number;
   stationId: number | null;
   onAdvance: (item: KdsItem, status: 'PREPARING' | 'READY') => void;
+  stationNames?: Map<number, string>;
   revisions?: OrderRevision[];
   onShowRevisions?: () => void;
-}> = ({ col, now, onAdvance, revisions, onShowRevisions }) => {
+}> = ({ col, now, onAdvance, stationNames, revisions, onShowRevisions }) => {
   const start = col.items[0]?.station_start_at ?? col.firedAt;
   const elapsed = minutesSince(start, now);
   const allReady = col.items.every(i => i.status === 'READY');
+
+  // Le altre partite della stessa uscita, compresse in un pallino a testa:
+  // il pacing («la griglia è indietro, aspetto a calare») si legge sempre,
+  // il dettaglio si apre col tocco solo quando serve. Mai righe altrui in
+  // mezzo alle mie: quelle si toccano per segnare pronto, queste no.
+  const [othersOpen, setOthersOpen] = useState(false);
+  const otherGroups = useMemo(() => {
+    const map = new Map<number | null, KdsOtherItem[]>();
+    for (const o of col.others) {
+      if (!map.has(o.station_id)) map.set(o.station_id, []);
+      map.get(o.station_id)!.push(o);
+    }
+    return [...map.entries()];
+  }, [col.others]);
 
   // Ho finito ma l'uscita no: da qui in poi il piatto peggiora sotto la
   // lampada, e il ritardo è di qualcun altro. Il bordo lampeggia per dirlo.
@@ -732,6 +831,54 @@ const CourseCard: React.FC<{
           );
         })}
       </div>
+
+      {otherGroups.length > 0 && (
+        <div className="flex-shrink-0 border-t border-[var(--ds-border)] px-2">
+          <button
+            type="button"
+            onClick={() => setOthersOpen(o => !o)}
+            aria-expanded={othersOpen}
+            className="flex min-h-[44px] w-full flex-wrap items-center gap-x-3 gap-y-1 px-1 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            {otherGroups.map(([sid, list]) => {
+              const ready = list.every(o => o.status === 'READY');
+              const working = list.some(o => o.status === 'PREPARING');
+              return (
+                <span key={sid ?? 'x'} className="inline-flex items-center gap-1.5 text-[13px] text-[var(--ds-text-secondary)]">
+                  <span
+                    aria-hidden
+                    className={`h-2 w-2 flex-shrink-0 rounded-full ${
+                      ready ? 'bg-[var(--ds-seated-solid)]'
+                      : working ? 'bg-[var(--ds-pending-solid)]'
+                      : 'bg-[var(--ds-border-strong)]'
+                    }`}
+                  />
+                  {stationNames?.get(sid ?? -1) ?? 'altra partita'}
+                  <span className="tabular-nums text-[var(--ds-text-muted)]">{list.reduce((n, o) => n + o.qty, 0)}</span>
+                </span>
+              );
+            })}
+            <ChevronRight
+              size={14}
+              className={`ml-auto flex-shrink-0 text-[var(--ds-text-muted)] transition-transform ${othersOpen ? 'rotate-90' : ''}`}
+              aria-hidden
+            />
+          </button>
+          {othersOpen && (
+            <div className="space-y-0.5 pb-2 pl-1">
+              {col.others.map(o => (
+                <div key={o.id} className="flex items-baseline gap-2 text-[13px] text-[var(--ds-text-muted)]">
+                  <span className="tabular-nums">{o.qty}×</span>
+                  <span className="min-w-0 truncate">{o.name_snapshot}</span>
+                  <span className="ml-auto flex-shrink-0">
+                    {o.status === 'READY' ? 'pronto' : o.status === 'PREPARING' ? 'in lavorazione' : 'in coda'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="p-2">
         {allReady ? (
