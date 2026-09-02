@@ -40,12 +40,17 @@ interface DishBrowserProps {
   /** false quando la ricerca vive altrove (la lente nella testata del tavolo):
    *  qui non compare la pillola e le categorie salgono di una riga. */
   showSearch?: boolean;
+  /** Preferenza personale dell'operatore, solo per il layout 'list':
+   *  'comfortable' è la scheda per piatto (default), 'compact' una scheda
+   *  unica a righe da 56px — 6–7 piatti in vista invece di 3, bersagli
+   *  comunque a 44px. Catalogo chiuso: due varianti, non un tema libero. */
+  density?: 'comfortable' | 'compact';
 }
 
 export const DishBrowser: React.FC<DishBrowserProps> = ({
   dishes, categories, category, onCategory, query, onQuery,
   qtyInCourse, markedCategories, hasVariants, onAdd, onRemove, onLongPress, layout,
-  showSearch = true,
+  showSearch = true, density = 'comfortable',
 }) => {
   const q = query.trim().toLowerCase();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -80,6 +85,54 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
     onClick: () => { if (lpFired.current) { lpFired.current = false; return; } onAdd(d); },
   });
+
+  // I controlli di riga sono gli stessi nelle due densità della lista: la
+  // preferenza cambia quanto si vede, mai come si tocca.
+  const rowControls = (d: Dish) => {
+    const qty = qtyInCourse.get(d.id) ?? 0;
+    // Con le varianti non si toglie da qui: quale delle due «al sangue»
+    // andrebbe via non lo sa nessuno. Si toglie dalla comanda, dove le righe
+    // sono distinte.
+    const canRemove = qty > 0 && !hasVariants(d.id);
+    return (
+      <div className="flex flex-shrink-0 items-center gap-2">
+        {canRemove && (
+          // L'ultimo pezzo si toglie con il cestino, non con il meno: «meno
+          // uno» da uno è togliere il piatto, e dirlo con l'icona giusta
+          // evita il tocco di troppo.
+          <button
+            type="button"
+            onClick={() => onRemove(d)}
+            aria-label={qty === 1 ? `Togli ${d.name}` : `Uno in meno di ${d.name}`}
+            className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+              qty === 1
+                ? 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]'
+                : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
+            }`}
+          >
+            {qty === 1 ? <Trash2 size={16} /> : <Minus size={16} />}
+          </button>
+        )}
+        {qty > 0 && (
+          <span className="min-w-[16px] text-center text-[17px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+            {qty}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={() => onAdd(d)}
+          aria-label={`Aggiungi ${d.name}`}
+          className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+            qty > 0
+              ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]'
+              : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
+          }`}
+        >
+          <Plus size={16} />
+        </button>
+      </div>
+    );
+  };
 
   // Cercando si cerca in tutto il menu: se il piatto è fra i primi e la pista
   // è ferma sugli antipasti, una ricerca che non lo trova è una ricerca rotta.
@@ -129,10 +182,11 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
   );
 
   return (
-    // Sul palmare i tre blocchi — ricerca, categorie, piatti — respirano di
-    // più: sono tre decisioni diverse in fila, e a 12px si leggono come una
-    // fascia sola di controlli.
-    <div className={`flex min-h-0 flex-1 flex-col ${layout === 'list' ? 'gap-4' : 'gap-3'}`}>
+    // Sul palmare i blocchi respirano di più: sono decisioni diverse in fila,
+    // e a 12px si leggono come una fascia sola di controlli. In vista
+    // compatta il respiro lo cede ai piatti — lì è la sagoma della scheda
+    // unica a separare le zone.
+    <div className={`flex min-h-0 flex-1 flex-col ${layout === 'list' && density !== 'compact' ? 'gap-4' : 'gap-3'}`}>
       {layout === 'list' ? (
         showSearch && (
           <>
@@ -203,14 +257,41 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
               );
             })}
           </div>
+        ) : density === 'compact' && visible.length > 0 ? (
+          // Vista compatta, a scelta dell'operatore (menu ⋮): una scheda sola
+          // con righe divise da hairline invece di una scheda per piatto —
+          // 6–7 piatti in vista invece di 3, controlli identici, bersagli
+          // sempre a 44px. Niente ring sulla riga piena: in una lista divisa
+          // lo dicono già il più scuro e la quantità.
+          <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+            {visible.map((d, i) => (
+              <div
+                key={d.id}
+                className={`flex min-h-[56px] items-center gap-2 py-1 pl-4 pr-2 ${
+                  i > 0 ? 'border-t border-[var(--ds-border)]' : ''
+                }`}
+              >
+                <button
+                  type="button"
+                  {...press(d)}
+                  className="min-w-0 flex-1 select-none self-stretch py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)]"
+                >
+                  <div className="truncate text-[15px] font-semibold leading-snug text-[var(--ds-text-primary)]">
+                    {d.name}
+                  </div>
+                  <div className="flex items-center gap-1 text-[13px] leading-snug tabular-nums text-[var(--ds-text-muted)]">
+                    {euro(Math.round(Number(d.price) * 100))}
+                    {hasVariants(d.id) && <ChevronDown size={14} aria-hidden />}
+                  </div>
+                </button>
+                {rowControls(d)}
+              </div>
+            ))}
+          </div>
         ) : (
           <div className="flex flex-col gap-2">
             {visible.length === 0 ? empty : visible.map(d => {
               const qty = qtyInCourse.get(d.id) ?? 0;
-              // Con le varianti non si toglie da qui: quale delle due «al
-              // sangue» andrebbe via non lo sa nessuno. Si toglie dalla
-              // comanda, dove le righe sono distinte.
-              const canRemove = qty > 0 && !hasVariants(d.id);
               return (
                 <div
                   key={d.id}
@@ -231,43 +312,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                       {hasVariants(d.id) && <ChevronDown size={15} aria-hidden />}
                     </div>
                   </button>
-
-                  <div className="flex flex-shrink-0 items-center gap-2">
-                    {canRemove && (
-                      // L'ultimo pezzo si toglie con il cestino, non con il
-                      // meno: «meno uno» da uno è togliere il piatto, e dirlo
-                      // con l'icona giusta evita il tocco di troppo.
-                      <button
-                        type="button"
-                        onClick={() => onRemove(d)}
-                        aria-label={qty === 1 ? `Togli ${d.name}` : `Uno in meno di ${d.name}`}
-                        className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
-                          qty === 1
-                            ? 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]'
-                            : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
-                        }`}
-                      >
-                        {qty === 1 ? <Trash2 size={16} /> : <Minus size={16} />}
-                      </button>
-                    )}
-                    {qty > 0 && (
-                      <span className="min-w-[16px] text-center text-[17px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
-                        {qty}
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => onAdd(d)}
-                      aria-label={`Aggiungi ${d.name}`}
-                      className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
-                        qty > 0
-                          ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]'
-                          : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
-                      }`}
-                    >
-                      <Plus size={16} />
-                    </button>
-                  </div>
+                  {rowControls(d)}
                 </div>
               );
             })}

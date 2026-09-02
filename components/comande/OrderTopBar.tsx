@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ArrowLeft, ArrowRightLeft, MoreVertical, Minus, Percent, Plus, Receipt, Search, Trash2, Users,
+  ArrowLeft, ArrowRightLeft, Check, MoreVertical, Minus, Percent, Plus, Receipt, Rows3, Search, Trash2, Users,
 } from 'lucide-react';
 import { Sheet, StatusPill } from '../ds';
 import { euro, rowCountLabel } from './orderView';
@@ -27,6 +27,11 @@ interface OrderTopBarProps {
   /** Apre la ricerca piatti sul velo. Solo palmare: su schermo largo la
    *  ricerca sta inline nel menu, un secondo punto d'ingresso confonderebbe. */
   onSearch?: () => void;
+  /** Vista compatta della lista piatti — preferenza personale dell'operatore,
+   *  quindi vive nel menu ⋮ del tavolo, dove nasce il bisogno, non nelle
+   *  Impostazioni. Solo palmare: la griglia larga non ha densità. */
+  densityCompact?: boolean;
+  onToggleDensity?: () => void;
   onBack: () => void;
   onCovers: (delta: number) => void;
   onBill: () => void;
@@ -41,7 +46,8 @@ const stepper =
 export const OrderTopBar: React.FC<OrderTopBarProps> = ({
   tableName, guestName, totalCents, rows, covers, sentCourses, busy,
   billDisabled, clearDisabled, wide,
-  onSearch, onBack, onCovers, onBill, onDiscount, onTransfer, onClearDrafts,
+  onSearch, densityCompact, onToggleDensity,
+  onBack, onCovers, onBill, onDiscount, onTransfer, onClearDrafts,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -65,9 +71,22 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
     };
   }, [menuOpen, wide]);
 
-  const actions = [
+  interface MenuAction {
+    icon: typeof Percent;
+    label: string;
+    onClick: () => void;
+    disabled: boolean;
+    critical: boolean;
+    /** Presente solo sugli interruttori: spunta a destra quando attivo. */
+    active?: boolean;
+  }
+  const actions: MenuAction[] = [
     { icon: Percent, label: 'Sconto', onClick: onDiscount, disabled: false, critical: false },
     { icon: ArrowRightLeft, label: 'Sposta tavolo', onClick: onTransfer, disabled: false, critical: false },
+    ...(onToggleDensity ? [{
+      icon: Rows3, label: 'Vista compatta', onClick: onToggleDensity,
+      disabled: false, critical: false, active: densityCompact === true,
+    }] : []),
     { icon: Trash2, label: 'Svuota le righe non inviate', onClick: onClearDrafts, disabled: clearDisabled, critical: true },
   ];
 
@@ -145,7 +164,8 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
         <button
           key={a.label}
           type="button"
-          role="menuitem"
+          role={a.active !== undefined ? 'menuitemcheckbox' : 'menuitem'}
+          aria-checked={a.active}
           disabled={a.disabled}
           onClick={() => { setMenuOpen(false); a.onClick(); }}
           className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-[15px] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 ${
@@ -157,6 +177,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
             aria-hidden
           />
           <span className="min-w-0 flex-1 truncate">{a.label}</span>
+          {a.active && <Check className="h-4 w-4 flex-shrink-0" aria-hidden />}
         </button>
       ))}
     </div>
@@ -176,6 +197,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
           <button
             key={a.label}
             type="button"
+            aria-pressed={a.active}
             disabled={a.disabled}
             onClick={() => { setMenuOpen(false); a.onClick(); }}
             className={`flex min-h-[56px] w-full items-center gap-3 px-4 text-left text-[16px] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 ${
@@ -187,6 +209,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
               aria-hidden
             />
             <span className="min-w-0 flex-1 truncate">{a.label}</span>
+            {a.active && <Check className="h-5 w-5 flex-shrink-0" aria-hidden />}
           </button>
         ))}
       </div>

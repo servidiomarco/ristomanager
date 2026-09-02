@@ -59,6 +59,10 @@ import {
 // albero, non di stile, quindi la sceglie useMediaQuery (regola 13).
 // ---------------------------------------------------------------------------
 
+// Stessa famiglia di chiavi del tema (ristocrm_theme): preferenza personale,
+// per dispositivo.
+const DENSITY_KEY = 'ristocrm_orderpad_density';
+
 interface OrderPadProps {
   /** Tavolo da aprire subito (arrivando da Cassa · «Apri in Comande»). */
   initialTableId?: number | null;
@@ -104,6 +108,18 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   // La ricerca piatti del palmare: si apre dalla lente nella testata del
   // tavolo e vive sul velo, quindi lo stato sta qui e non nel browser.
   const [dishSearchOpen, setDishSearchOpen] = useState(false);
+  // Densità della lista piatti: preferenza personale dell'operatore, salvata
+  // per dispositivo come il tema (ristocrm_theme). Quando arriverà una
+  // seconda preferenza personale, questo migra in prefs utente sul server.
+  const [density, setDensity] = useState<'comfortable' | 'compact'>(() => {
+    try { return localStorage.getItem(DENSITY_KEY) === 'compact' ? 'compact' : 'comfortable'; }
+    catch { return 'comfortable'; }
+  });
+  const toggleDensity = () => setDensity(prev => {
+    const next = prev === 'compact' ? 'comfortable' : 'compact';
+    try { localStorage.setItem(DENSITY_KEY, next); } catch { /* la scelta vale comunque per la sessione */ }
+    return next;
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
@@ -1065,6 +1081,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       layout={isWide ? 'grid' : 'list'}
       // Sul palmare la ricerca sta nella testata del tavolo (lente), non qui.
       showSearch={false}
+      density={density}
     />
   );
 
@@ -1081,6 +1098,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       clearDisabled={cart.length === 0}
       wide={isWide}
       onSearch={isWide ? undefined : () => setDishSearchOpen(true)}
+      densityCompact={density === 'compact'}
+      onToggleDensity={isWide ? undefined : toggleDensity}
       onBack={leaveTable}
       onCovers={changeCovers}
       onBill={() => setClosing(true)}
@@ -1234,9 +1253,12 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     <div className="flex h-full min-h-0 flex-col bg-[var(--ds-canvas)] px-4 pt-[max(0.75rem,env(safe-area-inset-top))]">
       <div className="flex-shrink-0">{topBar}</div>
 
-      <div className="mt-4 flex-shrink-0">
-        <SectionHeader>Uscita</SectionHeader>
-        <div className="mt-1">
+      {/* In vista compatta l'operatore ha chiesto piatti, non didascalie:
+          l'eyebrow «Uscita» sparisce e i margini si stringono — le pastiglie
+          ordinali (1ª, 2ª…) si spiegano da sole. */}
+      <div className={`flex-shrink-0 ${density === 'compact' ? 'mt-2' : 'mt-4'}`}>
+        {density !== 'compact' && <SectionHeader>Uscita</SectionHeader>}
+        <div className={density === 'compact' ? '' : 'mt-1'}>
           <CourseChips order={order} cart={cart} course={course} onCourse={setCourse} />
         </div>
       </div>
@@ -1248,7 +1270,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         </div>
       )}
 
-      <div className="mt-4 flex min-h-0 flex-1 flex-col">{browser}</div>
+      <div className={`flex min-h-0 flex-1 flex-col ${density === 'compact' ? 'mt-3' : 'mt-4'}`}>{browser}</div>
 
       {/* Un elemento fisso possiede lo spazio sotto di sé: il padding sta qui
           dentro, non sulla zona che scorre, altrimenti quella dipinge sopra
