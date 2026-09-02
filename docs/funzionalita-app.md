@@ -257,7 +257,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 - Coda comande **per partita** (es. Pizzeria, Primi…), con avanzamento riga Inviato → In preparazione → Pronto, note del piatto, colonna "In arrivo", filtro turno. Ogni monitor si sottoscrive alla propria partita.
 - **Modifiche dopo il lancio in evidenza**: storno di una riga inviata, piatti aggiunti a un'uscita già lanciata, "riporta" e trasferimento di tavolo accendono sulla card la pill rossa **"modificata"** — il tocco mostra cosa è cambiato, chi e quando (con la motivazione dello storno); **Ok** spegne l'avviso su tutti gli schermi. Suona come una comanda nuova.
 - **Le altre partite della stessa uscita** in piede di card: un pallino colorato per partita (in coda / in lavorazione / pronta) con nome e numero di piatti — la pasta sa quanto manca alla griglia prima di calare. Un tocco espande le loro righe in sola lettura; mai mischiate con le proprie, che si toccano per segnare pronto.
-- **Consegnate**: accanto a "In lavorazione" c'è l'archivio del servito, **raggruppato per comanda** — una card per tavolo con le sue uscite in ordine (piatti della propria partita e orario di ciascuna) — la risposta a "il 12 dice che manca il piatto: l'abbiamo mandato?". Sola consultazione: la card lascia il monitor solo al servito, mai al pronto; segnarla servita da un monitor la chiude su tutti.
+- **Consegnate**: accanto a "In lavorazione" c'è l'archivio del servito, **raggruppato per comanda** — una card per tavolo con le sue uscite in ordine e la comanda **intera**: i piatti della propria partita in chiaro, quelli delle altre attenuati col nome della partita — la risposta a "il 12 dice che manca il piatto: l'abbiamo mandato?". Sola consultazione: la card lascia il monitor solo al servito, mai al pronto; segnarla servita da un monitor la chiude su tutti.
 - I messaggi del canale **Cucina** della chat staff compaiono come **striscia sul monitor** (con la campana delle comande): "finito il branzino" arriva senza aprire la chat.
 
 **Passe (expediter)**
@@ -542,6 +542,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-02 | Comande, Cucina e Passe | Le Consegnate mostrano la comanda intera: piatti della propria partita in chiaro, quelli delle altre attenuati col nome della partita. |
 | 2026-09-02 | Comande, Cucina e Passe | I piatti aggiunti a un'uscita già lanciata partono subito all'invio, in qualunque modalità di lancio; sulla comanda le righe rimaste in coda dentro un'uscita partita sono marcate «in coda» con un Chiama dedicato. |
 | 2026-09-02 | Menu & Banchetti | Menu multipli: Alla carta, Banchetti e menu stagionali (Ferragosto, Pasqua…), con appartenenza dei piatti a spunte nella scheda; comande, cassa e menu digitale seguono Alla carta, la composizione banchetti pesca dal menu Banchetti o da uno stagionale. |
 | 2026-09-02 | Menu & Banchetti | Banchetti in voce di sidebar propria, divisi in Preventivi e Confermati: un evento nasce preventivo, si conferma con un'azione e la registrazione di un acconto propone la conferma; i KPI contano solo i confermati. |

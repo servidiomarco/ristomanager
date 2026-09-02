@@ -381,7 +381,14 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         const row = served.body.courses.find((c: any) => c.order_id === orderId);
         expect(row).toBeTruthy();
         expect(row.served_at).toBeTruthy();
-        expect(row.items).toEqual([{ name: 'Tagliata Collaudo', qty: 1 }]);
+        // La comanda servita si legge INTERA: le righe delle altre partite
+        // arrivano anche loro, con la partita addosso — il monitor le
+        // attenua invece di nasconderle.
+        expect(row.items).toEqual(expect.arrayContaining([
+            { name: 'Tagliata Collaudo', qty: 1, station_id: griglia.body.id },
+            { name: 'Patate Ciclo', qty: 2, station_id: fritti.body.id },
+        ]));
+        expect(row.items).toHaveLength(2);
     });
 
     it("le righe aggiunte a un'uscita già lanciata partono subito, in qualunque fire mode", async () => {

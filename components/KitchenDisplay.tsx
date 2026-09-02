@@ -621,19 +621,41 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                         </span>
                       </div>
                       <div className="mt-2 space-y-1.5">
-                        {list.map(c => (
-                          <div key={c.course_no} className="flex items-baseline gap-2 text-[14px]">
-                            <span className="flex-shrink-0 font-medium text-[var(--ds-text-primary)]">
-                              {ORDINALS[c.course_no] ?? c.course_no}
-                            </span>
-                            <span className="min-w-0 flex-1 text-[var(--ds-text-secondary)]">
-                              {c.items.map(i => `${i.qty}× ${i.name}`).join(' · ')}
-                            </span>
-                            <span className="flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">
-                              {getRomeTimePart(c.served_at)}
-                            </span>
-                          </div>
-                        ))}
+                        {list.map(c => {
+                          // Le MIE righe in chiaro, quelle delle altre
+                          // partite sotto, attenuate e col nome della
+                          // partita: la comanda servita si legge intera,
+                          // ma si vede subito cosa era di questa sezione —
+                          // stesso linguaggio del piede «altre partite».
+                          const mine = c.items.filter(i => stationId == null || i.station_id === stationId);
+                          const othersByStation = new Map<number | null, typeof c.items>();
+                          for (const i of c.items) {
+                            if (stationId != null && i.station_id !== stationId) {
+                              if (!othersByStation.has(i.station_id)) othersByStation.set(i.station_id, []);
+                              othersByStation.get(i.station_id)!.push(i);
+                            }
+                          }
+                          return (
+                            <div key={c.course_no} className="text-[14px]">
+                              <div className="flex items-baseline gap-2">
+                                <span className="flex-shrink-0 font-medium text-[var(--ds-text-primary)]">
+                                  {ORDINALS[c.course_no] ?? c.course_no}
+                                </span>
+                                <span className="min-w-0 flex-1 text-[var(--ds-text-secondary)]">
+                                  {mine.map(i => `${i.qty}× ${i.name}`).join(' · ')}
+                                </span>
+                                <span className="flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">
+                                  {getRomeTimePart(c.served_at)}
+                                </span>
+                              </div>
+                              {[...othersByStation.entries()].map(([sid, its]) => (
+                                <div key={sid ?? 'x'} className="ml-6 text-[13px] text-[var(--ds-text-muted)]">
+                                  {stationNames.get(sid ?? -1) ?? 'altra partita'} · {its.map(i => `${i.qty}× ${i.name}`).join(' · ')}
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   );

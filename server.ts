@@ -25016,19 +25016,30 @@ app.get('/kds/served', authenticate, requirePermission('orders:kds'), async (req
             return res.status(400).json({ error: 'station_id non valido' });
         }
         const service = serviceFromQuery(req.query);
+        // Le uscite dove QUESTA partita ha lavorato, ma con TUTTE le righe
+        // dell'uscita (station_id su ciascuna): il monitor mostra le proprie
+        // in chiaro e quelle delle altre partite attenuate — la comanda
+        // servita si legge intera, come sul ticket.
         const rows = await queryWithRetry(
-            `SELECT oi.order_id, oi.course_no, t.name AS table_name, r.customer_name,
+            `WITH mine AS (
+                SELECT DISTINCT oi.order_id, oi.course_no
+                FROM order_items oi
+                JOIN orders o ON o.id = oi.order_id
+                WHERE oi.status = 'SERVED' AND oi.served_at IS NOT NULL
+                  AND o.tenant_id = $4
+                  AND o.service_date = $2 AND o.shift = $3
+                  AND ($1::int IS NULL OR oi.station_id = $1)
+                  AND ($1::int IS NOT NULL OR oi.station_id IS NULL)
+             )
+             SELECT oi.order_id, oi.course_no, t.name AS table_name, r.customer_name,
                     MAX(oi.served_at) AS served_at,
-                    jsonb_agg(jsonb_build_object('name', oi.name_snapshot, 'qty', oi.qty) ORDER BY oi.id) AS items
+                    jsonb_agg(jsonb_build_object('name', oi.name_snapshot, 'qty', oi.qty, 'station_id', oi.station_id) ORDER BY oi.id) AS items
              FROM order_items oi
+             JOIN mine m ON m.order_id = oi.order_id AND m.course_no = oi.course_no
              JOIN orders o ON o.id = oi.order_id
              LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
              LEFT JOIN reservations r ON r.id = o.reservation_id AND r.tenant_id = o.tenant_id
              WHERE oi.status = 'SERVED' AND oi.served_at IS NOT NULL
-               AND o.tenant_id = $4
-               AND o.service_date = $2 AND o.shift = $3
-               AND ($1::int IS NULL OR oi.station_id = $1)
-               AND ($1::int IS NOT NULL OR oi.station_id IS NULL)
              GROUP BY oi.order_id, oi.course_no, t.name, r.customer_name
              ORDER BY MAX(oi.served_at) DESC
              LIMIT 100`,
