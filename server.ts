@@ -3749,7 +3749,9 @@ const MENU_CAT_PREFS_KEY = 'menu_category_prefs';
 // menu_ids: i menu "della categoria" — solo il DEFAULT per i piatti nuovi di
 // quella categoria. La verità sull'appartenenza resta sui piatti (dish_menus):
 // la spunta in modale applica in blocco e ogni piatto resta libero dopo.
-type MenuCategoryPref = { enabled: boolean; sort: number; menu_ids?: number[] };
+// manual: categoria creata a mano dalla modale — esiste anche senza piatti,
+// e la pulizia dei fantasmi nel PUT non deve toccarla.
+type MenuCategoryPref = { enabled: boolean; sort: number; menu_ids?: number[]; manual?: boolean };
 
 async function getMenuCategoryPrefs(tenantId: number): Promise<Record<string, MenuCategoryPref>> {
     const rs = await queryWithRetry(
@@ -3761,6 +3763,16 @@ async function getMenuCategoryPrefs(tenantId: number): Promise<Record<string, Me
     } catch {
         return {};
     }
+}
+
+async function saveMenuCategoryPrefs(tenantId: number, prefs: Record<string, MenuCategoryPref>): Promise<void> {
+    await queryWithRetry(
+        `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+         VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+         ON CONFLICT (tenant_id, key) DO UPDATE
+           SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+        [tenantId, MENU_CAT_PREFS_KEY, JSON.stringify(prefs)]
+    );
 }
 
 // Comparatore condiviso fra CRM, palmare e menu pubblico: prima le categorie
@@ -3789,6 +3801,11 @@ app.get('/menu/categories', authenticate, async (req, res) => {
             getMenuCategoryPrefs(req.tenantId!),
         ]);
         const byName = new Map<string, number>(rows.rows.map((r: any) => [String(r.category), r.dishes]));
+        // Le categorie create a mano esistono anche senza piatti: si
+        // aggiungono dal blob, con zero piatti.
+        for (const [name, p] of Object.entries(prefs)) {
+            if (p.manual && !byName.has(name)) byName.set(name, 0);
+        }
         const ordered = sortCategoriesByPrefs([...byName.keys()], prefs);
         res.json({
             categories: ordered.map(name => ({
@@ -3824,20 +3841,135 @@ app.put('/menu/categories', authenticate, requirePermission('menu:full'), async 
             const name = c.name.trim();
             prefs[name] = { enabled: c.enabled !== false, sort: i };
             if (Array.isArray(existing[name]?.menu_ids)) prefs[name].menu_ids = existing[name].menu_ids;
+            if (existing[name]?.manual) prefs[name].manual = true;
         });
-        await queryWithRetry(
-            `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
-             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
-             ON CONFLICT (tenant_id, key) DO UPDATE
-               SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
-            [req.tenantId!, MENU_CAT_PREFS_KEY, JSON.stringify(prefs)]
-        );
+        // Le categorie manuali sopravvivono anche a un client che non le
+        // manda (versione vecchia dell'app): vanno eliminate col cestino,
+        // non perse per sbaglio in un riordino.
+        for (const [name, p] of Object.entries(existing)) {
+            if (p.manual && !prefs[name]) prefs[name] = p;
+        }
+        await saveMenuCategoryPrefs(req.tenantId!, prefs);
         // Stesso evento del sync cassa: i client ricaricano l'anagrafica
         // intera invece di rincorrere il dettaglio di cosa è cambiato.
         try { socketService?.broadcastToAll(req.tenantId!, 'dish:synced', { categorie: input.length }); } catch (_) {}
         res.json({ ok: true });
     } catch (err: any) {
         console.error('PUT /menu/categories error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Una categoria esiste in due modi: sui piatti (stringa libera) o creata a
+// mano nel blob prefs (manual, anche vuota). Il controllo di esistenza per
+// il CRUD guarda entrambi i posti.
+const menuCategoryExists = async (tenantId: number, name: string): Promise<boolean> => {
+    const onDishes = await queryWithRetry(
+        'SELECT 1 FROM dishes WHERE tenant_id = $1 AND category = $2 LIMIT 1',
+        [tenantId, name]
+    );
+    if (onDishes.rows.length > 0) return true;
+    const prefs = await getMenuCategoryPrefs(tenantId);
+    return prefs[name] != null;
+};
+
+// Nuova categoria, anche vuota: vive nel blob finché non ha piatti.
+app.post('/menu/categories', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const name = String(req.body?.name ?? '').trim();
+        if (!name || name.length > 60) return res.status(400).json({ error: 'name deve essere 1..60 caratteri' });
+        if (await menuCategoryExists(req.tenantId!, name)) {
+            return res.status(409).json({ error: 'Categoria già esistente' });
+        }
+        const prefs = await getMenuCategoryPrefs(req.tenantId!);
+        // sort sentinella = in coda, come una categoria mai ordinata.
+        prefs[name] = { enabled: true, sort: Number.MAX_SAFE_INTEGER, manual: true };
+        await saveMenuCategoryPrefs(req.tenantId!, prefs);
+        try { socketService?.broadcastToAll(req.tenantId!, 'dish:synced', { categoria_creata: name }); } catch (_) {}
+        res.status(201).json({ ok: true, name });
+    } catch (err: any) {
+        console.error('POST /menu/categories error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Rinomina: sposta i piatti sul nuovo nome e migra le preferenze. La
+// traduzione del vecchio nome si scarta (era la traduzione di QUEL nome):
+// il prossimo giro di traduzioni rifà la voce. Attenzione lato client: i
+// piatti sincronizzati dalla cassa torneranno alla categoria della cassa al
+// prossimo import — il server rinomina comunque, l'avviso sta nella modale.
+app.put('/menu/categories/rename', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const from = String(req.body?.from ?? '').trim();
+        const to = String(req.body?.to ?? '').trim();
+        if (!from || !to || to.length > 60) return res.status(400).json({ error: 'servono from e to (1..60 caratteri)' });
+        if (from === to) return res.status(400).json({ error: 'Il nome è già questo' });
+        if (!(await menuCategoryExists(req.tenantId!, from))) {
+            return res.status(404).json({ error: 'Categoria non trovata' });
+        }
+        if (await menuCategoryExists(req.tenantId!, to)) {
+            return res.status(409).json({ error: 'Esiste già una categoria con questo nome' });
+        }
+        const moved = await queryWithRetry(
+            'UPDATE dishes SET category = $1 WHERE tenant_id = $2 AND category = $3',
+            [to, req.tenantId!, from]
+        );
+        const prefs = await getMenuCategoryPrefs(req.tenantId!);
+        if (prefs[from]) {
+            prefs[to] = prefs[from];
+            delete prefs[from];
+            await saveMenuCategoryPrefs(req.tenantId!, prefs);
+        }
+        try {
+            const trad = await getMenuCategoryTranslations(req.tenantId!);
+            if (trad[from]) {
+                delete trad[from];
+                await saveMenuCategoryTranslations(req.tenantId!, trad);
+            }
+        } catch (_) { /* best effort: al peggio resta una voce orfana nel blob */ }
+        try { socketService?.broadcastToAll(req.tenantId!, 'dish:synced', { categoria_rinominata: to, piatti: moved.rowCount ?? 0 }); } catch (_) {}
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.DISH, 0, `${from} → ${to}`,
+                { category_rename: true, piatti: moved.rowCount ?? 0 }
+            ).catch(() => {});
+        }
+        res.json({ ok: true, piatti: moved.rowCount ?? 0 });
+    } catch (err: any) {
+        console.error('PUT /menu/categories/rename error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Si elimina solo una categoria vuota: una con piatti lascerebbe righe
+// orfane o cancellerebbe anagrafica — prima si spostano i piatti.
+app.delete('/menu/categories', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const name = String(req.query?.name ?? '').trim();
+        if (!name) return res.status(400).json({ error: 'serve name' });
+        const cnt = await queryWithRetry(
+            'SELECT count(*)::int AS n FROM dishes WHERE tenant_id = $1 AND category = $2',
+            [req.tenantId!, name]
+        );
+        if ((cnt.rows[0]?.n ?? 0) > 0) {
+            return res.status(409).json({ error: 'La categoria ha ancora piatti: spostali prima di eliminarla' });
+        }
+        const prefs = await getMenuCategoryPrefs(req.tenantId!);
+        if (!prefs[name]) return res.status(404).json({ error: 'Categoria non trovata' });
+        delete prefs[name];
+        await saveMenuCategoryPrefs(req.tenantId!, prefs);
+        try {
+            const trad = await getMenuCategoryTranslations(req.tenantId!);
+            if (trad[name]) {
+                delete trad[name];
+                await saveMenuCategoryTranslations(req.tenantId!, trad);
+            }
+        } catch (_) {}
+        try { socketService?.broadcastToAll(req.tenantId!, 'dish:synced', { categoria_eliminata: name }); } catch (_) {}
+        res.status(204).send();
+    } catch (err: any) {
+        console.error('DELETE /menu/categories error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
