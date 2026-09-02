@@ -224,6 +224,8 @@ export interface KdsItem {
   table_id: number | null;
   table_name: string | null;
   customer_name: string | null;
+  /** Chi ha preso la comanda: la card del monitor lo mostra. */
+  opened_by_name: string | null;
   reservation_notes: string | null;
   customer_dietary_notes: string | null;
 }

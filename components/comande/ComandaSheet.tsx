@@ -37,6 +37,8 @@ interface ComandaSheetProps {
   onVoid: (item: OrderItem) => void;
   onRecall: (courseNo: number) => void;
   onFire?: (courseNo: number) => void;
+  /** «di Luca» / «dalla cassa» quando la comanda l'ha aperta qualcun altro. */
+  openedBy?: string | null;
   onSend: () => void;
   onSendAll: () => void;
   onRepeat: (line: RepeatLine, qty: number) => void;
@@ -45,7 +47,7 @@ interface ComandaSheetProps {
 
 export const ComandaSheet: React.FC<ComandaSheetProps> = ({
   open, onClose, order, cart, dishes, categories, course, onCourse, busy,
-  onBump, onDrop, onVoid, onRecall, onFire, onSend, onSendAll, onRepeat, onRepeatAll,
+  onBump, onDrop, onVoid, onRecall, onFire, openedBy, onSend, onSendAll, onRepeat, onRepeatAll,
 }) => {
   const [tab, setTab] = useState<SheetTab>('course');
 
@@ -91,7 +93,7 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
     <Sheet
       open={open}
       onClose={onClose}
-      title="Comanda"
+      title={openedBy ? `Comanda ${openedBy}` : 'Comanda'}
       subtitle={rows === 0 ? 'vuota' : rowCountLabel(rows)}
       ariaLabel="Comanda del tavolo"
       bodyClassName="px-4 py-4"

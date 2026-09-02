@@ -67,6 +67,9 @@ interface Column {
   course_no: number;
   table_name: string | null;
   customer_name: string | null;
+  /** Chi ha preso la comanda: in cucina serve sapere a chi chiedere
+   *  («questo 12 senza glutine è di Luca?»). */
+  openedBy: string | null;
   allergens: string | null;
   items: KdsItem[];
   firedAt: string | null;
@@ -363,6 +366,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           course_no: it.course_no,
           table_name: it.table_name,
           customer_name: it.customer_name,
+          openedBy: it.opened_by_name,
           allergens: it.customer_dietary_notes || it.reservation_notes,
           items: [],
           firedAt: it.fired_at,
@@ -383,6 +387,16 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   useEffect(() => {
     courseKeysRef.current = new Set(columns.map(c => c.key));
   }, [columns]);
+
+  // I tablet in sala sospendono la pagina in background e il socket perde
+  // eventi: un'uscita servita da un ALTRO monitor qui restava a schermo, e
+  // il tocco sulla card fantasma sembrava «servire di nuovo» (in realtà
+  // 409 silenzioso + reload). Il rientro in primo piano rilegge la coda.
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') reload(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [reload]);
 
   // La lista delle consegnate si carica solo quando la si guarda: è
   // consultazione, non deve pesare sul monitor che lavora.
@@ -565,35 +579,66 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
       )}
 
       {view === 'consegnate' ? (
-        // Consultazione, non lavoro: righe verticali, sola lettura, la più
-        // recente in alto — la domanda riguarda sempre gli ultimi minuti.
+        // Consultazione, non lavoro. Raggruppata PER COMANDA (chiesto dalla
+        // brigata): una card per tavolo con dentro le sue uscite in ordine,
+        // così i piatti consegnati allo stesso tavolo si leggono insieme.
+        // Le comande ordinate per ultima uscita servita, la più recente in
+        // alto — la domanda riguarda sempre gli ultimi minuti.
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-1">
           {served.length === 0 ? (
             <EmptyState icon={Check}>Nessuna uscita servita in questo servizio.</EmptyState>
           ) : (
             <div className="mx-auto max-w-[640px] space-y-2">
-              {served.map(c => (
-                <div
-                  key={`${c.order_id}:${c.course_no}`}
-                  className="rounded-[16px] bg-[var(--ds-surface)] px-4 py-3 shadow-[var(--ds-shadow-card)]"
-                >
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-[16px] font-semibold text-[var(--ds-text-primary)]">
-                      T{c.table_name ?? '—'}
-                    </span>
-                    <span className="text-[13px] text-[var(--ds-text-muted)]">
-                      {ORDINALS[c.course_no] ?? c.course_no} uscita
-                      {c.customer_name ? ` · ${c.customer_name}` : ''}
-                    </span>
-                    <span className="ml-auto text-[14px] tabular-nums text-[var(--ds-text-secondary)]">
-                      servita {getRomeTimePart(c.served_at)}
-                    </span>
-                  </div>
-                  <div className="mt-1 text-[14px] text-[var(--ds-text-secondary)]">
-                    {c.items.map(i => `${i.qty}× ${i.name}`).join(' · ')}
-                  </div>
-                </div>
-              ))}
+              {(() => {
+                const byOrder = new Map<number, KdsServedCourse[]>();
+                for (const c of served) {
+                  if (!byOrder.has(c.order_id)) byOrder.set(c.order_id, []);
+                  byOrder.get(c.order_id)!.push(c);
+                }
+                const orders = [...byOrder.values()]
+                  .map(list => [...list].sort((a, b) => a.course_no - b.course_no))
+                  .sort((a, b) => {
+                    const la = Math.max(...a.map(c => new Date(c.served_at).getTime()));
+                    const lb = Math.max(...b.map(c => new Date(c.served_at).getTime()));
+                    return lb - la;
+                  });
+                return orders.map(list => {
+                  const head = list[0];
+                  return (
+                    <div
+                      key={head.order_id}
+                      className="rounded-[16px] bg-[var(--ds-surface)] px-4 py-3 shadow-[var(--ds-shadow-card)]"
+                    >
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-[16px] font-semibold text-[var(--ds-text-primary)]">
+                          T{head.table_name ?? '—'}
+                        </span>
+                        {head.customer_name && (
+                          <span className="min-w-0 truncate text-[13px] text-[var(--ds-text-muted)]">{head.customer_name}</span>
+                        )}
+                        <span className="ml-auto flex-shrink-0 text-[13px] tabular-nums text-[var(--ds-text-muted)]">
+                          {list.length === 1 ? '1 uscita servita' : `${list.length} uscite servite`}
+                        </span>
+                      </div>
+                      <div className="mt-2 space-y-1.5">
+                        {list.map(c => (
+                          <div key={c.course_no} className="flex items-baseline gap-2 text-[14px]">
+                            <span className="flex-shrink-0 font-medium text-[var(--ds-text-primary)]">
+                              {ORDINALS[c.course_no] ?? c.course_no}
+                            </span>
+                            <span className="min-w-0 flex-1 text-[var(--ds-text-secondary)]">
+                              {c.items.map(i => `${i.qty}× ${i.name}`).join(' · ')}
+                            </span>
+                            <span className="flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">
+                              {getRomeTimePart(c.served_at)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
             </div>
           )}
         </div>
@@ -802,6 +847,12 @@ const CourseCard: React.FC<{
           {ORDINALS[col.course_no] ?? col.course_no} uscita
           {col.customer_name ? ` · ${col.customer_name}` : ''}
         </div>
+        {/* «di Luca», non un'etichetta lunga: in cucina serve solo sapere a
+            chi chiedere. Sta su una riga sua per non confondersi col nome
+            del CLIENTE qui sopra. */}
+        {col.openedBy && (
+          <div className="text-[12px] text-[var(--ds-text-muted)]">di {col.openedBy}</div>
+        )}
         {/* Comanda cambiata dopo il lancio: rosso pieno per scelta di Marco
             (29/08) — l'ambra tinta annegava fra venti card nel picco, e qui
             la modifica È un'interruzione: continuare a cucinare un piatto
