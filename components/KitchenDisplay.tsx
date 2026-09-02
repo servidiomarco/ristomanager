@@ -695,11 +695,16 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                       </div>
                       <div className="mt-2 space-y-1.5">
                         {list.map(c => {
-                          // Le MIE righe in chiaro, quelle delle altre
-                          // partite sotto, attenuate e col nome della
-                          // partita: la comanda servita si legge intera,
-                          // ma si vede subito cosa era di questa sezione —
-                          // stesso linguaggio del piede «altre partite».
+                          // Le MIE righe in primo piano (peso e corpo pieni);
+                          // quelle delle altre partite sotto, in corpo 12 e
+                          // attenuate, col nome della partita davanti. Le
+                          // quantità si SOMMANO per piatto («2× Amatriciana»
+                          // invece di due righe uguali): è metà del rumore.
+                          const aggregate = (its: typeof c.items): string => {
+                            const byName = new Map<string, number>();
+                            for (const i of its) byName.set(i.name, (byName.get(i.name) ?? 0) + i.qty);
+                            return [...byName.entries()].map(([name, qty]) => `${qty}× ${name}`).join(' · ');
+                          };
                           const mine = c.items.filter(i => stationId == null || i.station_id === stationId);
                           const othersByStation = new Map<number | null, typeof c.items>();
                           for (const i of c.items) {
@@ -714,16 +719,16 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                                 <span className="flex-shrink-0 font-medium text-[var(--ds-text-primary)]">
                                   {ORDINALS[c.course_no] ?? c.course_no}
                                 </span>
-                                <span className="min-w-0 flex-1 text-[var(--ds-text-secondary)]">
-                                  {mine.map(i => `${i.qty}× ${i.name}`).join(' · ')}
+                                <span className="min-w-0 flex-1 font-medium text-[var(--ds-text-primary)]">
+                                  {aggregate(mine)}
                                 </span>
                                 <span className="flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">
                                   {getRomeTimePart(c.served_at)}
                                 </span>
                               </div>
                               {[...othersByStation.entries()].map(([sid, its]) => (
-                                <div key={sid ?? 'x'} className="ml-6 text-[13px] text-[var(--ds-text-muted)]">
-                                  {stationNames.get(sid ?? -1) ?? 'altra partita'} · {its.map(i => `${i.qty}× ${i.name}`).join(' · ')}
+                                <div key={sid ?? 'x'} className="ml-6 text-[12px] leading-snug text-[var(--ds-text-muted)]">
+                                  {stationNames.get(sid ?? -1) ?? 'altra partita'} · {aggregate(its)}
                                 </div>
                               ))}
                             </div>
