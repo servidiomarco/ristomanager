@@ -640,7 +640,10 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
         // sinistra (max-width animato) e la storia si apre accanto — la
         // cucina continua a vedere l'archivio mentre legge la timeline.
         <div className="flex min-h-0 flex-1 gap-3 px-4 pb-4 pt-1">
-          <div className={`min-h-0 w-full overflow-y-auto transition-[max-width] duration-300 ease-out ${timelineFor ? 'mx-auto max-w-[340px] flex-shrink-0' : 'mx-auto max-w-[640px]'}`}>
+          {/* p-1: l'anello della card selezionata sporge 2px fuori dal
+              riquadro e senza respiro la colonna a scorrimento lo taglia
+              (stesso male dell'anello «pronto» sulle card, stesso rimedio). */}
+          <div className={`min-h-0 w-full overflow-y-auto p-1 transition-[max-width] duration-300 ease-out ${timelineFor ? 'mx-auto max-w-[340px] flex-shrink-0' : 'mx-auto max-w-[640px]'}`}>
           {servedFiltered.length === 0 ? (
             <EmptyState icon={Check}>
               {query ? 'Nessuna uscita servita per questa ricerca.' : 'Nessuna uscita servita in questo servizio.'}
