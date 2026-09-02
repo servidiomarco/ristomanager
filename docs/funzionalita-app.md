@@ -545,7 +545,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
-| 2026-09-02 | Comande, Cucina e Passe | La card del monitor cucina diventa una per comanda, col binario delle uscite: testata con tavolo, operatore e ora di apertura, uscita in lavorazione distesa con le azioni, servite compresse e attenuate con l'ora, future in fantasma tratteggiato («fra N′», «in coda»). |
+| 2026-09-02 | Comande, Cucina e Passe | La card del monitor cucina diventa una per comanda, col binario delle uscite al centro: testata con tavolo, operatore e ora di apertura, poi un pallino per uscita sul filo — pulsante ambra in lavorazione, verde fermo a pronto/servita, neutro per le future; distesa con le azioni solo l'uscita in lavorazione, servite compresse con l'ora, future in fantasma tratteggiato («fra N′», «in coda»). |
 | 2026-09-02 | Comande, Cucina e Passe | L'aggancio categoria→partita ignora le maiuscole («Primi» e «PRIMI» sono la stessa cucina) e le Impostazioni Sala & Cucina segnalano le categorie senza partita, i cui piatti non compaiono su nessun monitor. |
 | 2026-09-02 | Comande, Cucina e Passe | Il tocco su una riga in bozza riapre il foglio varianti precompilato: si leggono per intero le varianti troncate in lista e si correggono prima dell'invio («Aggiorna»); combinazioni identiche si fondono. |
 | 2026-09-02 | Comande, Cucina e Passe | Varianti col verso e le ripetizioni, alla Passepartout: tasti − e + per variante («+ prosciutto», «++ prosciutto», «−− prosciutto»); il + addebita n volte il prezzo della variante, il − sconta. Prefisso e prezzo viaggiano su comanda, monitor, preconto e scontrino. |
