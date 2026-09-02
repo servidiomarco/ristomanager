@@ -11,7 +11,7 @@ import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BanquetPaymentsModal } from './BanquetPaymentsModal';
 import { DishDetailModal } from './DishDetailModal';
 import { CustomerPickerModal } from './CustomerPickerModal';
-import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, type MenuImportResult, type MenuTranslateResult, type MenuCategory } from '../services/apiService';
+import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, type MenuImportResult, type MenuTranslateResult, type MenuCategory } from '../services/apiService';
 import { billsApiService } from '../services/billsApiService';
 import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '../contexts/AuthContext';
@@ -213,6 +213,17 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [catsOpen, setCatsOpen] = useState(false);
   const [catsBusy, setCatsBusy] = useState(false);
   const [togglingDishId, setTogglingDishId] = useState<number | null>(null);
+  // Spunta di menu su una categoria (modale Categorie): chiave `nome|menuId`.
+  const [catMenuBusy, setCatMenuBusy] = useState<string | null>(null);
+  const handleToggleCategoryMenu = async (catName: string, menuId: number, member: boolean) => {
+    setCatMenuBusy(`${catName}|${menuId}`);
+    try {
+      // Il server applica in blocco e broadcasta 'dish:synced': i piatti si
+      // ricaricano via App e le pill si riallineano da sole.
+      await setCategoryMenu(catName, menuId, member);
+    } catch { /* le pill restano com'erano: nessun falso ok */ }
+    finally { setCatMenuBusy(null); }
+  };
   const [reorderBusy, setReorderBusy] = useState(false);
   useEffect(() => {
     let cancelled = false;
@@ -624,11 +635,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const handleOpenNewDish = () => {
     setIsEditingDish(false);
     setEditingDishId(null);
-    // Il piatto nuovo nasce nel menu che si sta guardando (e in Alla carta
-    // se non se ne sta guardando nessuno): la spunta si toglie, non si
-    // rincorre.
+    // Il piatto nuovo nasce nei menu della sua categoria (se impostati in
+    // modale Categorie), altrimenti nel menu che si sta guardando (o Alla
+    // carta): la spunta si toglie, non si rincorre.
+    const catDefault = menuCats?.find(c => c.name === 'Antipasti')?.menu_ids;
     const defaultMenuId = selectedMenu?.id ?? cartaMenu?.id;
-    setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '', vat_rate: defaultVatRate, menu_ids: defaultMenuId != null ? [defaultMenuId] : [] });
+    const defaultMenus = Array.isArray(catDefault) && catDefault.length > 0
+      ? catDefault
+      : defaultMenuId != null ? [defaultMenuId] : [];
+    setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '', vat_rate: defaultVatRate, menu_ids: defaultMenus });
     setPhotoUploadError(null);
     setIsDishFormOpen(true);
   };
@@ -2196,7 +2211,20 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     <select
                       className={dsSelect}
                       value={newDish.category}
-                      onChange={e => setNewDish({ ...newDish, category: e.target.value })}
+                      onChange={e => {
+                        const category = e.target.value;
+                        // In creazione la categoria porta i suoi menu di
+                        // default (quelli spuntati in modale Categorie); in
+                        // modifica le spunte del piatto non si toccano.
+                        const catDefault = !isEditingDish
+                          ? menuCats?.find(c => c.name === category)?.menu_ids
+                          : null;
+                        setNewDish(prev => ({
+                          ...prev,
+                          category,
+                          ...(Array.isArray(catDefault) && catDefault.length > 0 ? { menu_ids: catDefault } : {}),
+                        }));
+                      }}
                     >
                       <option>Antipasti</option>
                       <option>Primi</option>
@@ -3318,6 +3346,40 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[14px] font-medium text-[var(--ds-text-primary)]">{cat.name}</div>
                   <div className="text-[12px] tabular-nums text-[var(--ds-text-muted)]">{cat.dishes} {cat.dishes === 1 ? 'piatto' : 'piatti'}</div>
+                  {/* In quali menu sta la categoria. Lo stato lo dicono i
+                      piatti veri, non il default salvato: piena = tutti i
+                      piatti nel menu, parziale = «3/12». Il click applica in
+                      blocco; i singoli piatti restano regolabili dopo. */}
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {menus.map(m => {
+                      const inCat = dishes.filter(d => (d.category ?? '') === cat.name);
+                      const inMenu = inCat.filter(d => (d.menu_ids ?? []).includes(m.id)).length;
+                      const full = inCat.length > 0 && inMenu === inCat.length;
+                      const partial = inMenu > 0 && !full;
+                      const busyKey = `${cat.name}|${m.id}`;
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          disabled={catMenuBusy === busyKey || inCat.length === 0}
+                          onClick={() => handleToggleCategoryMenu(cat.name, m.id, !full)}
+                          aria-pressed={full}
+                          title={full
+                            ? `Tutti i piatti di ${cat.name} sono in ${m.name} — togli tutti`
+                            : `Metti tutti i piatti di ${cat.name} in ${m.name}`}
+                          className={`inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                            full
+                              ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                              : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
+                          } ${catMenuBusy === busyKey ? 'opacity-50' : ''}`}
+                        >
+                          {full && <Check size={12} />}
+                          {m.name}
+                          {partial && <span className="tabular-nums opacity-70">{inMenu}/{inCat.length}</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
                 <button
                   type="button" role="switch" aria-checked={cat.enabled}

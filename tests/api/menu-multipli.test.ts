@@ -107,6 +107,56 @@ describe('menu multipli e stato banchetti', () => {
         expect(names).not.toContain('Piatto due menu');       // solo in Banchetti
     });
 
+    it('la spunta di menu su una categoria applica in blocco e fa da default per i piatti nuovi', async () => {
+        const CAT = 'Categoria Menu Test';
+        for (const name of ['Cat uno', 'Cat due']) {
+            const res = await api().post('/dishes').set(bearer(token)).send({
+                name, description: '', price: 9, category: CAT, allergens: [],
+            });
+            expect(res.status).toBe(201);
+            dishIds.push(res.body.id);
+        }
+
+        // In blocco dentro Banchetti: entrambi i piatti guadagnano il menu.
+        const on = await api().put('/menu/category-menus').set(bearer(token))
+            .send({ category: CAT, menu_id: banquetsId, member: true });
+        expect(on.status).toBe(200);
+        expect(on.body.piatti).toBe(2);
+        const after = await api().get('/dishes').set(bearer(token));
+        for (const d of after.body.filter((d: any) => d.category === CAT)) {
+            expect(d.menu_ids).toContain(banquetsId);
+        }
+
+        // Il default della categoria vale per i piatti nuovi senza spunte.
+        const cats = await api().get('/menu/categories').set(bearer(token));
+        const mine = cats.body.categories.find((c: any) => c.name === CAT);
+        expect([...mine.menu_ids].sort()).toEqual([cartaId, banquetsId].sort());
+        const born = await api().post('/dishes').set(bearer(token)).send({
+            name: 'Cat tre', description: '', price: 9, category: CAT, allergens: [],
+        });
+        expect(born.status).toBe(201);
+        dishIds.push(born.body.id);
+        expect([...born.body.menu_ids].sort()).toEqual([cartaId, banquetsId].sort());
+
+        // Riordinare le categorie non azzera i menu della categoria.
+        const order = cats.body.categories.map((c: any) => ({ name: c.name, enabled: c.enabled }));
+        const saved = await api().put('/menu/categories').set(bearer(token)).send({ categories: order });
+        expect(saved.status).toBe(200);
+        const cats2 = await api().get('/menu/categories').set(bearer(token));
+        const mine2 = cats2.body.categories.find((c: any) => c.name === CAT);
+        expect([...mine2.menu_ids].sort()).toEqual([cartaId, banquetsId].sort());
+
+        // In blocco fuori da Alla carta: tolto da tutti e tre.
+        const off = await api().put('/menu/category-menus').set(bearer(token))
+            .send({ category: CAT, menu_id: cartaId, member: false });
+        expect(off.status).toBe(200);
+        expect(off.body.piatti).toBe(3);
+        const final = await api().get('/dishes').set(bearer(token));
+        for (const d of final.body.filter((d: any) => d.category === CAT)) {
+            expect(d.menu_ids).toEqual([banquetsId]);
+        }
+    });
+
     it('un banchetto nasce preventivo e si conferma dalla rotta di stato', async () => {
         const created = await api().post('/banquet-menus').set(bearer(token)).send({
             name: 'Prova stato', description: '', price_per_person: 50,
