@@ -399,6 +399,11 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         expect(other[0].name_snapshot).toBe('Patate Ciclo');
         expect(other[0].qty).toBe(2);
         expect(other[0].status).toBe('SENT');
+        // La comanda INTERA per la card a binario: tutte le uscite, con la
+        // partita su ogni riga — anche quelle che qui non si lavorano.
+        const fullRows = (queue.body.full ?? []).filter((f: any) => f.order_id === orderId);
+        expect(fullRows.some((f: any) => f.name_snapshot === 'Patate Ciclo' && f.station_id === fritti.body.id)).toBe(true);
+        expect(fullRows.some((f: any) => f.name_snapshot === 'Tagliata Collaudo' && f.station_id === griglia.body.id)).toBe(true);
 
         // Tutta pronta e servita: l'uscita compare nelle Consegnate della
         // Griglia, con le SUE righe e il suo orario.

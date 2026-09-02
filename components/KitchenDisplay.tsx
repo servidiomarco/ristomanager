@@ -8,7 +8,7 @@ import { channelThreadKey, staffMessagePreview, type StaffMessage } from '../ser
 import {
   getKdsQueue, getKdsServed, setKdsItemStatus, getMenuCatalogue, getKdsRevisions, ackKdsRevision,
   callWaiterForCourse, serveCourse, getOrderTimeline,
-  type KdsItem, type KdsCourseState, type KdsOtherItem, type KdsServedCourse, type MenuCatalogue, type OrderRevision,
+  type KdsItem, type KdsCourseState, type KdsOtherItem, type KdsFullItem, type KdsServedCourse, type MenuCatalogue, type OrderRevision,
   type OrderTimelineEvent,
 } from '../services/ordersApiService';
 import { getKitchenServiceSummary, type KitchenServiceSummary } from '../services/apiService';
@@ -79,6 +79,24 @@ interface Column {
   others: KdsOtherItem[];
 }
 
+/** Una card del monitor = una comanda: il binario delle sue uscite, con
+ *  distesa solo quella in lavorazione qui. */
+interface OrderGroup {
+  order_id: number;
+  table_name: string | null;
+  customer_name: string | null;
+  openedBy: string | null;
+  /** Quando il tavolo ha aperto: la testata è l'inizio del binario. */
+  openedAt: string | null;
+  allergens: string | null;
+  /** Le uscite attive su questa partita (le sezioni distese). */
+  cols: Column[];
+  /** Le uscite in arrivo (partenza scaglionata): sezioni fantasma. */
+  upcomingCols: Column[];
+  /** Tutta la comanda, uscita per uscita, con la partita su ogni riga. */
+  rows: KdsFullItem[];
+}
+
 interface KitchenDisplayProps {
   globalDate?: Date;
   globalShiftFilter?: 'ALL' | 'LUNCH' | 'DINNER';
@@ -105,6 +123,9 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   const [items, setItems] = useState<KdsItem[]>([]);
   const [courses, setCourses] = useState<KdsCourseState[]>([]);
   const [others, setOthers] = useState<KdsOtherItem[]>([]);
+  // La comanda intera (tutte le uscite, servite e future comprese): il
+  // binario della card si disegna da qui, non dalla sola fetta attiva.
+  const [full, setFull] = useState<KdsFullItem[]>([]);
   // «In lavorazione» è il lavoro; «Consegnate» è consultazione («il 12 dice
   // che manca il piatto: l'abbiamo mandato?») — sola lettura, mai un posto
   // dove le card si annidano prima del servito.
@@ -124,7 +145,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   // riporta, trasferimento). La card mostra "modificata", il tocco apre il
   // dettaglio, Ok le spegne per tutti gli schermi.
   const [revisions, setRevisions] = useState<OrderRevision[]>([]);
-  const [revisionsModalKey, setRevisionsModalKey] = useState<string | null>(null);
+  const [revisionsFor, setRevisionsFor] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [offline, setOffline] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -244,6 +265,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
       setItems(q.items);
       setCourses(q.courses);
       setOthers(q.others ?? []);
+      setFull(q.full ?? []);
       setRevisions(rev.revisions);
       setOffline(false);
     } catch {
@@ -442,18 +464,20 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
     col.items.every(i => i.status === 'SENT')
     && col.items.every(i => i.station_start_at != null && new Date(i.station_start_at).getTime() > now);
 
-  const revisionsByKey = useMemo(() => {
-    const map = new Map<string, OrderRevision[]>();
-    for (const col of columns) {
-      const list = revisions.filter(r =>
-        r.order_id === col.order_id && (r.course_no == null || r.course_no === col.course_no));
-      if (list.length > 0) map.set(col.key, list);
+  // Le revisioni si mostrano sulla TESTATA della card (una per comanda):
+  // qualunque uscita tocchino, per la cucina sono un cambio di piano del
+  // tavolo intero.
+  const revisionsByOrder = useMemo(() => {
+    const map = new Map<number, OrderRevision[]>();
+    for (const r of revisions) {
+      if (!map.has(r.order_id)) map.set(r.order_id, []);
+      map.get(r.order_id)!.push(r);
     }
     return map;
-  }, [columns, revisions]);
+  }, [revisions]);
 
   const ackRevisions = useCallback(async (list: OrderRevision[]) => {
-    setRevisionsModalKey(null);
+    setRevisionsFor(null);
     // Ottimistico come advance(): la pill sparisce al tocco, il server segue.
     setRevisions(prev => prev.filter(r => !list.some(l => l.id === r.id)));
     await Promise.all(list.map(r => ackKdsRevision(r.id).catch(() => {})));
@@ -471,6 +495,35 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
 
   const todo = columns.filter(c => !isUpcoming(c) && colMatches(c));
   const upcoming = columns.filter(c => isUpcoming(c) && colMatches(c));
+
+  // Una card PER COMANDA, col binario delle uscite dentro. Una comanda entra
+  // quando ha almeno un'uscita da lavorare qui e adesso; le sue uscite in
+  // arrivo (partenza scaglionata) diventano sezioni fantasma della stessa
+  // card, e la striscia «In arrivo» resta solo per le comande che una card
+  // non ce l'hanno ancora. `todo` è già ordinata per urgenza: l'ordine di
+  // inserimento delle comande la eredita.
+  const orderGroups: OrderGroup[] = (() => {
+    const map = new Map<number, OrderGroup>();
+    for (const col of todo) {
+      if (!map.has(col.order_id)) {
+        map.set(col.order_id, {
+          order_id: col.order_id,
+          table_name: col.table_name,
+          customer_name: col.customer_name,
+          openedBy: col.openedBy,
+          openedAt: col.items[0]?.order_opened_at ?? null,
+          allergens: col.allergens,
+          cols: [],
+          upcomingCols: [],
+          rows: full.filter(r => r.order_id === col.order_id),
+        });
+      }
+      map.get(col.order_id)!.cols.push(col);
+    }
+    for (const col of upcoming) map.get(col.order_id)?.upcomingCols.push(col);
+    return [...map.values()];
+  })();
+  const upcomingLoose = upcoming.filter(c => !orderGroups.some(g => g.order_id === c.order_id));
   const servedFiltered = served.filter(c => !query
     || (c.table_name ?? '').toLowerCase().includes(query)
     || (c.customer_name ?? '').toLowerCase().includes(query)
@@ -763,19 +816,19 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           </EmptyState>
         ) : (
           <div className="flex h-full items-start gap-4">
-            {todo.map(col => (
-              <CourseCard
-                key={col.key}
-                col={col}
+            {orderGroups.map(g => (
+              <OrderCard
+                key={g.order_id}
+                g={g}
                 now={now}
                 stationId={stationId}
                 stationNames={stationNames}
                 onAdvance={advance}
                 onCallWaiter={passeEnabled ? undefined : callWaiter}
-                waiterCalled={waiterCalled.has(col.key)}
+                waiterCalled={waiterCalled}
                 onServeCourse={passeEnabled ? undefined : serveColumn}
-                revisions={revisionsByKey.get(col.key)}
-                onShowRevisions={() => setRevisionsModalKey(col.key)}
+                revisions={revisionsByOrder.get(g.order_id)}
+                onShowRevisions={() => setRevisionsFor(g.order_id)}
               />
             ))}
           </div>
@@ -783,11 +836,11 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
       </div>
       )}
 
-      {view === 'lavoro' && upcoming.length > 0 && (
+      {view === 'lavoro' && upcomingLoose.length > 0 && (
         <div className="flex-shrink-0 px-4 pb-4">
           <div className="mb-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">In arrivo</div>
           <div className="flex gap-3 overflow-x-auto pb-1">
-            {upcoming.map(col => {
+            {upcomingLoose.map(col => {
               const wait = minutesUntil(col.items[0]?.station_start_at ?? null, now);
               return (
                 // Bordo tratteggiato invece di un'opacità: l'opacità porta il
@@ -824,15 +877,15 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
       )}
 
       <ModalShell
-        open={revisionsModalKey != null && (revisionsByKey.get(revisionsModalKey)?.length ?? 0) > 0}
-        onClose={() => setRevisionsModalKey(null)}
-        title={`Modifiche · T${columns.find(c => c.key === revisionsModalKey)?.table_name ?? '—'}`}
+        open={revisionsFor != null && (revisionsByOrder.get(revisionsFor)?.length ?? 0) > 0}
+        onClose={() => setRevisionsFor(null)}
+        title={`Modifiche · T${columns.find(c => c.order_id === revisionsFor)?.table_name ?? '—'}`}
         size="sm"
         closeOnEscape
         bodyClassName="p-5 sm:p-6"
       >
         <div className="space-y-3">
-          {(revisionsByKey.get(revisionsModalKey ?? '') ?? []).map(r => (
+          {(revisionsByOrder.get(revisionsFor ?? -1) ?? []).map(r => (
             <div key={r.id} className="rounded-[14px] bg-[var(--ds-surface-row)] px-3.5 py-3">
               <p className="text-[16px] font-semibold text-[var(--ds-text-primary)]">{r.summary}</p>
               {(r.details ?? []).filter(d => d.note).map((d, i) => (
@@ -845,7 +898,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           ))}
           <button
             type="button"
-            onClick={() => ackRevisions(revisionsByKey.get(revisionsModalKey ?? '') ?? [])}
+            onClick={() => ackRevisions(revisionsByOrder.get(revisionsFor ?? -1) ?? [])}
             className={`${dsButton.primary} w-full`}
           >
             Ok, visto
@@ -895,20 +948,174 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   );
 };
 
-const CourseCard: React.FC<{
-  col: Column;
+// La card della comanda: la testata (tavolo, chi l'ha presa, l'ora) è
+// l'inizio del binario, e sotto scorrono TUTTE le uscite — distesa quella in
+// lavorazione qui, compressa e attenuata la servita, fantasma quella che deve
+// ancora partire (stesso tratteggio della striscia «In arrivo»: un colore
+// nuovo direbbe alla cucina uno stato che non esiste). Il ritmo del tavolo si
+// legge su una card sola, come sul ticket di carta.
+const OrderCard: React.FC<{
+  g: OrderGroup;
   now: number;
   stationId: number | null;
-  onAdvance: (item: KdsItem, status: 'PREPARING' | 'READY') => void;
   stationNames?: Map<number, string>;
+  onAdvance: (item: KdsItem, status: 'PREPARING' | 'READY') => void;
   /** Presenti solo col passe spento: la campanella avvisa la sala che
    *  l'uscita è pronta (non muove lo stato), la spunta la segna servita. */
   onCallWaiter?: (col: Column) => void;
-  waiterCalled?: boolean;
+  waiterCalled: Set<string>;
   onServeCourse?: (col: Column) => void;
   revisions?: OrderRevision[];
   onShowRevisions?: () => void;
-}> = ({ col, now, onAdvance, stationNames, onCallWaiter, waiterCalled, onServeCourse, revisions, onShowRevisions }) => {
+}> = ({ g, now, stationId, stationNames, onAdvance, onCallWaiter, waiterCalled, onServeCourse, revisions, onShowRevisions }) => {
+  const activeByCourse = new Map(g.cols.map(c => [c.course_no, c]));
+  const upcomingByCourse = new Map(g.upcomingCols.map(c => [c.course_no, c]));
+  const courseNos = [...new Set([
+    ...g.rows.map(r => r.course_no),
+    ...g.cols.map(c => c.course_no),
+    ...g.upcomingCols.map(c => c.course_no),
+  ])].sort((a, b) => a - b);
+
+  // L'anello resta il segnale di stato della card, ora a livello di comanda:
+  // verde quando TUTTO il lavoro attivo di questa partita è pronto, lampeggio
+  // critico se un'uscita pronta aspetta le altre da troppo sotto la lampada.
+  const allReadyHere = g.cols.length > 0 && g.cols.every(c => c.items.every(i => i.status === 'READY'));
+  const lampAlert = g.cols.some(c => {
+    if (!c.items.every(i => i.status === 'READY') || !c.waitingOthers) return false;
+    return Math.min(...c.items.map(i => minutesSince(i.ready_at, now))) >= LAMP_ALERT_MIN;
+  });
+
+  return (
+    <div
+      className={`flex max-h-full w-64 flex-shrink-0 flex-col overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] ${
+        lampAlert
+          ? 'animate-pulse ring-2 ring-[var(--ds-critical-solid)]'
+          : allReadyHere
+          ? 'ring-2 ring-[var(--ds-seated-solid)]'
+          : ''
+      }`}
+    >
+      <div className="px-3 py-2.5">
+        <div className="flex items-baseline gap-2">
+          <span className="text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
+            T{g.table_name ?? '—'}
+          </span>
+          {/* L'ora in cui il tavolo ha aperto: il primo fatto del binario. */}
+          {g.openedAt && (
+            <span className="ml-auto text-[14px] tabular-nums text-[var(--ds-text-muted)]">
+              {getRomeTimePart(g.openedAt)}
+            </span>
+          )}
+        </div>
+        {/* «di Luca», non un'etichetta lunga: in cucina serve solo sapere a
+            chi chiedere. Cliente e operatore su una riga sola. */}
+        {(g.customer_name || g.openedBy) && (
+          <div className="text-[13px] text-[var(--ds-text-muted)]">
+            {g.customer_name ?? ''}
+            {g.customer_name && g.openedBy ? ' · ' : ''}
+            {g.openedBy ? `di ${g.openedBy}` : ''}
+          </div>
+        )}
+        {/* Comanda cambiata dopo il lancio: rosso pieno per scelta di Marco
+            (29/08) — l'ambra tinta annegava fra venti card nel picco, e qui
+            la modifica È un'interruzione: continuare a cucinare un piatto
+            stornato è spreco. 44px: si tocca con le mani in pasta. */}
+        {revisions && revisions.length > 0 && onShowRevisions && (
+          <button
+            type="button"
+            onClick={onShowRevisions}
+            className="mt-2 flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-[12px] bg-[var(--ds-critical-solid)] px-3 text-[14px] font-semibold text-[var(--ds-critical-fg)] transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            <Pencil size={14} aria-hidden />
+            modificata{revisions.length > 1 ? ` · ${revisions.length}` : ''}
+          </button>
+        )}
+      </div>
+
+      {g.allergens && (
+        <div className="flex items-start gap-1.5 bg-[var(--ds-critical-tint)] px-3 py-2 text-[13px] font-medium text-[var(--ds-critical-text)]">
+          <TriangleAlert size={14} className="mt-0.5 flex-shrink-0" aria-hidden />
+          <span>{g.allergens}</span>
+        </div>
+      )}
+
+      {/* Il binario: come nella storia della comanda, un filo verticale con un
+          pallino per uscita — la famiglia del pallino dice lo stato. */}
+      <div className="relative min-h-0 flex-1 overflow-y-auto py-2 pl-6 pr-1.5">
+        <div aria-hidden className="absolute bottom-4 left-[13px] top-4 w-px bg-[var(--ds-border)]" />
+        <div className="space-y-3">
+          {courseNos.map(no => {
+            const active = activeByCourse.get(no);
+            if (active) {
+              return (
+                <CourseSection
+                  key={no}
+                  col={active}
+                  now={now}
+                  stationNames={stationNames}
+                  onAdvance={onAdvance}
+                  onCallWaiter={onCallWaiter}
+                  called={waiterCalled.has(active.key)}
+                  onServeCourse={onServeCourse}
+                />
+              );
+            }
+            const soon = upcomingByCourse.get(no);
+            if (soon) {
+              const wait = minutesUntil(soon.items[0]?.station_start_at ?? null, now);
+              return (
+                <div key={no} className="relative">
+                  <span aria-hidden className="absolute -left-[16px] top-[5px] h-[9px] w-[9px] rounded-full bg-[var(--ds-border-strong)] ring-2 ring-[var(--ds-surface)]" />
+                  <div className="rounded-[12px] border-2 border-dashed border-[var(--ds-border-strong)] px-2.5 py-2">
+                    <div className="flex items-baseline gap-2 text-[13px]">
+                      <span className="font-semibold text-[var(--ds-text-primary)]">
+                        {ORDINALS[no] ?? no} uscita
+                      </span>
+                      <span className="ml-auto font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                        fra {Math.max(wait, 1)}′
+                      </span>
+                    </div>
+                    <div className="mt-0.5 text-[13px] text-[var(--ds-text-muted)]">
+                      {soon.items.map(i => `${i.qty} ${i.name_snapshot}`).join(', ')}
+                    </div>
+                    {/* 44px: si preme con le mani sporche, non col mouse. */}
+                    <button
+                      type="button"
+                      onClick={() => soon.items.forEach(i => onAdvance(i, 'PREPARING'))}
+                      className="mt-1.5 inline-flex h-11 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[14px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
+                    >
+                      <Play size={13} aria-hidden /> inizia ora
+                    </button>
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <PassiveSection
+                key={no}
+                courseNo={no}
+                rows={g.rows.filter(r => r.course_no === no)}
+                stationId={stationId}
+              />
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Un'uscita in lavorazione su questa partita: righe che si toccano per
+// segnare pronto, piede con le altre partite, azioni dell'uscita in fondo.
+const CourseSection: React.FC<{
+  col: Column;
+  now: number;
+  stationNames?: Map<number, string>;
+  onAdvance: (item: KdsItem, status: 'PREPARING' | 'READY') => void;
+  onCallWaiter?: (col: Column) => void;
+  called?: boolean;
+  onServeCourse?: (col: Column) => void;
+}> = ({ col, now, stationNames, onAdvance, onCallWaiter, called, onServeCourse }) => {
   const start = col.items[0]?.station_start_at ?? col.firedAt;
   const elapsed = minutesSince(start, now);
   const allReady = col.items.every(i => i.status === 'READY');
@@ -927,69 +1134,28 @@ const CourseCard: React.FC<{
     return [...map.entries()];
   }, [col.others]);
 
-  // Ho finito ma l'uscita no: da qui in poi il piatto peggiora sotto la
-  // lampada, e il ritardo è di qualcun altro. Il bordo lampeggia per dirlo.
   const readySince = allReady
     ? Math.min(...col.items.map(i => minutesSince(i.ready_at, now)))
     : 0;
-  const lampAlert = allReady && col.waitingOthers && readySince >= LAMP_ALERT_MIN;
 
   return (
-    // Lo stato viaggia su un anello, non su un bordo: la card è una superficie
-    // bianca sulla tela come tutte le altre, e l'anello si disegna fuori dal
-    // riquadro senza spostare di due pixel il contenuto quando cambia stato.
-    <div
-      className={`flex max-h-full w-60 flex-shrink-0 flex-col overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] ${
-        lampAlert
-          ? 'animate-pulse ring-2 ring-[var(--ds-critical-solid)]'
-          : allReady
-          ? 'ring-2 ring-[var(--ds-seated-solid)]'
-          : ''
-      }`}
-    >
-      <div className="px-3 py-2.5">
-        <div className="flex items-baseline gap-2">
-          <span className="text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
-            T{col.table_name ?? '—'}
-          </span>
-          <span className={`ml-auto text-[20px] font-semibold tabular-nums ${timerTone(elapsed)}`}>
-            {elapsed}′
-          </span>
-        </div>
-        <div className="text-[13px] text-[var(--ds-text-muted)]">
+    <div className="relative">
+      <span
+        aria-hidden
+        className={`absolute -left-[16px] top-[7px] h-[9px] w-[9px] rounded-full ring-2 ring-[var(--ds-surface)] ${
+          allReady ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-pending-solid)]'
+        }`}
+      />
+      <div className="flex items-baseline gap-2 pr-1">
+        <span className="text-[14px] font-semibold text-[var(--ds-text-primary)]">
           {ORDINALS[col.course_no] ?? col.course_no} uscita
-          {col.customer_name ? ` · ${col.customer_name}` : ''}
-        </div>
-        {/* «di Luca», non un'etichetta lunga: in cucina serve solo sapere a
-            chi chiedere. Sta su una riga sua per non confondersi col nome
-            del CLIENTE qui sopra. */}
-        {col.openedBy && (
-          <div className="text-[12px] text-[var(--ds-text-muted)]">di {col.openedBy}</div>
-        )}
-        {/* Comanda cambiata dopo il lancio: rosso pieno per scelta di Marco
-            (29/08) — l'ambra tinta annegava fra venti card nel picco, e qui
-            la modifica È un'interruzione: continuare a cucinare un piatto
-            stornato è spreco. 44px: si tocca con le mani in pasta. */}
-        {revisions && revisions.length > 0 && onShowRevisions && (
-          <button
-            type="button"
-            onClick={onShowRevisions}
-            className="mt-2 flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-[12px] bg-[var(--ds-critical-solid)] px-3 text-[14px] font-semibold text-[var(--ds-critical-fg)] transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-          >
-            <Pencil size={14} aria-hidden />
-            modificata{revisions.length > 1 ? ` · ${revisions.length}` : ''}
-          </button>
-        )}
+        </span>
+        <span className={`ml-auto text-[17px] font-semibold tabular-nums ${timerTone(elapsed)}`}>
+          {elapsed}′
+        </span>
       </div>
 
-      {col.allergens && (
-        <div className="flex items-start gap-1.5 bg-[var(--ds-critical-tint)] px-3 py-2 text-[13px] font-medium text-[var(--ds-critical-text)]">
-          <TriangleAlert size={14} className="mt-0.5 flex-shrink-0" aria-hidden />
-          <span>{col.allergens}</span>
-        </div>
-      )}
-
-      <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-1.5 py-2">
+      <div className="mt-0.5 space-y-0.5">
         {col.items.map(i => {
           // Il fatto viene detto dal segno di spunta e dal testo attenuato, non
           // da un'opacità che porta sotto contrasto anche la quantità.
@@ -1051,7 +1217,7 @@ const CourseCard: React.FC<{
       </div>
 
       {otherGroups.length > 0 && (
-        <div className="flex-shrink-0 border-t border-[var(--ds-border)] px-2">
+        <div className="border-t border-[var(--ds-border)]">
           <button
             type="button"
             onClick={() => setOthersOpen(o => !o)}
@@ -1098,9 +1264,9 @@ const CourseCard: React.FC<{
         </div>
       )}
 
-      <div className="flex items-center gap-2 p-2">
+      <div className="mt-1 flex items-center gap-2">
         {allReady ? (
-          <div className="min-w-0 flex-1 py-2 text-center text-[14px] font-semibold text-[var(--ds-seated-text)]">
+          <div className="min-w-0 flex-1 py-1.5 text-center text-[14px] font-semibold text-[var(--ds-seated-text)]">
             {col.waitingOthers ? `pronto · attende le altre partite (${readySince}′)` : 'pronto'}
           </div>
         ) : (
@@ -1111,7 +1277,7 @@ const CourseCard: React.FC<{
           <button
             type="button"
             onClick={() => col.items.filter(i => i.status !== 'READY').forEach(i => onAdvance(i, 'READY'))}
-            className="min-w-0 flex-1 rounded-[16px] bg-[var(--ds-action-bg)] py-3.5 text-[17px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="min-w-0 flex-1 rounded-[16px] bg-[var(--ds-action-bg)] py-3 text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             Tutto pronto
           </button>
@@ -1120,19 +1286,18 @@ const CourseCard: React.FC<{
             icone: la campanella AVVISA la sala che l'uscita è al passe
             (annuncio nel canale sala — non muove lo stato, i tempi del
             servizio restano ai camerieri), la spunta la segna servita.
-            Nome per esteso nel title e nell'aria-label. */}
-        {/* Solo a uscita pronta PER INTERO: finché waitingOthers è vero le
-            altre partite stanno ancora cucinando — avvisare la sala o servire
-            adesso spaccherebbe l'uscita. */}
+            Nome per esteso nel title e nell'aria-label. Solo a uscita pronta
+            PER INTERO: finché waitingOthers è vero le altre partite stanno
+            ancora cucinando — avvisare o servire adesso spaccherebbe l'uscita. */}
         {onCallWaiter && allReady && !col.waitingOthers && (
           <button
             type="button"
             onClick={() => onCallWaiter(col)}
-            disabled={waiterCalled}
-            title={waiterCalled ? 'Sala avvisata' : "Avvisa la sala: l'uscita è pronta al ritiro"}
-            aria-label={waiterCalled ? 'Sala avvisata' : "Avvisa la sala: l'uscita è pronta al ritiro"}
+            disabled={called}
+            title={called ? 'Sala avvisata' : "Avvisa la sala: l'uscita è pronta al ritiro"}
+            aria-label={called ? 'Sala avvisata' : "Avvisa la sala: l'uscita è pronta al ritiro"}
             className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
-              waiterCalled
+              called
                 ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)]'
                 : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]'
             }`}
@@ -1151,6 +1316,54 @@ const CourseCard: React.FC<{
             <Check size={18} aria-hidden />
           </button>
         )}
+      </div>
+    </div>
+  );
+};
+
+// Un'uscita che qui non si lavora adesso: la servita (attenuata, con l'ora) e
+// quella ancora da lanciare o di altre partite (neutra). Una riga di piatti
+// aggregata, non l'elenco: è contesto, non lavoro.
+const PassiveSection: React.FC<{
+  courseNo: number;
+  rows: KdsFullItem[];
+  stationId: number | null;
+}> = ({ courseNo, rows, stationId }) => {
+  const served = rows.length > 0 && rows.every(r => r.status === 'SERVED');
+  const queued = rows.length > 0 && rows.every(r => r.status === 'QUEUED');
+  const mine = rows.filter(r => stationId == null || r.station_id === stationId);
+  const aggregate = (rs: KdsFullItem[]): string => {
+    const byName = new Map<string, number>();
+    for (const r of rs) byName.set(r.name_snapshot, (byName.get(r.name_snapshot) ?? 0) + r.qty);
+    return [...byName.entries()].map(([name, qty]) => `${qty}× ${name}`).join(' · ');
+  };
+  const servedAt = served
+    ? rows.reduce<string | null>((max, r) => (r.served_at && (!max || r.served_at > max) ? r.served_at : max), null)
+    : null;
+
+  return (
+    <div className="relative">
+      <span
+        aria-hidden
+        className={`absolute -left-[16px] top-[5px] h-[9px] w-[9px] rounded-full ring-2 ring-[var(--ds-surface)] ${
+          served ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-border-strong)]'
+        }`}
+      />
+      <div className="flex items-baseline gap-2 pr-1 text-[13px]">
+        <span className="font-medium text-[var(--ds-text-muted)]">
+          {ORDINALS[courseNo] ?? courseNo} uscita
+        </span>
+        <span className="ml-auto flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">
+          {served
+            ? `servita${servedAt ? ` ${getRomeTimePart(servedAt)}` : ''}`
+            : queued ? 'in coda' : 'altre partite'}
+        </span>
+      </div>
+      {/* I MIEI piatti, aggregati; se l'uscita non mi riguarda, il totale. */}
+      <div className="mt-0.5 pr-1 text-[13px] leading-snug text-[var(--ds-text-muted)]">
+        {mine.length > 0
+          ? aggregate(mine)
+          : `${rows.reduce((n, r) => n + r.qty, 0)} piatti di altre partite`}
       </div>
     </div>
   );
