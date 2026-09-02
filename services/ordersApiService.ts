@@ -20,6 +20,10 @@ export interface NewOrderItem {
   seat_no?: number | null;
   note?: string | null;
   modifier_ids?: number[];
+  /** Varianti firmate: n>0 aggiunge n volte (addebito), n<0 toglie
+   *  (sconto) — «++ prosciutto», «-- prosciutto». Se presente vince su
+   *  modifier_ids. */
+  modifiers?: { id: number; n: number }[];
   station_id?: number | null;
   /** Chiave di idempotenza per riga: il server la vincola per tenant, quindi
    *  rimandare la stessa riga (retry, coda offline) non la duplica mai. */

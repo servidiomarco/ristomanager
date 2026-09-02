@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Check, Loader2, TriangleAlert, Utensils, X,
+  Check, Loader2, Minus, Plus, TriangleAlert, Utensils, X,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import type { Dish, RestaurantMenu, Reservation, Table, TableMerge, OrderWithItems, OrderItem } from '../types';
@@ -354,10 +354,12 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
 
   const pushLine = useCallback((
     dish: Dish, courseNo: number, qty: number,
-    modifierIds: number[], modifierLabels: string[], modifierDelta: number,
+    entries: { id: number; n: number }[], modifierLabels: string[], modifierDelta: number,
     note?: string,
   ) => {
-    const key = cartKey(dish.id, courseNo, modifierIds, note);
+    // Il verso e le ripetizioni entrano in chiave: «++ prosciutto» e
+    // «- prosciutto» sono piatti diversi in cucina, come le cotture.
+    const key = cartKey(dish.id, courseNo, entries.map(e => `${e.id}x${e.n}`), note);
     setCart(prev => {
       const at = prev.findIndex(l => l.key === key);
       if (at >= 0) {
@@ -370,7 +372,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         // retry di un invio andato in timeout ripresenta la stessa chiave e
         // il server non duplica (vedi ON CONFLICT su order_items).
         key, idem: newIdempotencyKey(), dish, qty, course_no: courseNo,
-        modifier_ids: modifierIds,
+        modifier_ids: entries.map(e => e.id),
+        modifiers: entries,
         modifier_labels: modifierLabels,
         modifier_delta_cents: modifierDelta,
         ...(note ? { note } : {}),
@@ -378,13 +381,21 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     });
   }, []);
 
-  const addToCart = (dish: Dish, modifierIds: number[] = [], note?: string) => {
+  // Etichetta col verso e le ripetizioni cotti dentro, identica alla regola
+  // dello snapshot server: n=1 nome nudo (battitura storica), poi «++ …» /
+  // «-- …». Il delta è n×prezzo: addebito col +, sconto col − (regola di
+  // Marco, come in Passepartout).
+  const signedLabel = (name: string, n: number): string =>
+    n === 1 ? name : n > 0 ? `${'+'.repeat(n)} ${name}` : `${'-'.repeat(-n)} ${name}`;
+
+  const addToCart = (dish: Dish, entries: { id: number; n: number }[] = [], note?: string) => {
     const all = groupsForDish(dish.id).flatMap(g => g.modifiers);
-    const chosen = all.filter(m => modifierIds.includes(m.id));
+    const byId = new Map(all.map(m => [m.id, m]));
+    const chosen = entries.filter(e => byId.has(e.id));
     pushLine(
-      dish, course, 1, modifierIds,
-      chosen.map(m => m.name),
-      chosen.reduce((s, m) => s + m.price_delta_cents, 0),
+      dish, course, 1, chosen,
+      chosen.map(e => signedLabel(byId.get(e.id)!.name, e.n)),
+      chosen.reduce((s, e) => s + e.n * byId.get(e.id)!.price_delta_cents, 0),
       note,
     );
   };
@@ -414,7 +425,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
    *  server: diventa una bozza come tutte le altre, e parte con Invia. */
   const repeatLine = (line: RepeatLine, qty: number) => {
     if (!line.dish) return;
-    pushLine(line.dish, course, qty, line.modifier_ids, line.modifier_labels, line.modifier_delta_cents);
+    pushLine(line.dish, course, qty, line.modifiers, line.modifier_labels, line.modifier_delta_cents);
   };
 
   const repeatAll = (lines: RepeatLine[]) => {
@@ -460,6 +471,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         qty: l.qty,
         course_no: l.course_no,
         modifier_ids: l.modifier_ids,
+        // Le varianti firmate vincono su modifier_ids lato server; le righe
+        // di bozze vecchie (senza modifiers) viaggiano come sempre.
+        ...(l.modifiers ? { modifiers: l.modifiers } : {}),
         note: l.note ?? null,
         // Chiave per riga, stabile dalla nascita della riga: un retry dopo un
         // timeout rimanda le stesse chiavi e il server dedup-a invece di
@@ -1211,7 +1225,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           dish={variantFor}
           groups={groupsForDish(variantFor.id)}
           onCancel={() => setVariantFor(null)}
-          onConfirm={(ids, note) => { addToCart(variantFor, ids, note); setVariantFor(null); }}
+          onConfirm={(entries, note) => { addToCart(variantFor, entries, note); setVariantFor(null); }}
         />
       )}
 
@@ -1359,26 +1373,44 @@ const VariantSheet: React.FC<{
   dish: Dish;
   groups: MenuCatalogue['modifier_groups'];
   onCancel: () => void;
-  onConfirm: (ids: number[], note?: string) => void;
+  onConfirm: (entries: { id: number; n: number }[], note?: string) => void;
 }> = ({ dish, groups, onCancel, onConfirm }) => {
-  const [selected, setSelected] = useState<number[]>([]);
+  // Verso e ripetizioni per variante (battitura alla Passepartout): n>0
+  // aggiunge n volte (addebito), n<0 toglie (sconto), 0 = non applicata.
+  // Le scelte singole (cotture) restano chip a +1: un «-- media» non
+  // significa niente.
+  const [selected, setSelected] = useState<Map<number, number>>(new Map());
   // Variante libera: quello che in cassa il cameriere scrive a mano («senza
   // sale», «metà porzione»). Viaggia come nota di riga — KDS e comanda in
   // cucina la stampano già sotto il piatto.
   const [custom, setCustom] = useState('');
 
-  const toggle = (groupId: number, modId: number, single: boolean) => {
+  const setN = (modId: number, n: number) => {
     setSelected(prev => {
-      const group = groups.find(g => g.id === groupId);
-      const siblings = group ? group.modifiers.map(m => m.id) : [];
-      if (prev.includes(modId)) return prev.filter(x => x !== modId);
-      const cleaned = single ? prev.filter(x => !siblings.includes(x)) : prev;
-      return [...cleaned, modId];
+      const next = new Map(prev);
+      if (n === 0) next.delete(modId);
+      else next.set(modId, Math.max(-5, Math.min(5, n)));
+      return next;
     });
   };
 
+  const toggleSingle = (groupId: number, modId: number) => {
+    setSelected(prev => {
+      const next = new Map(prev);
+      const group = groups.find(g => g.id === groupId);
+      const siblings = group ? group.modifiers.map(m => m.id) : [];
+      const wasOn = next.get(modId) != null;
+      for (const s of siblings) next.delete(s);
+      if (!wasOn) next.set(modId, 1);
+      return next;
+    });
+  };
+
+  const entries = [...selected.entries()].map(([id, n]) => ({ id, n }));
   const missing = groups.filter(g => g.min_select > 0
-    && g.modifiers.filter(m => selected.includes(m.id)).length < g.min_select);
+    && g.modifiers.filter(m => (selected.get(m.id) ?? 0) > 0).length < g.min_select);
+  const signedName = (name: string, n: number): string =>
+    n === 0 || n === 1 ? name : n > 0 ? `${'+'.repeat(n)} ${name}` : `${'-'.repeat(-n)} ${name}`;
 
   return (
     <Sheet
@@ -1395,7 +1427,7 @@ const VariantSheet: React.FC<{
       footer={
         <button
           type="button"
-          onClick={() => onConfirm(selected, custom.trim() || undefined)}
+          onClick={() => onConfirm(entries, custom.trim() || undefined)}
           disabled={missing.length > 0}
           className={`w-full ${dsButton.primary}`}
         >
@@ -1413,31 +1445,86 @@ const VariantSheet: React.FC<{
                 <span className="text-[var(--ds-critical-text)]"> · obbligatorio</span>
               )}
             </div>
-            <div className="flex flex-wrap gap-2">
-              {g.modifiers.map(m => {
-                const active = selected.includes(m.id);
-                return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => toggle(g.id, m.id, single)}
-                    aria-pressed={active}
-                    className={`inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium transition-colors ${
-                      active
-                        ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
-                        : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
-                    }`}
-                  >
-                    {m.name}
-                    {m.price_delta_cents !== 0 && (
-                      <span className="ml-1.5 tabular-nums opacity-75">
-                        {m.price_delta_cents > 0 ? '+' : '−'}{euro(Math.abs(m.price_delta_cents))}
+            {single ? (
+              <div className="flex flex-wrap gap-2">
+                {g.modifiers.map(m => {
+                  const active = (selected.get(m.id) ?? 0) > 0;
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => toggleSingle(g.id, m.id)}
+                      aria-pressed={active}
+                      className={`inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium transition-colors ${
+                        active
+                          ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                          : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
+                      }`}
+                    >
+                      {m.name}
+                      {m.price_delta_cents !== 0 && (
+                        <span className="ml-1.5 tabular-nums opacity-75">
+                          {m.price_delta_cents > 0 ? '+' : '−'}{euro(Math.abs(m.price_delta_cents))}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              /* Le aggiunte alla Passepartout: − e + accumulano il verso —
+                 «+ prosciutto», «++ prosciutto», e sotto lo zero la
+                 rimozione «- prosciutto», «-- prosciutto». Il + addebita
+                 n×prezzo, il − sconta (regola concordata con Marco). */
+              <div className="space-y-1.5">
+                {g.modifiers.map(m => {
+                  const n = selected.get(m.id) ?? 0;
+                  const deltaTot = n * m.price_delta_cents;
+                  return (
+                    <div
+                      key={m.id}
+                      className={`flex min-h-[48px] items-center gap-2 rounded-[14px] px-3 py-1.5 ${
+                        n !== 0 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]' : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
+                      }`}
+                    >
+                      <span className="min-w-0 flex-1 truncate text-[15px] font-medium">
+                        {signedName(m.name, n)}
+                        {n !== 0 && deltaTot !== 0 && (
+                          <span className="ml-1.5 tabular-nums opacity-75">
+                            {deltaTot > 0 ? '+' : '−'}{euro(Math.abs(deltaTot))}
+                          </span>
+                        )}
+                        {n === 0 && m.price_delta_cents !== 0 && (
+                          <span className="ml-1.5 tabular-nums opacity-60">
+                            {m.price_delta_cents > 0 ? '+' : '−'}{euro(Math.abs(m.price_delta_cents))}
+                          </span>
+                        )}
                       </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+                      <button
+                        type="button"
+                        onClick={() => setN(m.id, n - 1)}
+                        aria-label={`Togli ${m.name}`}
+                        className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full transition-colors ${
+                          n !== 0 ? 'bg-white/15 hover:bg-white/25' : 'bg-[var(--ds-surface)] hover:bg-[var(--ds-border)]'
+                        }`}
+                      >
+                        <Minus size={16} aria-hidden />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setN(m.id, n + 1)}
+                        aria-label={`Aggiungi ${m.name}`}
+                        className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full transition-colors ${
+                          n !== 0 ? 'bg-white/15 hover:bg-white/25' : 'bg-[var(--ds-surface)] hover:bg-[var(--ds-border)]'
+                        }`}
+                      >
+                        <Plus size={16} aria-hidden />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         );
       })}

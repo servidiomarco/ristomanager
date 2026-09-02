@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
+import { Client } from 'pg';
 import { api, bearer, ownerToken } from './helpers';
 
 // Il ciclo di servizio visto dalla cucina: DRAFT → QUEUED (invio) → SENT
@@ -444,5 +445,48 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         expect(blocked.status).toBe(409);
         const still = await api().get(`/orders/${usedId}`).set(bearer(token));
         expect(still.status).toBe(200);
+    });
+
+    it('varianti firmate: «++» addebita n volte, «-» sconta, snapshot col prefisso', async () => {
+        // Le varianti nascono solo dall'import Passepartout: per il test si
+        // seminano a DB, come farebbe l'import.
+        const db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
+        await db.connect();
+        const g = await db.query(
+            `INSERT INTO modifier_groups (tenant_id, name, min_select, max_select) VALUES (1, 'Aggiunte Ciclo', 0, 9) RETURNING id`);
+        const m = await db.query(
+            `INSERT INTO modifiers (tenant_id, group_id, name, price_delta_cents) VALUES (1, $1, 'Prosciutto Ciclo', 200) RETURNING id`,
+            [g.rows[0].id]);
+        await db.query(
+            `INSERT INTO dish_modifier_groups (tenant_id, dish_id, group_id) VALUES (1, $1, $2)`,
+            [piatto1, g.rows[0].id]);
+        await db.end();
+        const modId = m.rows[0].id;
+
+        const orderId = await nuovaComanda();
+        const add = await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [
+                { dish_id: piatto1, qty: 1, course_no: 1, modifiers: [{ id: modId, n: 2 }] },
+                { dish_id: piatto1, qty: 1, course_no: 1, modifiers: [{ id: modId, n: -1 }] },
+            ],
+        });
+        expect(add.status).toBe(201);
+        const rows = righe(add.body);
+        // «++»: nome col prefisso, delta 2× in ADDEBITO, totale riga coerente.
+        const plus = rows.find((r: any) => r.modifiers?.[0]?.n === 2);
+        expect(plus.modifiers[0].name).toBe('++ Prosciutto Ciclo');
+        expect(plus.modifiers[0].price_delta_cents).toBe(400);
+        expect(plus.line_total_cents).toBe(1800 + 400);
+        // «-»: rimozione in SCONTO (regola di Marco, come in Passepartout).
+        const minus = rows.find((r: any) => r.modifiers?.[0]?.n === -1);
+        expect(minus.modifiers[0].name).toBe('- Prosciutto Ciclo');
+        expect(minus.modifiers[0].price_delta_cents).toBe(-200);
+        expect(minus.line_total_cents).toBe(1800 - 200);
+
+        // La variante resta legata al SUO piatto: su un altro → 400.
+        const bad = await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [{ dish_id: piatto2, qty: 1, course_no: 1, modifiers: [{ id: modId, n: 1 }] }],
+        });
+        expect(bad.status).toBe(400);
     });
 });

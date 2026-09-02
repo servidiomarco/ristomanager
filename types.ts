@@ -659,8 +659,12 @@ export interface Modifier {
 // domani il listino cambia.
 export interface OrderItemModifier {
   id?: number | null;
+  /** Già col prefisso del verso quando firmata: «++ prosciutto». */
   name: string;
+  /** Già moltiplicato per n: addebito col +, sconto col −. */
   price_delta_cents: number;
+  /** Verso e ripetizioni (n>0 aggiunge, n<0 toglie). Assente = +1 storico. */
+  n?: number;
 }
 
 export type OrderStatus = 'OPEN' | 'CLOSED' | 'VOIDED';
