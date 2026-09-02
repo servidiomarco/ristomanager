@@ -49,6 +49,11 @@ export const CourseList: React.FC<CourseListProps> = ({
       const sent = isSent(status);
       const current = n === course;
       const badge = COURSE_BADGE[status];
+      // Righe rimaste in coda dentro un'uscita GIÀ partita (aggiunte dopo il
+      // lancio in un fire mode che non le fa partire da solo, o dati vecchi):
+      // il «Chiama» deve coprirle, o restano orfane — l'uscita non risulta
+      // «in coda» e il bottone normale non comparirebbe.
+      const strandedQueued = status === 'FIRED' && serverRows.some(i => i.status === 'QUEUED');
 
       if (serverRows.length === 0 && draftRows.length === 0 && !current) {
         // L'uscita vuota resta un bersaglio: portarci sopra il prossimo piatto
@@ -84,6 +89,17 @@ export const CourseList: React.FC<CourseListProps> = ({
             {sent && <StatusPill tone={badge.tone}>{badge.text}</StatusPill>}
             {!sent && serverRows.length > 0 && (
               <StatusPill tone="pending">da inviare</StatusPill>
+            )}
+            {strandedQueued && onFire && (
+              <button
+                type="button"
+                onClick={() => onFire(n)}
+                disabled={busy}
+                title="Lancia in cucina le righe rimaste in coda su questa uscita"
+                className="flex-shrink-0 rounded-full bg-[var(--ds-action-bg)] px-3.5 py-1.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+              >
+                Chiama
+              </button>
             )}
             {status === 'QUEUED' && (
               <>
@@ -133,6 +149,9 @@ export const CourseList: React.FC<CourseListProps> = ({
                       <span className="text-[13px] text-[var(--ds-text-muted)]">
                         {' · '}{[...(i.modifiers ?? []).map(m => m.name), ...(i.note ? [i.note] : [])].join(', ')}
                       </span>
+                    )}
+                    {sent && i.status === 'QUEUED' && (
+                      <span className="text-[13px] text-[var(--ds-pending-text)]"> · in coda</span>
                     )}
                   </span>
                   <span className="flex-shrink-0 text-[14px] tabular-nums text-[var(--ds-text-muted)]">

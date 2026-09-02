@@ -383,4 +383,38 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         expect(row.served_at).toBeTruthy();
         expect(row.items).toEqual([{ name: 'Tagliata Collaudo', qty: 1 }]);
     });
+
+    it("le righe aggiunte a un'uscita già lanciata partono subito, in qualunque fire mode", async () => {
+        // AUTO_FIRST: la 2ª uscita NON parte da sola all'invio — è il caso
+        // del T40 al collaudo, dove i primi aggiunti dopo il lancio
+        // restavano QUEUED per sempre (senza passe nessuno li lanciava più).
+        await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'AUTO_FIRST' });
+        const orderId = await nuovaComanda();
+        await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [
+                { dish_id: piatto1, qty: 1, course_no: 1 },
+                { dish_id: piatto2, qty: 1, course_no: 2 },
+            ],
+        });
+        const first = await api().post(`/orders/${orderId}/send`).set(bearer(token)).send({});
+        expect(first.body.fired_courses).toEqual([1]);
+        expect(first.body.queued_courses).toEqual([2]);
+
+        // Il cameriere chiama la 2ª; poi il tavolo aggiunge un piatto.
+        const fired = await api().post(`/orders/${orderId}/courses/2/fire`).set(bearer(token)).send({});
+        expect(fired.status).toBe(200);
+        await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [{ dish_id: piatto1, qty: 2, course_no: 2 }],
+        });
+        const second = await api().post(`/orders/${orderId}/send`).set(bearer(token)).send({});
+        expect(second.status).toBe(200);
+        // La chiamata dell'uscita è già avvenuta: la riga nuova parte subito
+        // anche se il mode non lancerebbe la 2ª, e la cucina riceve la
+        // revisione «aggiunto» sulla card già a video.
+        expect(second.body.fired_courses).toContain(2);
+        const rows = second.body.items.filter((i: any) => i.course_no === 2 && i.dish_id != null);
+        expect(rows.every((i: any) => i.status === 'SENT')).toBe(true);
+        // Ripristino il mode per i file successivi (contratto della suite).
+        await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'AUTO_ALL' });
+    });
 });

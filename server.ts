@@ -24754,21 +24754,25 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
             );
             if (inFlight.rows.length === 0) autoNextFirst = [proposedCourses[0]];
         }
-        const toFire = mode === 'AUTO_ALL' ? proposedCourses
+        // Un'uscita che aveva GIÀ righe lanciate e ne riceve altre è una
+        // modifica della card a video, non una card nuova: le righe nuove
+        // partono SUBITO, qualunque sia il fire mode — la chiamata di
+        // quell'uscita è già avvenuta, non c'è più un tempo da decidere.
+        // Senza questo, col passe spento e «prima uscita subito», i primi
+        // aggiunti a una 2ª uscita già in cucina restavano QUEUED per
+        // sempre: invisibili al monitor, senza «Chiama» sulla comanda
+        // (l'uscita non risulta in coda), orfani (T40 al collaudo, 2/09).
+        const prev = await client.query(
+            `SELECT DISTINCT course_no FROM order_items
+             WHERE order_id = $1 AND course_no = ANY($2) AND fired_at IS NOT NULL`,
+            [orderId, proposedCourses]
+        );
+        const alreadyFired: number[] = prev.rows.map((r: any) => r.course_no);
+        const byMode = mode === 'AUTO_ALL' ? proposedCourses
                      : mode === 'AUTO_FIRST' ? proposedCourses.filter(c => c === 1)
                      : mode === 'AUTO_NEXT' ? autoNextFirst
                      : [];
-        // Un'uscita che aveva GIÀ righe lanciate e ne riceve altre è una
-        // modifica della card a video, non una card nuova: va segnalata.
-        let alreadyFired: number[] = [];
-        if (toFire.length > 0) {
-            const prev = await client.query(
-                `SELECT DISTINCT course_no FROM order_items
-                 WHERE order_id = $1 AND course_no = ANY($2) AND fired_at IS NOT NULL`,
-                [orderId, toFire]
-            );
-            alreadyFired = prev.rows.map((r: any) => r.course_no);
-        }
+        const toFire = [...new Set([...byMode, ...alreadyFired])].sort((a, b) => a - b);
         const fired: number[] = [];
         for (const c of toFire) {
             const rows = await fireCourseInTx(client, req.tenantId!, orderId, c);

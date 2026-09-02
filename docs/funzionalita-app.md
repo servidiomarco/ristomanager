@@ -542,6 +542,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-02 | Comande, Cucina e Passe | I piatti aggiunti a un'uscita già lanciata partono subito all'invio, in qualunque modalità di lancio; sulla comanda le righe rimaste in coda dentro un'uscita partita sono marcate «in coda» con un Chiama dedicato. |
 | 2026-09-02 | Menu & Banchetti | Menu multipli: Alla carta, Banchetti e menu stagionali (Ferragosto, Pasqua…), con appartenenza dei piatti a spunte nella scheda; comande, cassa e menu digitale seguono Alla carta, la composizione banchetti pesca dal menu Banchetti o da uno stagionale. |
 | 2026-09-02 | Menu & Banchetti | Banchetti in voce di sidebar propria, divisi in Preventivi e Confermati: un evento nasce preventivo, si conferma con un'azione e la registrazione di un acconto propone la conferma; i KPI contano solo i confermati. |
 | 2026-09-02 | Comande, Cucina e Passe | Le card del monitor cucina dicono chi ha preso la comanda («di Luca»); sul palmare la comanda aperta da un altro operatore (o dalla cassa) lo dichiara in testa («Comanda di Luca» / «Comanda dalla cassa»). |

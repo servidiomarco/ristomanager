@@ -4,7 +4,7 @@ import type { Dish, OrderItem, OrderWithItems } from '../../types';
 import { EmptyState, SectionHeader, Sheet, SegmentedControl } from '../ds';
 import { CourseList, SendFooter } from './CourseColumn';
 import {
-  cartForCourse, cartSum, courseLabel, euro, groupByCategory, ordinal,
+  cartForCourse, cartSum, courseLabel, euro, groupByCategory, isSystemLine, ordinal,
   repeatLines, repeatQty, repeatTotal, rowCount, rowCountLabel,
   type CartLine, type RepeatLine,
 } from './orderView';
@@ -56,13 +56,24 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
   const courseLines = cartForCourse(cart, course);
   const rows = rowCount(order, cart);
 
+  // Le bozze rimaste SUL SERVER (uscita tornata in bozza, invio interrotto)
+  // contano come «da inviare» anche qui: è il TERZO footer con lo stesso
+  // dovere — palmare e colonna erano già stati sistemati (tavolo 40), questo
+  // dentro il foglio no, e a carrello vuoto l'Invia restava disabilitato con
+  // la pill «da inviare» a vista (successo di nuovo al 40, 3ª uscita).
+  const isServerDraft = (i: OrderItem) => i.status === 'DRAFT' && !isSystemLine(i);
+  const serverCourseQty = order.items.reduce((s, i) => s + (isServerDraft(i) && i.course_no === course ? i.qty : 0), 0);
+  const serverCourseTotal = order.items.reduce((s, i) => s + (isServerDraft(i) && i.course_no === course ? i.qty * i.unit_price_cents : 0), 0);
+  const serverAllQty = order.items.reduce((s, i) => s + (isServerDraft(i) ? i.qty : 0), 0);
+  const serverAllTotal = order.items.reduce((s, i) => s + (isServerDraft(i) ? i.qty * i.unit_price_cents : 0), 0);
+
   const footer = tab === 'course' ? (
     <SendFooter
       course={course}
-      courseCount={courseLines.reduce((s, l) => s + l.qty, 0)}
-      courseTotal={cartSum(courseLines)}
-      allCount={cart.reduce((s, l) => s + l.qty, 0)}
-      allTotal={cartSum(cart)}
+      courseCount={courseLines.reduce((s, l) => s + l.qty, 0) + serverCourseQty}
+      courseTotal={cartSum(courseLines) + serverCourseTotal}
+      allCount={cart.reduce((s, l) => s + l.qty, 0) + serverAllQty}
+      allTotal={cartSum(cart) + serverAllTotal}
       busy={busy}
       onSend={onSend}
       onSendAll={onSendAll}
