@@ -30,6 +30,11 @@ export interface CartLine {
   qty: number;
   course_no: number;
   modifier_ids: number[];
+  /** Varianti firmate alla Passepartout: n>0 aggiunge (n volte, addebito),
+   *  n<0 toglie (sconto). Assente = battitura storica (tutto a +1). Le
+   *  etichette e il delta qui sopra sono GIÀ cotti col verso e le
+   *  ripetizioni: chi mostra la riga non deve sapere la regola. */
+  modifiers?: { id: number; n: number }[];
   modifier_labels: string[];
   modifier_delta_cents: number;
   note?: string;
@@ -39,8 +44,8 @@ export interface CartLine {
  *  due. Stesso piatto ma varianti diverse restano righe distinte: in cucina
  *  «al sangue» e «ben cotta» sono due piatti. La variante libera entra in
  *  chiave per lo stesso motivo: due note diverse sono due piatti diversi. */
-export const cartKey = (dishId: number, courseNo: number, modifierIds: number[], note?: string): string =>
-  `${dishId}|${courseNo}|${[...modifierIds].sort((a, b) => a - b).join(',')}|${(note ?? '').trim().toLowerCase()}`;
+export const cartKey = (dishId: number, courseNo: number, modifierParts: (number | string)[], note?: string): string =>
+  `${dishId}|${courseNo}|${[...modifierParts].map(String).sort().join(',')}|${(note ?? '').trim().toLowerCase()}`;
 
 export const cartUnitCents = (l: CartLine): number =>
   Math.round(Number(l.dish.price) * 100) + l.modifier_delta_cents;
@@ -110,6 +115,9 @@ export interface RepeatLine {
   /** Le uscite in cui compare, in ordine. */
   courses: number[];
   modifier_ids: number[];
+  /** Varianti firmate della riga d'origine: la ripetizione le riporta
+   *  identiche («++ prosciutto» resta «++ prosciutto»). */
+  modifiers: { id: number; n: number }[];
   modifier_labels: string[];
   modifier_delta_cents: number;
 }
@@ -121,9 +129,11 @@ export const repeatLines = (
 
   const push = (
     dishId: number | null, name: string, unitCents: number, qty: number, courseNo: number,
-    modifierIds: number[], modifierLabels: string[], modifierDelta: number,
+    modifierEntries: { id: number; n: number }[], modifierLabels: string[], modifierDelta: number,
   ) => {
-    const key = `${dishId ?? name}|${[...modifierIds].sort((a, b) => a - b).join(',')}`;
+    // Il verso e le ripetizioni entrano in chiave: «++ prosciutto» e
+    // «- prosciutto» non collassano nella stessa riga.
+    const key = `${dishId ?? name}|${modifierEntries.map(e => `${e.id}x${e.n}`).sort().join(',')}`;
     const at = byKey.get(key);
     if (at) {
       at.qty += qty;
@@ -136,7 +146,9 @@ export const repeatLines = (
       category: dish?.category ?? null,
       unit_cents: unitCents + modifierDelta,
       qty, courses: [courseNo],
-      modifier_ids: modifierIds, modifier_labels: modifierLabels,
+      modifier_ids: modifierEntries.map(e => e.id),
+      modifiers: modifierEntries,
+      modifier_labels: modifierLabels,
       modifier_delta_cents: modifierDelta,
     });
   };
@@ -148,8 +160,8 @@ export const repeatLines = (
       i.dish_id, i.name_snapshot, i.unit_price_cents, i.qty, i.course_no,
       // Lo snapshot porta sempre l'id del modificatore (lo scrive il server
       // alla creazione della riga), quindi ripetere una variante la ripete
-      // davvero invece di perderla per strada.
-      mods.map(m => m.id).filter((x): x is number => x != null),
+      // davvero invece di perderla per strada — verso e ripetizioni compresi.
+      mods.filter(m => m.id != null).map(m => ({ id: m.id as number, n: m.n ?? 1 })),
       mods.map(m => m.name),
       mods.reduce((s, m) => s + m.price_delta_cents, 0),
     );
@@ -157,7 +169,8 @@ export const repeatLines = (
   for (const l of cart) {
     push(
       l.dish.id, l.dish.name, Math.round(Number(l.dish.price) * 100), l.qty, l.course_no,
-      l.modifier_ids, l.modifier_labels, l.modifier_delta_cents,
+      l.modifiers ?? l.modifier_ids.map(id => ({ id, n: 1 })),
+      l.modifier_labels, l.modifier_delta_cents,
     );
   }
 

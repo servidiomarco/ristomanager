@@ -24843,29 +24843,56 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
 
             // Varianti: accettiamo solo quelle collegate al piatto, altrimenti
             // un client sbagliato potrebbe attaccare "al sangue" a un tiramisù.
-            const modifierIds: number[] = Array.isArray(raw?.modifier_ids)
-                ? raw.modifier_ids.map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n))
-                : [];
+            //
+            // Due forme nel body. Storica: modifier_ids (ogni id vale +1).
+            // Firmata (battitura alla Passepartout, chiesta da Marco il 2/09):
+            // modifiers: [{id, n}] con n∈[-5..5]\{0} — «++ prosciutto» = due
+            // aggiunte, «-- prosciutto» = doppia rimozione. Il verso e le
+            // ripetizioni si CUOCIONO nello snapshot (nome col prefisso,
+            // delta già moltiplicato: n×prezzo, addebito col +, sconto col −)
+            // così comanda, monitor, preconto e scontrino leggono giusto
+            // senza sapere nulla della regola. n=1 resta il nome nudo: è la
+            // battitura storica (cotture e scelte), zero regressioni.
+            const signedEntries: { id: number; n: number }[] = Array.isArray(raw?.modifiers)
+                ? raw.modifiers
+                    .map((e: any) => ({ id: Number(e?.id), n: Number(e?.n) }))
+                    .filter((e: any) => Number.isFinite(e.id) && Number.isInteger(e.n) && e.n !== 0 && Math.abs(e.n) <= 5)
+                : (Array.isArray(raw?.modifier_ids)
+                    ? raw.modifier_ids.map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n)).map((id: number) => ({ id, n: 1 }))
+                    : []);
             let modifiers: any[] | null = null;
-            if (modifierIds.length > 0) {
+            if (signedEntries.length > 0) {
+                const uniqueIds = [...new Set(signedEntries.map(e => e.id))];
+                if (uniqueIds.length !== signedEntries.length) {
+                    await client.query('ROLLBACK'); client.release();
+                    return res.status(400).json({ error: `items[${i}]: variante ripetuta nel payload — le ripetizioni viaggiano su n` });
+                }
                 const mres = await client.query(
                     `SELECT m.id, m.name, m.price_delta_cents
                      FROM modifiers m
                      JOIN dish_modifier_groups dmg ON dmg.group_id = m.group_id AND dmg.tenant_id = m.tenant_id
                      WHERE m.id = ANY($1::int[]) AND dmg.dish_id = $2 AND m.tenant_id = $3 AND m.is_active`,
-                    [modifierIds, dishId, req.tenantId!]
+                    [uniqueIds, dishId, req.tenantId!]
                 );
-                if (mres.rows.length !== modifierIds.length) {
+                if (mres.rows.length !== uniqueIds.length) {
                     await client.query('ROLLBACK'); client.release();
                     return res.status(400).json({
                         error: `items[${i}]: una o più varianti non sono valide per questo piatto`,
-                        richieste: modifierIds,
+                        richieste: uniqueIds,
                         ammesse: mres.rows.map((r: any) => r.id),
                     });
                 }
-                modifiers = mres.rows.map((r: any) => ({
-                    id: r.id, name: r.name, price_delta_cents: Number(r.price_delta_cents),
-                }));
+                const byId = new Map(mres.rows.map((r: any) => [Number(r.id), r]));
+                modifiers = signedEntries.map(e => {
+                    const m: any = byId.get(e.id);
+                    const prefix = e.n === 1 ? '' : e.n > 0 ? `${'+'.repeat(e.n)} ` : `${'-'.repeat(-e.n)} `;
+                    return {
+                        id: m.id,
+                        name: `${prefix}${m.name}`,
+                        price_delta_cents: e.n * Number(m.price_delta_cents),
+                        n: e.n,
+                    };
+                });
             }
 
             // La partita viene copiata sulla riga, non risolta via join a
