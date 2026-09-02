@@ -3549,11 +3549,13 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
         }
 
         await ensureSystemMenus(req.tenantId!);
+        const catPrefsSync = await getMenuCategoryPrefs(req.tenantId!);
         const esito = await withTenant(req.tenantId!, async (client) => {
             let creati = 0, aggiornati = 0;
             const refs: string[] = [];
             const groupCache = new Map<string, number>();
-            // Gli articoli nuovi della cassa entrano nel menu Alla carta:
+            // Gli articoli nuovi della cassa entrano nei menu della loro
+            // categoria (se impostati in modale Categorie), o in Alla carta:
             // sono voci da battere in comanda. Le appartenenze dei piatti
             // già presenti non si toccano — quelle le cura il ristoratore.
             const cartaRs = await client.query(
@@ -3561,6 +3563,11 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
                 [req.tenantId!]
             );
             const cartaMenuId: number | null = cartaRs.rows[0]?.id ?? null;
+            const menusForCategory = (cat: string): number[] => {
+                const ids = catPrefsSync[cat.trim()]?.menu_ids;
+                if (Array.isArray(ids) && ids.length > 0) return ids;
+                return cartaMenuId != null ? [cartaMenuId] : [];
+            };
             for (const a of validi) {
                 const ref = `pp:articolo:${Number(a.idGestionale)}`;
                 refs.push(ref);
@@ -3582,11 +3589,16 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
                 );
                 if (up.rows[0]?.inserted) creati++; else aggiornati++;
                 const dishId: number = up.rows[0].id;
-                if (up.rows[0]?.inserted && cartaMenuId != null) {
+                if (up.rows[0]?.inserted) {
+                    // SELECT su menus, non VALUES: un id rimasto nel blob
+                    // dopo l'eliminazione di un menu non deve far saltare
+                    // il sync per violazione di FK.
                     await client.query(
                         `INSERT INTO dish_menus (tenant_id, dish_id, menu_id)
-                         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-                        [req.tenantId!, dishId, cartaMenuId]
+                         SELECT $1, $2, m.id FROM menus m
+                         WHERE m.tenant_id = $1 AND m.id = ANY($3::int[])
+                         ON CONFLICT DO NOTHING`,
+                        [req.tenantId!, dishId, menusForCategory(String(a.categoria ?? 'Senza categoria'))]
                     );
                 }
 
@@ -3734,7 +3746,10 @@ async function saveMenuCategoryTranslations(tenantId: number, map: Record<string
 // accesa e va in coda — così le categorie nuove (a mano o dal sync cassa)
 // compaiono senza bisogno di un passaggio in più.
 const MENU_CAT_PREFS_KEY = 'menu_category_prefs';
-type MenuCategoryPref = { enabled: boolean; sort: number };
+// menu_ids: i menu "della categoria" — solo il DEFAULT per i piatti nuovi di
+// quella categoria. La verità sull'appartenenza resta sui piatti (dish_menus):
+// la spunta in modale applica in blocco e ogni piatto resta libero dopo.
+type MenuCategoryPref = { enabled: boolean; sort: number; menu_ids?: number[] };
 
 async function getMenuCategoryPrefs(tenantId: number): Promise<Record<string, MenuCategoryPref>> {
     const rs = await queryWithRetry(
@@ -3780,6 +3795,9 @@ app.get('/menu/categories', authenticate, async (req, res) => {
                 name,
                 dishes: byName.get(name) ?? 0,
                 enabled: prefs[name]?.enabled !== false,
+                // Default dei piatti nuovi della categoria; null = mai
+                // impostato (il form ripiega sul menu che si sta guardando).
+                menu_ids: prefs[name]?.menu_ids ?? null,
             })),
         });
     } catch (err: any) {
@@ -3797,9 +3815,15 @@ app.put('/menu/categories', authenticate, requirePermission('menu:full'), async 
         if (!Array.isArray(input) || input.some((c: any) => typeof c?.name !== 'string' || c.name.trim() === '')) {
             return res.status(400).json({ error: 'categories deve essere una lista di { name, enabled }' });
         }
+        // Il PUT riscrive stato e ordine, ma i menu della categoria vengono
+        // da un'altra azione (la spunta in modale): si riportano dal blob
+        // esistente o ogni riordino li azzererebbe.
+        const existing = await getMenuCategoryPrefs(req.tenantId!);
         const prefs: Record<string, MenuCategoryPref> = {};
         input.forEach((c: any, i: number) => {
-            prefs[c.name.trim()] = { enabled: c.enabled !== false, sort: i };
+            const name = c.name.trim();
+            prefs[name] = { enabled: c.enabled !== false, sort: i };
+            if (Array.isArray(existing[name]?.menu_ids)) prefs[name].menu_ids = existing[name].menu_ids;
         });
         await queryWithRetry(
             `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
@@ -3814,6 +3838,102 @@ app.put('/menu/categories', authenticate, requirePermission('menu:full'), async 
         res.json({ ok: true });
     } catch (err: any) {
         console.error('PUT /menu/categories error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// La spunta di menu su una categoria: applica in blocco a tutti i suoi
+// piatti (aggiunge o toglie le righe dish_menus) e registra il default nel
+// blob prefs per i piatti nuovi della categoria. I piatti restano liberi:
+// dopo, ogni scheda si regola da sola — la prossima spunta di categoria
+// riapplica in blocco, com'è giusto per un'azione dichiarata "in blocco".
+app.put('/menu/category-menus', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const category = typeof req.body?.category === 'string' ? req.body.category : '';
+        const menuId = Number(req.body?.menu_id);
+        const member = req.body?.member;
+        if (!category.trim() || !Number.isInteger(menuId) || typeof member !== 'boolean') {
+            return res.status(400).json({ error: 'servono category, menu_id e member (true/false)' });
+        }
+        const menuRs = await queryWithRetry(
+            'SELECT id FROM menus WHERE id = $1 AND tenant_id = $2',
+            [menuId, req.tenantId!]
+        );
+        if (!menuRs.rows[0]) return res.status(404).json({ error: 'Menu non trovato' });
+
+        let applied: number;
+        if (member) {
+            const ins = await queryWithRetry(
+                `INSERT INTO dish_menus (tenant_id, dish_id, menu_id)
+                 SELECT $1, d.id, $2 FROM dishes d
+                 WHERE d.tenant_id = $1 AND d.category = $3
+                 ON CONFLICT DO NOTHING`,
+                [req.tenantId!, menuId, category]
+            );
+            applied = ins.rowCount ?? 0;
+        } else {
+            const del = await queryWithRetry(
+                `DELETE FROM dish_menus dm USING dishes d
+                 WHERE dm.dish_id = d.id AND dm.menu_id = $2
+                   AND d.tenant_id = $1 AND d.category = $3`,
+                [req.tenantId!, menuId, category]
+            );
+            applied = del.rowCount ?? 0;
+        }
+
+        const prefs = await getMenuCategoryPrefs(req.tenantId!);
+        const prev = prefs[category.trim()];
+        // sort assente = "in coda, alfabetico": il sentinella riproduce lo
+        // stesso comportamento del comparatore senza inventare una posizione.
+        const next: MenuCategoryPref = prev ?? { enabled: true, sort: Number.MAX_SAFE_INTEGER };
+        // Il default per i piatti nuovi rispecchia dove stanno DAVVERO tutti
+        // i piatti della categoria dopo l'applicazione — non la sola spunta
+        // toccata: la modale mostra le pill piene, e un piatto nuovo deve
+        // nascere esattamente lì.
+        const dishCount = await queryWithRetry(
+            'SELECT count(*)::int AS n FROM dishes WHERE tenant_id = $1 AND category = $2',
+            [req.tenantId!, category]
+        );
+        if ((dishCount.rows[0]?.n ?? 0) > 0) {
+            const full = await queryWithRetry(
+                `SELECT m.id FROM menus m
+                 WHERE m.tenant_id = $1
+                   AND NOT EXISTS (
+                     SELECT 1 FROM dishes d
+                     WHERE d.tenant_id = $1 AND d.category = $2
+                       AND NOT EXISTS (SELECT 1 FROM dish_menus dm WHERE dm.dish_id = d.id AND dm.menu_id = m.id)
+                   )
+                 ORDER BY m.id`,
+                [req.tenantId!, category]
+            );
+            next.menu_ids = full.rows.map((r: any) => Number(r.id));
+        } else {
+            const ids = new Set(next.menu_ids ?? []);
+            if (member) ids.add(menuId); else ids.delete(menuId);
+            next.menu_ids = [...ids].sort((a, b) => a - b);
+        }
+        prefs[category.trim()] = next;
+        await queryWithRetry(
+            `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (tenant_id, key) DO UPDATE
+               SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+            [req.tenantId!, MENU_CAT_PREFS_KEY, JSON.stringify(prefs)]
+        );
+
+        // I client ricaricano l'anagrafica intera: un evento solo, non una
+        // pioggia di dish:updated.
+        try { socketService?.broadcastToAll(req.tenantId!, 'dish:synced', { categoria: category, menu_id: menuId, member, piatti: applied }); } catch (_) {}
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.DISH, menuId, category,
+                { category_menu: member ? 'added' : 'removed', piatti: applied }
+            ).catch(() => {});
+        }
+        res.json({ ok: true, piatti: applied });
+    } catch (err: any) {
+        console.error('PUT /menu/category-menus error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -10173,6 +10293,27 @@ app.delete('/menus/:id', authenticate, requirePermission('menu:full'), async (re
             [id, req.tenantId!]
         );
         if (!rs.rows[0]) return res.status(404).json({ error: 'Menu non trovato o di sistema' });
+        // Il menu sparisce anche dai default delle categorie, o resterebbe
+        // un id fantasma nel blob prefs.
+        try {
+            const prefs = await getMenuCategoryPrefs(req.tenantId!);
+            let touched = false;
+            for (const p of Object.values(prefs)) {
+                if (Array.isArray(p.menu_ids) && p.menu_ids.includes(id)) {
+                    p.menu_ids = p.menu_ids.filter(m => m !== id);
+                    touched = true;
+                }
+            }
+            if (touched) {
+                await queryWithRetry(
+                    `INSERT INTO app_settings (tenant_id, key, text_value, updated_at)
+                     VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                     ON CONFLICT (tenant_id, key) DO UPDATE
+                       SET text_value = EXCLUDED.text_value, updated_at = CURRENT_TIMESTAMP`,
+                    [req.tenantId!, MENU_CAT_PREFS_KEY, JSON.stringify(prefs)]
+                );
+            }
+        } catch (_) { /* best effort: il blob si risana alla prossima spunta */ }
         try {
             socketService?.broadcastToAll(req.tenantId!, 'menu:deleted', id);
             // Le appartenenze cascano col menu: i client ricaricano
@@ -10229,19 +10370,26 @@ app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, re
         const newDish = result.rows[0];
 
         // Appartenenza ai menu: le spunte del form. Un client che non le
-        // manda (o le manda vuote) ottiene il default Alla carta — un piatto
-        // in nessun menu non si batte da nessuna parte, e non è mai voluto
-        // alla creazione.
+        // manda (o le manda vuote) ottiene il default della categoria (i
+        // menu spuntati in modale Categorie), o Alla carta in mancanza — un
+        // piatto in nessun menu non si batte da nessuna parte, e non è mai
+        // voluto alla creazione.
         await ensureSystemMenus(req.tenantId!);
         let wantedMenus: number[] = Array.isArray(req.body?.menu_ids)
             ? req.body.menu_ids.map(Number).filter(Number.isInteger)
             : [];
         if (wantedMenus.length === 0) {
-            const carta = await queryWithRetry(
-                `SELECT id FROM menus WHERE tenant_id = $1 AND system_key = 'ALLA_CARTA'`,
-                [req.tenantId!]
-            );
-            wantedMenus = carta.rows[0] ? [Number(carta.rows[0].id)] : [];
+            const prefs = await getMenuCategoryPrefs(req.tenantId!);
+            const catDefault = prefs[String(category ?? '').trim()]?.menu_ids;
+            if (Array.isArray(catDefault) && catDefault.length > 0) {
+                wantedMenus = catDefault;
+            } else {
+                const carta = await queryWithRetry(
+                    `SELECT id FROM menus WHERE tenant_id = $1 AND system_key = 'ALLA_CARTA'`,
+                    [req.tenantId!]
+                );
+                wantedMenus = carta.rows[0] ? [Number(carta.rows[0].id)] : [];
+            }
         }
         newDish.menu_ids = await replaceDishMenus(req.tenantId!, newDish.id, wantedMenus);
 

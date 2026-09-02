@@ -469,6 +469,8 @@ export interface MenuCategory {
   name: string;
   dishes: number;
   enabled: boolean;
+  /** Menu della categoria (default per i piatti nuovi); null = mai impostato. */
+  menu_ids?: number[] | null;
 }
 
 export const getMenuCategories = async (): Promise<MenuCategory[]> => {
@@ -485,6 +487,17 @@ export const saveMenuCategories = async (categories: { name: string; enabled: bo
     method: 'PUT',
     headers: getHeaders(),
     body: JSON.stringify({ categories }),
+  });
+};
+
+/** Spunta di menu su una categoria: applica in blocco a tutti i suoi piatti
+ *  e registra il default per i piatti nuovi. Il server broadcasta
+ *  'dish:synced'. */
+export const setCategoryMenu = async (category: string, menuId: number, member: boolean): Promise<void> => {
+  await apiRequest<{ ok: true }>(`${API_URL}/menu/category-menus`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify({ category, menu_id: menuId, member }),
   });
 };
 

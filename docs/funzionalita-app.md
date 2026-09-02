@@ -213,6 +213,7 @@ Due voci in sidebar: **Menu** (i piatti, organizzati in menu) e **Banchetti** (g
 **Menu multipli**
 - La pagina Menu è divisa in menu: **Alla carta** (ciò che si batte in comanda e appare sul menu digitale QR), **Banchetti** (i piatti proponibili nella composizione degli eventi) e i **menu stagionali** creati dal ristoratore (es. Ferragosto, Pasqua), rinominabili ed eliminabili.
 - **Ogni piatto appartiene a uno o più menu** tramite spunte nella sua scheda: lo stesso piatto può stare alla carta e nei banchetti senza doppioni in anagrafica.
+- **Anche le categorie appartengono ai menu**: nella modale «Categorie» ogni categoria ha le spunte dei menu — spuntarne una mette (o toglie) tutti i suoi piatti da quel menu in un colpo, con indicatore parziale («3/12») quando i piatti sono divisi. I singoli piatti restano regolabili dopo, e i piatti nuovi di una categoria nascono nei menu della categoria.
 - I piatti nuovi (anche quelli importati dalla cassa) nascono in Alla carta; il menu pubblico, il palmare comande e la cassa mostrano solo i piatti di quel menu.
 
 **Piatti**
@@ -542,6 +543,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-02 | Menu & Banchetti | Le categorie appartengono ai menu: spunte per categoria nella modale «Categorie» che applicano in blocco a tutti i piatti (con indicatore parziale), e i piatti nuovi della categoria nascono nei menu della categoria. |
 | 2026-09-02 | Menu & Banchetti | Menu multipli: Alla carta, Banchetti e menu stagionali (Ferragosto, Pasqua…), con appartenenza dei piatti a spunte nella scheda; comande, cassa e menu digitale seguono Alla carta, la composizione banchetti pesca dal menu Banchetti o da uno stagionale. |
 | 2026-09-02 | Menu & Banchetti | Banchetti in voce di sidebar propria, divisi in Preventivi e Confermati: un evento nasce preventivo, si conferma con un'azione e la registrazione di un acconto propone la conferma; i KPI contano solo i confermati. |
 | 2026-09-02 | Comande, Cucina e Passe | Le card del monitor cucina dicono chi ha preso la comanda («di Luca»); sul palmare la comanda aperta da un altro operatore (o dalla cassa) lo dichiara in testa («Comanda di Luca» / «Comanda dalla cassa»). |
