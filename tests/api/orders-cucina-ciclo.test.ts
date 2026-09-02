@@ -424,4 +424,25 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         // Ripristino il mode per i file successivi (contratto della suite).
         await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'AUTO_ALL' });
     });
+
+    it('una comanda intonsa si disfa; con righe battute il DELETE rifiuta', async () => {
+        // Aperta toccando il tavolo e abbandonata: si disfa, il tavolo torna
+        // com'era (niente «occupato», niente comanda appesa a fine servizio).
+        const emptyId = await nuovaComanda();
+        const gone = await api().delete(`/orders/${emptyId}`).set(bearer(token));
+        expect(gone.status).toBe(200);
+        const refetch = await api().get(`/orders/${emptyId}`).set(bearer(token));
+        expect(refetch.status).toBe(404);
+
+        // Con anche una sola riga battuta la guardia rifiuta: il disfare è
+        // solo per le comande mai toccate.
+        const usedId = await nuovaComanda();
+        await api().post(`/orders/${usedId}/items`).set(bearer(token)).send({
+            items: [{ dish_id: piatto1, qty: 1, course_no: 1 }],
+        });
+        const blocked = await api().delete(`/orders/${usedId}`).set(bearer(token));
+        expect(blocked.status).toBe(409);
+        const still = await api().get(`/orders/${usedId}`).set(bearer(token));
+        expect(still.status).toBe(200);
+    });
 });
