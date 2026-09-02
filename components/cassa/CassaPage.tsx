@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import type { Customer, Dish, OrderItem, OrderWithItems, Reservation, Room, Table } from '../../types';
+import type { Customer, Dish, RestaurantMenu, OrderItem, OrderWithItems, Reservation, Room, Table } from '../../types';
 import { ArrivalStatus, PaymentStatus, ReservationSource, ReservationStatus } from '../../types';
 import type { CashSessionView, CashTransactionsView } from '../../types';
 import { Shift } from '../../types';
@@ -49,6 +49,8 @@ import { buildQueue, tablesInService } from './cassaView';
 
 interface CassaPageProps {
   dishes: Dish[];
+  /** Serve solo Alla carta: la griglia batte gli stessi piatti di Comande. */
+  menus: RestaurantMenu[];
   tables: Table[];
   rooms: Room[];
   reservations: Reservation[];
@@ -65,7 +67,7 @@ interface CassaPageProps {
 type Screen = 'queue' | 'tables' | 'table' | 'payment' | 'split' | 'esito' | 'transazioni' | 'cassetto';
 
 export const CassaPage: React.FC<CassaPageProps> = ({
-  dishes: allDishes, tables, rooms, reservations, globalDate, globalShiftFilter, onImmersive, onOpenInComande, onOpenPagamenti,
+  dishes: allDishes, menus, tables, rooms, reservations, globalDate, globalShiftFilter, onImmersive, onOpenInComande, onOpenPagamenti,
 }) => {
   const [screen, setScreen] = useState<Screen>('queue');
   const [roomId, setRoomId] = useState<string>('ALL');
@@ -140,8 +142,12 @@ export const CassaPage: React.FC<CassaPageProps> = ({
   }, []);
 
   // I piatti spenti restano in anagrafica per lo storico ma non si battono
-  // più: stesso filtro di Comande, così le due griglie mostrano lo stesso menu.
-  const dishes = useMemo(() => allDishes.filter(d => d.is_active !== false), [allDishes]);
+  // più: stesso filtro di Comande, così le due griglie mostrano lo stesso
+  // menu — incluso il perimetro Alla carta (le liste banchetti e i menu
+  // stagionali non si battono nemmeno qui).
+  const cartaMenuId = useMemo(() => menus.find(m => m.system_key === 'ALLA_CARTA')?.id ?? null, [menus]);
+  const dishes = useMemo(() => allDishes.filter(d => d.is_active !== false
+    && (cartaMenuId == null || !Array.isArray(d.menu_ids) || d.menu_ids.includes(cartaMenuId))), [allDishes, cartaMenuId]);
 
   useEffect(() => {
     getMenuCatalogue().then(setCatalogue).catch(() => setCatalogue(null));

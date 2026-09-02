@@ -1,7 +1,7 @@
 
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Dish, BanquetMenu, BanquetCourse, Shift, COMMON_ALLERGENS, VAT_RATES, Customer, Table, TableMerge, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
+import { Dish, RestaurantMenu, BanquetMenu, BanquetCourse, BanquetStatus, Shift, COMMON_ALLERGENS, VAT_RATES, Customer, Table, TableMerge, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
 import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, SlidersHorizontal } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { getRomeDatePart } from '../utils/reservationTime';
@@ -11,7 +11,7 @@ import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BanquetPaymentsModal } from './BanquetPaymentsModal';
 import { DishDetailModal } from './DishDetailModal';
 import { CustomerPickerModal } from './CustomerPickerModal';
-import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, type MenuImportResult, type MenuTranslateResult, type MenuCategory } from '../services/apiService';
+import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, type MenuImportResult, type MenuTranslateResult, type MenuCategory } from '../services/apiService';
 import { billsApiService } from '../services/billsApiService';
 import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '../contexts/AuthContext';
@@ -153,7 +153,12 @@ const formatEuro = (n: number): string =>
   new Intl.NumberFormat('it-IT', { minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(Math.round(n));
 
 interface MenuManagerProps {
+  /* Quale metà mostrare: DISHES è la pagina Menu (piatti nei vari menu),
+     BANQUETS la pagina Banchetti (gli eventi). Un componente solo perché
+     condividono anagrafiche, wizard e modali. */
+  mode: 'DISHES' | 'BANQUETS';
   dishes: Dish[];
+  menus: RestaurantMenu[];
   banquetMenus: BanquetMenu[];
   tables: Table[];
   rooms: Room[];
@@ -165,16 +170,16 @@ interface MenuManagerProps {
   onUpdateBanquetMenu: (id: number, menu: Partial<BanquetMenu>) => void;
   onDeleteBanquetMenu: (id: number) => void;
   canEdit?: boolean;
-  initialTab?: 'DISHES' | 'BANQUETS';
   autoOpenNewBanquet?: boolean;
   onAutoOpenNewBanquetHandled?: () => void;
   autoOpenNewDish?: boolean;
   onAutoOpenNewDishHandled?: () => void;
-  onActiveTabChange?: (tab: 'DISHES' | 'BANQUETS') => void;
 }
 
 export const MenuManager: React.FC<MenuManagerProps> = ({
+    mode,
     dishes,
+    menus,
     banquetMenus,
     tables,
     rooms,
@@ -186,12 +191,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     onUpdateBanquetMenu,
     onDeleteBanquetMenu,
     canEdit = true,
-    initialTab = 'BANQUETS',
     autoOpenNewBanquet,
     onAutoOpenNewBanquetHandled,
     autoOpenNewDish,
-    onAutoOpenNewDishHandled,
-    onActiveTabChange
+    onAutoOpenNewDishHandled
 }) => {
   const { hasPermission, hasFeature } = useAuth();
   const canViewBanquetPrice = hasPermission('banquet:view_price');
@@ -325,7 +328,86 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     }).catch(() => {});
   };
 
-  const [activeTab, setActiveTab] = useState<'DISHES' | 'BANQUETS'>(initialTab);
+  const activeTab = mode;
+
+  // I due menu di sistema: ALLA_CARTA governa comande e menu digitale,
+  // BANQUETS il picker della composizione banchetti.
+  const cartaMenu = useMemo(() => menus.find(m => m.system_key === 'ALLA_CARTA') ?? null, [menus]);
+  const banquetsMenu = useMemo(() => menus.find(m => m.system_key === 'BANQUETS') ?? null, [menus]);
+
+  // Menu selezionato nella pagina Menu. Se quello selezionato sparisce
+  // (eliminato da un altro client) si ricade su Alla carta via fallback.
+  const [selectedMenuId, setSelectedMenuId] = useState<number | null>(null);
+  const selectedMenu = menus.find(m => m.id === selectedMenuId) ?? cartaMenu;
+  useEffect(() => {
+    if (selectedMenuId == null && cartaMenu) setSelectedMenuId(cartaMenu.id);
+  }, [selectedMenuId, cartaMenu]);
+  const inSelectedMenu = (d: Dish): boolean =>
+    selectedMenu == null || (d.menu_ids ?? []).includes(selectedMenu.id);
+  const menuDishes = useMemo(
+    () => selectedMenu == null ? dishes : dishes.filter(d => (d.menu_ids ?? []).includes(selectedMenu.id)),
+    [dishes, selectedMenu]
+  );
+
+  // Creazione/rinomina dei menu stagionali (i due di sistema non si toccano).
+  const [menuForm, setMenuForm] = useState<{ kind: 'create' } | { kind: 'rename'; menu: RestaurantMenu } | null>(null);
+  const [menuFormName, setMenuFormName] = useState('');
+  const [menuFormBusy, setMenuFormBusy] = useState(false);
+  const [menuFormError, setMenuFormError] = useState<string | null>(null);
+  const [deleteMenuConfirm, setDeleteMenuConfirm] = useState<RestaurantMenu | null>(null);
+
+  const submitMenuForm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = menuFormName.trim();
+    if (!menuForm || !name || menuFormBusy) return;
+    setMenuFormBusy(true);
+    setMenuFormError(null);
+    try {
+      if (menuForm.kind === 'create') {
+        const created = await createMenu(name);
+        // La lista arriva via socket 'menu:created'; qui si seleziona subito.
+        setSelectedMenuId(created.id);
+      } else {
+        await renameMenu(menuForm.menu.id, name);
+      }
+      setMenuForm(null);
+      setMenuFormName('');
+    } catch (err: any) {
+      setMenuFormError(err?.data?.error ?? err?.message ?? 'Salvataggio non riuscito');
+    } finally {
+      setMenuFormBusy(false);
+    }
+  };
+
+  const handleDeleteMenu = async (menu: RestaurantMenu) => {
+    try {
+      await deleteMenu(menu.id);
+      if (selectedMenuId === menu.id) setSelectedMenuId(cartaMenu?.id ?? null);
+    } catch { /* il menu resta: nessun falso ok */ }
+    setDeleteMenuConfirm(null);
+  };
+
+  // Pagina Banchetti: preventivi e confermati sono due liste. Un evento
+  // senza status (dati pre-migrazione ancora in cache) conta da confermato.
+  const banquetStatusOf = (b: BanquetMenu): 'QUOTE' | 'CONFIRMED' =>
+    b.status === BanquetStatus.QUOTE ? 'QUOTE' : 'CONFIRMED';
+  const [banquetStatusFilter, setBanquetStatusFilter] = useState<'CONFIRMED' | 'QUOTE'>('CONFIRMED');
+  const statusBanquets = useMemo(
+    () => banquetMenus.filter(b => banquetStatusOf(b) === banquetStatusFilter),
+    [banquetMenus, banquetStatusFilter]
+  );
+  const quoteCount = useMemo(() => banquetMenus.filter(b => banquetStatusOf(b) === 'QUOTE').length, [banquetMenus]);
+  const [statusBusyId, setStatusBusyId] = useState<number | null>(null);
+  const handleSetBanquetStatus = async (menu: BanquetMenu, status: BanquetStatus) => {
+    if (statusBusyId === menu.id) return;
+    setStatusBusyId(menu.id);
+    try {
+      // La riga aggiornata torna dal socket (banquet:updated → App).
+      await setBanquetStatus(menu.id, status);
+    } catch { /* lo stato resta com'era */ }
+    finally { setStatusBusyId(null); }
+  };
+
   const [banquetView, setBanquetView] = useState<'LIST' | 'CALENDAR'>('LIST');
   type BanquetSortBy = 'date-asc' | 'date-desc' | 'name-asc' | 'name-desc' | 'guests-asc' | 'guests-desc';
   const [banquetSortBy, setBanquetSortBy] = useState<BanquetSortBy>('date-asc');
@@ -353,6 +435,18 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   // Which step of the create/edit wizard is showing. Steps never gate each
   // other — validation still runs once, on save.
   const [banquetStep, setBanquetStep] = useState(0);
+  // Da quale menu pesca il picker della composizione: il menu Banchetti di
+  // default, o uno stagionale (es. Ferragosto) per comporre da quella lista.
+  const [pickerMenuId, setPickerMenuId] = useState<number | null>(null);
+  const pickerMenus = useMemo(
+    () => menus.filter(m => m.system_key === 'BANQUETS' || !m.system_key),
+    [menus]
+  );
+  const pickerDishes = useMemo(() => {
+    const target = pickerMenuId ?? banquetsMenu?.id ?? null;
+    if (target == null) return dishes;
+    return dishes.filter(d => (d.menu_ids ?? []).includes(target));
+  }, [dishes, pickerMenuId, banquetsMenu]);
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [isDishFormOpen, setIsDishFormOpen] = useState(false);
   const [isBanquetFormOpen, setIsBanquetFormOpen] = useState(false);
@@ -389,7 +483,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     category: 'Antipasti',
     allergens: [],
     photo_url: '',
-    vat_rate: 10
+    vat_rate: 10,
+    menu_ids: []
   });
 
   // New Banquet Menu State
@@ -435,10 +530,6 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   }, [banquetStep]);
   const [cardMenuOpenId, setCardMenuOpenId] = useState<number | null>(null);
   const cardMenuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    onActiveTabChange?.(activeTab);
-  }, [activeTab]);
 
   useEffect(() => {
     if (autoOpenNewBanquet) {
@@ -500,7 +591,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           category: newDish.category || 'Antipasti',
           allergens: newDish.allergens || [],
           photo_url: newDish.photo_url?.trim() || undefined,
-          vat_rate: newDish.vat_rate ?? defaultVatRate
+          vat_rate: newDish.vat_rate ?? defaultVatRate,
+          menu_ids: newDish.menu_ids ?? []
         });
       } else {
         await onAddDish({
@@ -510,14 +602,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           category: newDish.category || 'Antipasti',
           allergens: newDish.allergens || [],
           photo_url: newDish.photo_url?.trim() || undefined,
-          vat_rate: newDish.vat_rate ?? defaultVatRate
+          vat_rate: newDish.vat_rate ?? defaultVatRate,
+          menu_ids: newDish.menu_ids ?? []
         } as Dish);
       }
 
       setIsDishFormOpen(false);
       setIsEditingDish(false);
       setEditingDishId(null);
-      setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '', vat_rate: defaultVatRate });
+      setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '', vat_rate: defaultVatRate, menu_ids: [] });
     } finally {
       setIsSavingDish(false);
     }
@@ -531,7 +624,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const handleOpenNewDish = () => {
     setIsEditingDish(false);
     setEditingDishId(null);
-    setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '', vat_rate: defaultVatRate });
+    // Il piatto nuovo nasce nel menu che si sta guardando (e in Alla carta
+    // se non se ne sta guardando nessuno): la spunta si toglie, non si
+    // rincorre.
+    const defaultMenuId = selectedMenu?.id ?? cartaMenu?.id;
+    setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '', vat_rate: defaultVatRate, menu_ids: defaultMenuId != null ? [defaultMenuId] : [] });
     setPhotoUploadError(null);
     setIsDishFormOpen(true);
   };
@@ -544,7 +641,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       category: dish.category,
       allergens: dish.allergens,
       photo_url: dish.photo_url || '',
-      vat_rate: dish.vat_rate ?? 10
+      vat_rate: dish.vat_rate ?? 10,
+      menu_ids: dish.menu_ids ?? []
     });
     setEditingDishId(dish.id);
     setIsEditingDish(true);
@@ -623,6 +721,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         } else {
           await onAddBanquetMenu(payload as BanquetMenu);
           clearDraft(DRAFT_KEYS.BANQUET_NEW);
+          // Il banchetto nuovo nasce preventivo: la lista si sposta lì,
+          // o sembrerebbe che il salvataggio non abbia fatto nulla.
+          setBanquetStatusFilter('QUOTE');
         }
 
         setIsBanquetFormOpen(false);
@@ -672,6 +773,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     setEditingBanquetId(menu.id);
     setIsEditingBanquet(true);
     setBanquetStep(0);
+    setPickerMenuId(null);
     setIsBanquetFormOpen(true);
   };
 
@@ -693,6 +795,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       table_ids: []
     });
     setBanquetStep(0);
+    setPickerMenuId(null);
     setIsBanquetFormOpen(true);
 
     const existing = loadDraft<Partial<BanquetMenu>>(DRAFT_KEYS.BANQUET_NEW);
@@ -818,6 +921,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     });
   };
 
+  const toggleDishMenu = (menuId: number) => {
+    setNewDish(prev => {
+      const current = prev.menu_ids ?? [];
+      return current.includes(menuId)
+        ? { ...prev, menu_ids: current.filter(id => id !== menuId) }
+        : { ...prev, menu_ids: [...current, menuId] };
+    });
+  };
+
   const toggleAllergen = (allergen: string) => {
     setNewDish(prev => {
         const current = prev.allergens || [];
@@ -831,7 +943,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
   const dishCategories = useMemo(() => {
     const present = new Set<string>();
-    for (const d of dishes) {
+    for (const d of menuDishes) {
       if (d.category && d.category.trim()) present.add(d.category.trim());
     }
     // Con le preferenze caricate comanda l'ordine scelto in "Categorie";
@@ -852,7 +964,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       if (bi !== -1) return 1;
       return a.localeCompare(b, 'it');
     });
-  }, [dishes, menuCats]);
+  }, [menuDishes, menuCats]);
 
   const disabledCategories = useMemo(
     () => new Set((menuCats ?? []).filter(c => !c.enabled).map(c => c.name)),
@@ -946,7 +1058,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     };
 
     const buckets: Record<BanquetGroupKey, BanquetMenu[]> = { week: [], month: [], later: [], past: [] };
-    for (const b of banquetMenus) {
+    for (const b of statusBanquets) {
       if (!matches(b)) continue;
       buckets[banquetGroupFor(b, today, weekEnd, monthEnd)].push(b);
     }
@@ -959,13 +1071,16 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         : compare);
     });
     return buckets;
-  }, [banquetMenus, banquetSortBy, banquetSearchTerm]);
+  }, [statusBanquets, banquetSortBy, banquetSearchTerm]);
 
   // Header figures. All three come from data already loaded — nothing new is
   // fetched to show them.
   const banquetKpis = useMemo(() => {
     const today = formatLocalDate(new Date());
-    const upcoming = banquetMenus.filter(b => !b.event_date || b.event_date >= today);
+    // Solo i confermati: un preventivo non ha coperti prenotati né incassi
+    // da rincorrere — contarlo gonfierebbe i numeri del servizio.
+    const upcoming = banquetMenus.filter(b =>
+      banquetStatusOf(b) === 'CONFIRMED' && (!b.event_date || b.event_date >= today));
     const covers = upcoming.reduce((s, b) => s + (Number(b.guests) || 0), 0);
     const outstanding = upcoming.reduce((s, b) => {
       const due = computeBanquetTotalDue(b);
@@ -999,7 +1114,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     () => new Map(dishCategories.map((c, i) => [c, i])),
     [dishCategories]
   );
-  const filteredDishes = dishes.filter(d => {
+  const filteredDishes = menuDishes.filter(d => {
     const matchesSearch = d.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       d.category.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = !categoryFilter || d.category === categoryFilter;
@@ -1019,16 +1134,71 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
             two labels identically sized — as separate buttons in separate rows
             they had drifted to different heights and widths. */}
         <div className="flex flex-col items-start gap-2.5">
-          <SegmentedControl<'BANQUETS' | 'DISHES'>
-            value={activeTab}
-            onChange={setActiveTab}
-            ariaLabel="Sezione"
-            equalWidth={false}
-            options={[
-              { value: 'BANQUETS', label: 'Menu banchetti' },
-              { value: 'DISHES', label: 'Piatti alla carta' },
-            ]}
-          />
+          {/* Pagina Menu: un menu per pill — i due di sistema poi gli
+              stagionali, col "+" in coda. Un menu stagionale selezionato
+              porta con sé rinomina ed elimina; i due di sistema no. */}
+          {activeTab === 'DISHES' && (
+            <div className="flex flex-wrap items-center gap-2">
+              {menus.map(m => {
+                const isActive = selectedMenu?.id === m.id;
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setSelectedMenuId(m.id)}
+                    className={`${DISH_FILTER_BASE} h-9 ${isActive ? DISH_FILTER_ON : DISH_FILTER_OFF}`}
+                  >
+                    {m.name}
+                  </button>
+                );
+              })}
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => { setMenuFormName(''); setMenuFormError(null); setMenuForm({ kind: 'create' }); }}
+                  title="Nuovo menu (es. Ferragosto, Pasqua)"
+                  className={`${DISH_FILTER_BASE} h-9 ${DISH_FILTER_OFF}`}
+                >
+                  <Plus className="h-4 w-4" aria-hidden />
+                  Nuovo menu
+                </button>
+              )}
+              {canEdit && selectedMenu && !selectedMenu.system_key && (
+                <span className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => { setMenuFormName(selectedMenu.name); setMenuFormError(null); setMenuForm({ kind: 'rename', menu: selectedMenu }); }}
+                    className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] shadow-none`}
+                    title="Rinomina menu"
+                  >
+                    <Edit2 className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDeleteMenuConfirm(selectedMenu)}
+                    className={`${dsIconButton} h-9 w-9 bg-[var(--ds-surface-row)] shadow-none hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]`}
+                    title="Elimina menu"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </span>
+              )}
+            </div>
+          )}
+          {/* Pagina Banchetti: prima i confermati (il lavoro vero), i
+              preventivi accanto col loro conteggio. */}
+          {activeTab === 'BANQUETS' && (
+            <SegmentedControl<'CONFIRMED' | 'QUOTE'>
+              value={banquetStatusFilter}
+              onChange={setBanquetStatusFilter}
+              ariaLabel="Stato banchetti"
+              equalWidth={false}
+              options={[
+                { value: 'CONFIRMED', label: 'Confermati' },
+                { value: 'QUOTE', label: quoteCount > 0 ? `Preventivi (${quoteCount})` : 'Preventivi' },
+              ]}
+            />
+          )}
           {/* Phone only, and the breakpoint is not a guess: the global "+" menu
               in the top bar is `hidden md:block`, so below md this is the only
               route into either form. From md up it would be a second button for
@@ -1138,10 +1308,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     onClick={() => setCategoryFilter(null)}
                     className={`${DISH_FILTER_BASE} ${categoryFilter === null ? DISH_FILTER_ON : DISH_FILTER_OFF}`}
                   >
-                    Tutte <span className="tabular-nums opacity-70">{dishes.length}</span>
+                    Tutte <span className="tabular-nums opacity-70">{menuDishes.length}</span>
                   </button>
                   {dishCategories.map(cat => {
-                    const count = dishes.filter(d => d.category === cat).length;
+                    const count = menuDishes.filter(d => d.category === cat).length;
                     const isActive = categoryFilter === cat;
                     const isOff = disabledCategories.has(cat);
                     return (
@@ -1173,7 +1343,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 </button>
               )}
               <span className="text-[13px] text-[var(--ds-text-muted)] md:flex-shrink-0 md:self-center">
-                {dishes.length} piatti · {dishes.filter(d => d.allergens.length > 0).length} con allergeni · {dishes.filter(d => !d.photo_url).length} senza foto
+                {menuDishes.length} piatti · {menuDishes.filter(d => d.allergens.length > 0).length} con allergeni · {menuDishes.filter(d => !d.photo_url).length} senza foto
               </span>
             </div>
 
@@ -1181,7 +1351,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               <EmptyState icon={Utensils}>
                 {searchTerm || categoryFilter
                   ? 'Nessun piatto corrisponde ai filtri.'
-                  : 'Non hai ancora aggiunto piatti alla carta.'}
+                  : dishes.length > 0 && selectedMenu
+                    ? `Nessun piatto in «${selectedMenu.name}»: spuntalo dalla scheda del piatto.`
+                    : 'Non hai ancora aggiunto piatti.'}
               </EmptyState>
             ) : (
               <div className="flex gap-4">
@@ -1562,6 +1734,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           {banquetView === 'LIST' && (() => {
             const renderBanquetCard = (menu: BanquetMenu) => {
                 const isPast = computeBanquetTimeStatus(menu) === 'PAST';
+                const isQuote = banquetStatusOf(menu) === 'QUOTE';
                 const paymentStatus = computeBanquetPaymentStatus(menu);
                 const due = computeBanquetTotalDue(menu);
                 const paid = Number(menu.total_paid || 0);
@@ -1662,11 +1835,20 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                           grigio, quindi qui la pill resta attaccata al
                                           titolo; da sm segue la descrizione. Una
                                           posizione sola che funziona in entrambi. */}
-                                      {notesCount > 0 && (
-                                        <StatusPill tone="neutral" className="mt-2 h-7 px-2.5">
-                                          <StickyNote className="h-3.5 w-3.5" aria-hidden />
-                                          {notesCount} {notesCount === 1 ? 'nota' : 'note'}
-                                        </StatusPill>
+                                      {(isQuote || notesCount > 0) && (
+                                        <span className="mt-2 flex flex-wrap items-center gap-1.5">
+                                          {/* pending = "in attesa di una decisione": è
+                                              esattamente cosa è un preventivo. */}
+                                          {isQuote && (
+                                            <StatusPill tone="pending" className="h-7 px-2.5">preventivo</StatusPill>
+                                          )}
+                                          {notesCount > 0 && (
+                                            <StatusPill tone="neutral" className="h-7 px-2.5">
+                                              <StickyNote className="h-3.5 w-3.5" aria-hidden />
+                                              {notesCount} {notesCount === 1 ? 'nota' : 'note'}
+                                            </StatusPill>
+                                          )}
+                                        </span>
                                       )}
                                   </div>
                                   <div className="flex flex-shrink-0 items-center gap-1">
@@ -1756,6 +1938,25 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                                       <Edit2 className="h-3.5 w-3.5 text-[var(--ds-text-muted)]" />
                                                       Modifica
                                                   </button>
+                                                  {isQuote ? (
+                                                      <button
+                                                          type="button"
+                                                          onClick={e => { e.stopPropagation(); setCardMenuOpenId(null); handleSetBanquetStatus(menu, BanquetStatus.CONFIRMED); }}
+                                                          className="flex w-full items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-[var(--ds-seated-text)] transition-colors hover:bg-[var(--ds-seated-tint)]"
+                                                      >
+                                                          <Check className="h-3.5 w-3.5" />
+                                                          Conferma banchetto
+                                                      </button>
+                                                  ) : (
+                                                      <button
+                                                          type="button"
+                                                          onClick={e => { e.stopPropagation(); setCardMenuOpenId(null); handleSetBanquetStatus(menu, BanquetStatus.QUOTE); }}
+                                                          className="flex w-full items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)]"
+                                                      >
+                                                          <StickyNote className="h-3.5 w-3.5 text-[var(--ds-text-muted)]" />
+                                                          Riporta a preventivo
+                                                      </button>
+                                                  )}
                                                   <button
                                                       type="button"
                                                       onClick={e => { e.stopPropagation(); setCardMenuOpenId(null); setDeleteBanquetConfirm(menu); }}
@@ -1879,12 +2080,16 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
             return (
               <div className="space-y-5">
-                {banquetMenus.length === 0 && (
+                {statusBanquets.length === 0 && (
                   <EmptyState icon={BookOpen}>
-                    Non hai ancora creato menu per banchetti.
+                    {banquetStatusFilter === 'QUOTE'
+                      ? 'Nessun preventivo in corso.'
+                      : banquetMenus.length > 0
+                        ? 'Nessun banchetto confermato: i preventivi sono nella scheda accanto.'
+                        : 'Non hai ancora creato banchetti.'}
                   </EmptyState>
                 )}
-                {banquetMenus.length > 0 && visibleGroups.length === 0 && (
+                {statusBanquets.length > 0 && visibleGroups.length === 0 && (
                   <EmptyState icon={Search}>
                     Nessun banchetto per «{banquetSearchTerm}».
                   </EmptyState>
@@ -1925,7 +2130,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
           {banquetView === 'CALENDAR' && (
             <BanquetCalendar
-              banquetMenus={banquetMenus}
+              banquetMenus={statusBanquets}
               onSelectBanquet={handleEditBanquet}
               onViewBanquet={setViewBanquet}
               canEdit={canEdit}
@@ -2024,6 +2229,41 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     onChange={e => setNewDish({ ...newDish, description: e.target.value })}
                   />
                 </Field>
+              </div>
+            </FormCard>
+
+            {/* Le spunte dei menu: stesso vestito degli allergeni. Un piatto
+                può stare in più menu; fuori da tutti non si batte da nessuna
+                parte, e il footer lo dice invece di impedirlo — è legittimo
+                per un piatto in preparazione. */}
+            <FormCard
+              title="Nei menu"
+              aside={
+                (newDish.menu_ids?.length ?? 0) === 0
+                  ? <span className="text-[13px] text-[var(--ds-pending-text)]">in nessun menu</span>
+                  : <span className="text-[13px] text-[var(--ds-text-muted)]">{newDish.menu_ids!.length} selezionati</span>
+              }
+            >
+              <div className="flex flex-wrap gap-2">
+                {menus.map(m => {
+                  const isSelected = newDish.menu_ids?.includes(m.id) ?? false;
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => toggleDishMenu(m.id)}
+                      aria-pressed={isSelected}
+                      className={`inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                        isSelected
+                          ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                          : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
+                      }`}
+                    >
+                      {isSelected && <Check size={13} />}
+                      {m.name}
+                    </button>
+                  );
+                })}
               </div>
             </FormCard>
 
@@ -2540,6 +2780,26 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 >
                   <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">Crea le uscite del menu (es. Antipasti, Primi, Secondi) e assegna i piatti a ciascuna.</p>
 
+                  {/* Da dove pescano le uscite: il menu Banchetti, o uno
+                      stagionale. Le chip compaiono solo se c'è una scelta. */}
+                  {pickerMenus.length > 1 && (
+                    <div className="mb-4 flex flex-wrap gap-2">
+                      {pickerMenus.map(m => {
+                        const isActive = (pickerMenuId ?? banquetsMenu?.id) === m.id;
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => setPickerMenuId(m.id)}
+                            className={`${DISH_FILTER_BASE} ${isActive ? DISH_FILTER_ON : DISH_FILTER_OFF}`}
+                          >
+                            {m.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
                 <div className="space-y-3">
                   {(newBanquet.courses || []).map((course, courseIndex) => {
                     const totalCourses = (newBanquet.courses || []).length;
@@ -2588,7 +2848,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
                         <div className="p-3 max-h-60 overflow-y-auto space-y-3">
                           {BANQUET_DISH_CATEGORIES.map(category => {
-                            const categoryDishes = dishes.filter(d => d.category === category);
+                            const categoryDishes = pickerDishes.filter(d => d.category === category);
                             if (categoryDishes.length === 0) return null;
                             return (
                               <div key={category}>
@@ -2625,7 +2885,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             );
                           })}
                           {(() => {
-                            const orphan = dishes.filter(d => !BANQUET_DISH_CATEGORIES.includes(d.category as any));
+                            const orphan = pickerDishes.filter(d => !BANQUET_DISH_CATEGORIES.includes(d.category as any));
                             if (orphan.length === 0) return null;
                             return (
                               <div>
@@ -2657,8 +2917,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               </div>
                             );
                           })()}
-                          {dishes.length === 0 && (
-                            <div className="text-xs text-[var(--ds-text-subtle)] text-center py-4">Aggiungi prima dei piatti alla carta.</div>
+                          {pickerDishes.length === 0 && (
+                            <div className="text-xs text-[var(--ds-text-subtle)] text-center py-4">
+                              Nessun piatto in questo menu: spuntalo dalla scheda del piatto, in Menu.
+                            </div>
                           )}
                         </div>
 
@@ -2943,6 +3205,57 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           if (deleteBanquetConfirm) onDeleteBanquetMenu(deleteBanquetConfirm.id);
           setDeleteBanquetConfirm(null);
         }}
+      />
+
+      {/* Nuovo menu / rinomina menu stagionale. */}
+      {menuForm && (
+        <ModalShell
+          open={!!menuForm}
+          onClose={() => setMenuForm(null)}
+          title={menuForm.kind === 'create' ? 'Nuovo menu' : 'Rinomina menu'}
+          size="sm"
+          bodyClassName="p-5"
+          footer={
+            <>
+              <button type="button" onClick={() => setMenuForm(null)} className={dsButton.secondary}>
+                Annulla
+              </button>
+              <button
+                type="submit"
+                form="menu-form"
+                disabled={menuFormBusy || !menuFormName.trim()}
+                className={dsButton.primary}
+              >
+                {menuFormBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+                {menuForm.kind === 'create' ? 'Crea menu' : 'Salva'}
+              </button>
+            </>
+          }
+        >
+          <form id="menu-form" onSubmit={submitMenuForm}>
+            <Field label="Nome" required>
+              <input
+                autoFocus
+                required
+                maxLength={80}
+                placeholder="es. Ferragosto, Pasqua…"
+                className={dsInput}
+                value={menuFormName}
+                onChange={e => setMenuFormName(e.target.value)}
+              />
+            </Field>
+            {menuFormError && <p className="mt-2 text-[13px] text-[var(--ds-critical-text)]">{menuFormError}</p>}
+          </form>
+        </ModalShell>
+      )}
+
+      <ConfirmDeleteModal
+        isOpen={!!deleteMenuConfirm}
+        title="Elimina Menu"
+        message="I piatti restano in anagrafica e negli altri menu. Stai per eliminare:"
+        itemName={deleteMenuConfirm?.name}
+        onCancel={() => setDeleteMenuConfirm(null)}
+        onConfirm={() => { if (deleteMenuConfirm) handleDeleteMenu(deleteMenuConfirm); }}
       />
 
       {viewBanquet && (

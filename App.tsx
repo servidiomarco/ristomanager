@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator } from 'lucide-react';
-import { ViewState, Room, Table, Dish, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
+import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
 import { MenuManager } from './components/MenuManager';
@@ -98,6 +98,7 @@ import {
   deleteRoom,
   setRoomClosed,
   getDishes,
+  getMenus,
   createDish,
   updateDish,
   deleteDish,
@@ -139,7 +140,6 @@ type NavItem = {
   view?: ViewState;                // present for 'link' items
   requiresUserManagement?: boolean;// gate via canManageUsers() instead of canAccessView()
   sidebarCollapse?: boolean;       // desktop side effect on select: true→collapse, false→expand, undefined→leave as-is
-  menuInitialTab?: 'DISHES' | 'BANQUETS';
 };
 
 const NAV_ITEMS: NavItem[] = [
@@ -150,7 +150,8 @@ const NAV_ITEMS: NavItem[] = [
   { kind: 'link', label: 'Prenotazioni', Icon: Calendar, group: 'servizio', isTab: true, view: ViewState.RESERVATIONS, sidebarCollapse: true },
   { kind: 'link', label: 'Reception', Icon: ConciergeBell, group: 'servizio', isTab: false, view: ViewState.RECEPTION, sidebarCollapse: true },
   { kind: 'link', label: 'Sale & Tavoli', Icon: Grid, group: 'servizio', isTab: false, view: ViewState.FLOOR_PLAN, sidebarCollapse: true },
-  { kind: 'link', label: 'Menu & Banchetti', Icon: UtensilsCrossed, group: 'servizio', isTab: false, view: ViewState.MENU, sidebarCollapse: false, menuInitialTab: 'BANQUETS' },
+  { kind: 'link', label: 'Menu', Icon: UtensilsCrossed, group: 'servizio', isTab: false, view: ViewState.MENU, sidebarCollapse: false },
+  { kind: 'link', label: 'Banchetti', Icon: PartyPopper, group: 'servizio', isTab: false, view: ViewState.BANCHETTI, sidebarCollapse: false },
   { kind: 'link', label: 'Comande', Icon: ClipboardList, group: 'servizio', isTab: false, view: ViewState.COMANDE, sidebarCollapse: true },
   { kind: 'link', label: 'Cassa', Icon: Calculator, group: 'servizio', isTab: false, view: ViewState.CASSA, sidebarCollapse: true },
   { kind: 'link', label: 'Cucina', Icon: CookingPot, group: 'servizio', isTab: false, view: ViewState.CUCINA, sidebarCollapse: true },
@@ -430,7 +431,6 @@ const App: React.FC = () => {
     // suoi verbi sono appena migrati.
     if (!passeEnabled && view === ViewState.PASSE) setView(ViewState.COMANDE);
   }, [tableOrdersEnabled, passeEnabled, view]);
-  const [menuInitialTab, setMenuInitialTab] = useState<'DISHES' | 'BANQUETS'>('BANQUETS');
   const [autoOpenNewReservation, setAutoOpenNewReservation] = useState(false);
   const [newReservationKind, setNewReservationKind] = useState<'standard' | 'walkin'>('standard');
   // Prefill applied when opening the new-reservation modal — used when
@@ -491,7 +491,6 @@ const App: React.FC = () => {
     document.addEventListener('mousedown', handlePointerDown);
     return () => document.removeEventListener('mousedown', handlePointerDown);
   }, [showCreateMenu]);
-  const [activeMenuTab, setActiveMenuTab] = useState<'DISHES' | 'BANQUETS'>('BANQUETS');
   const [reservationsSearchPrefill, setReservationsSearchPrefill] = useState<string | undefined>(undefined);
   // Set when a notification deep-links to a specific booking (?reservationId=…);
   // handed to ReservationList so it opens that booking's detail drawer.
@@ -920,6 +919,9 @@ const App: React.FC = () => {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [tables, setTables] = useState<Table[]>([]);
   const [dishes, setDishes] = useState<Dish[]>([]);
+  // I menu (Alla carta, Banchetti, stagionali): pochi e stabili, mutati via
+  // socket 'menu:*' come il resto dello stato condiviso.
+  const [menus, setMenus] = useState<RestaurantMenu[]>([]);
   const [banquetMenus, setBanquetMenus] = useState<BanquetMenu[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   // Flips to false the first time fetchData() completes. Consumers (list
@@ -1237,10 +1239,11 @@ const App: React.FC = () => {
     }
     const windowFrom = getRomeDatePart(new Date(Date.now() - RESERVATIONS_WINDOW_DAYS * 86400000));
     try {
-      const [roomsData, tablesData, dishesData, banquetMenusData, reservationsData] = await Promise.all([
+      const [roomsData, tablesData, dishesData, menusData, banquetMenusData, reservationsData] = await Promise.all([
         getRooms(),
         getTables(),
         getDishes(),
+        getMenus(),
         getBanquetMenus(),
         getReservations({ from: windowFrom }),
       ]);
@@ -1271,6 +1274,7 @@ const App: React.FC = () => {
       setRooms(sortRooms(roomsData));
       setTables(uniqueTables);
       setDishes(dishesData);
+      setMenus(menusData);
       setBanquetMenus(banquetMenusData);
       setReservations(mergeReservationsById(reservationsData, reservationsArchiveRef.current));
       hydrateBellFromRecentReservations(reservationsData);
@@ -1481,6 +1485,21 @@ const App: React.FC = () => {
       getDishes().then(setDishes).catch(() => {});
     });
 
+    // Menu events (Alla carta / Banchetti / stagionali)
+    socket.on('menu:created', (menu: RestaurantMenu) => {
+      setMenus(prev => prev.some(m => m.id === menu.id) ? prev : [...prev, menu]);
+    });
+
+    socket.on('menu:updated', (menu: RestaurantMenu) => {
+      setMenus(prev => prev.map(m => m.id === menu.id ? menu : m));
+    });
+
+    // L'eliminazione arriva insieme a un 'dish:synced': è quello a ripulire
+    // i menu_ids orfani sui piatti, qui basta togliere il menu.
+    socket.on('menu:deleted', (id: number) => {
+      setMenus(prev => prev.filter(m => m.id !== id));
+    });
+
     // Banquet Menu events
     socket.on('banquet:created', (menu: BanquetMenu) => {
       setBanquetMenus(prev => [...prev, menu]);
@@ -1580,6 +1599,9 @@ const App: React.FC = () => {
       socket.off('dish:updated');
       socket.off('dish:deleted');
       socket.off('dish:synced');
+      socket.off('menu:created');
+      socket.off('menu:updated');
+      socket.off('menu:deleted');
       socket.off('banquet:created');
       socket.off('banquet:updated');
       socket.off('banquet:deleted');
@@ -1973,7 +1995,6 @@ const App: React.FC = () => {
     if (item.view === undefined) return;
     if (item.sidebarCollapse === true) setSidebarCollapsed(true);
     else if (item.sidebarCollapse === false) setSidebarCollapsed(false);
-    if (item.menuInitialTab) setMenuInitialTab(item.menuInitialTab);
     // Dashboard is a "now" view — the live-service hero, KPIs and Stato Tavoli
     // all describe today by design. If the user navigated in from a
     // reservation/notification that pinned globalDate to a future or past day,
@@ -2026,8 +2047,8 @@ const App: React.FC = () => {
     [
       { label: 'Prenotazione', Icon: Calendar, show: hasPermission('reservations:full'), run: () => { setNewReservationKind('standard'); setAutoOpenNewReservation(true); } },
       { label: 'Walk-in', Icon: Zap, show: canAccessView(ViewState.RECEPTION), run: () => { setView(ViewState.RECEPTION); setAutoOpenWalkIn(true); } },
-      { label: 'Banchetto', Icon: PartyPopper, show: hasPermission('menu:full'), run: () => { setMenuInitialTab('BANQUETS'); setView(ViewState.MENU); setAutoOpenNewBanquet(true); } },
-      { label: 'Piatto', Icon: UtensilsCrossed, show: hasPermission('menu:full'), run: () => { setMenuInitialTab('DISHES'); setView(ViewState.MENU); setAutoOpenNewDish(true); } },
+      { label: 'Banchetto', Icon: PartyPopper, show: hasPermission('menu:full'), run: () => { setView(ViewState.BANCHETTI); setAutoOpenNewBanquet(true); } },
+      { label: 'Piatto', Icon: UtensilsCrossed, show: hasPermission('menu:full'), run: () => { setView(ViewState.MENU); setAutoOpenNewDish(true); } },
     ],
     [
       { label: 'Spesa', Icon: ShoppingCart, show: canAccessView(ViewState.LISTA_DELLA_SPESA), run: () => { setView(ViewState.LISTA_DELLA_SPESA); setAutoOpenNewShoppingItem(true); } },
@@ -2648,7 +2669,7 @@ const App: React.FC = () => {
             dishes={dishes}
             rooms={rooms}
             banquetMenus={banquetMenus}
-            onNavigateToBanquets={() => { setMenuInitialTab('BANQUETS'); setView(ViewState.MENU); }}
+            onNavigateToBanquets={() => setView(ViewState.BANCHETTI)}
             onNavigateToReservations={() => { setSidebarCollapsed(true); setView(ViewState.RESERVATIONS); }}
             onNavigateToInventario={() => { setSidebarCollapsed(false); setView(ViewState.INVENTARIO); }}
             onNavigateToShoppingList={() => setView(ViewState.LISTA_DELLA_SPESA)}
@@ -2754,9 +2775,14 @@ const App: React.FC = () => {
           />
         )}
 
-        {view === ViewState.MENU && (
+        {/* Menu e Banchetti sono due voci di sidebar ma un componente solo:
+            la pagina piatti/menu e la pagina eventi condividono anagrafiche,
+            wizard e modali, cambia solo quale metà si mostra. */}
+        {(view === ViewState.MENU || view === ViewState.BANCHETTI) && (
           <MenuManager
+            mode={view === ViewState.MENU ? 'DISHES' : 'BANQUETS'}
             dishes={dishes}
+            menus={menus}
             banquetMenus={banquetMenus}
             tables={tables}
             rooms={rooms}
@@ -2768,12 +2794,10 @@ const App: React.FC = () => {
             onUpdateBanquetMenu={handleUpdateBanquet}
             onDeleteBanquetMenu={handleDeleteBanquet}
             canEdit={hasPermission('menu:full')}
-            initialTab={menuInitialTab}
             autoOpenNewBanquet={autoOpenNewBanquet}
             onAutoOpenNewBanquetHandled={() => setAutoOpenNewBanquet(false)}
             autoOpenNewDish={autoOpenNewDish}
             onAutoOpenNewDishHandled={() => setAutoOpenNewDish(false)}
-            onActiveTabChange={setActiveMenuTab}
           />
         )}
 
@@ -2879,13 +2903,13 @@ const App: React.FC = () => {
 
         {view === ViewState.COMANDE && (
           <CardErrorBoundary label="Comande">
-            <OrderPad dishes={dishes} tables={tables} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} onImmersive={setImmersive} initialTableId={pendingComandeTableId} onInitialTableConsumed={() => setPendingComandeTableId(null)} />
+            <OrderPad dishes={dishes} menus={menus} tables={tables} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} onImmersive={setImmersive} initialTableId={pendingComandeTableId} onInitialTableConsumed={() => setPendingComandeTableId(null)} />
           </CardErrorBoundary>
         )}
 
         {view === ViewState.CASSA && (
           <CardErrorBoundary label="Cassa">
-            <CassaPage dishes={dishes} tables={tables} rooms={rooms} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} onImmersive={setImmersive} onOpenInComande={(tableId) => { setPendingComandeTableId(tableId); setView(ViewState.COMANDE); }} onOpenPagamenti={canAccessView(ViewState.PAGAMENTI) ? () => setView(ViewState.PAGAMENTI) : undefined} />
+            <CassaPage dishes={dishes} menus={menus} tables={tables} rooms={rooms} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} onImmersive={setImmersive} onOpenInComande={(tableId) => { setPendingComandeTableId(tableId); setView(ViewState.COMANDE); }} onOpenPagamenti={canAccessView(ViewState.PAGAMENTI) ? () => setView(ViewState.PAGAMENTI) : undefined} />
           </CardErrorBoundary>
         )}
 
@@ -3005,7 +3029,8 @@ const App: React.FC = () => {
                       [ViewState.RECEPTION]: 'Reception',
                       [ViewState.CHAT_STAFF]: 'Chat staff',
                       [ViewState.FLOOR_PLAN]: 'Sale & Tavoli',
-                      [ViewState.MENU]: 'Menu & Banchetti',
+                      [ViewState.MENU]: 'Menu',
+                      [ViewState.BANCHETTI]: 'Banchetti',
                       [ViewState.COMANDE]: 'Comande',
                       [ViewState.CASSA]: 'Cassa',
                       [ViewState.CUCINA]: 'Cucina',
@@ -3185,7 +3210,7 @@ const App: React.FC = () => {
                       icon={Percent}
                       title="Aliquote IVA"
                       description="L'aliquota si imposta piatto per piatto nel menù (default 10%). Coperto e servizio al 10%."
-                      onClick={() => { setMenuInitialTab('DISHES'); setView(ViewState.MENU); }}
+                      onClick={() => setView(ViewState.MENU)}
                     />
                   )}
                 </div>

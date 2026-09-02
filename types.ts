@@ -62,6 +62,21 @@ export interface Dish {
   /** Posizione dentro la categoria (dall'ordinamento in Menu). NULL = mai
    *  ordinato a mano: in coda, alfabetico. */
   sort_order?: number | null;
+  /** Menu di appartenenza (spunte nel form): ALLA_CARTA governa comande e
+   *  menu digitale, BANQUETS la composizione banchetti. */
+  menu_ids?: number[];
+}
+
+/** I menu del ristorante: i due di sistema (Alla carta, Banchetti — non
+ *  eliminabili né rinominabili) più quelli stagionali del ristoratore
+ *  (Ferragosto, Pasqua…). */
+export type MenuSystemKey = 'ALLA_CARTA' | 'BANQUETS';
+
+export interface RestaurantMenu {
+  id: number;
+  name: string;
+  system_key?: MenuSystemKey | null;
+  sort_order?: number;
 }
 
 /** Aliquote proposte dalla UI. Il server accetta 0..100: l'elenco lo cambia
@@ -78,6 +93,13 @@ export interface BanquetCourse {
   name: string;          // e.g. "1ª Uscita", "Antipasti"
   dish_ids: number[];
   notes?: string;
+}
+
+/** Preventivo o confermato. Nasce QUOTE; la conferma è un'azione dello
+ *  staff (la registrazione di un acconto la suggerisce, non la impone). */
+export enum BanquetStatus {
+  QUOTE = 'QUOTE',
+  CONFIRMED = 'CONFIRMED'
 }
 
 export interface BanquetMenu {
@@ -101,6 +123,7 @@ export interface BanquetMenu {
   table_ids?: number[];
   discount_type?: 'PERCENT' | 'AMOUNT' | null;
   discount_value?: number | null;
+  status?: BanquetStatus;
 }
 
 export enum PaymentStatus {
@@ -756,6 +779,7 @@ export enum ViewState {
   DASHBOARD = 'DASHBOARD',
   FLOOR_PLAN = 'FLOOR_PLAN',
   MENU = 'MENU',
+  BANCHETTI = 'BANCHETTI',
   COMANDE = 'COMANDE',
   CASSA = 'CASSA',
   CUCINA = 'CUCINA',

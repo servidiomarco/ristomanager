@@ -3,7 +3,7 @@ import {
   Check, Loader2, TriangleAlert, Utensils, X,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import type { Dish, Reservation, Table, TableMerge, OrderWithItems, OrderItem } from '../types';
+import type { Dish, RestaurantMenu, Reservation, Table, TableMerge, OrderWithItems, OrderItem } from '../types';
 import { Shift } from '../types';
 import { getRomeDatePart } from '../utils/reservationTime';
 import { getTableMerges } from '../services/apiService';
@@ -64,6 +64,9 @@ interface OrderPadProps {
   initialTableId?: number | null;
   onInitialTableConsumed?: () => void;
   dishes: Dish[];
+  /** I menu del ristorante: qui serve solo Alla carta, per battere in
+   *  comanda i suoi piatti e non le liste banchetti o stagionali. */
+  menus: RestaurantMenu[];
   tables: Table[];
   reservations: Reservation[];
   /** Giorno selezionato nella barra globale — la griglia mostra le
@@ -76,17 +79,22 @@ interface OrderPadProps {
   onImmersive?: (on: boolean) => void;
 }
 
-export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, reservations, globalDate, globalShiftFilter, onImmersive, initialTableId, onInitialTableConsumed }) => {
+export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, tables, reservations, globalDate, globalShiftFilter, onImmersive, initialTableId, onInitialTableConsumed }) => {
   const [catalogue, setCatalogue] = useState<MenuCatalogue | null>(null);
   // I piatti spenti restano in anagrafica per lo storico ma non si battono
-  // più. Tre interruttori: is_active della cassa (articolo disattivato in
-  // Passepartout), crm_enabled del ristoratore (toggle nella pagina Menu) e
-  // la categoria spenta, che nasconde i suoi piatti anche dalla ricerca.
+  // più. Quattro interruttori: is_active della cassa (articolo disattivato
+  // in Passepartout), crm_enabled del ristoratore (toggle nella pagina
+  // Menu), la categoria spenta — che nasconde i suoi piatti anche dalla
+  // ricerca — e l'appartenenza al menu Alla carta: le liste banchetti e i
+  // menu stagionali non si battono in comanda.
+  const cartaMenuId = useMemo(() => menus.find(m => m.system_key === 'ALLA_CARTA')?.id ?? null, [menus]);
   const dishes = useMemo(() => {
     const prefs = catalogue?.category_prefs ?? {};
     return allDishes.filter(d => d.is_active !== false && d.crm_enabled !== false
-      && (!d.category || prefs[d.category]?.enabled !== false));
-  }, [allDishes, catalogue]);
+      && (!d.category || prefs[d.category]?.enabled !== false)
+      // menu_ids assente = anagrafica di un server vecchio: il piatto resta.
+      && (cartaMenuId == null || !Array.isArray(d.menu_ids) || d.menu_ids.includes(cartaMenuId)));
+  }, [allDishes, catalogue, cartaMenuId]);
   const [tableId, setTableId] = useState<number | null>(null);
   const [order, setOrder] = useState<OrderWithItems | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);

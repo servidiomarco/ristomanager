@@ -1,4 +1,4 @@
-import { Reservation, Table, Room, Dish, BanquetMenu, BanquetPayment, TableMerge, TableHiddenOverride, RoomClosedOverride, Shift, Customer, InventoryArea, InventoryLocation, InventoryProduct, InventoryStockRow, InventoryMovement, InventoryMovementReason, InventoryCategory, PaymentRequest, TableAssignmentSuggestion } from '../types';
+import { Reservation, Table, Room, Dish, RestaurantMenu, BanquetMenu, BanquetPayment, BanquetStatus, TableMerge, TableHiddenOverride, RoomClosedOverride, Shift, Customer, InventoryArea, InventoryLocation, InventoryProduct, InventoryStockRow, InventoryMovement, InventoryMovementReason, InventoryCategory, PaymentRequest, TableAssignmentSuggestion } from '../types';
 import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
 import { buildApiError } from './apiError';
@@ -406,6 +406,37 @@ export const deleteDish = async (id: number): Promise<void> => {
   }, false);
 };
 
+// I menu del ristorante (Alla carta, Banchetti, stagionali). Le mutazioni
+// tornano anche via socket 'menu:*': lo stato condiviso vive in App.
+export const getMenus = async (): Promise<RestaurantMenu[]> => {
+  return apiRequest<RestaurantMenu[]>(`${API_URL}/menus`, {
+    headers: getHeaders(false)
+  });
+};
+
+export const createMenu = async (name: string): Promise<RestaurantMenu> => {
+  return apiRequest<RestaurantMenu>(`${API_URL}/menus`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ name }),
+  });
+};
+
+export const renameMenu = async (id: number, name: string): Promise<RestaurantMenu> => {
+  return apiRequest<RestaurantMenu>(`${API_URL}/menus/${id}`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify({ name }),
+  });
+};
+
+export const deleteMenu = async (id: number): Promise<void> => {
+  return apiRequest<void>(`${API_URL}/menus/${id}`, {
+    method: 'DELETE',
+    headers: getHeaders(false),
+  }, false);
+};
+
 /** Esito del sync menu dalla cassa Passepartout (feature 'passepartout'). */
 export interface MenuImportResult {
   totale_cassa: number;
@@ -518,6 +549,15 @@ export const deleteBanquetMenu = async (id: number): Promise<void> => {
     method: 'DELETE',
     headers: getHeaders(false),
   }, false);
+};
+
+/** Preventivo ⇄ confermato, senza passare dal PUT che riscrive l'evento. */
+export const setBanquetStatus = async (id: number, status: BanquetStatus): Promise<BanquetMenu> => {
+  return apiRequest<BanquetMenu>(`${API_URL}/banquet-menus/${id}/status`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify({ status }),
+  });
 };
 
 // ============================================
