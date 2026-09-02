@@ -6956,7 +6956,7 @@ app.get('/email/threads/:emailKey', authenticate, requirePermission('reservation
         // VECCHI del thread, e superata quota i nuovi sparivano.
         const result = await queryWithRetry(
             `SELECT * FROM (
-                SELECT id, provider, channel, direction, from_email, to_email, subject, body,
+                SELECT id, provider, channel, direction, from_email, to_email, subject, body, body_html,
                        status, provider_sid, message_id, in_reply_to, reservation_id, media,
                        sent_at, delivered_at, failed_at, read_at, error_code, error_message
                 FROM outbound_messages

@@ -177,7 +177,9 @@ export const MessaggiPanel: React.FC<{
                 {msg.subject && (
                   <div className="mb-1 text-[14px] font-semibold text-[var(--ds-text-primary)]">{msg.subject}</div>
                 )}
-                <p className="whitespace-pre-wrap text-[14px] leading-relaxed text-[var(--ds-text-secondary)]">
+                {/* overflow-wrap:anywhere: i link lunghi delle email (token di
+                    unsubscribe e simili) altrimenti sfondano la card. */}
+                <p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-[14px] leading-relaxed text-[var(--ds-text-secondary)]">
                   {msg.body}
                 </p>
                 {msg.error_message && (
