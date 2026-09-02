@@ -124,8 +124,19 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
   // Chiusura con intento «Fattura»: il conto chiude con proforma e questo
   // apre subito l'emissione, precompilata col cliente della visita.
   const [invoiceFor, setInvoiceFor] = useState<(ServiceBill & { initialQuery?: string }) | null>(null);
-  const { hasPermission } = useAuth();
+  const { user, hasPermission } = useAuth();
   const canCassa = hasPermission('cash:operate');
+
+  // La comanda di qualcun altro: chi tocca un tavolo non suo lo legge in
+  // testa prima di battere. La cassa si nomina come banco («dalla cassa»),
+  // non come persona: è il flusso a contare, non il nome del cassiere.
+  const openedByOther = useMemo(() => {
+    const o = order?.order;
+    if (!o || o.opened_by_user_id == null || !user) return null;
+    if (Number(o.opened_by_user_id) === Number(user.id)) return null;
+    if (String(o.opened_by_role) === 'CASSA') return 'dalla cassa';
+    return o.opened_by_name ? `di ${o.opened_by_name}` : null;
+  }, [order, user]);
   const billTables = useMemo(() => new Set(serviceBills.keys()), [serviceBills]);
 
   const isWide = useMediaQuery('(min-width: 1024px)');
@@ -1171,6 +1182,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
           {browser}
           <CourseColumn
             {...listProps}
+            openedBy={openedByOther}
             onSend={() => submit('course')}
             onSendAll={() => submit('all')}
           />
@@ -1253,6 +1265,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, tables, r
         onVoid={i => setVoidTarget(i)}
         onRecall={recall}
         onFire={fire}
+        openedBy={openedByOther}
         onSend={() => submit('course')}
         onSendAll={() => submit('all')}
         onRepeat={repeatLine}

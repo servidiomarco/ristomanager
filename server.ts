@@ -23745,7 +23745,16 @@ const deriveCourseStatus = (items: any[]): string => {
 
 // Vista completa della comanda: righe, uscite e totali già sommati.
 async function loadOrderView(tenantId: number, orderId: number): Promise<any | null> {
-    const o = await queryWithRetry(`SELECT * FROM orders WHERE id = $1 AND tenant_id = $2`, [orderId, tenantId]);
+    // Chi ha aperto la comanda, con nome e ruolo: il palmare lo mostra quando
+    // ad aprirla è stato un ALTRO operatore (o la cassa) — chi tocca un
+    // tavolo non suo deve saperlo prima di battere.
+    const o = await queryWithRetry(
+        `SELECT o.*, u.full_name AS opened_by_name, u.role AS opened_by_role
+         FROM orders o
+         LEFT JOIN users u ON u.id = o.opened_by_user_id AND u.tenant_id = o.tenant_id
+         WHERE o.id = $1 AND o.tenant_id = $2`,
+        [orderId, tenantId]
+    );
     if (o.rows.length === 0) return null;
     const it = await queryWithRetry(
         `SELECT * FROM order_items WHERE order_id = $1 ORDER BY course_no, id`,
@@ -24688,10 +24697,12 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
                     oi.fired_at, oi.station_start_at, oi.started_at, oi.ready_at,
                     o.table_id, t.name AS table_name,
                     r.customer_name, r.notes AS reservation_notes,
+                    u.full_name AS opened_by_name,
                     c.dietary_notes AS customer_dietary_notes
              FROM order_items oi
              JOIN orders o ON o.id = oi.order_id
              LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
+             LEFT JOIN users u ON u.id = o.opened_by_user_id AND u.tenant_id = o.tenant_id
              LEFT JOIN reservations r ON r.id = o.reservation_id AND r.tenant_id = o.tenant_id
              -- Gli allergeni stanno in anagrafica cliente, agganciata per
              -- telefono normalizzato: stessa lateral join delle prenotazioni.

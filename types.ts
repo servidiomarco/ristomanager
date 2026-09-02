@@ -702,6 +702,10 @@ export interface Order {
   covers: number;
   status: OrderStatus;
   opened_by_user_id?: number | null;
+  /** Nome e ruolo di chi ha aperto la comanda (join su users): il palmare
+   *  li mostra quando la comanda è di un altro operatore o della cassa. */
+  opened_by_name?: string | null;
+  opened_by_role?: string | null;
   closed_by_user_id?: number | null;
   opened_at?: string;
   closed_at?: string | null;
