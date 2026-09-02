@@ -35,3 +35,4 @@ export type { PillTone, CalloutTone, SectionTone, Stat, StatTone } from './ListP
 export { MonthGrid, DayPicker, asIsoDay, addDays, startOfMonth, mondayIndex, MONTHS, WEEKDAYS } from './Calendar';
 export { SwipeRow, useFirstRunHint } from './SwipeRow';
 export type { SwipeAction } from './SwipeRow';
+export { LinkifiedText } from './LinkifiedText';
