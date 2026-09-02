@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, BellOff, BellRing, Check, ChevronRight, Loader2, MessagesSquare, Pencil, Play, TriangleAlert, WifiOff } from 'lucide-react';
+import { Bell, BellOff, BellRing, Check, ChevronRight, Loader2, MessagesSquare, Pencil, Play, Search, TriangleAlert, WifiOff } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
 import { useAuth } from '../contexts/AuthContext';
 import { socketClient } from '../services/socketClient';
@@ -13,7 +13,7 @@ import {
 import { getKitchenServiceSummary, type KitchenServiceSummary } from '../services/apiService';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 import { chime } from '../utils/chime';
-import { ModalShell, EmptyState, SegmentedControl, StatusPill, dsButton } from './ds';
+import { ModalShell, EmptyState, SearchField, SegmentedControl, StatusPill, dsButton } from './ds';
 
 // ---------------------------------------------------------------------------
 // Monitor di partita — una istanza per postazione (Antipasti, Primi, Griglia).
@@ -109,6 +109,13 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   // dove le card si annidano prima del servito.
   const [view, setView] = useState<'lavoro' | 'consegnate'>('lavoro');
   const [served, setServed] = useState<KdsServedCourse[]>([]);
+  // Ricerca comande: la lente accanto alla campana apre il campo, che filtra
+  // sia il lavoro sia le Consegnate. Chiudere azzera: una ricerca dimenticata
+  // aperta non deve nascondere le comande nuove del servizio.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (searchOpen) searchRef.current?.focus(); }, [searchOpen]);
   // Revisioni aperte: modifiche a comande già lanciate (storno, aggiunta,
   // riporta, trasferimento). La card mostra "modificata", il tocco apre il
   // dettaglio, Ok le spegne per tutti gli schermi.
@@ -448,8 +455,22 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
     await Promise.all(list.map(r => ackKdsRevision(r.id).catch(() => {})));
   }, []);
 
-  const todo = columns.filter(c => !isUpcoming(c));
-  const upcoming = columns.filter(isUpcoming);
+  // Il filtro guarda ovunque il cuoco potrebbe cercare: tavolo, cliente,
+  // operatore, piatti (anche delle altre partite).
+  const query = search.trim().toLowerCase();
+  const colMatches = (c: Column): boolean => !query
+    || (c.table_name ?? '').toLowerCase().includes(query)
+    || (c.customer_name ?? '').toLowerCase().includes(query)
+    || (c.openedBy ?? '').toLowerCase().includes(query)
+    || c.items.some(i => i.name_snapshot.toLowerCase().includes(query))
+    || c.others.some(o => o.name_snapshot.toLowerCase().includes(query));
+
+  const todo = columns.filter(c => !isUpcoming(c) && colMatches(c));
+  const upcoming = columns.filter(c => isUpcoming(c) && colMatches(c));
+  const servedFiltered = served.filter(c => !query
+    || (c.table_name ?? '').toLowerCase().includes(query)
+    || (c.customer_name ?? '').toLowerCase().includes(query)
+    || c.items.some(i => i.name.toLowerCase().includes(query)));
 
   // Totale vivo per piatto di tutta la coda ("5× tagliata"): il cuoco che
   // batch-a le cotture lo legge qui invece di sommare a mente fra le card.
@@ -506,6 +527,21 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
               <WifiOff size={13} aria-hidden /> riconnessione…
             </StatusPill>
           )}
+          {/* Icona sola, 44px: la lente apre il campo di ricerca sotto la
+              testata; richiuderla azzera il filtro. */}
+          <button
+            type="button"
+            onClick={() => setSearchOpen(o => { if (o) setSearch(''); return !o; })}
+            aria-pressed={searchOpen}
+            aria-label={searchOpen ? 'Chiudi la ricerca' : 'Cerca una comanda'}
+            className={`ml-auto inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+              searchOpen
+                ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]'
+                : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
+            }`}
+          >
+            <Search size={17} aria-hidden />
+          </button>
           {/* Icona sola, 44px, incassata sulla card come i controlli quiet:
               il testo qui non aggiungerebbe nulla che la campana non dica. */}
           <button
@@ -513,7 +549,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             onClick={toggleSound}
             aria-pressed={sound}
             aria-label={sound ? 'Disattiva l\'avviso sonoro' : 'Attiva l\'avviso sonoro'}
-            className="ml-auto inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             {sound ? <Bell size={17} aria-hidden /> : <BellOff size={17} className="text-[var(--ds-text-muted)]" aria-hidden />}
           </button>
@@ -526,6 +562,18 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           </button>
         </div>
       </div>
+
+      {searchOpen && (
+        <div className="flex-shrink-0 px-4 pb-3">
+          <SearchField
+            value={search}
+            onChange={setSearch}
+            placeholder="Cerca tavolo, cliente o piatto…"
+            ariaLabel="Cerca una comanda"
+            inputRef={searchRef}
+          />
+        </div>
+      )}
 
       {chatStrip && (
         <div className="flex-shrink-0 px-4 pb-3">
@@ -585,13 +633,15 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
         // Le comande ordinate per ultima uscita servita, la più recente in
         // alto — la domanda riguarda sempre gli ultimi minuti.
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-1">
-          {served.length === 0 ? (
-            <EmptyState icon={Check}>Nessuna uscita servita in questo servizio.</EmptyState>
+          {servedFiltered.length === 0 ? (
+            <EmptyState icon={Check}>
+              {query ? 'Nessuna uscita servita per questa ricerca.' : 'Nessuna uscita servita in questo servizio.'}
+            </EmptyState>
           ) : (
             <div className="mx-auto max-w-[640px] space-y-2">
               {(() => {
                 const byOrder = new Map<number, KdsServedCourse[]>();
-                for (const c of served) {
+                for (const c of servedFiltered) {
                   if (!byOrder.has(c.order_id)) byOrder.set(c.order_id, []);
                   byOrder.get(c.order_id)!.push(c);
                 }
@@ -669,7 +719,9 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           senza un filo di padding l'overflow nascosto ne mangiava il lato alto. */
       <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-4 pb-4 pt-1">
         {todo.length === 0 && upcoming.length === 0 ? (
-          <EmptyState icon={Check}>Nessuna comanda in coda.</EmptyState>
+          <EmptyState icon={Check}>
+            {query ? 'Nessuna comanda per questa ricerca.' : 'Nessuna comanda in coda.'}
+          </EmptyState>
         ) : (
           <div className="flex h-full items-start gap-4">
             {todo.map(col => (
