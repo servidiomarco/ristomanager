@@ -11,7 +11,7 @@ import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BanquetPaymentsModal } from './BanquetPaymentsModal';
 import { DishDetailModal } from './DishDetailModal';
 import { CustomerPickerModal } from './CustomerPickerModal';
-import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, type MenuImportResult, type MenuTranslateResult, type MenuCategory } from '../services/apiService';
+import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, createMenuCategory, renameMenuCategory, deleteMenuCategory, type MenuImportResult, type MenuTranslateResult, type MenuCategory } from '../services/apiService';
 import { billsApiService } from '../services/billsApiService';
 import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '../contexts/AuthContext';
@@ -213,6 +213,44 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const [catsOpen, setCatsOpen] = useState(false);
   const [catsBusy, setCatsBusy] = useState(false);
   const [togglingDishId, setTogglingDishId] = useState<number | null>(null);
+  // CRUD delle categorie (modale Categorie): crea, rinomina, elimina.
+  const [catForm, setCatForm] = useState<{ kind: 'create' } | { kind: 'rename'; name: string } | null>(null);
+  const [catFormName, setCatFormName] = useState('');
+  const [catFormBusy, setCatFormBusy] = useState(false);
+  const [catFormError, setCatFormError] = useState<string | null>(null);
+  const [deleteCatConfirm, setDeleteCatConfirm] = useState<string | null>(null);
+
+  const refreshMenuCats = () => { getMenuCategories().then(setMenuCats).catch(() => {}); };
+
+  const submitCatForm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = catFormName.trim();
+    if (!catForm || !name || catFormBusy) return;
+    setCatFormBusy(true);
+    setCatFormError(null);
+    try {
+      if (catForm.kind === 'create') await createMenuCategory(name);
+      else await renameMenuCategory(catForm.name, name);
+      setCatForm(null);
+      setCatFormName('');
+      // I piatti arrivano dal socket; l'elenco categorie si aggiorna subito
+      // (una categoria vuota non muove l'anagrafica piatti).
+      refreshMenuCats();
+    } catch (err: any) {
+      setCatFormError(err?.data?.error ?? err?.message ?? 'Salvataggio non riuscito');
+    } finally {
+      setCatFormBusy(false);
+    }
+  };
+
+  const handleDeleteCategory = async (name: string) => {
+    try {
+      await deleteMenuCategory(name);
+      refreshMenuCats();
+    } catch { /* la categoria resta: nessun falso ok */ }
+    setDeleteCatConfirm(null);
+  };
+
   // Spunta di menu su una categoria (modale Categorie): chiave `nome|menuId`.
   const [catMenuBusy, setCatMenuBusy] = useState<string | null>(null);
   const handleToggleCategoryMenu = async (catName: string, menuId: number, member: boolean) => {
@@ -635,15 +673,17 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const handleOpenNewDish = () => {
     setIsEditingDish(false);
     setEditingDishId(null);
-    // Il piatto nuovo nasce nei menu della sua categoria (se impostati in
-    // modale Categorie), altrimenti nel menu che si sta guardando (o Alla
-    // carta): la spunta si toglie, non si rincorre.
-    const catDefault = menuCats?.find(c => c.name === 'Antipasti')?.menu_ids;
+    // Il piatto nuovo nasce nella prima categoria vera del ristorante e nei
+    // menu della sua categoria (se impostati in modale Categorie), altrimenti
+    // nel menu che si sta guardando (o Alla carta): la spunta si toglie, non
+    // si rincorre.
+    const firstCat = menuCats?.[0]?.name ?? 'Antipasti';
+    const catDefault = menuCats?.find(c => c.name === firstCat)?.menu_ids;
     const defaultMenuId = selectedMenu?.id ?? cartaMenu?.id;
     const defaultMenus = Array.isArray(catDefault) && catDefault.length > 0
       ? catDefault
       : defaultMenuId != null ? [defaultMenuId] : [];
-    setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '', vat_rate: defaultVatRate, menu_ids: defaultMenus });
+    setNewDish({ name: '', description: '', price: 0, category: firstCat, allergens: [], photo_url: '', vat_rate: defaultVatRate, menu_ids: defaultMenus });
     setPhotoUploadError(null);
     setIsDishFormOpen(true);
   };
@@ -2226,12 +2266,19 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         }));
                       }}
                     >
-                      <option>Antipasti</option>
-                      <option>Primi</option>
-                      <option>Secondi</option>
-                      <option>Contorni</option>
-                      <option>Dolci</option>
-                      <option>Bevande</option>
+                      {/* Le categorie vere del ristorante (incluse quelle
+                          appena create, ancora vuote); i sei classici solo
+                          finché l'elenco non è arrivato. Il valore corrente
+                          resta sempre in lista o la select lo azzererebbe. */}
+                      {(() => {
+                        const base = menuCats && menuCats.length > 0
+                          ? menuCats.map(c => c.name)
+                          : [...BANQUET_DISH_CATEGORIES];
+                        const options = newDish.category && !base.includes(newDish.category)
+                          ? [newDish.category, ...base]
+                          : base;
+                        return options.map(name => <option key={name}>{name}</option>);
+                      })()}
                     </select>
                   </Field>
                   {/* Il 10% è la somministrazione in loco: quasi ogni piatto
@@ -3396,11 +3443,95 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   <span aria-hidden="true"
                     className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${cat.enabled ? 'translate-x-5' : 'translate-x-0.5'} translate-y-0.5`} />
                 </button>
+                <button
+                  type="button"
+                  onClick={() => { setCatFormName(cat.name); setCatFormError(null); setCatForm({ kind: 'rename', name: cat.name }); }}
+                  className={`${dsIconButton} h-9 w-9 flex-shrink-0 bg-[var(--ds-surface-row)] shadow-none`}
+                  title="Rinomina categoria"
+                >
+                  <Edit2 className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  disabled={cat.dishes > 0}
+                  onClick={() => setDeleteCatConfirm(cat.name)}
+                  className={`${dsIconButton} h-9 w-9 flex-shrink-0 bg-[var(--ds-surface-row)] shadow-none disabled:opacity-30 hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]`}
+                  title={cat.dishes > 0 ? 'Ha ancora piatti: spostali prima di eliminarla' : 'Elimina categoria'}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
               </div>
             ))}
           </div>
+          <div className="px-3 py-3">
+            <button
+              type="button"
+              onClick={() => { setCatFormName(''); setCatFormError(null); setCatForm({ kind: 'create' }); }}
+              className={`${dsButton.quiet} h-9 px-4 text-[13px]`}
+            >
+              <Plus className="h-3.5 w-3.5" /> Nuova categoria
+            </button>
+          </div>
         </ModalShell>
       )}
+
+      {/* Nuova categoria / rinomina. La rinomina sposta tutti i piatti sul
+          nuovo nome; per i piatti della cassa vale solo fino al prossimo
+          import, e la modale lo dice invece di lasciarlo scoprire. */}
+      {catForm && (
+        <ModalShell
+          open={!!catForm}
+          onClose={() => setCatForm(null)}
+          title={catForm.kind === 'create' ? 'Nuova categoria' : 'Rinomina categoria'}
+          size="sm"
+          bodyClassName="p-5"
+          footer={
+            <>
+              <button type="button" onClick={() => setCatForm(null)} className={dsButton.secondary}>
+                Annulla
+              </button>
+              <button
+                type="submit"
+                form="cat-form"
+                disabled={catFormBusy || !catFormName.trim() || (catForm.kind === 'rename' && catFormName.trim() === catForm.name)}
+                className={dsButton.primary}
+              >
+                {catFormBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+                {catForm.kind === 'create' ? 'Crea categoria' : 'Salva'}
+              </button>
+            </>
+          }
+        >
+          <form id="cat-form" onSubmit={submitCatForm} className="space-y-3">
+            <Field label="Nome" required>
+              <input
+                autoFocus
+                required
+                maxLength={60}
+                placeholder="es. Fritture, Pizze…"
+                className={dsInput}
+                value={catFormName}
+                onChange={e => setCatFormName(e.target.value)}
+              />
+            </Field>
+            {catForm.kind === 'rename' && dishes.some(d => d.category === catForm.name && d.external_ref?.startsWith('pp:')) && (
+              <Callout tone="pending">
+                Qui ci sono piatti sincronizzati dalla cassa: al prossimo «Importa da cassa» torneranno alla categoria della cassa. Per un nome definitivo rinominala anche in Passepartout.
+              </Callout>
+            )}
+            {catFormError && <p className="text-[13px] text-[var(--ds-critical-text)]">{catFormError}</p>}
+          </form>
+        </ModalShell>
+      )}
+
+      <ConfirmDeleteModal
+        isOpen={!!deleteCatConfirm}
+        title="Elimina Categoria"
+        message="La categoria è vuota: nessun piatto viene toccato. Stai per eliminare:"
+        itemName={deleteCatConfirm ?? undefined}
+        onCancel={() => setDeleteCatConfirm(null)}
+        onConfirm={() => { if (deleteCatConfirm) handleDeleteCategory(deleteCatConfirm); }}
+      />
 
       {/* Only when the inline panel cannot show — otherwise the same dish would
           open twice, in a panel and a modal on top of it. */}

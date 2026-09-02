@@ -490,6 +490,32 @@ export const saveMenuCategories = async (categories: { name: string; enabled: bo
   });
 };
 
+/** Nuova categoria (anche vuota: vive nelle preferenze finché non ha piatti). */
+export const createMenuCategory = async (name: string): Promise<void> => {
+  await apiRequest<{ ok: true }>(`${API_URL}/menu/categories`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ name }),
+  });
+};
+
+/** Rinomina una categoria spostando tutti i suoi piatti sul nuovo nome. */
+export const renameMenuCategory = async (from: string, to: string): Promise<void> => {
+  await apiRequest<{ ok: true }>(`${API_URL}/menu/categories/rename`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify({ from, to }),
+  });
+};
+
+/** Elimina una categoria vuota (il server rifiuta se ha ancora piatti). */
+export const deleteMenuCategory = async (name: string): Promise<void> => {
+  await apiRequest<void>(`${API_URL}/menu/categories?name=${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+    headers: getHeaders(false),
+  }, false);
+};
+
 /** Spunta di menu su una categoria: applica in blocco a tutti i suoi piatti
  *  e registra il default per i piatti nuovi. Il server broadcasta
  *  'dish:synced'. */

@@ -214,6 +214,7 @@ Due voci in sidebar: **Menu** (i piatti, organizzati in menu) e **Banchetti** (g
 - La pagina Menu è divisa in menu: **Alla carta** (ciò che si batte in comanda e appare sul menu digitale QR), **Banchetti** (i piatti proponibili nella composizione degli eventi) e i **menu stagionali** creati dal ristoratore (es. Ferragosto, Pasqua), rinominabili ed eliminabili.
 - **Ogni piatto appartiene a uno o più menu** tramite spunte nella sua scheda: lo stesso piatto può stare alla carta e nei banchetti senza doppioni in anagrafica.
 - **Anche le categorie appartengono ai menu**: nella modale «Categorie» ogni categoria ha le spunte dei menu — spuntarne una mette (o toglie) tutti i suoi piatti da quel menu in un colpo, con indicatore parziale («3/12») quando i piatti sono divisi. I singoli piatti restano regolabili dopo, e i piatti nuovi di una categoria nascono nei menu della categoria.
+- **Le categorie si creano, rinominano ed eliminano** dalla stessa modale: la rinomina sposta tutti i piatti sul nuovo nome (con avviso se contiene piatti sincronizzati dalla cassa, che al prossimo import torneranno alla categoria della cassa); si elimina solo una categoria vuota; una categoria appena creata è subito disponibile nella scheda del piatto, la cui tendina mostra le categorie vere del ristorante.
 - I piatti nuovi (anche quelli importati dalla cassa) nascono in Alla carta; il menu pubblico, il palmare comande e la cassa mostrano solo i piatti di quel menu.
 
 **Piatti**
@@ -543,6 +544,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-02 | Menu & Banchetti | Categorie con crud completo dalla modale «Categorie»: creazione (anche vuote), rinomina che sposta i piatti (con avviso per i piatti della cassa), eliminazione delle categorie vuote; la tendina categoria della scheda piatto mostra le categorie vere del ristorante. |
 | 2026-09-02 | Menu & Banchetti | Le categorie appartengono ai menu: spunte per categoria nella modale «Categorie» che applicano in blocco a tutti i piatti (con indicatore parziale), e i piatti nuovi della categoria nascono nei menu della categoria. |
 | 2026-09-02 | Comande, Cucina e Passe | Toccando una comanda nelle Consegnate si apre la sua storia: apertura (con l'operatore), chiamata/in lavorazione/pronta/servita di ogni uscita (con sincronia fra partite e minuti sotto la lampada) e le revisioni con autore. |
 | 2026-09-02 | Comande, Cucina e Passe | Lente di ricerca sul monitor cucina: filtra In lavorazione e Consegnate per tavolo, cliente, piatto (anche delle altre partite) e operatore. |
