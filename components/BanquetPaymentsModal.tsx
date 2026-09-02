@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { BanquetMenu, BanquetPayment, BanquetPaymentType, BanquetPaymentMethod } from '../types';
-import { X, Plus, Trash2, Wallet, Banknote, CreditCard, Building2, Loader2 } from 'lucide-react';
+import { BanquetMenu, BanquetPayment, BanquetPaymentType, BanquetPaymentMethod, BanquetStatus } from '../types';
+import { X, Plus, Trash2, Wallet, Banknote, CreditCard, Building2, Loader2, Check } from 'lucide-react';
 import { Loader } from './Loader';
-import { getBanquetPayments, createBanquetPayment, deleteBanquetPayment } from '../services/apiService';
+import { getBanquetPayments, createBanquetPayment, deleteBanquetPayment, setBanquetStatus } from '../services/apiService';
 
 interface Props {
   banquet: BanquetMenu;
@@ -58,6 +58,11 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
   const [error, setError] = useState<string | null>(null);
 
   const [showForm, setShowForm] = useState(false);
+  // Un acconto su un preventivo è il segnale di conferma per eccellenza: la
+  // registrazione lo propone, non lo impone — la decisione resta allo staff.
+  const [suggestConfirm, setSuggestConfirm] = useState(false);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [form, setForm] = useState({
@@ -129,6 +134,7 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
         notes: form.notes.trim() || undefined
       });
       setPayments(prev => [{ ...created, amount: Number(created.amount) }, ...prev]);
+      if (banquet.status === BanquetStatus.QUOTE && !confirmed) setSuggestConfirm(true);
       setShowForm(false);
       setForm({
         amount: '',
@@ -176,6 +182,40 @@ export const BanquetPaymentsModal: React.FC<Props> = ({ banquet, onClose }) => {
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {suggestConfirm && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--ds-pending-tint)] bg-[var(--ds-pending-tint)] p-3">
+              <p className="text-sm text-[var(--ds-pending-text)]">
+                Pagamento registrato su un preventivo: confermare il banchetto?
+              </p>
+              <span className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={confirmBusy}
+                  onClick={async () => {
+                    setConfirmBusy(true);
+                    try {
+                      // La lista si aggiorna via socket banquet:updated.
+                      await setBanquetStatus(banquet.id, BanquetStatus.CONFIRMED);
+                      setConfirmed(true);
+                      setSuggestConfirm(false);
+                    } catch { /* resta preventivo: nessun falso ok */ }
+                    finally { setConfirmBusy(false); }
+                  }}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                >
+                  {confirmBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                  Conferma banchetto
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSuggestConfirm(false)}
+                  className="inline-flex h-9 items-center rounded-full px-3 text-[13px] font-medium text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)]"
+                >
+                  Resta preventivo
+                </button>
+              </span>
+            </div>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="rounded-lg bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3">
               <div className="text-[11px] tracking-wide font-semibold text-[var(--ds-text-muted)]">Totale dovuto</div>

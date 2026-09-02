@@ -3548,10 +3548,19 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
             }
         }
 
+        await ensureSystemMenus(req.tenantId!);
         const esito = await withTenant(req.tenantId!, async (client) => {
             let creati = 0, aggiornati = 0;
             const refs: string[] = [];
             const groupCache = new Map<string, number>();
+            // Gli articoli nuovi della cassa entrano nel menu Alla carta:
+            // sono voci da battere in comanda. Le appartenenze dei piatti
+            // già presenti non si toccano — quelle le cura il ristoratore.
+            const cartaRs = await client.query(
+                `SELECT id FROM menus WHERE tenant_id = $1 AND system_key = 'ALLA_CARTA'`,
+                [req.tenantId!]
+            );
+            const cartaMenuId: number | null = cartaRs.rows[0]?.id ?? null;
             for (const a of validi) {
                 const ref = `pp:articolo:${Number(a.idGestionale)}`;
                 refs.push(ref);
@@ -3573,6 +3582,13 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
                 );
                 if (up.rows[0]?.inserted) creati++; else aggiornati++;
                 const dishId: number = up.rows[0].id;
+                if (up.rows[0]?.inserted && cartaMenuId != null) {
+                    await client.query(
+                        `INSERT INTO dish_menus (tenant_id, dish_id, menu_id)
+                         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+                        [req.tenantId!, dishId, cartaMenuId]
+                    );
+                }
 
                 // Set effettivo: varianti dell'articolo + della sua categoria.
                 const codes = [...new Set(
@@ -3841,6 +3857,9 @@ app.put('/dishes/:id/enabled', authenticate, requirePermission('menu:full'), asy
         );
         const dish = rs.rows[0];
         if (!dish) return res.status(404).json({ error: 'Dish not found' });
+        // La riga viaggia intera sul socket: senza menu_ids le spunte dei
+        // menu si azzererebbero su tutti i client a ogni toggle.
+        dish.menu_ids = await dishMenuIds(dish.id);
         if (socketService) socketService.broadcastDishUpdated(req.tenantId!, dish);
         if (req.user) {
             LogService.logActivity(
@@ -3924,10 +3943,14 @@ const handlePublicMenu = async (tenantId: number, _req: express.Request, res: ex
     }
     // Doppio interruttore: is_active è della cassa, crm_enabled del
     // ristoratore — il menu pubblico mostra solo ciò che entrambi accendono.
+    // E solo i piatti del menu Alla carta: il QR al tavolo mostra ciò che si
+    // può ordinare, non le liste banchetti o i menu stagionali.
     const dishesRs = await queryWithRetry(
-        `SELECT name, description, price, category, allergens, photo_url, translations
-         FROM dishes WHERE tenant_id = $1 AND is_active AND crm_enabled
-         ORDER BY category, sort_order NULLS LAST, name`,
+        `SELECT d.name, d.description, d.price, d.category, d.allergens, d.photo_url, d.translations
+         FROM dishes d WHERE d.tenant_id = $1 AND d.is_active AND d.crm_enabled
+           AND EXISTS (SELECT 1 FROM dish_menus dm JOIN menus m ON m.id = dm.menu_id
+                       WHERE dm.dish_id = d.id AND m.system_key = 'ALLA_CARTA')
+         ORDER BY d.category, d.sort_order NULLS LAST, d.name`,
         [tenantId]
     );
     const prefs = await getMenuCategoryPrefs(tenantId);
@@ -10040,6 +10063,129 @@ app.delete('/rooms/:id', authenticate, requirePermission('floorplan:full'), asyn
 
 
 // Dishes - require authentication
+// ============================================
+// MENUS — "Alla carta" e "Banchetti" (di sistema) più i menu stagionali del
+// ristoratore. L'appartenenza piatto→menu vive in dish_menus; ALLA_CARTA
+// governa comande e menu digitale, BANQUETS la composizione banchetti.
+// ============================================
+
+// I menu di sistema per i tenant nati dopo la migrazione: la prima lettura
+// li crea. ON CONFLICT sull'indice parziale (tenant_id, system_key).
+const ensureSystemMenus = async (tenantId: number): Promise<void> => {
+    await queryWithRetry(
+        `INSERT INTO menus (tenant_id, name, system_key, sort_order)
+         VALUES ($1, 'Alla carta', 'ALLA_CARTA', 0), ($1, 'Banchetti', 'BANQUETS', 1)
+         ON CONFLICT (tenant_id, system_key) WHERE system_key IS NOT NULL DO NOTHING`,
+        [tenantId]
+    );
+};
+
+// Appartenenze di un piatto, per completare la riga prima del broadcast: i
+// client sostituiscono l'oggetto intero su dish:updated, quindi ogni risposta
+// che viaggia sul socket deve portare menu_ids o le spunte si azzererebbero.
+const dishMenuIds = async (dishId: number): Promise<number[]> => {
+    const rs = await queryWithRetry(
+        'SELECT menu_id FROM dish_menus WHERE dish_id = $1 ORDER BY menu_id',
+        [dishId]
+    );
+    return rs.rows.map((r: any) => Number(r.menu_id));
+};
+
+// Sostituisce le appartenenze di un piatto. Gli id vengono intersecati con i
+// menu del tenant: un id altrui sparisce in silenzio invece di legare il
+// piatto al menu di un altro ristorante.
+const replaceDishMenus = async (tenantId: number, dishId: number, menuIds: number[]): Promise<number[]> => {
+    const wanted = [...new Set(menuIds.map(Number).filter(Number.isInteger))];
+    await queryWithRetry('DELETE FROM dish_menus WHERE dish_id = $1 AND tenant_id = $2', [dishId, tenantId]);
+    if (wanted.length > 0) {
+        await queryWithRetry(
+            `INSERT INTO dish_menus (tenant_id, dish_id, menu_id)
+             SELECT $1, $2, m.id FROM menus m WHERE m.tenant_id = $1 AND m.id = ANY($3::int[])
+             ON CONFLICT DO NOTHING`,
+            [tenantId, dishId, wanted]
+        );
+    }
+    return dishMenuIds(dishId);
+};
+
+app.get('/menus', authenticate, async (req, res) => {
+    try {
+        await ensureSystemMenus(req.tenantId!);
+        const rs = await queryWithRetry(
+            'SELECT id, name, system_key, sort_order FROM menus WHERE tenant_id = $1 ORDER BY sort_order, id',
+            [req.tenantId!]
+        );
+        res.json(rs.rows);
+    } catch (err) {
+        console.error('GET /menus error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/menus', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const name = String(req.body?.name ?? '').trim();
+        if (!name || name.length > 80) return res.status(400).json({ error: 'name deve essere 1..80 caratteri' });
+        const rs = await queryWithRetry(
+            `INSERT INTO menus (tenant_id, name, sort_order)
+             VALUES ($1, $2, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM menus WHERE tenant_id = $1))
+             RETURNING id, name, system_key, sort_order`,
+            [req.tenantId!, name]
+        );
+        const menu = rs.rows[0];
+        try { socketService?.broadcastToAll(req.tenantId!, 'menu:created', menu); } catch (_) {}
+        res.status(201).json(menu);
+    } catch (err) {
+        console.error('POST /menus error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/menus/:id', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        const name = String(req.body?.name ?? '').trim();
+        if (!Number.isInteger(id)) return res.status(400).json({ error: 'id non valido' });
+        if (!name || name.length > 80) return res.status(400).json({ error: 'name deve essere 1..80 caratteri' });
+        // Solo i menu del ristoratore si rinominano: i due di sistema hanno
+        // nomi canonici che le superfici danno per scontati.
+        const rs = await queryWithRetry(
+            `UPDATE menus SET name = $1 WHERE id = $2 AND tenant_id = $3 AND system_key IS NULL
+             RETURNING id, name, system_key, sort_order`,
+            [name, id, req.tenantId!]
+        );
+        const menu = rs.rows[0];
+        if (!menu) return res.status(404).json({ error: 'Menu non trovato o di sistema' });
+        try { socketService?.broadcastToAll(req.tenantId!, 'menu:updated', menu); } catch (_) {}
+        res.json(menu);
+    } catch (err) {
+        console.error('PUT /menus/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/menus/:id', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: 'id non valido' });
+        const rs = await queryWithRetry(
+            'DELETE FROM menus WHERE id = $1 AND tenant_id = $2 AND system_key IS NULL RETURNING id',
+            [id, req.tenantId!]
+        );
+        if (!rs.rows[0]) return res.status(404).json({ error: 'Menu non trovato o di sistema' });
+        try {
+            socketService?.broadcastToAll(req.tenantId!, 'menu:deleted', id);
+            // Le appartenenze cascano col menu: i client ricaricano
+            // l'anagrafica piatti per non tenere menu_ids orfani.
+            socketService?.broadcastToAll(req.tenantId!, 'dish:synced', { menu_eliminato: id });
+        } catch (_) {}
+        res.status(204).send();
+    } catch (err) {
+        console.error('DELETE /menus/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.get('/dishes', authenticate, async (req, res) => {
     try {
         // Dentro la categoria comanda sort_order (l'ordine scelto in Menu);
@@ -10047,7 +10193,9 @@ app.get('/dishes', authenticate, async (req, res) => {
         // DELLE categorie invece lo applica il client con le preferenze di
         // /menu/categories: qui le righe restano solo raggruppate.
         const result = await queryWithRetry(
-            'SELECT * FROM dishes WHERE tenant_id = $1 ORDER BY category, sort_order NULLS LAST, name',
+            `SELECT d.*, COALESCE((SELECT array_agg(dm.menu_id ORDER BY dm.menu_id)
+                                   FROM dish_menus dm WHERE dm.dish_id = d.id), '{}') AS menu_ids
+             FROM dishes d WHERE d.tenant_id = $1 ORDER BY d.category, d.sort_order NULLS LAST, d.name`,
             [req.tenantId!]
         );
         res.json(result.rows);
@@ -10079,6 +10227,23 @@ app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, re
             [name, description, price, category, allergens, photo_url || null, req.tenantId!, vatRate]
         );
         const newDish = result.rows[0];
+
+        // Appartenenza ai menu: le spunte del form. Un client che non le
+        // manda (o le manda vuote) ottiene il default Alla carta — un piatto
+        // in nessun menu non si batte da nessuna parte, e non è mai voluto
+        // alla creazione.
+        await ensureSystemMenus(req.tenantId!);
+        let wantedMenus: number[] = Array.isArray(req.body?.menu_ids)
+            ? req.body.menu_ids.map(Number).filter(Number.isInteger)
+            : [];
+        if (wantedMenus.length === 0) {
+            const carta = await queryWithRetry(
+                `SELECT id FROM menus WHERE tenant_id = $1 AND system_key = 'ALLA_CARTA'`,
+                [req.tenantId!]
+            );
+            wantedMenus = carta.rows[0] ? [Number(carta.rows[0].id)] : [];
+        }
+        newDish.menu_ids = await replaceDishMenus(req.tenantId!, newDish.id, wantedMenus);
 
         // Log activity
         if (req.user) {
@@ -10121,6 +10286,13 @@ app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req,
         if (!updatedDish) {
             return res.status(404).json({ error: 'Dish not found' });
         }
+
+        // menu_ids assente = client vecchio: le appartenenze restano come
+        // sono (stessa logica del COALESCE su vat_rate). Presente = le
+        // spunte del form sostituiscono l'insieme per intero.
+        updatedDish.menu_ids = Array.isArray(req.body?.menu_ids)
+            ? await replaceDishMenus(req.tenantId!, updatedDish.id, req.body.menu_ids)
+            : await dishMenuIds(updatedDish.id);
 
         // Log activity
         if (req.user) {
@@ -12493,7 +12665,7 @@ app.get('/banquet-menus', authenticate, async (req, res) => {
                     TO_CHAR(b.event_date, 'YYYY-MM-DD') AS event_date, b.shift, b.deposit_amount,
                     b.guests, b.children, b.children_price, b.notes_courses, b.notes_service,
                     b.notes_mise_en_place, b.customer_id, b.table_ids,
-                    b.discount_type, b.discount_value,
+                    b.discount_type, b.discount_value, b.status,
                     COALESCE((SELECT SUM(amount) FROM banquet_payments WHERE banquet_id = b.id), 0)::float AS total_paid
              FROM banquet_menus b
              WHERE b.tenant_id = $1
@@ -12520,6 +12692,9 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
         if (!event_date) {
             return res.status(400).json({ error: 'event_date is required' });
         }
+        // Un banchetto nasce preventivo: diventa confermato con l'azione
+        // dedicata (o subito, se il client lo chiede esplicitamente).
+        const status: 'QUOTE' | 'CONFIRMED' = req.body?.status === 'CONFIRMED' ? 'CONFIRMED' : 'QUOTE';
         // Derive flat dish_ids from courses if courses provided, else use the supplied flat list
         const flatDishIds: number[] = Array.isArray(courses) && courses.length > 0
             ? courses.flatMap((c: any) => Array.isArray(c.dish_ids) ? c.dish_ids : [])
@@ -12542,8 +12717,8 @@ app.post('/banquet-menus', authenticate, requirePermission('menu:full'), async (
             }
         }
         const result = await queryWithRetry(
-            "INSERT INTO banquet_menus (tenant_id, name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids, discount_type, discount_value) VALUES ($19, $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids, discount_type, discount_value",
-            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, childrenCount, childrenPrice, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, customer_id ?? null, tableIdsArr.length > 0 ? tableIdsArr : null, normalizedDiscountType, normalizedDiscountValue, req.tenantId!]
+            "INSERT INTO banquet_menus (tenant_id, name, description, price_per_person, dish_ids, courses, event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids, discount_type, discount_value, status) VALUES ($19, $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $20) RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids, discount_type, discount_value, status",
+            [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, childrenCount, childrenPrice, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, customer_id ?? null, tableIdsArr.length > 0 ? tableIdsArr : null, normalizedDiscountType, normalizedDiscountValue, req.tenantId!, status]
         );
         const newMenu = result.rows[0];
 
@@ -12610,7 +12785,10 @@ app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), asyn
             }
         }
         const result = await queryWithRetry(
-            "UPDATE banquet_menus SET name = $1, description = $2, price_per_person = $3, dish_ids = $4, courses = $5::jsonb, event_date = $6, shift = $7, deposit_amount = $8, guests = $9, children = $10, children_price = $11, notes_courses = $12, notes_service = $13, notes_mise_en_place = $14, customer_id = $15, table_ids = $16, discount_type = $17, discount_value = $18 WHERE id = $19 AND tenant_id = $20 RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids, discount_type, discount_value",
+            // Lo status non passa da qui: il wizard riscrive l'anagrafica
+            // dell'evento, la conferma ha la sua rotta dedicata — così un
+            // salvataggio del form non può mai retrocedere un confermato.
+            "UPDATE banquet_menus SET name = $1, description = $2, price_per_person = $3, dish_ids = $4, courses = $5::jsonb, event_date = $6, shift = $7, deposit_amount = $8, guests = $9, children = $10, children_price = $11, notes_courses = $12, notes_service = $13, notes_mise_en_place = $14, customer_id = $15, table_ids = $16, discount_type = $17, discount_value = $18 WHERE id = $19 AND tenant_id = $20 RETURNING id, name, description, price_per_person, dish_ids, courses, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, shift, deposit_amount, guests, children, children_price, notes_courses, notes_service, notes_mise_en_place, customer_id, table_ids, discount_type, discount_value, status",
             [name, description, price_per_person, flatDishIds, coursesJson, event_date, shift ?? null, deposit_amount ?? null, guests ?? null, childrenCount, childrenPrice, notes_courses ?? null, notes_service ?? null, notes_mise_en_place ?? null, customer_id ?? null, tableIdsArr.length > 0 ? tableIdsArr : null, normalizedDiscountType, normalizedDiscountValue, id, req.tenantId!]
         );
         const updatedMenu = result.rows[0];
@@ -12644,6 +12822,48 @@ app.put('/banquet-menus/:id', authenticate, requirePermission('menu:full'), asyn
         res.json(updatedMenu);
     } catch (err) {
         console.error(err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Preventivo ⇄ confermato. Separato dal PUT /banquet-menus/:id che riscrive
+// l'anagrafica intera (stessa ragione di /dishes/:id/enabled): qui si tocca
+// solo lo stato, e il broadcast porta la riga completa di total_paid.
+app.put('/banquet-menus/:id/status', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: 'id non valido' });
+        const status = req.body?.status;
+        if (status !== 'QUOTE' && status !== 'CONFIRMED') {
+            return res.status(400).json({ error: 'status deve essere QUOTE o CONFIRMED' });
+        }
+        const rs = await queryWithRetry(
+            'UPDATE banquet_menus SET status = $1 WHERE id = $2 AND tenant_id = $3 RETURNING id, name',
+            [status, id, req.tenantId!]
+        );
+        if (!rs.rows[0]) return res.status(404).json({ error: 'Banquet not found' });
+        const refreshed = await queryWithRetry(
+            `SELECT b.id, b.name, b.description, b.price_per_person, b.dish_ids, b.courses,
+                    TO_CHAR(b.event_date, 'YYYY-MM-DD') AS event_date, b.shift, b.deposit_amount,
+                    b.guests, b.children, b.children_price, b.notes_courses, b.notes_service,
+                    b.notes_mise_en_place, b.customer_id, b.table_ids,
+                    b.discount_type, b.discount_value, b.status,
+                    COALESCE((SELECT SUM(amount) FROM banquet_payments WHERE banquet_id = b.id), 0)::float AS total_paid
+             FROM banquet_menus b WHERE b.id = $1 AND b.tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        const banquet = refreshed.rows[0];
+        if (socketService && banquet) socketService.broadcastBanquetUpdated(req.tenantId!, banquet);
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.BANQUET_MENU, id, rs.rows[0].name,
+                { status }
+            ).catch(() => {});
+        }
+        res.json(banquet);
+    } catch (err) {
+        console.error('PUT /banquet-menus/:id/status error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -12765,7 +12985,7 @@ app.post('/banquet-menus/:id/payments', authenticate, requirePermission('banquet
                     TO_CHAR(b.event_date, 'YYYY-MM-DD') AS event_date, b.shift, b.deposit_amount,
                     b.guests, b.children, b.children_price, b.notes_courses, b.notes_service,
                     b.notes_mise_en_place, b.customer_id, b.table_ids,
-                    b.discount_type, b.discount_value,
+                    b.discount_type, b.discount_value, b.status,
                     COALESCE((SELECT SUM(amount) FROM banquet_payments WHERE banquet_id = b.id), 0)::float AS total_paid
              FROM banquet_menus b WHERE b.id = $1 AND b.tenant_id = $2`,
             [id, req.tenantId!]
@@ -12815,7 +13035,7 @@ app.delete('/banquet-menus/:id/payments/:paymentId', authenticate, requirePermis
                     TO_CHAR(b.event_date, 'YYYY-MM-DD') AS event_date, b.shift, b.deposit_amount,
                     b.guests, b.children, b.children_price, b.notes_courses, b.notes_service,
                     b.notes_mise_en_place, b.customer_id, b.table_ids,
-                    b.discount_type, b.discount_value,
+                    b.discount_type, b.discount_value, b.status,
                     COALESCE((SELECT SUM(amount) FROM banquet_payments WHERE banquet_id = b.id), 0)::float AS total_paid
              FROM banquet_menus b WHERE b.id = $1 AND b.tenant_id = $2`,
             [id, req.tenantId!]

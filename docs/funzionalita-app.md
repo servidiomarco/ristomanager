@@ -208,7 +208,14 @@ Il colpo d'occhio del "adesso", sempre sulla giornata corrente.
 
 ## Menu & Banchetti
 
-**Piatti alla carta**
+Due voci in sidebar: **Menu** (i piatti, organizzati in menu) e **Banchetti** (gli eventi).
+
+**Menu multipli**
+- La pagina Menu è divisa in menu: **Alla carta** (ciò che si batte in comanda e appare sul menu digitale QR), **Banchetti** (i piatti proponibili nella composizione degli eventi) e i **menu stagionali** creati dal ristoratore (es. Ferragosto, Pasqua), rinominabili ed eliminabili.
+- **Ogni piatto appartiene a uno o più menu** tramite spunte nella sua scheda: lo stesso piatto può stare alla carta e nei banchetti senza doppioni in anagrafica.
+- I piatti nuovi (anche quelli importati dalla cassa) nascono in Alla carta; il menu pubblico, il palmare comande e la cassa mostrano solo i piatti di quel menu.
+
+**Piatti**
 - Anagrafica completa: categorie (Antipasti, Primi, Secondi, Contorni, Dolci, Bevande, Altro), nome, descrizione, prezzo, **aliquota IVA**, foto (con ridimensionamento automatico), **allergeni**, visibilità sul menu digitale. Viste griglia ed elenco.
 - **Piatti e categorie accendibili e spegnibili con un interruttore**: un piatto spento resta in anagrafica ma sparisce dal palmare comande e dal menu digitale; una categoria spenta nasconde tutti i suoi piatti. Separato dallo stato che arriva dalla cassa ("spento in cassa").
 - **Ordinamento libero**: frecce su/giù sui piatti (dentro la categoria) e sulle categorie (modale "Categorie"); l'ordine scelto vale in tutta l'app — gestione menu, palmare comande e menu digitale.
@@ -216,7 +223,8 @@ Il colpo d'occhio del "adesso", sempre sulla giornata corrente.
 - Import e sincronizzazione dal catalogo della cassa Passepartout (per chi ha l'integrazione).
 
 **Banchetti ed eventi**
-- Wizard a passi: evento e cliente → coperti e tariffa (prezzo adulti, bambini, sconto in € o %) → composizione del menù per uscite → tavoli assegnati → note operative (Portate, Servizio, Mise en place).
+- **Preventivi e Confermati**: ogni banchetto nasce come preventivo e si conferma con un'azione dello staff; la registrazione di un acconto propone la conferma. Le due liste sono separate, e i numeri di testata (eventi in arrivo, coperti, da incassare) contano solo i confermati.
+- Wizard a passi: evento e cliente → coperti e tariffa (prezzo adulti, bambini, sconto in € o %) → composizione del menù per uscite → tavoli assegnati → note operative (Portate, Servizio, Mise en place). La composizione pesca dal menu Banchetti, o da un menu stagionale a scelta.
 - **Registro pagamenti del banchetto**: acconti e saldo per contanti/carta/bonifico, stato Saldato / Parziale / Non pagato. Prezzi e pagamenti visibili solo ai ruoli autorizzati.
 - Calendario eventi e filtri temporali (questa settimana, questo mese, più avanti, passati).
 - **Promemoria automatici in cucina a 72, 48 e 24 ore** dall'evento, a priorità crescente, che si spostano da soli se la data cambia.
@@ -534,6 +542,8 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-02 | Menu & Banchetti | Menu multipli: Alla carta, Banchetti e menu stagionali (Ferragosto, Pasqua…), con appartenenza dei piatti a spunte nella scheda; comande, cassa e menu digitale seguono Alla carta, la composizione banchetti pesca dal menu Banchetti o da uno stagionale. |
+| 2026-09-02 | Menu & Banchetti | Banchetti in voce di sidebar propria, divisi in Preventivi e Confermati: un evento nasce preventivo, si conferma con un'azione e la registrazione di un acconto propone la conferma; i KPI contano solo i confermati. |
 | 2026-09-02 | Comande, Cucina e Passe | Le card del monitor cucina dicono chi ha preso la comanda («di Luca»); sul palmare la comanda aperta da un altro operatore (o dalla cassa) lo dichiara in testa («Comanda di Luca» / «Comanda dalla cassa»). |
 | 2026-09-02 | Comande, Cucina e Passe | Consegnate raggruppate per comanda (una card per tavolo con le sue uscite e gli orari); i monitor rileggono la coda al rientro in primo piano — l'uscita servita altrove non resta a schermo sui tablet sospesi. |
 | 2026-09-02 | Email | Nei corpi email testuali link e indirizzi email sono cliccabili (si aprono in nuova scheda), sia in Messaggi che nella timeline della prenotazione. |

@@ -274,6 +274,9 @@ const VIEW_PERMISSIONS: Record<ViewState, Permission[]> = {
   [ViewState.DASHBOARD]: ['dashboard:view'],
   [ViewState.FLOOR_PLAN]: ['floorplan:view'],
   [ViewState.MENU]: ['menu:view'],
+  // Stessi permessi di Menu: la pagina Banchetti è la vecchia metà eventi
+  // della pagina Menu & Banchetti, separata in sidebar.
+  [ViewState.BANCHETTI]: ['menu:view'],
   [ViewState.COMANDE]: ['orders:take'],
   [ViewState.CASSA]: ['cash:operate'],
   [ViewState.CUCINA]: ['orders:kds'],
