@@ -264,14 +264,16 @@ export const getKdsQueue = async (stationId: number | null): Promise<KdsQueue> =
     { headers: getHeaders() },
   );
 
-/** Uscita servita, per lo schermo «Consegnate» (consultazione). */
+/** Uscita servita, per lo schermo «Consegnate» (consultazione). Le righe
+ *  portano la partita: il monitor mostra le proprie in chiaro e quelle
+ *  delle altre attenuate — la comanda servita si legge intera. */
 export interface KdsServedCourse {
   order_id: number;
   course_no: number;
   table_name: string | null;
   customer_name: string | null;
   served_at: string;
-  items: { name: string; qty: number }[];
+  items: { name: string; qty: number; station_id: number | null }[];
 }
 
 export const getKdsServed = async (stationId: number | null): Promise<{ courses: KdsServedCourse[] }> =>
