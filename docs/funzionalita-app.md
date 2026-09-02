@@ -249,7 +249,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 - Coda comande **per partita** (es. Pizzeria, Primi…), con avanzamento riga Inviato → In preparazione → Pronto, note del piatto, colonna "In arrivo", filtro turno. Ogni monitor si sottoscrive alla propria partita.
 - **Modifiche dopo il lancio in evidenza**: storno di una riga inviata, piatti aggiunti a un'uscita già lanciata, "riporta" e trasferimento di tavolo accendono sulla card la pill rossa **"modificata"** — il tocco mostra cosa è cambiato, chi e quando (con la motivazione dello storno); **Ok** spegne l'avviso su tutti gli schermi. Suona come una comanda nuova.
 - **Le altre partite della stessa uscita** in piede di card: un pallino colorato per partita (in coda / in lavorazione / pronta) con nome e numero di piatti — la pasta sa quanto manca alla griglia prima di calare. Un tocco espande le loro righe in sola lettura; mai mischiate con le proprie, che si toccano per segnare pronto.
-- **Consegnate**: accanto a "In lavorazione" c'è l'archivio delle uscite servite del servizio (tavolo, uscita, orario, piatti della propria partita) — la risposta a "il 12 dice che manca il piatto: l'abbiamo mandato?". Sola consultazione: la card lascia il monitor solo al servito, mai al pronto.
+- **Consegnate**: accanto a "In lavorazione" c'è l'archivio del servito, **raggruppato per comanda** — una card per tavolo con le sue uscite in ordine (piatti della propria partita e orario di ciascuna) — la risposta a "il 12 dice che manca il piatto: l'abbiamo mandato?". Sola consultazione: la card lascia il monitor solo al servito, mai al pronto; segnarla servita da un monitor la chiude su tutti.
 - I messaggi del canale **Cucina** della chat staff compaiono come **striscia sul monitor** (con la campana delle comande): "finito il branzino" arriva senza aprire la chat.
 
 **Passe (expediter)**
@@ -534,6 +534,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-02 | Comande, Cucina e Passe | Consegnate raggruppate per comanda (una card per tavolo con le sue uscite e gli orari); i monitor rileggono la coda al rientro in primo piano — l'uscita servita altrove non resta a schermo sui tablet sospesi. |
 | 2026-09-02 | Email | Nei corpi email testuali link e indirizzi email sono cliccabili (si aprono in nuova scheda), sia in Messaggi che nella timeline della prenotazione. |
 | 2026-09-02 | Email | Le email HTML in arrivo si mostrano impaginate come le ha fatte il mittente (in un riquadro isolato, senza script); i testi semplici spezzano i link lunghi invece di sforare dalla card. |
 | 2026-09-01 | Comande, Cucina e Passe | «Stampa copia» dice l'esito addosso al bottone: rotellina durante l'invio, spunta verde «Copia in stampa», errore scritto lì sotto — nell'esito di chiusura del palmare e della cassa. |
