@@ -66,6 +66,67 @@ const statusIcon = (m: EmailMessage) => {
 const displayName = (t: EmailThreadSummary): string =>
   (t.customer_name && t.customer_name.trim() && toTitleCase(t.customer_name)) || t.email;
 
+/**
+ * Corpo HTML di un'email in arrivo, isolato in un iframe sandbox.
+ *
+ * Il sandbox NON concede allow-scripts: l'HTML del mittente non può eseguire
+ * JS, e allow-same-origin serve solo al parent per misurare l'altezza e
+ * iniettare gli stili di contenimento (immagini e tabelle dentro la bolla,
+ * spezzatura dei link chilometrici tipo i token di unsubscribe). Lo sfondo è
+ * volutamente bianco fisso anche in dark mode: le email sono impaginate per
+ * fondo chiaro, stessa logica dei token --ds-print-*.
+ */
+const EmailHtmlBody: React.FC<{ html: string }> = ({ html }) => {
+  const frameRef = useRef<HTMLIFrameElement | null>(null);
+  const observerRef = useRef<ResizeObserver | null>(null);
+  const [height, setHeight] = useState(80);
+
+  useEffect(() => () => observerRef.current?.disconnect(), []);
+
+  const handleLoad = useCallback(() => {
+    const doc = frameRef.current?.contentDocument;
+    if (!doc) return;
+    const head = doc.head || doc.documentElement;
+    // I link aprono in una nuova scheda invece di navigare dentro l'iframe.
+    const base = doc.createElement('base');
+    base.target = '_blank';
+    head.insertBefore(base, head.firstChild);
+    const style = doc.createElement('style');
+    style.textContent = [
+      'body{margin:0;padding:0;background:#ffffff;color:#111111;',
+      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;',
+      'word-break:break-word;overflow-wrap:anywhere;}',
+      'img{max-width:100%!important;height:auto;}',
+      'table{max-width:100%!important;}',
+      'a{color:#1d4ed8;}',
+    ].join('');
+    head.appendChild(style);
+    const measure = () => {
+      const h = doc.documentElement?.scrollHeight || doc.body?.scrollHeight || 0;
+      if (h > 0) setHeight(Math.min(h, 4000));
+    };
+    measure();
+    // Le immagini remote arrivano dopo il load e cambiano l'altezza.
+    observerRef.current?.disconnect();
+    if (doc.body) {
+      observerRef.current = new ResizeObserver(measure);
+      observerRef.current.observe(doc.body);
+    }
+  }, []);
+
+  return (
+    <iframe
+      ref={frameRef}
+      srcDoc={html}
+      sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+      onLoad={handleLoad}
+      style={{ height: `${height}px` }}
+      className="w-full rounded-[12px] border-0 bg-white"
+      title="Contenuto email"
+    />
+  );
+};
+
 interface EmailPageProps {
   // Apre il form di nuova prenotazione già compilato, sia con i soli
   // customer_name/email (bottone "Crea prenotazione") sia con i campi che
@@ -760,10 +821,14 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                         const isReply = !isOut && !!m.in_reply_to;
                         const DirIcon = isOut ? ArrowUpRight : isReply ? Reply : ArrowDownLeft;
                         const dirLabel = isOut ? 'Uscita' : isReply ? 'Risposta' : 'Entrata';
+                        // Le email HTML sono impaginate a ~600px: la bolla al
+                        // 70% le strozzerebbe, qui prende tutta la larghezza
+                        // fino a quel formato.
+                        const hasHtml = !!m.body_html;
                         return (
                           <div key={m.id} className={`flex ${isOut ? 'justify-end' : 'justify-start'}`}>
                             <div
-                              className={`max-w-[85%] rounded-[18px] px-4 py-3 md:max-w-[70%] ${
+                              className={`${hasHtml ? 'w-full max-w-[680px]' : 'max-w-[85%] md:max-w-[70%]'} rounded-[18px] px-4 py-3 ${
                                 isOut
                                   ? 'rounded-br-[6px] bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)]'
                                   : 'rounded-bl-[6px] bg-[var(--ds-surface)] text-[var(--ds-text-primary)]'
@@ -776,7 +841,11 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                               {m.subject && (
                                 <div className="mb-1.5 text-[15px] font-semibold">{m.subject}</div>
                               )}
-                              <p className="whitespace-pre-wrap text-[15px] leading-relaxed">{m.body}</p>
+                              {m.body_html ? (
+                                <EmailHtmlBody html={m.body_html} />
+                              ) : (
+                                <p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-[15px] leading-relaxed">{m.body}</p>
+                              )}
                               {Array.isArray(m.media) && m.media.length > 0 && (
                                 <div className="mt-2 flex flex-wrap gap-1.5">
                                   {m.media.map(att => (

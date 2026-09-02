@@ -34,6 +34,9 @@ export interface EmailMessage {
   to_email: string | null;
   subject: string | null;
   body: string;
+  /** HTML originale (solo inbound via IMAP): la UI lo mostra in un iframe
+   *  sandbox; `body` resta la versione testuale per anteprime, ricerca e AI. */
+  body_html?: string | null;
   status: string | null;
   provider_sid: string | null;
   message_id: string | null;

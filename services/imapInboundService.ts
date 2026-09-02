@@ -453,6 +453,13 @@ async function handleMessageInner(tenantId: number, msg: FetchMessageObject): Pr
     const body = parsed.text?.trim()
         || (parsed.html ? String(parsed.html).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() : '')
         || '(email vuota)';
+    // L'HTML originale viaggia intero fino alla UI, che lo mostra in un
+    // iframe sandbox: `body` (testo) resta per anteprime, ricerca e AI.
+    // Cap a 1MB: oltre è quasi certamente un'email malformata e non vale
+    // una riga enorme in tabella.
+    const bodyHtml = parsed.html && String(parsed.html).length <= 1_000_000
+        ? String(parsed.html)
+        : null;
 
     const sentAt = parsed.date instanceof Date && !Number.isNaN(parsed.date.getTime())
         ? parsed.date
@@ -462,11 +469,11 @@ async function handleMessageInner(tenantId: number, msg: FetchMessageObject): Pr
     try {
         const insert = await queryWithRetry(
             `INSERT INTO outbound_messages
-                (tenant_id, provider, channel, direction, from_email, to_email, subject, body, status,
+                (tenant_id, provider, channel, direction, from_email, to_email, subject, body, body_html, status,
                  provider_sid, message_id, in_reply_to, reservation_id, sent_at)
-             VALUES ($10, 'imap', 'email', 'inbound', $1, $2, $3, $4, 'received',
+             VALUES ($10, 'imap', 'email', 'inbound', $1, $2, $3, $4, $11, 'received',
                      $5, $6, $7, $8, COALESCE($9::timestamptz, CURRENT_TIMESTAMP))
-             RETURNING id, provider, channel, direction, from_email, to_email, subject, body, status,
+             RETURNING id, provider, channel, direction, from_email, to_email, subject, body, body_html, status,
                        provider_sid, message_id, in_reply_to, reservation_id, sent_at,
                        delivered_at, failed_at, error_code, error_message, to_phone`,
             [
@@ -480,6 +487,7 @@ async function handleMessageInner(tenantId: number, msg: FetchMessageObject): Pr
                 reservationId,
                 sentAt,
                 tenantId,
+                bodyHtml,
             ]
         );
         insertedRow = insert.rows[0] ?? null;
