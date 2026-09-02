@@ -18,7 +18,7 @@ import { toTitleCase } from '../utils/text';
 import {
   ModalShell, FormCard, Field, SearchField, Callout, SplitPane, SectionHeader,
   Avatar, EmptyState, SwipeRow, useFirstRunHint, PanePlaceholder, PaneHeader, CountBadge,
-  dsInput, dsTextarea, dsButton, dsIconButton, AttachmentRow,
+  dsInput, dsTextarea, dsButton, dsIconButton, AttachmentRow, LinkifiedText,
 } from './ds';
 
 const formatRelative = (iso: string | null): string => {
@@ -844,7 +844,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                               {m.body_html ? (
                                 <EmailHtmlBody html={m.body_html} />
                               ) : (
-                                <p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-[15px] leading-relaxed">{m.body}</p>
+                                <p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-[15px] leading-relaxed"><LinkifiedText text={m.body} /></p>
                               )}
                               {Array.isArray(m.media) && m.media.length > 0 && (
                                 <div className="mt-2 flex flex-wrap gap-1.5">

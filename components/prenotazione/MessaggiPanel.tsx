@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { BellRing, Loader2, Mail, Send } from 'lucide-react';
 import type { OutboundMessage } from '../../services/apiService';
-import { EmptyState, StatusPill } from '../ds';
+import { EmptyState, StatusPill, LinkifiedText } from '../ds';
 import type { PillTone } from '../ds';
 
 /* ── Comunicazione con il cliente ─────────────────────────────────────────
@@ -180,7 +180,7 @@ export const MessaggiPanel: React.FC<{
                 {/* overflow-wrap:anywhere: i link lunghi delle email (token di
                     unsubscribe e simili) altrimenti sfondano la card. */}
                 <p className="whitespace-pre-wrap [overflow-wrap:anywhere] text-[14px] leading-relaxed text-[var(--ds-text-secondary)]">
-                  {msg.body}
+                  <LinkifiedText text={msg.body} />
                 </p>
                 {msg.error_message && (
                   <p className="mt-2 text-[13px] text-[var(--ds-critical-text)]">

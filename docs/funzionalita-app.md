@@ -348,7 +348,7 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 - **Invio**: conferme, disdette, richieste caparra ed email libere (oggetto + corpo) con template HTML brandizzato del ristorante, via SMTP proprio o Resend.
 - **Ricezione**: le risposte dei clienti entrano nell'app (via webhook Resend o direttamente dalla casella IMAP del ristorante, es. Aruba/Gmail) e vengono **agganciate al thread giusto**.
 - Inbox email a due pannelli con schede Tutte / Risposte dei clienti, allegati, ricerca, composizione e risposta in thread.
-- **Le email HTML si vedono come il mittente le ha impaginate** (immagini, bottoni, colori), isolate in modo sicuro senza esecuzione di script; le email solo testo restano testo, con i link lunghi spezzati invece che fuori dalla card.
+- **Le email HTML si vedono come il mittente le ha impaginate** (immagini, bottoni, colori), isolate in modo sicuro senza esecuzione di script; nelle email solo testo link e indirizzi diventano cliccabili e i link lunghi si spezzano invece di uscire dalla card.
 - Chi può leggere le prenotazioni può leggere i thread email di quei clienti.
 
 ---
@@ -534,6 +534,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-02 | Email | Nei corpi email testuali link e indirizzi email sono cliccabili (si aprono in nuova scheda), sia in Messaggi che nella timeline della prenotazione. |
 | 2026-09-02 | Email | Le email HTML in arrivo si mostrano impaginate come le ha fatte il mittente (in un riquadro isolato, senza script); i testi semplici spezzano i link lunghi invece di sforare dalla card. |
 | 2026-09-01 | Comande, Cucina e Passe | «Stampa copia» dice l'esito addosso al bottone: rotellina durante l'invio, spunta verde «Copia in stampa», errore scritto lì sotto — nell'esito di chiusura del palmare e della cassa. |
 | 2026-09-01 | Comande, Cucina e Passe | Tavolo aperto a tutto schermo sul palmare: la barra dell'app sparisce e in cima resta la scheda del tavolo; la ricerca piatti sta nella lente della testata e si apre sul velo trasparente della ricerca globale, coi risultati che si aggiungono al tocco. |
