@@ -331,6 +331,38 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         expect(di_nuovo.status).toBe(200);
     });
 
+    it('la categoria aggancia la partita anche se il maiuscolo non coincide', async () => {
+        // La cassa scrive le categorie come vuole ("Primi" e "PRIMI"
+        // convivono nel catalogo): il piatto è in "Dolci Ciclo", la mappa
+        // dice "DOLCI CICLO". L'aggancio non deve perdersi la riga —
+        // successo in collaudo: inviata e invisibile a ogni monitor.
+        const pasticceria = await api().post('/sala/stations').set(bearer(token)).send({ name: 'Pasticceria Ciclo' });
+        expect(pasticceria.status).toBe(201);
+        expect((await api().put('/sala/category-stations').set(bearer(token)).send({ category: 'DOLCI CICLO', station_id: pasticceria.body.id })).status).toBe(200);
+        const tortino = await api().post('/dishes').set(bearer(token)).send({
+            name: 'Tortino Ciclo', description: null, price: 6, category: 'Dolci Ciclo', allergens: null,
+        });
+        expect(tortino.status).toBe(201);
+
+        await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'AUTO_ALL' });
+        const orderId = await nuovaComanda();
+        await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [{ dish_id: tortino.body.id, qty: 1, course_no: 1 }],
+        });
+        await api().post(`/orders/${orderId}/send`).set(bearer(token)).send({});
+        const queue = await api().get(`/kds/queue?station_id=${pasticceria.body.id}`).set(bearer(token));
+        expect(queue.status).toBe(200);
+        expect(queue.body.items.some((i: any) => i.order_id === orderId && i.name_snapshot === 'Tortino Ciclo')).toBe(true);
+
+        // Risalvare la stessa categoria con un altro maiuscolo non crea un
+        // doppione: resta una riga sola, l'ultima scritta.
+        expect((await api().put('/sala/category-stations').set(bearer(token)).send({ category: 'Dolci Ciclo', station_id: pasticceria.body.id })).status).toBe(200);
+        const cfg = await api().get('/sala/config').set(bearer(token));
+        expect(cfg.status).toBe(200);
+        const chiavi = Object.keys(cfg.body.category_stations).filter(k => k.toLowerCase() === 'dolci ciclo');
+        expect(chiavi).toEqual(['Dolci Ciclo']);
+    });
+
     it('il monitor di partita vede le altre partite dell\'uscita, e il servito finisce in Consegnate', async () => {
         // Due partite vere: SECONDI → Griglia, CONTORNI → Fritti. La comanda
         // ha un piatto per parte sulla stessa uscita.

@@ -94,6 +94,17 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
   const thermal = config.printers.filter(p => p.kind === 'THERMAL');
   const fiscal = config.printers.filter(p => p.kind === 'FISCAL');
 
+  // La mappa a DB può avere un maiuscolo diverso dalla categoria del piatto
+  // (la cassa le scrive come vuole: "Primi" e "PRIMI" convivono): la lettura
+  // è insensibile alle maiuscole, come l'aggancio all'invio lato server.
+  const stationForCategory = (cat: string): number | '' => {
+    const exact = config.category_stations[cat];
+    if (exact != null) return exact;
+    const hit = Object.keys(config.category_stations).find(k => k.toLowerCase() === cat.toLowerCase());
+    return hit != null ? (config.category_stations[hit] ?? '') : '';
+  };
+  const uncovered = config.categories.filter(c => stationForCategory(c) === '');
+
   const toggleModule = () => act(
     async () => { setFlags(await updateFeatureFlags({ table_orders_enabled: !enabled })); },
     `Gestione sala: ${!enabled ? 'attiva' : 'disattivata'}`
@@ -299,12 +310,21 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
           <h5 className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-2">
             Partita per categoria di menu
           </h5>
+          {/* Il buco si deve vedere qui, prima del servizio: un piatto di
+              categoria scoperta parte e non compare su nessun monitor. */}
+          {uncovered.length > 0 && (
+            <div className="rounded-md bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)] px-3 py-2 mb-2 text-[13px]">
+              {uncovered.length === 1
+                ? <>La categoria <span className="font-semibold">{uncovered[0]}</span> è senza partita: i suoi piatti non compaiono su nessun monitor di cucina.</>
+                : <>{uncovered.length} categorie senza partita ({uncovered.join(', ')}): i loro piatti non compaiono su nessun monitor di cucina.</>}
+            </div>
+          )}
           <div className="rounded-md border border-[var(--ds-border)] divide-y divide-[var(--ds-border)]">
             {config.categories.map(cat => (
               <div key={cat} className="flex items-center gap-3 px-3 py-2">
                 <span className="flex-1 min-w-0 text-[13px] font-medium text-[var(--ds-text-primary)] truncate">{cat}</span>
                 <select
-                  value={config.category_stations[cat] ?? ''}
+                  value={stationForCategory(cat)}
                   disabled={!canEdit || saving}
                   onChange={e => act(
                     () => setCategoryStation(cat, e.target.value ? Number(e.target.value) : null),
