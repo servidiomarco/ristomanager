@@ -395,6 +395,21 @@ export const unserveCourse = async (orderId: number, courseNo: number): Promise<
     method: 'POST', headers: getHeaders(),
   });
 
+/** Un evento della vita della comanda, per la timeline (consultazione). */
+export type OrderTimelineEvent =
+  | { kind: 'opened'; at: string; by: string | null }
+  | { kind: 'course_fired'; at: string; course_no: number }
+  | { kind: 'course_started'; at: string; course_no: number }
+  | { kind: 'course_ready'; at: string; course_no: number; sync_delta_s: number }
+  | { kind: 'course_served'; at: string; course_no: number; lamp_s: number | null }
+  | { kind: 'revision'; at: string; revision_kind: string; summary: string; by: string; course_no: number | null };
+
+export const getOrderTimeline = async (orderId: number): Promise<{
+  order: { id: number; table_name: string | null; customer_name: string | null; opened_by_name: string | null };
+  events: OrderTimelineEvent[];
+}> =>
+  apiRequest(`${API_URL}/orders/${orderId}/timeline`, { headers: getHeaders() });
+
 /** La campanella della cucina: avvisa la sala che l'uscita è pronta al
  *  ritiro (annuncio nel canale sala della chat staff). Non muove lo stato. */
 export const callWaiterForCourse = async (orderId: number, courseNo: number): Promise<unknown> =>
