@@ -543,6 +543,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-02 | Comande, Cucina e Passe | La storia della comanda si apre accanto alla lista (la lista scivola a sinistra), non più in un velo: timeline su binario verticale con pallini per famiglia, ora in evidenza e ingressi scaglionati. |
 | 2026-09-02 | Menu & Banchetti | Le categorie appartengono ai menu: spunte per categoria nella modale «Categorie» che applicano in blocco a tutti i piatti (con indicatore parziale), e i piatti nuovi della categoria nascono nei menu della categoria. |
 | 2026-09-02 | Comande, Cucina e Passe | Toccando una comanda nelle Consegnate si apre la sua storia: apertura (con l'operatore), chiamata/in lavorazione/pronta/servita di ogni uscita (con sincronia fra partite e minuti sotto la lampada) e le revisioni con autore. |
 | 2026-09-02 | Comande, Cucina e Passe | Lente di ricerca sul monitor cucina: filtra In lavorazione e Consegnate per tavolo, cliente, piatto (anche delle altre partite) e operatore. |

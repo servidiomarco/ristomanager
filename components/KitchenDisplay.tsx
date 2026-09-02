@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, BellOff, BellRing, Check, ChevronRight, Loader2, MessagesSquare, Pencil, Play, Search, TriangleAlert, WifiOff } from 'lucide-react';
+import { Bell, BellOff, BellRing, Check, ChevronRight, Loader2, MessagesSquare, Pencil, Play, Search, TriangleAlert, WifiOff, X } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
 import { useAuth } from '../contexts/AuthContext';
 import { socketClient } from '../services/socketClient';
@@ -636,13 +636,17 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
         // così i piatti consegnati allo stesso tavolo si leggono insieme.
         // Le comande ordinate per ultima uscita servita, la più recente in
         // alto — la domanda riguarda sempre gli ultimi minuti.
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-1">
+        // Il tocco su una comanda non copre la pagina: la lista scivola a
+        // sinistra (max-width animato) e la storia si apre accanto — la
+        // cucina continua a vedere l'archivio mentre legge la timeline.
+        <div className="flex min-h-0 flex-1 gap-3 px-4 pb-4 pt-1">
+          <div className={`min-h-0 w-full overflow-y-auto transition-[max-width] duration-300 ease-out ${timelineFor ? 'mx-auto max-w-[340px] flex-shrink-0' : 'mx-auto max-w-[640px]'}`}>
           {servedFiltered.length === 0 ? (
             <EmptyState icon={Check}>
               {query ? 'Nessuna uscita servita per questa ricerca.' : 'Nessuna uscita servita in questo servizio.'}
             </EmptyState>
           ) : (
-            <div className="mx-auto max-w-[640px] space-y-2">
+            <div className="space-y-2">
               {(() => {
                 const byOrder = new Map<number, KdsServedCourse[]>();
                 for (const c of servedFiltered) {
@@ -666,9 +670,14 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                     <button
                       type="button"
                       key={head.order_id}
-                      onClick={() => setTimelineFor({ orderId: head.order_id, tableName: head.table_name, customerName: head.customer_name })}
+                      onClick={() => setTimelineFor(prev => prev?.orderId === head.order_id
+                        ? null
+                        : { orderId: head.order_id, tableName: head.table_name, customerName: head.customer_name })}
+                      aria-pressed={timelineFor?.orderId === head.order_id}
                       aria-label={`Storia della comanda del tavolo ${head.table_name ?? head.order_id}`}
-                      className="block w-full rounded-[16px] bg-[var(--ds-surface)] px-4 py-3 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      className={`block w-full rounded-[16px] bg-[var(--ds-surface)] px-4 py-3 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                        timelineFor?.orderId === head.order_id ? 'ring-2 ring-[var(--ds-action-bg)]' : ''
+                      }`}
                     >
                       <div className="flex items-baseline gap-2">
                         <span className="text-[16px] font-semibold text-[var(--ds-text-primary)]">
@@ -722,6 +731,17 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                   );
                 });
               })()}
+            </div>
+          )}
+          </div>
+          {timelineFor && (
+            <div className="min-h-0 flex-1 overflow-y-auto" style={{ animation: 'tileIn 220ms ease-out both' }}>
+              <TimelinePane
+                orderId={timelineFor.orderId}
+                tableName={timelineFor.tableName}
+                customerName={timelineFor.customerName}
+                onClose={() => setTimelineFor(null)}
+              />
             </div>
           )}
         </div>
@@ -793,15 +813,6 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             })}
           </div>
         </div>
-      )}
-
-      {timelineFor && (
-        <TimelineModal
-          orderId={timelineFor.orderId}
-          tableName={timelineFor.tableName}
-          customerName={timelineFor.customerName}
-          onClose={() => setTimelineFor(null)}
-        />
       )}
 
       <ModalShell
@@ -1259,11 +1270,13 @@ const ServiceSummaryBanner: React.FC<{
 };
 
 /* ── La vita di una comanda ───────────────────────────────────────────────
-   Dal tocco su una card delle Consegnate: gli eventi in fila, con l'ora in
-   tabulare e un pallino per famiglia — neutro per i passaggi, verde per il
-   servito, rosso per gli storni. Consultazione: risponde alle dispute coi
-   numeri («chiamata 12:41, pronta 12:58, servita 13:07»), non coi ricordi. */
-const TimelineModal: React.FC<{
+   Pannello accanto alle Consegnate (non un velo sopra): gli eventi su un
+   binario verticale, pallino per famiglia — neutro per i passaggi, verde
+   per il servito, rosso per gli storni, ambra per aggiunte e riporti —
+   ora in grande sulla card di ogni evento, ingressi scaglionati con la
+   tileIn di casa. Consultazione: risponde alle dispute coi numeri
+   («chiamata 12:41, pronta 12:58, servita 13:07»), non coi ricordi. */
+const TimelinePane: React.FC<{
   orderId: number;
   tableName: string | null;
   customerName: string | null;
@@ -1273,6 +1286,8 @@ const TimelineModal: React.FC<{
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
+    setEvents(null);
+    setFailed(false);
     let cancelled = false;
     getOrderTimeline(orderId)
       .then(r => { if (!cancelled) setEvents(r.events); })
@@ -1298,36 +1313,56 @@ const TimelineModal: React.FC<{
   };
 
   return (
-    <ModalShell
-      open
-      onClose={onClose}
-      title={`T${tableName ?? '—'} · comanda`}
-      subtitle={customerName ?? undefined}
-      size="sm"
-      closeOnEscape
-      bodyClassName="p-4"
-    >
+    <div className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <h2 className="text-[18px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
+            T{tableName ?? '—'} · comanda
+          </h2>
+          {customerName && (
+            <p className="text-[13px] text-[var(--ds-text-muted)]">{customerName}</p>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Chiudi la storia"
+          className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        >
+          <X size={16} aria-hidden />
+        </button>
+      </div>
+
       {failed ? (
-        <p className="text-[14px] text-[var(--ds-critical-text)]">Storia non caricata: riprova.</p>
+        <p className="mt-4 text-[14px] text-[var(--ds-critical-text)]">Storia non caricata: riprova.</p>
       ) : events == null ? (
-        <div className="flex items-center gap-2 py-4 text-[14px] text-[var(--ds-text-muted)]">
+        <div className="mt-4 flex items-center gap-2 text-[14px] text-[var(--ds-text-muted)]">
           <Loader2 size={16} className="animate-spin" aria-hidden /> Carico la storia…
         </div>
       ) : (
-        <div className="rounded-[16px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
-          <ol className="space-y-2.5">
-            {events.map((e, i) => (
-              <li key={i} className="flex items-baseline gap-3 text-[14px]">
-                <span className="w-11 flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">
+        <ol className="relative mt-5 space-y-3 pl-7">
+          {/* Il binario: parte dal primo pallino e finisce sull'ultimo. */}
+          <span className="absolute bottom-4 left-[5px] top-4 w-px bg-[var(--ds-border)]" aria-hidden />
+          {events.map((e, i) => (
+            <li
+              key={i}
+              className="relative"
+              style={{ animation: 'tileIn 260ms ease-out both', animationDelay: `${Math.min(i * 45, 450)}ms` }}
+            >
+              <span
+                className={`absolute -left-7 top-1/2 h-[11px] w-[11px] -translate-y-1/2 rounded-full ring-4 ring-[var(--ds-surface)] ${dot(e)}`}
+                aria-hidden
+              />
+              <div className="flex items-center gap-3 rounded-[14px] bg-[var(--ds-surface-row)] px-3.5 py-2.5">
+                <span className="min-w-0 flex-1 text-[14px] leading-snug text-[var(--ds-text-primary)]">{label(e)}</span>
+                <span className="flex-shrink-0 text-[16px] font-semibold tabular-nums tracking-[-0.01em] text-[var(--ds-text-primary)]">
                   {getRomeTimePart(e.at)}
                 </span>
-                <span className={`relative top-[-1px] h-2 w-2 flex-shrink-0 rounded-full ${dot(e)}`} aria-hidden />
-                <span className="min-w-0 text-[var(--ds-text-primary)]">{label(e)}</span>
-              </li>
-            ))}
-          </ol>
-        </div>
+              </div>
+            </li>
+          ))}
+        </ol>
       )}
-    </ModalShell>
+    </div>
   );
 };
