@@ -8,7 +8,7 @@ import { Shift } from '../types';
 import { getRomeDatePart } from '../utils/reservationTime';
 import { getTableMerges } from '../services/apiService';
 import {
-  ordersApiService, getMenuCatalogue, newIdempotencyKey, closeOrder, updateOrder, fireCourse,
+  ordersApiService, getMenuCatalogue, newIdempotencyKey, closeOrder, updateOrder, fireCourse, deleteEmptyOrder,
   voidItem, setOrderDiscount, transferOrder,
   type MenuCatalogue, type NewOrderItem, type CloseOrderResult,
 } from '../services/ordersApiService';
@@ -610,6 +610,24 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     }
   };
 
+  // L'uscita dal tavolo: se la comanda è INTONSA — niente battuto, niente
+  // inviato, carrello vuoto — si disfa, e il tavolo torna com'era (deciso
+  // con Marco il 2/09: la comanda vuota in griglia era solo rumore). La
+  // guardia vera sta sul server (409 su qualunque comanda non vuota): qui
+  // il controllo evita solo la chiamata inutile. Con una bozza nel
+  // carrello la comanda resta viva: la bozza è lavoro da non perdere.
+  const leaveTable = () => {
+    const o = order;
+    const untouched = o != null && cart.length === 0
+      && o.items.every(i => isSystemLine(i))
+      && o.courses.every(c => c.status === 'PENDING');
+    if (untouched) {
+      deleteEmptyOrder(o.order.id).catch(() => { /* la guardia ha deciso: resta viva */ });
+      setOpenTables(prev => { const n = new Set(prev); if (o.order.table_id != null) n.delete(o.order.table_id); return n; });
+    }
+    setTableId(null); setOrder(null); setCart([]); setComandaOpen(false);
+  };
+
   const recall = async (courseNo: number) => {
     if (!order || busy) return;
     setBusy(true); setError(null);
@@ -745,9 +763,18 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     };
     socket.on('bill:updated', refresh);
     socket.on('bill:closed', refresh);
+    // Comanda intonsa disfatta da un altro device: il tavolo si spegne
+    // anche su questa griglia, senza aspettare il prossimo rescan.
+    const onOrderDeleted = (p: any) => {
+      if (p?.table_id != null) {
+        setOpenTables(prev => { const n = new Set(prev); n.delete(p.table_id); return n; });
+      }
+    };
+    socket.on('order:deleted', onOrderDeleted);
     return () => {
       socket.off('bill:updated', refresh);
       socket.off('bill:closed', refresh);
+      socket.off('order:deleted', onOrderDeleted);
     };
   }, [serviceQuery]);
 
@@ -1073,7 +1100,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       onSearch={isWide ? undefined : () => setDishSearchOpen(true)}
       densityCompact={density === 'compact'}
       onToggleDensity={isWide ? undefined : toggleDensity}
-      onBack={() => { setTableId(null); setOrder(null); setCart([]); setComandaOpen(false); }}
+      onBack={leaveTable}
       onCovers={changeCovers}
       onBill={() => setClosing(true)}
       onDiscount={() => setDiscountOpen(true)}

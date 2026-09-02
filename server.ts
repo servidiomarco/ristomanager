@@ -24384,6 +24384,57 @@ async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: n
 //
 // Se il tavolo ha già una comanda aperta la restituisce invece di fallire:
 // due camerieri sullo stesso tavolo devono scrivere sulla stessa comanda.
+// Disfa una comanda intonsa: aperta toccando il tavolo e abbandonata senza
+// battere nulla. La guardia è tutta qui e in transazione: solo OPEN, solo
+// righe di sistema (coperto/servizio) mai uscite dallo stato DRAFT, nessun
+// conto agganciato — una corsa con un device che nel frattempo ha battuto
+// trova la guardia e riceve 409, mai una cancellazione. Il tavolo torna
+// esattamente com'era: niente «occupato» in griglia, niente conflitti
+// prenotazioni, niente comanda appesa a fine servizio.
+app.delete('/orders/:id', authenticate, requirePermission('orders:take'), async (req: any, res) => {
+    const client = await pool.connect();
+    try {
+        if (!(await ordersEnabledGuard(req, res))) { client.release(); return; }
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) { client.release(); return res.status(400).json({ error: 'id non valido' }); }
+
+        await client.query('BEGIN');
+        const o = await client.query(
+            `SELECT id, status, table_id, table_bill_id FROM orders WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+            [id, req.tenantId!]
+        );
+        const order = o.rows[0];
+        if (!order) { await client.query('ROLLBACK'); client.release(); return res.status(404).json({ error: 'Comanda non trovata' }); }
+        if (order.status !== 'OPEN' || order.table_bill_id != null) {
+            await client.query('ROLLBACK'); client.release();
+            return res.status(409).json({ error: 'La comanda non è più vuota: non si disfa' });
+        }
+        const touched = await client.query(
+            `SELECT 1 FROM order_items
+             WHERE order_id = $1 AND (line_kind = 'DISH' OR status <> 'DRAFT') LIMIT 1`,
+            [id]
+        );
+        if (touched.rows.length > 0) {
+            await client.query('ROLLBACK'); client.release();
+            return res.status(409).json({ error: 'La comanda ha righe battute: non si disfa' });
+        }
+        await client.query(`DELETE FROM order_items WHERE order_id = $1`, [id]);
+        await client.query(`DELETE FROM orders WHERE id = $1 AND tenant_id = $2`, [id, req.tenantId!]);
+        await client.query('COMMIT');
+        client.release();
+
+        try {
+            socketService?.broadcastToAll(req.tenantId!, 'order:deleted', { order_id: id, table_id: order.table_id });
+        } catch (_) {}
+        res.json({ ok: true, order_id: id, table_id: order.table_id });
+    } catch (err: any) {
+        await client.query('ROLLBACK').catch(() => {});
+        client.release();
+        console.error('DELETE /orders/:id error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 app.post('/orders', authenticate, requirePermission('orders:take'), async (req, res) => {
     try {
         if (!(await ordersEnabledGuard(req, res))) return;

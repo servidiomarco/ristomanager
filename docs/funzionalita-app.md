@@ -545,6 +545,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-02 | Comande, Cucina e Passe | Aprire un tavolo e uscire senza battere nulla non lascia più la comanda vuota: si disfa da sola e il tavolo torna com'era (con una bozza nel carrello resta viva). |
 | 2026-09-02 | Menu & Banchetti | Categorie con crud completo dalla modale «Categorie»: creazione (anche vuote), rinomina che sposta i piatti (con avviso per i piatti della cassa), eliminazione delle categorie vuote; la tendina categoria della scheda piatto mostra le categorie vere del ristorante. |
 | 2026-09-02 | Comande, Cucina e Passe | La storia della comanda si apre accanto alla lista (la lista scivola a sinistra), non più in un velo: timeline su binario verticale con pallini per famiglia, ora in evidenza e ingressi scaglionati. |
 | 2026-09-02 | Menu & Banchetti | Le categorie appartengono ai menu: spunte per categoria nella modale «Categorie» che applicano in blocco a tutti i piatti (con indicatore parziale), e i piatti nuovi della categoria nascono nei menu della categoria. |

@@ -395,6 +395,12 @@ export const unserveCourse = async (orderId: number, courseNo: number): Promise<
     method: 'POST', headers: getHeaders(),
   });
 
+/** Disfa una comanda intonsa (aperta e abbandonata senza battere nulla).
+ *  Il server rifiuta con 409 qualunque comanda non vuota: chiamarla è
+ *  sempre sicuro, decide la guardia. */
+export const deleteEmptyOrder = async (orderId: number): Promise<unknown> =>
+  apiRequest(`${API_URL}/orders/${orderId}`, { method: 'DELETE', headers: getHeaders() });
+
 /** Un evento della vita della comanda, per la timeline (consultazione). */
 export type OrderTimelineEvent =
   | { kind: 'opened'; at: string; by: string | null }
