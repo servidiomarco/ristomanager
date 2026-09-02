@@ -25080,8 +25080,11 @@ app.get('/orders/:id/timeline', authenticate, requireAnyPermission('orders:kds',
              FROM order_items WHERE order_id = $1 AND status <> 'VOIDED'`,
             [id]
         );
+        // Ogni `at` in ISO fin da subito: pg restituisce Date, i nostri
+        // aggregati stringhe — il sort su formati misti mette l'apertura in
+        // fondo (visto al primo giro sul collaudo).
         const events: any[] = [];
-        if (order.opened_at) events.push({ kind: 'opened', at: order.opened_at, by: order.opened_by_name ?? null });
+        if (order.opened_at) events.push({ kind: 'opened', at: new Date(order.opened_at).toISOString(), by: order.opened_by_name ?? null });
 
         const byCourse = new Map<number, any[]>();
         for (const r of it.rows) {
@@ -25117,7 +25120,7 @@ app.get('/orders/:id/timeline', authenticate, requireAnyPermission('orders:kds',
             [id, req.tenantId!]
         );
         for (const r of revs.rows) {
-            events.push({ kind: 'revision', at: r.created_at, revision_kind: r.kind, summary: r.summary, by: r.created_by_name, course_no: r.course_no });
+            events.push({ kind: 'revision', at: new Date(r.created_at).toISOString(), revision_kind: r.kind, summary: r.summary, by: r.created_by_name, course_no: r.course_no });
         }
 
         events.sort((a, b) => String(a.at).localeCompare(String(b.at)));
