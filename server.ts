@@ -24816,11 +24816,20 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
             // quella mappata sulla sua CATEGORIA (Impostazioni → Sala & Cucina).
             // Risolta e congelata qui: cambiare la mappa domani non deve
             // spostare le comande di stasera fra i monitor.
+            // Confronto senza maiuscole: la cassa scrive le categorie come
+            // vuole ("Primi" e "PRIMI" convivono nel catalogo Passepartout) e
+            // il match esatto lasciava la riga senza partita — inviata ma
+            // invisibile a ogni monitor di cucina (collaudo 2/09, Fusillo).
+            // Il match esatto, se c'è, vince sugli omonimi.
             const dish = await client.query(
                 `SELECT d.id, d.name, d.price, d.vat_rate,
                         COALESCE(d.station_id, cs.station_id) AS station_id
                  FROM dishes d
-                 LEFT JOIN category_stations cs ON cs.category = d.category AND cs.tenant_id = d.tenant_id
+                 LEFT JOIN LATERAL (
+                     SELECT station_id FROM category_stations cs
+                     WHERE cs.tenant_id = d.tenant_id AND LOWER(cs.category) = LOWER(d.category)
+                     ORDER BY (cs.category = d.category) DESC LIMIT 1
+                 ) cs ON true
                  WHERE d.id = $1 AND d.tenant_id = $2`, [dishId, req.tenantId!]
             );
             if (dish.rows.length === 0) {
@@ -28367,7 +28376,7 @@ app.put('/sala/category-stations', authenticate, requirePermission('settings:ful
         if (!category || category.length > 100) return res.status(400).json({ error: 'Categoria non valida' });
         const stationId = req.body?.station_id != null ? Number(req.body.station_id) : null;
         if (stationId === null) {
-            await queryWithRetry(`DELETE FROM category_stations WHERE category = $1 AND tenant_id = $2`, [category, req.tenantId!]);
+            await queryWithRetry(`DELETE FROM category_stations WHERE LOWER(category) = LOWER($1) AND tenant_id = $2`, [category, req.tenantId!]);
             return res.json({ category, station_id: null });
         }
         if (!Number.isFinite(stationId)) return res.status(400).json({ error: 'station_id non valido' });
@@ -28376,6 +28385,10 @@ app.put('/sala/category-stations', authenticate, requirePermission('settings:ful
         // comande sul monitor di un altro ristorante.
         const st = await queryWithRetry(`SELECT id FROM stations WHERE id = $1 AND tenant_id = $2`, [stationId, req.tenantId!]);
         if (st.rows.length === 0) return res.status(404).json({ error: 'Partita non trovata' });
+        // Una riga sola per categoria a prescindere dal maiuscolo: l'upsert
+        // esatto lascerebbe convivere "Primi" e "PRIMI" con partite diverse,
+        // e all'invio vincerebbe l'una o l'altra a seconda del piatto.
+        await queryWithRetry(`DELETE FROM category_stations WHERE LOWER(category) = LOWER($1) AND category <> $1 AND tenant_id = $2`, [category, req.tenantId!]);
         await queryWithRetry(
             `INSERT INTO category_stations (tenant_id, category, station_id) VALUES ($3, $1, $2)
              ON CONFLICT (tenant_id, category) DO UPDATE SET station_id = $2`,
