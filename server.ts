@@ -25200,6 +25200,88 @@ app.get('/kds/served', authenticate, requirePermission('orders:kds'), async (req
     }
 });
 
+// La vita di una comanda, evento per evento: apertura, chiamata/pronta/
+// servita di ogni uscita (coi delta che già calcoliamo per le statistiche)
+// e le revisioni, che portano da sole riassunto e autore. Tutto già a
+// registro: questa route lo mette solo in fila. Consultazione — risponde
+// «quando è partita e quando è uscita?» con i numeri, non coi ricordi.
+app.get('/orders/:id/timeline', authenticate, requireAnyPermission('orders:kds', 'orders:view', 'orders:expedite'), async (req: any, res) => {
+    try {
+        if (!(await ordersEnabledGuard(req, res))) return;
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+
+        const o = await queryWithRetry(
+            `SELECT o.id, o.opened_at, t.name AS table_name, r.customer_name, u.full_name AS opened_by_name
+             FROM orders o
+             LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
+             LEFT JOIN reservations r ON r.id = o.reservation_id AND r.tenant_id = o.tenant_id
+             LEFT JOIN users u ON u.id = o.opened_by_user_id AND u.tenant_id = o.tenant_id
+             WHERE o.id = $1 AND o.tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        const order = o.rows[0];
+        if (!order) return res.status(404).json({ error: 'Comanda non trovata' });
+
+        const it = await queryWithRetry(
+            `SELECT course_no, status, fired_at, started_at, ready_at, served_at
+             FROM order_items WHERE order_id = $1 AND status <> 'VOIDED'`,
+            [id]
+        );
+        // Ogni `at` in ISO fin da subito: pg restituisce Date, i nostri
+        // aggregati stringhe — il sort su formati misti mette l'apertura in
+        // fondo (visto al primo giro sul collaudo).
+        const events: any[] = [];
+        if (order.opened_at) events.push({ kind: 'opened', at: new Date(order.opened_at).toISOString(), by: order.opened_by_name ?? null });
+
+        const byCourse = new Map<number, any[]>();
+        for (const r of it.rows) {
+            if (!byCourse.has(r.course_no)) byCourse.set(r.course_no, []);
+            byCourse.get(r.course_no)!.push(r);
+        }
+        for (const [courseNo, rows] of byCourse) {
+            const ts = (k: string) => rows.map((r: any) => r[k]).filter(Boolean).map((v: any) => new Date(v).getTime());
+            const fired = ts('fired_at'); const started = ts('started_at');
+            const ready = ts('ready_at'); const servedTs = ts('served_at');
+            if (fired.length > 0) events.push({ kind: 'course_fired', at: new Date(Math.min(...fired)).toISOString(), course_no: courseNo });
+            if (started.length > 0) events.push({ kind: 'course_started', at: new Date(Math.min(...started)).toISOString(), course_no: courseNo });
+            // «Pronta» solo quando lo sono TUTTE le righe vive: un pronto
+            // parziale non è un evento dell'uscita.
+            if (ready.length === rows.length && ready.length > 0) {
+                events.push({
+                    kind: 'course_ready', at: new Date(Math.max(...ready)).toISOString(), course_no: courseNo,
+                    sync_delta_s: ready.length > 1 ? Math.round((Math.max(...ready) - Math.min(...ready)) / 1000) : 0,
+                });
+            }
+            if (servedTs.length === rows.length && servedTs.length > 0) {
+                const servedAt = Math.max(...servedTs);
+                events.push({
+                    kind: 'course_served', at: new Date(servedAt).toISOString(), course_no: courseNo,
+                    lamp_s: ready.length > 0 ? Math.max(0, Math.round((servedAt - Math.max(...ready)) / 1000)) : null,
+                });
+            }
+        }
+
+        const revs = await queryWithRetry(
+            `SELECT kind, course_no, summary, created_by_name, created_at
+             FROM order_revisions WHERE order_id = $1 AND tenant_id = $2 ORDER BY created_at`,
+            [id, req.tenantId!]
+        );
+        for (const r of revs.rows) {
+            events.push({ kind: 'revision', at: new Date(r.created_at).toISOString(), revision_kind: r.kind, summary: r.summary, by: r.created_by_name, course_no: r.course_no });
+        }
+
+        events.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+        res.json({
+            order: { id: order.id, table_name: order.table_name, customer_name: order.customer_name, opened_by_name: order.opened_by_name },
+            events,
+        });
+    } catch (err: any) {
+        console.error('GET /orders/:id/timeline error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 // La campanella del monitor cucina: «l'uscita è pronta, venite a ritirarla».
 // NON muove lo stato della comanda — i tempi del servizio restano alla sala —
 // recapita un annuncio nel canale sala della chat staff, con striscia, badge
