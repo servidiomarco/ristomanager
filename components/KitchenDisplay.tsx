@@ -976,25 +976,13 @@ const OrderCard: React.FC<{
     ...g.upcomingCols.map(c => c.course_no),
   ])].sort((a, b) => a - b);
 
-  // L'anello resta il segnale di stato della card, ora a livello di comanda:
-  // verde quando TUTTO il lavoro attivo di questa partita è pronto, lampeggio
-  // critico se un'uscita pronta aspetta le altre da troppo sotto la lampada.
-  const allReadyHere = g.cols.length > 0 && g.cols.every(c => c.items.every(i => i.status === 'READY'));
-  const lampAlert = g.cols.some(c => {
-    if (!c.items.every(i => i.status === 'READY') || !c.waitingOthers) return false;
-    return Math.min(...c.items.map(i => minutesSince(i.ready_at, now))) >= LAMP_ALERT_MIN;
-  });
-
   return (
-    <div
-      className={`flex max-h-full w-64 flex-shrink-0 flex-col overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] ${
-        lampAlert
-          ? 'animate-pulse ring-2 ring-[var(--ds-critical-solid)]'
-          : allReadyHere
-          ? 'ring-2 ring-[var(--ds-seated-solid)]'
-          : ''
-      }`}
-    >
+    // Non una card monolitica ma una COLONNA di card appese al filo di
+    // sinistra — la testata, poi una card per uscita, come nell'esempio
+    // itinerario scelto da Marco (2/09). Lo stato (anello verde, lampeggio
+    // lampada) vive sulla card della SUA uscita, non sull'insieme.
+    <div className="flex max-h-full w-72 flex-shrink-0 flex-col">
+      <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
       <div className="px-3 py-2.5">
         <div className="flex items-baseline gap-2">
           <span className="text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
@@ -1038,13 +1026,15 @@ const OrderCard: React.FC<{
           <span>{g.allergens}</span>
         </div>
       )}
+      </div>
 
-      {/* Il binario: un filo verticale al CENTRO della card, con un pallino
-          per uscita sopra ogni sezione — la famiglia del pallino dice lo
-          stato, e quello in lavorazione pulsa. */}
-      <div className="relative min-h-0 flex-1 overflow-y-auto px-2.5 pb-2 pt-3">
-        <div aria-hidden className="absolute bottom-6 left-1/2 top-0 w-px -translate-x-1/2 bg-[var(--ds-border)]" />
-        <div className="space-y-5">
+      {/* Il filo corre a sinistra e ogni uscita è una card appesa, col suo
+          pallino sul filo — la famiglia del pallino dice lo stato, e quello
+          in lavorazione pulsa. pr-1/pt-3: l'anello di stato delle card
+          sporge 2px e l'overflow lo taglierebbe (male noto, stesso rimedio). */}
+      <div className="relative min-h-0 flex-1 overflow-y-auto pb-1 pl-7 pr-1 pt-3">
+        <div aria-hidden className="absolute bottom-8 left-[10px] top-0 w-px bg-[var(--ds-border-strong)]" />
+        <div className="space-y-3">
           {courseNos.map(no => {
             const active = activeByCourse.get(no);
             if (active) {
@@ -1066,8 +1056,8 @@ const OrderCard: React.FC<{
               const wait = minutesUntil(soon.items[0]?.station_start_at ?? null, now);
               return (
                 <div key={no} className="relative">
-                  <span aria-hidden className="mx-auto mb-1.5 block h-3.5 w-3.5 rounded-full bg-[var(--ds-border-strong)] ring-4 ring-[var(--ds-surface)]" />
-                  <div className="rounded-[12px] border-2 border-dashed border-[var(--ds-border-strong)] px-2.5 py-2">
+                  <span aria-hidden className="absolute -left-[25px] top-3 h-3.5 w-3.5 rounded-full bg-[var(--ds-border-strong)] ring-4 ring-[var(--ds-canvas)]" />
+                  <div className="rounded-[16px] border-2 border-dashed border-[var(--ds-border-strong)] px-2.5 py-2">
                     <div className="flex items-baseline gap-2 text-[13px]">
                       <span className="font-semibold text-[var(--ds-text-primary)]">
                         {ORDINALS[no] ?? no} uscita
@@ -1138,6 +1128,9 @@ const CourseSection: React.FC<{
   const readySince = allReady
     ? Math.min(...col.items.map(i => minutesSince(i.ready_at, now)))
     : 0;
+  // Ho finito ma l'uscita no: da qui in poi il piatto peggiora sotto la
+  // lampada, e il ritardo è di qualcun altro. La card lampeggia per dirlo.
+  const lampAlert = allReady && col.waitingOthers && readySince >= LAMP_ALERT_MIN;
 
   return (
     <div className="relative">
@@ -1145,10 +1138,19 @@ const CourseSection: React.FC<{
           binario. Fermo e verde quando tutto è pronto. */}
       <span
         aria-hidden
-        className={`mx-auto mb-1.5 block h-3.5 w-3.5 rounded-full ring-4 ring-[var(--ds-surface)] ${
+        className={`absolute -left-[25px] top-3 h-3.5 w-3.5 rounded-full ring-4 ring-[var(--ds-canvas)] ${
           allReady ? 'bg-[var(--ds-seated-solid)]' : 'animate-pulse bg-[var(--ds-pending-solid)]'
         }`}
       />
+      <div
+        className={`rounded-[16px] bg-[var(--ds-surface)] px-2.5 py-2 shadow-[var(--ds-shadow-card)] ${
+          lampAlert
+            ? 'animate-pulse ring-2 ring-[var(--ds-critical-solid)]'
+            : allReady
+            ? 'ring-2 ring-[var(--ds-seated-solid)]'
+            : ''
+        }`}
+      >
       <div className="flex items-baseline gap-2 pr-1">
         <span className="text-[14px] font-semibold text-[var(--ds-text-primary)]">
           {ORDINALS[col.course_no] ?? col.course_no} uscita
@@ -1320,6 +1322,7 @@ const CourseSection: React.FC<{
           </button>
         )}
       </div>
+      </div>
     </div>
   );
 };
@@ -1348,10 +1351,11 @@ const PassiveSection: React.FC<{
     <div className="relative">
       <span
         aria-hidden
-        className={`mx-auto mb-1.5 block h-3.5 w-3.5 rounded-full ring-4 ring-[var(--ds-surface)] ${
+        className={`absolute -left-[25px] top-3 h-3.5 w-3.5 rounded-full ring-4 ring-[var(--ds-canvas)] ${
           served ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-border-strong)]'
         }`}
       />
+      <div className="rounded-[16px] bg-[var(--ds-surface)] px-2.5 py-2 shadow-[var(--ds-shadow-card)]">
       <div className="flex items-baseline gap-2 pr-1 text-[13px]">
         <span className="font-medium text-[var(--ds-text-muted)]">
           {ORDINALS[courseNo] ?? courseNo} uscita
@@ -1367,6 +1371,7 @@ const PassiveSection: React.FC<{
         {mine.length > 0
           ? aggregate(mine)
           : `${rows.reduce((n, r) => n + r.qty, 0)} piatti di altre partite`}
+      </div>
       </div>
     </div>
   );
