@@ -1039,11 +1039,12 @@ const OrderCard: React.FC<{
         </div>
       )}
 
-      {/* Il binario: come nella storia della comanda, un filo verticale con un
-          pallino per uscita — la famiglia del pallino dice lo stato. */}
-      <div className="relative min-h-0 flex-1 overflow-y-auto py-2 pl-6 pr-1.5">
-        <div aria-hidden className="absolute bottom-4 left-[13px] top-4 w-px bg-[var(--ds-border)]" />
-        <div className="space-y-3">
+      {/* Il binario: un filo verticale al CENTRO della card, con un pallino
+          per uscita sopra ogni sezione — la famiglia del pallino dice lo
+          stato, e quello in lavorazione pulsa. */}
+      <div className="relative min-h-0 flex-1 overflow-y-auto px-2.5 pb-2 pt-3">
+        <div aria-hidden className="absolute bottom-6 left-1/2 top-0 w-px -translate-x-1/2 bg-[var(--ds-border)]" />
+        <div className="space-y-5">
           {courseNos.map(no => {
             const active = activeByCourse.get(no);
             if (active) {
@@ -1065,7 +1066,7 @@ const OrderCard: React.FC<{
               const wait = minutesUntil(soon.items[0]?.station_start_at ?? null, now);
               return (
                 <div key={no} className="relative">
-                  <span aria-hidden className="absolute -left-[16px] top-[5px] h-[9px] w-[9px] rounded-full bg-[var(--ds-border-strong)] ring-2 ring-[var(--ds-surface)]" />
+                  <span aria-hidden className="mx-auto mb-1.5 block h-3.5 w-3.5 rounded-full bg-[var(--ds-border-strong)] ring-4 ring-[var(--ds-surface)]" />
                   <div className="rounded-[12px] border-2 border-dashed border-[var(--ds-border-strong)] px-2.5 py-2">
                     <div className="flex items-baseline gap-2 text-[13px]">
                       <span className="font-semibold text-[var(--ds-text-primary)]">
@@ -1140,10 +1141,12 @@ const CourseSection: React.FC<{
 
   return (
     <div className="relative">
+      {/* Il pallino dell'uscita in lavorazione pulsa: è il punto vivo del
+          binario. Fermo e verde quando tutto è pronto. */}
       <span
         aria-hidden
-        className={`absolute -left-[16px] top-[7px] h-[9px] w-[9px] rounded-full ring-2 ring-[var(--ds-surface)] ${
-          allReady ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-pending-solid)]'
+        className={`mx-auto mb-1.5 block h-3.5 w-3.5 rounded-full ring-4 ring-[var(--ds-surface)] ${
+          allReady ? 'bg-[var(--ds-seated-solid)]' : 'animate-pulse bg-[var(--ds-pending-solid)]'
         }`}
       />
       <div className="flex items-baseline gap-2 pr-1">
@@ -1345,7 +1348,7 @@ const PassiveSection: React.FC<{
     <div className="relative">
       <span
         aria-hidden
-        className={`absolute -left-[16px] top-[5px] h-[9px] w-[9px] rounded-full ring-2 ring-[var(--ds-surface)] ${
+        className={`mx-auto mb-1.5 block h-3.5 w-3.5 rounded-full ring-4 ring-[var(--ds-surface)] ${
           served ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-border-strong)]'
         }`}
       />
