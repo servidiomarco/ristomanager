@@ -542,6 +542,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-02 | Comande, Cucina e Passe | Toccando una comanda nelle Consegnate si apre la sua storia: apertura (con l'operatore), chiamata/in lavorazione/pronta/servita di ogni uscita (con sincronia fra partite e minuti sotto la lampada) e le revisioni con autore. |
 | 2026-09-02 | Comande, Cucina e Passe | Lente di ricerca sul monitor cucina: filtra In lavorazione e Consegnate per tavolo, cliente, piatto (anche delle altre partite) e operatore. |
 | 2026-09-02 | Comande, Cucina e Passe | Le Consegnate mostrano la comanda intera: piatti della propria partita in chiaro, quelli delle altre attenuati col nome della partita. |
 | 2026-09-02 | Comande, Cucina e Passe | I piatti aggiunti a un'uscita già lanciata partono subito all'invio, in qualunque modalità di lancio; sulla comanda le righe rimaste in coda dentro un'uscita partita sono marcate «in coda» con un Chiama dedicato. |

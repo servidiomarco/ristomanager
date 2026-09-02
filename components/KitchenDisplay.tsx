@@ -7,8 +7,9 @@ import { staffChatApiService } from '../services/staffChatApiService';
 import { channelThreadKey, staffMessagePreview, type StaffMessage } from '../services/staffChat';
 import {
   getKdsQueue, getKdsServed, setKdsItemStatus, getMenuCatalogue, getKdsRevisions, ackKdsRevision,
-  callWaiterForCourse, serveCourse,
+  callWaiterForCourse, serveCourse, getOrderTimeline,
   type KdsItem, type KdsCourseState, type KdsOtherItem, type KdsServedCourse, type MenuCatalogue, type OrderRevision,
+  type OrderTimelineEvent,
 } from '../services/ordersApiService';
 import { getKitchenServiceSummary, type KitchenServiceSummary } from '../services/apiService';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
@@ -116,6 +117,9 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   const [search, setSearch] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
   useEffect(() => { if (searchOpen) searchRef.current?.focus(); }, [searchOpen]);
+  // La vita della comanda, dal tocco su una card delle Consegnate:
+  // consultazione — risponde alle dispute coi numeri, non coi ricordi.
+  const [timelineFor, setTimelineFor] = useState<{ orderId: number; tableName: string | null; customerName: string | null } | null>(null);
   // Revisioni aperte: modifiche a comande già lanciate (storno, aggiunta,
   // riporta, trasferimento). La card mostra "modificata", il tocco apre il
   // dettaglio, Ok le spegne per tutti gli schermi.
@@ -655,9 +659,16 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                 return orders.map(list => {
                   const head = list[0];
                   return (
-                    <div
+                    // Il tocco apre la vita della comanda: qui la card è
+                    // inerte (a differenza di quelle in lavorazione, dove le
+                    // righe si toccano per segnare pronto), quindi può essere
+                    // tutta bersaglio.
+                    <button
+                      type="button"
                       key={head.order_id}
-                      className="rounded-[16px] bg-[var(--ds-surface)] px-4 py-3 shadow-[var(--ds-shadow-card)]"
+                      onClick={() => setTimelineFor({ orderId: head.order_id, tableName: head.table_name, customerName: head.customer_name })}
+                      aria-label={`Storia della comanda del tavolo ${head.table_name ?? head.order_id}`}
+                      className="block w-full rounded-[16px] bg-[var(--ds-surface)] px-4 py-3 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       <div className="flex items-baseline gap-2">
                         <span className="text-[16px] font-semibold text-[var(--ds-text-primary)]">
@@ -707,7 +718,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                           );
                         })}
                       </div>
-                    </div>
+                    </button>
                   );
                 });
               })()}
@@ -782,6 +793,15 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             })}
           </div>
         </div>
+      )}
+
+      {timelineFor && (
+        <TimelineModal
+          orderId={timelineFor.orderId}
+          tableName={timelineFor.tableName}
+          customerName={timelineFor.customerName}
+          onClose={() => setTimelineFor(null)}
+        />
       )}
 
       <ModalShell
@@ -1235,5 +1255,79 @@ const ServiceSummaryBanner: React.FC<{
         )}
       </div>
     </div>
+  );
+};
+
+/* ── La vita di una comanda ───────────────────────────────────────────────
+   Dal tocco su una card delle Consegnate: gli eventi in fila, con l'ora in
+   tabulare e un pallino per famiglia — neutro per i passaggi, verde per il
+   servito, rosso per gli storni. Consultazione: risponde alle dispute coi
+   numeri («chiamata 12:41, pronta 12:58, servita 13:07»), non coi ricordi. */
+const TimelineModal: React.FC<{
+  orderId: number;
+  tableName: string | null;
+  customerName: string | null;
+  onClose: () => void;
+}> = ({ orderId, tableName, customerName, onClose }) => {
+  const [events, setEvents] = useState<OrderTimelineEvent[] | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getOrderTimeline(orderId)
+      .then(r => { if (!cancelled) setEvents(r.events); })
+      .catch(() => { if (!cancelled) setFailed(true); });
+    return () => { cancelled = true; };
+  }, [orderId]);
+
+  const mins = (s: number) => Math.round(s / 60);
+  const label = (e: OrderTimelineEvent): string => {
+    switch (e.kind) {
+      case 'opened': return `comanda aperta${e.by ? ` · ${e.by}` : ''}`;
+      case 'course_fired': return `${ORDINALS[e.course_no] ?? e.course_no} uscita chiamata`;
+      case 'course_started': return `${ORDINALS[e.course_no] ?? e.course_no} uscita in lavorazione`;
+      case 'course_ready': return `${ORDINALS[e.course_no] ?? e.course_no} uscita pronta${e.sync_delta_s >= 60 ? ` · sincronia ${mins(e.sync_delta_s)}′` : ''}`;
+      case 'course_served': return `${ORDINALS[e.course_no] ?? e.course_no} uscita servita${e.lamp_s != null && e.lamp_s >= 60 ? ` · ${mins(e.lamp_s)}′ sotto la lampada` : ''}`;
+      case 'revision': return `${e.summary} · ${e.by}`;
+    }
+  };
+  const dot = (e: OrderTimelineEvent): string => {
+    if (e.kind === 'course_served') return 'bg-[var(--ds-seated-solid)]';
+    if (e.kind === 'revision') return e.revision_kind === 'void' ? 'bg-[var(--ds-critical-solid)]' : 'bg-[var(--ds-pending-solid)]';
+    return 'bg-[var(--ds-border-strong)]';
+  };
+
+  return (
+    <ModalShell
+      open
+      onClose={onClose}
+      title={`T${tableName ?? '—'} · comanda`}
+      subtitle={customerName ?? undefined}
+      size="sm"
+      closeOnEscape
+      bodyClassName="p-4"
+    >
+      {failed ? (
+        <p className="text-[14px] text-[var(--ds-critical-text)]">Storia non caricata: riprova.</p>
+      ) : events == null ? (
+        <div className="flex items-center gap-2 py-4 text-[14px] text-[var(--ds-text-muted)]">
+          <Loader2 size={16} className="animate-spin" aria-hidden /> Carico la storia…
+        </div>
+      ) : (
+        <div className="rounded-[16px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+          <ol className="space-y-2.5">
+            {events.map((e, i) => (
+              <li key={i} className="flex items-baseline gap-3 text-[14px]">
+                <span className="w-11 flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">
+                  {getRomeTimePart(e.at)}
+                </span>
+                <span className={`relative top-[-1px] h-2 w-2 flex-shrink-0 rounded-full ${dot(e)}`} aria-hidden />
+                <span className="min-w-0 text-[var(--ds-text-primary)]">{label(e)}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+    </ModalShell>
   );
 };
