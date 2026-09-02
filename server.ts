@@ -25286,7 +25286,7 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
             `SELECT oi.id, oi.order_id, oi.course_no, oi.name_snapshot, oi.qty,
                     oi.modifiers, oi.note, oi.status, oi.station_id,
                     oi.fired_at, oi.station_start_at, oi.started_at, oi.ready_at,
-                    o.table_id, t.name AS table_name,
+                    o.table_id, t.name AS table_name, o.opened_at AS order_opened_at,
                     r.customer_name, r.notes AS reservation_notes,
                     u.full_name AS opened_by_name,
                     c.dietary_notes AS customer_dietary_notes
@@ -25362,7 +25362,27 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
             };
         });
 
-        res.json({ station_id: stationId, ...service, items: rows.rows, courses, others });
+        // La comanda INTERA, per la card a binario: tutte le uscite delle
+        // comande a schermo — servite comprese, future comprese (QUEUED) —
+        // con la partita su ogni riga. Il monitor distende l'uscita in
+        // lavorazione e comprime le altre; senza queste righe vedrebbe solo
+        // la fetta attiva e il cuoco perderebbe il ritmo del tavolo.
+        const orderIds = [...new Set(rows.rows.map((r: any) => r.order_id))];
+        let full: any[] = [];
+        if (orderIds.length > 0) {
+            const f = await queryWithRetry(
+                `SELECT id, order_id, course_no, station_id, name_snapshot, qty,
+                        modifiers, note, status, fired_at, station_start_at, ready_at, served_at
+                 FROM order_items
+                 WHERE tenant_id = $2 AND order_id = ANY($1::int[])
+                   AND status NOT IN ('DRAFT','VOIDED')
+                 ORDER BY course_no, id`,
+                [orderIds, req.tenantId!]
+            );
+            full = f.rows;
+        }
+
+        res.json({ station_id: stationId, ...service, items: rows.rows, courses, others, full });
     } catch (err: any) {
         console.error('GET /kds/queue error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });

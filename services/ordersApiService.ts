@@ -227,6 +227,8 @@ export interface KdsItem {
   ready_at: string | null;
   table_id: number | null;
   table_name: string | null;
+  /** Quando il tavolo ha aperto: la testata della card è l'inizio del binario. */
+  order_opened_at: string | null;
   customer_name: string | null;
   /** Chi ha preso la comanda: la card del monitor lo mostra. */
   opened_by_name: string | null;
@@ -254,12 +256,31 @@ export interface KdsOtherItem {
   status: 'SENT' | 'PREPARING' | 'READY';
 }
 
+/** Riga della comanda intera per la card a binario: tutte le uscite delle
+ *  comande a schermo, servite e future comprese, con la partita addosso. */
+export interface KdsFullItem {
+  id: number;
+  order_id: number;
+  course_no: number;
+  station_id: number | null;
+  name_snapshot: string;
+  qty: number;
+  modifiers: { name: string; price_delta_cents: number }[] | null;
+  note: string | null;
+  status: 'QUEUED' | 'SENT' | 'PREPARING' | 'READY' | 'SERVED';
+  fired_at: string | null;
+  station_start_at: string | null;
+  ready_at: string | null;
+  served_at: string | null;
+}
+
 export interface KdsQueue {
   station_id: number | null;
   items: KdsItem[];
   courses: KdsCourseState[];
   /** Presente solo col filtro partita; vuoto sul monitor senza partita. */
   others?: KdsOtherItem[];
+  full?: KdsFullItem[];
 }
 
 export const getKdsQueue = async (stationId: number | null): Promise<KdsQueue> =>
