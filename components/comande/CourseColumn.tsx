@@ -307,9 +307,12 @@ export const SendFooter: React.FC<SendFooterProps> = ({
 interface CourseColumnProps extends CourseListProps {
   onSend: () => void;
   onSendAll: () => void;
+  /** «di Luca» / «dalla cassa» quando la comanda l'ha aperta qualcun altro:
+   *  chi tocca un tavolo non suo lo legge in testa, prima di battere. */
+  openedBy?: string | null;
 }
 
-export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, ...list }) => {
+export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, openedBy, ...list }) => {
   const { order, cart, course } = list;
   const courseLines = cartForCourse(cart, course);
   const rows = rowCount(order, cart);
@@ -325,7 +328,7 @@ export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, .
     <div className="flex min-h-0 flex-col overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
       <header className="flex flex-shrink-0 items-center gap-2 border-b border-[var(--ds-border)] px-4 py-3">
         <h2 className="min-w-0 flex-1 truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
-          Comanda
+          Comanda{openedBy ? <span className="font-normal text-[var(--ds-text-muted)]"> {openedBy}</span> : null}
         </h2>
         <span className="flex-shrink-0 text-[13px] tabular-nums text-[var(--ds-text-muted)]">
           {rows === 0 ? 'vuota' : rowCountLabel(rows)}

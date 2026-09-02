@@ -67,6 +67,9 @@ interface Column {
   course_no: number;
   table_name: string | null;
   customer_name: string | null;
+  /** Chi ha preso la comanda: in cucina serve sapere a chi chiedere
+   *  («questo 12 senza glutine è di Luca?»). */
+  openedBy: string | null;
   allergens: string | null;
   items: KdsItem[];
   firedAt: string | null;
@@ -363,6 +366,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           course_no: it.course_no,
           table_name: it.table_name,
           customer_name: it.customer_name,
+          openedBy: it.opened_by_name,
           allergens: it.customer_dietary_notes || it.reservation_notes,
           items: [],
           firedAt: it.fired_at,
@@ -843,6 +847,12 @@ const CourseCard: React.FC<{
           {ORDINALS[col.course_no] ?? col.course_no} uscita
           {col.customer_name ? ` · ${col.customer_name}` : ''}
         </div>
+        {/* «di Luca», non un'etichetta lunga: in cucina serve solo sapere a
+            chi chiedere. Sta su una riga sua per non confondersi col nome
+            del CLIENTE qui sopra. */}
+        {col.openedBy && (
+          <div className="text-[12px] text-[var(--ds-text-muted)]">di {col.openedBy}</div>
+        )}
         {/* Comanda cambiata dopo il lancio: rosso pieno per scelta di Marco
             (29/08) — l'ambra tinta annegava fra venti card nel picco, e qui
             la modifica È un'interruzione: continuare a cucinare un piatto

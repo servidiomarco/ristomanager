@@ -534,6 +534,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-02 | Comande, Cucina e Passe | Le card del monitor cucina dicono chi ha preso la comanda («di Luca»); sul palmare la comanda aperta da un altro operatore (o dalla cassa) lo dichiara in testa («Comanda di Luca» / «Comanda dalla cassa»). |
 | 2026-09-02 | Comande, Cucina e Passe | Consegnate raggruppate per comanda (una card per tavolo con le sue uscite e gli orari); i monitor rileggono la coda al rientro in primo piano — l'uscita servita altrove non resta a schermo sui tablet sospesi. |
 | 2026-09-02 | Email | Nei corpi email testuali link e indirizzi email sono cliccabili (si aprono in nuova scheda), sia in Messaggi che nella timeline della prenotazione. |
 | 2026-09-02 | Email | Le email HTML in arrivo si mostrano impaginate come le ha fatte il mittente (in un riquadro isolato, senza script); i testi semplici spezzano i link lunghi invece di sforare dalla card. |
