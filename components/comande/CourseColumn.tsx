@@ -33,13 +33,16 @@ interface CourseListProps {
    *  nei ristoranti dove i tempi li batte la sala, non il passe. Assente =
    *  il bottone non compare (il lancio resta del passe). */
   onFire?: (courseNo: number) => void;
+  /** Apre il foglio varianti su una riga in bozza: si leggono tutte
+   *  (le lunghe si troncano in lista) e si correggono prima dell'invio. */
+  onEditLine?: (line: CartLine) => void;
 }
 
 const stepper =
   'inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 export const CourseList: React.FC<CourseListProps> = ({
-  order, cart, course, onCourse, busy, onBump, onDrop, onVoid, onRecall, onFire,
+  order, cart, course, onCourse, busy, onBump, onDrop, onVoid, onRecall, onFire, onEditLine,
 }) => (
   <div className="flex flex-col gap-2">
     {Array.from({ length: MAX_COURSES }, (_, i) => i + 1).map(n => {
@@ -173,7 +176,18 @@ export const CourseList: React.FC<CourseListProps> = ({
 
               {draftRows.map(l => (
                 <div key={l.key} className="flex items-center gap-2">
-                  <div className="min-w-0 flex-1">
+                  {/* Le varianti lunghe si troncano: il tocco sul nome apre
+                      il foglio varianti della riga, dove si leggono TUTTE e
+                      si correggono — chiesto da Marco dal palmare («--- Con
+                      burrata, ++ S…» non si legge). Bozza sola: una riga già
+                      inviata non si riapre, si storna. */}
+                  <button
+                    type="button"
+                    onClick={onEditLine ? () => onEditLine(l) : undefined}
+                    disabled={!onEditLine}
+                    aria-label={`Varianti di ${l.dish.name}`}
+                    className="min-w-0 flex-1 rounded-[10px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  >
                     <div className="truncate text-[15px] text-[var(--ds-text-primary)]">
                       {l.dish.name}
                     </div>
@@ -182,7 +196,7 @@ export const CourseList: React.FC<CourseListProps> = ({
                         ↳ {[...l.modifier_labels, ...(l.note ? [l.note] : [])].join(', ')}
                       </div>
                     )}
-                  </div>
+                  </button>
                   <span className="flex-shrink-0 text-[14px] tabular-nums text-[var(--ds-text-muted)]">
                     {euro(cartUnitCents(l) * l.qty)}
                   </span>

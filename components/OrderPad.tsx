@@ -124,6 +124,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [variantFor, setVariantFor] = useState<Dish | null>(null);
+  // Riga in bozza riaperta per leggere/correggere le varianti (le lunghe si
+  // troncano in lista): stesso foglio della battitura, precompilato.
+  const [editLine, setEditLine] = useState<CartLine | null>(null);
   const [closing, setClosing] = useState(false);
   const [voidTarget, setVoidTarget] = useState<OrderItem | null>(null);
   const [discountOpen, setDiscountOpen] = useState(false);
@@ -398,6 +401,38 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       chosen.reduce((s, e) => s + e.n * byId.get(e.id)!.price_delta_cents, 0),
       note,
     );
+  };
+
+  // Sostituisce varianti e nota di una riga in bozza mantenendo qty e chiave
+  // di idempotenza. Se la nuova combinazione coincide con un'altra riga già
+  // nel carrello, le due si fondono (stessa regola del tocco sul menu).
+  const updateLine = (lineKey: string, entries: { id: number; n: number }[], note?: string) => {
+    setCart(prev => {
+      const at = prev.findIndex(l => l.key === lineKey);
+      if (at < 0) return prev;
+      const line = prev[at];
+      const all = groupsForDish(line.dish.id).flatMap(g => g.modifiers);
+      const byId = new Map(all.map(m => [m.id, m]));
+      const chosen = entries.filter(e => byId.has(e.id));
+      const newKey = cartKey(line.dish.id, line.course_no, chosen.map(e => `${e.id}x${e.n}`), note);
+      const updated: CartLine = {
+        ...line,
+        key: newKey,
+        modifier_ids: chosen.map(e => e.id),
+        modifiers: chosen,
+        modifier_labels: chosen.map(e => signedLabel(byId.get(e.id)!.name, e.n)),
+        modifier_delta_cents: chosen.reduce((s, e) => s + e.n * byId.get(e.id)!.price_delta_cents, 0),
+        note: note || undefined,
+      };
+      const next = prev.filter((_, i) => i !== at);
+      const dup = next.findIndex(l => l.key === newKey);
+      if (dup >= 0) {
+        next[dup] = { ...next[dup], qty: next[dup].qty + line.qty };
+        return next;
+      }
+      next.splice(at, 0, updated);
+      return next;
+    });
   };
 
   const onDishTap = (dish: Dish) => {
@@ -1076,6 +1111,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     onVoid: (i: OrderItem) => setVoidTarget(i),
     onRecall: recall,
     onFire: fire,
+    onEditLine: (l: CartLine) => setEditLine(l),
   };
 
   const browser = (
@@ -1228,6 +1264,16 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           onConfirm={(entries, note) => { addToCart(variantFor, entries, note); setVariantFor(null); }}
         />
       )}
+      {editLine && (
+        <VariantSheet
+          dish={editLine.dish}
+          groups={groupsForDish(editLine.dish.id)}
+          initial={{ entries: editLine.modifiers ?? editLine.modifier_ids.map(id => ({ id, n: 1 })), note: editLine.note }}
+          confirmLabel="Aggiorna"
+          onCancel={() => setEditLine(null)}
+          onConfirm={(entries, note) => { updateLine(editLine.key, entries, note); setEditLine(null); }}
+        />
+      )}
 
       {billSheets}
     </>
@@ -1336,6 +1382,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         onVoid={i => setVoidTarget(i)}
         onRecall={recall}
         onFire={fire}
+        onEditLine={(l) => setEditLine(l)}
         openedBy={openedByOther}
         onSend={() => submit('course')}
         onSendAll={() => submit('all')}
@@ -1372,18 +1419,24 @@ const ErrorBar: React.FC<{ message: string; onDismiss: () => void }> = ({ messag
 const VariantSheet: React.FC<{
   dish: Dish;
   groups: MenuCatalogue['modifier_groups'];
+  /** Riapertura di una riga in bozza: il foglio parte dallo stato della
+   *  riga — è anche il posto dove le varianti troncate si leggono intere. */
+  initial?: { entries: { id: number; n: number }[]; note?: string };
+  confirmLabel?: string;
   onCancel: () => void;
   onConfirm: (entries: { id: number; n: number }[], note?: string) => void;
-}> = ({ dish, groups, onCancel, onConfirm }) => {
+}> = ({ dish, groups, initial, confirmLabel, onCancel, onConfirm }) => {
   // Verso e ripetizioni per variante (battitura alla Passepartout): n>0
   // aggiunge n volte (addebito), n<0 toglie (sconto), 0 = non applicata.
   // Le scelte singole (cotture) restano chip a +1: un «-- media» non
   // significa niente.
-  const [selected, setSelected] = useState<Map<number, number>>(new Map());
+  const [selected, setSelected] = useState<Map<number, number>>(
+    () => new Map((initial?.entries ?? []).map(e => [e.id, e.n])),
+  );
   // Variante libera: quello che in cassa il cameriere scrive a mano («senza
   // sale», «metà porzione»). Viaggia come nota di riga — KDS e comanda in
   // cucina la stampano già sotto il piatto.
-  const [custom, setCustom] = useState('');
+  const [custom, setCustom] = useState(initial?.note ?? '');
 
   const setN = (modId: number, n: number) => {
     setSelected(prev => {
@@ -1431,7 +1484,7 @@ const VariantSheet: React.FC<{
           disabled={missing.length > 0}
           className={`w-full ${dsButton.primary}`}
         >
-          {missing.length > 0 ? `Scegli: ${missing.map(g => g.name).join(', ')}` : 'Aggiungi'}
+          {missing.length > 0 ? `Scegli: ${missing.map(g => g.name).join(', ')}` : (confirmLabel ?? 'Aggiungi')}
         </button>
       }
     >

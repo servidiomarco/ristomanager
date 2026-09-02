@@ -545,6 +545,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-02 | Comande, Cucina e Passe | Il tocco su una riga in bozza riapre il foglio varianti precompilato: si leggono per intero le varianti troncate in lista e si correggono prima dell'invio («Aggiorna»); combinazioni identiche si fondono. |
 | 2026-09-02 | Comande, Cucina e Passe | Varianti col verso e le ripetizioni, alla Passepartout: tasti − e + per variante («+ prosciutto», «++ prosciutto», «−− prosciutto»); il + addebita n volte il prezzo della variante, il − sconta. Prefisso e prezzo viaggiano su comanda, monitor, preconto e scontrino. |
 | 2026-09-02 | Comande, Cucina e Passe | Aprire un tavolo e uscire senza battere nulla non lascia più la comanda vuota: si disfa da sola e il tavolo torna com'era (con una bozza nel carrello resta viva). |
 | 2026-09-02 | Menu & Banchetti | Categorie con crud completo dalla modale «Categorie»: creazione (anche vuote), rinomina che sposta i piatti (con avviso per i piatti della cassa), eliminazione delle categorie vuote; la tendina categoria della scheda piatto mostra le categorie vere del ristorante. |
