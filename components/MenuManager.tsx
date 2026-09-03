@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Dish, RestaurantMenu, BanquetMenu, BanquetCourse, BanquetStatus, Shift, COMMON_ALLERGENS, VAT_RATES, Customer, Table, TableMerge, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
-import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, SlidersHorizontal } from 'lucide-react';
+import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, SlidersHorizontal, Share2, MessageCircle } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { getRomeDatePart } from '../utils/reservationTime';
 import { printBanquet } from '../utils/printBanquet';
@@ -11,7 +11,7 @@ import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BanquetPaymentsModal } from './BanquetPaymentsModal';
 import { DishDetailModal } from './DishDetailModal';
 import { CustomerPickerModal } from './CustomerPickerModal';
-import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, createMenuCategory, renameMenuCategory, deleteMenuCategory, type MenuImportResult, type MenuTranslateResult, type MenuCategory } from '../services/apiService';
+import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, createMenuCategory, renameMenuCategory, deleteMenuCategory, getBanquetShareLink, sendBanquetQuoteEmail, type MenuImportResult, type MenuTranslateResult, type MenuCategory } from '../services/apiService';
 import { billsApiService } from '../services/billsApiService';
 import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '../contexts/AuthContext';
@@ -455,6 +455,84 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       await setBanquetStatus(menu.id, status);
     } catch { /* lo stato resta com'era */ }
     finally { setStatusBusyId(null); }
+  };
+
+  // Foglio «Condividi preventivo»: link pubblico stabile + invio WhatsApp
+  // (wa.me dal telefono dell'operatore, nella chat dove la trattativa sta
+  // già succedendo) + invio email dal server.
+  const [shareBanquet, setShareBanquet] = useState<BanquetMenu | null>(null);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [shareCopied, setShareCopied] = useState(false);
+  const [shareCustomer, setShareCustomer] = useState<Customer | null>(null);
+  const [shareEmail, setShareEmail] = useState('');
+  const [shareEmailBusy, setShareEmailBusy] = useState(false);
+  const [shareEmailDone, setShareEmailDone] = useState<string | null>(null);
+  const [shareEmailError, setShareEmailError] = useState<string | null>(null);
+
+  const openShareSheet = (menu: BanquetMenu) => {
+    setShareBanquet(menu);
+    setShareUrl(null);
+    setShareError(null);
+    setShareCopied(false);
+    setShareCustomer(null);
+    setShareEmail('');
+    setShareEmailDone(null);
+    setShareEmailError(null);
+    getBanquetShareLink(menu.id)
+      .then(r => setShareUrl(r.url))
+      .catch(err => setShareError(err?.data?.error ?? err?.message ?? 'Link non disponibile'));
+    if (menu.customer_id) {
+      getCustomers()
+        .then(list => {
+          const found = list.find(c => c.id === menu.customer_id) ?? null;
+          setShareCustomer(found);
+          if (found?.email) setShareEmail(found.email);
+        })
+        .catch(() => {});
+    }
+  };
+
+  const shareMessage = (menu: BanquetMenu, url: string): string => {
+    const name = shareCustomer?.name ? `Ciao ${shareCustomer.name.split(' ')[0]}, ` : 'Ciao, ';
+    const when = menu.event_date
+      ? ` del ${new Date(menu.event_date + 'T00:00:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' })}`
+      : '';
+    return `${name}ecco il preventivo per «${menu.name}»${when}: menù, tariffe e totale sono qui: ${url}`;
+  };
+
+  const handleShareWhatsApp = () => {
+    if (!shareBanquet || !shareUrl) return;
+    // Cifre sole per wa.me; un numero italiano senza prefisso guadagna il 39.
+    const digits = (shareCustomer?.phone ?? '').replace(/\D/g, '');
+    const phone = digits ? (digits.startsWith('39') || digits.startsWith('00') ? digits.replace(/^00/, '') : `39${digits}`) : '';
+    const text = encodeURIComponent(shareMessage(shareBanquet, shareUrl));
+    window.open(phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`, '_blank', 'noopener');
+  };
+
+  const handleCopyShareLink = () => {
+    if (!shareUrl) return;
+    navigator.clipboard?.writeText(shareUrl).then(() => {
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+    }).catch(() => {});
+  };
+
+  const handleSendQuoteEmail = async () => {
+    if (!shareBanquet || shareEmailBusy) return;
+    const email = shareEmail.trim();
+    if (!email) return;
+    setShareEmailBusy(true);
+    setShareEmailError(null);
+    setShareEmailDone(null);
+    try {
+      const r = await sendBanquetQuoteEmail(shareBanquet.id, email);
+      setShareEmailDone(r.email);
+    } catch (err: any) {
+      setShareEmailError(err?.data?.error ?? err?.message ?? 'Invio non riuscito');
+    } finally {
+      setShareEmailBusy(false);
+    }
   };
 
   const [banquetView, setBanquetView] = useState<'LIST' | 'CALENDAR'>('LIST');
@@ -1993,6 +2071,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                                       <Edit2 className="h-3.5 w-3.5 text-[var(--ds-text-muted)]" />
                                                       Modifica
                                                   </button>
+                                                  <button
+                                                      type="button"
+                                                      onClick={e => { e.stopPropagation(); setCardMenuOpenId(null); openShareSheet(menu); }}
+                                                      className="flex w-full items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)]"
+                                                  >
+                                                      <Share2 className="h-3.5 w-3.5 text-[var(--ds-text-muted)]" />
+                                                      Condividi preventivo
+                                                  </button>
                                                   {isQuote ? (
                                                       <button
                                                           type="button"
@@ -3332,6 +3418,84 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         onCancel={() => setDeleteMenuConfirm(null)}
         onConfirm={() => { if (deleteMenuConfirm) handleDeleteMenu(deleteMenuConfirm); }}
       />
+
+      {/* Condividi preventivo: link pubblico, WhatsApp, email. */}
+      {shareBanquet && (
+        <ModalShell
+          open={!!shareBanquet}
+          onClose={() => setShareBanquet(null)}
+          title="Condividi preventivo"
+          subtitle={shareBanquet.name}
+          size="sm"
+          bodyClassName="p-5"
+        >
+          <div className="space-y-4">
+            {shareError && <Callout tone="critical">{shareError}</Callout>}
+
+            <div>
+              <p className="mb-1.5 text-[13px] font-medium text-[var(--ds-text-secondary)]">Link del preventivo</p>
+              <div className="flex items-center gap-2">
+                <input
+                  readOnly
+                  value={shareUrl ?? 'Genero il link…'}
+                  onFocus={e => e.currentTarget.select()}
+                  className={`${dsInput} min-w-0 flex-1 text-[13px]`}
+                />
+                <button
+                  type="button"
+                  disabled={!shareUrl}
+                  onClick={handleCopyShareLink}
+                  className={`${dsIconButton} h-11 w-11 flex-shrink-0 bg-[var(--ds-surface-row)] shadow-none disabled:opacity-40`}
+                  title="Copia link"
+                >
+                  {shareCopied ? <Check className="h-4 w-4 text-[var(--ds-seated-text)]" /> : <Copy className="h-4 w-4" />}
+                </button>
+              </div>
+              <p className="mt-1.5 text-[12px] text-[var(--ds-text-muted)]">
+                La pagina mostra sempre la versione aggiornata: le modifiche al preventivo non richiedono un nuovo invio.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              disabled={!shareUrl}
+              onClick={handleShareWhatsApp}
+              className={`${dsButton.secondary} w-full disabled:opacity-40`}
+            >
+              <MessageCircle className="h-4 w-4" />
+              {shareCustomer?.phone ? `WhatsApp a ${shareCustomer.name}` : 'Invia su WhatsApp'}
+            </button>
+
+            <div className="border-t border-[var(--ds-border)] pt-4">
+              <p className="mb-1.5 text-[13px] font-medium text-[var(--ds-text-secondary)]">Invia via email</p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="email"
+                  placeholder="email del cliente"
+                  className={`${dsInput} min-w-0 flex-1`}
+                  value={shareEmail}
+                  onChange={e => { setShareEmail(e.target.value); setShareEmailDone(null); setShareEmailError(null); }}
+                />
+                <button
+                  type="button"
+                  disabled={shareEmailBusy || !shareEmail.trim()}
+                  onClick={handleSendQuoteEmail}
+                  className={`${dsButton.primary} flex-shrink-0 disabled:opacity-40`}
+                >
+                  {shareEmailBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
+                  Invia
+                </button>
+              </div>
+              {shareEmailDone && (
+                <p className="mt-1.5 text-[13px] text-[var(--ds-seated-text)]">Preventivo inviato a {shareEmailDone}.</p>
+              )}
+              {shareEmailError && (
+                <p className="mt-1.5 text-[13px] text-[var(--ds-critical-text)]">{shareEmailError}</p>
+              )}
+            </div>
+          </div>
+        </ModalShell>
+      )}
 
       {viewBanquet && (
         <BanquetCompositionModal

@@ -13148,6 +13148,214 @@ app.put('/banquet-menus/:id/status', authenticate, requirePermission('menu:full'
     }
 });
 
+// ============================================
+// PREVENTIVO CONDIVISIBILE — link pubblico /preventivo/<token> (stesso
+// schema capability di /pay e /scontrino) + invio via email. Il WhatsApp
+// parte dal telefono dell'operatore (wa.me precompilato dal foglio
+// Condividi): niente template Meta da approvare, e il preventivo arriva
+// nella chat dove la trattativa sta già succedendo.
+// ============================================
+
+// Il token nasce alla prima condivisione e poi resta stabile: il cliente
+// che riapre il link ricevuto ieri deve trovare il preventivo aggiornato,
+// non un 404.
+const ensureBanquetShareToken = async (tenantId: number, banquetId: number): Promise<string | null> => {
+    const rs = await queryWithRetry(
+        'SELECT share_token FROM banquet_menus WHERE id = $1 AND tenant_id = $2',
+        [banquetId, tenantId]
+    );
+    if (!rs.rows[0]) return null;
+    if (rs.rows[0].share_token) return rs.rows[0].share_token;
+    const token = crypto.randomBytes(24).toString('base64url');
+    const up = await queryWithRetry(
+        // Il WHERE ripete share_token IS NULL: due condivisioni simultanee
+        // non devono coniare due token (vincerebbe l'ultima, invalidando il
+        // link appena inviato dall'altra).
+        'UPDATE banquet_menus SET share_token = $1 WHERE id = $2 AND tenant_id = $3 AND share_token IS NULL RETURNING share_token',
+        [token, banquetId, tenantId]
+    );
+    if (up.rows[0]?.share_token) return up.rows[0].share_token;
+    const again = await queryWithRetry(
+        'SELECT share_token FROM banquet_menus WHERE id = $1 AND tenant_id = $2',
+        [banquetId, tenantId]
+    );
+    return again.rows[0]?.share_token ?? null;
+};
+
+const banquetQuoteUrl = (token: string): string => `${payAtTableBaseUrl()}/preventivo/${token}`;
+
+app.post('/banquet-menus/:id/share', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: 'id non valido' });
+        const token = await ensureBanquetShareToken(req.tenantId!, id);
+        if (!token) return res.status(404).json({ error: 'Banquet not found' });
+        res.json({ token, url: banquetQuoteUrl(token) });
+    } catch (err) {
+        console.error('POST /banquet-menus/:id/share error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// La pagina pubblica del preventivo: composizione per uscite, tariffe e
+// totali. Niente note operative (cucina/sala/mise en place) né riferimenti
+// interni — è il documento che il cliente inoltra alla famiglia.
+app.get('/preventivo/:token', publicPayLimiter, async (req, res) => runAsPlatform(async () => {
+    try {
+        const token = String(req.params.token || '');
+        if (!token || token.length < 24) return res.status(404).json({ error: 'Not found' });
+        const rs = await queryWithRetry(
+            `SELECT b.tenant_id, b.name, b.status, TO_CHAR(b.event_date, 'YYYY-MM-DD') AS event_date,
+                    b.shift, b.guests, b.children, b.price_per_person, b.children_price,
+                    b.discount_type, b.discount_value, b.deposit_amount, b.dish_ids, b.courses
+             FROM banquet_menus b WHERE b.share_token = $1`,
+            [token]
+        );
+        const row = rs.rows[0];
+        if (!row) return res.status(404).json({ error: 'Not found' });
+
+        const courses: { name: string; dish_ids: number[]; notes?: string }[] =
+            Array.isArray(row.courses) && row.courses.length > 0
+                ? row.courses
+                : (Array.isArray(row.dish_ids) && row.dish_ids.length > 0
+                    ? [{ name: 'Menù', dish_ids: row.dish_ids }]
+                    : []);
+        const allIds = [...new Set(courses.flatMap(c => Array.isArray(c.dish_ids) ? c.dish_ids : []))];
+        const dishRows = allIds.length > 0
+            ? (await queryWithRetry(
+                'SELECT id, name, description, allergens FROM dishes WHERE tenant_id = $1 AND id = ANY($2::int[])',
+                [row.tenant_id, allIds]
+            )).rows
+            : [];
+        const dishById = new Map<number, any>(dishRows.map((d: any) => [Number(d.id), d]));
+
+        const guests = Number(row.guests) || 0;
+        const children = Math.min(Number(row.children) || 0, guests);
+        const adults = Math.max(0, guests - children);
+        const adultPrice = Number(row.price_per_person) || 0;
+        const childPrice = row.children_price != null ? Number(row.children_price) : adultPrice;
+        const gross = adults * adultPrice + children * childPrice;
+        const discountValue = Number(row.discount_value) || 0;
+        const discount = row.discount_type === 'PERCENT'
+            ? Math.min(gross, gross * (discountValue / 100))
+            : row.discount_type === 'AMOUNT' ? Math.min(gross, discountValue) : 0;
+
+        const identity = businessIdentity(row.tenant_id);
+        res.json({
+            business: {
+                name: identity.name,
+                phone: identity.phone || null,
+                whatsapp: identity.whatsapp || null,
+                address: identity.address || null,
+                logo_url: identity.logoUrl || null,
+            },
+            quote: {
+                name: row.name,
+                status: row.status === 'QUOTE' ? 'QUOTE' : 'CONFIRMED',
+                event_date: row.event_date,
+                shift: row.shift ?? null,
+                guests: guests || null,
+                children: children || null,
+                price_per_person: adultPrice || null,
+                children_price: row.children_price != null ? childPrice : null,
+                discount_type: row.discount_type ?? null,
+                discount_value: row.discount_value != null ? Number(row.discount_value) : null,
+                deposit_amount: row.deposit_amount != null ? Number(row.deposit_amount) : null,
+                totals: gross > 0 ? { gross, discount, total: Math.max(0, gross - discount) } : null,
+                courses: courses.map(c => ({
+                    name: c.name,
+                    notes: c.notes?.trim() || null,
+                    dishes: (Array.isArray(c.dish_ids) ? c.dish_ids : [])
+                        .map(id => dishById.get(Number(id)))
+                        .filter(Boolean)
+                        .map((d: any) => ({
+                            name: d.name,
+                            description: d.description || null,
+                            allergens: Array.isArray(d.allergens) ? d.allergens : [],
+                        })),
+                })).filter(c => c.dishes.length > 0 || c.notes),
+            },
+        });
+    } catch (err) {
+        console.error('GET /preventivo/:token error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}));
+
+app.post('/banquet-menus/:id/send-quote-email', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: 'id non valido' });
+        const rs = await queryWithRetry(
+            `SELECT b.name, TO_CHAR(b.event_date, 'YYYY-MM-DD') AS event_date, b.guests,
+                    c.name AS customer_name, c.email AS customer_email
+             FROM banquet_menus b
+             LEFT JOIN customers c ON c.id = b.customer_id AND c.tenant_id = b.tenant_id
+             WHERE b.id = $1 AND b.tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        const row = rs.rows[0];
+        if (!row) return res.status(404).json({ error: 'Banquet not found' });
+        const email = String(req.body?.email ?? row.customer_email ?? '').trim();
+        if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            return res.status(400).json({ error: 'Serve un indirizzo email valido' });
+        }
+        if (!(await isSmtpConfigured(req.tenantId!))) {
+            return res.status(400).json({ error: 'SMTP non è configurato. Configura il server email in Impostazioni.' });
+        }
+        const token = await ensureBanquetShareToken(req.tenantId!, id);
+        if (!token) return res.status(404).json({ error: 'Banquet not found' });
+        const url = banquetQuoteUrl(token);
+
+        const identity = businessIdentity(req.tenantId!);
+        const name = toTitleCase(row.customer_name);
+        const dateLabel = row.event_date
+            ? new Date(row.event_date + 'T00:00:00').toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+            : null;
+        const subject = `Preventivo ${row.name} — ${identity.name}`;
+        const text = `${name ? `Ciao ${name},` : 'Ciao,'}\n\necco il preventivo per «${row.name}»${dateLabel ? ` (${dateLabel})` : ''}: menù, tariffe e totale sono qui:\n${url}\n\nPer qualunque modifica siamo a disposizione.\nA presto!\n${identity.name}`;
+        const detailsHtml = `
+          <p style="margin:0 0 16px;font-size:15px;line-height:1.6;">${name ? `Ciao ${escapeHtml(name)},` : 'Ciao,'}<br>ecco il preventivo per <strong>${escapeHtml(row.name)}</strong>${dateLabel ? ` — ${escapeHtml(dateLabel)}` : ''}${row.guests ? ` · ${Number(row.guests)} coperti` : ''}.</p>
+          <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 16px;"><tr><td align="center">
+            <a href="${escapeHtml(url)}" style="display:inline-block;background:#065f46;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:12px 28px;border-radius:10px;">Apri il preventivo</a>
+          </td></tr></table>
+          <p class="muted" style="margin:0 0 16px;font-size:13px;line-height:1.6;color:#57534e;">Se il pulsante non funziona, copia e incolla questo link nel browser:<br><a href="${escapeHtml(url)}" style="color:#065f46;word-break:break-all;">${escapeHtml(url)}</a></p>
+          <p class="muted" style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#57534e;">Per qualunque modifica al menù o ai coperti siamo a disposizione.</p>
+          ${contactBlockHtml()}
+          <p style="margin:16px 0 0;font-size:14px;">A presto!<br><em>${escapeHtml(identity.name)}</em></p>
+        `;
+        const html = wrapEmailHtml(`Il preventivo per ${row.name}`, detailsHtml);
+
+        const emailStatus = await getSmtpConfigStatus(req.tenantId!).catch(() => null);
+        const emailProvider: 'smtp' | 'resend' = emailStatus?.provider === 'resend' ? 'resend' : 'smtp';
+        let sent;
+        try {
+            sent = await sendMail(req.tenantId!, { to: email, subject, text, html });
+        } catch (sendErr: any) {
+            await logOutboundEmail({
+                tenantId: req.tenantId!, provider: emailProvider, to: email,
+                subject, body: text, errorMessage: sendErr?.message || String(sendErr),
+            });
+            throw sendErr;
+        }
+        await logOutboundEmail({
+            tenantId: req.tenantId!, provider: emailProvider, to: email,
+            subject, body: text, messageId: sent.messageId || null,
+        });
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.BANQUET_MENU, id, row.name,
+                { quote_email_sent_to: email }
+            ).catch(() => {});
+        }
+        res.json({ ok: true, email, url });
+    } catch (err: any) {
+        console.error('POST /banquet-menus/:id/send-quote-email error:', err);
+        res.status(500).json({ error: err?.message || 'Internal server error' });
+    }
+});
+
 app.delete('/banquet-menus/:id', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { id } = req.params;

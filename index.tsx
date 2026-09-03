@@ -6,6 +6,7 @@ import { ShoppingProvider } from './contexts/ShoppingContext';
 import { TodosProvider } from './contexts/TodosContext';
 import { PublicPayPageEntry } from './components/PublicPayPage';
 import { PublicReceiptPage } from './components/PublicReceiptPage';
+import { PublicQuotePage } from './components/PublicQuotePage';
 import I18nProvider from './i18n/I18nProvider';
 import './index.css';
 
@@ -23,6 +24,9 @@ const isPublicPayRoute = /^\/pay\//.test(window.location.pathname);
 // Scontrino digitale: stessa famiglia di /pay — l'ospite arriva dal QR
 // sull'esito di chiusura, niente login.
 const isPublicReceiptRoute = /^\/scontrino\//.test(window.location.pathname);
+// Preventivo banchetto condiviso: il cliente apre il link ricevuto via
+// WhatsApp o email, niente login.
+const isPublicQuoteRoute = /^\/preventivo\//.test(window.location.pathname);
 
 root.render(
   <React.StrictMode>
@@ -32,6 +36,8 @@ root.render(
       </I18nProvider>
     ) : isPublicReceiptRoute ? (
       <PublicReceiptPage />
+    ) : isPublicQuoteRoute ? (
+      <PublicQuotePage />
     ) : (
       <AuthProvider>
         <ShoppingProvider>
