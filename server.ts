@@ -130,6 +130,7 @@ import {
     cancelVoiceReservation,
     modifyVoiceReservation,
     recordVoiceCall,
+    recordCallbackRequest,
     formatItalianConfirmation,
     formatItalianCancellation,
     formatItalianModification,
@@ -1289,7 +1290,17 @@ async function handleElevenLabsInitConversation(tenantId: number, req: express.R
     // Ferragosto siamo al completo, prenota sul sito"): se c'è un messaggio
     // custom è lui il testo, altrimenti quello automatico.
     const effectiveFirstMessage = suspended && !customFirst ? suspensionMessage : genericGreeting;
+    // Data e ora correnti in Europe/Rome, pronte da leggere. Senza questa
+    // variabile l'agente ripiegava sull'orologio della piattaforma, che è in
+    // UTC: "sono le 15:33" dette alle 17:33 (estate 2026). Il prompt la usa
+    // come unica fonte per "che ore sono" e per ragionare su stasera/domani.
+    const nowRome = new Intl.DateTimeFormat('it-IT', {
+        timeZone: 'Europe/Rome',
+        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+    }).format(new Date());
     const baseDynamicVars = {
+        current_datetime_rome: nowRome,
         customer_first_name: '',
         customer_full_name: '',
         customer_id: '',
@@ -1385,6 +1396,7 @@ async function handleElevenLabsInitConversation(tenantId: number, req: express.R
         res.json({
             type: 'conversation_initiation_client_data',
             dynamic_variables: {
+                current_datetime_rome: nowRome,
                 customer_first_name: firstName,
                 customer_full_name: lookup.customer_name || '',
                 customer_id: String(lookup.customer_id || ''),
@@ -1540,22 +1552,31 @@ const elevenLabsParams = (req: express.Request): Record<string, any> => {
     return params;
 };
 
-/** Interruttori del canale telefonico. Restituisce true se si può procedere. */
+/** Interruttori del canale telefonico. Restituisce true se si può procedere.
+ *  ATTENZIONE al codice HTTP: ElevenLabs NON passa al modello il corpo delle
+ *  risposte non-2xx (stesso contratto documentato in bookingTools). Per tutta
+ *  l'estate 2026 la sospensione rispondeva 503 → Sofia non leggeva mai il
+ *  messaggio preparato ("richiami dopo le 19:00") e ripiegava su un generico
+ *  "problema tecnico con il sistema" (23 chiamate travisate così). Canale
+ *  spento e sospensione sono stati del servizio, non guasti: 200 con
+ *  success:false, così l'agente rilancia il messaggio al cliente. */
 const voiceChannelOpen = async (tenantId: number, res: express.Response, checkSuspension: boolean): Promise<boolean> => {
+    const closedBody = (error: string, message: string) =>
+        ({ success: false, available: false, free_tables_count: 0, error, message });
     // Entitlement voice (C1) prima del flag operativo: canale non venduto
     // risponde come quello spento — l'agente legge lo stesso messaggio.
     if (!(await isFeatureEnabledForTenant(tenantId, 'voice'))) {
-        res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
+        res.status(200).json(closedBody('voice_agent_disabled', VOICE_AGENT_DISABLED_MESSAGE));
         return false;
     }
     if (!(await getFeatureFlag(tenantId, 'voice_agent_enabled', true))) {
-        res.status(503).json({ error: 'voice_agent_disabled', message: VOICE_AGENT_DISABLED_MESSAGE });
+        res.status(200).json(closedBody('voice_agent_disabled', VOICE_AGENT_DISABLED_MESSAGE));
         return false;
     }
     if (checkSuspension) {
         const state = await computeVoiceSuspensionState(tenantId);
         if (state.suspended) {
-            res.status(503).json({ error: 'voice_bookings_suspended', message: buildVoiceSuspensionMessage(state.callbackTime) });
+            res.status(200).json(closedBody('voice_bookings_suspended', buildVoiceSuspensionMessage(state.callbackTime)));
             return false;
         }
     }
@@ -1631,6 +1652,24 @@ app.post('/webhook/t/:tenantToken/elevenlabs/modify-reservation', async (req, re
     const tenantId = await resolveWebhookTenantOr404(req, res);
     if (tenantId == null) return;
     await runWithTenantContext(tenantId, () => handleElevenLabsModifyReservation(tenantId, req, res));
+});
+
+// Tool 5 — save_callback_request
+// Salva il promemoria di richiamata (gruppi grandi, guasti, prenotazioni non
+// trovate). Niente controllo di sospensione: è proprio a prenotazioni sospese
+// che i promemoria servono di più.
+async function handleElevenLabsSaveCallback(tenantId: number, req: express.Request, res: express.Response): Promise<void> {
+    if (!authorizeElevenLabs(req, res)) return;
+    if (!(await voiceChannelOpen(tenantId, res, false))) return;
+    sendToolOutcome(res, await bookingTools.saveCallbackRequest(tenantId, elevenLabsParams(req), VOICE_CHANNEL));
+}
+
+// Alias tenant 1 finché i provider non sono riconfigurati sui path con token.
+app.post('/webhook/elevenlabs/save-callback-request', (req, res) => { void runWithTenantContext(PUBLIC_TENANT_ID, () => handleElevenLabsSaveCallback(PUBLIC_TENANT_ID, req, res)); });
+app.post('/webhook/t/:tenantToken/elevenlabs/save-callback-request', async (req, res) => {
+    const tenantId = await resolveWebhookTenantOr404(req, res);
+    if (tenantId == null) return;
+    await runWithTenantContext(tenantId, () => handleElevenLabsSaveCallback(tenantId, req, res));
 });
 
 // Post-call webhook — fires when the conversation ends.
@@ -11486,6 +11525,7 @@ const SCHEDULER_LOCK_PAYMENT_REQUEST_RECONCILE = 761002;
 const SCHEDULER_LOCK_REMINDERS = 761003;
 const SCHEDULER_LOCK_PAYMENT_LINK_EXPIRY = 761004;
 const SCHEDULER_LOCK_STAFF_CHAT_RETENTION = 761005;
+const SCHEDULER_LOCK_ELEVENLABS_QUOTA = 761006;
 
 // Il lock advisory è di SESSIONE: va preso su un client dedicato tenuto per
 // tutta la durata del tick (sul pool condiviso un'altra query potrebbe
@@ -11986,6 +12026,73 @@ const startStaffChatRetentionScheduler = () => {
         .catch((err: any) => console.error('[staffchat-retention] lock wrapper failed:', err?.message || err));
     lockedTick();
     setInterval(lockedTick, 6 * 60 * 60 * 1000);
+};
+
+// Guardiano della quota ElevenLabs. Nell'estate 2026 il credito è finito in
+// cinque giornate di punta (29/7, 13/8 vigilia di Ferragosto, 26–28/8): 175
+// chiamate cadute nel silenzio dopo ~4 secondi, senza che nessuno se ne
+// accorgesse fino ai clienti arrabbiati. Un giro ogni ora sull'API
+// subscription e una push agli admin quando il consumo supera l'80% e il 95%
+// del periodo — in tempo per ricaricare PRIMA che Sofia ammutolisca.
+const ELEVENLABS_QUOTA_THRESHOLDS = [80, 95];
+// Dedup in memoria per periodo di fatturazione: a ogni reset della quota
+// (next_reset cambia) si riparte da zero. Un riavvio del server può
+// ripetere un avviso già mandato: accettabile, è raro e il messaggio è utile.
+let elevenLabsQuotaAlerted: { resetUnix: number | null; thresholds: Set<number> } = { resetUnix: null, thresholds: new Set() };
+const startElevenLabsQuotaWatchdog = () => {
+    if (!ELEVENLABS_API_KEY) {
+        console.log('[quota-elevenlabs] ELEVENLABS_API_KEY assente: watchdog spento');
+        return;
+    }
+    const tick = async () => {
+        try {
+            const r = await fetch(`${ELEVENLABS_API_BASE}/user/subscription`, {
+                headers: { 'xi-api-key': ELEVENLABS_API_KEY },
+            });
+            if (!r.ok) {
+                console.warn(`[quota-elevenlabs] ElevenLabs ha risposto ${r.status}`);
+                return;
+            }
+            const d: any = await r.json();
+            const used = Number(d.character_count);
+            const limit = Number(d.character_limit);
+            const resetUnix = d.next_character_count_reset_unix ?? null;
+            if (!Number.isFinite(used) || !Number.isFinite(limit) || limit <= 0) return;
+
+            if (elevenLabsQuotaAlerted.resetUnix !== resetUnix) {
+                elevenLabsQuotaAlerted = { resetUnix, thresholds: new Set() };
+            }
+            const pct = Math.round((used / limit) * 100);
+            for (const threshold of ELEVENLABS_QUOTA_THRESHOLDS) {
+                if (pct < threshold || elevenLabsQuotaAlerted.thresholds.has(threshold)) continue;
+                elevenLabsQuotaAlerted.thresholds.add(threshold);
+                const resetLabel = resetUnix
+                    ? new Intl.DateTimeFormat('it-IT', { timeZone: 'Europe/Rome', day: 'numeric', month: 'long' }).format(new Date(resetUnix * 1000))
+                    : null;
+                const body = `Crediti voce al ${pct}% (${used.toLocaleString('it-IT')} su ${limit.toLocaleString('it-IT')})`
+                    + (resetLabel ? ` — reset il ${resetLabel}` : '')
+                    + `. Sopra il 100% le chiamate cadono nel vuoto: ricaricare ora.`;
+                console.warn(`[quota-elevenlabs] soglia ${threshold}% superata (${pct}%)`);
+                const payload = {
+                    category: 'voice',
+                    title: threshold >= 95 ? '🔴 Quota ElevenLabs quasi esaurita' : '⚠️ Quota ElevenLabs in esaurimento',
+                    body,
+                    url: '/?view=CONVERSAZIONI',
+                    tag: `elevenlabs-quota-${threshold}`,
+                };
+                pushSendToRoles(PUBLIC_TENANT_ID, ['OWNER', 'GENERAL_MANAGER'], payload, { excludeUserId: null })
+                    .catch((err: any) => console.error('Push (quota ElevenLabs) failed:', err));
+                pushSendToPlatformAdmins(payload)
+                    .catch((err: any) => console.error('Push admin (quota ElevenLabs) failed:', err));
+            }
+        } catch (err: any) {
+            console.warn('[quota-elevenlabs] tick failed:', err?.message || err);
+        }
+    };
+    const lockedTick = () => runSchedulerTickWithLock(SCHEDULER_LOCK_ELEVENLABS_QUOTA, 'elevenlabs-quota', tick)
+        .catch((err: any) => console.error('[elevenlabs-quota] lock wrapper failed:', err?.message || err));
+    lockedTick();
+    setInterval(lockedTick, 60 * 60 * 1000);
 };
 
 // ============================================
@@ -20007,6 +20114,10 @@ app.get('/voice-calls', authenticate, requireFeature('voice'), voiceCallsAuthori
                     vc.phantom_confirmation,
                     vc.phantom_recovered,
                     vc.large_group_handoff,
+                    vc.callback_requested,
+                    vc.callback_name,
+                    vc.callback_reason,
+                    vc.callback_details,
                     u.full_name AS follow_up_updated_by_name,
                     r.customer_name AS reservation_customer_name,
                     r.reservation_time AS reservation_time,
@@ -20240,6 +20351,10 @@ app.get('/voice-calls/:id', authenticate, requireFeature('voice'), voiceCallsAut
                     vc.phantom_confirmation,
                     vc.phantom_recovered,
                     vc.large_group_handoff,
+                    vc.callback_requested,
+                    vc.callback_name,
+                    vc.callback_reason,
+                    vc.callback_details,
                     u.full_name AS follow_up_updated_by_name,
                     r.customer_name AS reservation_customer_name,
                     r.reservation_time AS reservation_time,
@@ -29808,6 +29923,7 @@ bookingTools.configureBookingTools({
     cancelVoiceReservation,
     modifyVoiceReservation,
     recordVoiceCall,
+    recordCallbackRequest,
     upsertCustomerFromReservation,
     isPhoneBlacklisted,
     getBlacklistPolicy,
@@ -29968,6 +30084,12 @@ const startServer = async () => {
                         console.log('✅ Staff chat retention scheduler started (6h, 90 giorni)');
                     } catch (schedErr) {
                         console.error('Staff chat retention scheduler failed to start:', schedErr);
+                    }
+                    try {
+                        startElevenLabsQuotaWatchdog();
+                        console.log('✅ ElevenLabs quota watchdog started (1h, soglie 80/95%)');
+                    } catch (schedErr) {
+                        console.error('ElevenLabs quota watchdog failed to start:', schedErr);
                     }
                     try {
                         startPaymentRequestReconcileScheduler();
