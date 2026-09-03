@@ -13184,16 +13184,97 @@ const ensureBanquetShareToken = async (tenantId: number, banquetId: number): Pro
 
 const banquetQuoteUrl = (token: string): string => `${payAtTableBaseUrl()}/preventivo/${token}`;
 
+// L'invio WhatsApp del preventivo parte SOLO dal numero business, con
+// template approvato da Meta (decisione utente 3/09: niente wa.me
+// dall'operatore). Finché il template non è approvato e cablato in env, il
+// foglio Condividi mostra il canale come «in attivazione» — l'interruttore
+// è questa funzione, nessun deploy applicativo per accenderlo.
+const banquetQuoteWhatsAppReady = (): boolean =>
+    isTwilioWhatsAppConfigured() && !!process.env.TWILIO_WA_CONTENT_SID_BANQUET_QUOTE;
+
+// Card call-to-action: corpo {{1}} nome, {{2}} evento, {{3}} data; il
+// bottone «Apri il preventivo» ha l'host cablato nel template e {{4}} porta
+// SOLO il token (stessa regola dei template acconto: host nel template,
+// token nella variabile).
+function buildBanquetQuoteTemplate(
+    customerName: string | null | undefined,
+    eventName: string,
+    dateLabel: string,
+    shareToken: string
+): WhatsAppTemplateOpts | undefined {
+    const contentSid = process.env.TWILIO_WA_CONTENT_SID_BANQUET_QUOTE;
+    if (!contentSid) return undefined;
+    return {
+        contentSid,
+        contentVariables: {
+            '1': templateName(customerName),
+            '2': eventName,
+            '3': dateLabel,
+            '4': shareToken,
+        },
+    };
+}
+
 app.post('/banquet-menus/:id/share', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const id = Number(req.params.id);
         if (!Number.isInteger(id)) return res.status(400).json({ error: 'id non valido' });
         const token = await ensureBanquetShareToken(req.tenantId!, id);
         if (!token) return res.status(404).json({ error: 'Banquet not found' });
-        res.json({ token, url: banquetQuoteUrl(token) });
+        res.json({ token, url: banquetQuoteUrl(token), whatsapp_ready: banquetQuoteWhatsAppReady() });
     } catch (err) {
         console.error('POST /banquet-menus/:id/share error:', err);
         res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/banquet-menus/:id/send-quote-whatsapp', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: 'id non valido' });
+        if (!banquetQuoteWhatsAppReady()) {
+            return res.status(503).json({ error: 'whatsapp_non_configurato', message: "L'invio WhatsApp dal numero del ristorante non è ancora attivo." });
+        }
+        const rs = await queryWithRetry(
+            `SELECT b.name, TO_CHAR(b.event_date, 'YYYY-MM-DD') AS event_date,
+                    c.name AS customer_name, c.phone AS customer_phone
+             FROM banquet_menus b
+             LEFT JOIN customers c ON c.id = b.customer_id AND c.tenant_id = b.tenant_id
+             WHERE b.id = $1 AND b.tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        const row = rs.rows[0];
+        if (!row) return res.status(404).json({ error: 'Banquet not found' });
+        const phone = String(req.body?.phone ?? row.customer_phone ?? '').trim();
+        if (!phone || phone.replace(/\D/g, '').length < 8) {
+            return res.status(400).json({ error: 'Serve un numero di telefono valido' });
+        }
+        const token = await ensureBanquetShareToken(req.tenantId!, id);
+        if (!token) return res.status(404).json({ error: 'Banquet not found' });
+
+        const dateLabel = row.event_date
+            ? new Date(row.event_date + 'T00:00:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' })
+            : 'da definire';
+        const template = buildBanquetQuoteTemplate(row.customer_name, row.name, dateLabel, token);
+        if (!template) {
+            return res.status(503).json({ error: 'whatsapp_non_configurato', message: "L'invio WhatsApp dal numero del ristorante non è ancora attivo." });
+        }
+        // Testo di cortesia: finisce nel log messaggi (il contenuto vero lo
+        // rende Meta dal template).
+        const url = banquetQuoteUrl(token);
+        const text = `Preventivo «${row.name}» (${dateLabel}): ${url}`;
+        const result = await sendWhatsAppText(req.tenantId!, normalizeItalianPhone(phone), text, null, template);
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.BANQUET_MENU, id, row.name,
+                { quote_whatsapp_sent_to: phone }
+            ).catch(() => {});
+        }
+        res.json({ ok: true, phone, channel: result.channel, url });
+    } catch (err: any) {
+        console.error('POST /banquet-menus/:id/send-quote-whatsapp error:', err);
+        res.status(500).json({ error: err?.message || 'Internal server error' });
     }
 });
 

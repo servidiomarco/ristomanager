@@ -75,6 +75,17 @@ describe('preventivo condivisibile', () => {
         expect(res.status).toBe(404);
     });
 
+    it("senza template approvato il canale WhatsApp è dichiarato spento", async () => {
+        const share = await api().post(`/banquet-menus/${banquetId}/share`).set(bearer(token));
+        expect(share.status).toBe(200);
+        expect(share.body.whatsapp_ready).toBe(false);
+
+        const res = await api().post(`/banquet-menus/${banquetId}/send-quote-whatsapp`).set(bearer(token))
+            .send({ phone: '3331234567' });
+        expect(res.status).toBe(503);
+        expect(res.body.error).toBe('whatsapp_non_configurato');
+    });
+
     it("l'invio email valida indirizzo e configurazione SMTP", async () => {
         const noEmail = await api().post(`/banquet-menus/${banquetId}/send-quote-email`).set(bearer(token)).send({});
         expect(noEmail.status).toBe(400);
