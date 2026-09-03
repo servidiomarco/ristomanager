@@ -155,6 +155,8 @@ Agente conversazionale AI (ElevenLabs) che **risponde al telefono del ristorante
 - Verifica la disponibilità reale (stessa griglia orari e stesse regole del CRM), **crea, modifica e cancella** prenotazioni.
 - Per modificare o cancellare ritrova la prenotazione dal **numero del chiamante**; se non corrisponde (si chiama da un altro telefono), la cerca per **nome e data**, accenti inclusi, o accetta il numero dettato a voce.
 - Applica le regole di casa: date bloccate, soglia gruppi grandi oltre la quale passa la chiamata a un operatore (default 8), caparra automatica (annuncia importo e condizioni con i numeri veri delle Impostazioni), eventuale secondo giro sullo stesso tavolo se abilitato.
+- La verifica di disponibilità **controlla anche l'orario richiesto** contro la griglia degli orari prenotabili: se il cliente chiede un orario che quel giorno non esiste, Sofia lo sa subito e propone i **due orari più vicini** (non l'elenco completo recitato a voce).
+- Quando promette una richiamata (gruppo grande, problema tecnico, prenotazione non trovata) **salva un promemoria strutturato**: nome, numero, motivo e dettagli compaiono in Chiamate come "Da richiamare" e parte una notifica push allo staff.
 - Ogni prenotazione presa da Sofia nasce marcata **"da rivedere"**: lo staff la vede evidenziata e la valida.
 
 **Controllo operativo**
@@ -548,6 +550,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-03 | Agente vocale "Sofia" | Fix dall'analisi di 2.125 chiamate estive: la verifica di disponibilità valida anche l'orario richiesto e propone i due slot adiacenti invece della lista completa; nuovo tool che salva i promemoria di richiamata (badge "Da richiamare" in Chiamate + push allo staff, funziona anche a prenotazioni sospese); la sospensione viene riletta al cliente col suo messaggio invece di "problema tecnico"; watchdog orario sulla quota ElevenLabs con push all'80% e al 95%; i cognomi con particella non vengono più troncati nei saluti e nelle conferme; "Ferragosto" è una data valida; l'agente conosce data e ora correnti in ora italiana. |
 | 2026-09-03 | Menu & Banchetti | Gestione varianti completa: modale "Varianti" (gruppi con min/max, riordino, interruttore, sovrapprezzi in € o in % del prezzo battuto), aggancio dei gruppi dalla scheda del piatto (anche quelli della cassa, con legami manuali che sopravvivono agli import), piatti semplici/composti con ingredienti togliibili ("Senza X", sconto configurabile). Il foglio varianti del palmare mostra gli ingredienti pre-inclusi e vale anche in Cassa, che prima le ignorava; min/max fatti rispettare dal server; i palmari aggiornano il catalogo in tempo reale. |
 | 2026-09-03 | Menu & Banchetti | L'invio WhatsApp del preventivo parte dal numero business del ristorante (modello Meta approvato) invece che dal telefono dell'operatore; finché il modello non è attivo il canale si dichiara «in attivazione». |
 | 2026-09-03 | Menu & Banchetti | Preventivo condivisibile: link pubblico stabile del banchetto (menù, tariffe e totale, senza note interne) con invio su WhatsApp precompilato o via email dal server. |

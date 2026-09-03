@@ -449,11 +449,27 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
               La conferma fantasma dell'agent è stata gestita.
             </Callout>
           )}
+          {/* Promemoria strutturato salvato dall'agente in chiamata
+              (save_callback_request): chi richiamare, a che numero e perché.
+              Più preciso del badge "gruppo grande" dedotto dal transcript,
+              che resta come rete per le chiamate senza promemoria. */}
+          {detail.callback_requested && (
+            <Callout tone="info" icon={Phone} title="Da richiamare — promemoria dell'agente">
+              {[
+                detail.callback_name ? toTitleCase(detail.callback_name) : null,
+                detail.phone,
+                detail.callback_reason,
+              ].filter(Boolean).join(' · ') || 'Il cliente aspetta una richiamata.'}
+              {detail.callback_details && (
+                <div className="mt-1 text-[13px] opacity-80">{detail.callback_details}</div>
+              )}
+            </Callout>
+          )}
           {/* Large-group handoff: agent redirected the caller to a human
               because the party was above the configurable threshold.
               Distinct from phantom (which is an agent hallucination);
               this one is expected behavior and just needs a callback. */}
-          {detail.large_group_handoff && !detail.reservation_id && (
+          {!detail.callback_requested && detail.large_group_handoff && !detail.reservation_id && (
             <Callout tone="info" icon={Users} title="Gruppo grande — richiamare">
               Il cliente voleva prenotare per un gruppo oltre la soglia dell'agent. Sofia ha detto che avremmo richiamato: concorda con lui data, orario e mise en place.
             </Callout>
@@ -965,10 +981,18 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
                   {group.length} chiamate
                 </StatusPill>
               )}
+              {item.callback_requested && (
+                <StatusPill
+                  tone="info"
+                  title={[item.callback_name, item.callback_reason].filter(Boolean).join(' · ') || 'Promemoria di richiamata salvato dall\'agente'}
+                >
+                  Da richiamare
+                </StatusPill>
+              )}
               {/* Handoff reason badge: shown alongside the follow-up status so
                   the operator knows *why* this call needs a callback (agent
                   redirected a large group). */}
-              {!phantomOpen && item.reservation_id == null && item.large_group_handoff && (
+              {!item.callback_requested && !phantomOpen && item.reservation_id == null && item.large_group_handoff && (
                 <StatusPill
                   tone="info"
                   title="Il cliente voleva prenotare per un gruppo grande — l'agent ha promesso una richiamata"

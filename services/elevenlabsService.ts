@@ -3,6 +3,7 @@ import type { Request } from 'express';
 import { queryWithRetry } from '../db.js';
 import { Shift, ReservationSource } from '../types.js';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime.js';
+import { spokenFirstName } from '../utils/text.js';
 import { getAvailableSlots } from '../utils/slots.js';
 import { getCappedRoomIds, pickSelfServiceTable, isTableStillAssignable } from './roomOccupancyService.js';
 
@@ -230,6 +231,15 @@ export function parseFlexibleDate(input: unknown): string | null {
         return utcDateToIso(today);
     }
 
+    // "Ferragosto": i clienti lo dicono al posto della data (estate 2026,
+    // due chiamate rifiutate con invalid_date). Il 15 agosto di quest'anno,
+    // o del prossimo se è già passato.
+    if (/\bferragosto\b/.test(lower)) {
+        const y = today.getUTCFullYear();
+        const thisYear = new Date(Date.UTC(y, 7, 15));
+        return utcDateToIso(thisYear < today ? new Date(Date.UTC(y + 1, 7, 15)) : thisYear);
+    }
+
     // Bare weekday (Italian or English), optionally with "prossimo" /
     // "che viene" / "next" to force the *following* week when today matches
     // the requested weekday. "this Friday" = nearest upcoming, like bare.
@@ -454,7 +464,7 @@ export async function findCustomerByPhone(tenantId: number, phone: string): Prom
 
     const row = result.rows[0];
     const customerName: string = (row.name || '').trim();
-    const firstName = customerName.split(/\s+/)[0] || customerName;
+    const firstName = spokenFirstName(customerName) || customerName;
 
     // Best-effort last visit — used only for the greeting phrase, never blocks.
     let lastVisit: string | undefined;
@@ -1037,7 +1047,7 @@ export async function cancelVoiceReservation(
  */
 export function formatItalianCancellation(r: CancelCandidate): string {
     const rome = romeWallClock(r.reservation_time);
-    const firstName = r.customer_name.split(' ')[0];
+    const firstName = spokenFirstName(r.customer_name);
     return `Cancellazione confermata ${firstName}, la prenotazione di ${rome.weekday} ${rome.day} ${rome.month} alle ${rome.hh}:${rome.mm} è stata annullata. Le invieremo conferma su WhatsApp.`;
 }
 
@@ -1260,7 +1270,7 @@ export async function modifyVoiceReservation(
  */
 export function formatItalianModification(r: ModifiedReservation): string {
     const rome = romeWallClock(r.reservation_time);
-    const firstName = r.customer_name.split(' ')[0];
+    const firstName = spokenFirstName(r.customer_name);
     return `Prenotazione aggiornata ${firstName}: ${rome.weekday} ${rome.day} ${rome.month} alle ${rome.hh}:${rome.mm} per ${r.guests} persone. Le invieremo la conferma su WhatsApp.`;
 }
 
@@ -1301,6 +1311,38 @@ export async function recordVoiceCall(tenantId: number, record: VoiceCallRecord)
     ]);
 }
 
+export interface CallbackRequestRecord {
+    conversation_id: string;
+    phone?: string;
+    name?: string;
+    reason?: string;
+    details?: string;
+}
+
+// Promemoria di richiamata raccolto A METÀ chiamata: la riga voice_calls può
+// non esistere ancora (il webhook post-call arriva a fine conversazione),
+// quindi upsert — il post-call poi completa transcript e durata via
+// recordVoiceCall, che non tocca i campi callback_*.
+export async function recordCallbackRequest(tenantId: number, r: CallbackRequestRecord): Promise<void> {
+    await queryWithRetry(`
+        INSERT INTO voice_calls (tenant_id, conversation_id, phone, callback_requested, callback_name, callback_reason, callback_details)
+        VALUES ($6, $1, $2, TRUE, $3, $4, $5)
+        ON CONFLICT (conversation_id) DO UPDATE SET
+            callback_requested = TRUE,
+            phone = COALESCE(EXCLUDED.phone, voice_calls.phone),
+            callback_name = COALESCE(EXCLUDED.callback_name, voice_calls.callback_name),
+            callback_reason = COALESCE(EXCLUDED.callback_reason, voice_calls.callback_reason),
+            callback_details = COALESCE(EXCLUDED.callback_details, voice_calls.callback_details)
+    `, [
+        r.conversation_id,
+        r.phone ?? null,
+        r.name ?? null,
+        r.reason ?? null,
+        r.details ?? null,
+        tenantId,
+    ]);
+}
+
 // ============================================
 // ITALIAN CONFIRMATION FORMATTING
 // ============================================
@@ -1316,7 +1358,7 @@ const ITALIAN_MONTHS = ['gennaio', 'febbraio', 'marzo', 'aprile', 'maggio', 'giu
 export function formatItalianConfirmation(r: VoiceReservationOutput): string {
     const rome = romeWallClock(r.reservation_time);
     const persone = r.guests === 1 ? 'persona' : 'persone';
-    const firstName = r.customer_name.split(' ')[0];
+    const firstName = spokenFirstName(r.customer_name);
     const childrenSuffix = r.children && r.children > 0
         ? ` di cui ${r.children} ${r.children === 1 ? 'bambino' : 'bambini'}`
         : '';

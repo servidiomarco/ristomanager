@@ -26,6 +26,7 @@
 
 import { Shift } from '../types.js';
 import { normalizeLanguageCode, detectLanguageFromPhonePrefix } from '../utils/language.js';
+import { spokenFirstName } from '../utils/text.js';
 
 // Il tenant arriva come primo parametro di ogni tool (Fase C2): i canali
 // self-service non hanno JWT, quindi è l'adattatore del canale a risolverlo
@@ -111,6 +112,7 @@ export interface BookingToolsDeps {
     cancelVoiceReservation: (tenantId: number, p: any) => Promise<any>;
     modifyVoiceReservation: (tenantId: number, p: any) => Promise<any>;
     recordVoiceCall: (tenantId: number, p: any) => Promise<any>;
+    recordCallbackRequest: (tenantId: number, p: any) => Promise<any>;
     upsertCustomerFromReservation: (tenantId: number, name: string, phone: string, a: any, b: any, language?: string | null) => Promise<string | null>;
     /** Card #27 — true se il numero appartiene a un cliente in blacklist. */
     isPhoneBlacklisted: (tenantId: number, phone: string) => Promise<boolean>;
@@ -185,6 +187,27 @@ export interface CheckAvailabilityParams {
     shift?: any;
     guests?: any;
     location_preference?: any;
+    /** Orario desiderato dal cliente. L'estate 2026 ha mostrato il buco: il
+     *  tool rispondeva "c'è posto" per il turno intero, l'agente lo
+     *  ricapitolava come conferma dell'orario, e solo create_reservation
+     *  scopriva che le 21:00 erano spente (71 chiamate, 9 clienti persi).
+     *  Validarlo qui chiude il gap fra promessa e salvataggio. */
+    time?: any;
+}
+
+/** I due orari della griglia più vicini a quello richiesto, per proporli a
+ *  voce al posto della lista completa (7–9 slot letti al telefono sono il
+ *  punto in cui i clienti riattaccano). */
+export function nearestSlots(requested: string, slots: string[]): string[] {
+    const toMin = (t: string) => {
+        const [h, m] = t.split(':').map(Number);
+        return h * 60 + m;
+    };
+    const req = toMin(requested);
+    return [...slots]
+        .sort((a, b) => Math.abs(toMin(a) - req) - Math.abs(toMin(b) - req) || toMin(a) - toMin(b))
+        .slice(0, 2)
+        .sort((a, b) => toMin(a) - toMin(b));
 }
 
 export async function checkAvailability(
@@ -230,7 +253,9 @@ export async function checkAvailability(
     const threshold = await d.getLargeGroupThreshold(tenantId);
     if (guests > threshold) {
         console.log(`${channel.logPrefix} check-availability handoff (large group)`, { date: normalizedDate, shift: rawShift, guests, threshold });
-        return fail('large_group', MSG.largeGroup(threshold));
+        // next_tool: il promemoria promesso dalla frase va salvato DAVVERO —
+        // l'estate 2026 ha chiuso 13 gruppi grandi senza lasciare traccia.
+        return fail('large_group', MSG.largeGroup(threshold), { next_tool: 'save_callback_request' });
     }
 
     try {
@@ -240,11 +265,40 @@ export async function checkAvailability(
             guests: Math.trunc(guests),
             location_preference: locationPreference,
         });
+
+        // Griglia slot già in verifica: se il cliente ha detto un orario che
+        // quel giorno non esiste, l'agente lo deve sapere ADESSO — non dopo
+        // il "confermo" del cliente, quando create_reservation rifiuta.
+        const requestedTime = d.parseFlexibleTime(p.time);
+        let timeFields: Record<string, any> = {};
+        if (requestedTime) {
+            const validSlots = await d.getAvailableSlots(tenantId, normalizedDate, rawShift as Shift);
+            if (validSlots.includes(requestedTime)) {
+                timeFields = { requested_time: requestedTime, requested_time_available: true };
+            } else {
+                const near = nearestSlots(requestedTime, validSlots);
+                const proposal = near.length === 2 ? `alle ${near[0]} o alle ${near[1]}`
+                    : near.length === 1 ? `alle ${near[0]}` : '';
+                console.warn(`${channel.logPrefix} check-availability: requested time off grid`, {
+                    date: normalizedDate, shift: rawShift, requested_time: requestedTime, available_slots: validSlots,
+                });
+                timeFields = {
+                    requested_time: requestedTime,
+                    requested_time_available: false,
+                    available_slots: validSlots,
+                    nearest_slots: near,
+                    message: proposal
+                        ? `Alle ${requestedTime} quel giorno non prendiamo prenotazioni. Gli orari più vicini sono ${proposal}: quale preferisce?`
+                        : 'Per quel turno non ci sono orari prenotabili quel giorno. Possiamo provare un altro giorno?',
+                };
+            }
+        }
+
         console.log(`${channel.logPrefix} check-availability`, { date: normalizedDate, raw_date: p.date, shift: rawShift, guests, location_preference: locationPreference, result });
         // date_readback è la stringa "venerdì 10 luglio" che il modello DEVE
         // ripetere alla lettera: da solo sbaglia regolarmente l'accoppiata
         // giorno della settimana / giorno del mese.
-        return { body: { ...result, date_readback: d.formatItalianDateReadback(normalizedDate) } };
+        return { body: { ...result, ...timeFields, date_readback: d.formatItalianDateReadback(normalizedDate) } };
     } catch (err) {
         console.error(`${channel.logPrefix} check-availability error`, err);
         return {
@@ -368,17 +422,23 @@ export async function createReservation(
         console.warn(`${channel.logPrefix} create-reservation rejected: invalid_slot`, {
             received_time: p.time, normalized_time: normalizedTime, shift: rawShift, available_slots: validSlots,
         });
+        // I due orari più vicini, non la lista completa: 7–9 slot recitati al
+        // telefono sono il punto esatto in cui i clienti dell'estate 2026
+        // riattaccavano ("Non ho capito gli orari").
+        const near = nearestSlots(normalizedTime, validSlots);
         const message = validSlots.length === 0
             ? `Mi dispiace, ${shiftLabel} di quel giorno non è disponibile. Possiamo provare un altro giorno?`
-            : `Per ${shiftLabel} possiamo prenotare solo alle ${d.formatSlotListItalian(validSlots)}. Quale orario preferisce?`;
-        return fail('invalid_slot', message, { available_slots: validSlots });
+            : near.length === 2
+                ? `Alle ${normalizedTime} non prendiamo prenotazioni: gli orari più vicini sono le ${near[0]} o le ${near[1]}. Quale preferisce?`
+                : `Per ${shiftLabel} possiamo prenotare solo alle ${d.formatSlotListItalian(validSlots)}. Quale orario preferisce?`;
+        return fail('invalid_slot', message, { available_slots: validSlots, nearest_slots: near });
     }
     if (!Number.isFinite(guests) || guests < 1 || guests > 50) return fail('invalid_guests', MSG.invalidGuests);
 
     const threshold = await d.getLargeGroupThreshold(tenantId);
     if (guests > threshold) {
         console.log(`${channel.logPrefix} create-reservation blocked (large group)`, { guests, threshold, conversation_id: conversationId });
-        return fail('large_group', MSG.largeGroup(threshold));
+        return fail('large_group', MSG.largeGroup(threshold), { next_tool: 'save_callback_request' });
     }
 
     const childrenNum = Number(p.children);
@@ -538,7 +598,7 @@ export async function createReservation(
 
         // Con la caparra la frase di chiusura cambia: il cliente deve sapere
         // che il tavolo è garantito solo dopo il pagamento.
-        const firstName = d.toTitleCase(created.customer_name).split(' ')[0];
+        const firstName = spokenFirstName(d.toTitleCase(created.customer_name));
         const confirmationPhrase = depositCheckoutUrl
             ? `Registrato ${firstName}: per i gruppi numerosi chiediamo una caparra di ${d.formatEuroMinor(depositAmountCents)}. Le ho appena inviato il link di pagamento su WhatsApp, o via SMS. Il tavolo sarà confermato appena riceviamo il pagamento. Grazie!`
             : depositRequired
@@ -951,6 +1011,104 @@ export async function modifyReservation(
         return {
             serverError: true,
             body: { success: false, message: 'Si è verificato un errore tecnico nel modificare la prenotazione, posso richiamarla?' },
+        };
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tool 5 — save_callback_request
+// ---------------------------------------------------------------------------
+// Il promemoria di richiamata che per tutta l'estate 2026 è rimasto solo una
+// frase: gruppi grandi, errori tecnici e not_found finivano con "la
+// richiamiamo il prima possibile" e nessuna traccia nel CRM (0 lead salvati
+// su 32 promesse — nomi e numeri restavano nei transcript ElevenLabs).
+// Upsert su voice_calls: la riga compare subito in Conversazioni come
+// "da ricontattare" e parte una push allo staff.
+
+export interface SaveCallbackRequestParams {
+    customer_name?: any;
+    phone?: any;
+    caller_id?: any;
+    /** Motivo della richiamata in una frase (es. "gruppo da 12 per sabato"). */
+    reason?: any;
+    requested_date?: any;
+    requested_time?: any;
+    guests?: any;
+    notes?: any;
+    conversation_id?: string;
+}
+
+export async function saveCallbackRequest(
+    tenantId: number,
+    p: SaveCallbackRequestParams,
+    channel: ToolChannel = VOICE_CHANNEL
+): Promise<ToolOutcome> {
+    const d = deps();
+    const fail = (error: string, message: string): ToolOutcome => ({ body: { success: false, error, message } });
+
+    const phoneRaw = firstUsablePhone(p.phone, p.caller_id);
+    if (!phoneRaw) {
+        return fail('invalid_phone', 'Mi serve un numero a cui richiamare il cliente. Può chiederglielo e riprovare?');
+    }
+    const customerName = d.normalizeCustomerName(String(p.customer_name ?? '').trim()) || undefined;
+    const reason = String(p.reason ?? '').trim() || undefined;
+
+    // Data/ora/coperti desiderati: informativi, mai bloccanti — un promemoria
+    // con la data scritta male vale comunque più di nessun promemoria.
+    const parts: string[] = [];
+    const reqDate = d.parseFlexibleDate(p.requested_date);
+    if (reqDate) parts.push(d.formatItalianDateReadback(reqDate));
+    else if (String(p.requested_date ?? '').trim()) parts.push(String(p.requested_date).trim());
+    const reqTime = d.parseFlexibleTime(p.requested_time);
+    if (reqTime) parts.push(`ore ${reqTime}`);
+    const guestsNum = Number(p.guests);
+    if (Number.isFinite(guestsNum) && guestsNum > 0) parts.push(`${Math.trunc(guestsNum)} persone`);
+    const extraNotes = String(p.notes ?? '').trim();
+    if (extraNotes) parts.push(extraNotes);
+    const details = parts.join(' · ') || undefined;
+
+    // Senza conversation_id (placeholder scartato, canale diverso) il lead
+    // non deve andare perso: chiave sintetica, la riga resta comunque.
+    const conversationId = p.conversation_id
+        || `callback-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    try {
+        await d.recordCallbackRequest(tenantId, {
+            conversation_id: conversationId,
+            phone: d.normalizeItalianPhone(phoneRaw),
+            name: customerName,
+            reason,
+            details,
+        });
+
+        const who = customerName ? d.toTitleCase(customerName) : 'Cliente';
+        d.pushSendToRoles(
+            tenantId,
+            ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
+            {
+                category: 'voice',
+                title: '📞 Cliente da richiamare',
+                body: [who, d.normalizeItalianPhone(phoneRaw), reason || details].filter(Boolean).join(' · '),
+                url: '/?view=CONVERSAZIONI',
+                tag: `voice-callback-${conversationId}`,
+            },
+            { excludeUserId: null }
+        ).catch((err: any) => console.error(`Push (${channel.id} callback) failed:`, err));
+
+        console.log(`${channel.logPrefix} save-callback-request OK`, {
+            conversation_id: conversationId, customer_name: customerName, reason, details,
+        });
+        return {
+            body: {
+                success: true,
+                confirmation_phrase: 'Promemoria salvato: vi richiamiamo il prima possibile. Grazie!',
+            },
+        };
+    } catch (err: any) {
+        console.error(`${channel.logPrefix} save-callback-request error`, err);
+        return {
+            serverError: true,
+            body: { success: false, message: 'Non sono riuscita a salvare il promemoria. Può invitare il cliente a richiamare il ristorante?' },
         };
     }
 }

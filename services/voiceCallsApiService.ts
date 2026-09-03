@@ -37,6 +37,14 @@ export interface VoiceCallSummary {
   // caller they'll be called back — the badge on the card reminds staff
   // this is a callback request, not a plain follow-up.
   large_group_handoff: boolean;
+  // Promemoria salvato dall'agente col tool save_callback_request: il
+  // cliente ha lasciato nome e numero e aspetta di essere richiamato.
+  // A differenza di large_group_handoff (dedotto dal transcript) qui i
+  // dati sono strutturati: chi, perché, per quando.
+  callback_requested: boolean;
+  callback_name: string | null;
+  callback_reason: string | null;
+  callback_details: string | null;
 }
 
 export interface VoiceCallFollowUpUpdate {
