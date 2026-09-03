@@ -1230,16 +1230,17 @@ const CourseSection: React.FC<{
             className="flex min-h-[44px] w-full flex-wrap items-center gap-x-3 gap-y-1 px-1 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             {otherGroups.map(([sid, list]) => {
+              // L'uscita è chiamata: anche per le altre partite il lavoro è
+              // vivo, e il pallino pulsa ambra come quello grande sul filo —
+              // neutro direbbe «niente in corso», che qui è falso (Marco,
+              // 3/09). Verde fermo quando quella partita ha tutto pronto.
               const ready = list.every(o => o.status === 'READY');
-              const working = list.some(o => o.status === 'PREPARING');
               return (
                 <span key={sid ?? 'x'} className="inline-flex items-center gap-1.5 text-[13px] text-[var(--ds-text-secondary)]">
                   <span
                     aria-hidden
                     className={`h-2 w-2 flex-shrink-0 rounded-full ${
-                      ready ? 'bg-[var(--ds-seated-solid)]'
-                      : working ? 'bg-[var(--ds-pending-solid)]'
-                      : 'bg-[var(--ds-border-strong)]'
+                      ready ? 'bg-[var(--ds-seated-solid)]' : 'animate-pulse bg-[var(--ds-pending-solid)]'
                     }`}
                   />
                   {stationNames?.get(sid ?? -1) ?? 'altra partita'}
