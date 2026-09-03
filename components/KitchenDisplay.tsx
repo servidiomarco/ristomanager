@@ -1260,6 +1260,7 @@ const OrderCard: React.FC<{
                 courseNo={no}
                 rows={g.rows.filter(r => r.course_no === no)}
                 stationId={stationId}
+                stationNames={stationNames}
               />
             );
           })}
@@ -1530,12 +1531,16 @@ const CourseSection: React.FC<{
 
 // Un'uscita che qui non si lavora adesso: la servita (attenuata, con l'ora) e
 // quella ancora da lanciare o di altre partite (neutra). Una riga di piatti
-// aggregata, non l'elenco: è contesto, non lavoro.
+// aggregata, non l'elenco: è contesto, non lavoro. Il tocco apre il
+// contenuto per intero, partita per partita — stesso patto del piede «altre
+// partite» sulla card attiva: riassunto sempre, dettaglio a richiesta.
 const PassiveSection: React.FC<{
   courseNo: number;
   rows: KdsFullItem[];
   stationId: number | null;
-}> = ({ courseNo, rows, stationId }) => {
+  stationNames?: Map<number, string>;
+}> = ({ courseNo, rows, stationId, stationNames }) => {
+  const [open, setOpen] = useState(false);
   const served = rows.length > 0 && rows.every(r => r.status === 'SERVED');
   const queued = rows.length > 0 && rows.every(r => r.status === 'QUEUED');
   const mine = rows.filter(r => stationId == null || r.station_id === stationId);
@@ -1547,6 +1552,16 @@ const PassiveSection: React.FC<{
   const servedAt = served
     ? rows.reduce<string | null>((max, r) => (r.served_at && (!max || r.served_at > max) ? r.served_at : max), null)
     : null;
+  // Aperta: le partite dell'uscita in ordine, la mia per prima se c'è.
+  const byStation = useMemo(() => {
+    const m = new Map<number | null, KdsFullItem[]>();
+    for (const r of rows) {
+      if (!m.has(r.station_id)) m.set(r.station_id, []);
+      m.get(r.station_id)!.push(r);
+    }
+    return [...m.entries()].sort((a, b) =>
+      (a[0] === stationId ? -1 : b[0] === stationId ? 1 : 0));
+  }, [rows, stationId]);
 
   return (
     <div className="relative">
@@ -1556,24 +1571,50 @@ const PassiveSection: React.FC<{
           served ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-border-strong)]'
         }`}
       />
-      <div className="rounded-[16px] bg-[var(--ds-surface)] px-2.5 py-2 shadow-[var(--ds-shadow-card)]">
-      <div className="flex items-baseline gap-2 pr-1 text-[13px]">
-        <span className="font-medium text-[var(--ds-text-muted)]">
-          {ORDINALS[courseNo] ?? courseNo} uscita
-        </span>
-        <span className="ml-auto flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">
-          {served
-            ? `servita${servedAt ? ` ${getRomeTimePart(servedAt)}` : ''}`
-            : queued ? 'in coda' : 'altre partite'}
-        </span>
-      </div>
-      {/* I MIEI piatti, aggregati; se l'uscita non mi riguarda, il totale. */}
-      <div className="mt-0.5 pr-1 text-[13px] leading-snug text-[var(--ds-text-muted)]">
-        {mine.length > 0
-          ? aggregate(mine)
-          : `${rows.reduce((n, r) => n + r.qty, 0)} piatti di altre partite`}
-      </div>
-      </div>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        aria-label={`${ORDINALS[courseNo] ?? courseNo} uscita: mostra i piatti`}
+        className="block w-full rounded-[16px] bg-[var(--ds-surface)] px-2.5 py-2 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+      >
+        <div className="flex items-baseline gap-2 pr-1 text-[13px]">
+          <span className="font-medium text-[var(--ds-text-muted)]">
+            {ORDINALS[courseNo] ?? courseNo} uscita
+          </span>
+          <span className="ml-auto flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">
+            {served
+              ? `servita${servedAt ? ` ${getRomeTimePart(servedAt)}` : ''}`
+              : queued ? 'in coda' : 'altre partite'}
+          </span>
+          <ChevronRight
+            size={13}
+            className={`flex-shrink-0 self-center text-[var(--ds-text-muted)] transition-transform ${open ? 'rotate-90' : ''}`}
+            aria-hidden
+          />
+        </div>
+        {open ? (
+          <div className="mt-1 space-y-1 pr-1">
+            {byStation.map(([sid, list]) => (
+              <div key={sid ?? 'x'} className="text-[13px] leading-snug">
+                <span className={`font-semibold ${sid === stationId ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)]'}`}>
+                  {sid === stationId ? null : <>{stationNames?.get(sid ?? -1) ?? 'altra partita'} · </>}
+                </span>
+                <span className={sid === stationId ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)]'}>
+                  {aggregate(list)}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          // I MIEI piatti, aggregati; se l'uscita non mi riguarda, il totale.
+          <div className="mt-0.5 pr-1 text-[13px] leading-snug text-[var(--ds-text-muted)]">
+            {mine.length > 0
+              ? aggregate(mine)
+              : `${rows.reduce((n, r) => n + r.qty, 0)} piatti di altre partite`}
+          </div>
+        )}
+      </button>
     </div>
   );
 };
