@@ -545,7 +545,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
-| 2026-09-03 | Comande, Cucina e Passe | In Cucina la testata globale dell'app sparisce (niente date picker, turno, ricerca globale, campana e «+»): lo spazio va alle comande, e la topbar del monitor porta data di oggi, orologio vivo col punto pulsante, nome della partita, In lavorazione/Consegnate, ricerca, avviso sonoro e Cambia partita. |
+| 2026-09-03 | Comande, Cucina e Passe | In Cucina la testata globale dell'app sparisce (niente date picker, turno, ricerca globale, campana e «+»): la topbar del monitor apre col nome della partita e il toggle a icone (pentola = in lavorazione, spunta = consegnate), al centro data e pill dell'ora in tinta verde col punto pulsante, a destra ricerca, avviso sonoro e Cambia partita. |
 | 2026-09-03 | Comande, Cucina e Passe | Nel piede della card dell'uscita chiamata i pallini delle altre partite pulsano ambra finché non hanno tutto pronto (prima restavano neutri fino a «in preparazione»). |
 | 2026-09-02 | Comande, Cucina e Passe | Il monitor cucina mostra una colonna per comanda, in stile itinerario: filo a sinistra e una card per uscita appesa al filo, con la testata (tavolo, operatore, ora di apertura) come prima card; pallino pulsante ambra sull'uscita in lavorazione (distesa con le azioni), verde fermo su pronta/servita (compressa con l'ora), neutro sulle future in fantasma tratteggiato («fra N′», «in coda»). |
 | 2026-09-02 | Comande, Cucina e Passe | L'aggancio categoria→partita ignora le maiuscole («Primi» e «PRIMI» sono la stessa cucina) e le Impostazioni Sala & Cucina segnalano le categorie senza partita, i cui piatti non compaiono su nessun monitor. |
