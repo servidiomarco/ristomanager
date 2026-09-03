@@ -291,6 +291,9 @@ export interface KdsComingItem {
   qty: number;
   status: 'QUEUED' | 'SENT' | 'PREPARING';
   station_start_at: string | null;
+  course_no: number;
+  /** Il tocco sul chip apre «dove va questo piatto»: serve il tavolo. */
+  table_name: string | null;
 }
 
 export interface KdsQueue {

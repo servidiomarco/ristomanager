@@ -549,6 +549,9 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   // fuori vista, e la domanda del cuoco è «di questo qui, quanti ne
   // arrivano ancora?». `tick` distingue due pressioni sullo stesso piatto.
   const [flashDish, setFlashDish] = useState<{ name: string; tick: number } | null>(null);
+  // Tocco sul chip: «dove va questo piatto?» — modal coi tavoli, divisi fra
+  // in lavorazione e in arrivo.
+  const [chipDetail, setChipDetail] = useState<string | null>(null);
   const [litChip, setLitChip] = useState<string | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const flashChip = useCallback((name: string) => setFlashDish({ name, tick: Date.now() }), []);
@@ -561,19 +564,24 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
     return () => window.clearTimeout(t);
   }, [flashDish]);
 
-  // La barra è SOLO ciò che deve ancora arrivare (scelta di Marco, 3/09):
-  // il chiamato sta già sulle card, ripeterlo qui era rumore. Un piatto
-  // conta finché aspetta la chiamata — QUEUED, o lanciato con partenza
-  // scaglionata non ancora scattata — e sparisce dalla barra quando parte.
+  // La barra conta TUTTO ciò che resta da fare, ma nei suoi due tempi: il
+  // numero pieno è il totale ancora da cucinare, la parentesi ambra la quota
+  // già in lavorazione («5× Tagliata (2)» = 5 in tutto, 2 sul fuoco adesso).
+  // Separati apposta — la lezione della #393: un numero unico fa cuocere
+  // tagliate di tavoli ancora sugli antipasti. READY resta fuori da tutto:
+  // cotto, non è più lavoro di nessuno. Utile quando le card scorrono fuori
+  // schermo: la barra è l'unico posto letto a colpo d'occhio.
   const allDay = useMemo(() => {
-    const totals = new Map<string, number>();
+    const totals = new Map<string, { ahead: number; working: number }>();
     for (const r of coming) {
+      const cur = totals.get(r.name_snapshot) ?? { ahead: 0, working: 0 };
       const waiting = r.status === 'QUEUED'
         || (r.status === 'SENT' && r.station_start_at != null && new Date(r.station_start_at).getTime() > now);
-      if (!waiting) continue;
-      totals.set(r.name_snapshot, (totals.get(r.name_snapshot) ?? 0) + r.qty);
+      if (waiting) cur.ahead += r.qty; else cur.working += r.qty;
+      totals.set(r.name_snapshot, cur);
     }
-    return [...totals.entries()].sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]));
+    return [...totals.entries()].sort((a, b) =>
+      ((b[1].ahead + b[1].working) - (a[1].ahead + a[1].working)) || a[0].localeCompare(b[0]));
   }, [coming, now]);
 
   const stationName = stationId == null
@@ -725,19 +733,33 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             {/* Solo i chip scorrono: la pill delle note sta FUORI dall'area a
                 scorrimento, sempre visibile a destra qualunque sia la coda. */}
             <div ref={barRef} className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
-              {allDay.map(([name, qty]) => (
-                <span
+              {allDay.map(([name, t]) => (
+                // Il chip si tocca: apre i tavoli a cui è destinato il piatto.
+                <button
                   key={name}
+                  type="button"
                   data-chip={name}
-                  className={`inline-flex flex-shrink-0 items-baseline gap-1 rounded-full px-2.5 py-1 text-[14px] font-semibold transition-colors ${
+                  onClick={() => setChipDetail(name)}
+                  aria-label={`Dove va ${name}`}
+                  className={`inline-flex flex-shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[14px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                     litChip === name
                       ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
-                      : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
+                      : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
                   }`}
                 >
-                  <span className="tabular-nums">{qty}×</span>
+                  <span className="tabular-nums">{t.ahead + t.working}×</span>
                   <span>{name}</span>
-                </span>
+                  {/* La quota sul fuoco: tondo ambra pieno che batte come il
+                      pallino della card — si vede anche con la coda lunga.
+                      text SU tint invertiti come coppia bg/fg: contrasto alto
+                      in entrambi i temi (l'oro solid col grigio scuro sopra
+                      leggeva impastato, visto da Marco sul monitor). */}
+                  {t.working > 0 && (
+                    <span className="ml-0.5 inline-flex h-5 min-w-5 animate-pulse items-center justify-center rounded-full bg-[var(--ds-pending-text)] px-1 text-[12px] font-bold tabular-nums text-[var(--ds-pending-tint)]">
+                      {t.working}
+                    </span>
+                  )}
+                </button>
               ))}
             </div>
             {summary && (summary.dietary.length > 0 || summary.dietary_lines.length > 0) && (
@@ -951,6 +973,64 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           </div>
         </div>
       )}
+
+      {/* Dove va il piatto del chip: tavoli e uscite, prima la parte già sul
+          fuoco poi quella in arrivo — le stesse due voci del chip. */}
+      <ModalShell
+        open={chipDetail != null}
+        onClose={() => setChipDetail(null)}
+        title={chipDetail ?? ''}
+        size="sm"
+        closeOnEscape
+        bodyClassName="p-5 sm:p-6"
+      >
+        {(() => {
+          const rows = coming.filter(r => r.name_snapshot === chipDetail);
+          const isWaiting = (r: KdsComingItem) => r.status === 'QUEUED'
+            || (r.status === 'SENT' && r.station_start_at != null && new Date(r.station_start_at).getTime() > now);
+          const group = (list: KdsComingItem[]) => {
+            const m = new Map<string, { table: string; course: number; qty: number }>();
+            for (const r of list) {
+              const table = r.table_name ?? '—';
+              const key = `${table}:${r.course_no}`;
+              const cur = m.get(key) ?? { table, course: r.course_no, qty: 0 };
+              cur.qty += r.qty;
+              m.set(key, cur);
+            }
+            return [...m.values()].sort((a, b) => a.table.localeCompare(b.table, undefined, { numeric: true }) || a.course - b.course);
+          };
+          const Section = ({ label, dot, list }: { label: string; dot: string; list: { table: string; course: number; qty: number }[] }) => (
+            <div>
+              <div className="mb-1.5 flex items-center gap-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">
+                <span aria-hidden className={`h-2 w-2 rounded-full ${dot}`} />
+                {label}
+              </div>
+              {list.length === 0 ? (
+                <p className="text-[13px] text-[var(--ds-text-muted)]">niente</p>
+              ) : (
+                <div className="flex flex-col items-start gap-1.5">
+                  {list.map(e => (
+                    <span key={`${e.table}-${e.course}`} className="inline-flex items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3 py-1.5 text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                      <span className="tabular-nums">{e.qty}×</span>
+                      T{e.table}
+                      <span className="text-[13px] font-medium text-[var(--ds-text-muted)]">{ORDINALS[e.course] ?? e.course} usc.</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+          return rows.length === 0 ? (
+            <p className="text-[14px] text-[var(--ds-text-muted)]">Niente in coda per questo piatto.</p>
+          ) : (
+            // Due colonne affiancate: il fuoco a sinistra, il futuro a destra.
+            <div className="grid grid-cols-2 gap-4">
+              <Section label="In lavorazione" dot="animate-pulse bg-[var(--ds-pending-solid)]" list={group(rows.filter(r => !isWaiting(r)))} />
+              <Section label="In arrivo" dot="bg-[var(--ds-border-strong)]" list={group(rows.filter(isWaiting))} />
+            </div>
+          );
+        })()}
+      </ModalShell>
 
       {summary && (
         <ModalShell
@@ -1180,6 +1260,7 @@ const OrderCard: React.FC<{
                 courseNo={no}
                 rows={g.rows.filter(r => r.course_no === no)}
                 stationId={stationId}
+                stationNames={stationNames}
               />
             );
           })}
@@ -1450,23 +1531,39 @@ const CourseSection: React.FC<{
 
 // Un'uscita che qui non si lavora adesso: la servita (attenuata, con l'ora) e
 // quella ancora da lanciare o di altre partite (neutra). Una riga di piatti
-// aggregata, non l'elenco: è contesto, non lavoro.
+// aggregata, non l'elenco: è contesto, non lavoro. Il tocco apre il
+// contenuto per intero, partita per partita — stesso patto del piede «altre
+// partite» sulla card attiva: riassunto sempre, dettaglio a richiesta.
 const PassiveSection: React.FC<{
   courseNo: number;
   rows: KdsFullItem[];
   stationId: number | null;
-}> = ({ courseNo, rows, stationId }) => {
+  stationNames?: Map<number, string>;
+}> = ({ courseNo, rows, stationId, stationNames }) => {
+  const [open, setOpen] = useState(false);
   const served = rows.length > 0 && rows.every(r => r.status === 'SERVED');
   const queued = rows.length > 0 && rows.every(r => r.status === 'QUEUED');
   const mine = rows.filter(r => stationId == null || r.station_id === stationId);
-  const aggregate = (rs: KdsFullItem[]): string => {
+  const aggregateEntries = (rs: KdsFullItem[]): [string, number][] => {
     const byName = new Map<string, number>();
     for (const r of rs) byName.set(r.name_snapshot, (byName.get(r.name_snapshot) ?? 0) + r.qty);
-    return [...byName.entries()].map(([name, qty]) => `${qty}× ${name}`).join(' · ');
+    return [...byName.entries()];
   };
+  const aggregate = (rs: KdsFullItem[]): string =>
+    aggregateEntries(rs).map(([name, qty]) => `${qty}× ${name}`).join(' · ');
   const servedAt = served
     ? rows.reduce<string | null>((max, r) => (r.served_at && (!max || r.served_at > max) ? r.served_at : max), null)
     : null;
+  // Aperta: le partite dell'uscita in ordine, la mia per prima se c'è.
+  const byStation = useMemo(() => {
+    const m = new Map<number | null, KdsFullItem[]>();
+    for (const r of rows) {
+      if (!m.has(r.station_id)) m.set(r.station_id, []);
+      m.get(r.station_id)!.push(r);
+    }
+    return [...m.entries()].sort((a, b) =>
+      (a[0] === stationId ? -1 : b[0] === stationId ? 1 : 0));
+  }, [rows, stationId]);
 
   return (
     <div className="relative">
@@ -1476,24 +1573,68 @@ const PassiveSection: React.FC<{
           served ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-border-strong)]'
         }`}
       />
-      <div className="rounded-[16px] bg-[var(--ds-surface)] px-2.5 py-2 shadow-[var(--ds-shadow-card)]">
-      <div className="flex items-baseline gap-2 pr-1 text-[13px]">
-        <span className="font-medium text-[var(--ds-text-muted)]">
-          {ORDINALS[courseNo] ?? courseNo} uscita
-        </span>
-        <span className="ml-auto flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">
-          {served
-            ? `servita${servedAt ? ` ${getRomeTimePart(servedAt)}` : ''}`
-            : queued ? 'in coda' : 'altre partite'}
-        </span>
-      </div>
-      {/* I MIEI piatti, aggregati; se l'uscita non mi riguarda, il totale. */}
-      <div className="mt-0.5 pr-1 text-[13px] leading-snug text-[var(--ds-text-muted)]">
-        {mine.length > 0
-          ? aggregate(mine)
-          : `${rows.reduce((n, r) => n + r.qty, 0)} piatti di altre partite`}
-      </div>
-      </div>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        aria-label={`${ORDINALS[courseNo] ?? courseNo} uscita: mostra i piatti`}
+        className="block w-full rounded-[16px] bg-[var(--ds-surface)] px-2.5 py-2 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+      >
+        <div className="flex items-baseline gap-2 pr-1 text-[13px]">
+          <span className="font-medium text-[var(--ds-text-muted)]">
+            {ORDINALS[courseNo] ?? courseNo} uscita
+          </span>
+          <span className="ml-auto flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">
+            {served
+              ? `servita${servedAt ? ` ${getRomeTimePart(servedAt)}` : ''}`
+              : queued ? 'in coda' : 'altre partite'}
+          </span>
+          <ChevronRight
+            size={13}
+            className={`flex-shrink-0 self-center text-[var(--ds-text-muted)] transition-transform ${open ? 'rotate-90' : ''}`}
+            aria-hidden
+          />
+        </div>
+        {open ? (
+          // La partita è un'etichetta su riga sua, poi un piatto per riga con
+          // la quantità incolonnata: si legge come le righe della card
+          // distesa, solo in piccolo. Le proprie righe in chiaro, le altrui
+          // attenuate.
+          <div className="mt-1.5 space-y-2 pr-1">
+            {byStation.map(([sid, list]) => (
+              <div key={sid ?? 'x'}>
+                {sid !== stationId && (
+                  <div className="text-[11px] font-semibold text-[var(--ds-text-muted)]">
+                    {stationNames?.get(sid ?? -1) ?? 'altra partita'}
+                  </div>
+                )}
+                <div className="mt-0.5 space-y-0.5">
+                  {aggregateEntries(list).map(([name, qty]) => (
+                    <div
+                      key={name}
+                      className={`flex items-baseline gap-1.5 text-[13px] leading-snug ${
+                        sid === stationId
+                          ? 'font-medium text-[var(--ds-text-primary)]'
+                          : 'text-[var(--ds-text-muted)]'
+                      }`}
+                    >
+                      <span className="w-6 flex-shrink-0 text-right tabular-nums">{qty}×</span>
+                      <span className="min-w-0">{name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          // I MIEI piatti, aggregati; se l'uscita non mi riguarda, il totale.
+          <div className="mt-0.5 pr-1 text-[13px] leading-snug text-[var(--ds-text-muted)]">
+            {mine.length > 0
+              ? aggregate(mine)
+              : `${rows.reduce((n, r) => n + r.qty, 0)} piatti di altre partite`}
+          </div>
+        )}
+      </button>
     </div>
   );
 };
