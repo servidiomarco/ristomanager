@@ -599,9 +599,11 @@ export const setBanquetStatus = async (id: number, status: BanquetStatus): Promi
   });
 };
 
-/** Link pubblico del preventivo (nasce alla prima chiamata, poi è stabile). */
-export const getBanquetShareLink = async (id: number): Promise<{ token: string; url: string }> => {
-  return apiRequest<{ token: string; url: string }>(`${API_URL}/banquet-menus/${id}/share`, {
+/** Link pubblico del preventivo (nasce alla prima chiamata, poi è stabile).
+ *  whatsapp_ready dice se l'invio dal numero business è attivo (template
+ *  Meta approvato e cablato lato server). */
+export const getBanquetShareLink = async (id: number): Promise<{ token: string; url: string; whatsapp_ready?: boolean }> => {
+  return apiRequest<{ token: string; url: string; whatsapp_ready?: boolean }>(`${API_URL}/banquet-menus/${id}/share`, {
     method: 'POST',
     headers: getHeaders(false),
   });
@@ -613,6 +615,16 @@ export const sendBanquetQuoteEmail = async (id: number, email?: string): Promise
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify(email ? { email } : {}),
+  });
+};
+
+/** Invia il preventivo su WhatsApp DAL NUMERO BUSINESS (template approvato).
+ *  503 finché il canale non è attivo lato server. */
+export const sendBanquetQuoteWhatsApp = async (id: number, phone?: string): Promise<{ ok: true; phone: string; url: string }> => {
+  return apiRequest<{ ok: true; phone: string; url: string }>(`${API_URL}/banquet-menus/${id}/send-quote-whatsapp`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(phone ? { phone } : {}),
   });
 };
 

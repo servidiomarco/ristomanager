@@ -11,7 +11,7 @@ import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BanquetPaymentsModal } from './BanquetPaymentsModal';
 import { DishDetailModal } from './DishDetailModal';
 import { CustomerPickerModal } from './CustomerPickerModal';
-import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, createMenuCategory, renameMenuCategory, deleteMenuCategory, getBanquetShareLink, sendBanquetQuoteEmail, type MenuImportResult, type MenuTranslateResult, type MenuCategory } from '../services/apiService';
+import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, createMenuCategory, renameMenuCategory, deleteMenuCategory, getBanquetShareLink, sendBanquetQuoteEmail, sendBanquetQuoteWhatsApp, type MenuImportResult, type MenuTranslateResult, type MenuCategory } from '../services/apiService';
 import { billsApiService } from '../services/billsApiService';
 import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '../contexts/AuthContext';
@@ -458,13 +458,19 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   };
 
   // Foglio «Condividi preventivo»: link pubblico stabile + invio WhatsApp
-  // (wa.me dal telefono dell'operatore, nella chat dove la trattativa sta
-  // già succedendo) + invio email dal server.
+  // DAL NUMERO BUSINESS (template Meta, decisione utente 3/09 — mai wa.me
+  // dall'operatore) + invio email dal server. Finché il template non è
+  // approvato e cablato, il canale WhatsApp si presenta «in attivazione».
   const [shareBanquet, setShareBanquet] = useState<BanquetMenu | null>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
   const [shareCustomer, setShareCustomer] = useState<Customer | null>(null);
+  const [shareWhatsAppReady, setShareWhatsAppReady] = useState(false);
+  const [sharePhone, setSharePhone] = useState('');
+  const [sharePhoneBusy, setSharePhoneBusy] = useState(false);
+  const [sharePhoneDone, setSharePhoneDone] = useState<string | null>(null);
+  const [sharePhoneError, setSharePhoneError] = useState<string | null>(null);
   const [shareEmail, setShareEmail] = useState('');
   const [shareEmailBusy, setShareEmailBusy] = useState(false);
   const [shareEmailDone, setShareEmailDone] = useState<string | null>(null);
@@ -476,11 +482,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     setShareError(null);
     setShareCopied(false);
     setShareCustomer(null);
+    setShareWhatsAppReady(false);
+    setSharePhone('');
+    setSharePhoneDone(null);
+    setSharePhoneError(null);
     setShareEmail('');
     setShareEmailDone(null);
     setShareEmailError(null);
     getBanquetShareLink(menu.id)
-      .then(r => setShareUrl(r.url))
+      .then(r => { setShareUrl(r.url); setShareWhatsAppReady(r.whatsapp_ready === true); })
       .catch(err => setShareError(err?.data?.error ?? err?.message ?? 'Link non disponibile'));
     if (menu.customer_id) {
       getCustomers()
@@ -488,26 +498,27 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           const found = list.find(c => c.id === menu.customer_id) ?? null;
           setShareCustomer(found);
           if (found?.email) setShareEmail(found.email);
+          if (found?.phone) setSharePhone(found.phone);
         })
         .catch(() => {});
     }
   };
 
-  const shareMessage = (menu: BanquetMenu, url: string): string => {
-    const name = shareCustomer?.name ? `Ciao ${shareCustomer.name.split(' ')[0]}, ` : 'Ciao, ';
-    const when = menu.event_date
-      ? ` del ${new Date(menu.event_date + 'T00:00:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' })}`
-      : '';
-    return `${name}ecco il preventivo per «${menu.name}»${when}: menù, tariffe e totale sono qui: ${url}`;
-  };
-
-  const handleShareWhatsApp = () => {
-    if (!shareBanquet || !shareUrl) return;
-    // Cifre sole per wa.me; un numero italiano senza prefisso guadagna il 39.
-    const digits = (shareCustomer?.phone ?? '').replace(/\D/g, '');
-    const phone = digits ? (digits.startsWith('39') || digits.startsWith('00') ? digits.replace(/^00/, '') : `39${digits}`) : '';
-    const text = encodeURIComponent(shareMessage(shareBanquet, shareUrl));
-    window.open(phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`, '_blank', 'noopener');
+  const handleSendQuoteWhatsApp = async () => {
+    if (!shareBanquet || sharePhoneBusy) return;
+    const phone = sharePhone.trim();
+    if (!phone) return;
+    setSharePhoneBusy(true);
+    setSharePhoneError(null);
+    setSharePhoneDone(null);
+    try {
+      const r = await sendBanquetQuoteWhatsApp(shareBanquet.id, phone);
+      setSharePhoneDone(r.phone);
+    } catch (err: any) {
+      setSharePhoneError(err?.data?.message ?? err?.data?.error ?? err?.message ?? 'Invio non riuscito');
+    } finally {
+      setSharePhoneBusy(false);
+    }
   };
 
   const handleCopyShareLink = () => {
@@ -3456,15 +3467,44 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               </p>
             </div>
 
-            <button
-              type="button"
-              disabled={!shareUrl}
-              onClick={handleShareWhatsApp}
-              className={`${dsButton.secondary} w-full disabled:opacity-40`}
-            >
-              <MessageCircle className="h-4 w-4" />
-              {shareCustomer?.phone ? `WhatsApp a ${shareCustomer.name}` : 'Invia su WhatsApp'}
-            </button>
+            <div className="border-t border-[var(--ds-border)] pt-4">
+              <p className="mb-1.5 text-[13px] font-medium text-[var(--ds-text-secondary)]">Invia su WhatsApp</p>
+              {shareWhatsAppReady ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="tel"
+                      placeholder="telefono del cliente"
+                      className={`${dsInput} min-w-0 flex-1`}
+                      value={sharePhone}
+                      onChange={e => { setSharePhone(e.target.value); setSharePhoneDone(null); setSharePhoneError(null); }}
+                    />
+                    <button
+                      type="button"
+                      disabled={sharePhoneBusy || !sharePhone.trim()}
+                      onClick={handleSendQuoteWhatsApp}
+                      className={`${dsButton.primary} flex-shrink-0 disabled:opacity-40`}
+                    >
+                      {sharePhoneBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageCircle className="h-4 w-4" />}
+                      Invia
+                    </button>
+                  </div>
+                  <p className="mt-1.5 text-[12px] text-[var(--ds-text-muted)]">
+                    Parte dal numero WhatsApp del ristorante.
+                  </p>
+                  {sharePhoneDone && (
+                    <p className="mt-1.5 text-[13px] text-[var(--ds-seated-text)]">Preventivo inviato a {sharePhoneDone}.</p>
+                  )}
+                  {sharePhoneError && (
+                    <p className="mt-1.5 text-[13px] text-[var(--ds-critical-text)]">{sharePhoneError}</p>
+                  )}
+                </>
+              ) : (
+                <p className="rounded-[12px] bg-[var(--ds-surface-row)] px-3 py-2.5 text-[13px] text-[var(--ds-text-muted)]">
+                  L'invio dal numero WhatsApp del ristorante è in attivazione (serve l'approvazione del modello da parte di Meta). Intanto copia il link o usa l'email.
+                </p>
+              )}
+            </div>
 
             <div className="border-t border-[var(--ds-border)] pt-4">
               <p className="mb-1.5 text-[13px] font-medium text-[var(--ds-text-secondary)]">Invia via email</p>
