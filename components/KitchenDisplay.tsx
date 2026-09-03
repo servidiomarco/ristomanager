@@ -534,22 +534,19 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
     || (c.customer_name ?? '').toLowerCase().includes(query)
     || c.items.some(i => i.name.toLowerCase().includes(query)));
 
-  // Totale vivo per piatto di TUTTO il servizio, non della sola coda: il
-  // cuoco che batch-a le cotture legge qui il quadro intero. Due numeri per
-  // chip, tenuti separati apposta: il pieno è il chiamato (da cuocere ORA),
-  // il «+n» attenuato è ciò che aspetta la chiamata — sommarli in un numero
-  // solo farebbe cuocere tagliate di tavoli ancora sugli antipasti.
+  // La barra è SOLO ciò che deve ancora arrivare (scelta di Marco, 3/09):
+  // il chiamato sta già sulle card, ripeterlo qui era rumore. Un piatto
+  // conta finché aspetta la chiamata — QUEUED, o lanciato con partenza
+  // scaglionata non ancora scattata — e sparisce dalla barra quando parte.
   const allDay = useMemo(() => {
-    const totals = new Map<string, { active: number; ahead: number }>();
+    const totals = new Map<string, number>();
     for (const r of coming) {
-      const cur = totals.get(r.name_snapshot) ?? { active: 0, ahead: 0 };
       const waiting = r.status === 'QUEUED'
         || (r.status === 'SENT' && r.station_start_at != null && new Date(r.station_start_at).getTime() > now);
-      if (waiting) cur.ahead += r.qty; else cur.active += r.qty;
-      totals.set(r.name_snapshot, cur);
+      if (!waiting) continue;
+      totals.set(r.name_snapshot, (totals.get(r.name_snapshot) ?? 0) + r.qty);
     }
-    return [...totals.entries()].sort((a, b) =>
-      (b[1].active - a[1].active) || (b[1].ahead - a[1].ahead) || a[0].localeCompare(b[0]));
+    return [...totals.entries()].sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]));
   }, [coming, now]);
 
   const stationName = stationId == null
@@ -701,20 +698,13 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             {/* Solo i chip scorrono: la pill delle note sta FUORI dall'area a
                 scorrimento, sempre visibile a destra qualunque sia la coda. */}
             <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
-              {allDay.map(([name, t]) => (
-                // «3× Tagliata +2»: pieno il chiamato, attenuato l'in arrivo.
-                // Un piatto solo-futuro è un chip interamente attenuato.
+              {allDay.map(([name, qty]) => (
                 <span
                   key={name}
-                  className={`inline-flex flex-shrink-0 items-baseline gap-1 rounded-full bg-[var(--ds-surface-row)] px-2.5 py-1 text-[14px] font-semibold ${
-                    t.active > 0 ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)]'
-                  }`}
+                  className="inline-flex flex-shrink-0 items-baseline gap-1 rounded-full bg-[var(--ds-surface-row)] px-2.5 py-1 text-[14px] font-semibold text-[var(--ds-text-primary)]"
                 >
-                  <span className="tabular-nums">{t.active > 0 ? `${t.active}×` : `+${t.ahead}×`}</span>
+                  <span className="tabular-nums">{qty}×</span>
                   <span>{name}</span>
-                  {t.active > 0 && t.ahead > 0 && (
-                    <span className="tabular-nums font-medium text-[var(--ds-text-muted)]">+{t.ahead}</span>
-                  )}
                 </span>
               ))}
             </div>
@@ -725,7 +715,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                   onClick={() => setSummaryOpen(true)}
                   className="inline-flex h-9 items-center gap-2 rounded-full pl-2.5 pr-1 text-[14px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
-                  Note del servizio
+                  Note
                   <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-[var(--ds-pending-solid)] text-[13px] font-semibold tabular-nums text-[var(--ds-pending-fg)]">
                     {summary.dietary.length + summary.dietary_lines.length}
                   </span>
