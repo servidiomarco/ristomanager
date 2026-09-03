@@ -2381,8 +2381,11 @@ const App: React.FC = () => {
             bottom-sheet backdrop (z-[29]) has to dim the header there. */}
         {/* In immersive (tavolo aperto in Comande/Cassa) la testata sparisce
             sotto lg insieme alla barra in basso: il telefono è tutto del
-            tavolo, e in cima ci va la sua scheda con la freccia indietro. */}
-        <header className={`flex-shrink-0 h-16 md:h-[72px] m-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] z-10 md:z-30 items-center justify-between px-3 md:px-4 ${immersive ? 'hidden lg:flex' : 'flex'}`}>
+            tavolo, e in cima ci va la sua scheda con la freccia indietro.
+            In Cucina sparisce del tutto: data-picker, turno, ricerca globale
+            e «+» lì non servono, e lo spazio è delle comande — la topbar del
+            monitor porta da sola data, orologio e i suoi controlli. */}
+        <header className={`flex-shrink-0 h-16 md:h-[72px] m-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] z-10 md:z-30 items-center justify-between px-3 md:px-4 ${view === ViewState.CUCINA ? 'hidden' : immersive ? 'hidden lg:flex' : 'flex'}`}>
            {/* `pl-2` sopra al `px-3` della testata: il marchio ha aria propria
                dentro l'immagine solo sopra e sotto, ai lati arriva al bordo, e
                attaccato alla curva della card sembrava scivolato fuori. */}
