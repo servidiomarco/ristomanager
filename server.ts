@@ -13989,13 +13989,25 @@ app.get('/preventivo/:token', publicPayLimiter, async (req, res) => runAsPlatfor
             : row.discount_type === 'AMOUNT' ? Math.min(gross, discountValue) : 0;
 
         const identity = businessIdentity(row.tenant_id);
+        // Il logo in anagrafica è un path del backend (/public/media/…): la
+        // pagina vive sul dominio dell'app, quindi qui diventa assoluto — la
+        // stessa ragione per cui le email non usano path relativi.
+        const apiBase = publicAppBaseUrl();
+        const logoAbs = identity.logoUrl
+            ? (/^https?:\/\//i.test(identity.logoUrl)
+                ? identity.logoUrl
+                : (apiBase ? `${apiBase}${identity.logoUrl}` : null))
+            : null;
         res.json({
             business: {
                 name: identity.name,
+                tagline: identity.tagline || null,
                 phone: identity.phone || null,
                 whatsapp: identity.whatsapp || null,
                 address: identity.address || null,
-                logo_url: identity.logoUrl || null,
+                maps_url: identity.mapsUrl || null,
+                website_url: identity.websiteUrl || null,
+                logo_url: logoAbs,
             },
             quote: {
                 name: row.name,
