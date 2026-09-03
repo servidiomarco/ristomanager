@@ -1000,13 +1000,15 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             return [...m.values()].sort((a, b) => a.table.localeCompare(b.table, undefined, { numeric: true }) || a.course - b.course);
           };
           const Section = ({ label, dot, list }: { label: string; dot: string; list: { table: string; course: number; qty: number }[] }) => (
-            list.length === 0 ? null : (
-              <div>
-                <div className="mb-1.5 flex items-center gap-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">
-                  <span aria-hidden className={`h-2 w-2 rounded-full ${dot}`} />
-                  {label}
-                </div>
-                <div className="flex flex-wrap gap-1.5">
+            <div>
+              <div className="mb-1.5 flex items-center gap-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">
+                <span aria-hidden className={`h-2 w-2 rounded-full ${dot}`} />
+                {label}
+              </div>
+              {list.length === 0 ? (
+                <p className="text-[13px] text-[var(--ds-text-muted)]">niente</p>
+              ) : (
+                <div className="flex flex-col items-start gap-1.5">
                   {list.map(e => (
                     <span key={`${e.table}-${e.course}`} className="inline-flex items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3 py-1.5 text-[15px] font-semibold text-[var(--ds-text-primary)]">
                       <span className="tabular-nums">{e.qty}×</span>
@@ -1015,16 +1017,16 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                     </span>
                   ))}
                 </div>
-              </div>
-            )
+              )}
+            </div>
           );
-          return (
-            <div className="space-y-4">
+          return rows.length === 0 ? (
+            <p className="text-[14px] text-[var(--ds-text-muted)]">Niente in coda per questo piatto.</p>
+          ) : (
+            // Due colonne affiancate: il fuoco a sinistra, il futuro a destra.
+            <div className="grid grid-cols-2 gap-4">
               <Section label="In lavorazione" dot="animate-pulse bg-[var(--ds-pending-solid)]" list={group(rows.filter(r => !isWaiting(r)))} />
               <Section label="In arrivo" dot="bg-[var(--ds-border-strong)]" list={group(rows.filter(isWaiting))} />
-              {rows.length === 0 && (
-                <p className="text-[14px] text-[var(--ds-text-muted)]">Niente in coda per questo piatto.</p>
-              )}
             </div>
           );
         })()}
