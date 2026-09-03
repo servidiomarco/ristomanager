@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, BellOff, BellRing, Check, ChevronRight, Loader2, MessagesSquare, Pencil, Play, Search, TriangleAlert, WifiOff, X } from 'lucide-react';
+import { Bell, BellOff, BellRing, Check, ChevronRight, CookingPot, Loader2, MessagesSquare, Pencil, Play, Search, TriangleAlert, WifiOff, X } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
 import { useAuth } from '../contexts/AuthContext';
 import { socketClient } from '../services/socketClient';
@@ -560,36 +560,24 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           pagina — non una barra a filo con una linea sotto. */}
       <div className="flex-shrink-0 px-4 pb-3 pt-4">
         <div className="flex items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 pl-4 shadow-[var(--ds-shadow-card)]">
-          {/* Data e orologio vivi: in Cucina la testata globale non c'è (lo
-              spazio è delle comande), quindi il servizio si àncora qui. Solo
-              l'orario col punto pulsante — la parola «Live» non diceva niente
-              che il punto non dica già. */}
-          <div className="flex flex-shrink-0 items-center gap-2.5">
-            <span className="text-[14px] font-medium text-[var(--ds-text-muted)]">
-              {new Date(now).toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' })
-                .split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
-            </span>
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-2.5 py-1 text-[14px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
-              <span aria-hidden className="h-2 w-2 animate-pulse rounded-full bg-[var(--ds-seated-solid)]" />
-              {new Date(now).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
-            </span>
-          </div>
-          {/* Il nome della partita in tondo, non in maiuscolo: a un metro di
-              distanza conta il corpo, e le maiuscole cancellano la forma della
-              parola invece di renderla più leggibile (§5.2). */}
-          <h1 className="min-w-0 truncate text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
+          {/* Il nome della partita per primo, in tondo, non in maiuscolo: a
+              un metro di distanza conta il corpo, e le maiuscole cancellano
+              la forma della parola invece di renderla più leggibile (§5.2). */}
+          <h1 className="min-w-0 flex-shrink-0 truncate text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
             {stationName}
           </h1>
           {/* Il contatore è entrato nel tab: dice la stessa cosa di prima e
-              in più apre l'archivio del servito. */}
+              in più apre l'archivio del servito. Icone al posto del testo —
+              la pentola è il lavoro, la spunta il servito. */}
           <div className="flex-shrink-0">
             <SegmentedControl<'lavoro' | 'consegnate'>
               value={view}
               onChange={setView}
               ariaLabel="In lavorazione o consegnate"
+              iconOnly
               options={[
-                { value: 'lavoro', label: 'In lavorazione', badge: todo.length || undefined },
-                { value: 'consegnate', label: 'Consegnate' },
+                { value: 'lavoro', label: 'In lavorazione', icon: <CookingPot size={17} aria-hidden />, badge: todo.length || undefined },
+                { value: 'consegnate', label: 'Consegnate', icon: <Check size={17} aria-hidden /> },
               ]}
             />
           </div>
@@ -598,6 +586,26 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
               <WifiOff size={13} aria-hidden /> riconnessione…
             </StatusPill>
           )}
+          {/* Data e orologio al centro: in Cucina la testata globale non c'è
+              (lo spazio è delle comande), quindi il servizio si àncora qui.
+              La pill dell'ora nello stile della vecchia «Live» — tinta
+              seated e punto che pulsa — ma senza la parola: non diceva
+              niente che il punto non dica già. */}
+          <div className="flex-1" />
+          <div className="hidden flex-shrink-0 items-center gap-2.5 sm:flex">
+            <span className="text-[14px] font-medium text-[var(--ds-text-muted)]">
+              {new Date(now).toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' })
+                .split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+            </span>
+            <span className="inline-flex h-10 items-center gap-2 rounded-full bg-[var(--ds-seated-tint)] pl-2.5 pr-3 text-[15px] font-medium tabular-nums text-[var(--ds-seated-text)]">
+              <span className="relative flex h-2 w-2" aria-hidden>
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--ds-seated-solid)] opacity-60 motion-reduce:hidden" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--ds-seated-solid)]" />
+              </span>
+              {new Date(now).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          </div>
+          <div className="flex-1" />
           {/* Icona sola, 44px: la lente apre il campo di ricerca sotto la
               testata; richiuderla azzera il filtro. */}
           <button
@@ -605,7 +613,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             onClick={() => setSearchOpen(o => { if (o) setSearch(''); return !o; })}
             aria-pressed={searchOpen}
             aria-label={searchOpen ? 'Chiudi la ricerca' : 'Cerca una comanda'}
-            className={`ml-auto inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+            className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               searchOpen
                 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]'
                 : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
