@@ -19,6 +19,7 @@ export type Permission =
   | 'users:full'
   | 'reports:view'
   | 'reports:full'
+  | 'fiscal:view'
   | 'logs:view'
   | 'logs:full'
   | 'banquet:view_price'
@@ -78,6 +79,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'users:full',
     'reports:view',
     'reports:full',
+    'fiscal:view',
     'logs:view',
     'logs:full',
     'banquet:view_price',
@@ -119,6 +121,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'users:full',
     'reports:view',
     'reports:full',
+    'fiscal:view',
     'logs:view',
     'logs:full',
     'banquet:view_price',
@@ -295,6 +298,10 @@ const VIEW_PERMISSIONS: Record<ViewState, Permission[]> = {
   [ViewState.USERS]: ['users:view'],
   [ViewState.SETTINGS]: ['settings:view'],
   [ViewState.PAGAMENTI]: ['payments:view'],
+  // Reportistica fiscale: permesso dedicato, di default del solo titolare
+  // (e concedibile per ruolo dalla matrice permessi): il registro documenti
+  // non è né la cassa del giorno né i report operativi.
+  [ViewState.FISCALITA]: ['fiscal:view'],
   // Email inbox reuses the same permission as the SMS/WhatsApp inbox — anyone
   // who can read reservations can read the email thread with those customers.
   [ViewState.EMAIL]: ['reservations:view'],

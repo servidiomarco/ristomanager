@@ -17,6 +17,7 @@ export const ALL_PERMISSIONS: { feature: string; permissions: Permission[] }[] =
   { feature: 'Impostazioni', permissions: ['settings:view', 'settings:full'] },
   { feature: 'Gestione Utenti', permissions: ['users:view', 'users:full'] },
   { feature: 'Report', permissions: ['reports:view', 'reports:full'] },
+  { feature: 'Fiscalità', permissions: ['fiscal:view'] },
   { feature: 'Log Attività', permissions: ['logs:view', 'logs:full'] },
   { feature: 'Conversazioni', permissions: ['voice_calls:view'] },
   { feature: 'Pagamenti', permissions: ['payments:view', 'payments:full'] },
