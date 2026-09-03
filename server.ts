@@ -60,7 +60,7 @@ import authRoutes from './auth/authRoutes.js';
 import logRoutes from './activityLogs/logRoutes.js';
 import { authenticate, authorize, requirePermission, requireAnyPermission } from './auth/authMiddleware.js';
 import { AuthService } from './auth/authService.js';
-import { RolePermissionService } from './auth/permissionService.js';
+import { RolePermissionService, isReportsAdmin } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
 import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles, sendToPlatformAdmins as pushSendToPlatformAdmins } from './services/pushService.js';
@@ -8263,7 +8263,17 @@ const OUTBOUND_MEDIA_TYPES = /^(image\/(jpeg|png|webp|gif)|video\/(mp4|3gpp)|aud
 // browser e mandava dieci prenotazioni grezze: dava consigli validi per
 // qualsiasi ristorante, cioe' per nessuno.
 
-app.post('/reports/ai-summary', authenticate, requirePermission('reports:view'), async (req, res) => {
+// Lancio ristretto della reportistica: la matrice del Frantoio è stata
+// ripulita da reports:* (migration reportistica-solo-allowlist) e gli account
+// in REPORTS_ADMIN_EMAILS passano comunque. Quando il titolare ridarà
+// reports:view ai ruoli dalla pagina Utenti, la via del permesso riprende a
+// funzionare da sola — questo middleware non va rimosso, diventa inerte.
+const requireReportsAccess = (req: any, res: any, next: any) => {
+    if (isReportsAdmin(req.user?.email)) return next();
+    return requirePermission('reports:view')(req, res, next);
+};
+
+app.post('/reports/ai-summary', authenticate, requireReportsAccess, async (req, res) => {
     try {
         if (!aiReport.isReportConfigured()) {
             return res.status(503).json({ error: 'not_configured', message: 'ANTHROPIC_API_KEY non configurata sul backend' });
@@ -28766,6 +28776,51 @@ app.get('/kitchen/service-summary', authenticate, requirePermission('orders:kds'
 // quanto tempo passa fra la prima riga pronta di un'uscita e l'ultima. Dice
 // dov'è il collo di bottiglia con un numero, invece che con le impressioni
 // del sabato sera.
+
+// Tempo di preparazione reale per partita: da quando la riga doveva
+// iniziare a quando è stata dichiarata pronta. Mediana oltre alla
+// media, perché una sola comanda dimenticata sposta la media e non la
+// mediana. Condivisa fra /reports/kitchen (Passe) e /reports/dishes
+// (Reportistica): stessa query o i due schermi direbbero numeri diversi.
+const kitchenPerStation = (tenantId: number, from: string | null, to: string | null) => queryWithRetry(
+    `SELECT s.id AS station_id, s.name AS station_name,
+            COUNT(*)::int AS righe,
+            ROUND(AVG(GREATEST(0, EXTRACT(epoch FROM (oi.ready_at - COALESCE(oi.station_start_at, oi.fired_at)))))/60.0, 1) AS media_min,
+            ROUND((PERCENTILE_CONT(0.5) WITHIN GROUP (
+                ORDER BY GREATEST(0, EXTRACT(epoch FROM (oi.ready_at - COALESCE(oi.station_start_at, oi.fired_at))))
+            ))::numeric/60.0, 1) AS mediana_min,
+            COUNT(*) FILTER (WHERE oi.status = 'VOIDED')::int AS stornate
+     FROM order_items oi
+     LEFT JOIN stations s ON s.id = oi.station_id AND s.tenant_id = oi.tenant_id
+     WHERE oi.ready_at IS NOT NULL AND oi.line_kind = 'DISH'
+       AND oi.tenant_id = $3
+       AND ($1::date IS NULL OR oi.fired_at >= $1::date)
+       AND ($2::date IS NULL OR oi.fired_at < ($2::date + INTERVAL '1 day'))
+     GROUP BY s.id, s.name
+     ORDER BY s.sort_order NULLS LAST, s.id`,
+    [from, to, tenantId]
+);
+
+// Scarto: cosa è stato stornato e perché, con il valore in centesimi.
+// Bucketing su voided_at: conta quando il piatto è stato buttato, non
+// quando era stato lanciato. Condivisa come kitchenPerStation.
+const kitchenWaste = (tenantId: number, from: string | null, to: string | null) => queryWithRetry(
+    `SELECT oi.void_reason AS motivo, COUNT(*)::int AS righe,
+            SUM((oi.unit_price_cents + COALESCE((
+                SELECT SUM((m->>'price_delta_cents')::int)
+                FROM jsonb_array_elements(COALESCE(oi.modifiers, '[]'::jsonb)) m
+            ), 0)) * oi.qty)::int AS valore_cents
+     FROM order_items oi
+     WHERE oi.status = 'VOIDED' AND oi.line_kind = 'DISH'
+       AND oi.tenant_id = $3
+       AND ($1::date IS NULL OR oi.voided_at >= $1::date)
+       AND ($2::date IS NULL OR oi.voided_at < ($2::date + INTERVAL '1 day'))
+     GROUP BY oi.void_reason
+     ORDER BY valore_cents DESC NULLS LAST
+     LIMIT 10`,
+    [from, to, tenantId]
+);
+
 app.get('/reports/kitchen', authenticate, requirePermission('orders:expedite'), async (req, res) => {
     try {
         if (!(await ordersEnabledGuard(req, res))) return;
@@ -28773,28 +28828,7 @@ app.get('/reports/kitchen', authenticate, requirePermission('orders:expedite'), 
         const from = typeof req.query.from === 'string' ? req.query.from : null;
         const to = typeof req.query.to === 'string' ? req.query.to : null;
 
-        // Tempo di preparazione reale per partita: da quando la riga doveva
-        // iniziare a quando è stata dichiarata pronta. Mediana oltre alla
-        // media, perché una sola comanda dimenticata sposta la media e non la
-        // mediana.
-        const perStation = await queryWithRetry(
-            `SELECT s.id AS station_id, s.name AS station_name,
-                    COUNT(*)::int AS righe,
-                    ROUND(AVG(GREATEST(0, EXTRACT(epoch FROM (oi.ready_at - COALESCE(oi.station_start_at, oi.fired_at)))))/60.0, 1) AS media_min,
-                    ROUND((PERCENTILE_CONT(0.5) WITHIN GROUP (
-                        ORDER BY GREATEST(0, EXTRACT(epoch FROM (oi.ready_at - COALESCE(oi.station_start_at, oi.fired_at))))
-                    ))::numeric/60.0, 1) AS mediana_min,
-                    COUNT(*) FILTER (WHERE oi.status = 'VOIDED')::int AS stornate
-             FROM order_items oi
-             LEFT JOIN stations s ON s.id = oi.station_id AND s.tenant_id = oi.tenant_id
-             WHERE oi.ready_at IS NOT NULL AND oi.line_kind = 'DISH'
-               AND oi.tenant_id = $3
-               AND ($1::date IS NULL OR oi.fired_at >= $1::date)
-               AND ($2::date IS NULL OR oi.fired_at < ($2::date + INTERVAL '1 day'))
-             GROUP BY s.id, s.name
-             ORDER BY s.sort_order NULLS LAST, s.id`,
-            [from, to, req.tenantId!]
-        );
+        const perStation = await kitchenPerStation(req.tenantId!, from, to);
 
         // Delta di sincronia per uscita completata.
         const sync = await queryWithRetry(
@@ -28863,22 +28897,7 @@ app.get('/reports/kitchen', authenticate, requirePermission('orders:expedite'), 
 
         // Scarto: cosa è stato stornato e perché. La motivazione è
         // obbligatoria dalla PR 7, quindi qui c'è sempre qualcosa da leggere.
-        const scarti = await queryWithRetry(
-            `SELECT oi.void_reason AS motivo, COUNT(*)::int AS righe,
-                    SUM((oi.unit_price_cents + COALESCE((
-                        SELECT SUM((m->>'price_delta_cents')::int)
-                        FROM jsonb_array_elements(COALESCE(oi.modifiers, '[]'::jsonb)) m
-                    ), 0)) * oi.qty)::int AS valore_cents
-             FROM order_items oi
-             WHERE oi.status = 'VOIDED' AND oi.line_kind = 'DISH'
-               AND oi.tenant_id = $3
-               AND ($1::date IS NULL OR oi.voided_at >= $1::date)
-               AND ($2::date IS NULL OR oi.voided_at < ($2::date + INTERVAL '1 day'))
-             GROUP BY oi.void_reason
-             ORDER BY valore_cents DESC NULLS LAST
-             LIMIT 10`,
-            [from, to, req.tenantId!]
-        );
+        const scarti = await kitchenWaste(req.tenantId!, from, to);
 
         res.json({
             from, to,
@@ -29465,6 +29484,314 @@ app.get('/cash/transactions', authenticate, requirePermission('cash:operate'), a
     }
 });
 
+
+// --- Reportistica (reports:view) --------------------------------------------
+// Quattro endpoint di sola lettura per la pagina Reportistica, uno per area:
+// un errore SQL in un'area non deve svuotare le altre (la pagina li carica
+// con Promise.allSettled). Le query di /reports/ai-summary NON sono riusate
+// qui: quelle ancorano a NOW() e si affidano alla sola RLS, queste lavorano
+// su un range esplicito con tenant_id nella WHERE — cintura e bretelle come
+// il resto del modulo cassa.
+//
+// Due bucketing diversi, dichiarati anche in UI: le prenotazioni per giorno
+// solare Europe/Rome (una cena del 12 è "il 12"), gli incassi per giorno di
+// SERVIZIO (SERVICE_OF: un conto incassato all'1:00 appartiene alla sera
+// prima). Confrontare i due blocchi sullo stesso giorno può quindi mostrare
+// scarti legittimi a cavallo di mezzanotte.
+
+const REPORT_RANGE_MAX_DAYS = 366;
+
+// Range con default "ultimi 30 giorni" e finestra precedente di pari
+// ampiezza subito prima. Risponde 400 da solo: il chiamante esce su null.
+const parseReportRange = (req: any, res: any): { from: string; to: string; prevFrom: string; prevTo: string; days: number } | null => {
+    const isIso = (s: any): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s));
+    const to = isIso(req.query?.to) ? req.query.to : getRomeDatePart(new Date());
+    const from = isIso(req.query?.from) ? req.query.from : addDaysIso(to, -29);
+    if (from > to) {
+        res.status(400).json({ error: 'range_non_valido', message: 'La data di inizio è dopo quella di fine.' });
+        return null;
+    }
+    const days = Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1;
+    if (days > REPORT_RANGE_MAX_DAYS) {
+        res.status(400).json({ error: 'range_troppo_ampio', message: `Il periodo massimo è di ${REPORT_RANGE_MAX_DAYS} giorni.` });
+        return null;
+    }
+    const prevTo = addDaysIso(from, -1);
+    return { from, to, prevFrom: addDaysIso(prevTo, -(days - 1)), prevTo, days };
+};
+
+const ROME_DAY = (col: string) => `(${col} AT TIME ZONE 'Europe/Rome')::date`;
+
+app.get('/reports/reservations', authenticate, requireReportsAccess, async (req, res) => {
+    try {
+        const range = parseReportRange(req, res);
+        if (!range) return;
+        const tenantId = req.tenantId!;
+
+        const totali = async (da: string, a: string) => {
+            const r = await queryWithRetry(
+                `SELECT COUNT(*)::int AS prenotazioni,
+                        COALESCE(SUM(guests), 0)::int AS coperti,
+                        COALESCE(SUM(children), 0)::int AS bambini,
+                        COUNT(*) FILTER (WHERE reservation_status = 'CANCELLED')::int AS cancellate,
+                        COUNT(*) FILTER (WHERE reservation_status = 'NO_SHOW')::int AS no_show
+                   FROM reservations
+                  WHERE tenant_id = $1 AND ${ROME_DAY('reservation_time')} BETWEEN $2 AND $3`,
+                [tenantId, da, a]);
+            return r.rows[0];
+        };
+
+        // I trend escludono cancellate e rifiutate (non sono servizio reso);
+        // i tassi nei totali le contano — stessa convenzione dell'ai-summary.
+        const trendWhere = `tenant_id = $1 AND ${ROME_DAY('reservation_time')} BETWEEN $2 AND $3
+                    AND reservation_status NOT IN ('CANCELLED','DECLINED')`;
+        const params = [tenantId, range.from, range.to];
+
+        const [periodo, precedente, perGiorno, perDow, perOra, perCanale, perSala] = await Promise.all([
+            totali(range.from, range.to),
+            totali(range.prevFrom, range.prevTo),
+            queryWithRetry(
+                `SELECT ${ROME_DAY('reservation_time')}::text AS giorno,
+                        COUNT(*)::int AS prenotazioni, COALESCE(SUM(guests),0)::int AS coperti
+                   FROM reservations WHERE ${trendWhere}
+                  GROUP BY 1 ORDER BY 1`, params),
+            queryWithRetry(
+                `SELECT EXTRACT(DOW FROM reservation_time AT TIME ZONE 'Europe/Rome')::int AS giorno,
+                        COUNT(*)::int AS prenotazioni, COALESCE(SUM(guests),0)::int AS coperti
+                   FROM reservations WHERE ${trendWhere}
+                  GROUP BY 1 ORDER BY 1`, params),
+            queryWithRetry(
+                `SELECT EXTRACT(HOUR FROM reservation_time AT TIME ZONE 'Europe/Rome')::int AS ora,
+                        COUNT(*)::int AS prenotazioni, COALESCE(SUM(guests),0)::int AS coperti
+                   FROM reservations WHERE ${trendWhere}
+                  GROUP BY 1 ORDER BY 1`, params),
+            queryWithRetry(
+                `SELECT COALESCE(source, 'MANUAL') AS canale,
+                        COUNT(*)::int AS prenotazioni, COALESCE(SUM(guests),0)::int AS coperti
+                   FROM reservations
+                  WHERE tenant_id = $1 AND ${ROME_DAY('reservation_time')} BETWEEN $2 AND $3
+                  GROUP BY 1 ORDER BY 2 DESC`, params),
+            queryWithRetry(
+                `SELECT COALESCE(ro.name, '(nessuna sala)') AS sala,
+                        COUNT(*)::int AS prenotazioni, COALESCE(SUM(r.guests),0)::int AS coperti
+                   FROM reservations r
+                   LEFT JOIN tables t ON t.id = r.table_id AND t.tenant_id = r.tenant_id
+                   LEFT JOIN rooms ro ON ro.id = t.room_id AND ro.tenant_id = t.tenant_id
+                  WHERE r.tenant_id = $1 AND ${ROME_DAY('r.reservation_time')} BETWEEN $2 AND $3
+                    AND r.reservation_status NOT IN ('CANCELLED','DECLINED')
+                  GROUP BY 1 ORDER BY 3 DESC`, params),
+        ]);
+
+        res.json({
+            from: range.from, to: range.to,
+            precedente_range: { from: range.prevFrom, to: range.prevTo },
+            totali: periodo,
+            precedente,
+            per_giorno: perGiorno.rows,
+            per_dow: perDow.rows,
+            per_ora: perOra.rows,
+            per_canale: perCanale.rows,
+            per_sala: perSala.rows,
+        });
+    } catch (err: any) {
+        console.error('GET /reports/reservations error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/reports/revenue', authenticate, requireReportsAccess, async (req, res) => {
+    try {
+        const range = parseReportRange(req, res);
+        if (!range) return;
+        const tenantId = req.tenantId!;
+
+        // Incassato = movimenti vivi del libro cassa, esclusi OMAGGIO e
+        // SOSPESO (chiudono un conto senza portare un euro — stessa regola
+        // della chiusura di cassa). Le caparre restano fuori: erano state
+        // incassate alla prenotazione, non nel periodo.
+        const incassato = async (da: string, a: string) => {
+            const r = await queryWithRetry(
+                `SELECT COALESCE(SUM(amount_cents), 0)::int AS incassato_cents, COUNT(*)::int AS movimenti
+                   FROM table_bill_payments p
+                  WHERE p.tenant_id = $1 AND p.voided_at IS NULL
+                    AND p.method NOT IN ${NON_CASH_METHODS}
+                    AND ${SERVICE_OF('p.recorded_at')} BETWEEN $2 AND $3`,
+                [tenantId, da, a]);
+            return r.rows[0];
+        };
+
+        const conti = async (da: string, a: string) => {
+            const r = await queryWithRetry(
+                `SELECT COUNT(*)::int AS conti,
+                        COALESCE(SUM(total_cents), 0)::int AS totale_cents,
+                        COALESCE(ROUND(AVG(total_cents)), 0)::int AS scontrino_medio_cents,
+                        CASE WHEN COALESCE(SUM(covers), 0) > 0
+                             THEN ROUND(SUM(total_cents)::numeric / SUM(covers))::int ELSE 0 END AS coperto_medio_cents,
+                        COALESCE(SUM(covers), 0)::int AS coperti,
+                        COALESCE(SUM(tip_cents), 0)::int AS mance_cents
+                   FROM table_bills b
+                  WHERE b.tenant_id = $1 AND b.closed_at IS NOT NULL AND b.status <> 'VOIDED'
+                    AND ${SERVICE_OF('b.closed_at')} BETWEEN $2 AND $3`,
+                [tenantId, da, a]);
+            return r.rows[0];
+        };
+
+        const params = [tenantId, range.from, range.to];
+        const [periodo, precedente, contiPeriodo, contiPrecedente, perGiorno, perMetodo, casse, differenze] = await Promise.all([
+            incassato(range.from, range.to),
+            incassato(range.prevFrom, range.prevTo),
+            conti(range.from, range.to),
+            conti(range.prevFrom, range.prevTo),
+            queryWithRetry(
+                `SELECT ${SERVICE_OF('p.recorded_at')}::text AS giorno,
+                        ${SHIFT_OF('p.recorded_at')} AS turno,
+                        COALESCE(SUM(amount_cents), 0)::int AS incassato_cents
+                   FROM table_bill_payments p
+                  WHERE p.tenant_id = $1 AND p.voided_at IS NULL
+                    AND p.method NOT IN ${NON_CASH_METHODS}
+                    AND ${SERVICE_OF('p.recorded_at')} BETWEEN $2 AND $3
+                  GROUP BY 1, 2 ORDER BY 1`, params),
+            queryWithRetry(
+                `SELECT method AS metodo,
+                        COALESCE(SUM(amount_cents), 0)::int AS amount_cents,
+                        COUNT(*)::int AS movimenti,
+                        (method IN ${NON_CASH_METHODS}) AS non_cash
+                   FROM table_bill_payments p
+                  WHERE p.tenant_id = $1 AND p.voided_at IS NULL
+                    AND ${SERVICE_OF('p.recorded_at')} BETWEEN $2 AND $3
+                  GROUP BY method ORDER BY amount_cents DESC`, params),
+            queryWithRetry(
+                `SELECT COUNT(*)::int AS sessioni,
+                        COUNT(*) FILTER (WHERE closed_at IS NOT NULL)::int AS chiuse,
+                        COALESCE(SUM(difference_cents) FILTER (WHERE closed_at IS NOT NULL), 0)::int AS differenza_totale_cents
+                   FROM cash_sessions
+                  WHERE tenant_id = $1 AND service_date BETWEEN $2 AND $3`, params),
+            queryWithRetry(
+                `SELECT service_date::text AS giorno, shift AS turno,
+                        difference_cents::int AS differenza_cents, note
+                   FROM cash_sessions
+                  WHERE tenant_id = $1 AND service_date BETWEEN $2 AND $3
+                    AND closed_at IS NOT NULL AND COALESCE(difference_cents, 0) <> 0
+                  ORDER BY ABS(difference_cents) DESC LIMIT 10`, params),
+        ]);
+
+        res.json({
+            from: range.from, to: range.to,
+            precedente_range: { from: range.prevFrom, to: range.prevTo },
+            totali: { ...periodo, ...contiPeriodo },
+            precedente: { ...precedente, ...contiPrecedente },
+            per_giorno: perGiorno.rows,
+            per_metodo: perMetodo.rows,
+            casse: casse.rows[0],
+            differenze: differenze.rows,
+        });
+    } catch (err: any) {
+        console.error('GET /reports/revenue error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/reports/dishes', authenticate, requireReportsAccess, async (req, res) => {
+    try {
+        const range = parseReportRange(req, res);
+        if (!range) return;
+        const tenantId = req.tenantId!;
+
+        // Modulo comande spento: risposta piatta, non 403 — chi guarda i
+        // report non ha colpe e il blocco mostra un vuoto spiegato.
+        if (!(await getFeatureFlag(tenantId, 'table_orders_enabled', false))) {
+            return res.json({ enabled: false, from: range.from, to: range.to });
+        }
+
+        const [topPiatti, partite, scarti] = await Promise.all([
+            // Bucketing su fired_at come /reports/kitchen: un piatto "conta"
+            // quando è stato lanciato. Righe mai lanciate restano fuori.
+            queryWithRetry(
+                `SELECT oi.name_snapshot AS piatto,
+                        SUM(oi.qty)::int AS qty,
+                        SUM((oi.unit_price_cents + COALESCE((
+                            SELECT SUM((m->>'price_delta_cents')::int)
+                            FROM jsonb_array_elements(COALESCE(oi.modifiers, '[]'::jsonb)) m
+                        ), 0)) * oi.qty)::int AS ricavo_cents
+                   FROM order_items oi
+                  WHERE oi.tenant_id = $1 AND oi.line_kind = 'DISH'
+                    AND oi.status <> 'VOIDED' AND oi.fired_at IS NOT NULL
+                    AND oi.fired_at >= $2::date
+                    AND oi.fired_at < ($3::date + INTERVAL '1 day')
+                  GROUP BY 1 ORDER BY qty DESC, ricavo_cents DESC LIMIT 50`,
+                [tenantId, range.from, range.to]),
+            kitchenPerStation(tenantId, range.from, range.to),
+            kitchenWaste(tenantId, range.from, range.to),
+        ]);
+
+        res.json({
+            enabled: true,
+            from: range.from, to: range.to,
+            top_piatti: topPiatti.rows,
+            partite: partite.rows,
+            scarti: scarti.rows,
+        });
+    } catch (err: any) {
+        console.error('GET /reports/dishes error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/reports/communications', authenticate, requireReportsAccess, async (req, res) => {
+    try {
+        const range = parseReportRange(req, res);
+        if (!range) return;
+        const tenantId = req.tenantId!;
+
+        const voce = async (da: string, a: string) => {
+            const r = await queryWithRetry(
+                `SELECT COUNT(*)::int AS chiamate,
+                        COALESCE(SUM(duration_seconds), 0)::int AS secondi,
+                        COUNT(reservation_id)::int AS con_prenotazione,
+                        COUNT(*) FILTER (WHERE phantom_confirmation)::int AS phantom,
+                        COUNT(*) FILTER (WHERE large_group_handoff)::int AS gruppi_grandi
+                   FROM voice_calls
+                  WHERE tenant_id = $1 AND ${ROME_DAY('created_at')} BETWEEN $2 AND $3`,
+                [tenantId, da, a]);
+            return r.rows[0];
+        };
+
+        const params = [tenantId, range.from, range.to];
+        const [vocePeriodo, vocePrecedente, vocePerGiorno, messaggi] = await Promise.all([
+            voce(range.from, range.to),
+            voce(range.prevFrom, range.prevTo),
+            queryWithRetry(
+                `SELECT ${ROME_DAY('created_at')}::text AS giorno,
+                        COUNT(*)::int AS chiamate, COALESCE(SUM(duration_seconds), 0)::int AS secondi
+                   FROM voice_calls
+                  WHERE tenant_id = $1 AND ${ROME_DAY('created_at')} BETWEEN $2 AND $3
+                  GROUP BY 1 ORDER BY 1`, params),
+            // Solo le righe in uscita: il log unificato contiene anche email
+            // e messaggi ricevuti (direction='inbound'), che sporcherebbero i
+            // tassi di consegna.
+            queryWithRetry(
+                `SELECT channel AS canale, COUNT(*)::int AS inviati,
+                        COUNT(*) FILTER (WHERE delivered_at IS NOT NULL)::int AS consegnati,
+                        COUNT(*) FILTER (WHERE failed_at IS NOT NULL)::int AS falliti
+                   FROM outbound_messages
+                  WHERE tenant_id = $1 AND direction <> 'inbound'
+                    AND ${ROME_DAY('sent_at')} BETWEEN $2 AND $3
+                  GROUP BY 1 ORDER BY 2 DESC`, params),
+        ]);
+
+        res.json({
+            from: range.from, to: range.to,
+            precedente_range: { from: range.prevFrom, to: range.prevTo },
+            voce: vocePeriodo,
+            voce_precedente: vocePrecedente,
+            voce_per_giorno: vocePerGiorno.rows,
+            messaggi: messaggi.rows,
+        });
+    } catch (err: any) {
+        console.error('GET /reports/communications error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
 
 // --- Stampa preconti (Ditron PRP-300 via agente locale) ---------------------
 // Il backend può stare in cloud, la termica sta in sala: in mezzo c'è una

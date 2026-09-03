@@ -33,6 +33,7 @@ const VIEW_PERMISSIONS: Record<ViewState, string> = {
   [ViewState.USERS]: 'users:view',
   [ViewState.SETTINGS]: 'settings:view',
   [ViewState.PAGAMENTI]: 'payments:view',
+  [ViewState.REPORTISTICA]: 'reports:view',
   [ViewState.FISCALITA]: 'fiscal:view',
   [ViewState.EMAIL]: 'reservations:view',
   [ViewState.NOTIFICHE]: 'dashboard:view',
@@ -187,6 +188,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // PLATFORM_ADMIN sta sopra i tenant e la matrice permessi è per-tenant.
     if (view === ViewState.PLATFORM) {
       return user?.role === UserRole.PLATFORM_ADMIN;
+    }
+    // Lancio ristretto: gli account in allowlist (flag dal backend) vedono la
+    // Reportistica anche senza reports:view; il permesso resta la via
+    // ordinaria, assegnabile dalla matrice ruoli.
+    if (view === ViewState.REPORTISTICA && user?.is_reports_admin) {
+      return true;
     }
     // Prima l'entitlement, poi il permesso: un canale fuori dal piano non
     // appare a nessun ruolo, nemmeno all'OWNER.

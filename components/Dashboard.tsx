@@ -209,7 +209,7 @@ const KpiCard: React.FC<{
 };
 
 export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dishes, rooms, banquetMenus, onNavigateToBanquets, onNavigateToReservations, onNavigateToInventario, onNavigateToShoppingList, onNavigateToAttivita, globalDate, globalShiftFilter: globalShiftFilterProp, onDateChange, onShiftFilterChange, onUpdateReservation, onOpenReservationInList, isInitialLoading = false }) => {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const { items: shoppingItems, addItem: addShoppingItemCtx, toggleItem: toggleShoppingItemCtx } = useShopping();
   const { todos, addTodo: addTodoCtx, toggleTodo: toggleTodoCtx } = useTodos();
   const [report, setReport] = useState<string | null>(null);
@@ -2326,7 +2326,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
       {/* Report di andamento. Il calcolo sta sul backend: qui si chiede e si
           legge. Prima di questa scheda esisteva un blocco identico che non si
-          e' mai visto, perche' nessun pulsante lo riempiva. */}
+          e' mai visto, perche' nessun pulsante lo riempiva.
+          Visibile solo a chi puo' leggere la reportistica (permesso di
+          matrice o allowlist): stessa regola dell'endpoint, o il bottone
+          esisterebbe solo per rispondere 403. */}
+      {(hasPermission('reports:view') || user?.is_reports_admin) && (
       <div className="bg-[var(--ds-surface)] p-4 sm:p-5 rounded-[20px] shadow-[var(--ds-shadow-card)]">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2 min-w-0">
@@ -2360,6 +2364,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           </div>
         )}
       </div>
+      )}
 
       {/* Pending reservation quick-action modal. Rendered via Portal so it
           escapes the Dashboard's stacking context. Handles the two common

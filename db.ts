@@ -1117,7 +1117,10 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             ['GENERAL_MANAGER', 'menu:view'], ['GENERAL_MANAGER', 'menu:full'],
             ['GENERAL_MANAGER', 'reservations:view'], ['GENERAL_MANAGER', 'reservations:full'],
             ['GENERAL_MANAGER', 'staff:view'], ['GENERAL_MANAGER', 'staff:full'],
-            ['GENERAL_MANAGER', 'reports:view'], ['GENERAL_MANAGER', 'reports:full'],
+            // reports:view/full NON si ri-seminano più: la migration
+            // reportistica-solo-allowlist li ha tolti di proposito dalla
+            // matrice del tenant 1 (lancio ristretto della Reportistica) e
+            // questo ensure li avrebbe reinseriti a ogni boot.
             ['GENERAL_MANAGER', 'logs:view']
         ];
         for (const [role, permission] of generalManagerPermissions) {

@@ -26,6 +26,22 @@ export const ALL_PERMISSIONS: { feature: string; permissions: Permission[] }[] =
   { feature: 'Chat staff', permissions: ['staffchat:use'] }
 ];
 
+// Lancio ristretto della Reportistica: gli account in allowlist la vedono
+// anche senza reports:view in matrice. La via ordinaria resta il permesso di
+// ruolo (assegnabile dalla UI); l'allowlist serve a dare la pagina al solo
+// titolare mentre decide a chi aprirla. Default = l'admin del dev board, così
+// dev e test funzionano senza env dedicata.
+const REPORTS_ADMIN_EMAILS: Set<string> = new Set(
+  (process.env.REPORTS_ADMIN_EMAILS || process.env.DEV_BOARD_ADMIN_EMAIL || 'admin@ristomanager.com')
+    .toLowerCase()
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+);
+
+export const isReportsAdmin = (email?: string | null): boolean =>
+  REPORTS_ADMIN_EMAILS.has((email || '').toLowerCase());
+
 // Fase B2 del piano SaaS: la matrice permessi è PER TENANT — ogni
 // ristorante può personalizzare cosa fa un MANAGER senza toccare gli
 // altri. La cache è keyed per tenant, con la stessa semantica
