@@ -35,6 +35,10 @@ export interface CartLine {
    *  etichette e il delta qui sopra sono GIÀ cotti col verso e le
    *  ripetizioni: chi mostra la riga non deve sapere la regola. */
   modifiers?: { id: number; n: number }[];
+  /** Ingredienti tolti da un piatto composto. Etichette («Senza X») e sconto
+   *  sono GIÀ cotti in modifier_labels/delta come per le varianti: chi
+   *  mostra la riga non deve sapere cosa sono. */
+  removed_component_ids?: number[];
   modifier_labels: string[];
   modifier_delta_cents: number;
   note?: string;
@@ -118,6 +122,9 @@ export interface RepeatLine {
   /** Varianti firmate della riga d'origine: la ripetizione le riporta
    *  identiche («++ prosciutto» resta «++ prosciutto»). */
   modifiers: { id: number; n: number }[];
+  /** Ingredienti tolti della riga d'origine («Senza X»): anche loro si
+   *  ripetono identici. */
+  removed_component_ids: number[];
   modifier_labels: string[];
   modifier_delta_cents: number;
 }
@@ -130,10 +137,12 @@ export const repeatLines = (
   const push = (
     dishId: number | null, name: string, unitCents: number, qty: number, courseNo: number,
     modifierEntries: { id: number; n: number }[], modifierLabels: string[], modifierDelta: number,
+    removedIds: number[] = [],
   ) => {
     // Il verso e le ripetizioni entrano in chiave: «++ prosciutto» e
-    // «- prosciutto» non collassano nella stessa riga.
-    const key = `${dishId ?? name}|${modifierEntries.map(e => `${e.id}x${e.n}`).sort().join(',')}`;
+    // «- prosciutto» non collassano nella stessa riga. Gli ingredienti tolti
+    // idem: «senza cipolla» e il piatto intero sono due righe.
+    const key = `${dishId ?? name}|${modifierEntries.map(e => `${e.id}x${e.n}`).sort().join(',')}|${[...removedIds].sort().join(',')}`;
     const at = byKey.get(key);
     if (at) {
       at.qty += qty;
@@ -148,6 +157,7 @@ export const repeatLines = (
       qty, courses: [courseNo],
       modifier_ids: modifierEntries.map(e => e.id),
       modifiers: modifierEntries,
+      removed_component_ids: removedIds,
       modifier_labels: modifierLabels,
       modifier_delta_cents: modifierDelta,
     });
@@ -164,6 +174,9 @@ export const repeatLines = (
       mods.filter(m => m.id != null).map(m => ({ id: m.id as number, n: m.n ?? 1 })),
       mods.map(m => m.name),
       mods.reduce((s, m) => s + m.price_delta_cents, 0),
+      // I «Senza X» viaggiano nello snapshot con component_id: senza questo
+      // la ripetizione perderebbe la rimozione per strada.
+      mods.filter(m => m.component_id != null).map(m => m.component_id as number),
     );
   }
   for (const l of cart) {
@@ -171,6 +184,7 @@ export const repeatLines = (
       l.dish.id, l.dish.name, Math.round(Number(l.dish.price) * 100), l.qty, l.course_no,
       l.modifiers ?? l.modifier_ids.map(id => ({ id, n: 1 })),
       l.modifier_labels, l.modifier_delta_cents,
+      l.removed_component_ids ?? [],
     );
   }
 

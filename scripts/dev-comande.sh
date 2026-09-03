@@ -62,10 +62,14 @@ fi
 
 # --- schema -----------------------------------------------------------------
 # createSchema è idempotente: crea ciò che manca e lascia stare il resto.
+# Le migrazioni girano SUBITO dopo, come al boot del server: il seed qui
+# sotto usa colonne e tabelle che esistono solo lì (dish_type,
+# dish_components, price_delta_pct…).
 say "Schema"
 cat > .dev-schema.mjs <<'EOF'
-import { createSchema } from './db.ts';
+import { createSchema, runMigrations } from './db.ts';
 await createSchema();
+await runMigrations();
 process.exit(0);
 EOF
 DATABASE_URL="$DATABASE_URL" npx tsx .dev-schema.mjs
@@ -110,6 +114,22 @@ INSERT INTO dishes (tenant_id, name, price, category) VALUES
     (1, 'Costata',            28.00, 'Secondi')
 ON CONFLICT DO NOTHING;
 
+-- Piatto composto: ingredienti pre-inclusi, «Salumi» a sconto se tolto.
+INSERT INTO dishes (tenant_id, name, price, category, dish_type)
+SELECT 1, 'Antipasto del frantoio', 16.00, 'Antipasti', 'COMPOSED'
+WHERE NOT EXISTS (SELECT 1 FROM dishes WHERE name = 'Antipasto del frantoio');
+INSERT INTO dish_components (tenant_id, dish_id, name, removal_delta_cents, sort_order)
+SELECT 1, d.id, v.name, v.delta, v.ord
+FROM dishes d
+JOIN (VALUES ('Crostini', 0, 0), ('Salumi', -200, 1), ('Giardiniera', 0, 2)) AS v(name, delta, ord) ON TRUE
+WHERE d.name = 'Antipasto del frantoio'
+  AND NOT EXISTS (SELECT 1 FROM dish_components c WHERE c.dish_id = d.id AND c.name = v.name);
+-- Nel menu Alla carta, o il palmare lo filtra via.
+INSERT INTO dish_menus (tenant_id, dish_id, menu_id)
+SELECT 1, d.id, m.id FROM dishes d, menus m
+WHERE d.name = 'Antipasto del frantoio' AND m.system_key = 'ALLA_CARTA'
+ON CONFLICT DO NOTHING;
+
 -- Partite e tempi: senza prep_minutes lo scaglionamento non ha dati e
 -- tutte le partite partono insieme.
 UPDATE dishes SET station_id = (SELECT id FROM stations WHERE name = 'Antipasti'), prep_minutes = 3
@@ -150,6 +170,19 @@ WHERE g.name = 'Aggiunte'
 INSERT INTO dish_modifier_groups (tenant_id, dish_id, group_id)
 SELECT 1, d.id, g.id FROM dishes d, modifier_groups g
 WHERE d.category = 'Secondi' AND g.name IN ('Cottura', 'Aggiunte')
+ON CONFLICT DO NOTHING;
+
+-- Sovrapprezzo percentuale: «XL» = +10% del prezzo battuto, sul composto.
+INSERT INTO modifier_groups (tenant_id, name, min_select, max_select, sort_order)
+SELECT 1, 'Porzione', 0, 1, 3
+WHERE NOT EXISTS (SELECT 1 FROM modifier_groups WHERE name = 'Porzione');
+INSERT INTO modifiers (tenant_id, group_id, name, price_delta_cents, price_delta_pct, sort_order)
+SELECT 1, g.id, 'XL', 0, 10, 0 FROM modifier_groups g
+WHERE g.name = 'Porzione'
+  AND NOT EXISTS (SELECT 1 FROM modifiers m WHERE m.group_id = g.id AND m.name = 'XL');
+INSERT INTO dish_modifier_groups (tenant_id, dish_id, group_id, source)
+SELECT 1, d.id, g.id, 'manual' FROM dishes d, modifier_groups g
+WHERE d.name = 'Antipasto del frantoio' AND g.name = 'Porzione'
 ON CONFLICT DO NOTHING;
 
 -- Una prenotazione su un tavolo, per vedere nome e allergeni in testata

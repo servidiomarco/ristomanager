@@ -24,6 +24,9 @@ export interface NewOrderItem {
    *  (sconto) — «++ prosciutto», «-- prosciutto». Se presente vince su
    *  modifier_ids. */
   modifiers?: { id: number; n: number }[];
+  /** Ingredienti tolti da un piatto composto: entrano nello snapshot come
+   *  «Senza X» con l'eventuale sconto. Solo su piatti COMPOSED. */
+  removed_component_ids?: number[];
   station_id?: number | null;
   /** Chiave di idempotenza per riga: il server la vincola per tenant, quindi
    *  rimandare la stessa riga (retry, coda offline) non la duplica mai. */
@@ -182,9 +185,15 @@ export interface MenuCatalogue {
   stations: { id: number; name: string; color: string | null; sort_order: number }[];
   modifier_groups: {
     id: number; name: string; min_select: number; max_select: number; sort_order: number;
-    modifiers: { id: number; group_id: number; name: string; price_delta_cents: number }[];
+    /** price_delta_pct: percentuale del prezzo battuto (pg serializza NUMERIC
+     *  come stringa); null = sovrapprezzo assoluto. Il foglio la mostra in €
+     *  calcolati sul piatto corrente; il conto vero lo fa il server. */
+    modifiers: { id: number; group_id: number; name: string; price_delta_cents: number; price_delta_pct: string | null }[];
   }[];
   dish_modifier_groups: { dish_id: number; group_id: number }[];
+  /** Ingredienti dei piatti composti: pre-inclusi sul foglio varianti, si
+   *  battono in negativo (removed_component_ids sulla riga). */
+  dish_components: { id: number; dish_id: number; name: string; removal_delta_cents: number; sort_order: number }[];
   /** Preferenze delle categorie decise in Menu: ordine (sort) e accensione.
    *  Categoria assente = accesa, in coda. */
   category_prefs?: Record<string, { enabled: boolean; sort: number }>;

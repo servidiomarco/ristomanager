@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Dish, RestaurantMenu, BanquetMenu, BanquetCourse, BanquetStatus, Shift, COMMON_ALLERGENS, VAT_RATES, Customer, Table, TableMerge, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
-import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, SlidersHorizontal } from 'lucide-react';
+import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, Layers, SlidersHorizontal } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { getRomeDatePart } from '../utils/reservationTime';
 import { printBanquet } from '../utils/printBanquet';
@@ -11,7 +11,9 @@ import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BanquetPaymentsModal } from './BanquetPaymentsModal';
 import { DishDetailModal } from './DishDetailModal';
 import { CustomerPickerModal } from './CustomerPickerModal';
-import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, createMenuCategory, renameMenuCategory, deleteMenuCategory, type MenuImportResult, type MenuTranslateResult, type MenuCategory } from '../services/apiService';
+import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, createMenuCategory, renameMenuCategory, deleteMenuCategory, getModifierGroups, getDishComponents, type AdminModifierGroup, type MenuImportResult, type MenuTranslateResult, type MenuCategory } from '../services/apiService';
+import { socketClient } from '../services/socketClient';
+import { MenuVariantsModal } from './MenuVariantsModal';
 import { billsApiService } from '../services/billsApiService';
 import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '../contexts/AuthContext';
@@ -222,6 +224,25 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
   const refreshMenuCats = () => { getMenuCategories().then(setMenuCats).catch(() => {}); };
 
+  // Gruppi di varianti: la lista è del padre, condivisa fra la modale
+  // «Varianti» e le chip nell'editor piatto. Solo con menu:full — la GET è
+  // protetta come tutte le scritture del menu.
+  const [variantsOpen, setVariantsOpen] = useState(false);
+  const [modifierGroups, setModifierGroups] = useState<AdminModifierGroup[]>([]);
+  const refreshModifierGroups = React.useCallback(() => {
+    if (canEdit) getModifierGroups().then(setModifierGroups).catch(() => {});
+  }, [canEdit]);
+  useEffect(() => { refreshModifierGroups(); }, [refreshModifierGroups]);
+  // Un'altra postazione tocca le varianti → il server emette
+  // catalogue:updated e qui la lista si riallinea da sola.
+  useEffect(() => {
+    const s = socketClient.getSocket();
+    if (!s) return;
+    const onCatalogue = () => refreshModifierGroups();
+    s.on('catalogue:updated', onCatalogue);
+    return () => { s.off('catalogue:updated', onCatalogue); };
+  }, [refreshModifierGroups]);
+
   const submitCatForm = async (e: React.FormEvent) => {
     e.preventDefault();
     const name = catFormName.trim();
@@ -394,7 +415,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   const inSelectedMenu = (d: Dish): boolean =>
     selectedMenu == null || (d.menu_ids ?? []).includes(selectedMenu.id);
   const menuDishes = useMemo(
-    () => selectedMenu == null ? dishes : dishes.filter(d => (d.menu_ids ?? []).includes(selectedMenu.id)),
+    () => (selectedMenu == null ? dishes : dishes.filter(d => (d.menu_ids ?? []).includes(selectedMenu.id)))
+      // allergens può arrivare NULL dal DB (piatto creato via API senza il
+      // campo): senza questa normalizzazione i conteggi e le pill in lista
+      // fanno cadere l'intera pagina su .length.
+      .map(d => (d.allergens ? d : { ...d, allergens: [] })),
     [dishes, selectedMenu]
   );
 
@@ -535,6 +560,10 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     vat_rate: 10,
     menu_ids: []
   });
+  // Gruppi varianti spuntati nel form e ingredienti del composto: viaggiano
+  // nel salvataggio del piatto (semantica menu_ids), non con chiamate a parte.
+  const [dishGroupIds, setDishGroupIds] = useState<number[]>([]);
+  const [dishComponents, setDishComponents] = useState<{ id?: number; name: string; removal_delta_cents: number }[]>([]);
 
   // New Banquet Menu State
   const [newBanquet, setNewBanquet] = useState<Partial<BanquetMenu>>({
@@ -632,34 +661,39 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
     try {
       setIsSavingDish(true);
+      const dishType = newDish.dish_type ?? 'SIMPLE';
+      const payload: Partial<Dish> = {
+        name: newDish.name!,
+        description: newDish.description || '',
+        price: Number(newDish.price),
+        category: newDish.category || 'Antipasti',
+        allergens: newDish.allergens || [],
+        photo_url: newDish.photo_url?.trim() || undefined,
+        vat_rate: newDish.vat_rate ?? defaultVatRate,
+        menu_ids: newDish.menu_ids ?? [],
+        dish_type: dishType,
+        modifier_group_ids: dishGroupIds,
+        // Gli ingredienti si mandano solo per i composti: su un piatto
+        // tornato Semplice restano com'erano, ignorati (non cancellati).
+        ...(dishType === 'COMPOSED'
+          ? { components: dishComponents.filter(c => c.name.trim()).map(c => ({ ...c, name: c.name.trim() })) }
+          : {}),
+      };
       if (isEditingDish && editingDishId !== null) {
-        await onUpdateDish(editingDishId, {
-          name: newDish.name!,
-          description: newDish.description || '',
-          price: Number(newDish.price),
-          category: newDish.category || 'Antipasti',
-          allergens: newDish.allergens || [],
-          photo_url: newDish.photo_url?.trim() || undefined,
-          vat_rate: newDish.vat_rate ?? defaultVatRate,
-          menu_ids: newDish.menu_ids ?? []
-        });
+        await onUpdateDish(editingDishId, payload);
       } else {
-        await onAddDish({
-          name: newDish.name!,
-          description: newDish.description || '',
-          price: Number(newDish.price),
-          category: newDish.category || 'Antipasti',
-          allergens: newDish.allergens || [],
-          photo_url: newDish.photo_url?.trim() || undefined,
-          vat_rate: newDish.vat_rate ?? defaultVatRate,
-          menu_ids: newDish.menu_ids ?? []
-        } as Dish);
+        await onAddDish(payload as Dish);
       }
+      // I legami varianti vivono nel catalogo, non nell'anagrafica piatti:
+      // il refetch tiene allineate le chip e i conteggi della modale.
+      refreshModifierGroups();
 
       setIsDishFormOpen(false);
       setIsEditingDish(false);
       setEditingDishId(null);
       setNewDish({ name: '', description: '', price: 0, category: 'Antipasti', allergens: [], photo_url: '', vat_rate: defaultVatRate, menu_ids: [] });
+      setDishGroupIds([]);
+      setDishComponents([]);
     } finally {
       setIsSavingDish(false);
     }
@@ -683,7 +717,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     const defaultMenus = Array.isArray(catDefault) && catDefault.length > 0
       ? catDefault
       : defaultMenuId != null ? [defaultMenuId] : [];
-    setNewDish({ name: '', description: '', price: 0, category: firstCat, allergens: [], photo_url: '', vat_rate: defaultVatRate, menu_ids: defaultMenus });
+    setNewDish({ name: '', description: '', price: 0, category: firstCat, allergens: [], photo_url: '', vat_rate: defaultVatRate, menu_ids: defaultMenus, dish_type: 'SIMPLE' });
+    setDishGroupIds([]);
+    setDishComponents([]);
     setPhotoUploadError(null);
     setIsDishFormOpen(true);
   };
@@ -697,8 +733,18 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       allergens: dish.allergens,
       photo_url: dish.photo_url || '',
       vat_rate: dish.vat_rate ?? 10,
-      menu_ids: dish.menu_ids ?? []
+      menu_ids: dish.menu_ids ?? [],
+      dish_type: dish.dish_type ?? 'SIMPLE'
     });
+    // Le spunte dei gruppi si leggono dai dish_ids della gestione varianti;
+    // gli ingredienti si caricano pigri — servono solo aprendo un composto.
+    setDishGroupIds(modifierGroups.filter(g => g.dish_ids.includes(dish.id)).map(g => g.id));
+    setDishComponents([]);
+    if (dish.dish_type === 'COMPOSED') {
+      getDishComponents(dish.id)
+        .then(list => setDishComponents(list.map(c => ({ id: c.id, name: c.name, removal_delta_cents: c.removal_delta_cents }))))
+        .catch(() => {});
+    }
     setEditingDishId(dish.id);
     setIsEditingDish(true);
     setIsDishFormOpen(true);
@@ -1397,6 +1443,17 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   Categorie
                 </button>
               )}
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => setVariantsOpen(true)}
+                  title="Gruppi di varianti: cotture, aggiunte, sovrapprezzi"
+                  className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 self-start rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] md:self-center"
+                >
+                  <Layers className="h-4 w-4" aria-hidden />
+                  Varianti
+                </button>
+              )}
               <span className="text-[13px] text-[var(--ds-text-muted)] md:flex-shrink-0 md:self-center">
                 {menuDishes.length} piatti · {menuDishes.filter(d => d.allergens.length > 0).length} con allergeni · {menuDishes.filter(d => !d.photo_url).length} senza foto
               </span>
@@ -1549,6 +1606,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                 <span className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">{dish.name}</span>
                                 {dish.is_active === false && <StatusPill tone="critical">spento in cassa</StatusPill>}
                                 {dish.crm_enabled === false && <StatusPill tone="neutral">spento</StatusPill>}
+                                {dish.dish_type === 'COMPOSED' && <StatusPill tone="neutral">composto</StatusPill>}
+                                {(() => {
+                                  const n = modifierGroups.filter(g => g.is_active && g.dish_ids.includes(dish.id)).length;
+                                  return n > 0 ? <StatusPill tone="neutral">{n === 1 ? '1 variante' : `${n} varianti`}</StatusPill> : null;
+                                })()}
                               </div>
                               <div className="truncate text-[13px] text-[var(--ds-text-muted)]">
                                 {[dish.category, dish.description].filter(Boolean).join(' · ')}
@@ -2339,6 +2401,125 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     </button>
                   );
                 })}
+              </div>
+            </FormCard>
+
+            {/* I gruppi di varianti agganciati al piatto: cotture, aggiunte,
+                sovrapprezzi. Anche quelli della cassa si agganciano
+                liberamente — il legame fatto qui sopravvive agli import. */}
+            <FormCard
+              title="Varianti"
+              aside={
+                dishGroupIds.length === 0
+                  ? <span className="text-[13px] text-[var(--ds-text-muted)]">nessun gruppo</span>
+                  : <span className="text-[13px] text-[var(--ds-text-muted)]">{dishGroupIds.length} {dishGroupIds.length === 1 ? 'gruppo' : 'gruppi'}</span>
+              }
+            >
+              {modifierGroups.length === 0 ? (
+                <p className="text-[13px] text-[var(--ds-text-muted)]">
+                  Nessun gruppo di varianti: crealo da «Varianti» in testa alla pagina.
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {modifierGroups
+                    .filter(g => g.is_active || dishGroupIds.includes(g.id))
+                    .map(g => {
+                      const isSelected = dishGroupIds.includes(g.id);
+                      const pp = !!g.external_ref?.startsWith('pp:varianti:');
+                      return (
+                        <button
+                          key={g.id}
+                          type="button"
+                          onClick={() => setDishGroupIds(prev =>
+                            prev.includes(g.id) ? prev.filter(x => x !== g.id) : [...prev, g.id])}
+                          aria-pressed={isSelected}
+                          title={pp ? 'Gruppo della cassa: le opzioni si aggiornano a ogni import' : undefined}
+                          className={`inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                            isSelected
+                              ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                              : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
+                          }`}
+                        >
+                          {isSelected && <Check size={13} />}
+                          {g.name}
+                          {pp && <span className="text-[11px] opacity-70">cassa</span>}
+                        </button>
+                      );
+                    })}
+                </div>
+              )}
+            </FormCard>
+
+            {/* Semplice = com'è sempre stato. Composto = fatto di ingredienti
+                pre-inclusi che il cameriere può togliere («Senza cipolla»),
+                gratis o a sconto. */}
+            <FormCard
+              title="Composizione"
+              aside={newDish.dish_type === 'COMPOSED'
+                ? <span className="text-[13px] text-[var(--ds-text-muted)]">{dishComponents.length} {dishComponents.length === 1 ? 'ingrediente' : 'ingredienti'}</span>
+                : undefined}
+            >
+              <div className="space-y-3">
+                <div className="flex items-center rounded-full bg-[var(--ds-surface-row)] p-1">
+                  {([['SIMPLE', 'Semplice'], ['COMPOSED', 'Composto']] as const).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setNewDish({ ...newDish, dish_type: value })}
+                      aria-pressed={(newDish.dish_type ?? 'SIMPLE') === value}
+                      className={`inline-flex h-9 flex-1 items-center justify-center rounded-full text-[13px] font-medium transition-colors ${
+                        (newDish.dish_type ?? 'SIMPLE') === value
+                          ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
+                          : 'text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {newDish.dish_type === 'COMPOSED' && (
+                  <div className="space-y-2">
+                    {dishComponents.map((c, i) => (
+                      <div key={c.id ?? `new-${i}`} className="flex items-center gap-2">
+                        <input
+                          className={`${dsInput} min-w-0 flex-1`}
+                          maxLength={100}
+                          placeholder="Ingrediente…"
+                          value={c.name}
+                          onChange={e => setDishComponents(prev => prev.map((x, j) => j === i ? { ...x, name: e.target.value } : x))}
+                        />
+                        <input
+                          className={`${dsInput} w-24 text-right tabular-nums`}
+                          inputMode="decimal"
+                          placeholder="sconto €"
+                          title="Sconto se tolto (vuoto = togliere è gratis)"
+                          value={c.removal_delta_cents === 0 ? '' : (Math.abs(c.removal_delta_cents) / 100).toFixed(2)}
+                          onChange={e => {
+                            const n = Number(e.target.value.replace(',', '.'));
+                            setDishComponents(prev => prev.map((x, j) => j === i
+                              ? { ...x, removal_delta_cents: Number.isFinite(n) && n > 0 ? -Math.round(n * 100) : 0 }
+                              : x));
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setDishComponents(prev => prev.filter((_, j) => j !== i))}
+                          className={`${dsIconButton} h-9 w-9 flex-shrink-0 bg-[var(--ds-surface-row)] shadow-none hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]`}
+                          title="Togli ingrediente"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setDishComponents(prev => [...prev, { name: '', removal_delta_cents: 0 }])}
+                      className={`${dsButton.quiet} h-9 px-4 text-[13px]`}
+                    >
+                      <Plus className="h-3.5 w-3.5" /> Ingrediente
+                    </button>
+                  </div>
+                )}
               </div>
             </FormCard>
 
@@ -3474,6 +3655,13 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
           </div>
         </ModalShell>
       )}
+
+      <MenuVariantsModal
+        open={variantsOpen}
+        onClose={() => setVariantsOpen(false)}
+        groups={modifierGroups}
+        onChanged={refreshModifierGroups}
+      />
 
       {/* Nuova categoria / rinomina. La rinomina sposta tutti i piatti sul
           nuovo nome; per i piatti della cassa vale solo fino al prossimo

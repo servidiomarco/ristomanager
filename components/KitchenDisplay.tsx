@@ -176,6 +176,16 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
 
   useEffect(() => { getMenuCatalogue().then(setCatalogue).catch(() => {}); }, []);
 
+  // Varianti o ingredienti cambiati in gestione menu: il catalogo si
+  // ricarica da solo, senza reload del monitor.
+  useEffect(() => {
+    const socket = socketClient.getSocket();
+    if (!socket) return;
+    const onCatalogue = () => { getMenuCatalogue().then(setCatalogue).catch(() => {}); };
+    socket.on('catalogue:updated', onCatalogue);
+    return () => { socket.off('catalogue:updated', onCatalogue); };
+  }, []);
+
   // Striscia della chat staff: l'ultimo messaggio non letto del canale
   // cucina, così "finito il branzino" arriva sul monitor senza aprire la
   // chat. "Ok" marca letto col cursore e la striscia sparisce anche dagli
