@@ -60,7 +60,7 @@ import authRoutes from './auth/authRoutes.js';
 import logRoutes from './activityLogs/logRoutes.js';
 import { authenticate, authorize, requirePermission, requireAnyPermission } from './auth/authMiddleware.js';
 import { AuthService } from './auth/authService.js';
-import { RolePermissionService } from './auth/permissionService.js';
+import { RolePermissionService, isReportsAdmin } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
 import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles, sendToPlatformAdmins as pushSendToPlatformAdmins } from './services/pushService.js';
@@ -7967,7 +7967,17 @@ const OUTBOUND_MEDIA_TYPES = /^(image\/(jpeg|png|webp|gif)|video\/(mp4|3gpp)|aud
 // browser e mandava dieci prenotazioni grezze: dava consigli validi per
 // qualsiasi ristorante, cioe' per nessuno.
 
-app.post('/reports/ai-summary', authenticate, requirePermission('reports:view'), async (req, res) => {
+// Lancio ristretto della reportistica: la matrice del Frantoio è stata
+// ripulita da reports:* (migration reportistica-solo-allowlist) e gli account
+// in REPORTS_ADMIN_EMAILS passano comunque. Quando il titolare ridarà
+// reports:view ai ruoli dalla pagina Utenti, la via del permesso riprende a
+// funzionare da sola — questo middleware non va rimosso, diventa inerte.
+const requireReportsAccess = (req: any, res: any, next: any) => {
+    if (isReportsAdmin(req.user?.email)) return next();
+    return requirePermission('reports:view')(req, res, next);
+};
+
+app.post('/reports/ai-summary', authenticate, requireReportsAccess, async (req, res) => {
     try {
         if (!aiReport.isReportConfigured()) {
             return res.status(503).json({ error: 'not_configured', message: 'ANTHROPIC_API_KEY non configurata sul backend' });
@@ -29211,7 +29221,7 @@ const parseReportRange = (req: any, res: any): { from: string; to: string; prevF
 
 const ROME_DAY = (col: string) => `(${col} AT TIME ZONE 'Europe/Rome')::date`;
 
-app.get('/reports/reservations', authenticate, requirePermission('reports:view'), async (req, res) => {
+app.get('/reports/reservations', authenticate, requireReportsAccess, async (req, res) => {
     try {
         const range = parseReportRange(req, res);
         if (!range) return;
@@ -29288,7 +29298,7 @@ app.get('/reports/reservations', authenticate, requirePermission('reports:view')
     }
 });
 
-app.get('/reports/revenue', authenticate, requirePermission('reports:view'), async (req, res) => {
+app.get('/reports/revenue', authenticate, requireReportsAccess, async (req, res) => {
     try {
         const range = parseReportRange(req, res);
         if (!range) return;
@@ -29380,7 +29390,7 @@ app.get('/reports/revenue', authenticate, requirePermission('reports:view'), asy
     }
 });
 
-app.get('/reports/dishes', authenticate, requirePermission('reports:view'), async (req, res) => {
+app.get('/reports/dishes', authenticate, requireReportsAccess, async (req, res) => {
     try {
         const range = parseReportRange(req, res);
         if (!range) return;
@@ -29426,7 +29436,7 @@ app.get('/reports/dishes', authenticate, requirePermission('reports:view'), asyn
     }
 });
 
-app.get('/reports/communications', authenticate, requirePermission('reports:view'), async (req, res) => {
+app.get('/reports/communications', authenticate, requireReportsAccess, async (req, res) => {
     try {
         const range = parseReportRange(req, res);
         if (!range) return;

@@ -918,6 +918,10 @@ export interface User {
   updated_at?: string;
   last_login?: string;
   preferred_landing_view?: string | null;
+  // Account nell'allowlist REPORTS_ADMIN_EMAILS (env backend): vede la
+  // Reportistica anche senza reports:view in matrice. Serve al lancio
+  // ristretto — i permessi di ruolo restano la via ordinaria.
+  is_reports_admin?: boolean;
   // Ristorante di appartenenza (Fase B2). Opzionale: gli elenchi utenti
   // non lo caricano, login e /auth/me sì. `features` sono gli entitlements
   // commerciali (Fase C1): quali add-on il ristorante ha comprato. Il

@@ -211,7 +211,7 @@ Il colpo d'occhio del "adesso", sempre sulla giornata corrente.
 
 ## Reportistica
 
-L'analisi sul periodo, dove la Dashboard è il "adesso". Pagina riservata a direzione e manager (permesso dedicato), con periodo a scelta dal calendario e ogni numero confrontato col periodo precedente di pari durata.
+L'analisi sul periodo, dove la Dashboard è il "adesso". L'accesso si governa col permesso dedicato dalla matrice ruoli (pagina Utenti); al lancio è ristretta agli account del titolare, che decide a chi aprirla. Periodo a scelta dal calendario e ogni numero confrontato col periodo precedente di pari durata.
 
 - **Prenotazioni e canali**: coperti per giorno, per giorno della settimana e per ora di arrivo; tassi di no-show e cancellazione; da dove arrivano le prenotazioni (staff, WhatsApp, Sofia, pagina pubblica) e ripartizione per sala.
 - **Incassi e cassa**: incassato per giorno di servizio diviso pranzo/cena, mix dei metodi di pagamento dal libro cassa (omaggi e sospesi mostrati ma fuori dal totale), scontrino medio, coperto medio, mance e differenze dei cassetti con le note di chiusura.

@@ -124,6 +124,19 @@ describe('reportistica — endpoint aggregati', () => {
         }
     });
 
+    it('lancio ristretto: reports:* fuori dalla matrice, l\'owner passa dall\'allowlist', async () => {
+        // La migration reportistica-solo-allowlist spazza reports:* dal
+        // tenant 1: i 200 dell'owner in questo file provano quindi la via
+        // dell'allowlist (REPORTS_ADMIN_EMAILS, default = l'admin di test),
+        // non quella del permesso.
+        for (const role of ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER']) {
+            const res = await api().get(`/auth/permissions/roles/${role}`).set(bearer(owner));
+            expect(res.status).toBe(200);
+            expect(res.body.permissions, role).not.toContain('reports:view');
+            expect(res.body.permissions, role).not.toContain('reports:full');
+        }
+    });
+
     it('un cameriere non li vede (403)', async () => {
         for (const route of ROUTES) {
             const res = await api().get(route).set(bearer(waiterToken));

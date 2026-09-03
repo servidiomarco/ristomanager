@@ -4,7 +4,7 @@ import rateLimit from 'express-rate-limit';
 import { AuthService } from './authService.js';
 import { authenticate, authorize } from './authMiddleware.js';
 import { UserRole, ViewState } from '../types.js';
-import { RolePermissionService, ALL_PERMISSIONS, Permission } from './permissionService.js';
+import { RolePermissionService, ALL_PERMISSIONS, Permission, isReportsAdmin } from './permissionService.js';
 import { LogService, ActivityAction, ResourceType } from '../activityLogs/logService.js';
 import { getTenantFeatures } from '../services/entitlements.js';
 import { isSmtpConfigured, sendMail } from '../services/smtpService.js';
@@ -64,7 +64,9 @@ router.post('/login', (req: Request, res: Response) => runAsPlatform(async () =>
     );
 
     res.json({
-      user: { ...result.user, tenant: { ...result.user.tenant!, features } },
+      // is_reports_admin: il frontend non legge le env del backend, quindi
+      // l'allowlist della Reportistica viaggia col profilo.
+      user: { ...result.user, is_reports_admin: isReportsAdmin(result.user.email), tenant: { ...result.user.tenant!, features } },
       permissions,
       accessToken: result.tokens.accessToken,
       refreshToken: result.tokens.refreshToken
@@ -144,7 +146,7 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
     // Entitlements commerciali (C1) — stessa forma della risposta di login.
     const features = await getTenantFeatures(req.user.tenantId);
 
-    res.json({ ...user, tenant: user.tenant ? { ...user.tenant, features } : user.tenant, permissions });
+    res.json({ ...user, is_reports_admin: isReportsAdmin(user.email), tenant: user.tenant ? { ...user.tenant, features } : user.tenant, permissions });
   } catch (error) {
     console.error('Get current user error:', error);
     res.status(500).json({ error: 'Internal server error' });
