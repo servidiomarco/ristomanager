@@ -15,6 +15,7 @@ import { api, ownerToken, bearer } from './helpers';
 const FROM = '2026-03-10';
 const TO = '2026-03-11';
 const CASSA_EMAIL = 'cassa.fiscalita@example.com';
+const GM_EMAIL = 'gm.fiscalita@example.com';
 const PASSWORD = 'password-cassa-fiscalita';
 
 const receiptRequest = (items: { q: string; p: string; vat: string }[], discount = '0.00') => JSON.stringify({
@@ -156,7 +157,7 @@ describe('reportistica fiscale (vista Fiscalità)', () => {
             if (billIds.length) await db.query(`DELETE FROM table_bills WHERE id = ANY($1::int[])`, [billIds]);
             if (seedTableId) await db.query(`DELETE FROM tables WHERE id = $1`, [seedTableId]);
             if (seedRoomId) await db.query(`DELETE FROM rooms WHERE id = $1`, [seedRoomId]);
-            await db.query(`DELETE FROM users WHERE email = $1`, [CASSA_EMAIL]);
+            await db.query(`DELETE FROM users WHERE email = ANY($1::text[])`, [[CASSA_EMAIL, GM_EMAIL]]);
         } finally {
             await db.end();
         }
@@ -248,7 +249,7 @@ describe('reportistica fiscale (vista Fiscalità)', () => {
         expect(missing.status).toBe(404);
     });
 
-    it('reports:view, non payments:view: il cassiere resta fuori', async () => {
+    it('fiscal:view: il cassiere resta fuori (e di default anche i ruoli non-owner)', async () => {
         for (const path of [
             `/reports/fiscal-registry?from=${FROM}&to=${TO}`,
             `/reports/fiscal-vat-summary?from=${FROM}&to=${TO}`,
@@ -257,6 +258,17 @@ describe('reportistica fiscale (vista Fiscalità)', () => {
             const res = await api().get(path).set(bearer(cassaToken));
             expect(res.status, path).toBe(403);
         }
+
+        // La prova del "solo titolare": un GENERAL_MANAGER ha reports:view e
+        // reports:full, ma fiscal:view di default non ce l'ha — se questi
+        // endpoint tornassero su reports:view, questo test lo direbbe.
+        const created = await api().post('/auth/users').set(bearer(owner)).send({
+            email: GM_EMAIL, password: PASSWORD, full_name: 'Gm Fiscalità', role: 'GENERAL_MANAGER',
+        });
+        expect(created.status).toBe(201);
+        const login = await api().post('/auth/login').send({ email: GM_EMAIL, password: PASSWORD });
+        const gm = await api().get(`/reports/fiscal-registry?from=${FROM}&to=${TO}`).set(bearer(login.body.accessToken));
+        expect(gm.status).toBe(403);
     });
 
     it('periodi malformati o enormi vengono rifiutati', async () => {

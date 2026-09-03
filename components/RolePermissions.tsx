@@ -41,6 +41,7 @@ const PERMISSION_LABELS: Record<string, string> = {
   'users:full': 'Gestione completa',
   'reports:view': 'Visualizza',
   'reports:full': 'Modifica',
+  'fiscal:view': 'Registro e report fiscali',
   'orders:view': 'Visualizza comande',
   'orders:take': 'Prende e invia comande',
   'orders:kds': 'Monitor di partita',

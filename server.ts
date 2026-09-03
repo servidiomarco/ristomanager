@@ -5754,8 +5754,9 @@ app.get('/reports/cash-closure', authenticate, requirePermission('payments:view'
 // --- Reportistica fiscale (vista Fiscalità) ----------------------------------
 // Registro documenti per periodo + corrispettivi per aliquota, per le
 // interrogazioni del ristoratore e gli export al commercialista. Permesso
-// reports:view, NON payments:view: il cassiere vede la cassa del giorno, i
-// report fiscali sono un'altra cosa (la matrice ruoli li separa già).
+// dedicato fiscal:view: di default ce l'ha il solo titolare, che lo concede
+// per ruolo dalla matrice permessi (Utenti) — né payments:view (cassa del
+// giorno) né reports:view (report operativi).
 //
 // Periodo su created_at: è l'unico timestamp indicizzato ((tenant_id,
 // created_at)), fiscalmente il documento nasce contestualmente all'emissione,
@@ -5794,7 +5795,7 @@ const FISCAL_TYPE_LABEL: Record<string, string> = {
     RECEIPT: 'scontrino', INVOICE: 'fattura', CREDIT_NOTE: 'nota di credito', PROFORMA: 'proforma',
 };
 
-app.get('/reports/fiscal-registry', authenticate, requirePermission('reports:view'), async (req, res) => {
+app.get('/reports/fiscal-registry', authenticate, requirePermission('fiscal:view'), async (req, res) => {
     try {
         const period = parseFiscalPeriod(req);
         if (!period) return res.status(400).json({ error: 'invalid_period', message: 'Servono from e to (YYYY-MM-DD), massimo 400 giorni' });
@@ -5909,7 +5910,7 @@ app.get('/reports/fiscal-registry', authenticate, requirePermission('reports:vie
 // scontrini CONFIRMED: gli annullati escono, fatture e NC non sono
 // corrispettivi. Aggregazione in SQL (jsonb_array_elements): per giorno ×
 // aliquota viaggiano decine di righe, non i payload interi.
-app.get('/reports/fiscal-vat-summary', authenticate, requirePermission('reports:view'), async (req, res) => {
+app.get('/reports/fiscal-vat-summary', authenticate, requirePermission('fiscal:view'), async (req, res) => {
     try {
         const period = parseFiscalPeriod(req);
         if (!period) return res.status(400).json({ error: 'invalid_period', message: 'Servono from e to (YYYY-MM-DD), massimo 400 giorni' });
@@ -5989,7 +5990,7 @@ app.get('/reports/fiscal-vat-summary', authenticate, requirePermission('reports:
 // Drill-down di un documento del registro: la riga completa più le righe
 // articolo parsate dal payload trasmesso (stessa conversione euro→cents
 // della pagina pubblica /scontrino/:token) e il documento correlato.
-app.get('/reports/fiscal-documents/:id', authenticate, requirePermission('reports:view'), async (req, res) => {
+app.get('/reports/fiscal-documents/:id', authenticate, requirePermission('fiscal:view'), async (req, res) => {
     try {
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
