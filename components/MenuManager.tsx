@@ -651,8 +651,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   });
   // Gruppi varianti spuntati nel form e ingredienti del composto: viaggiano
   // nel salvataggio del piatto (semantica menu_ids), non con chiamate a parte.
+  // Lo sconto resta stringa mentre si scrive (un campo controllato che
+  // riformatta a ogni tasto rende impossibile battere «2,50») e diventa
+  // centesimi solo al salvataggio.
   const [dishGroupIds, setDishGroupIds] = useState<number[]>([]);
-  const [dishComponents, setDishComponents] = useState<{ id?: number; name: string; removal_delta_cents: number }[]>([]);
+  const [dishComponents, setDishComponents] = useState<{ id?: number; name: string; sconto: string }[]>([]);
 
   // New Banquet Menu State
   const [newBanquet, setNewBanquet] = useState<Partial<BanquetMenu>>({
@@ -765,7 +768,16 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         // Gli ingredienti si mandano solo per i composti: su un piatto
         // tornato Semplice restano com'erano, ignorati (non cancellati).
         ...(dishType === 'COMPOSED'
-          ? { components: dishComponents.filter(c => c.name.trim()).map(c => ({ ...c, name: c.name.trim() })) }
+          ? {
+              components: dishComponents.filter(c => c.name.trim()).map(c => {
+                const n = Number(c.sconto.trim().replace(',', '.'));
+                return {
+                  ...(c.id != null ? { id: c.id } : {}),
+                  name: c.name.trim(),
+                  removal_delta_cents: Number.isFinite(n) && n > 0 ? -Math.round(n * 100) : 0,
+                };
+              }),
+            }
           : {}),
       };
       if (isEditingDish && editingDishId !== null) {
@@ -831,7 +843,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     setDishComponents([]);
     if (dish.dish_type === 'COMPOSED') {
       getDishComponents(dish.id)
-        .then(list => setDishComponents(list.map(c => ({ id: c.id, name: c.name, removal_delta_cents: c.removal_delta_cents }))))
+        .then(list => setDishComponents(list.map(c => ({
+          id: c.id,
+          name: c.name,
+          sconto: c.removal_delta_cents === 0 ? '' : (Math.abs(c.removal_delta_cents) / 100).toFixed(2),
+        }))))
         .catch(() => {});
     }
     setEditingDishId(dish.id);
@@ -2578,26 +2594,29 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   <div className="space-y-2">
                     {dishComponents.map((c, i) => (
                       <div key={c.id ?? `new-${i}`} className="flex items-center gap-2">
-                        <input
-                          className={`${dsInput} min-w-0 flex-1`}
-                          maxLength={100}
-                          placeholder="Ingrediente…"
-                          value={c.name}
-                          onChange={e => setDishComponents(prev => prev.map((x, j) => j === i ? { ...x, name: e.target.value } : x))}
-                        />
-                        <input
-                          className={`${dsInput} w-24 text-right tabular-nums`}
-                          inputMode="decimal"
-                          placeholder="sconto €"
-                          title="Sconto se tolto (vuoto = togliere è gratis)"
-                          value={c.removal_delta_cents === 0 ? '' : (Math.abs(c.removal_delta_cents) / 100).toFixed(2)}
-                          onChange={e => {
-                            const n = Number(e.target.value.replace(',', '.'));
-                            setDishComponents(prev => prev.map((x, j) => j === i
-                              ? { ...x, removal_delta_cents: Number.isFinite(n) && n > 0 ? -Math.round(n * 100) : 0 }
-                              : x));
-                          }}
-                        />
+                        {/* dsInput porta w-full: i due campi vanno dimensionati
+                            dal contenitore, non con classi di larghezza sul
+                            campo — la cascata le farebbe perdere e lo sconto
+                            si mangerebbe la riga schiacciando il nome. */}
+                        <div className="min-w-0 flex-1">
+                          <input
+                            className={dsInput}
+                            maxLength={100}
+                            placeholder="Ingrediente…"
+                            value={c.name}
+                            onChange={e => setDishComponents(prev => prev.map((x, j) => j === i ? { ...x, name: e.target.value } : x))}
+                          />
+                        </div>
+                        <div className="w-28 flex-none">
+                          <input
+                            className={`${dsInput} text-right tabular-nums`}
+                            inputMode="decimal"
+                            placeholder="sconto €"
+                            title="Sconto se tolto (vuoto = togliere è gratis)"
+                            value={c.sconto}
+                            onChange={e => setDishComponents(prev => prev.map((x, j) => j === i ? { ...x, sconto: e.target.value } : x))}
+                          />
+                        </div>
                         <button
                           type="button"
                           onClick={() => setDishComponents(prev => prev.filter((_, j) => j !== i))}
@@ -2610,7 +2629,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     ))}
                     <button
                       type="button"
-                      onClick={() => setDishComponents(prev => [...prev, { name: '', removal_delta_cents: 0 }])}
+                      onClick={() => setDishComponents(prev => [...prev, { name: '', sconto: '' }])}
                       className={`${dsButton.quiet} h-9 px-4 text-[13px]`}
                     >
                       <Plus className="h-3.5 w-3.5" /> Ingrediente
