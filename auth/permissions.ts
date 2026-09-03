@@ -295,6 +295,9 @@ const VIEW_PERMISSIONS: Record<ViewState, Permission[]> = {
   [ViewState.USERS]: ['users:view'],
   [ViewState.SETTINGS]: ['settings:view'],
   [ViewState.PAGAMENTI]: ['payments:view'],
+  // Reportistica fiscale: reports:view, NON payments:view — il cassiere vede
+  // la cassa del giorno, il registro documenti è dei ruoli direttivi.
+  [ViewState.FISCALITA]: ['reports:view'],
   // Email inbox reuses the same permission as the SMS/WhatsApp inbox — anyone
   // who can read reservations can read the email thread with those customers.
   [ViewState.EMAIL]: ['reservations:view'],

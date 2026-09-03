@@ -385,3 +385,126 @@ export const printBill = async (
     headers: getHeaders(),
     body: JSON.stringify({ bill_id: billId, origin: window.location.origin, kind }),
   });
+
+// --- Reportistica fiscale (vista Fiscalità) ---------------------------------
+
+export type FiscalRegistryDocType = 'RECEIPT' | 'INVOICE' | 'CREDIT_NOTE' | 'PROFORMA';
+export type FiscalRegistryStatus = 'PENDING' | 'CONFIRMED' | 'FAILED' | 'VOIDED';
+
+export interface FiscalRegistryRow {
+  id: number;
+  doc_type: FiscalRegistryDocType;
+  provider: string;
+  status: FiscalRegistryStatus;
+  doc_number: string | null;
+  provider_ref: string | null;
+  total_cents: number;
+  created_at: string;
+  confirmed_at: string | null;
+  voided_at: string | null;
+  public_token: string | null;
+  related_doc_id: number | null;
+  table_bill_id: number | null;
+  day: string;
+  table_name: string | null;
+  customer_name: string | null;
+  /** Fattura stornata: numero della nota di credito che la punta. */
+  credit_note_number: string | null;
+}
+
+export interface FiscalRegistryTotals {
+  documented_total_cents: number;
+  receipts: { count: number; total_cents: number };
+  invoices: { count: number; total_cents: number };
+  credit_notes: { count: number; total_cents: number };
+  proforma: { count: number; total_cents: number };
+  voided_count: number;
+  failed_count: number;
+  pending_count: number;
+}
+
+export interface FiscalRegistryResponse {
+  from: string;
+  to: string;
+  totals: FiscalRegistryTotals;
+  counts: { all: number; receipt: number; invoice: number; credit_note: number; proforma: number; voided: number; failed: number };
+  documents: FiscalRegistryRow[];
+  total_count: number;
+}
+
+export interface FiscalVatSummaryRow {
+  day: string;
+  vat_rate_code: string;
+  is_nature: boolean;
+  gross_cents: number;
+  net_cents: number;
+  tax_cents: number;
+  docs: number;
+}
+
+export interface FiscalVatSummaryResponse {
+  from: string;
+  to: string;
+  rows: FiscalVatSummaryRow[];
+  discounts: { day: string; discount_cents: number }[];
+  excluded: { passepartout_docs: number; passepartout_total_cents: number };
+}
+
+export interface FiscalDocumentDetail {
+  document: {
+    id: number; doc_type: FiscalRegistryDocType; provider: string; status: FiscalRegistryStatus;
+    doc_number: string | null; provider_ref: string | null; total_cents: number;
+    fiscal_id: string | null; error: string | null;
+    created_at: string; confirmed_at: string | null; voided_at: string | null;
+    public_token: string | null; table_bill_id: number | null;
+    table_name: string | null; customer_name: string | null; bill_closed_at: string | null;
+    related: { id: number; doc_type: FiscalRegistryDocType; doc_number: string | null } | null;
+    credit_note_number: string | null;
+  };
+  items: { description: string; quantity: number; unit_price_cents: number; vat_rate_code: string }[];
+  payments: { cash_cents: number; electronic_cents: number; ticket_cents: number; uncollected_cents: number; discount_cents: number };
+}
+
+export interface FiscalRegistryQuery {
+  from: string;
+  to: string;
+  doc_type?: FiscalRegistryDocType;
+  status?: FiscalRegistryStatus;
+  limit?: number;
+  offset?: number;
+}
+
+const fiscalRegistryQs = (q: FiscalRegistryQuery): string => {
+  const qs = new URLSearchParams({ from: q.from, to: q.to });
+  if (q.doc_type) qs.set('doc_type', q.doc_type);
+  if (q.status) qs.set('status', q.status);
+  if (q.limit != null) qs.set('limit', String(q.limit));
+  if (q.offset != null) qs.set('offset', String(q.offset));
+  return qs.toString();
+};
+
+export const getFiscalRegistry = async (q: FiscalRegistryQuery): Promise<FiscalRegistryResponse> =>
+  apiRequest(`${API_URL}/reports/fiscal-registry?${fiscalRegistryQs(q)}`, { headers: getHeaders() });
+
+export const getFiscalVatSummary = async (from: string, to: string): Promise<FiscalVatSummaryResponse> =>
+  apiRequest(`${API_URL}/reports/fiscal-vat-summary?from=${from}&to=${to}`, { headers: getHeaders() });
+
+export const getFiscalDocumentDetail = async (id: number): Promise<FiscalDocumentDetail> =>
+  apiRequest(`${API_URL}/reports/fiscal-documents/${id}`, { headers: getHeaders() });
+
+/** Scarica un CSV di report autenticato. Il JWT vive in localStorage, non in
+ *  cookie: un <a href> nudo prenderebbe 401 — serve il fetch con header e il
+ *  click su un object URL (stesso pattern dell'export marketing). */
+export const downloadReportCsv = async (path: string, filename: string): Promise<void> => {
+  const res = await fetch(`${API_URL}${path}`, { headers: getHeaders() });
+  if (!res.ok) throw buildApiError(res.status, await res.json().catch(() => null));
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+};

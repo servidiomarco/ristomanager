@@ -31,6 +31,7 @@ import { NotificationsPanel } from './components/NotificationsPanel';
 import EmailPage from './components/EmailPage';
 import NotifichePage from './components/NotifichePage';
 import PagamentiPage from './components/PagamentiPage';
+import FiscalitaPage from './components/fiscalita/FiscalitaPage';
 import { DevelopmentPage } from './components/DevelopmentPage';
 import { RoadmapPage } from './components/RoadmapPage';
 import { MonitoringPage } from './components/MonitoringPage';
@@ -173,6 +174,7 @@ const NAV_ITEMS: NavItem[] = [
   { kind: 'link', label: 'Lista della Spesa', Icon: ShoppingCart, group: 'operazioni', isTab: false, view: ViewState.LISTA_DELLA_SPESA, sidebarCollapse: false },
   { kind: 'link', label: 'HACCP', Icon: ShieldCheck, group: 'operazioni', isTab: false, view: ViewState.HACCP, sidebarCollapse: false },
   { kind: 'link', label: 'Pagamenti', Icon: CreditCard, group: 'operazioni', isTab: false, view: ViewState.PAGAMENTI, sidebarCollapse: false },
+  { kind: 'link', label: 'Fiscalità', Icon: Landmark, group: 'gestione', isTab: false, view: ViewState.FISCALITA, sidebarCollapse: false },
 
   // Gestione
   { kind: 'link', label: 'Clienti', Icon: BookUser, group: 'gestione', isTab: false, view: ViewState.CLIENTI, sidebarCollapse: false },
@@ -2932,6 +2934,12 @@ const App: React.FC = () => {
           <PagamentiPage globalDate={globalDate} globalShiftFilter={globalShiftFilter} onOpenCassa={canAccessView(ViewState.CASSA) ? () => setView(ViewState.CASSA) : undefined} />
         )}
 
+        {view === ViewState.FISCALITA && (
+          <CardErrorBoundary label="Fiscalità">
+            <FiscalitaPage />
+          </CardErrorBoundary>
+        )}
+
         {view === ViewState.DEVELOPMENT && (
           <DevelopmentPage />
         )}
@@ -3048,6 +3056,7 @@ const App: React.FC = () => {
                       [ViewState.EMAIL]: 'Email',
                       [ViewState.NOTIFICHE]: 'Notifiche',
                       [ViewState.PAGAMENTI]: 'Pagamenti',
+                      [ViewState.FISCALITA]: 'Fiscalità',
                       [ViewState.ATTIVITA]: 'Attività',
                       [ViewState.USERS]: 'Utenti',
                       [ViewState.SETTINGS]: 'Impostazioni',
