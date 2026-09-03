@@ -560,6 +560,20 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           pagina — non una barra a filo con una linea sotto. */}
       <div className="flex-shrink-0 px-4 pb-3 pt-4">
         <div className="flex items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 pl-4 shadow-[var(--ds-shadow-card)]">
+          {/* Data e orologio vivi: in Cucina la testata globale non c'è (lo
+              spazio è delle comande), quindi il servizio si àncora qui. Solo
+              l'orario col punto pulsante — la parola «Live» non diceva niente
+              che il punto non dica già. */}
+          <div className="flex flex-shrink-0 items-center gap-2.5">
+            <span className="text-[14px] font-medium text-[var(--ds-text-muted)]">
+              {new Date(now).toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' })
+                .split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-2.5 py-1 text-[14px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+              <span aria-hidden className="h-2 w-2 animate-pulse rounded-full bg-[var(--ds-seated-solid)]" />
+              {new Date(now).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          </div>
           {/* Il nome della partita in tondo, non in maiuscolo: a un metro di
               distanza conta il corpo, e le maiuscole cancellano la forma della
               parola invece di renderla più leggibile (§5.2). */}
