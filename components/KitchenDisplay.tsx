@@ -681,27 +681,11 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
         </div>
       )}
 
-      {/* Niente più barra fissa del riepilogo: se il servizio ha note
-          strutturate (piatti prenotati, allergie) compare una pill
-          galleggiante in alto a destra — il tocco apre il dettaglio.
-          A zero note, zero pixel: lo spazio è delle comande. */}
-      {summary && (summary.dietary.length > 0 || summary.dietary_lines.length > 0) && (
-        <div className="relative z-20 h-0 flex-shrink-0">
-          <button
-            type="button"
-            onClick={() => setSummaryOpen(true)}
-            className="absolute right-6 top-1 inline-flex h-11 items-center gap-2 rounded-full bg-[var(--ds-surface)] pl-4 pr-1.5 text-[15px] font-semibold text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-            style={{ animation: 'tileIn 220ms ease-out both' }}
-          >
-            Note del servizio
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--ds-pending-solid)] text-[14px] font-semibold tabular-nums text-[var(--ds-pending-fg)]">
-              {summary.dietary.length + summary.dietary_lines.length}
-            </span>
-          </button>
-        </div>
-      )}
-
-      {allDay.length > 0 && (
+      {/* La barra dei piatti raggruppati porta anche le note del servizio:
+          una pill a destra, staccata dai conteggi da un bordo leggero — il
+          tocco apre il dettaglio. La barra esiste se ha almeno una delle due
+          cose da dire; a zero note e coda vuota, zero pixel. */}
+      {(allDay.length > 0 || (summary && (summary.dietary.length > 0 || summary.dietary_lines.length > 0))) && (
         <div className="flex-shrink-0 px-4 pb-3">
           <div className="flex items-center gap-2 overflow-x-auto rounded-[20px] bg-[var(--ds-surface)] px-3 py-2 shadow-[var(--ds-shadow-card)]">
             {allDay.map(([name, qty]) => (
@@ -713,6 +697,20 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                 <span>{name}</span>
               </span>
             ))}
+            {summary && (summary.dietary.length > 0 || summary.dietary_lines.length > 0) && (
+              <span className="ml-auto flex flex-shrink-0 items-center border-l border-[var(--ds-border)] pl-2.5">
+                <button
+                  type="button"
+                  onClick={() => setSummaryOpen(true)}
+                  className="inline-flex h-9 items-center gap-2 rounded-full pl-2.5 pr-1 text-[14px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                >
+                  Note del servizio
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-[var(--ds-pending-solid)] text-[13px] font-semibold tabular-nums text-[var(--ds-pending-fg)]">
+                    {summary.dietary.length + summary.dietary_lines.length}
+                  </span>
+                </button>
+              </span>
+            )}
           </div>
         </div>
       )}
