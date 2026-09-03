@@ -34,6 +34,7 @@ const VIEW_PERMISSIONS: Record<ViewState, string> = {
   [ViewState.SETTINGS]: 'settings:view',
   [ViewState.PAGAMENTI]: 'payments:view',
   [ViewState.REPORTISTICA]: 'reports:view',
+  [ViewState.FISCALITA]: 'fiscal:view',
   [ViewState.EMAIL]: 'reservations:view',
   [ViewState.NOTIFICHE]: 'dashboard:view',
   [ViewState.MONITORING]: '', // gated by account email, not by permission — see canAccessView

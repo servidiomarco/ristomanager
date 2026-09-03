@@ -5751,6 +5751,302 @@ app.get('/reports/cash-closure', authenticate, requirePermission('payments:view'
     }
 });
 
+// --- Reportistica fiscale (vista Fiscalità) ----------------------------------
+// Registro documenti per periodo + corrispettivi per aliquota, per le
+// interrogazioni del ristoratore e gli export al commercialista. Permesso
+// dedicato fiscal:view: di default ce l'ha il solo titolare, che lo concede
+// per ruolo dalla matrice permessi (Utenti) — né payments:view (cassa del
+// giorno) né reports:view (report operativi).
+//
+// Periodo su created_at: è l'unico timestamp indicizzato ((tenant_id,
+// created_at)), fiscalmente il documento nasce contestualmente all'emissione,
+// e FAILED/PENDING (confirmed_at NULL) devono comunque comparire nel
+// registro. Bound sargabili — la forma "(x AT TIME ZONE ...)::date = $2" di
+// cash-closure va bene su UN giorno ma butta l'indice su un trimestre.
+
+const parseFiscalPeriod = (req: any): { from: string; to: string } | null => {
+    const from = typeof req.query.from === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.from) ? req.query.from : null;
+    const to = typeof req.query.to === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.query.to) ? req.query.to : null;
+    if (!from || !to || from > to) return null;
+    // Cap difensivo: ~400 giorni coprono l'anno fiscale con margine; oltre,
+    // l'aggregato jsonb del vat-summary diventa un lavoro da batch.
+    const days = (Date.parse(to) - Date.parse(from)) / 86_400_000;
+    if (days > 400) return null;
+    return { from, to };
+};
+
+// WHERE di periodo (parametri $2=from, $3=to sul tenant $1). date::timestamp
+// AT TIME ZONE 'Europe/Rome' = l'istante UTC della mezzanotte di Roma.
+const FISCAL_PERIOD_WHERE = `fd.tenant_id = $1
+    AND fd.created_at >= ($2::date::timestamp AT TIME ZONE 'Europe/Rome')
+    AND fd.created_at < (($3::date + 1)::timestamp AT TIME ZONE 'Europe/Rome')`;
+
+const csvCell = (v: unknown): string => `"${String(v ?? '').replace(/"/g, '""')}"`;
+const sendCsv = (res: any, filename: string, rows: unknown[][]) => {
+    const csv = rows.map(r => r.map(csvCell).join(',')).join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    // BOM: senza, Excel legge gli accenti come mojibake (stesso pattern
+    // dell'export marketing client-side).
+    res.send('\uFEFF' + csv);
+};
+
+const FISCAL_TYPE_LABEL: Record<string, string> = {
+    RECEIPT: 'scontrino', INVOICE: 'fattura', CREDIT_NOTE: 'nota di credito', PROFORMA: 'proforma',
+};
+
+app.get('/reports/fiscal-registry', authenticate, requirePermission('fiscal:view'), async (req, res) => {
+    try {
+        const period = parseFiscalPeriod(req);
+        if (!period) return res.status(400).json({ error: 'invalid_period', message: 'Servono from e to (YYYY-MM-DD), massimo 400 giorni' });
+        const docType = typeof req.query.doc_type === 'string' && ['RECEIPT', 'INVOICE', 'CREDIT_NOTE', 'PROFORMA'].includes(req.query.doc_type) ? req.query.doc_type : null;
+        const status = typeof req.query.status === 'string' && ['PENDING', 'CONFIRMED', 'FAILED', 'VOIDED'].includes(req.query.status) ? req.query.status : null;
+        const wantCsv = req.query.format === 'csv';
+        const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit ?? '200'), 10) || 200));
+        const offset = Math.max(0, parseInt(String(req.query.offset ?? '0'), 10) || 0);
+
+        const params: any[] = [req.tenantId!, period.from, period.to];
+        let filters = '';
+        if (docType) { params.push(docType); filters += ` AND fd.doc_type = $${params.length}`; }
+        if (status) { params.push(status); filters += ` AND fd.status = $${params.length}`; }
+
+        // Totali e conteggi sull'INTERO periodo (i KPI e i chip non devono
+        // cambiare quando la lista pagina). Semantica — la parte delicata:
+        //  - documentato = scontrini CONFIRMED + fatture CONFIRMED − note di
+        //    credito CONFIRMED; la proforma (provider 'crm') NON è un
+        //    documento fiscale e resta fuori, mostrata a parte;
+        //  - VOIDED e FAILED fuori dai totali;
+        //  - la fattura VOIDED per storno si riconosce dalla NC che la punta
+        //    (related_doc_id), distinta dallo scontrino VOIDED (annullo al
+        //    provider, ha voided_at).
+        const totalsRs = await queryWithRetry(
+            `SELECT fd.doc_type, fd.status, COUNT(*)::int AS count, COALESCE(SUM(fd.total_cents), 0)::bigint AS total_cents
+             FROM fiscal_documents fd
+             WHERE ${FISCAL_PERIOD_WHERE}
+             GROUP BY fd.doc_type, fd.status`,
+            [req.tenantId!, period.from, period.to]
+        );
+        const bucket = (type: string, st: string) => {
+            const r = totalsRs.rows.find((x: any) => x.doc_type === type && x.status === st);
+            return { count: r?.count ?? 0, total_cents: Number(r?.total_cents ?? 0) };
+        };
+        const receipts = bucket('RECEIPT', 'CONFIRMED');
+        const invoices = bucket('INVOICE', 'CONFIRMED');
+        const creditNotes = bucket('CREDIT_NOTE', 'CONFIRMED');
+        const sumBy = (pred: (r: any) => boolean, field: 'count' | 'total_cents') =>
+            totalsRs.rows.filter(pred).reduce((n: number, r: any) => n + Number(r[field]), 0);
+        const totals = {
+            documented_total_cents: receipts.total_cents + invoices.total_cents - creditNotes.total_cents,
+            receipts, invoices, credit_notes: creditNotes,
+            proforma: { count: sumBy(r => r.doc_type === 'PROFORMA', 'count'), total_cents: sumBy(r => r.doc_type === 'PROFORMA', 'total_cents') },
+            voided_count: sumBy(r => r.status === 'VOIDED', 'count'),
+            failed_count: sumBy(r => r.status === 'FAILED', 'count'),
+            pending_count: sumBy(r => r.status === 'PENDING', 'count'),
+        };
+        const counts = {
+            all: sumBy(() => true, 'count'),
+            receipt: sumBy(r => r.doc_type === 'RECEIPT', 'count'),
+            invoice: sumBy(r => r.doc_type === 'INVOICE', 'count'),
+            credit_note: sumBy(r => r.doc_type === 'CREDIT_NOTE', 'count'),
+            proforma: sumBy(r => r.doc_type === 'PROFORMA', 'count'),
+            voided: sumBy(r => r.status === 'VOIDED', 'count'),
+            failed: sumBy(r => r.status === 'FAILED', 'count'),
+        };
+
+        const rowsSql = `
+            SELECT fd.id, fd.doc_type, fd.provider, fd.status, fd.doc_number, fd.provider_ref,
+                   fd.total_cents, fd.created_at, fd.confirmed_at, fd.voided_at, fd.public_token,
+                   fd.related_doc_id, fd.table_bill_id,
+                   (fd.created_at AT TIME ZONE 'Europe/Rome')::date AS day,
+                   t.name AS table_name, r.customer_name,
+                   nc.doc_number AS credit_note_number
+            FROM fiscal_documents fd
+            LEFT JOIN table_bills b ON b.id = fd.table_bill_id AND b.tenant_id = fd.tenant_id
+            LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
+            LEFT JOIN reservations r ON r.id = b.reservation_id AND r.tenant_id = b.tenant_id
+            LEFT JOIN fiscal_documents nc ON nc.related_doc_id = fd.id AND nc.doc_type = 'CREDIT_NOTE'
+                 AND nc.status = 'CONFIRMED' AND nc.tenant_id = fd.tenant_id
+            WHERE ${FISCAL_PERIOD_WHERE}${filters}
+            ORDER BY fd.created_at DESC`;
+
+        if (wantCsv) {
+            // Il CSV va al commercialista: COMPLETO, la paginazione della
+            // vista non lo riguarda. Qualche migliaio di righe sta in
+            // memoria; se un giorno servirà il multi-anno, cursor.
+            const all = await queryWithRetry(rowsSql, params);
+            const statusLabel = (row: any) =>
+                row.status === 'CONFIRMED' ? 'emesso'
+                : row.status === 'VOIDED' ? (row.credit_note_number ? `stornata da NC ${row.credit_note_number}` : 'annullato')
+                : row.status === 'FAILED' ? 'errore'
+                : 'in corso';
+            sendCsv(res, `registro-documenti-${period.from}_${period.to}.csv`, [
+                ['data', 'ora', 'tipo', 'numero', 'stato', 'totale', 'provider', 'riferimento provider', 'tavolo', 'cliente', 'conto'],
+                ...all.rows.map((row: any) => [
+                    getRomeDatePart(row.created_at), getRomeTimePart(row.created_at),
+                    FISCAL_TYPE_LABEL[row.doc_type] ?? row.doc_type,
+                    row.doc_number ?? '', statusLabel(row),
+                    (row.total_cents / 100).toFixed(2).replace('.', ','),
+                    row.provider, row.provider_ref ?? '',
+                    row.table_name ?? '', row.customer_name ?? '', row.table_bill_id ?? '',
+                ]),
+            ]);
+            return;
+        }
+
+        const pageParams = [...params, limit, offset];
+        const page = await queryWithRetry(`${rowsSql} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`, pageParams);
+        const countRs = await queryWithRetry(
+            `SELECT COUNT(*)::int AS n FROM fiscal_documents fd WHERE ${FISCAL_PERIOD_WHERE}${filters}`, params
+        );
+        res.json({ from: period.from, to: period.to, totals, counts, documents: page.rows, total_count: countRs.rows[0].n });
+    } catch (err: any) {
+        console.error('GET /reports/fiscal-registry error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Corrispettivi per aliquota: il dato per la liquidazione IVA, ricavato dai
+// payload TRASMESSI (request.items) — la stessa verità che ha l'AdE. Solo
+// scontrini CONFIRMED: gli annullati escono, fatture e NC non sono
+// corrispettivi. Aggregazione in SQL (jsonb_array_elements): per giorno ×
+// aliquota viaggiano decine di righe, non i payload interi.
+app.get('/reports/fiscal-vat-summary', authenticate, requirePermission('fiscal:view'), async (req, res) => {
+    try {
+        const period = parseFiscalPeriod(req);
+        if (!period) return res.status(400).json({ error: 'invalid_period', message: 'Servono from e to (YYYY-MM-DD), massimo 400 giorni' });
+        const params = [req.tenantId!, period.from, period.to];
+
+        const rowsRs = await queryWithRetry(
+            `SELECT (fd.created_at AT TIME ZONE 'Europe/Rome')::date AS day,
+                    i->>'vat_rate_code' AS vat_rate_code,
+                    SUM(ROUND((i->>'unit_price')::numeric * (i->>'quantity')::numeric * 100))::bigint AS gross_cents,
+                    COUNT(DISTINCT fd.id)::int AS docs
+             FROM fiscal_documents fd
+             CROSS JOIN LATERAL jsonb_array_elements(fd.request->'items') AS i
+             WHERE ${FISCAL_PERIOD_WHERE}
+               AND fd.doc_type = 'RECEIPT' AND fd.status = 'CONFIRMED'
+               AND fd.request IS NOT NULL AND jsonb_typeof(fd.request->'items') = 'array'
+             GROUP BY 1, 2 ORDER BY 1, 2`,
+            params
+        );
+        // Sconto globale (sconti comanda + omaggi): riduce il documentato ma
+        // non è attribuibile per aliquota — colonna a parte, per giorno.
+        const discountRs = await queryWithRetry(
+            `SELECT (fd.created_at AT TIME ZONE 'Europe/Rome')::date AS day,
+                    SUM(ROUND(COALESCE((fd.request->>'discount')::numeric, 0) * 100))::bigint AS discount_cents
+             FROM fiscal_documents fd
+             WHERE ${FISCAL_PERIOD_WHERE}
+               AND fd.doc_type = 'RECEIPT' AND fd.status = 'CONFIRMED' AND fd.request IS NOT NULL
+             GROUP BY 1 HAVING SUM(ROUND(COALESCE((fd.request->>'discount')::numeric, 0) * 100)) > 0`,
+            params
+        );
+        // Scontrini emessi dall'RT di cassa (Passepartout): request NULL, i
+        // loro corrispettivi vivono nel registratore — esclusi con conteggio,
+        // mai sommati in silenzio.
+        const excludedRs = await queryWithRetry(
+            `SELECT COUNT(*)::int AS docs, COALESCE(SUM(fd.total_cents), 0)::bigint AS total_cents
+             FROM fiscal_documents fd
+             WHERE ${FISCAL_PERIOD_WHERE}
+               AND fd.doc_type = 'RECEIPT' AND fd.status = 'CONFIRMED' AND fd.provider = 'passepartout'`,
+            params
+        );
+
+        // Scorporo in Node: codice numerico → imponibile = lordo/(1+aliquota);
+        // natura (N2, N2.2, ...) → imposta zero, chiave separata così N2 e
+        // N2.2 non si mischiano mai.
+        const rows = rowsRs.rows.map((row: any) => {
+            const gross = Number(row.gross_cents);
+            const numeric = /^\d/.test(String(row.vat_rate_code));
+            const rate = numeric ? parseFloat(row.vat_rate_code) : null;
+            const net = rate != null ? Math.round(gross / (1 + rate / 100)) : gross;
+            return {
+                day: row.day, vat_rate_code: row.vat_rate_code, is_nature: !numeric,
+                gross_cents: gross, net_cents: net, tax_cents: rate != null ? gross - net : 0, docs: row.docs,
+            };
+        });
+        const excluded = { passepartout_docs: excludedRs.rows[0].docs, passepartout_total_cents: Number(excludedRs.rows[0].total_cents) };
+        const discounts = discountRs.rows.map((row: any) => ({ day: row.day, discount_cents: Number(row.discount_cents) }));
+
+        if (req.query.format === 'csv') {
+            const vatLabel = (code: string, nature: boolean) => nature ? `natura ${code}` : `iva ${code.replace('.', ',')}%`;
+            const eur = (c: number) => (c / 100).toFixed(2).replace('.', ',');
+            sendCsv(res, `corrispettivi-iva-${period.from}_${period.to}.csv`, [
+                ['giorno', 'aliquota/natura', 'imponibile', 'imposta', 'lordo', 'documenti'],
+                ...rows.map(row => [row.day, vatLabel(row.vat_rate_code, row.is_nature), eur(row.net_cents), eur(row.tax_cents), eur(row.gross_cents), row.docs]),
+                ...discounts.map(d => [d.day, 'sconti e omaggi (fuori riparto)', '', '', '-' + eur(d.discount_cents), '']),
+                ...(excluded.passepartout_docs > 0
+                    ? [['', `scontrini dall'RT di cassa esclusi: ${excluded.passepartout_docs}`, '', '', eur(excluded.passepartout_total_cents), '']]
+                    : []),
+            ]);
+            return;
+        }
+        res.json({ from: period.from, to: period.to, rows, discounts, excluded });
+    } catch (err: any) {
+        console.error('GET /reports/fiscal-vat-summary error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Drill-down di un documento del registro: la riga completa più le righe
+// articolo parsate dal payload trasmesso (stessa conversione euro→cents
+// della pagina pubblica /scontrino/:token) e il documento correlato.
+app.get('/reports/fiscal-documents/:id', authenticate, requirePermission('fiscal:view'), async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+        const rs = await queryWithRetry(
+            `SELECT fd.id, fd.doc_type, fd.provider, fd.status, fd.doc_number, fd.provider_ref,
+                    fd.total_cents, fd.fiscal_id_snapshot, fd.request, fd.response, fd.error,
+                    fd.created_at, fd.confirmed_at, fd.voided_at, fd.public_token,
+                    fd.related_doc_id, fd.table_bill_id, fd.table_bill_split_id,
+                    t.name AS table_name, r.customer_name, b.closed_at AS bill_closed_at,
+                    rel.doc_type AS related_doc_type, rel.doc_number AS related_doc_number,
+                    nc.doc_number AS credit_note_number
+             FROM fiscal_documents fd
+             LEFT JOIN table_bills b ON b.id = fd.table_bill_id AND b.tenant_id = fd.tenant_id
+             LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
+             LEFT JOIN reservations r ON r.id = b.reservation_id AND r.tenant_id = b.tenant_id
+             LEFT JOIN fiscal_documents rel ON rel.id = fd.related_doc_id AND rel.tenant_id = fd.tenant_id
+             LEFT JOIN fiscal_documents nc ON nc.related_doc_id = fd.id AND nc.doc_type = 'CREDIT_NOTE'
+                  AND nc.status = 'CONFIRMED' AND nc.tenant_id = fd.tenant_id
+             WHERE fd.id = $1 AND fd.tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        const doc = rs.rows[0];
+        if (!doc) return res.status(404).json({ error: 'Documento non trovato' });
+        const payload = doc.request ?? {};
+        const euroToCents = (s: unknown): number => Math.round((parseFloat(String(s ?? '0')) || 0) * 100);
+        res.json({
+            document: {
+                id: doc.id, doc_type: doc.doc_type, provider: doc.provider, status: doc.status,
+                doc_number: doc.doc_number, provider_ref: doc.provider_ref, total_cents: doc.total_cents,
+                fiscal_id: doc.fiscal_id_snapshot, error: doc.error,
+                created_at: doc.created_at, confirmed_at: doc.confirmed_at, voided_at: doc.voided_at,
+                public_token: doc.public_token, table_bill_id: doc.table_bill_id,
+                table_name: doc.table_name, customer_name: doc.customer_name, bill_closed_at: doc.bill_closed_at,
+                related: doc.related_doc_id ? { id: doc.related_doc_id, doc_type: doc.related_doc_type, doc_number: doc.related_doc_number } : null,
+                credit_note_number: doc.credit_note_number,
+            },
+            items: (Array.isArray(payload.items) ? payload.items : []).map((i: any) => ({
+                description: String(i.description ?? ''),
+                quantity: parseFloat(String(i.quantity ?? '1')) || 1,
+                unit_price_cents: euroToCents(i.unit_price),
+                vat_rate_code: String(i.vat_rate_code ?? ''),
+            })),
+            payments: {
+                cash_cents: euroToCents(payload.cash_payment_amount),
+                electronic_cents: euroToCents(payload.electronic_payment_amount),
+                ticket_cents: euroToCents(payload.ticket_restaurant_payment_amount),
+                uncollected_cents: euroToCents(payload.services_uncollected_amount),
+                discount_cents: euroToCents(payload.discount),
+            },
+        });
+    } catch (err: any) {
+        console.error('GET /reports/fiscal-documents/:id error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 // ============================================
 // DOCUMENTI FISCALI — documento commerciale (fase 3 fatturazione)
 // ============================================
