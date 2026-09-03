@@ -545,6 +545,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-03 | Comande, Cucina e Passe | La barra del riepilogo servizio in Cucina sparisce: se il turno ha note strutturate (piatti prenotati, allergie) compare una pill galleggiante «Note del servizio» col conteggio in alto a destra, e il tocco apre il dettaglio in un modal; senza note, tutto lo spazio è delle comande. |
 | 2026-09-03 | Comande, Cucina e Passe | In Cucina la testata globale dell'app sparisce (niente date picker, turno, ricerca globale, campana e «+»): la topbar del monitor apre col nome della partita e il toggle a icone (pentola = in lavorazione, spunta = consegnate), al centro data e pill dell'ora in tinta verde col punto pulsante, a destra ricerca, avviso sonoro e Cambia partita. |
 | 2026-09-03 | Comande, Cucina e Passe | Nel piede della card dell'uscita chiamata i pallini delle altre partite pulsano ambra finché non hanno tutto pronto (prima restavano neutri fino a «in preparazione»). |
 | 2026-09-02 | Comande, Cucina e Passe | Il monitor cucina mostra una colonna per comanda, in stile itinerario: filo a sinistra e una card per uscita appesa al filo, con la testata (tavolo, operatore, ora di apertura) come prima card; pallino pulsante ambra sull'uscita in lavorazione (distesa con le azioni), verde fermo su pronta/servita (compressa con l'ora), neutro sulle future in fantasma tratteggiato («fra N′», «in coda»). |
