@@ -681,12 +681,24 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
         </div>
       )}
 
-      {summary && (
-        <ServiceSummaryBanner
-          summary={summary}
-          open={summaryOpen}
-          onToggle={() => setSummaryOpen(o => !o)}
-        />
+      {/* Niente più barra fissa del riepilogo: se il servizio ha note
+          strutturate (piatti prenotati, allergie) compare una pill
+          galleggiante in alto a destra — il tocco apre il dettaglio.
+          A zero note, zero pixel: lo spazio è delle comande. */}
+      {summary && (summary.dietary.length > 0 || summary.dietary_lines.length > 0) && (
+        <div className="relative z-20 h-0 flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => setSummaryOpen(true)}
+            className="absolute right-6 top-1 inline-flex h-11 items-center gap-2 rounded-full bg-[var(--ds-surface)] pl-4 pr-1.5 text-[15px] font-semibold text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            style={{ animation: 'tileIn 220ms ease-out both' }}
+          >
+            Note del servizio
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--ds-pending-solid)] text-[14px] font-semibold tabular-nums text-[var(--ds-pending-fg)]">
+              {summary.dietary.length + summary.dietary_lines.length}
+            </span>
+          </button>
+        </div>
       )}
 
       {allDay.length > 0 && (
@@ -896,6 +908,20 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             })}
           </div>
         </div>
+      )}
+
+      {summary && (
+        <ModalShell
+          open={summaryOpen}
+          onClose={() => setSummaryOpen(false)}
+          title="Note del servizio"
+          subtitle={`${summary.shift === 'LUNCH' ? 'Pranzo' : 'Cena'} · ${summary.reservations} prenotazion${summary.reservations === 1 ? 'e' : 'i'}`}
+          size="md"
+          closeOnEscape
+          bodyClassName="p-5 sm:p-6"
+        >
+          <ServiceSummaryDetail summary={summary} />
+        </ModalShell>
       )}
 
       <ModalShell
@@ -1400,123 +1426,69 @@ const PassiveSection: React.FC<{
   );
 };
 
-// Riepilogo del servizio: piatti da preparare in totale (aggregati per label
-// e variante) + un elenco delle allergie/diete registrate per prenotazione.
-// La cucina lo legge a colpo d'occhio a inizio turno per attrezzarsi ("stasera
-// 8 stinchi di maiale, 3 di vitello, 2 tavoli senza glutine"). Le allergie
-// restano libere (customers.dietary_notes) — non le aggreghiamo per non
-// suggerire falsi conteggi su testo non normalizzato.
-const ServiceSummaryBanner: React.FC<{
-  summary: KitchenServiceSummary;
-  open: boolean;
-  onToggle: () => void;
-}> = ({ summary, open, onToggle }) => {
-  const shift = summary.shift === 'LUNCH' ? 'Pranzo' : 'Cena';
+// Il dettaglio delle note del servizio, dentro il modal aperto dalla pill
+// galleggiante: piatti prenotati (aggregati per label e variante, tavoli come
+// pill) e allergie/diete per prenotazione. Le allergie restano testo libero
+// (customers.dietary_notes) — non le aggreghiamo per non suggerire falsi
+// conteggi su testo non normalizzato.
+const ServiceSummaryDetail: React.FC<{ summary: KitchenServiceSummary }> = ({ summary }) => {
   const total = summary.dietary.reduce((s, d) => s + d.quantity, 0);
-  const hasDietary = summary.dietary.length > 0;
-  const hasDiets = summary.dietary_lines.length > 0;
   return (
-    <div className="flex-shrink-0 px-4 pb-3">
-      <div className="rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] overflow-hidden">
-        <button
-          type="button"
-          onClick={onToggle}
-          className="w-full flex items-center gap-3 px-4 py-3 text-left"
-          aria-expanded={open}
-        >
-          <span className="text-[13px] font-semibold text-[var(--ds-text-muted)]">
-            {shift} · {summary.reservations} prenotazion{summary.reservations === 1 ? 'e' : 'i'}
-          </span>
-          <div className="min-w-0 flex-1 flex flex-wrap items-center gap-2">
-            {hasDietary
-              ? summary.dietary.slice(0, 6).map(d => (
-                <span
-                  key={`${d.label}--${d.variant ?? ''}`}
-                  className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-surface-row)] px-2.5 py-1 text-[13px] font-semibold text-[var(--ds-text-primary)]"
-                >
+    <div className="space-y-4">
+      {summary.dietary.length > 0 && (
+        <div>
+          <div className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-1.5">
+            Piatti del turno ({total})
+          </div>
+          {/* Una riga per piatto, tavoli come pill: si legge da lontano
+              con le mani in pasta, quindi corpi grandi e testo pieno —
+              niente muted sotto i 14px su questo schermo. */}
+          <ul className="divide-y divide-[var(--ds-border)]">
+            {summary.dietary.map(d => (
+              <li
+                key={`row-${d.label}--${d.variant ?? ''}`}
+                className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2.5 first:pt-0 last:pb-0"
+              >
+                <span className="text-[16px] font-semibold text-[var(--ds-text-primary)]">
                   <span className="tabular-nums">{d.quantity}×</span>
-                  <span className="truncate">
-                    {d.label}{d.variant ? ` (${d.variant})` : ''}
-                  </span>
+                  {' '}{d.label}{d.variant ? ` (${d.variant})` : ''}
                 </span>
-              ))
-              : <span className="text-[13px] text-[var(--ds-text-muted)]">Nessuna nota strutturata</span>
-            }
-            {hasDietary && summary.dietary.length > 6 && (
-              <span className="text-[13px] text-[var(--ds-text-muted)]">+{summary.dietary.length - 6}</span>
-            )}
-          </div>
-          {hasDiets && (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--ds-critical-tint)] px-2.5 py-1 text-[13px] font-semibold text-[var(--ds-critical-text)]">
-              <TriangleAlert size={13} aria-hidden />
-              {summary.dietary_lines.length} allergi{summary.dietary_lines.length === 1 ? 'a' : 'e'}
-            </span>
-          )}
-          <ChevronRight
-            size={16}
-            className={`flex-shrink-0 text-[var(--ds-text-muted)] transition-transform ${open ? 'rotate-90' : ''}`}
-            aria-hidden
-          />
-        </button>
-        {open && (
-          <div className="border-t border-[var(--ds-border)] px-4 py-3 space-y-3">
-            {hasDietary && (
-              <div>
-                <div className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-1.5">
-                  Piatti del turno ({total})
-                </div>
-                {/* Una riga per piatto, tavoli come pill: si legge da lontano
-                    con le mani in pasta, quindi corpi grandi e testo pieno —
-                    niente muted sotto i 14px su questo schermo. */}
-                <ul className="divide-y divide-[var(--ds-border)]">
-                  {summary.dietary.map(d => (
-                    <li
-                      key={`row-${d.label}--${d.variant ?? ''}`}
-                      className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2.5 first:pt-0 last:pb-0"
-                    >
-                      <span className="text-[16px] font-semibold text-[var(--ds-text-primary)]">
-                        <span className="tabular-nums">{d.quantity}×</span>
-                        {' '}{d.label}{d.variant ? ` (${d.variant})` : ''}
+                {(d.tables ?? []).length > 0 && (
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    {d.tables.map((t, i) => (
+                      <span
+                        key={t.table ?? `c-${i}`}
+                        className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-surface-row)] px-3 py-1.5 text-[14px] font-semibold text-[var(--ds-text-primary)]"
+                      >
+                        <span className="tabular-nums">{t.quantity}×</span>
+                        <span>{t.table ? `T${t.table}` : t.customer || '—'}</span>
                       </span>
-                      {(d.tables ?? []).length > 0 && (
-                        <span className="flex flex-wrap items-center gap-1.5">
-                          {d.tables.map((t, i) => (
-                            <span
-                              key={t.table ?? `c-${i}`}
-                              className="inline-flex items-center gap-1 rounded-full bg-[var(--ds-surface-row)] px-3 py-1.5 text-[14px] font-semibold text-[var(--ds-text-primary)]"
-                            >
-                              <span className="tabular-nums">{t.quantity}×</span>
-                              <span>{t.table ? `T${t.table}` : t.customer || '—'}</span>
-                            </span>
-                          ))}
-                        </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {hasDiets && (
-              <div>
-                <div className="text-[13px] font-semibold text-[var(--ds-critical-text)] mb-1.5">
-                  Allergie / diete
-                </div>
-                <ul className="space-y-1">
-                  {summary.dietary_lines.map(l => (
-                    <li key={l.reservation_id} className="flex items-start gap-2 text-[13px]">
-                      <TriangleAlert size={13} className="mt-0.5 flex-shrink-0 text-[var(--ds-critical-text)]" aria-hidden />
-                      <span className="text-[var(--ds-text-primary)]">
-                        <span className="font-semibold">{l.customer_name || '—'}</span>
-                        <span className="text-[var(--ds-text-muted)]"> · {l.text}</span>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+                    ))}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {summary.dietary_lines.length > 0 && (
+        <div>
+          <div className="text-[13px] font-semibold text-[var(--ds-critical-text)] mb-1.5">
+            Allergie / diete
           </div>
-        )}
-      </div>
+          <ul className="space-y-1">
+            {summary.dietary_lines.map(l => (
+              <li key={l.reservation_id} className="flex items-start gap-2 text-[14px]">
+                <TriangleAlert size={14} className="mt-0.5 flex-shrink-0 text-[var(--ds-critical-text)]" aria-hidden />
+                <span className="text-[var(--ds-text-primary)]">
+                  <span className="font-semibold">{l.customer_name || '—'}</span>
+                  <span className="text-[var(--ds-text-muted)]"> · {l.text}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 };
