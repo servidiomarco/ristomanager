@@ -1544,11 +1544,13 @@ const PassiveSection: React.FC<{
   const served = rows.length > 0 && rows.every(r => r.status === 'SERVED');
   const queued = rows.length > 0 && rows.every(r => r.status === 'QUEUED');
   const mine = rows.filter(r => stationId == null || r.station_id === stationId);
-  const aggregate = (rs: KdsFullItem[]): string => {
+  const aggregateEntries = (rs: KdsFullItem[]): [string, number][] => {
     const byName = new Map<string, number>();
     for (const r of rs) byName.set(r.name_snapshot, (byName.get(r.name_snapshot) ?? 0) + r.qty);
-    return [...byName.entries()].map(([name, qty]) => `${qty}× ${name}`).join(' · ');
+    return [...byName.entries()];
   };
+  const aggregate = (rs: KdsFullItem[]): string =>
+    aggregateEntries(rs).map(([name, qty]) => `${qty}× ${name}`).join(' · ');
   const servedAt = served
     ? rows.reduce<string | null>((max, r) => (r.served_at && (!max || r.served_at > max) ? r.served_at : max), null)
     : null;
@@ -1594,15 +1596,33 @@ const PassiveSection: React.FC<{
           />
         </div>
         {open ? (
-          <div className="mt-1 space-y-1 pr-1">
+          // La partita è un'etichetta su riga sua, poi un piatto per riga con
+          // la quantità incolonnata: si legge come le righe della card
+          // distesa, solo in piccolo. Le proprie righe in chiaro, le altrui
+          // attenuate.
+          <div className="mt-1.5 space-y-2 pr-1">
             {byStation.map(([sid, list]) => (
-              <div key={sid ?? 'x'} className="text-[13px] leading-snug">
-                <span className={`font-semibold ${sid === stationId ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)]'}`}>
-                  {sid === stationId ? null : <>{stationNames?.get(sid ?? -1) ?? 'altra partita'} · </>}
-                </span>
-                <span className={sid === stationId ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)]'}>
-                  {aggregate(list)}
-                </span>
+              <div key={sid ?? 'x'}>
+                {sid !== stationId && (
+                  <div className="text-[11px] font-semibold text-[var(--ds-text-muted)]">
+                    {stationNames?.get(sid ?? -1) ?? 'altra partita'}
+                  </div>
+                )}
+                <div className="mt-0.5 space-y-0.5">
+                  {aggregateEntries(list).map(([name, qty]) => (
+                    <div
+                      key={name}
+                      className={`flex items-baseline gap-1.5 text-[13px] leading-snug ${
+                        sid === stationId
+                          ? 'font-medium text-[var(--ds-text-primary)]'
+                          : 'text-[var(--ds-text-muted)]'
+                      }`}
+                    >
+                      <span className="w-6 flex-shrink-0 text-right tabular-nums">{qty}×</span>
+                      <span className="min-w-0">{name}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
