@@ -534,6 +534,23 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
     || (c.customer_name ?? '').toLowerCase().includes(query)
     || c.items.some(i => i.name.toLowerCase().includes(query)));
 
+  // Long press su un piatto in card → la barra scorre fino al suo chip e lo
+  // accende per qualche secondo: con tanti piatti in arrivo molti chip sono
+  // fuori vista, e la domanda del cuoco è «di questo qui, quanti ne
+  // arrivano ancora?». `tick` distingue due pressioni sullo stesso piatto.
+  const [flashDish, setFlashDish] = useState<{ name: string; tick: number } | null>(null);
+  const [litChip, setLitChip] = useState<string | null>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  const flashChip = useCallback((name: string) => setFlashDish({ name, tick: Date.now() }), []);
+  useEffect(() => {
+    if (!flashDish) return;
+    setLitChip(flashDish.name);
+    barRef.current?.querySelector<HTMLElement>(`[data-chip="${CSS.escape(flashDish.name)}"]`)
+      ?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    const t = window.setTimeout(() => setLitChip(null), 2600);
+    return () => window.clearTimeout(t);
+  }, [flashDish]);
+
   // La barra è SOLO ciò che deve ancora arrivare (scelta di Marco, 3/09):
   // il chiamato sta già sulle card, ripeterlo qui era rumore. Un piatto
   // conta finché aspetta la chiamata — QUEUED, o lanciato con partenza
@@ -697,11 +714,16 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           <div className="flex items-center rounded-[20px] bg-[var(--ds-surface)] px-3 py-2 shadow-[var(--ds-shadow-card)]">
             {/* Solo i chip scorrono: la pill delle note sta FUORI dall'area a
                 scorrimento, sempre visibile a destra qualunque sia la coda. */}
-            <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
+            <div ref={barRef} className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
               {allDay.map(([name, qty]) => (
                 <span
                   key={name}
-                  className="inline-flex flex-shrink-0 items-baseline gap-1 rounded-full bg-[var(--ds-surface-row)] px-2.5 py-1 text-[14px] font-semibold text-[var(--ds-text-primary)]"
+                  data-chip={name}
+                  className={`inline-flex flex-shrink-0 items-baseline gap-1 rounded-full px-2.5 py-1 text-[14px] font-semibold transition-colors ${
+                    litChip === name
+                      ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                      : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
+                  }`}
                 >
                   <span className="tabular-nums">{qty}×</span>
                   <span>{name}</span>
@@ -872,6 +894,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                 onServeCourse={passeEnabled ? undefined : serveColumn}
                 revisions={revisionsByOrder.get(g.order_id)}
                 onShowRevisions={() => setRevisionsFor(g.order_id)}
+                onFlashDish={flashChip}
               />
             ))}
           </div>
@@ -1024,7 +1047,9 @@ const OrderCard: React.FC<{
   onServeCourse?: (col: Column) => void;
   revisions?: OrderRevision[];
   onShowRevisions?: () => void;
-}> = ({ g, now, stationId, stationNames, onAdvance, onCallWaiter, waiterCalled, onServeCourse, revisions, onShowRevisions }) => {
+  /** Long press su una riga: accende il chip del piatto nella barra. */
+  onFlashDish?: (name: string) => void;
+}> = ({ g, now, stationId, stationNames, onAdvance, onCallWaiter, waiterCalled, onServeCourse, revisions, onShowRevisions, onFlashDish }) => {
   const activeByCourse = new Map(g.cols.map(c => [c.course_no, c]));
   const upcomingByCourse = new Map(g.upcomingCols.map(c => [c.course_no, c]));
   const courseNos = [...new Set([
@@ -1105,6 +1130,7 @@ const OrderCard: React.FC<{
                   onCallWaiter={onCallWaiter}
                   called={waiterCalled.has(active.key)}
                   onServeCourse={onServeCourse}
+                  onFlashDish={onFlashDish}
                 />
               );
             }
@@ -1163,10 +1189,28 @@ const CourseSection: React.FC<{
   onCallWaiter?: (col: Column) => void;
   called?: boolean;
   onServeCourse?: (col: Column) => void;
-}> = ({ col, now, stationNames, onAdvance, onCallWaiter, called, onServeCourse }) => {
+  onFlashDish?: (name: string) => void;
+}> = ({ col, now, stationNames, onAdvance, onCallWaiter, called, onServeCourse, onFlashDish }) => {
   const start = col.items[0]?.station_start_at ?? col.firedAt;
   const elapsed = minutesSince(start, now);
   const allReady = col.items.every(i => i.status === 'READY');
+
+  // Long press sulla riga (450ms): accende il chip del piatto nella barra.
+  // Il tocco breve resta la spunta: il flag sopprime il click che il
+  // browser emette comunque al rilascio dopo la pressione lunga.
+  const pressTimer = useRef<number | null>(null);
+  const longPressed = useRef(false);
+  const pressStart = (name: string) => {
+    longPressed.current = false;
+    if (!onFlashDish) return;
+    pressTimer.current = window.setTimeout(() => {
+      longPressed.current = true;
+      onFlashDish(name);
+    }, 450);
+  };
+  const pressEnd = () => {
+    if (pressTimer.current != null) { window.clearTimeout(pressTimer.current); pressTimer.current = null; }
+  };
 
   // Le altre partite della stessa uscita, compresse in un pallino a testa:
   // il pacing («la griglia è indietro, aspetto a calare») si legge sempre,
@@ -1266,11 +1310,20 @@ const CourseSection: React.FC<{
             <button
               key={i.id}
               type="button"
-              onClick={() => onAdvance(i, ready ? 'PREPARING' : 'READY')}
+              onClick={() => {
+                if (longPressed.current) { longPressed.current = false; return; }
+                onAdvance(i, ready ? 'PREPARING' : 'READY');
+              }}
+              onPointerDown={() => pressStart(i.name_snapshot)}
+              onPointerUp={pressEnd}
+              onPointerLeave={pressEnd}
+              onPointerCancel={pressEnd}
+              onContextMenu={e => e.preventDefault()}
               aria-label={ready
                 ? `Annulla pronto: ${i.qty} ${i.name_snapshot}`
                 : `Segna pronto: ${i.qty} ${i.name_snapshot}`}
-              className="block min-h-11 w-full rounded-[12px] px-1.5 py-1.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] active:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              className="block min-h-11 w-full select-none rounded-[12px] px-1.5 py-1.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] active:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              style={{ WebkitTouchCallout: 'none' } as React.CSSProperties}
             >
               {body}
             </button>
