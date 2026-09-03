@@ -3615,11 +3615,19 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
                     if (cached == null) {
                         const nomi = codes.map((c) => varByCode.get(c)!.nome);
                         const label = `Varianti (${nomi.slice(0, 3).join(', ')}${nomi.length > 3 ? ', …' : ''})`.slice(0, 100);
+                        // name NON è nel DO UPDATE: l'etichetta è funzione
+                        // deterministica del ref (stesso set ⇒ stessa
+                        // etichetta), quindi riscriverla era un no-op — e
+                        // toglierla rende durevole la rinomina fatta dal CRM.
+                        // GREATEST sul max: se il CRM ha alzato min_select
+                        // (campo suo, il sync non lo tocca) e la cassa
+                        // restringe il set, un max nudo violerebbe il CHECK
+                        // max >= min e farebbe fallire l'intero import.
                         const gr = await client.query(
                             `INSERT INTO modifier_groups (tenant_id, name, min_select, max_select, external_ref)
                              VALUES ($1, $2, 0, $3, $4)
                              ON CONFLICT (tenant_id, external_ref) WHERE external_ref IS NOT NULL
-                             DO UPDATE SET name = EXCLUDED.name, max_select = EXCLUDED.max_select
+                             DO UPDATE SET max_select = GREATEST(EXCLUDED.max_select, modifier_groups.min_select)
                              RETURNING id`,
                             [req.tenantId!, label, codes.length, setRef]
                         );
@@ -3644,17 +3652,22 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
                         groupCache.set(setRef, cached);
                     }
                     groupId = cached;
+                    // source 'pp': il DO NOTHING preserva un eventuale legame
+                    // manuale già presente sulla stessa coppia — il lavoro
+                    // dell'operatore vince sul sync.
                     await client.query(
-                        `INSERT INTO dish_modifier_groups (tenant_id, dish_id, group_id)
-                         VALUES ($1, $2, $3) ON CONFLICT (dish_id, group_id) DO NOTHING`,
+                        `INSERT INTO dish_modifier_groups (tenant_id, dish_id, group_id, source)
+                         VALUES ($1, $2, $3, 'pp') ON CONFLICT (dish_id, group_id) DO NOTHING`,
                         [req.tenantId!, dishId, groupId]
                     );
                 }
                 // Via i legami pp che non corrispondono più al set corrente
-                // (tutti, se l'articolo non ha più varianti).
+                // (tutti, se l'articolo non ha più varianti). SOLO i legami
+                // 'pp': un gruppo della cassa agganciato a mano a questo
+                // piatto (source 'manual') deve sopravvivere all'import.
                 await client.query(
                     `DELETE FROM dish_modifier_groups l USING modifier_groups g
-                     WHERE l.dish_id = $1 AND l.group_id = g.id
+                     WHERE l.dish_id = $1 AND l.group_id = g.id AND l.source = 'pp'
                        AND g.external_ref LIKE 'pp:varianti:%' AND g.id IS DISTINCT FROM $2`,
                     [dishId, groupId]
                 );
@@ -3692,8 +3705,12 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
         });
 
         // Un evento solo, non centinaia di dish:updated: i client ricaricano
-        // l'anagrafica intera.
-        try { socketService?.broadcastToAll(req.tenantId!, 'dish:synced', esito); } catch (_) {}
+        // l'anagrafica intera. catalogue:updated in coppia: l'import tocca
+        // anche gruppi e legami varianti, che vivono nel catalogue.
+        try {
+            socketService?.broadcastToAll(req.tenantId!, 'dish:synced', esito);
+            socketService?.broadcastToAll(req.tenantId!, 'catalogue:updated', { import: true });
+        } catch (_) {}
         if (req.user) {
             LogService.logActivity(
                 req.tenantId!, req.user.userId, req.user.email, req.user.email,
@@ -4066,6 +4083,431 @@ app.put('/menu/category-menus', authenticate, requirePermission('menu:full'), as
         res.json({ ok: true, piatti: applied });
     } catch (err: any) {
         console.error('PUT /menu/category-menus error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================================================
+// Gestione varianti (modifier group) — il CRUD che mancava: finora i gruppi
+// nascevano solo dall'import Passepartout. I gruppi della cassa
+// (external_ref 'pp:varianti:%') restano di sua proprietà per membri e
+// max_select — il sync li riscrive a ogni import, un edit qui durerebbe un
+// giorno — ma nome, min_select, accensione e ordine sono del ristoratore e
+// il sync non li tocca. Ogni scrittura emette 'catalogue:updated': i palmari
+// tengono il catalogue in mano dall'apertura e senza l'evento vedrebbero le
+// modifiche solo al reload.
+// ============================================================================
+
+const isPPGroupRef = (ref: string | null | undefined): boolean =>
+    typeof ref === 'string' && ref.startsWith('pp:varianti:');
+
+const emitCatalogueUpdated = (tenantId: number, payload: Record<string, unknown>) => {
+    try { socketService?.broadcastToAll(tenantId, 'catalogue:updated', payload); } catch (_) {}
+};
+
+// Il gruppo com'è servito alla pagina Menu: membri anche spenti (l'editor
+// deve poterli riaccendere) e piatti assegnati.
+const fetchModifierGroupFull = async (tenantId: number, groupId: number) => {
+    const [g, mods, links] = await Promise.all([
+        queryWithRetry(
+            `SELECT id, name, min_select, max_select, sort_order, is_active, external_ref
+             FROM modifier_groups WHERE tenant_id = $1 AND id = $2`,
+            [tenantId, groupId]
+        ),
+        queryWithRetry(
+            `SELECT id, name, price_delta_cents, price_delta_pct, is_active, sort_order
+             FROM modifiers WHERE tenant_id = $1 AND group_id = $2
+             ORDER BY sort_order, id`,
+            [tenantId, groupId]
+        ),
+        queryWithRetry(
+            'SELECT dish_id FROM dish_modifier_groups WHERE tenant_id = $1 AND group_id = $2',
+            [tenantId, groupId]
+        ),
+    ]);
+    if (!g.rows[0]) return null;
+    return {
+        ...g.rows[0],
+        modifiers: mods.rows,
+        dish_ids: links.rows.map((r: any) => Number(r.dish_id)),
+    };
+};
+
+// Sovrapprezzo di un modifier dal body: o assoluto in centesimi o
+// percentuale del prezzo battuto — mai entrambi. pct valorizzato azzera i
+// centesimi, pct null esplicito torna all'assoluto.
+const parseModifierDelta = (body: any): { cents: number; pct: number | null } | { error: string } => {
+    const rawPct = body?.price_delta_pct;
+    const rawCents = body?.price_delta_cents;
+    if (rawPct !== undefined && rawPct !== null) {
+        const pct = Number(rawPct);
+        if (!Number.isFinite(pct) || pct <= -100 || pct > 500) {
+            return { error: 'price_delta_pct deve essere tra -100 (escluso) e 500' };
+        }
+        return { cents: 0, pct: Math.round(pct * 100) / 100 };
+    }
+    const cents = rawCents === undefined ? 0 : Number(rawCents);
+    if (!Number.isInteger(cents)) return { error: 'price_delta_cents deve essere un intero (centesimi)' };
+    return { cents, pct: null };
+};
+
+app.get('/menu/modifier-groups', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const [groups, mods, links] = await Promise.all([
+            queryWithRetry(
+                `SELECT id, name, min_select, max_select, sort_order, is_active, external_ref
+                 FROM modifier_groups WHERE tenant_id = $1 ORDER BY sort_order, id`,
+                [req.tenantId!]
+            ),
+            queryWithRetry(
+                `SELECT id, group_id, name, price_delta_cents, price_delta_pct, is_active, sort_order
+                 FROM modifiers WHERE tenant_id = $1 ORDER BY sort_order, id`,
+                [req.tenantId!]
+            ),
+            queryWithRetry(
+                'SELECT dish_id, group_id FROM dish_modifier_groups WHERE tenant_id = $1',
+                [req.tenantId!]
+            ),
+        ]);
+        res.json({
+            groups: groups.rows.map((g: any) => ({
+                ...g,
+                modifiers: mods.rows.filter((m: any) => m.group_id === g.id),
+                dish_ids: links.rows.filter((l: any) => l.group_id === g.id).map((l: any) => Number(l.dish_id)),
+            })),
+        });
+    } catch (err: any) {
+        console.error('GET /menu/modifier-groups error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/menu/modifier-groups', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const name = String(req.body?.name ?? '').trim();
+        if (!name || name.length > 100) return res.status(400).json({ error: 'name deve essere 1..100 caratteri' });
+        const minSelect = req.body?.min_select === undefined ? 0 : Number(req.body.min_select);
+        const maxSelect = req.body?.max_select === undefined ? 1 : Number(req.body.max_select);
+        if (!Number.isInteger(minSelect) || minSelect < 0) return res.status(400).json({ error: 'min_select deve essere un intero >= 0' });
+        if (!Number.isInteger(maxSelect) || maxSelect < 1) return res.status(400).json({ error: 'max_select deve essere un intero >= 1' });
+        if (maxSelect < minSelect) return res.status(400).json({ error: 'max_select non può essere minore di min_select' });
+
+        const inlineMods: { name: string; cents: number; pct: number | null }[] = [];
+        if (req.body?.modifiers !== undefined) {
+            if (!Array.isArray(req.body.modifiers)) return res.status(400).json({ error: 'modifiers deve essere una lista' });
+            for (const m of req.body.modifiers) {
+                const mName = String(m?.name ?? '').trim();
+                if (!mName || mName.length > 100) return res.status(400).json({ error: 'ogni variante deve avere un nome di 1..100 caratteri' });
+                const delta = parseModifierDelta(m);
+                if ('error' in delta) return res.status(400).json({ error: delta.error });
+                inlineMods.push({ name: mName, cents: delta.cents, pct: delta.pct });
+            }
+        }
+
+        const groupId = await withTenant(req.tenantId!, async client => {
+            const ord = await client.query(
+                'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM modifier_groups WHERE tenant_id = $1',
+                [req.tenantId!]
+            );
+            const ins = await client.query(
+                `INSERT INTO modifier_groups (tenant_id, name, min_select, max_select, sort_order)
+                 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+                [req.tenantId!, name, minSelect, maxSelect, ord.rows[0].next]
+            );
+            const gid = Number(ins.rows[0].id);
+            for (let i = 0; i < inlineMods.length; i++) {
+                const m = inlineMods[i];
+                await client.query(
+                    `INSERT INTO modifiers (tenant_id, group_id, name, price_delta_cents, price_delta_pct, sort_order)
+                     VALUES ($1, $2, $3, $4, $5, $6)`,
+                    [req.tenantId!, gid, m.name, m.cents, m.pct, i]
+                );
+            }
+            return gid;
+        });
+
+        emitCatalogueUpdated(req.tenantId!, { gruppo_creato: name });
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.CREATE, ResourceType.DISH, groupId, name,
+                { modifier_group: true, varianti: inlineMods.length }
+            ).catch(() => {});
+        }
+        res.status(201).json(await fetchModifierGroupFull(req.tenantId!, groupId));
+    } catch (err: any) {
+        // 23505 = l'unique parziale sul nome dei gruppi manuali.
+        if (err?.code === '23505') return res.status(409).json({ error: 'Esiste già un gruppo con questo nome' });
+        console.error('POST /menu/modifier-groups error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Registrata PRIMA di /:id o «order» verrebbe catturato come id (stessa
+// classe del bug che colpì /orders/open).
+app.put('/menu/modifier-groups/order', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const ids = req.body?.group_ids;
+        if (!Array.isArray(ids) || ids.length === 0 || ids.some((n: any) => !Number.isInteger(n))) {
+            return res.status(400).json({ error: 'group_ids deve essere una lista di id' });
+        }
+        await queryWithRetry(
+            `UPDATE modifier_groups g SET sort_order = x.ord - 1
+             FROM unnest($2::int[]) WITH ORDINALITY AS x(id, ord)
+             WHERE g.id = x.id AND g.tenant_id = $1`,
+            [req.tenantId!, ids]
+        );
+        emitCatalogueUpdated(req.tenantId!, { gruppi_riordinati: ids.length });
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('PUT /menu/modifier-groups/order error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/menu/modifier-groups/:id', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: 'id non valido' });
+        const cur = await queryWithRetry(
+            'SELECT name, min_select, max_select, external_ref FROM modifier_groups WHERE tenant_id = $1 AND id = $2',
+            [req.tenantId!, id]
+        );
+        if (!cur.rows[0]) return res.status(404).json({ error: 'Gruppo non trovato' });
+        const pp = isPPGroupRef(cur.rows[0].external_ref);
+
+        // Sui gruppi della cassa il massimo è la dimensione del set che il
+        // sync riscrive a ogni import: cambiarlo qui durerebbe un giorno.
+        if (pp && req.body?.max_select !== undefined) {
+            return res.status(409).json({ error: 'Il massimo di questo gruppo lo decide la cassa' });
+        }
+
+        const name = req.body?.name === undefined ? null : String(req.body.name).trim();
+        if (name !== null && (!name || name.length > 100)) return res.status(400).json({ error: 'name deve essere 1..100 caratteri' });
+        const minSelect = req.body?.min_select === undefined ? null : Number(req.body.min_select);
+        if (minSelect !== null && (!Number.isInteger(minSelect) || minSelect < 0)) return res.status(400).json({ error: 'min_select deve essere un intero >= 0' });
+        const maxSelect = req.body?.max_select === undefined ? null : Number(req.body.max_select);
+        if (maxSelect !== null && (!Number.isInteger(maxSelect) || maxSelect < 1)) return res.status(400).json({ error: 'max_select deve essere un intero >= 1' });
+        const isActive = req.body?.is_active === undefined ? null : Boolean(req.body.is_active);
+
+        // Il CHECK min<=max va verificato combinando body e valori correnti,
+        // o un min alzato da solo diventerebbe un 500 dal vincolo.
+        const effMin = minSelect ?? Number(cur.rows[0].min_select);
+        const effMax = maxSelect ?? Number(cur.rows[0].max_select);
+        if (effMin > effMax) return res.status(400).json({ error: `min_select (${effMin}) non può superare max_select (${effMax})` });
+
+        await queryWithRetry(
+            `UPDATE modifier_groups SET
+                name = COALESCE($3, name),
+                min_select = COALESCE($4, min_select),
+                max_select = COALESCE($5, max_select),
+                is_active = COALESCE($6, is_active)
+             WHERE tenant_id = $1 AND id = $2`,
+            [req.tenantId!, id, name, minSelect, maxSelect, isActive]
+        );
+        emitCatalogueUpdated(req.tenantId!, { gruppo_aggiornato: id });
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.DISH, id, name ?? cur.rows[0].name,
+                { modifier_group: true }
+            ).catch(() => {});
+        }
+        res.json(await fetchModifierGroupFull(req.tenantId!, id));
+    } catch (err: any) {
+        if (err?.code === '23505') return res.status(409).json({ error: 'Esiste già un gruppo con questo nome' });
+        console.error('PUT /menu/modifier-groups/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/menu/modifier-groups/:id', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: 'id non valido' });
+        const cur = await queryWithRetry(
+            'SELECT name, external_ref FROM modifier_groups WHERE tenant_id = $1 AND id = $2',
+            [req.tenantId!, id]
+        );
+        if (!cur.rows[0]) return res.status(404).json({ error: 'Gruppo non trovato' });
+        if (isPPGroupRef(cur.rows[0].external_ref)) {
+            return res.status(409).json({ error: 'Questo gruppo lo gestisce la cassa: verrebbe ricreato al prossimo import' });
+        }
+        const links = await queryWithRetry(
+            'SELECT count(*)::int AS n FROM dish_modifier_groups WHERE tenant_id = $1 AND group_id = $2',
+            [req.tenantId!, id]
+        );
+        const n = links.rows[0]?.n ?? 0;
+        if (n > 0) {
+            return res.status(409).json({ error: n === 1 ? 'Il gruppo è usato da 1 piatto: sgancialo prima di eliminarlo' : `Il gruppo è usato da ${n} piatti: sgancialo prima di eliminarlo` });
+        }
+        // Le righe di comanda hanno lo snapshot JSONB, non la FK: eliminare
+        // non muove i conti già battuti. Il CASCADE porta via i membri.
+        await queryWithRetry('DELETE FROM modifier_groups WHERE tenant_id = $1 AND id = $2', [req.tenantId!, id]);
+        emitCatalogueUpdated(req.tenantId!, { gruppo_eliminato: id });
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.DELETE, ResourceType.DISH, id, cur.rows[0].name,
+                { modifier_group: true }
+            ).catch(() => {});
+        }
+        res.status(204).send();
+    } catch (err: any) {
+        console.error('DELETE /menu/modifier-groups/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// I membri dei gruppi della cassa sono suoi: il sync li riattiva e li
+// riscrive per nome a ogni import. Qui si toccano solo i gruppi manuali.
+const loadManualGroup = async (tenantId: number, groupId: number) => {
+    const g = await queryWithRetry(
+        'SELECT id, external_ref FROM modifier_groups WHERE tenant_id = $1 AND id = $2',
+        [tenantId, groupId]
+    );
+    if (!g.rows[0]) return { status: 404 as const, error: 'Gruppo non trovato' };
+    if (isPPGroupRef(g.rows[0].external_ref)) {
+        return { status: 409 as const, error: 'Le opzioni di questo gruppo arrivano dalla cassa' };
+    }
+    return { status: 200 as const };
+};
+
+app.post('/menu/modifier-groups/:id/modifiers', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const groupId = Number(req.params.id);
+        if (!Number.isInteger(groupId)) return res.status(400).json({ error: 'id non valido' });
+        const guard = await loadManualGroup(req.tenantId!, groupId);
+        if (guard.status !== 200) return res.status(guard.status).json({ error: guard.error });
+        const name = String(req.body?.name ?? '').trim();
+        if (!name || name.length > 100) return res.status(400).json({ error: 'name deve essere 1..100 caratteri' });
+        const delta = parseModifierDelta(req.body);
+        if ('error' in delta) return res.status(400).json({ error: delta.error });
+        const ins = await queryWithRetry(
+            `INSERT INTO modifiers (tenant_id, group_id, name, price_delta_cents, price_delta_pct, sort_order)
+             VALUES ($1, $2, $3, $4, $5,
+                     (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM modifiers WHERE tenant_id = $1 AND group_id = $2))
+             RETURNING id, group_id, name, price_delta_cents, price_delta_pct, is_active, sort_order`,
+            [req.tenantId!, groupId, name, delta.cents, delta.pct]
+        );
+        emitCatalogueUpdated(req.tenantId!, { variante_creata: name });
+        res.status(201).json(ins.rows[0]);
+    } catch (err: any) {
+        console.error('POST /menu/modifier-groups/:id/modifiers error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/menu/modifier-groups/:id/modifiers/order', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const groupId = Number(req.params.id);
+        if (!Number.isInteger(groupId)) return res.status(400).json({ error: 'id non valido' });
+        const guard = await loadManualGroup(req.tenantId!, groupId);
+        if (guard.status !== 200) return res.status(guard.status).json({ error: guard.error });
+        const ids = req.body?.modifier_ids;
+        if (!Array.isArray(ids) || ids.length === 0 || ids.some((n: any) => !Number.isInteger(n))) {
+            return res.status(400).json({ error: 'modifier_ids deve essere una lista di id' });
+        }
+        await queryWithRetry(
+            `UPDATE modifiers m SET sort_order = x.ord - 1
+             FROM unnest($3::int[]) WITH ORDINALITY AS x(id, ord)
+             WHERE m.id = x.id AND m.tenant_id = $1 AND m.group_id = $2`,
+            [req.tenantId!, groupId, ids]
+        );
+        emitCatalogueUpdated(req.tenantId!, { varianti_riordinate: ids.length });
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('PUT /menu/modifier-groups/:id/modifiers/order error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/menu/modifiers/:id', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: 'id non valido' });
+        // Il JOIN sul gruppo fa due cose: blocca i membri della cassa e non
+        // risolve id di altri tenant.
+        const cur = await queryWithRetry(
+            `SELECT m.id, g.external_ref FROM modifiers m
+             JOIN modifier_groups g ON g.id = m.group_id AND g.tenant_id = m.tenant_id
+             WHERE m.tenant_id = $1 AND m.id = $2`,
+            [req.tenantId!, id]
+        );
+        if (!cur.rows[0]) return res.status(404).json({ error: 'Variante non trovata' });
+        if (isPPGroupRef(cur.rows[0].external_ref)) {
+            return res.status(409).json({ error: 'Le opzioni di questo gruppo arrivano dalla cassa' });
+        }
+        const name = req.body?.name === undefined ? null : String(req.body.name).trim();
+        if (name !== null && (!name || name.length > 100)) return res.status(400).json({ error: 'name deve essere 1..100 caratteri' });
+        const isActive = req.body?.is_active === undefined ? null : Boolean(req.body.is_active);
+
+        // Il sovrapprezzo si aggiorna solo se il body ne parla: pct
+        // valorizzato → percentuale (centesimi a 0); pct null esplicito →
+        // torna assoluto; nessuno dei due campi → resta com'è.
+        let deltaSql = '';
+        const params: any[] = [req.tenantId!, id, name, isActive];
+        if (req.body?.price_delta_pct !== undefined || req.body?.price_delta_cents !== undefined) {
+            const delta = parseModifierDelta(req.body);
+            if ('error' in delta) return res.status(400).json({ error: delta.error });
+            deltaSql = ', price_delta_cents = $5, price_delta_pct = $6';
+            params.push(delta.cents, delta.pct);
+        }
+        const upd = await queryWithRetry(
+            `UPDATE modifiers SET
+                name = COALESCE($3, name),
+                is_active = COALESCE($4, is_active)${deltaSql}
+             WHERE tenant_id = $1 AND id = $2
+             RETURNING id, group_id, name, price_delta_cents, price_delta_pct, is_active, sort_order`,
+            params
+        );
+        emitCatalogueUpdated(req.tenantId!, { variante_aggiornata: id });
+        res.json(upd.rows[0]);
+    } catch (err: any) {
+        console.error('PUT /menu/modifiers/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/menu/modifiers/:id', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id)) return res.status(400).json({ error: 'id non valido' });
+        const cur = await queryWithRetry(
+            `SELECT m.id, m.name, g.external_ref FROM modifiers m
+             JOIN modifier_groups g ON g.id = m.group_id AND g.tenant_id = m.tenant_id
+             WHERE m.tenant_id = $1 AND m.id = $2`,
+            [req.tenantId!, id]
+        );
+        if (!cur.rows[0]) return res.status(404).json({ error: 'Variante non trovata' });
+        if (isPPGroupRef(cur.rows[0].external_ref)) {
+            return res.status(409).json({ error: 'Le opzioni di questo gruppo arrivano dalla cassa' });
+        }
+        // Sicuro: le righe battute portano lo snapshot, non la FK.
+        await queryWithRetry('DELETE FROM modifiers WHERE tenant_id = $1 AND id = $2', [req.tenantId!, id]);
+        emitCatalogueUpdated(req.tenantId!, { variante_eliminata: id });
+        res.status(204).send();
+    } catch (err: any) {
+        console.error('DELETE /menu/modifiers/:id error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Gli ingredienti di un piatto composto, per il prefill dell'editor: il
+// catalogue li porta già ai palmari, ma la pagina Menu non lo carica.
+app.get('/dishes/:id/components', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const dishId = Number(req.params.id);
+        if (!Number.isInteger(dishId)) return res.status(400).json({ error: 'id non valido' });
+        const rows = await queryWithRetry(
+            `SELECT id, name, removal_delta_cents, sort_order
+             FROM dish_components WHERE tenant_id = $1 AND dish_id = $2
+             ORDER BY sort_order, id`,
+            [req.tenantId!, dishId]
+        );
+        res.json({ components: rows.rows });
+    } catch (err: any) {
+        console.error('GET /dishes/:id/components error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -10360,6 +10802,89 @@ const replaceDishMenus = async (tenantId: number, dishId: number, menuIds: numbe
     return dishMenuIds(dishId);
 };
 
+// Assegnazione dei gruppi varianti al piatto — conservativa, non
+// delete-all+insert: i legami 'pp' li ha creati il sync e la sua pulizia
+// riconosce i suoi dal source. Riscriverli tutti come 'manual' a ogni
+// salvataggio del form li sfilerebbe alla gestione della cassa per sempre.
+const replaceDishModifierGroups = async (tenantId: number, dishId: number, groupIds: number[]): Promise<number[]> => {
+    const wanted = [...new Set(groupIds.map(Number).filter(Number.isInteger))];
+    await queryWithRetry(
+        `DELETE FROM dish_modifier_groups
+         WHERE tenant_id = $1 AND dish_id = $2 AND NOT (group_id = ANY($3::int[]))`,
+        [tenantId, dishId, wanted]
+    );
+    if (wanted.length > 0) {
+        // Il SELECT scarta id fantasma o di altri tenant senza far saltare
+        // la FK; il DO NOTHING preserva i legami esistenti col loro source
+        // (un legame 'pp' resta 'pp').
+        await queryWithRetry(
+            `INSERT INTO dish_modifier_groups (tenant_id, dish_id, group_id, source)
+             SELECT $1, $2, g.id, 'manual' FROM modifier_groups g
+             WHERE g.tenant_id = $1 AND g.id = ANY($3::int[])
+             ON CONFLICT (dish_id, group_id) DO NOTHING`,
+            [tenantId, dishId, wanted]
+        );
+    }
+    const rows = await queryWithRetry(
+        'SELECT group_id FROM dish_modifier_groups WHERE tenant_id = $1 AND dish_id = $2 ORDER BY group_id',
+        [tenantId, dishId]
+    );
+    return rows.rows.map((r: any) => Number(r.group_id));
+};
+
+// Ingredienti del piatto composto: upsert per id — update dei presenti,
+// insert dei nuovi, delete dei mancanti. Il keep-by-id tiene stabili gli id
+// che i palmari hanno nel catalogue: rigenerarli a ogni salvataggio
+// dell'editor significherebbe 400 su removed_component_ids diventati stantii
+// a metà servizio.
+const replaceDishComponents = async (tenantId: number, dishId: number, components: any[]) => {
+    const parsed: { id: number | null; name: string; delta: number }[] = [];
+    for (const c of components) {
+        const name = String(c?.name ?? '').trim();
+        if (!name || name.length > 100) return { error: 'ogni ingrediente deve avere un nome di 1..100 caratteri' };
+        const delta = c?.removal_delta_cents === undefined || c?.removal_delta_cents === null
+            ? 0 : Number(c.removal_delta_cents);
+        if (!Number.isInteger(delta) || delta > 0) return { error: 'removal_delta_cents deve essere un intero <= 0 (togliere è gratis o sconta)' };
+        const id = c?.id === undefined || c?.id === null ? null : Number(c.id);
+        if (id !== null && !Number.isInteger(id)) return { error: 'id ingrediente non valido' };
+        parsed.push({ id, name, delta });
+    }
+    const rows = await withTenant(tenantId, async client => {
+        const keepIds = parsed.filter(c => c.id !== null).map(c => c.id as number);
+        await client.query(
+            `DELETE FROM dish_components
+             WHERE tenant_id = $1 AND dish_id = $2 AND NOT (id = ANY($3::int[]))`,
+            [tenantId, dishId, keepIds]
+        );
+        for (let i = 0; i < parsed.length; i++) {
+            const c = parsed[i];
+            let updated = 0;
+            if (c.id !== null) {
+                const upd = await client.query(
+                    `UPDATE dish_components SET name = $4, removal_delta_cents = $5, sort_order = $6
+                     WHERE tenant_id = $1 AND dish_id = $2 AND id = $3`,
+                    [tenantId, dishId, c.id, c.name, c.delta, i]
+                );
+                updated = upd.rowCount ?? 0;
+            }
+            if (updated === 0) {
+                await client.query(
+                    `INSERT INTO dish_components (tenant_id, dish_id, name, removal_delta_cents, sort_order)
+                     VALUES ($1, $2, $3, $4, $5)`,
+                    [tenantId, dishId, c.name, c.delta, i]
+                );
+            }
+        }
+        const rs = await client.query(
+            `SELECT id, name, removal_delta_cents, sort_order FROM dish_components
+             WHERE tenant_id = $1 AND dish_id = $2 ORDER BY sort_order, id`,
+            [tenantId, dishId]
+        );
+        return rs.rows;
+    });
+    return { components: rows };
+};
+
 app.get('/menus', authenticate, async (req, res) => {
     try {
         await ensureSystemMenus(req.tenantId!);
@@ -10495,11 +11020,29 @@ app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, re
             ? (await getFiscalVatMap(req.tenantId!)).dish_default
             : parseVatRate(req.body.vat_rate);
         if (vatRate == null) return res.status(400).json({ error: 'vat_rate deve essere un intero fra 0 e 100' });
+        const dishType = req.body?.dish_type == null ? 'SIMPLE' : String(req.body.dish_type);
+        if (dishType !== 'SIMPLE' && dishType !== 'COMPOSED') return res.status(400).json({ error: 'dish_type deve essere SIMPLE o COMPOSED' });
         const result = await queryWithRetry(
-            'INSERT INTO dishes (tenant_id, name, description, price, category, allergens, photo_url, vat_rate) VALUES ($7, $1, $2, $3, $4, $5, $6, $8) RETURNING *',
-            [name, description, price, category, allergens, photo_url || null, req.tenantId!, vatRate]
+            'INSERT INTO dishes (tenant_id, name, description, price, category, allergens, photo_url, vat_rate, dish_type) VALUES ($7, $1, $2, $3, $4, $5, $6, $8, $9) RETURNING *',
+            [name, description, price, category, allergens, photo_url || null, req.tenantId!, vatRate, dishType]
         );
         const newDish = result.rows[0];
+
+        // Varianti e ingredienti: semantica di menu_ids — campo assente, non
+        // si tocca; presente, sostituisce l'insieme.
+        if (Array.isArray(req.body?.modifier_group_ids)) {
+            newDish.modifier_group_ids = await replaceDishModifierGroups(req.tenantId!, newDish.id, req.body.modifier_group_ids);
+        }
+        if (Array.isArray(req.body?.components)) {
+            const out = await replaceDishComponents(req.tenantId!, newDish.id, req.body.components);
+            if ('error' in out) return res.status(400).json({ error: out.error });
+            newDish.components = out.components;
+        }
+        if (Array.isArray(req.body?.modifier_group_ids) || Array.isArray(req.body?.components)) {
+            // dish:created non trasporta legami né ingredienti: vivono nel
+            // catalogue, e i palmari lo ricaricano su questo evento.
+            emitCatalogueUpdated(req.tenantId!, { piatto: newDish.id });
+        }
 
         // Appartenenza ai menu: le spunte del form. Un client che non le
         // manda (o le manda vuote) ottiene il default della categoria (i
@@ -10556,11 +11099,15 @@ app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req,
         const { name, description, price, category, allergens, photo_url } = req.body;
         const vatRate = parseVatRate(req.body?.vat_rate);
         if (req.body?.vat_rate != null && vatRate == null) return res.status(400).json({ error: 'vat_rate deve essere un intero fra 0 e 100' });
+        const dishType = req.body?.dish_type == null ? null : String(req.body.dish_type);
+        if (dishType !== null && dishType !== 'SIMPLE' && dishType !== 'COMPOSED') return res.status(400).json({ error: 'dish_type deve essere SIMPLE o COMPOSED' });
         const result = await queryWithRetry(
             // COALESCE sul body: un client vecchio che non manda vat_rate non
-            // deve resettare l'aliquota già impostata.
-            'UPDATE dishes SET name = $1, description = $2, price = $3, category = $4, allergens = $5, photo_url = $6, vat_rate = COALESCE($9, vat_rate) WHERE id = $7 AND tenant_id = $8 RETURNING *',
-            [name, description, price, category, allergens, photo_url || null, id, req.tenantId!, vatRate]
+            // deve resettare l'aliquota già impostata. Idem dish_type: il
+            // ritorno a SIMPLE non cancella gli ingredienti — restano e la
+            // validazione li ignora finché il piatto non torna COMPOSED.
+            'UPDATE dishes SET name = $1, description = $2, price = $3, category = $4, allergens = $5, photo_url = $6, vat_rate = COALESCE($9, vat_rate), dish_type = COALESCE($10, dish_type) WHERE id = $7 AND tenant_id = $8 RETURNING *',
+            [name, description, price, category, allergens, photo_url || null, id, req.tenantId!, vatRate, dishType]
         );
         const updatedDish = result.rows[0];
         if (!updatedDish) {
@@ -10573,6 +11120,19 @@ app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req,
         updatedDish.menu_ids = Array.isArray(req.body?.menu_ids)
             ? await replaceDishMenus(req.tenantId!, updatedDish.id, req.body.menu_ids)
             : await dishMenuIds(updatedDish.id);
+
+        // Varianti e ingredienti: stessa semantica di menu_ids.
+        if (Array.isArray(req.body?.modifier_group_ids)) {
+            updatedDish.modifier_group_ids = await replaceDishModifierGroups(req.tenantId!, updatedDish.id, req.body.modifier_group_ids);
+        }
+        if (Array.isArray(req.body?.components)) {
+            const out = await replaceDishComponents(req.tenantId!, updatedDish.id, req.body.components);
+            if ('error' in out) return res.status(400).json({ error: out.error });
+            updatedDish.components = out.components;
+        }
+        if (Array.isArray(req.body?.modifier_group_ids) || Array.isArray(req.body?.components)) {
+            emitCatalogueUpdated(req.tenantId!, { piatto: updatedDish.id });
+        }
 
         // Log activity
         if (req.user) {
@@ -24852,12 +25412,17 @@ app.post('/orders', authenticate, requirePermission('orders:take'), async (req, 
 // Sta sotto /menu e non sotto /orders per non collidere con /orders/:id.
 app.get('/menu/catalogue', authenticate, requirePermission('orders:view'), async (req, res) => {
     try {
-        const [lists, stations, groups, mods, links, catPrefs] = await Promise.all([
+        const [lists, stations, groups, mods, links, components, catPrefs] = await Promise.all([
             queryWithRetry(`SELECT id, name, is_default, is_active, sort_order FROM menu_price_lists WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
             queryWithRetry(`SELECT id, name, color, sort_order, is_active FROM stations WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
-            queryWithRetry(`SELECT id, name, min_select, max_select, sort_order FROM modifier_groups WHERE tenant_id = $1 ORDER BY sort_order, id`, [req.tenantId!]),
-            queryWithRetry(`SELECT id, group_id, name, price_delta_cents, is_active, sort_order FROM modifiers WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
+            // Solo gruppi accesi: un gruppo spento in gestione non deve né
+            // comparire sul foglio né pretendere il suo min alla battitura.
+            queryWithRetry(`SELECT id, name, min_select, max_select, sort_order FROM modifier_groups WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
+            // price_delta_pct: il foglio varianti mostra l'importo in € per
+            // il piatto corrente; il calcolo vero resta del server.
+            queryWithRetry(`SELECT id, group_id, name, price_delta_cents, price_delta_pct, is_active, sort_order FROM modifiers WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
             queryWithRetry(`SELECT dish_id, group_id FROM dish_modifier_groups WHERE tenant_id = $1`, [req.tenantId!]),
+            queryWithRetry(`SELECT id, dish_id, name, removal_delta_cents, sort_order FROM dish_components WHERE tenant_id = $1 ORDER BY sort_order, id`, [req.tenantId!]),
             getMenuCategoryPrefs(req.tenantId!),
         ]);
         res.json({
@@ -24868,6 +25433,9 @@ app.get('/menu/catalogue', authenticate, requirePermission('orders:view'), async
                 modifiers: mods.rows.filter((m: any) => m.group_id === g.id),
             })),
             dish_modifier_groups: links.rows,
+            // Ingredienti dei piatti composti: pre-inclusi sul foglio, si
+            // battono in negativo (removed_component_ids).
+            dish_components: components.rows,
             // Ordine e accensione delle categorie decisi in Menu: il palmare
             // li applica alle chip e nasconde le categorie spente.
             category_prefs: catPrefs,
@@ -25111,7 +25679,7 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
             // invisibile a ogni monitor di cucina (collaudo 2/09, Fusillo).
             // Il match esatto, se c'è, vince sugli omonimi.
             const dish = await client.query(
-                `SELECT d.id, d.name, d.price, d.vat_rate,
+                `SELECT d.id, d.name, d.price, d.vat_rate, d.dish_type,
                         COALESCE(d.station_id, cs.station_id) AS station_id
                  FROM dishes d
                  LEFT JOIN LATERAL (
@@ -25166,7 +25734,7 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
                     return res.status(400).json({ error: `items[${i}]: variante ripetuta nel payload — le ripetizioni viaggiano su n` });
                 }
                 const mres = await client.query(
-                    `SELECT m.id, m.name, m.price_delta_cents
+                    `SELECT m.id, m.name, m.price_delta_cents, m.price_delta_pct
                      FROM modifiers m
                      JOIN dish_modifier_groups dmg ON dmg.group_id = m.group_id AND dmg.tenant_id = m.tenant_id
                      WHERE m.id = ANY($1::int[]) AND dmg.dish_id = $2 AND m.tenant_id = $3 AND m.is_active`,
@@ -25183,14 +25751,83 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
                 const byId = new Map(mres.rows.map((r: any) => [Number(r.id), r]));
                 modifiers = signedEntries.map(e => {
                     const m: any = byId.get(e.id);
+                    // Percentuale del prezzo BATTUTO (listino della comanda),
+                    // risolta in centesimi qui e una volta sola: lo snapshot
+                    // resta in €, e conti, KDS e fiscale non sanno nulla
+                    // delle percentuali. Lo stesso «+10%» vale meno sul
+                    // listino pranzo — è il punto della feature.
+                    const baseDelta = m.price_delta_pct != null
+                        ? Math.round(unitPrice * Number(m.price_delta_pct) / 100)
+                        : Number(m.price_delta_cents);
                     const prefix = e.n === 1 ? '' : e.n > 0 ? `${'+'.repeat(e.n)} ` : `${'-'.repeat(-e.n)} `;
                     return {
                         id: m.id,
                         name: `${prefix}${m.name}`,
-                        price_delta_cents: e.n * Number(m.price_delta_cents),
+                        price_delta_cents: e.n * baseDelta,
                         n: e.n,
                     };
                 });
+            }
+
+            // Cardinalità dei gruppi del piatto — il buco che la UI copriva
+            // da sola: senza questo, un client qualsiasi salta i gruppi
+            // obbligatori. Contano le varianti DISTINTE scelte in aggiunta
+            // (n > 0): le rimozioni firmate non sono una scelta del gruppo,
+            // e le ripetizioni (n=2) restano una scelta sola. La variante
+            // libera viaggia in `note` e resta fuori da questi conteggi.
+            const chosenIds = signedEntries.filter(e => e.n > 0).map(e => e.id);
+            const card = await client.query(
+                `SELECT g.id, g.name, g.min_select, g.max_select,
+                        COUNT(m.id) FILTER (WHERE m.is_active) AS attivi,
+                        COUNT(m.id) FILTER (WHERE m.is_active AND m.id = ANY($3::int[])) AS scelti
+                 FROM dish_modifier_groups dmg
+                 JOIN modifier_groups g ON g.id = dmg.group_id AND g.tenant_id = dmg.tenant_id
+                 LEFT JOIN modifiers m ON m.group_id = g.id AND m.tenant_id = g.tenant_id
+                 WHERE dmg.dish_id = $1 AND dmg.tenant_id = $2 AND g.is_active
+                 GROUP BY g.id`,
+                [dishId, req.tenantId!, chosenIds]
+            );
+            for (const g of card.rows) {
+                const scelti = Number(g.scelti);
+                if (scelti > Number(g.max_select)) {
+                    await client.query('ROLLBACK'); client.release();
+                    return res.status(400).json({ error: `items[${i}]: troppe varianti per «${g.name}» (massimo ${g.max_select})` });
+                }
+                // LEAST: un gruppo obbligatorio coi membri tutti spenti non
+                // deve rendere il piatto imbattibile.
+                if (scelti < Math.min(Number(g.min_select), Number(g.attivi))) {
+                    await client.query('ROLLBACK'); client.release();
+                    return res.status(400).json({ error: `items[${i}]: manca la scelta per «${g.name}»` });
+                }
+            }
+
+            // Ingredienti tolti da un piatto composto: entrano nello snapshot
+            // come «Senza X» con l'eventuale sconto — da lì in poi comanda,
+            // KDS, conto e fiscale li leggono senza sapere cosa sono.
+            const removedIds = Array.isArray(raw?.removed_component_ids)
+                ? [...new Set(raw.removed_component_ids.map((n: any) => Number(n)).filter(Number.isInteger))] as number[]
+                : [];
+            if (removedIds.length > 0) {
+                if (dish.rows[0].dish_type !== 'COMPOSED') {
+                    await client.query('ROLLBACK'); client.release();
+                    return res.status(400).json({ error: `items[${i}]: il piatto non è composto, non ha ingredienti da togliere` });
+                }
+                const comps = await client.query(
+                    `SELECT id, name, removal_delta_cents FROM dish_components
+                     WHERE id = ANY($1::int[]) AND dish_id = $2 AND tenant_id = $3`,
+                    [removedIds, dishId, req.tenantId!]
+                );
+                if (comps.rows.length !== removedIds.length) {
+                    await client.query('ROLLBACK'); client.release();
+                    return res.status(400).json({ error: `items[${i}]: uno o più ingredienti non appartengono a questo piatto` });
+                }
+                const senza = comps.rows.map((c: any) => ({
+                    id: null,
+                    component_id: Number(c.id),
+                    name: `Senza ${c.name}`,
+                    price_delta_cents: Number(c.removal_delta_cents),
+                }));
+                modifiers = [...(modifiers ?? []), ...senza];
             }
 
             // La partita viene copiata sulla riga, non risolta via join a

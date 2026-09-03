@@ -14,6 +14,7 @@ import { billsApiService, getOpenBills, printBill, type OpenBillRow } from '../.
 import { cashApiService } from '../../services/cashApiService';
 import { socketClient } from '../../services/socketClient';
 import { useOpenBills } from '../pagamenti/useOpenBills';
+import { VariantSheet } from '../VariantSheet';
 import { BillSheet, type SettleOpts } from '../pagamenti/BillSheet';
 import {
   buildMergeGroups, buildRows, makeReservationForTable, type TableFilter,
@@ -153,6 +154,16 @@ export const CassaPage: React.FC<CassaPageProps> = ({
     getMenuCatalogue().then(setCatalogue).catch(() => setCatalogue(null));
   }, []);
 
+  // Varianti o ingredienti cambiati in gestione menu: il catalogo si
+  // ricarica da solo, senza reload di pagina.
+  useEffect(() => {
+    const socket = socketClient.getSocket();
+    if (!socket) return;
+    const onCatalogue = () => { getMenuCatalogue().then(setCatalogue).catch(() => {}); };
+    socket.on('catalogue:updated', onCatalogue);
+    return () => { socket.off('catalogue:updated', onCatalogue); };
+  }, []);
+
   const categories = useMemo(() => {
     const seen = new Set<string>();
     for (const d of dishes) if (d.category) seen.add(d.category);
@@ -165,11 +176,26 @@ export const CassaPage: React.FC<CassaPageProps> = ({
 
   // Varianti di un piatto, risolte dal catalogo — stessa derivazione di
   // Comande: il legame piatto→gruppi sta in `dish_modifier_groups`.
-  const hasVariants = useCallback((dishId: number) => {
-    if (!catalogue) return false;
+  const groupsForDish = useCallback((dishId: number) => {
+    if (!catalogue) return [];
     const ids = catalogue.dish_modifier_groups.filter(l => l.dish_id === dishId).map(l => l.group_id);
-    return catalogue.modifier_groups.some(g => ids.includes(g.id));
+    return catalogue.modifier_groups.filter(g => ids.includes(g.id));
   }, [catalogue]);
+
+  const componentsForDish = useCallback(
+    (dishId: number) => (catalogue?.dish_components ?? []).filter(c => c.dish_id === dishId),
+    [catalogue]
+  );
+
+  // Il foglio serve anche ai composti senza gruppi (ingredienti da togliere)
+  // e, soprattutto, ai gruppi obbligatori: senza foglio la cassa manderebbe
+  // il piatto nudo e la validazione min del server risponderebbe 400.
+  const needsVariantSheet = useCallback(
+    (dishId: number) => groupsForDish(dishId).length > 0
+      || (dishes.find(d => d.id === dishId)?.dish_type === 'COMPOSED' && componentsForDish(dishId).length > 0),
+    [groupsForDish, componentsForDish, dishes]
+  );
+  const [variantFor, setVariantFor] = useState<Dish | null>(null);
 
   const selectedDateRome = useMemo(() => getRomeDatePart(globalDate), [globalDate]);
 
@@ -425,10 +451,18 @@ export const CassaPage: React.FC<CassaPageProps> = ({
     }
   }, [serviceQuery, isTodayRome, reservationForTable, tables]);
 
-  const pushLine = useCallback((dish: Dish, modifierIds: number[] = [], labels: string[] = [], delta = 0, note?: string) => {
+  const pushLine = useCallback((
+    dish: Dish, entries: { id: number; n: number }[] = [], labels: string[] = [], delta = 0,
+    note?: string, removedIds: number[] = [],
+  ) => {
     // Le bozze restano locali fino all'invio, come in Comande: una sola
-    // chiamata di rete invece di una per piatto.
-    const key = cartKey(dish.id, 1, modifierIds, note);
+    // chiamata di rete invece di una per piatto. Verso, ripetizioni e
+    // ingredienti tolti entrano in chiave come là.
+    const key = cartKey(
+      dish.id, 1,
+      [...entries.map(e => `${e.id}x${e.n}`), ...removedIds.map(id => `r${id}`)],
+      note,
+    );
     setCart(prev => {
       const at = prev.findIndex(l => l.key === key);
       if (at >= 0) {
@@ -438,11 +472,40 @@ export const CassaPage: React.FC<CassaPageProps> = ({
       }
       return [...prev, {
         key, idem: newIdempotencyKey(), dish, qty: 1, course_no: 1,
-        modifier_ids: modifierIds, modifier_labels: labels,
+        modifier_ids: entries.map(e => e.id),
+        modifiers: entries,
+        ...(removedIds.length > 0 ? { removed_component_ids: removedIds } : {}),
+        modifier_labels: labels,
         modifier_delta_cents: delta, note,
       }];
     });
   }, []);
+
+  // Conferma dal foglio varianti: etichette e delta cotti come in Comande —
+  // le percentuali si mostrano risolte sul prezzo di anagrafica, il conto
+  // vero lo rifà il server sul prezzo battuto.
+  const addWithVariants = useCallback((dish: Dish, entries: { id: number; n: number }[], removedIds: number[], note?: string) => {
+    const byId = new Map(groupsForDish(dish.id).flatMap(g => g.modifiers).map(m => [m.id, m]));
+    const chosen = entries.filter(e => byId.has(e.id));
+    const deltaOf = (m: { price_delta_cents: number; price_delta_pct: string | null }) =>
+      m.price_delta_pct != null
+        ? Math.round(Math.round(Number(dish.price) * 100) * Number(m.price_delta_pct) / 100)
+        : m.price_delta_cents;
+    const signedLabel = (name: string, n: number) =>
+      n === 1 ? name : n > 0 ? `${'+'.repeat(n)} ${name}` : `${'-'.repeat(-n)} ${name}`;
+    const comps = componentsForDish(dish.id);
+    const removed = removedIds
+      .map(id => comps.find(c => c.id === id))
+      .filter((c): c is NonNullable<typeof c> => c != null);
+    pushLine(
+      dish, chosen,
+      [...chosen.map(e => signedLabel(byId.get(e.id)!.name, e.n)), ...removed.map(c => `Senza ${c.name}`)],
+      chosen.reduce((s, e) => s + e.n * deltaOf(byId.get(e.id)!), 0)
+        + removed.reduce((s, c) => s + c.removal_delta_cents, 0),
+      note,
+      removed.map(c => c.id),
+    );
+  }, [groupsForDish, componentsForDish, pushLine]);
 
   const changeQty = useCallback((key: string, delta: number) => {
     setCart(prev => prev.flatMap(l => {
@@ -461,6 +524,8 @@ export const CassaPage: React.FC<CassaPageProps> = ({
       qty: l.qty,
       course_no: l.course_no,
       modifier_ids: l.modifier_ids,
+      ...(l.modifiers ? { modifiers: l.modifiers } : {}),
+      ...(l.removed_component_ids?.length ? { removed_component_ids: l.removed_component_ids } : {}),
       note: l.note ?? null,
       idempotency_key: l.idem,
     }));
@@ -683,17 +748,19 @@ export const CassaPage: React.FC<CassaPageProps> = ({
           onCategory={setCategory}
           query={dishQuery}
           onQuery={setDishQuery}
-          hasVariants={hasVariants}
+          hasVariants={needsVariantSheet}
           busy={busyBillId != null}
           error={error}
           serviceLabel={serviceLabel}
           onBack={() => { setScreen('queue'); setOrder(null); setTableId(null); setCart([]); }}
-          onAddDish={d => pushLine(d)}
+          // Il piatto con varianti (o composto) passa dal foglio: mandarlo
+          // nudo incasserebbe un 400 dalla validazione min del server.
+          onAddDish={d => { if (needsVariantSheet(d.id)) setVariantFor(d); else pushLine(d); }}
           onRemoveDish={d => {
             const line = cart.find(l => l.dish.id === d.id);
             if (line) changeQty(line.key, -1);
           }}
-          onVariants={d => pushLine(d)}
+          onVariants={d => setVariantFor(d)}
           onCartQty={changeQty}
           onVoidItem={setVoidTarget}
           onCovers={changeCovers}
@@ -760,6 +827,16 @@ export const CassaPage: React.FC<CassaPageProps> = ({
           busy={busyBillId != null}
           onCancel={() => setVoidTarget(null)}
           onConfirm={reason => doVoid(voidTarget, reason)}
+        />
+      )}
+
+      {variantFor && (
+        <VariantSheet
+          dish={variantFor}
+          groups={groupsForDish(variantFor.id)}
+          components={variantFor.dish_type === 'COMPOSED' ? componentsForDish(variantFor.id) : []}
+          onCancel={() => setVariantFor(null)}
+          onConfirm={(entries, removedIds, note) => { addWithVariants(variantFor, entries, removedIds, note); setVariantFor(null); }}
         />
       )}
 

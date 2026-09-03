@@ -65,6 +65,15 @@ export interface Dish {
   /** Menu di appartenenza (spunte nel form): ALLA_CARTA governa comande e
    *  menu digitale, BANQUETS la composizione banchetti. */
   menu_ids?: number[];
+  /** COMPOSED = piatto fatto di ingredienti (dish_components) pre-inclusi e
+   *  togliibili sull'orderpad. Assente/SIMPLE = piatto com'è sempre stato. */
+  dish_type?: 'SIMPLE' | 'COMPOSED';
+  /** Solo nel salvataggio (semantica menu_ids: assente = non toccare) e
+   *  nelle risposte quando toccati: i gruppi varianti agganciati al piatto. */
+  modifier_group_ids?: number[];
+  /** Solo nel salvataggio: gli ingredienti del piatto composto. Con id =
+   *  ritocco (l'id resta stabile), senza id = nuovo, assente = eliminato. */
+  components?: { id?: number; name: string; removal_delta_cents?: number }[];
 }
 
 /** I menu del ristorante: i due di sistema (Alla carta, Banchetti — non
@@ -644,6 +653,10 @@ export interface ModifierGroup {
   min_select: number;
   max_select: number;
   sort_order: number;
+  is_active: boolean;
+  /** 'pp:varianti:…' = gruppo del sync Passepartout (membri e max della
+   *  cassa); null = gruppo creato a mano nel CRM. */
+  external_ref: string | null;
 }
 
 export interface Modifier {
@@ -651,7 +664,19 @@ export interface Modifier {
   group_id: number;
   name: string;
   price_delta_cents: number;
+  /** Percentuale del prezzo battuto (es. "10.00"; pg serializza NUMERIC come
+   *  stringa). null = sovrapprezzo assoluto in centesimi. */
+  price_delta_pct: string | null;
   is_active: boolean;
+  sort_order: number;
+}
+
+/** Ingrediente di un piatto composto: pre-incluso, si toglie sull'orderpad
+ *  («Senza X», gratis o a sconto — removal_delta_cents <= 0). */
+export interface DishComponent {
+  id: number;
+  name: string;
+  removal_delta_cents: number;
   sort_order: number;
 }
 
@@ -659,6 +684,9 @@ export interface Modifier {
 // domani il listino cambia.
 export interface OrderItemModifier {
   id?: number | null;
+  /** Ingrediente tolto da un piatto composto («Senza X»): id null e questo
+   *  valorizzato — serve a ripetere la riga con la rimozione intatta. */
+  component_id?: number | null;
   /** Già col prefisso del verso quando firmata: «++ prosciutto». */
   name: string;
   /** Già moltiplicato per n: addebito col +, sconto col −. */

@@ -1,4 +1,4 @@
-import { Reservation, Table, Room, Dish, RestaurantMenu, BanquetMenu, BanquetPayment, BanquetStatus, TableMerge, TableHiddenOverride, RoomClosedOverride, Shift, Customer, InventoryArea, InventoryLocation, InventoryProduct, InventoryStockRow, InventoryMovement, InventoryMovementReason, InventoryCategory, PaymentRequest, TableAssignmentSuggestion } from '../types';
+import { Reservation, Table, Room, Dish, DishComponent, Modifier, ModifierGroup, RestaurantMenu, BanquetMenu, BanquetPayment, BanquetStatus, TableMerge, TableHiddenOverride, RoomClosedOverride, Shift, Customer, InventoryArea, InventoryLocation, InventoryProduct, InventoryStockRow, InventoryMovement, InventoryMovementReason, InventoryCategory, PaymentRequest, TableAssignmentSuggestion } from '../types';
 import { socketClient } from './socketClient';
 import { authApiService } from './authApiService';
 import { buildApiError } from './apiError';
@@ -525,6 +525,92 @@ export const setCategoryMenu = async (category: string, menuId: number, member: 
     headers: getHeaders(),
     body: JSON.stringify({ category, menu_id: menuId, member }),
   });
+};
+
+/* --- Gestione varianti (modifier group) --------------------------------- */
+
+/** Gruppo come lo vede la gestione: membri anche spenti, piatti assegnati.
+ *  I gruppi con external_ref 'pp:varianti:…' sono della cassa: membri e
+ *  max_select non si toccano (il server risponde 409). */
+export interface AdminModifierGroup extends ModifierGroup {
+  modifiers: Modifier[];
+  dish_ids: number[];
+}
+
+export const getModifierGroups = async (): Promise<AdminModifierGroup[]> => {
+  const r = await apiRequest<{ groups: AdminModifierGroup[] }>(`${API_URL}/menu/modifier-groups`, {
+    headers: getHeaders(false),
+  });
+  return r.groups;
+};
+
+export interface ModifierDeltaInput {
+  price_delta_cents?: number;
+  /** Valorizzata = percentuale del prezzo battuto (i centesimi si azzerano);
+   *  null esplicito = torna al sovrapprezzo assoluto. */
+  price_delta_pct?: number | null;
+}
+
+export const createModifierGroup = async (payload: {
+  name: string; min_select?: number; max_select?: number;
+  modifiers?: ({ name: string } & ModifierDeltaInput)[];
+}): Promise<AdminModifierGroup> => {
+  return apiRequest<AdminModifierGroup>(`${API_URL}/menu/modifier-groups`, {
+    method: 'POST', headers: getHeaders(), body: JSON.stringify(payload),
+  });
+};
+
+export const updateModifierGroup = async (id: number, payload: {
+  name?: string; min_select?: number; max_select?: number; is_active?: boolean;
+}): Promise<AdminModifierGroup> => {
+  return apiRequest<AdminModifierGroup>(`${API_URL}/menu/modifier-groups/${id}`, {
+    method: 'PUT', headers: getHeaders(), body: JSON.stringify(payload),
+  });
+};
+
+export const deleteModifierGroup = async (id: number): Promise<void> => {
+  return apiRequest<void>(`${API_URL}/menu/modifier-groups/${id}`, {
+    method: 'DELETE', headers: getHeaders(false),
+  }, false);
+};
+
+/** Ordina i gruppi: l'array di id È l'ordine. */
+export const saveModifierGroupOrder = async (groupIds: number[]): Promise<void> => {
+  await apiRequest<{ ok: true }>(`${API_URL}/menu/modifier-groups/order`, {
+    method: 'PUT', headers: getHeaders(), body: JSON.stringify({ group_ids: groupIds }),
+  });
+};
+
+export const createModifier = async (groupId: number, payload: { name: string } & ModifierDeltaInput): Promise<Modifier> => {
+  return apiRequest<Modifier>(`${API_URL}/menu/modifier-groups/${groupId}/modifiers`, {
+    method: 'POST', headers: getHeaders(), body: JSON.stringify(payload),
+  });
+};
+
+export const updateModifier = async (id: number, payload: { name?: string; is_active?: boolean } & ModifierDeltaInput): Promise<Modifier> => {
+  return apiRequest<Modifier>(`${API_URL}/menu/modifiers/${id}`, {
+    method: 'PUT', headers: getHeaders(), body: JSON.stringify(payload),
+  });
+};
+
+export const deleteModifier = async (id: number): Promise<void> => {
+  return apiRequest<void>(`${API_URL}/menu/modifiers/${id}`, {
+    method: 'DELETE', headers: getHeaders(false),
+  }, false);
+};
+
+export const saveModifierOrder = async (groupId: number, modifierIds: number[]): Promise<void> => {
+  await apiRequest<{ ok: true }>(`${API_URL}/menu/modifier-groups/${groupId}/modifiers/order`, {
+    method: 'PUT', headers: getHeaders(), body: JSON.stringify({ modifier_ids: modifierIds }),
+  });
+};
+
+/** Ingredienti di un piatto composto (prefill dell'editor). */
+export const getDishComponents = async (dishId: number): Promise<DishComponent[]> => {
+  const r = await apiRequest<{ components: DishComponent[] }>(`${API_URL}/dishes/${dishId}/components`, {
+    headers: getHeaders(false),
+  });
+  return r.components;
 };
 
 /** Ordina i piatti di una categoria: l'array di id È l'ordine. */

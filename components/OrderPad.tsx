@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Check, Loader2, Minus, Plus, TriangleAlert, Utensils, X,
+  Check, Loader2, TriangleAlert, X,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import type { Dish, RestaurantMenu, Reservation, Table, TableMerge, OrderWithItems, OrderItem } from '../types';
@@ -21,9 +21,10 @@ import { billsApiService, printBill } from '../services/billsApiService';
 import { socketClient } from '../services/socketClient';
 import type { ServiceBill } from '../services/ordersApiService';
 import {
-  ModalShell, Sheet, Callout, SectionHeader, useMediaQuery,
-  dsInput, dsButton,
+  ModalShell, Callout, SectionHeader, useMediaQuery,
+  dsButton,
 } from './ds';
+import { VariantSheet } from './VariantSheet';
 import { TableGrid } from './comande/TableGrid';
 import { OrderTopBar } from './comande/OrderTopBar';
 import { DishBrowser } from './comande/DishBrowser';
@@ -172,6 +173,16 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     getMenuCatalogue().then(setCatalogue).catch(() => setCatalogue(null));
   }, []);
 
+  // Varianti o ingredienti cambiati in gestione menu (anche da un'altra
+  // postazione): il catalogo si ricarica da solo, senza reload di pagina.
+  useEffect(() => {
+    const socket = socketClient.getSocket();
+    if (!socket) return;
+    const onCatalogue = () => { getMenuCatalogue().then(setCatalogue).catch(() => {}); };
+    socket.on('catalogue:updated', onCatalogue);
+    return () => { socket.off('catalogue:updated', onCatalogue); };
+  }, []);
+
   useEffect(() => {
     if (!flash) return;
     const t = setTimeout(() => setFlash(null), 6000);
@@ -218,6 +229,20 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   const hasVariants = useCallback(
     (dishId: number) => groupsForDish(dishId).length > 0,
     [groupsForDish]
+  );
+
+  // Ingredienti del piatto composto, dal catalogo.
+  const componentsForDish = useCallback(
+    (dishId: number) => (catalogue?.dish_components ?? []).filter(c => c.dish_id === dishId),
+    [catalogue]
+  );
+
+  // Il foglio varianti si apre anche per un composto senza gruppi: gli
+  // ingredienti da togliere stanno lì.
+  const needsVariantSheet = useCallback(
+    (dishId: number) => hasVariants(dishId)
+      || (dishes.find(d => d.id === dishId)?.dish_type === 'COMPOSED' && componentsForDish(dishId).length > 0),
+    [hasVariants, componentsForDish, dishes]
   );
 
   // La prenotazione del giorno/turno selezionati per un tavolo: nome e
@@ -358,11 +383,17 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   const pushLine = useCallback((
     dish: Dish, courseNo: number, qty: number,
     entries: { id: number; n: number }[], modifierLabels: string[], modifierDelta: number,
-    note?: string,
+    note?: string, removedIds: number[] = [],
   ) => {
     // Il verso e le ripetizioni entrano in chiave: «++ prosciutto» e
-    // «- prosciutto» sono piatti diversi in cucina, come le cotture.
-    const key = cartKey(dish.id, courseNo, entries.map(e => `${e.id}x${e.n}`), note);
+    // «- prosciutto» sono piatti diversi in cucina, come le cotture. Gli
+    // ingredienti tolti idem: «senza cipolla» e il piatto intero sono due
+    // righe.
+    const key = cartKey(
+      dish.id, courseNo,
+      [...entries.map(e => `${e.id}x${e.n}`), ...removedIds.map(id => `r${id}`)],
+      note,
+    );
     setCart(prev => {
       const at = prev.findIndex(l => l.key === key);
       if (at >= 0) {
@@ -377,6 +408,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         key, idem: newIdempotencyKey(), dish, qty, course_no: courseNo,
         modifier_ids: entries.map(e => e.id),
         modifiers: entries,
+        ...(removedIds.length > 0 ? { removed_component_ids: removedIds } : {}),
         modifier_labels: modifierLabels,
         modifier_delta_cents: modifierDelta,
         ...(note ? { note } : {}),
@@ -391,22 +423,39 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   const signedLabel = (name: string, n: number): string =>
     n === 1 ? name : n > 0 ? `${'+'.repeat(n)} ${name}` : `${'-'.repeat(-n)} ${name}`;
 
-  const addToCart = (dish: Dish, entries: { id: number; n: number }[] = [], note?: string) => {
+  // Delta della variante in centesimi: le percentuali si risolvono sul
+  // prezzo di anagrafica del piatto — anteprima locale, il conto vero lo
+  // rifà il server sul prezzo del listino battuto.
+  const modifierDeltaCents = (dish: Dish, m: { price_delta_cents: number; price_delta_pct: string | null }): number =>
+    m.price_delta_pct != null
+      ? Math.round(Math.round(Number(dish.price) * 100) * Number(m.price_delta_pct) / 100)
+      : m.price_delta_cents;
+
+  const addToCart = (dish: Dish, entries: { id: number; n: number }[] = [], note?: string, removedIds: number[] = []) => {
     const all = groupsForDish(dish.id).flatMap(g => g.modifiers);
     const byId = new Map(all.map(m => [m.id, m]));
     const chosen = entries.filter(e => byId.has(e.id));
+    // Gli ingredienti tolti si cuociono come le varianti: etichetta «Senza X»
+    // e sconto dentro labels/delta, così ogni superficie li mostra senza
+    // sapere cosa sono.
+    const comps = componentsForDish(dish.id);
+    const removed = removedIds
+      .map(id => comps.find(c => c.id === id))
+      .filter((c): c is NonNullable<typeof c> => c != null);
     pushLine(
       dish, course, 1, chosen,
-      chosen.map(e => signedLabel(byId.get(e.id)!.name, e.n)),
-      chosen.reduce((s, e) => s + e.n * byId.get(e.id)!.price_delta_cents, 0),
+      [...chosen.map(e => signedLabel(byId.get(e.id)!.name, e.n)), ...removed.map(c => `Senza ${c.name}`)],
+      chosen.reduce((s, e) => s + e.n * modifierDeltaCents(dish, byId.get(e.id)!), 0)
+        + removed.reduce((s, c) => s + c.removal_delta_cents, 0),
       note,
+      removed.map(c => c.id),
     );
   };
 
   // Sostituisce varianti e nota di una riga in bozza mantenendo qty e chiave
   // di idempotenza. Se la nuova combinazione coincide con un'altra riga già
   // nel carrello, le due si fondono (stessa regola del tocco sul menu).
-  const updateLine = (lineKey: string, entries: { id: number; n: number }[], note?: string) => {
+  const updateLine = (lineKey: string, entries: { id: number; n: number }[], note?: string, removedIds: number[] = []) => {
     setCart(prev => {
       const at = prev.findIndex(l => l.key === lineKey);
       if (at < 0) return prev;
@@ -414,14 +463,24 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       const all = groupsForDish(line.dish.id).flatMap(g => g.modifiers);
       const byId = new Map(all.map(m => [m.id, m]));
       const chosen = entries.filter(e => byId.has(e.id));
-      const newKey = cartKey(line.dish.id, line.course_no, chosen.map(e => `${e.id}x${e.n}`), note);
+      const comps = componentsForDish(line.dish.id);
+      const removed = removedIds
+        .map(id => comps.find(c => c.id === id))
+        .filter((c): c is NonNullable<typeof c> => c != null);
+      const newKey = cartKey(
+        line.dish.id, line.course_no,
+        [...chosen.map(e => `${e.id}x${e.n}`), ...removed.map(c => `r${c.id}`)],
+        note,
+      );
       const updated: CartLine = {
         ...line,
         key: newKey,
         modifier_ids: chosen.map(e => e.id),
         modifiers: chosen,
-        modifier_labels: chosen.map(e => signedLabel(byId.get(e.id)!.name, e.n)),
-        modifier_delta_cents: chosen.reduce((s, e) => s + e.n * byId.get(e.id)!.price_delta_cents, 0),
+        removed_component_ids: removed.length > 0 ? removed.map(c => c.id) : undefined,
+        modifier_labels: [...chosen.map(e => signedLabel(byId.get(e.id)!.name, e.n)), ...removed.map(c => `Senza ${c.name}`)],
+        modifier_delta_cents: chosen.reduce((s, e) => s + e.n * modifierDeltaCents(line.dish, byId.get(e.id)!), 0)
+          + removed.reduce((s, c) => s + c.removal_delta_cents, 0),
         note: note || undefined,
       };
       const next = prev.filter((_, i) => i !== at);
@@ -436,9 +495,10 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   };
 
   const onDishTap = (dish: Dish) => {
-    // Se il piatto ha varianti le chiediamo: «al sangue» o «ben cotta» non è
-    // un dettaglio che si aggiusta a voce dopo.
-    if (hasVariants(dish.id)) setVariantFor(dish);
+    // Se il piatto ha varianti (o ingredienti da poter togliere) le
+    // chiediamo: «al sangue» o «ben cotta» non è un dettaglio che si
+    // aggiusta a voce dopo.
+    if (needsVariantSheet(dish.id)) setVariantFor(dish);
     else addToCart(dish);
   };
 
@@ -460,7 +520,10 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
    *  server: diventa una bozza come tutte le altre, e parte con Invia. */
   const repeatLine = (line: RepeatLine, qty: number) => {
     if (!line.dish) return;
-    pushLine(line.dish, course, qty, line.modifiers, line.modifier_labels, line.modifier_delta_cents);
+    pushLine(
+      line.dish, course, qty, line.modifiers, line.modifier_labels, line.modifier_delta_cents,
+      undefined, line.removed_component_ids,
+    );
   };
 
   const repeatAll = (lines: RepeatLine[]) => {
@@ -509,6 +572,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         // Le varianti firmate vincono su modifier_ids lato server; le righe
         // di bozze vecchie (senza modifiers) viaggiano come sempre.
         ...(l.modifiers ? { modifiers: l.modifiers } : {}),
+        ...(l.removed_component_ids?.length ? { removed_component_ids: l.removed_component_ids } : {}),
         note: l.note ?? null,
         // Chiave per riga, stabile dalla nascita della riga: un retry dopo un
         // timeout rimanda le stesse chiavi e il server dedup-a invece di
@@ -1124,7 +1188,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       onQuery={setDishQuery}
       qtyInCourse={qtyInCourse}
       markedCategories={markedCategories}
-      hasVariants={hasVariants}
+      hasVariants={needsVariantSheet}
       onAdd={onDishTap}
       onRemove={removeFromCart}
       onLongPress={setVariantFor}
@@ -1260,18 +1324,24 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         <VariantSheet
           dish={variantFor}
           groups={groupsForDish(variantFor.id)}
+          components={variantFor.dish_type === 'COMPOSED' ? componentsForDish(variantFor.id) : []}
           onCancel={() => setVariantFor(null)}
-          onConfirm={(entries, note) => { addToCart(variantFor, entries, note); setVariantFor(null); }}
+          onConfirm={(entries, removedIds, note) => { addToCart(variantFor, entries, note, removedIds); setVariantFor(null); }}
         />
       )}
       {editLine && (
         <VariantSheet
           dish={editLine.dish}
           groups={groupsForDish(editLine.dish.id)}
-          initial={{ entries: editLine.modifiers ?? editLine.modifier_ids.map(id => ({ id, n: 1 })), note: editLine.note }}
+          components={editLine.dish.dish_type === 'COMPOSED' ? componentsForDish(editLine.dish.id) : []}
+          initial={{
+            entries: editLine.modifiers ?? editLine.modifier_ids.map(id => ({ id, n: 1 })),
+            removed: editLine.removed_component_ids,
+            note: editLine.note,
+          }}
           confirmLabel="Aggiorna"
           onCancel={() => setEditLine(null)}
-          onConfirm={(entries, note) => { updateLine(editLine.key, entries, note); setEditLine(null); }}
+          onConfirm={(entries, removedIds, note) => { updateLine(editLine.key, entries, note, removedIds); setEditLine(null); }}
         />
       )}
 
@@ -1362,7 +1432,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         open={dishSearchOpen}
         dishes={dishes}
         qtyInCourse={qtyInCourse}
-        hasVariants={hasVariants}
+        hasVariants={needsVariantSheet}
         onAdd={onDishTap}
         onClose={() => setDishSearchOpen(false)}
       />
@@ -1414,188 +1484,3 @@ const ErrorBar: React.FC<{ message: string; onDismiss: () => void }> = ({ messag
   </Callout>
 );
 
-// Foglio varianti. I gruppi con max_select = 1 sono a scelta singola
-// (cottura), gli altri multipla (aggiunte).
-const VariantSheet: React.FC<{
-  dish: Dish;
-  groups: MenuCatalogue['modifier_groups'];
-  /** Riapertura di una riga in bozza: il foglio parte dallo stato della
-   *  riga — è anche il posto dove le varianti troncate si leggono intere. */
-  initial?: { entries: { id: number; n: number }[]; note?: string };
-  confirmLabel?: string;
-  onCancel: () => void;
-  onConfirm: (entries: { id: number; n: number }[], note?: string) => void;
-}> = ({ dish, groups, initial, confirmLabel, onCancel, onConfirm }) => {
-  // Verso e ripetizioni per variante (battitura alla Passepartout): n>0
-  // aggiunge n volte (addebito), n<0 toglie (sconto), 0 = non applicata.
-  // Le scelte singole (cotture) restano chip a +1: un «-- media» non
-  // significa niente.
-  const [selected, setSelected] = useState<Map<number, number>>(
-    () => new Map((initial?.entries ?? []).map(e => [e.id, e.n])),
-  );
-  // Variante libera: quello che in cassa il cameriere scrive a mano («senza
-  // sale», «metà porzione»). Viaggia come nota di riga — KDS e comanda in
-  // cucina la stampano già sotto il piatto.
-  const [custom, setCustom] = useState(initial?.note ?? '');
-
-  const setN = (modId: number, n: number) => {
-    setSelected(prev => {
-      const next = new Map(prev);
-      if (n === 0) next.delete(modId);
-      else next.set(modId, Math.max(-5, Math.min(5, n)));
-      return next;
-    });
-  };
-
-  const toggleSingle = (groupId: number, modId: number) => {
-    setSelected(prev => {
-      const next = new Map(prev);
-      const group = groups.find(g => g.id === groupId);
-      const siblings = group ? group.modifiers.map(m => m.id) : [];
-      const wasOn = next.get(modId) != null;
-      for (const s of siblings) next.delete(s);
-      if (!wasOn) next.set(modId, 1);
-      return next;
-    });
-  };
-
-  const entries = [...selected.entries()].map(([id, n]) => ({ id, n }));
-  const missing = groups.filter(g => g.min_select > 0
-    && g.modifiers.filter(m => (selected.get(m.id) ?? 0) > 0).length < g.min_select);
-  const signedName = (name: string, n: number): string =>
-    n === 0 || n === 1 ? name : n > 0 ? `${'+'.repeat(n)} ${name}` : `${'-'.repeat(-n)} ${name}`;
-
-  return (
-    <Sheet
-      open
-      onClose={onCancel}
-      title={dish.name}
-      subtitle={
-        <span className="inline-flex items-center gap-1.5">
-          <Utensils size={14} aria-hidden /> Varianti
-        </span>
-      }
-      ariaLabel={`Varianti per ${dish.name}`}
-      bodyClassName="space-y-5 px-5 py-5 sm:px-6"
-      footer={
-        <button
-          type="button"
-          onClick={() => onConfirm(entries, custom.trim() || undefined)}
-          disabled={missing.length > 0}
-          className={`w-full ${dsButton.primary}`}
-        >
-          {missing.length > 0 ? `Scegli: ${missing.map(g => g.name).join(', ')}` : (confirmLabel ?? 'Aggiungi')}
-        </button>
-      }
-    >
-      {groups.map(g => {
-        const single = g.max_select <= 1;
-        return (
-          <div key={g.id}>
-            <div className="mb-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">
-              {g.name}
-              {g.min_select > 0 && (
-                <span className="text-[var(--ds-critical-text)]"> · obbligatorio</span>
-              )}
-            </div>
-            {single ? (
-              <div className="flex flex-wrap gap-2">
-                {g.modifiers.map(m => {
-                  const active = (selected.get(m.id) ?? 0) > 0;
-                  return (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onClick={() => toggleSingle(g.id, m.id)}
-                      aria-pressed={active}
-                      className={`inline-flex h-11 items-center rounded-full px-4 text-[15px] font-medium transition-colors ${
-                        active
-                          ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
-                          : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
-                      }`}
-                    >
-                      {m.name}
-                      {m.price_delta_cents !== 0 && (
-                        <span className="ml-1.5 tabular-nums opacity-75">
-                          {m.price_delta_cents > 0 ? '+' : '−'}{euro(Math.abs(m.price_delta_cents))}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              /* Le aggiunte alla Passepartout: − e + accumulano il verso —
-                 «+ prosciutto», «++ prosciutto», e sotto lo zero la
-                 rimozione «- prosciutto», «-- prosciutto». Il + addebita
-                 n×prezzo, il − sconta (regola concordata con Marco). */
-              <div className="space-y-1.5">
-                {g.modifiers.map(m => {
-                  const n = selected.get(m.id) ?? 0;
-                  const deltaTot = n * m.price_delta_cents;
-                  return (
-                    <div
-                      key={m.id}
-                      className={`flex min-h-[48px] items-center gap-2 rounded-[14px] px-3 py-1.5 ${
-                        n !== 0 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]' : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
-                      }`}
-                    >
-                      <span className="min-w-0 flex-1 truncate text-[15px] font-medium">
-                        {signedName(m.name, n)}
-                        {n !== 0 && deltaTot !== 0 && (
-                          <span className="ml-1.5 tabular-nums opacity-75">
-                            {deltaTot > 0 ? '+' : '−'}{euro(Math.abs(deltaTot))}
-                          </span>
-                        )}
-                        {n === 0 && m.price_delta_cents !== 0 && (
-                          <span className="ml-1.5 tabular-nums opacity-60">
-                            {m.price_delta_cents > 0 ? '+' : '−'}{euro(Math.abs(m.price_delta_cents))}
-                          </span>
-                        )}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setN(m.id, n - 1)}
-                        aria-label={`Togli ${m.name}`}
-                        className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full transition-colors ${
-                          n !== 0 ? 'bg-white/15 hover:bg-white/25' : 'bg-[var(--ds-surface)] hover:bg-[var(--ds-border)]'
-                        }`}
-                      >
-                        <Minus size={16} aria-hidden />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setN(m.id, n + 1)}
-                        aria-label={`Aggiungi ${m.name}`}
-                        className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full transition-colors ${
-                          n !== 0 ? 'bg-white/15 hover:bg-white/25' : 'bg-[var(--ds-surface)] hover:bg-[var(--ds-border)]'
-                        }`}
-                      >
-                        <Plus size={16} aria-hidden />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        );
-      })}
-
-      <label className="block">
-        <span className="mb-2 block text-[13px] font-semibold text-[var(--ds-text-muted)]">Variante libera</span>
-        <input
-          type="text"
-          value={custom}
-          onChange={e => setCustom(e.target.value)}
-          maxLength={300}
-          placeholder="Es. senza sale, metà porzione…"
-          className={dsInput}
-          // Aperta dal tocco lungo su un piatto senza varianti, la sheet ha
-          // solo questo campo: il cameriere è qui per scrivere.
-          autoFocus={groups.length === 0}
-        />
-      </label>
-    </Sheet>
-  );
-};
