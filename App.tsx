@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3 } from 'lucide-react';
 import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -34,6 +34,7 @@ import PagamentiPage from './components/PagamentiPage';
 import { DevelopmentPage } from './components/DevelopmentPage';
 import { RoadmapPage } from './components/RoadmapPage';
 import { MonitoringPage } from './components/MonitoringPage';
+import { ReportisticaPage } from './components/reportistica/ReportisticaPage';
 import ReceptionPage from './components/ReceptionPage';
 import { AttivitaPage } from './components/AttivitaPage';
 import { PushNotificationsCard } from './components/PushNotificationsCard';
@@ -175,6 +176,7 @@ const NAV_ITEMS: NavItem[] = [
   { kind: 'link', label: 'Pagamenti', Icon: CreditCard, group: 'operazioni', isTab: false, view: ViewState.PAGAMENTI, sidebarCollapse: false },
 
   // Gestione
+  { kind: 'link', label: 'Reportistica', Icon: BarChart3, group: 'gestione', isTab: false, view: ViewState.REPORTISTICA, sidebarCollapse: false },
   { kind: 'link', label: 'Clienti', Icon: BookUser, group: 'gestione', isTab: false, view: ViewState.CLIENTI, sidebarCollapse: false },
   { kind: 'link', label: 'Personale', Icon: UsersRound, group: 'gestione', isTab: false, view: ViewState.STAFF, sidebarCollapse: false },
   { kind: 'link', label: 'Utenti', Icon: Users, group: 'gestione', isTab: false, view: ViewState.USERS, sidebarCollapse: false, requiresUserManagement: true },
@@ -2940,6 +2942,10 @@ const App: React.FC = () => {
           <RoadmapPage />
         )}
 
+        {view === ViewState.REPORTISTICA && (
+          <ReportisticaPage />
+        )}
+
         {view === ViewState.MONITORING && (
           <MonitoringPage />
         )}
@@ -3048,6 +3054,7 @@ const App: React.FC = () => {
                       [ViewState.EMAIL]: 'Email',
                       [ViewState.NOTIFICHE]: 'Notifiche',
                       [ViewState.PAGAMENTI]: 'Pagamenti',
+                      [ViewState.REPORTISTICA]: 'Reportistica',
                       [ViewState.ATTIVITA]: 'Attività',
                       [ViewState.USERS]: 'Utenti',
                       [ViewState.SETTINGS]: 'Impostazioni',
