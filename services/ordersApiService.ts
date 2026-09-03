@@ -274,6 +274,16 @@ export interface KdsFullItem {
   served_at: string | null;
 }
 
+/** Una riga ancora da cucinare per questa partita nel servizio — comprese le
+ *  uscite non ancora chiamate di comande fuori dalla coda a schermo. La barra
+ *  dei piatti raggruppati si costruisce da qui. */
+export interface KdsComingItem {
+  name_snapshot: string;
+  qty: number;
+  status: 'QUEUED' | 'SENT' | 'PREPARING';
+  station_start_at: string | null;
+}
+
 export interface KdsQueue {
   station_id: number | null;
   items: KdsItem[];
@@ -281,6 +291,7 @@ export interface KdsQueue {
   /** Presente solo col filtro partita; vuoto sul monitor senza partita. */
   others?: KdsOtherItem[];
   full?: KdsFullItem[];
+  coming?: KdsComingItem[];
 }
 
 export const getKdsQueue = async (stationId: number | null): Promise<KdsQueue> =>

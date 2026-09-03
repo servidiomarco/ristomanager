@@ -25382,7 +25382,26 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
             full = f.rows;
         }
 
-        res.json({ station_id: stationId, ...service, items: rows.rows, courses, others, full });
+        // TUTTO ciò che questa partita deve ancora cucinare nel servizio,
+        // comprese le uscite non ancora chiamate (QUEUED) di comande che a
+        // schermo non ci sono: la barra dei piatti raggruppati si costruisce
+        // da qui, o quando un'uscita è servita ovunque la comanda sparisce
+        // dalla coda e la cucina perde il quadro di cosa deve ancora uscire
+        // (visto in collaudo, 3/09). Il client distingue chiamato/in arrivo
+        // con status e station_start_at.
+        const coming = await queryWithRetry(
+            `SELECT oi.name_snapshot, oi.qty, oi.status, oi.station_start_at
+             FROM order_items oi
+             JOIN orders o ON o.id = oi.order_id
+             WHERE o.tenant_id = $4 AND o.status = 'OPEN'
+               AND o.service_date = $2 AND o.shift = $3
+               AND oi.status IN ('QUEUED','SENT','PREPARING')
+               AND ($1::int IS NULL OR oi.station_id = $1)
+               AND ($1::int IS NOT NULL OR oi.station_id IS NULL)`,
+            [stationId, service.service_date, service.shift, req.tenantId!]
+        );
+
+        res.json({ station_id: stationId, ...service, items: rows.rows, courses, others, full, coming: coming.rows });
     } catch (err: any) {
         console.error('GET /kds/queue error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });

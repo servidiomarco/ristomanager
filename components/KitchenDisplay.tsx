@@ -8,7 +8,7 @@ import { channelThreadKey, staffMessagePreview, type StaffMessage } from '../ser
 import {
   getKdsQueue, getKdsServed, setKdsItemStatus, getMenuCatalogue, getKdsRevisions, ackKdsRevision,
   callWaiterForCourse, serveCourse, getOrderTimeline,
-  type KdsItem, type KdsCourseState, type KdsOtherItem, type KdsFullItem, type KdsServedCourse, type MenuCatalogue, type OrderRevision,
+  type KdsItem, type KdsCourseState, type KdsOtherItem, type KdsFullItem, type KdsComingItem, type KdsServedCourse, type MenuCatalogue, type OrderRevision,
   type OrderTimelineEvent,
 } from '../services/ordersApiService';
 import { getKitchenServiceSummary, type KitchenServiceSummary } from '../services/apiService';
@@ -126,6 +126,10 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   // La comanda intera (tutte le uscite, servite e future comprese): il
   // binario della card si disegna da qui, non dalla sola fetta attiva.
   const [full, setFull] = useState<KdsFullItem[]>([]);
+  // Tutto ciò che la partita deve ancora cucinare nel servizio, uscite non
+  // chiamate comprese: la barra dei piatti raggruppati legge questo, non la
+  // coda — o a comanda servita il futuro spariva dal conteggio.
+  const [coming, setComing] = useState<KdsComingItem[]>([]);
   // «In lavorazione» è il lavoro; «Consegnate» è consultazione («il 12 dice
   // che manca il piatto: l'abbiamo mandato?») — sola lettura, mai un posto
   // dove le card si annidano prima del servito.
@@ -266,6 +270,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
       setCourses(q.courses);
       setOthers(q.others ?? []);
       setFull(q.full ?? []);
+      setComing(q.coming ?? []);
       setRevisions(rev.revisions);
       setOffline(false);
     } catch {
@@ -529,18 +534,23 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
     || (c.customer_name ?? '').toLowerCase().includes(query)
     || c.items.some(i => i.name.toLowerCase().includes(query)));
 
-  // Totale vivo per piatto di tutta la coda ("5× tagliata"): il cuoco che
-  // batch-a le cotture lo legge qui invece di sommare a mente fra le card.
-  // Diverso dal banner del servizio, che è previsionale dalle prenotazioni:
-  // questo conta solo ciò che è lanciato e non ancora pronto.
+  // Totale vivo per piatto di TUTTO il servizio, non della sola coda: il
+  // cuoco che batch-a le cotture legge qui il quadro intero. Due numeri per
+  // chip, tenuti separati apposta: il pieno è il chiamato (da cuocere ORA),
+  // il «+n» attenuato è ciò che aspetta la chiamata — sommarli in un numero
+  // solo farebbe cuocere tagliate di tavoli ancora sugli antipasti.
   const allDay = useMemo(() => {
-    const totals = new Map<string, number>();
-    for (const i of items) {
-      if (i.status === 'READY') continue;
-      totals.set(i.name_snapshot, (totals.get(i.name_snapshot) ?? 0) + i.qty);
+    const totals = new Map<string, { active: number; ahead: number }>();
+    for (const r of coming) {
+      const cur = totals.get(r.name_snapshot) ?? { active: 0, ahead: 0 };
+      const waiting = r.status === 'QUEUED'
+        || (r.status === 'SENT' && r.station_start_at != null && new Date(r.station_start_at).getTime() > now);
+      if (waiting) cur.ahead += r.qty; else cur.active += r.qty;
+      totals.set(r.name_snapshot, cur);
     }
-    return [...totals.entries()].sort((a, b) => b[1] - a[1]);
-  }, [items]);
+    return [...totals.entries()].sort((a, b) =>
+      (b[1].active - a[1].active) || (b[1].ahead - a[1].ahead) || a[0].localeCompare(b[0]));
+  }, [coming, now]);
 
   const stationName = stationId == null
     ? 'Senza partita'
@@ -688,13 +698,20 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
       {(allDay.length > 0 || (summary && (summary.dietary.length > 0 || summary.dietary_lines.length > 0))) && (
         <div className="flex-shrink-0 px-4 pb-3">
           <div className="flex items-center gap-2 overflow-x-auto rounded-[20px] bg-[var(--ds-surface)] px-3 py-2 shadow-[var(--ds-shadow-card)]">
-            {allDay.map(([name, qty]) => (
+            {allDay.map(([name, t]) => (
+              // «3× Tagliata +2»: pieno il chiamato, attenuato l'in arrivo.
+              // Un piatto solo-futuro è un chip interamente attenuato.
               <span
                 key={name}
-                className="inline-flex flex-shrink-0 items-baseline gap-1 rounded-full bg-[var(--ds-surface-row)] px-2.5 py-1 text-[14px] font-semibold text-[var(--ds-text-primary)]"
+                className={`inline-flex flex-shrink-0 items-baseline gap-1 rounded-full bg-[var(--ds-surface-row)] px-2.5 py-1 text-[14px] font-semibold ${
+                  t.active > 0 ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)]'
+                }`}
               >
-                <span className="tabular-nums">{qty}×</span>
+                <span className="tabular-nums">{t.active > 0 ? `${t.active}×` : `+${t.ahead}×`}</span>
                 <span>{name}</span>
+                {t.active > 0 && t.ahead > 0 && (
+                  <span className="tabular-nums font-medium text-[var(--ds-text-muted)]">+{t.ahead}</span>
+                )}
               </span>
             ))}
             {summary && (summary.dietary.length > 0 || summary.dietary_lines.length > 0) && (
