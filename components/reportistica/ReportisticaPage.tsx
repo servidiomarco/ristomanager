@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Loader2, RefreshCw, AlertTriangle } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import { Loader2, RefreshCw, AlertTriangle, Printer, Wand2 } from 'lucide-react';
 import { asIsoDay, addDays } from '../ds';
 import { PeriodPicker, PeriodTrigger, Period } from '../pagamenti/PeriodPicker';
+import { generateAiReport } from '../../services/aiMessagesApiService';
+import { printReportistica } from '../../utils/printReportistica';
 import {
   getReservationsReport, getRevenueReport, getDishesReport, getCommunicationsReport,
   ReservationsReport, RevenueReport, DishesReport, CommunicationsReport,
@@ -42,6 +45,9 @@ export const ReportisticaPage: React.FC = () => {
   const [incassi, setIncassi] = useState<Slot<RevenueReport>>(emptySlot);
   const [cucina, setCucina] = useState<Slot<DishesReport>>(emptySlot);
   const [comunicazioni, setComunicazioni] = useState<Slot<CommunicationsReport>>(emptySlot);
+  const [aiReport, setAiReport] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   const load = useCallback(async (p: Period) => {
     setLoading(true);
@@ -65,6 +71,32 @@ export const ReportisticaPage: React.FC = () => {
 
   const nothingYet = !prenotazioni.data && !incassi.data && !cucina.data && !comunicazioni.data;
 
+  const stampa = () => printReportistica({
+    from: period.from,
+    to: period.to,
+    prenotazioni: prenotazioni.data,
+    incassi: incassi.data,
+    cucina: cucina.data,
+    comunicazioni: comunicazioni.data,
+  });
+
+  // Il report AI narrativo ancora sempre a oggi: l'endpoint accetta solo un
+  // numero di giorni (7–90), non un range. La didascalia lo dichiara.
+  const aiDays = Math.min(90, Math.max(7, Math.round((Date.parse(period.to) - Date.parse(period.from)) / 86400000) + 1));
+
+  const generaAi = async () => {
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const { report } = await generateAiReport(aiDays);
+      setAiReport(report);
+    } catch (err: any) {
+      setAiError(err?.message || 'Errore nella generazione del report');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -79,6 +111,14 @@ export const ReportisticaPage: React.FC = () => {
             </div>
             <div className="flex items-center gap-2">
               <PeriodTrigger period={period} onClick={() => setPickerOpen(true)} />
+              <button
+                onClick={stampa}
+                disabled={loading || nothingYet}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)] disabled:opacity-50"
+                aria-label="Stampa il report"
+              >
+                <Printer className="h-4 w-4" />
+              </button>
               <button
                 onClick={() => load(period)}
                 disabled={loading}
@@ -107,6 +147,42 @@ export const ReportisticaPage: React.FC = () => {
 
               {comunicazioni.data && <BloccoComunicazioni data={comunicazioni.data} />}
               {comunicazioni.error && <BlockError title="Comunicazioni" message={comunicazioni.error} />}
+
+              {/* Report AI narrativo: stesso motore della Dashboard. Marcato
+                  Wand2 + famiglia arriving come ogni cosa scritta dall'AI. */}
+              <section className="ds-ai-frame rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
+                      <Wand2 className="h-5 w-5" />
+                    </span>
+                    <div>
+                      <h2 className="text-[17px] font-semibold text-[var(--ds-text-primary)]">Lettura AI</h2>
+                      <p className="text-[13px] text-[var(--ds-text-muted)]">
+                        Copre sempre gli ultimi {aiDays} giorni da oggi, non il periodo scelto sopra.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={generaAi}
+                    disabled={aiLoading}
+                    className="inline-flex h-10 flex-shrink-0 items-center gap-2 rounded-[10px] bg-[var(--ds-text-primary)] px-4 text-[14px] font-semibold text-[var(--ds-surface)] transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    {aiLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+                    {aiLoading ? 'Ci penso…' : aiReport ? 'Rigenera' : 'Genera'}
+                  </button>
+                </div>
+                {aiError && (
+                  <p className="mt-3 rounded-[10px] bg-[var(--ds-surface-row)] px-3 py-2 text-[13px] text-[var(--ds-text-muted)]">
+                    {aiError}
+                  </p>
+                )}
+                {aiReport && (
+                  <div className="prose prose-sm mt-4 max-w-none text-[var(--ds-text-muted)]">
+                    <ReactMarkdown>{aiReport}</ReactMarkdown>
+                  </div>
+                )}
+              </section>
             </div>
           )}
         </div>

@@ -18,31 +18,32 @@
 6. [Reception e accoglienza](#reception-e-accoglienza)
 7. [Sale & Tavoli (planimetria)](#sale--tavoli-planimetria)
 8. [Dashboard](#dashboard)
-9. [Menu & Banchetti](#menu--banchetti)
-10. [Menu digitale pubblico](#menu-digitale-pubblico)
-11. [Comande, Cucina e Passe (gestionale di sala)](#comande-cucina-e-passe-gestionale-di-sala)
-12. [Pagamenti, conto al tavolo e cassa](#pagamenti-conto-al-tavolo-e-cassa)
-13. [Fiscalità: scontrino, fattura elettronica, proforma](#fiscalità-scontrino-fattura-elettronica-proforma)
-14. [Integrazione cassa Passepartout](#integrazione-cassa-passepartout)
-15. [Stampa termica e print agent](#stampa-termica-e-print-agent)
-16. [Messaggi: WhatsApp e SMS](#messaggi-whatsapp-e-sms)
-17. [Email](#email)
-18. [Chat staff](#chat-staff)
-19. [Notifiche](#notifiche)
-20. [Clienti (CRM / rubrica)](#clienti-crm--rubrica)
-21. [Attività / to-do](#attività--to-do)
-22. [Personale (turni e presenze)](#personale-turni-e-presenze)
-23. [Inventario](#inventario)
-24. [Lista della spesa e fornitori](#lista-della-spesa-e-fornitori)
-25. [HACCP](#haccp)
-26. [Funzioni AI](#funzioni-ai)
-27. [Impostazioni](#impostazioni)
-28. [Utenti, ruoli e permessi](#utenti-ruoli-e-permessi)
-29. [Privacy e GDPR](#privacy-e-gdpr)
-30. [Piattaforma SaaS: multi-tenant, moduli e abbonamenti](#piattaforma-saas-multi-tenant-moduli-e-abbonamenti)
-31. [Funzionalità trasversali](#funzionalità-trasversali)
-32. [Integrazioni esterne](#integrazioni-esterne)
-33. [Registro aggiornamenti](#registro-aggiornamenti)
+9. [Reportistica](#reportistica)
+10. [Menu & Banchetti](#menu--banchetti)
+11. [Menu digitale pubblico](#menu-digitale-pubblico)
+12. [Comande, Cucina e Passe (gestionale di sala)](#comande-cucina-e-passe-gestionale-di-sala)
+13. [Pagamenti, conto al tavolo e cassa](#pagamenti-conto-al-tavolo-e-cassa)
+14. [Fiscalità: scontrino, fattura elettronica, proforma](#fiscalità-scontrino-fattura-elettronica-proforma)
+15. [Integrazione cassa Passepartout](#integrazione-cassa-passepartout)
+16. [Stampa termica e print agent](#stampa-termica-e-print-agent)
+17. [Messaggi: WhatsApp e SMS](#messaggi-whatsapp-e-sms)
+18. [Email](#email)
+19. [Chat staff](#chat-staff)
+20. [Notifiche](#notifiche)
+21. [Clienti (CRM / rubrica)](#clienti-crm--rubrica)
+22. [Attività / to-do](#attività--to-do)
+23. [Personale (turni e presenze)](#personale-turni-e-presenze)
+24. [Inventario](#inventario)
+25. [Lista della spesa e fornitori](#lista-della-spesa-e-fornitori)
+26. [HACCP](#haccp)
+27. [Funzioni AI](#funzioni-ai)
+28. [Impostazioni](#impostazioni)
+29. [Utenti, ruoli e permessi](#utenti-ruoli-e-permessi)
+30. [Privacy e GDPR](#privacy-e-gdpr)
+31. [Piattaforma SaaS: multi-tenant, moduli e abbonamenti](#piattaforma-saas-multi-tenant-moduli-e-abbonamenti)
+32. [Funzionalità trasversali](#funzionalità-trasversali)
+33. [Integrazioni esterne](#integrazioni-esterne)
+34. [Registro aggiornamenti](#registro-aggiornamenti)
 
 ---
 
@@ -205,6 +206,19 @@ Il colpo d'occhio del "adesso", sempre sulla giornata corrente.
 - Attività di oggi, lista della spesa e **prodotti sotto scorta** con azioni rapide e collegamenti alle sezioni.
 - **Chi è in turno oggi** (sala, cucina, reception).
 - **Report AI di andamento**: una lettura in italiano dell'andamento degli ultimi 30 giorni, generata su richiesta.
+
+---
+
+## Reportistica
+
+L'analisi sul periodo, dove la Dashboard è il "adesso". Pagina riservata a direzione e manager (permesso dedicato), con periodo a scelta dal calendario e ogni numero confrontato col periodo precedente di pari durata.
+
+- **Prenotazioni e canali**: coperti per giorno, per giorno della settimana e per ora di arrivo; tassi di no-show e cancellazione; da dove arrivano le prenotazioni (staff, WhatsApp, Sofia, pagina pubblica) e ripartizione per sala.
+- **Incassi e cassa**: incassato per giorno di servizio diviso pranzo/cena, mix dei metodi di pagamento dal libro cassa (omaggi e sospesi mostrati ma fuori dal totale), scontrino medio, coperto medio, mance e differenze dei cassetti con le note di chiusura.
+- **Cucina e piatti**: piatti più venduti ordinabili per quantità o ricavo, tempi medi e mediani per partita, scarti per motivo col valore. Con il modulo comande spento il blocco lo dichiara e il resto della pagina vive lo stesso.
+- **Sofia e comunicazioni**: chiamate e minuti dell'agente vocale, percentuale convertita in prenotazione, casi da ricontrollare (phantom e gruppi grandi), esiti dei messaggi in uscita per canale.
+- **Export**: csv per blocco (serie per giorno, metodi, top piatti) e un foglio di stampa unico con KPI e tabelle per la riunione o il commercialista.
+- **Lettura AI**: lo stesso report narrativo della Dashboard, richiamabile dal fondo pagina.
 
 ---
 
@@ -550,6 +564,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-03 | Reportistica | Nuova pagina Reportistica (direzione e manager): quattro blocchi — prenotazioni e canali, incassi e cassa, cucina e piatti, Sofia e comunicazioni — su periodo a scelta con confronto automatico col periodo precedente, export csv, foglio di stampa e lettura AI. |
 | 2026-09-03 | Agente vocale "Sofia" | Fix dall'analisi di 2.125 chiamate estive: la verifica di disponibilità valida anche l'orario richiesto e propone i due slot adiacenti invece della lista completa; nuovo tool che salva i promemoria di richiamata (badge "Da richiamare" in Chiamate + push allo staff, funziona anche a prenotazioni sospese); la sospensione viene riletta al cliente col suo messaggio invece di "problema tecnico"; watchdog orario sulla quota ElevenLabs con push all'80% e al 95%; i cognomi con particella non vengono più troncati nei saluti e nelle conferme; "Ferragosto" è una data valida; l'agente conosce data e ora correnti in ora italiana. |
 | 2026-09-03 | Menu & Banchetti | La pagina pubblica del preventivo porta il logo del ristorante in testa e i dettagli completi nel footer (nome, tagline, indirizzo con link alla mappa, telefono, WhatsApp, sito). |
 | 2026-09-03 | Menu & Banchetti | Gestione varianti completa: modale "Varianti" (gruppi con min/max, riordino, interruttore, sovrapprezzi in € o in % del prezzo battuto), aggancio dei gruppi dalla scheda del piatto (anche quelli della cassa, con legami manuali che sopravvivono agli import), piatti semplici/composti con ingredienti togliibili ("Senza X", sconto configurabile). Il foglio varianti del palmare mostra gli ingredienti pre-inclusi e vale anche in Cassa, che prima le ignorava; min/max fatti rispettare dal server; i palmari aggiornano il catalogo in tempo reale. |
