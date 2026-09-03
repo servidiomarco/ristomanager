@@ -561,19 +561,24 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
     return () => window.clearTimeout(t);
   }, [flashDish]);
 
-  // La barra è SOLO ciò che deve ancora arrivare (scelta di Marco, 3/09):
-  // il chiamato sta già sulle card, ripeterlo qui era rumore. Un piatto
-  // conta finché aspetta la chiamata — QUEUED, o lanciato con partenza
-  // scaglionata non ancora scattata — e sparisce dalla barra quando parte.
+  // La barra conta TUTTO ciò che resta da fare, ma nei suoi due tempi: il
+  // numero pieno è il totale ancora da cucinare, la parentesi ambra la quota
+  // già in lavorazione («5× Tagliata (2)» = 5 in tutto, 2 sul fuoco adesso).
+  // Separati apposta — la lezione della #393: un numero unico fa cuocere
+  // tagliate di tavoli ancora sugli antipasti. READY resta fuori da tutto:
+  // cotto, non è più lavoro di nessuno. Utile quando le card scorrono fuori
+  // schermo: la barra è l'unico posto letto a colpo d'occhio.
   const allDay = useMemo(() => {
-    const totals = new Map<string, number>();
+    const totals = new Map<string, { ahead: number; working: number }>();
     for (const r of coming) {
+      const cur = totals.get(r.name_snapshot) ?? { ahead: 0, working: 0 };
       const waiting = r.status === 'QUEUED'
         || (r.status === 'SENT' && r.station_start_at != null && new Date(r.station_start_at).getTime() > now);
-      if (!waiting) continue;
-      totals.set(r.name_snapshot, (totals.get(r.name_snapshot) ?? 0) + r.qty);
+      if (waiting) cur.ahead += r.qty; else cur.working += r.qty;
+      totals.set(r.name_snapshot, cur);
     }
-    return [...totals.entries()].sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]));
+    return [...totals.entries()].sort((a, b) =>
+      ((b[1].ahead + b[1].working) - (a[1].ahead + a[1].working)) || a[0].localeCompare(b[0]));
   }, [coming, now]);
 
   const stationName = stationId == null
@@ -725,18 +730,24 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             {/* Solo i chip scorrono: la pill delle note sta FUORI dall'area a
                 scorrimento, sempre visibile a destra qualunque sia la coda. */}
             <div ref={barRef} className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
-              {allDay.map(([name, qty]) => (
+              {allDay.map(([name, t]) => (
                 <span
                   key={name}
                   data-chip={name}
-                  className={`inline-flex flex-shrink-0 items-baseline gap-1 rounded-full px-2.5 py-1 text-[14px] font-semibold transition-colors ${
+                  className={`inline-flex flex-shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[14px] font-semibold transition-colors ${
                     litChip === name
                       ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                       : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
                   }`}
                 >
-                  <span className="tabular-nums">{qty}×</span>
+                  <span className="tabular-nums">{t.ahead + t.working}×</span>
                   <span>{name}</span>
+                  {/* La quota sul fuoco batte come il pallino della card. */}
+                  {t.working > 0 && (
+                    <span className="ml-0.5 inline-flex animate-pulse items-center rounded-full bg-[var(--ds-pending-tint)] px-1.5 text-[13px] font-semibold tabular-nums text-[var(--ds-pending-text)]">
+                      ({t.working})
+                    </span>
+                  )}
                 </span>
               ))}
             </div>
