@@ -697,25 +697,29 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           cose da dire; a zero note e coda vuota, zero pixel. */}
       {(allDay.length > 0 || (summary && (summary.dietary.length > 0 || summary.dietary_lines.length > 0))) && (
         <div className="flex-shrink-0 px-4 pb-3">
-          <div className="flex items-center gap-2 overflow-x-auto rounded-[20px] bg-[var(--ds-surface)] px-3 py-2 shadow-[var(--ds-shadow-card)]">
-            {allDay.map(([name, t]) => (
-              // «3× Tagliata +2»: pieno il chiamato, attenuato l'in arrivo.
-              // Un piatto solo-futuro è un chip interamente attenuato.
-              <span
-                key={name}
-                className={`inline-flex flex-shrink-0 items-baseline gap-1 rounded-full bg-[var(--ds-surface-row)] px-2.5 py-1 text-[14px] font-semibold ${
-                  t.active > 0 ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)]'
-                }`}
-              >
-                <span className="tabular-nums">{t.active > 0 ? `${t.active}×` : `+${t.ahead}×`}</span>
-                <span>{name}</span>
-                {t.active > 0 && t.ahead > 0 && (
-                  <span className="tabular-nums font-medium text-[var(--ds-text-muted)]">+{t.ahead}</span>
-                )}
-              </span>
-            ))}
+          <div className="flex items-center rounded-[20px] bg-[var(--ds-surface)] px-3 py-2 shadow-[var(--ds-shadow-card)]">
+            {/* Solo i chip scorrono: la pill delle note sta FUORI dall'area a
+                scorrimento, sempre visibile a destra qualunque sia la coda. */}
+            <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
+              {allDay.map(([name, t]) => (
+                // «3× Tagliata +2»: pieno il chiamato, attenuato l'in arrivo.
+                // Un piatto solo-futuro è un chip interamente attenuato.
+                <span
+                  key={name}
+                  className={`inline-flex flex-shrink-0 items-baseline gap-1 rounded-full bg-[var(--ds-surface-row)] px-2.5 py-1 text-[14px] font-semibold ${
+                    t.active > 0 ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)]'
+                  }`}
+                >
+                  <span className="tabular-nums">{t.active > 0 ? `${t.active}×` : `+${t.ahead}×`}</span>
+                  <span>{name}</span>
+                  {t.active > 0 && t.ahead > 0 && (
+                    <span className="tabular-nums font-medium text-[var(--ds-text-muted)]">+{t.ahead}</span>
+                  )}
+                </span>
+              ))}
+            </div>
             {summary && (summary.dietary.length > 0 || summary.dietary_lines.length > 0) && (
-              <span className="ml-auto flex flex-shrink-0 items-center border-l border-[var(--ds-border)] pl-2.5">
+              <span className="ml-2 flex flex-shrink-0 items-center border-l border-[var(--ds-border)] pl-2.5">
                 <button
                   type="button"
                   onClick={() => setSummaryOpen(true)}
