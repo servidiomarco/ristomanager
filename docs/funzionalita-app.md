@@ -548,6 +548,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-03 | Menu & Banchetti | La pagina pubblica del preventivo porta il logo del ristorante in testa e i dettagli completi nel footer (nome, tagline, indirizzo con link alla mappa, telefono, WhatsApp, sito). |
 | 2026-09-03 | Menu & Banchetti | Gestione varianti completa: modale "Varianti" (gruppi con min/max, riordino, interruttore, sovrapprezzi in € o in % del prezzo battuto), aggancio dei gruppi dalla scheda del piatto (anche quelli della cassa, con legami manuali che sopravvivono agli import), piatti semplici/composti con ingredienti togliibili ("Senza X", sconto configurabile). Il foglio varianti del palmare mostra gli ingredienti pre-inclusi e vale anche in Cassa, che prima le ignorava; min/max fatti rispettare dal server; i palmari aggiornano il catalogo in tempo reale. |
 | 2026-09-03 | Menu & Banchetti | L'invio WhatsApp del preventivo parte dal numero business del ristorante (modello Meta approvato) invece che dal telefono dell'operatore; finché il modello non è attivo il canale si dichiara «in attivazione». |
 | 2026-09-03 | Menu & Banchetti | Preventivo condivisibile: link pubblico stabile del banchetto (menù, tariffe e totale, senza note interne) con invio su WhatsApp precompilato o via email dal server. |
