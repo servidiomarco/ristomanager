@@ -742,10 +742,11 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                 >
                   <span className="tabular-nums">{t.ahead + t.working}×</span>
                   <span>{name}</span>
-                  {/* La quota sul fuoco batte come il pallino della card. */}
+                  {/* La quota sul fuoco: tondo ambra pieno che batte come il
+                      pallino della card — si vede anche con la coda lunga. */}
                   {t.working > 0 && (
-                    <span className="ml-0.5 inline-flex animate-pulse items-center rounded-full bg-[var(--ds-pending-tint)] px-1.5 text-[13px] font-semibold tabular-nums text-[var(--ds-pending-text)]">
-                      ({t.working})
+                    <span className="ml-0.5 inline-flex h-5 min-w-5 animate-pulse items-center justify-center rounded-full bg-[var(--ds-pending-solid)] px-1 text-[12px] font-semibold tabular-nums text-[var(--ds-pending-fg)]">
+                      {t.working}
                     </span>
                   )}
                 </span>
