@@ -26442,10 +26442,15 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
         // dalla coda e la cucina perde il quadro di cosa deve ancora uscire
         // (visto in collaudo, 3/09). Il client distingue chiamato/in arrivo
         // con status e station_start_at.
+        // Tavolo e uscita su ogni riga: il tocco sul chip della barra apre
+        // il dettaglio «dove va questo piatto», diviso fra in lavorazione e
+        // in arrivo.
         const coming = await queryWithRetry(
-            `SELECT oi.name_snapshot, oi.qty, oi.status, oi.station_start_at
+            `SELECT oi.name_snapshot, oi.qty, oi.status, oi.station_start_at,
+                    oi.course_no, t.name AS table_name
              FROM order_items oi
              JOIN orders o ON o.id = oi.order_id
+             LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
              WHERE o.tenant_id = $4 AND o.status = 'OPEN'
                AND o.service_date = $2 AND o.shift = $3
                AND oi.status IN ('QUEUED','SENT','PREPARING')

@@ -549,6 +549,9 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   // fuori vista, e la domanda del cuoco è «di questo qui, quanti ne
   // arrivano ancora?». `tick` distingue due pressioni sullo stesso piatto.
   const [flashDish, setFlashDish] = useState<{ name: string; tick: number } | null>(null);
+  // Tocco sul chip: «dove va questo piatto?» — modal coi tavoli, divisi fra
+  // in lavorazione e in arrivo.
+  const [chipDetail, setChipDetail] = useState<string | null>(null);
   const [litChip, setLitChip] = useState<string | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const flashChip = useCallback((name: string) => setFlashDish({ name, tick: Date.now() }), []);
@@ -731,13 +734,17 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                 scorrimento, sempre visibile a destra qualunque sia la coda. */}
             <div ref={barRef} className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
               {allDay.map(([name, t]) => (
-                <span
+                // Il chip si tocca: apre i tavoli a cui è destinato il piatto.
+                <button
                   key={name}
+                  type="button"
                   data-chip={name}
-                  className={`inline-flex flex-shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[14px] font-semibold transition-colors ${
+                  onClick={() => setChipDetail(name)}
+                  aria-label={`Dove va ${name}`}
+                  className={`inline-flex flex-shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[14px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                     litChip === name
                       ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
-                      : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
+                      : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
                   }`}
                 >
                   <span className="tabular-nums">{t.ahead + t.working}×</span>
@@ -752,7 +759,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                       {t.working}
                     </span>
                   )}
-                </span>
+                </button>
               ))}
             </div>
             {summary && (summary.dietary.length > 0 || summary.dietary_lines.length > 0) && (
@@ -966,6 +973,62 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           </div>
         </div>
       )}
+
+      {/* Dove va il piatto del chip: tavoli e uscite, prima la parte già sul
+          fuoco poi quella in arrivo — le stesse due voci del chip. */}
+      <ModalShell
+        open={chipDetail != null}
+        onClose={() => setChipDetail(null)}
+        title={chipDetail ?? ''}
+        size="sm"
+        closeOnEscape
+        bodyClassName="p-5 sm:p-6"
+      >
+        {(() => {
+          const rows = coming.filter(r => r.name_snapshot === chipDetail);
+          const isWaiting = (r: KdsComingItem) => r.status === 'QUEUED'
+            || (r.status === 'SENT' && r.station_start_at != null && new Date(r.station_start_at).getTime() > now);
+          const group = (list: KdsComingItem[]) => {
+            const m = new Map<string, { table: string; course: number; qty: number }>();
+            for (const r of list) {
+              const table = r.table_name ?? '—';
+              const key = `${table}:${r.course_no}`;
+              const cur = m.get(key) ?? { table, course: r.course_no, qty: 0 };
+              cur.qty += r.qty;
+              m.set(key, cur);
+            }
+            return [...m.values()].sort((a, b) => a.table.localeCompare(b.table, undefined, { numeric: true }) || a.course - b.course);
+          };
+          const Section = ({ label, dot, list }: { label: string; dot: string; list: { table: string; course: number; qty: number }[] }) => (
+            list.length === 0 ? null : (
+              <div>
+                <div className="mb-1.5 flex items-center gap-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">
+                  <span aria-hidden className={`h-2 w-2 rounded-full ${dot}`} />
+                  {label}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {list.map(e => (
+                    <span key={`${e.table}-${e.course}`} className="inline-flex items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3 py-1.5 text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                      <span className="tabular-nums">{e.qty}×</span>
+                      T{e.table}
+                      <span className="text-[13px] font-medium text-[var(--ds-text-muted)]">{ORDINALS[e.course] ?? e.course} usc.</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )
+          );
+          return (
+            <div className="space-y-4">
+              <Section label="In lavorazione" dot="animate-pulse bg-[var(--ds-pending-solid)]" list={group(rows.filter(r => !isWaiting(r)))} />
+              <Section label="In arrivo" dot="bg-[var(--ds-border-strong)]" list={group(rows.filter(isWaiting))} />
+              {rows.length === 0 && (
+                <p className="text-[14px] text-[var(--ds-text-muted)]">Niente in coda per questo piatto.</p>
+              )}
+            </div>
+          );
+        })()}
+      </ModalShell>
 
       {summary && (
         <ModalShell
