@@ -599,6 +599,23 @@ export const setBanquetStatus = async (id: number, status: BanquetStatus): Promi
   });
 };
 
+/** Link pubblico del preventivo (nasce alla prima chiamata, poi è stabile). */
+export const getBanquetShareLink = async (id: number): Promise<{ token: string; url: string }> => {
+  return apiRequest<{ token: string; url: string }>(`${API_URL}/banquet-menus/${id}/share`, {
+    method: 'POST',
+    headers: getHeaders(false),
+  });
+};
+
+/** Invia il preventivo via email (default: l'email del cliente in rubrica). */
+export const sendBanquetQuoteEmail = async (id: number, email?: string): Promise<{ ok: true; email: string; url: string }> => {
+  return apiRequest<{ ok: true; email: string; url: string }>(`${API_URL}/banquet-menus/${id}/send-quote-email`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(email ? { email } : {}),
+  });
+};
+
 // ============================================
 // BANQUET PAYMENTS
 // ============================================
