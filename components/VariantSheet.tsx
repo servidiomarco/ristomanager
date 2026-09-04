@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Minus, Plus, Utensils } from 'lucide-react';
+import { Info, Minus, Plus, Utensils } from 'lucide-react';
 import type { Dish } from '../types';
 import type { MenuCatalogue } from '../services/ordersApiService';
 import { Sheet, dsButton, dsInput } from './ds';
@@ -50,6 +50,9 @@ export const VariantSheet: React.FC<{
   // sale», «metà porzione»). Viaggia come nota di riga — KDS e comanda in
   // cucina la stampano già sotto il piatto.
   const [custom, setCustom] = useState(initial?.note ?? '');
+  // Guida del gruppo (es. i gradi di cottura spiegati): chiusa di default,
+  // il foglio serve a battere — la si apre quando serve ripassarla.
+  const [openNotes, setOpenNotes] = useState<Set<number>>(new Set());
 
   const dishCents = Math.round(Number(dish.price) * 100);
   // Percentuale risolta in € sul prezzo di anagrafica: anteprima leggibile;
@@ -163,17 +166,39 @@ export const VariantSheet: React.FC<{
         const chosen = chosenInGroup(g);
         return (
           <div key={g.id}>
-            <div className="mb-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">
-              {g.name}
-              {g.min_select > 0 && (
-                <span className="text-[var(--ds-critical-text)]"> · obbligatorio</span>
-              )}
-              {/* Il tetto si dice solo quando può mordere: un gruppo con max
-                  pari alle opzioni non ha niente da contare. */}
-              {!single && g.max_select < g.modifiers.length && (
-                <span className="tabular-nums"> · {chosen}/{g.max_select}</span>
+            <div className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-[var(--ds-text-muted)]">
+              <span>
+                {g.name}
+                {g.min_select > 0 && (
+                  <span className="text-[var(--ds-critical-text)]"> · obbligatorio</span>
+                )}
+                {/* Il tetto si dice solo quando può mordere: un gruppo con max
+                    pari alle opzioni non ha niente da contare. */}
+                {!single && g.max_select < g.modifiers.length && (
+                  <span className="tabular-nums"> · {chosen}/{g.max_select}</span>
+                )}
+              </span>
+              {g.note && (
+                <button
+                  type="button"
+                  onClick={() => setOpenNotes(prev => {
+                    const next = new Set(prev);
+                    if (next.has(g.id)) next.delete(g.id); else next.add(g.id);
+                    return next;
+                  })}
+                  aria-expanded={openNotes.has(g.id)}
+                  aria-label={`Note su ${g.name}`}
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
+                >
+                  <Info size={14} aria-hidden />
+                </button>
               )}
             </div>
+            {g.note && openNotes.has(g.id) && (
+              <p className="mb-2 whitespace-pre-line rounded-[14px] bg-[var(--ds-surface-row)] px-3 py-2.5 text-[13px] leading-relaxed text-[var(--ds-text-secondary)]">
+                {g.note}
+              </p>
+            )}
             {single ? (
               <div className="flex flex-wrap gap-2">
                 {g.modifiers.map(m => {
@@ -197,6 +222,7 @@ export const VariantSheet: React.FC<{
                           {delta > 0 ? '+' : '−'}{euro(Math.abs(delta))}
                         </span>
                       )}
+                      {m.note && <span className="ml-1.5 text-[12px] opacity-60">{m.note}</span>}
                     </button>
                   );
                 })}
@@ -231,6 +257,7 @@ export const VariantSheet: React.FC<{
                             {delta > 0 ? '+' : '−'}{euro(Math.abs(delta))}
                           </span>
                         )}
+                        {m.note && <span className="ml-1.5 text-[12px] opacity-60">{m.note}</span>}
                       </span>
                       <button
                         type="button"

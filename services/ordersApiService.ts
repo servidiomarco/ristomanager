@@ -185,10 +185,12 @@ export interface MenuCatalogue {
   stations: { id: number; name: string; color: string | null; sort_order: number }[];
   modifier_groups: {
     id: number; name: string; min_select: number; max_select: number; sort_order: number;
+    /** Guida del gruppo per sala e cucina, espandibile sul foglio varianti. */
+    note: string | null;
     /** price_delta_pct: percentuale del prezzo battuto (pg serializza NUMERIC
      *  come stringa); null = sovrapprezzo assoluto. Il foglio la mostra in €
      *  calcolati sul piatto corrente; il conto vero lo fa il server. */
-    modifiers: { id: number; group_id: number; name: string; price_delta_cents: number; price_delta_pct: string | null }[];
+    modifiers: { id: number; group_id: number; name: string; price_delta_cents: number; price_delta_pct: string | null; note: string | null }[];
   }[];
   dish_modifier_groups: { dish_id: number; group_id: number }[];
   /** Ingredienti dei piatti composti: pre-inclusi sul foglio varianti, si
@@ -226,7 +228,7 @@ export interface KdsItem {
   course_no: number;
   name_snapshot: string;
   qty: number;
-  modifiers: { name: string; price_delta_cents: number }[] | null;
+  modifiers: { id?: number | null; name: string; price_delta_cents: number }[] | null;
   note: string | null;
   status: 'SENT' | 'PREPARING' | 'READY';
   station_id: number | null;
@@ -274,7 +276,7 @@ export interface KdsFullItem {
   station_id: number | null;
   name_snapshot: string;
   qty: number;
-  modifiers: { name: string; price_delta_cents: number }[] | null;
+  modifiers: { id?: number | null; name: string; price_delta_cents: number }[] | null;
   note: string | null;
   status: 'QUEUED' | 'SENT' | 'PREPARING' | 'READY' | 'SERVED';
   fired_at: string | null;

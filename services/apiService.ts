@@ -549,6 +549,8 @@ export interface ModifierDeltaInput {
   /** Valorizzata = percentuale del prezzo battuto (i centesimi si azzerano);
    *  null esplicito = torna al sovrapprezzo assoluto. */
   price_delta_pct?: number | null;
+  /** Nota breve dell'opzione; assente = non toccare, vuota/null = cancella. */
+  note?: string | null;
 }
 
 export const createModifierGroup = async (payload: {
@@ -562,6 +564,8 @@ export const createModifierGroup = async (payload: {
 
 export const updateModifierGroup = async (id: number, payload: {
   name?: string; min_select?: number; max_select?: number; is_active?: boolean;
+  /** Assente = non toccare; stringa vuota o null = cancella la nota. */
+  note?: string | null;
 }): Promise<AdminModifierGroup> => {
   return apiRequest<AdminModifierGroup>(`${API_URL}/menu/modifier-groups/${id}`, {
     method: 'PUT', headers: getHeaders(), body: JSON.stringify(payload),
