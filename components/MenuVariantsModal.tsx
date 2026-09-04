@@ -283,7 +283,9 @@ const GroupEditor: React.FC<{
       onClose={onClose}
       title={group.name}
       subtitle={pp ? undefined : 'Le modifiche si salvano da sole'}
-      size="sm"
+      // md, non sm: la riga opzione porta importo, €/%, frecce, interruttore
+      // e cestino — nei 448px del sm al nome restavano due lettere.
+      size="md"
       bodyClassName="space-y-4 p-5"
       footerStart={
         <button type="button" onClick={onBack} className={dsButton.quiet}>
@@ -465,7 +467,7 @@ const MemberRow: React.FC<{
       />
       <div className="flex flex-shrink-0 items-center gap-1">
         <input
-          className="h-9 w-20 rounded-[10px] bg-[var(--ds-surface)] px-2 text-right text-[14px] tabular-nums text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          className="h-9 w-24 rounded-[10px] bg-[var(--ds-surface)] px-2 text-right text-[14px] tabular-nums text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           inputMode="decimal"
           placeholder="0"
           value={amount}
