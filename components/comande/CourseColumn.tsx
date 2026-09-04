@@ -36,13 +36,16 @@ interface CourseListProps {
   /** Apre il foglio varianti su una riga in bozza: si leggono tutte
    *  (le lunghe si troncano in lista) e si correggono prima dell'invio. */
   onEditLine?: (line: CartLine) => void;
+  /** Annulla la chiamata di un'uscita già lanciata (finché la cucina non
+   *  ha iniziato): torna in coda, le card spariscono dai monitor. */
+  onUnfire?: (courseNo: number) => void;
 }
 
 const stepper =
   'inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 export const CourseList: React.FC<CourseListProps> = ({
-  order, cart, course, onCourse, busy, onBump, onDrop, onVoid, onRecall, onFire, onEditLine,
+  order, cart, course, onCourse, busy, onBump, onDrop, onVoid, onRecall, onFire, onEditLine, onUnfire,
 }) => (
   <div className="flex flex-col gap-2">
     {Array.from({ length: MAX_COURSES }, (_, i) => i + 1).map(n => {
@@ -57,6 +60,10 @@ export const CourseList: React.FC<CourseListProps> = ({
       // il «Chiama» deve coprirle, o restano orfane — l'uscita non risulta
       // «in coda» e il bottone normale non comparirebbe.
       const strandedQueued = status === 'FIRED' && serverRows.some(i => i.status === 'QUEUED');
+      // La chiamata si può annullare solo finché NESSUNA riga è oltre SENT:
+      // alla prima in preparazione il rimedio è lo storno, non il riavvolgi.
+      const live = serverRows.filter(i => i.status !== 'VOIDED');
+      const unfirable = status === 'FIRED' && live.length > 0 && live.every(i => i.status === 'SENT');
 
       if (serverRows.length === 0 && draftRows.length === 0 && !current) {
         // L'uscita vuota resta un bersaglio: portarci sopra il prossimo piatto
@@ -92,6 +99,19 @@ export const CourseList: React.FC<CourseListProps> = ({
             {sent && <StatusPill tone={badge.tone}>{badge.text}</StatusPill>}
             {!sent && serverRows.length > 0 && (
               <StatusPill tone="pending">da inviare</StatusPill>
+            )}
+            {/* «annulla chiamata» quiet come «torna in bozza»: è il rimedio
+                del tavolo sbagliato, non un verbo del servizio normale. */}
+            {unfirable && onUnfire && (
+              <button
+                type="button"
+                onClick={() => onUnfire(n)}
+                disabled={busy}
+                title="Annulla la chiamata: l'uscita torna in coda e sparisce dai monitor di cucina"
+                className="flex-shrink-0 text-[13px] font-medium text-[var(--ds-text-muted)] underline decoration-dotted transition-opacity hover:opacity-70 disabled:opacity-40"
+              >
+                annulla chiamata
+              </button>
             )}
             {strandedQueued && onFire && (
               <button

@@ -754,6 +754,22 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     }
   };
 
+  // Annulla la CHIAMATA di un'uscita già lanciata: torna in coda e sparisce
+  // dai monitor. Il server rifiuta (409) se la cucina ha già iniziato — da
+  // lì in poi il rimedio è lo storno, e l'errore lo dice.
+  const unfire = async (courseNo: number) => {
+    if (!order || busy) return;
+    setBusy(true); setError(null);
+    try {
+      setOrder(await ordersApiService.unfireCourse(order.order.id, courseNo));
+      setFlash(`${courseLabel(courseNo)}: chiamata annullata, torna in coda`);
+    } catch (err: any) {
+      setError(err?.data?.error ?? err?.message ?? 'Annullo non riuscito');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // Chiusura in cassa dal foglio conto aperto sul tavolo. Il residuo che
   // resta è una decisione dell'operatore (SETTLED_PARTIAL), quindi dopo la
   // chiusura il tavolo torna libero.
@@ -1176,6 +1192,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     onRecall: recall,
     onFire: fire,
     onEditLine: (l: CartLine) => setEditLine(l),
+    onUnfire: unfire,
   };
 
   const browser = (
@@ -1453,6 +1470,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         onRecall={recall}
         onFire={fire}
         onEditLine={(l) => setEditLine(l)}
+        onUnfire={unfire}
         openedBy={openedByOther}
         onSend={() => submit('course')}
         onSendAll={() => submit('all')}
