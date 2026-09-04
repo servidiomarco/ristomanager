@@ -42,7 +42,10 @@ const TYPE_LABEL: Record<string, string> = {
 // proforma.
 const rowPill = (row: FiscalRegistryRow) => {
   if (row.status === 'CONFIRMED') {
-    return <StatusPill tone={row.doc_type === 'PROFORMA' ? 'neutral' : 'positive'}>{TYPE_LABEL[row.doc_type]}{row.doc_number ? ` ${row.doc_number}` : ''}</StatusPill>;
+    // Documento del registratore (RT esterno o Passepartout): stesso peso
+    // fiscale, provenienza dichiarata.
+    const cassa = row.doc_type === 'RECEIPT' && (row.provider === 'external_rt' || row.provider === 'passepartout');
+    return <StatusPill tone={row.doc_type === 'PROFORMA' ? 'neutral' : 'positive'}>{cassa ? 'scontrino di cassa' : TYPE_LABEL[row.doc_type]}{row.doc_number ? ` ${row.doc_number}` : ''}</StatusPill>;
   }
   if (row.status === 'VOIDED') {
     return <StatusPill tone="neutral">{row.credit_note_number ? `stornata da nc ${row.credit_note_number}` : `${TYPE_LABEL[row.doc_type]} annullato`}</StatusPill>;

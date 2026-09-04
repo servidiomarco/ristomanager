@@ -483,6 +483,7 @@ export interface CashClosureBillRow {
   fiscal_status: FiscalDocumentStatus | null;
   fiscal_doc_number: string | null;
   fiscal_public_token: string | null;
+  fiscal_provider: string | null;
   payments: { method: BillPaymentMethod; amount_cents: number }[];
 }
 

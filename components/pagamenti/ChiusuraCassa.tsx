@@ -52,6 +52,11 @@ const DOC_FILTERS: { value: DocFilter; label: string }[] = [
 
 const docPill = (b: CashClosureBillRow) => {
   const kind = docKind(b);
+  // Scontrino uscito dal registratore (Passepartout o battuto a mano nel
+  // periodo ponte): nel riscontro serale il numero è quello dell'RT.
+  if (kind === 'receipt' && (b.fiscal_provider === 'external_rt' || b.fiscal_provider === 'passepartout')) {
+    return <StatusPill tone="positive">scontrino di cassa{b.fiscal_doc_number ? ` ${b.fiscal_doc_number}` : ''}</StatusPill>;
+  }
   if (kind === 'receipt') return <StatusPill tone="positive">scontrino</StatusPill>;
   if (kind === 'invoice') return <StatusPill tone="positive">fattura {b.fiscal_doc_number ?? ''}</StatusPill>;
   if (kind === 'credit_note') return <StatusPill tone="neutral">nota di credito {b.fiscal_doc_number ?? ''}</StatusPill>;

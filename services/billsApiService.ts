@@ -32,7 +32,9 @@ export interface CloseBillPayload {
   /** Conti nativi: 'Proforma' = chiusura deliberata senza documento fiscale
    *  (registrata come segnaposto PROFORMA, sostituibile da scontrino o
    *  fattura emessi dopo). Assente o 'Scontrino' → emissione automatica. */
-  documento?: 'Scontrino' | 'Proforma';
+  documento?: 'Scontrino' | 'Proforma' | 'Cassa';
+  /** Numero dello scontrino battuto sull'RT esterno (con documento 'Cassa'). */
+  rt_doc_number?: string;
   /** Solo conti Passepartout: documento della chiusura in cassa.
    *  'Proforma' = niente scontrino (la routine della cassa); assente = Scontrino. */
   passepartout_documento?: 'Scontrino' | 'Proforma';
@@ -162,6 +164,16 @@ class BillsApiService {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify({ documento: 'Proforma' }),
+    });
+  }
+
+  /** Registra (anche a posteriori) lo scontrino battuto sull'RT esterno:
+   *  documento vero a registro, col numero del registratore se riportato. */
+  async markCassa(billId: number, rtDocNumber?: string): Promise<{ doc: FiscalDocument }> {
+    return apiRequest(`${API_URL}/bills/${billId}/fiscal-docs`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ documento: 'Cassa', ...(rtDocNumber ? { rt_doc_number: rtDocNumber } : {}) }),
     });
   }
 
