@@ -1744,10 +1744,15 @@ const App: React.FC = () => {
   };
 
   // --- Menu Logic ---
+  // La risposta dell'API si applica SUBITO allo stato: chi salva deve vedere
+  // il piatto senza dipendere dal broadcast — con un socket in riconnessione
+  // (WiFi di sala, hotspot) l'evento si perde e serviva un refresh della
+  // pagina (visto da Marco, 4/09). Il socket resta per gli altri device; il
+  // dedup per id nei suoi handler rende il doppio arrivo innocuo.
   const handleAddDish = async (dish: Omit<Dish, 'id'>) => {
     try {
-        await createDish(dish);
-        // Socket.IO will handle adding to state via dish:created event
+        const created = await createDish(dish);
+        setDishes(prev => (prev.some(d => d.id === created.id) ? prev : [...prev, created]));
         addToast('Piatto aggiunto al menu', 'success');
     } catch (error) {
         console.error("Error adding dish:", error);
@@ -1757,8 +1762,8 @@ const App: React.FC = () => {
 
   const handleUpdateDish = async (id: number, dish: Partial<Dish>) => {
     try {
-        await updateDish(id, dish);
-        // Socket.IO will handle updating state via dish:updated event
+        const updated = await updateDish(id, dish);
+        setDishes(prev => prev.map(d => (d.id === id ? { ...d, ...updated } : d)));
         addToast('Piatto aggiornato', 'success');
     } catch (error) {
         console.error("Error updating dish:", error);
@@ -1769,7 +1774,7 @@ const App: React.FC = () => {
   const handleDeleteDish = async (id: number) => {
     try {
         await deleteDish(id);
-        // Socket.IO will handle removing from state via dish:deleted event
+        setDishes(prev => prev.filter(d => d.id !== id));
         addToast('Piatto rimosso', 'success');
     } catch (error) {
         console.error("Error deleting dish:", error);
