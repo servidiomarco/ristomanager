@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { api, bearer, ownerToken } from './helpers';
 
 // Documento commerciale (fase 3 fatturazione) col driver mock: settings,
@@ -249,5 +249,101 @@ describe('documenti fiscali', () => {
         const again = await api().post(`/bills/${forgotten}/fiscal-docs`).set(bearer(token)).send({ documento: 'Proforma' });
         expect(again.status).toBe(409);
         expect(again.body.reason).toBe('doc_exists');
+    });
+});
+
+// Webhook esiti Openapi: lo scarto SDI arriva giorni dopo l'invio e deve
+// ribaltare il documento a FAILED; sul binario classico dello scontrino il
+// numero documento arriva via callback e va backfillato. Il payload è
+// l'entità del provider, con le due codifiche del sistema di callback
+// (JSON diretto o form 'data').
+describe('webhook esiti openapi', () => {
+    let token: string;
+    let webhookBase: string;
+
+    const closedBillWithDoc = async (tableName: string, totalCents: number): Promise<{ billId: number; ref: string }> => {
+        const room = await api().post('/rooms').set(bearer(token)).send({ name: `Sala Esiti ${tableName}`, width: 800, height: 600 });
+        const table = await api().post('/tables').set(bearer(token)).send({
+            name: tableName, shape: 'SQUARE', seats: 4, x: 100, y: 700, room_id: room.body.id, status: 'FREE',
+        });
+        const bill = await api().post(`/tables/${table.body.id}/bill`).set(bearer(token)).send({ total_cents: totalCents, covers: 2 });
+        expect(bill.status, JSON.stringify(bill.body)).toBe(201);
+        const billId = bill.body.bill.id as number;
+        await api().post(`/bills/${billId}/close`).set(bearer(token)).send({
+            payments: [{ method: 'CONTANTI', amount_cents: totalCents }],
+        });
+        let res: any = null;
+        for (let i = 0; i < 20; i++) {
+            res = await api().post(`/bills/${billId}/fiscal-docs`).set(bearer(token)).send({});
+            if (res.status === 200 && res.body?.doc?.status === 'CONFIRMED') break;
+            await new Promise(r => setTimeout(r, 150));
+        }
+        expect(res.body.doc.status).toBe('CONFIRMED');
+        return { billId, ref: String(res.body.doc.provider_ref) };
+    };
+
+    const fiscalRow = async (billId: number): Promise<any> => {
+        const bills = await api().get('/bills/open?status=closed').set(bearer(token));
+        return bills.body.bills.find((b: any) => b.id === billId);
+    };
+
+    beforeAll(async () => {
+        token = await ownerToken();
+        const on = await api().put('/settings/fiscal').set(bearer(token)).send({ provider: 'mock', vat_number: '11122211133' });
+        expect(on.status).toBe(200);
+        const info = await api().get('/settings/webhook-info').set(bearer(token));
+        expect(info.status).toBe(200);
+        webhookBase = new URL(info.body.examples.openapi_fiscale).pathname;
+    });
+
+    afterAll(async () => {
+        // Stato condiviso fra i file: il provider torna spento, come fa il
+        // describe sopra per i file successivi.
+        await api().put('/settings/fiscal').set(bearer(token)).send({ provider: 'none' });
+    });
+
+    it('REJECTED da SDI ribalta il documento a FAILED col motivo', async () => {
+        const { billId, ref } = await closedBillWithDoc('ESITO1', 3000);
+        const hook = await api().post(webhookBase).send({
+            id: ref, state: 'SENT',
+            details: { sdi_status: 'REJECTED', sdi_message: 'Errore 00301: IdFiscaleIVA non valido' },
+        });
+        expect(hook.status).toBe(200);
+        const row = await fiscalRow(billId);
+        expect(row.fiscal_status).toBe('FAILED');
+        expect(row.fiscal_error).toContain('REJECTED');
+        expect(row.fiscal_error).toContain('00301');
+    });
+
+    it('DELIVERED non tocca lo stato; la codifica form "data" è capita', async () => {
+        const { billId, ref } = await closedBillWithDoc('ESITO2', 2000);
+        const hook = await api().post(webhookBase)
+            .type('form')
+            .send({ data: JSON.stringify({ id: ref, state: 'DONE', details: { sdi_status: 'DELIVERED' } }) });
+        expect(hook.status).toBe(200);
+        const row = await fiscalRow(billId);
+        expect(row.fiscal_status).toBe('CONFIRMED');
+    });
+
+    it('il numero documento arrivato via callback viene backfillato', async () => {
+        // Binario classico: l'emissione risponde senza numero, il callback
+        // 'receipt' lo porta dopo. Il mock emette senza document_number,
+        // quindi il conto parte con doc_number NULL — perfetto per il caso.
+        const { billId, ref } = await closedBillWithDoc('ESITO3', 1500);
+        const hook = await api().post(webhookBase).send({
+            id: ref, status: 'ready', document_number: 'OPENAPI2026/0421-9999',
+        });
+        expect(hook.status).toBe(200);
+        const row = await fiscalRow(billId);
+        expect(row.fiscal_status).toBe('CONFIRMED');
+        expect(row.fiscal_doc_number).toBe('OPENAPI2026/0421-9999');
+    });
+
+    it('token ignoto → 404; riferimento ignoto → 200 senza effetti', async () => {
+        const wrongToken = await api().post('/webhook/t/token-inventato-lungo-abbastanza/openapi-fiscale').send({ id: 'X' });
+        expect(wrongToken.status).toBe(404);
+        const unknownRef = await api().post(webhookBase).send({ id: 'REF-CHE-NON-ESISTE', state: 'ERROR' });
+        expect(unknownRef.status).toBe(200);
+        expect(unknownRef.body.ignored).toBe('unknown_ref');
     });
 });

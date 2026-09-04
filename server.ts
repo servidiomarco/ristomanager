@@ -6759,6 +6759,75 @@ app.post('/bills/:id/fiscal-docs/:fid/credit-note', authenticate, requirePermiss
     }
 });
 
+
+// --- Webhook esiti Openapi ---------------------------------------------------
+// SDI può scartare una fattura GIORNI dopo l'invio, e sul binario classico
+// dello scontrino (/IT-receipts) numero documento ed esito arrivano in
+// asincrono: senza questo callback il documento resterebbe CONFIRMED per
+// sempre su una fattura scartata, e lo scontrino classico resterebbe senza
+// numero. L'URL va registrato nella IT-configuration del provider
+// (api_configurations, eventi customer-invoice / receipt / receipt-error,
+// method JSON) — scripts/collaudo-fiscale.mjs webhook <url>.
+//
+// Mappatura: REJECTED o state ERROR → FAILED (l'UI ha già il ramo errore con
+// "Riprova"); tutto il resto (DELIVERED, ACCEPTED, NOT_DELIVERED = in
+// cassetto fiscale, TERMS_EXPIRED = decorrenza termini, receipt ready) è un
+// esito valido: risposta aggiornata, doc_number backfillato se il provider
+// lo ha appena assegnato. Sempre 200 in uscita: un errore nostro non deve
+// far ritentare Openapi all'infinito.
+app.post('/webhook/t/:tenantToken/openapi-fiscale', express.urlencoded({ extended: false }), async (req, res) => {
+    const tenantId = await resolveWebhookTenantOr404(req, res);
+    if (tenantId == null) return;
+    try {
+        // method JSON → l'entità è il body; method POST → JSON incodato nel
+        // campo 'data' (default del sistema di callback Openapi).
+        let entity: any = req.body;
+        if (entity && typeof entity.data === 'string') {
+            try { entity = JSON.parse(entity.data); } catch (_) { /* resta com'è */ }
+        }
+        if (entity?.data && typeof entity.data === 'object') entity = entity.data;
+        const ref = entity?.id ?? entity?.uuid;
+        if (!ref) return res.json({ ok: true, ignored: 'no_id' });
+
+        // 'mock' incluso: i test API esercitano questo stesso percorso; fuori
+        // restano i documenti di cassa (passepartout) e i segnaposto (crm).
+        const docRs = await queryWithRetry(
+            `SELECT id, table_bill_id, doc_type, status FROM fiscal_documents
+             WHERE provider_ref = $1 AND tenant_id = $2 AND provider IN ('openapi', 'mock')`,
+            [String(ref), tenantId]
+        );
+        const doc = docRs.rows[0];
+        if (!doc) return res.json({ ok: true, ignored: 'unknown_ref' });
+
+        const sdiStatus = String(entity?.details?.sdi_status ?? '').toUpperCase();
+        const state = String(entity?.state ?? entity?.status ?? '').toUpperCase();
+        const failed = sdiStatus === 'REJECTED' || state === 'ERROR' || state === 'FAILED'
+            || Boolean(entity?.error_code) || Boolean(entity?.error_message);
+        const docNumber = typeof entity?.document_number === 'string' && entity.document_number.trim()
+            ? entity.document_number.trim() : null;
+        // Un documento VOIDED resta VOIDED qualunque cosa dica il callback:
+        // l'annullo è un atto nostro, l'esito arrivato dopo è storia vecchia.
+        const upd = await queryWithRetry(
+            `UPDATE fiscal_documents
+             SET response = $2::jsonb,
+                 doc_number = COALESCE(doc_number, $5),
+                 status = CASE WHEN status = 'VOIDED' THEN status WHEN $3 THEN 'FAILED' ELSE status END,
+                 error = CASE WHEN $3 THEN $4 ELSE error END
+             WHERE id = $1
+             RETURNING ${FISCAL_DOC_COLUMNS}`,
+            [doc.id, JSON.stringify({ data: entity }), failed,
+             failed ? `Provider: ${sdiStatus || state}${entity?.details?.sdi_message ?? entity?.error_message ? ` — ${String(entity?.details?.sdi_message ?? entity?.error_message).slice(0, 500)}` : ''}` : null,
+             docNumber]
+        );
+        try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: doc.table_bill_id, doc: upd.rows[0] }); } catch (_) {}
+        if (failed) console.warn(`[fiscal] webhook: documento ${doc.id} (conto ${doc.table_bill_id}) segnato FAILED da ${sdiStatus || state}`);
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('POST /webhook/openapi-fiscale error:', err?.message);
+        res.json({ ok: true, ignored: 'error' });
+    }
+});
+
 // Emissione fattura elettronica (SDI) su un conto CHIUSO o su una singola
 // quota PAGATA (l'azienda al tavolo misto che paga la sua parte con
 // fattura). Il cessionario arriva dalla rubrica (customers.billing) o
@@ -22445,6 +22514,7 @@ app.get('/settings/webhook-info', authenticate, requirePermission('settings:full
                 twilio_whatsapp_status: `${webhookBase}/twilio-whatsapp-status`,
                 vonage_inbound: `${webhookBase}/vonage-inbound`,
                 resend_inbound: `${webhookBase}/resend-inbound`,
+                openapi_fiscale: `${webhookBase}/openapi-fiscale`,
             } : null,
         });
     } catch (err) {
