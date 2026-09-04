@@ -474,6 +474,17 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
     [catalogue],
   );
 
+  // Nota breve della variante (es. «48–52°C al cuore»): il promemoria del
+  // cuoco, accanto al nome sulla riga. Risolta dal catalogo per id — lo
+  // snapshot della riga resta com'è.
+  const modifierNotes = useMemo(
+    () => new Map((catalogue?.modifier_groups ?? [])
+      .flatMap(g => g.modifiers)
+      .filter(m => m.note)
+      .map(m => [m.id, m.note as string])),
+    [catalogue],
+  );
+
   // "In arrivo" = lanciata ma la mia partita non deve ancora iniziare.
   const isUpcoming = (col: Column): boolean =>
     col.items.every(i => i.status === 'SENT')
@@ -920,6 +931,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                 now={now}
                 stationId={stationId}
                 stationNames={stationNames}
+                modifierNotes={modifierNotes}
                 onAdvance={advance}
                 onCallWaiter={passeEnabled ? undefined : callWaiter}
                 waiterCalled={waiterCalled}
@@ -1129,6 +1141,8 @@ const OrderCard: React.FC<{
   now: number;
   stationId: number | null;
   stationNames?: Map<number, string>;
+  /** Nota per opzione (per id), dal catalogo: accodata al nome sulla riga. */
+  modifierNotes?: Map<number, string>;
   onAdvance: (item: KdsItem, status: 'PREPARING' | 'READY') => void;
   /** Presenti solo col passe spento: la campanella avvisa la sala che
    *  l'uscita è pronta (non muove lo stato), la spunta la segna servita. */
@@ -1139,7 +1153,7 @@ const OrderCard: React.FC<{
   onShowRevisions?: () => void;
   /** Long press su una riga: accende il chip del piatto nella barra. */
   onFlashDish?: (name: string) => void;
-}> = ({ g, now, stationId, stationNames, onAdvance, onCallWaiter, waiterCalled, onServeCourse, revisions, onShowRevisions, onFlashDish }) => {
+}> = ({ g, now, stationId, stationNames, modifierNotes, onAdvance, onCallWaiter, waiterCalled, onServeCourse, revisions, onShowRevisions, onFlashDish }) => {
   const activeByCourse = new Map(g.cols.map(c => [c.course_no, c]));
   const upcomingByCourse = new Map(g.upcomingCols.map(c => [c.course_no, c]));
   const courseNos = [...new Set([
@@ -1216,6 +1230,7 @@ const OrderCard: React.FC<{
                   col={active}
                   now={now}
                   stationNames={stationNames}
+                  modifierNotes={modifierNotes}
                   onAdvance={onAdvance}
                   onCallWaiter={onCallWaiter}
                   called={waiterCalled.has(active.key)}
@@ -1276,12 +1291,14 @@ const CourseSection: React.FC<{
   col: Column;
   now: number;
   stationNames?: Map<number, string>;
+  /** Nota per opzione (per id), dal catalogo: accodata al nome sulla riga. */
+  modifierNotes?: Map<number, string>;
   onAdvance: (item: KdsItem, status: 'PREPARING' | 'READY') => void;
   onCallWaiter?: (col: Column) => void;
   called?: boolean;
   onServeCourse?: (col: Column) => void;
   onFlashDish?: (name: string) => void;
-}> = ({ col, now, stationNames, onAdvance, onCallWaiter, called, onServeCourse, onFlashDish }) => {
+}> = ({ col, now, stationNames, modifierNotes, onAdvance, onCallWaiter, called, onServeCourse, onFlashDish }) => {
   const start = col.items[0]?.station_start_at ?? col.firedAt;
   const elapsed = minutesSince(start, now);
   const allReady = col.items.every(i => i.status === 'READY');
@@ -1384,7 +1401,7 @@ const CourseSection: React.FC<{
               </div>
               {i.modifiers && i.modifiers.length > 0 && (
                 <div className="ml-6 text-[13px] font-medium text-[var(--ds-pending-text)]">
-                  ↳ {i.modifiers.map(m => m.name).join(', ')}
+                  ↳ {i.modifiers.map(m => m.id != null && modifierNotes?.get(m.id) ? `${m.name} · ${modifierNotes.get(m.id)}` : m.name).join(', ')}
                 </div>
               )}
               {i.note && <div className="ml-6 text-[13px] text-[var(--ds-text-muted)]">↳ {i.note}</div>}

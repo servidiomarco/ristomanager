@@ -657,6 +657,9 @@ export interface ModifierGroup {
   /** 'pp:varianti:…' = gruppo del sync Passepartout (membri e max della
    *  cassa); null = gruppo creato a mano nel CRM. */
   external_ref: string | null;
+  /** Guida del gruppo per sala e cucina (es. i gradi di cottura spiegati).
+   *  Campo del CRM anche sui gruppi della cassa. */
+  note?: string | null;
 }
 
 export interface Modifier {
@@ -669,6 +672,9 @@ export interface Modifier {
   price_delta_pct: string | null;
   is_active: boolean;
   sort_order: number;
+  /** Nota breve dell'opzione (es. «48–52°C al cuore»): sul foglio varianti
+   *  e accanto al nome sul monitor cucina. */
+  note?: string | null;
 }
 
 /** Ingrediente di un piatto composto: pre-incluso, si toglie sull'orderpad

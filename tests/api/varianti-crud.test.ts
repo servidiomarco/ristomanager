@@ -345,6 +345,44 @@ describe('varianti: crud, gruppi cassa, composti, percentuali', () => {
         expect(senzaObbligo.status).toBe(201);
     });
 
+    it('le note viaggiano: guida sul gruppo (anche della cassa), temperatura sull\'opzione', async () => {
+        const g = await api().post('/menu/modifier-groups').set(bearer(token)).send({
+            name: 'Cottura Note Vrt',
+            note: 'Guida ai gradi di cottura.',
+            modifiers: [{ name: 'Al sangue', note: '48–52°C al cuore' }],
+        });
+        expect(g.status).toBe(201);
+        groupIds.push(g.body.id);
+        expect(g.body.note).toBe('Guida ai gradi di cottura.');
+        expect(g.body.modifiers[0].note).toBe('48–52°C al cuore');
+
+        // La nota si modifica e si cancella; assente nel body non si tocca.
+        const upd = await api().put(`/menu/modifiers/${g.body.modifiers[0].id}`).set(bearer(token))
+            .send({ note: '48–52 °C' });
+        expect(upd.status).toBe(200);
+        expect(upd.body.note).toBe('48–52 °C');
+        const untouched = await api().put(`/menu/modifiers/${g.body.modifiers[0].id}`).set(bearer(token))
+            .send({ name: 'Al sangue (rare)' });
+        expect(untouched.body.note).toBe('48–52 °C');
+        const cleared = await api().put(`/menu/modifier-groups/${g.body.id}`).set(bearer(token)).send({ note: '' });
+        expect(cleared.status).toBe(200);
+        expect(cleared.body.note).toBeNull();
+
+        // Sul gruppo della cassa la nota è del CRM: si scrive senza 409.
+        const ppNote = await api().put(`/menu/modifier-groups/${ppGroupId}`).set(bearer(token))
+            .send({ note: 'Nota del ristoratore su un gruppo pp.' });
+        expect(ppNote.status).toBe(200);
+        expect(ppNote.body.note).toBe('Nota del ristoratore su un gruppo pp.');
+
+        // Il catalogue porta le note ai palmari e al monitor cucina.
+        const back = await api().put(`/menu/modifier-groups/${g.body.id}`).set(bearer(token)).send({ note: 'Guida.' });
+        expect(back.status).toBe(200);
+        const catalogue = await api().get('/menu/catalogue').set(bearer(token));
+        const inCat = catalogue.body.modifier_groups.find((x: any) => x.id === g.body.id);
+        expect(inCat.note).toBe('Guida.');
+        expect(inCat.modifiers[0].note).toBe('48–52 °C');
+    });
+
     it('la percentuale si risolve sul prezzo battuto e resta nello snapshot', async () => {
         const extra = await api().post('/menu/modifier-groups').set(bearer(token)).send({
             name: 'Extra Pct Vrt', max_select: 3,

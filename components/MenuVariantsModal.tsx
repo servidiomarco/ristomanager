@@ -6,7 +6,7 @@ import {
   createModifier, createModifierGroup, deleteModifier, deleteModifierGroup,
   saveModifierGroupOrder, saveModifierOrder, updateModifier, updateModifierGroup,
 } from '../services/apiService';
-import { Callout, Field, ModalShell, dsButton, dsIconButton, dsInput } from './ds';
+import { Callout, Field, ModalShell, dsButton, dsIconButton, dsInput, dsTextarea } from './ds';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { euro } from './comande/orderView';
 
@@ -267,14 +267,23 @@ const GroupEditor: React.FC<{
 }> = ({ group, busy, error, onBack, onClose, run }) => {
   const pp = isPP(group);
   const [name, setName] = useState(group.name);
+  const [note, setNote] = useState(group.note ?? '');
   const [newMod, setNewMod] = useState('');
 
   useEffect(() => { setName(group.name); }, [group.id, group.name]);
+  useEffect(() => { setNote(group.note ?? ''); }, [group.id, group.note]);
 
   const commitName = () => {
     const next = name.trim();
     if (next && next !== group.name) run(() => updateModifierGroup(group.id, { name: next }));
     else setName(group.name);
+  };
+
+  // La nota è modificabile anche sui gruppi della cassa: è campo del CRM,
+  // il sync non la tocca.
+  const commitNote = () => {
+    const next = note.trim();
+    if (next !== (group.note ?? '')) run(() => updateModifierGroup(group.id, { note: next || null }));
   };
 
   return (
@@ -339,6 +348,19 @@ const GroupEditor: React.FC<{
           </select>
         </Field>
       </div>
+
+      <Field label="Note per sala e cucina">
+        <textarea
+          rows={4}
+          className={`${dsTextarea} resize-none`}
+          maxLength={2000}
+          placeholder="es. i gradi di cottura spiegati, con l'avvertenza sulle carni bianche…"
+          value={note}
+          disabled={busy}
+          onChange={e => setNote(e.target.value)}
+          onBlur={commitNote}
+        />
+      </Field>
 
       <div>
         <div className="mb-1 text-[13px] font-semibold text-[var(--ds-text-muted)]">Opzioni</div>
@@ -409,20 +431,27 @@ const MemberRow: React.FC<{
 }> = ({ modifier: m, readOnly, busy, first, last, onMove, run }) => {
   const isPct = m.price_delta_pct != null;
   const [name, setName] = useState(m.name);
+  const [note, setNote] = useState(m.note ?? '');
   const [amount, setAmount] = useState(() =>
     isPct ? String(Number(m.price_delta_pct)) : m.price_delta_cents === 0 ? '' : (m.price_delta_cents / 100).toFixed(2));
 
   useEffect(() => {
     setName(m.name);
+    setNote(m.note ?? '');
     setAmount(m.price_delta_pct != null
       ? String(Number(m.price_delta_pct))
       : m.price_delta_cents === 0 ? '' : (m.price_delta_cents / 100).toFixed(2));
-  }, [m.id, m.name, m.price_delta_cents, m.price_delta_pct]);
+  }, [m.id, m.name, m.note, m.price_delta_cents, m.price_delta_pct]);
 
   const commitName = () => {
     const next = name.trim();
     if (next && next !== m.name) run(() => updateModifier(m.id, { name: next }));
     else setName(m.name);
+  };
+
+  const commitNote = () => {
+    const next = note.trim();
+    if (next !== (m.note ?? '')) run(() => updateModifier(m.id, { note: next || null }));
   };
 
   const commitAmount = () => {
@@ -448,7 +477,10 @@ const MemberRow: React.FC<{
   if (readOnly) {
     return (
       <div className={`flex min-h-[44px] items-center gap-2 py-2 ${m.is_active ? '' : 'opacity-60'}`}>
-        <span className="min-w-0 flex-1 truncate text-[14px] text-[var(--ds-text-primary)]">{m.name}</span>
+        <span className="min-w-0 flex-1 text-[14px] text-[var(--ds-text-primary)]">
+          <span className="block truncate">{m.name}</span>
+          {m.note && <span className="block truncate text-[12px] text-[var(--ds-text-muted)]">{m.note}</span>}
+        </span>
         {deltaLabel(m) && <span className="flex-shrink-0 text-[13px] tabular-nums text-[var(--ds-text-muted)]">{deltaLabel(m)}</span>}
       </div>
     );
@@ -536,6 +568,18 @@ const MemberRow: React.FC<{
           <Trash2 className="h-4 w-4" />
         </button>
       </div>
+      {/* La nota breve dell'opzione: compare sul foglio varianti e accanto
+          al nome sul monitor cucina. w-full = va a capo nel flex-wrap. */}
+      <input
+        className="h-8 w-full rounded-[10px] bg-[var(--ds-surface)] px-3 text-[13px] text-[var(--ds-text-secondary)] placeholder:text-[var(--ds-text-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        maxLength={300}
+        placeholder="Nota (es. 48–52°C al cuore)"
+        value={note}
+        disabled={busy}
+        onChange={e => setNote(e.target.value)}
+        onBlur={commitNote}
+        onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+      />
     </div>
   );
 };

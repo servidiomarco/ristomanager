@@ -4149,12 +4149,12 @@ const emitCatalogueUpdated = (tenantId: number, payload: Record<string, unknown>
 const fetchModifierGroupFull = async (tenantId: number, groupId: number) => {
     const [g, mods, links] = await Promise.all([
         queryWithRetry(
-            `SELECT id, name, min_select, max_select, sort_order, is_active, external_ref
+            `SELECT id, name, min_select, max_select, sort_order, is_active, external_ref, note
              FROM modifier_groups WHERE tenant_id = $1 AND id = $2`,
             [tenantId, groupId]
         ),
         queryWithRetry(
-            `SELECT id, name, price_delta_cents, price_delta_pct, is_active, sort_order
+            `SELECT id, name, price_delta_cents, price_delta_pct, is_active, sort_order, note
              FROM modifiers WHERE tenant_id = $1 AND group_id = $2
              ORDER BY sort_order, id`,
             [tenantId, groupId]
@@ -4194,12 +4194,12 @@ app.get('/menu/modifier-groups', authenticate, requirePermission('menu:full'), a
     try {
         const [groups, mods, links] = await Promise.all([
             queryWithRetry(
-                `SELECT id, name, min_select, max_select, sort_order, is_active, external_ref
+                `SELECT id, name, min_select, max_select, sort_order, is_active, external_ref, note
                  FROM modifier_groups WHERE tenant_id = $1 ORDER BY sort_order, id`,
                 [req.tenantId!]
             ),
             queryWithRetry(
-                `SELECT id, group_id, name, price_delta_cents, price_delta_pct, is_active, sort_order
+                `SELECT id, group_id, name, price_delta_cents, price_delta_pct, is_active, sort_order, note
                  FROM modifiers WHERE tenant_id = $1 ORDER BY sort_order, id`,
                 [req.tenantId!]
             ),
@@ -4221,6 +4221,14 @@ app.get('/menu/modifier-groups', authenticate, requirePermission('menu:full'), a
     }
 });
 
+// Nota libera (gruppo o opzione): stringa vuota o null = niente nota.
+const parseVariantNote = (raw: any, max: number): { value: string | null } | { error: string } => {
+    if (raw === undefined || raw === null) return { value: null };
+    const v = String(raw).trim();
+    if (v.length > max) return { error: `note deve stare in ${max} caratteri` };
+    return { value: v || null };
+};
+
 app.post('/menu/modifier-groups', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const name = String(req.body?.name ?? '').trim();
@@ -4230,8 +4238,10 @@ app.post('/menu/modifier-groups', authenticate, requirePermission('menu:full'), 
         if (!Number.isInteger(minSelect) || minSelect < 0) return res.status(400).json({ error: 'min_select deve essere un intero >= 0' });
         if (!Number.isInteger(maxSelect) || maxSelect < 1) return res.status(400).json({ error: 'max_select deve essere un intero >= 1' });
         if (maxSelect < minSelect) return res.status(400).json({ error: 'max_select non può essere minore di min_select' });
+        const note = parseVariantNote(req.body?.note, 2000);
+        if ('error' in note) return res.status(400).json({ error: note.error });
 
-        const inlineMods: { name: string; cents: number; pct: number | null }[] = [];
+        const inlineMods: { name: string; cents: number; pct: number | null; note: string | null }[] = [];
         if (req.body?.modifiers !== undefined) {
             if (!Array.isArray(req.body.modifiers)) return res.status(400).json({ error: 'modifiers deve essere una lista' });
             for (const m of req.body.modifiers) {
@@ -4239,7 +4249,9 @@ app.post('/menu/modifier-groups', authenticate, requirePermission('menu:full'), 
                 if (!mName || mName.length > 100) return res.status(400).json({ error: 'ogni variante deve avere un nome di 1..100 caratteri' });
                 const delta = parseModifierDelta(m);
                 if ('error' in delta) return res.status(400).json({ error: delta.error });
-                inlineMods.push({ name: mName, cents: delta.cents, pct: delta.pct });
+                const mNote = parseVariantNote(m?.note, 300);
+                if ('error' in mNote) return res.status(400).json({ error: mNote.error });
+                inlineMods.push({ name: mName, cents: delta.cents, pct: delta.pct, note: mNote.value });
             }
         }
 
@@ -4249,17 +4261,17 @@ app.post('/menu/modifier-groups', authenticate, requirePermission('menu:full'), 
                 [req.tenantId!]
             );
             const ins = await client.query(
-                `INSERT INTO modifier_groups (tenant_id, name, min_select, max_select, sort_order)
-                 VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-                [req.tenantId!, name, minSelect, maxSelect, ord.rows[0].next]
+                `INSERT INTO modifier_groups (tenant_id, name, min_select, max_select, sort_order, note)
+                 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+                [req.tenantId!, name, minSelect, maxSelect, ord.rows[0].next, note.value]
             );
             const gid = Number(ins.rows[0].id);
             for (let i = 0; i < inlineMods.length; i++) {
                 const m = inlineMods[i];
                 await client.query(
-                    `INSERT INTO modifiers (tenant_id, group_id, name, price_delta_cents, price_delta_pct, sort_order)
-                     VALUES ($1, $2, $3, $4, $5, $6)`,
-                    [req.tenantId!, gid, m.name, m.cents, m.pct, i]
+                    `INSERT INTO modifiers (tenant_id, group_id, name, price_delta_cents, price_delta_pct, sort_order, note)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                    [req.tenantId!, gid, m.name, m.cents, m.pct, i, m.note]
                 );
             }
             return gid;
@@ -4328,6 +4340,12 @@ app.put('/menu/modifier-groups/:id', authenticate, requirePermission('menu:full'
         const maxSelect = req.body?.max_select === undefined ? null : Number(req.body.max_select);
         if (maxSelect !== null && (!Number.isInteger(maxSelect) || maxSelect < 1)) return res.status(400).json({ error: 'max_select deve essere un intero >= 1' });
         const isActive = req.body?.is_active === undefined ? null : Boolean(req.body.is_active);
+        // La nota è del CRM anche sui gruppi della cassa (il sync non la
+        // tocca). `note` assente = non si tocca; presente (anche vuota) =
+        // sostituisce — il COALESCE non saprebbe cancellare.
+        const noteProvided = req.body?.note !== undefined;
+        const note = parseVariantNote(req.body?.note, 2000);
+        if ('error' in note) return res.status(400).json({ error: note.error });
 
         // Il CHECK min<=max va verificato combinando body e valori correnti,
         // o un min alzato da solo diventerebbe un 500 dal vincolo.
@@ -4340,9 +4358,10 @@ app.put('/menu/modifier-groups/:id', authenticate, requirePermission('menu:full'
                 name = COALESCE($3, name),
                 min_select = COALESCE($4, min_select),
                 max_select = COALESCE($5, max_select),
-                is_active = COALESCE($6, is_active)
+                is_active = COALESCE($6, is_active),
+                note = CASE WHEN $7 THEN $8 ELSE note END
              WHERE tenant_id = $1 AND id = $2`,
-            [req.tenantId!, id, name, minSelect, maxSelect, isActive]
+            [req.tenantId!, id, name, minSelect, maxSelect, isActive, noteProvided, note.value]
         );
         emitCatalogueUpdated(req.tenantId!, { gruppo_aggiornato: id });
         if (req.user) {
@@ -4422,12 +4441,14 @@ app.post('/menu/modifier-groups/:id/modifiers', authenticate, requirePermission(
         if (!name || name.length > 100) return res.status(400).json({ error: 'name deve essere 1..100 caratteri' });
         const delta = parseModifierDelta(req.body);
         if ('error' in delta) return res.status(400).json({ error: delta.error });
+        const note = parseVariantNote(req.body?.note, 300);
+        if ('error' in note) return res.status(400).json({ error: note.error });
         const ins = await queryWithRetry(
-            `INSERT INTO modifiers (tenant_id, group_id, name, price_delta_cents, price_delta_pct, sort_order)
-             VALUES ($1, $2, $3, $4, $5,
+            `INSERT INTO modifiers (tenant_id, group_id, name, price_delta_cents, price_delta_pct, note, sort_order)
+             VALUES ($1, $2, $3, $4, $5, $6,
                      (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM modifiers WHERE tenant_id = $1 AND group_id = $2))
-             RETURNING id, group_id, name, price_delta_cents, price_delta_pct, is_active, sort_order`,
-            [req.tenantId!, groupId, name, delta.cents, delta.pct]
+             RETURNING id, group_id, name, price_delta_cents, price_delta_pct, is_active, sort_order, note`,
+            [req.tenantId!, groupId, name, delta.cents, delta.pct, note.value]
         );
         emitCatalogueUpdated(req.tenantId!, { variante_creata: name });
         res.status(201).json(ins.rows[0]);
@@ -4483,21 +4504,28 @@ app.put('/menu/modifiers/:id', authenticate, requirePermission('menu:full'), asy
 
         // Il sovrapprezzo si aggiorna solo se il body ne parla: pct
         // valorizzato → percentuale (centesimi a 0); pct null esplicito →
-        // torna assoluto; nessuno dei due campi → resta com'è.
-        let deltaSql = '';
+        // torna assoluto; nessuno dei due campi → resta com'è. Idem la nota:
+        // assente = non si tocca, presente (anche vuota) = sostituisce.
+        let extraSql = '';
         const params: any[] = [req.tenantId!, id, name, isActive];
         if (req.body?.price_delta_pct !== undefined || req.body?.price_delta_cents !== undefined) {
             const delta = parseModifierDelta(req.body);
             if ('error' in delta) return res.status(400).json({ error: delta.error });
-            deltaSql = ', price_delta_cents = $5, price_delta_pct = $6';
             params.push(delta.cents, delta.pct);
+            extraSql += `, price_delta_cents = $${params.length - 1}, price_delta_pct = $${params.length}`;
+        }
+        if (req.body?.note !== undefined) {
+            const note = parseVariantNote(req.body?.note, 300);
+            if ('error' in note) return res.status(400).json({ error: note.error });
+            params.push(note.value);
+            extraSql += `, note = $${params.length}`;
         }
         const upd = await queryWithRetry(
             `UPDATE modifiers SET
                 name = COALESCE($3, name),
-                is_active = COALESCE($4, is_active)${deltaSql}
+                is_active = COALESCE($4, is_active)${extraSql}
              WHERE tenant_id = $1 AND id = $2
-             RETURNING id, group_id, name, price_delta_cents, price_delta_pct, is_active, sort_order`,
+             RETURNING id, group_id, name, price_delta_cents, price_delta_pct, is_active, sort_order, note`,
             params
         );
         emitCatalogueUpdated(req.tenantId!, { variante_aggiornata: id });
@@ -25850,10 +25878,10 @@ app.get('/menu/catalogue', authenticate, requirePermission('orders:view'), async
             queryWithRetry(`SELECT id, name, color, sort_order, is_active FROM stations WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
             // Solo gruppi accesi: un gruppo spento in gestione non deve né
             // comparire sul foglio né pretendere il suo min alla battitura.
-            queryWithRetry(`SELECT id, name, min_select, max_select, sort_order FROM modifier_groups WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
+            queryWithRetry(`SELECT id, name, min_select, max_select, sort_order, note FROM modifier_groups WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
             // price_delta_pct: il foglio varianti mostra l'importo in € per
             // il piatto corrente; il calcolo vero resta del server.
-            queryWithRetry(`SELECT id, group_id, name, price_delta_cents, price_delta_pct, is_active, sort_order FROM modifiers WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
+            queryWithRetry(`SELECT id, group_id, name, price_delta_cents, price_delta_pct, is_active, sort_order, note FROM modifiers WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
             queryWithRetry(`SELECT dish_id, group_id FROM dish_modifier_groups WHERE tenant_id = $1`, [req.tenantId!]),
             queryWithRetry(`SELECT id, dish_id, name, removal_delta_cents, sort_order FROM dish_components WHERE tenant_id = $1 ORDER BY sort_order, id`, [req.tenantId!]),
             getMenuCategoryPrefs(req.tenantId!),

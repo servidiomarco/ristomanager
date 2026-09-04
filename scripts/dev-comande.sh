@@ -156,9 +156,24 @@ WHERE NOT EXISTS (SELECT 1 FROM modifier_groups WHERE name = 'Aggiunte');
 INSERT INTO modifiers (tenant_id, group_id, name, price_delta_cents, sort_order)
 SELECT 1, g.id, v.name, v.delta, v.ord
 FROM modifier_groups g
-JOIN (VALUES ('Al sangue', 0, 1), ('Media', 0, 2), ('Ben cotta', 0, 3)) AS v(name, delta, ord) ON TRUE
+JOIN (VALUES ('Al sangue', 0, 1), ('Media-sangue', 0, 2), ('Media', 0, 3),
+             ('Media-ben cotta', 0, 4), ('Ben cotta', 0, 5)) AS v(name, delta, ord) ON TRUE
 WHERE g.name = 'Cottura'
   AND NOT EXISTS (SELECT 1 FROM modifiers m WHERE m.group_id = g.id AND m.name = v.name);
+
+-- Le note dei gradi di cottura: la guida sul gruppo (sala), la temperatura
+-- al cuore sull'opzione (griglia).
+UPDATE modifier_groups SET note =
+  'I gradi di cottura della carne rossa (fiorentina, filetto, costata) si distinguono per la temperatura al cuore del taglio. Al sangue: superficie ben scottata, cuore rosso e molto caldo, carne tenera e succosa. Media-sangue: il grado preferito dai grigliatori — cuore rosso intenso con fascia rosa, grasso ben disciolto. Media: rosa uniforme al centro, bordi dorati, consistenza più soda e succhi ben distribuiti. Media-ben cotta: solo una sfumatura rosa al centro, crosta pronunciata, inizia a perdere morbidezza. Ben cotta: interamente bruna, compatta e asciutta. Carni bianche (pollo, tacchino) e maiale: cottura sempre completa, almeno 74°C al cuore, per la sicurezza alimentare.'
+WHERE name = 'Cottura' AND note IS NULL;
+UPDATE modifiers m SET note = v.note, sort_order = v.ord
+FROM modifier_groups g,
+     (VALUES ('Al sangue', '48–52°C al cuore', 1),
+             ('Media-sangue', '53–56°C al cuore', 2),
+             ('Media', '57–62°C al cuore', 3),
+             ('Media-ben cotta', '63–68°C al cuore', 4),
+             ('Ben cotta', '70°C e oltre al cuore', 5)) AS v(name, note, ord)
+WHERE g.name = 'Cottura' AND m.group_id = g.id AND m.name = v.name AND m.note IS NULL;
 
 INSERT INTO modifiers (tenant_id, group_id, name, price_delta_cents, sort_order)
 SELECT 1, g.id, v.name, v.delta, v.ord
