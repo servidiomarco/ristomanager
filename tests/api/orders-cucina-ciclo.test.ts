@@ -331,6 +331,33 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         expect(di_nuovo.status).toBe(200);
     });
 
+    it('la chiamata di un\'uscita si annulla finché la cucina non inizia', async () => {
+        await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'AUTO_ALL' });
+        const orderId = await nuovaComanda();
+        await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [{ dish_id: piatto1, qty: 1, course_no: 1 }],
+        });
+        await api().post(`/orders/${orderId}/send`).set(bearer(token)).send({});
+
+        // Lanciata (SENT): l'annullo la riporta in coda, come mai chiamata.
+        const un = await api().post(`/orders/${orderId}/courses/1/unfire`).set(bearer(token)).send({});
+        expect(un.status).toBe(200);
+        for (const i of righe(un.body)) {
+            expect(i.status).toBe('QUEUED');
+            expect(i.fired_at).toBeNull();
+        }
+
+        // E si può richiamare: il fuoco riparte pulito.
+        const re = await api().post(`/orders/${orderId}/courses/1/fire`).set(bearer(token)).send({});
+        expect(re.status).toBe(200);
+
+        // La cucina inizia: da qui in poi si storna, l'annullo rifiuta.
+        const item = re.body.items[0];
+        expect((await api().post(`/kds/items/${item.id}/status`).set(bearer(token)).send({ status: 'PREPARING' })).status).toBe(200);
+        const no = await api().post(`/orders/${orderId}/courses/1/unfire`).set(bearer(token)).send({});
+        expect(no.status).toBe(409);
+    });
+
     it('la categoria aggancia la partita anche se il maiuscolo non coincide', async () => {
         // La cassa scrive le categorie come vuole ("Primi" e "PRIMI"
         // convivono nel catalogo): il piatto è in "Dolci Ciclo", la mappa

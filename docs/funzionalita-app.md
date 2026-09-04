@@ -565,6 +565,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-04 | Comande, Cucina e Passe | La chiamata di un'uscita si può annullare («annulla chiamata» sulla comanda, quiet accanto allo stato): l'uscita torna in coda come se il fuoco non fosse mai partito e le card spariscono subito dai monitor. Solo finché la cucina non ha iniziato: alla prima riga in preparazione l'annullo rifiuta — da lì si storna. |
 | 2026-09-04 | Menu & Banchetti | Note sulle varianti: ogni gruppo ha una guida per sala e cucina (es. i gradi di cottura spiegati, espandibile dal foglio varianti con l'icona info) e ogni opzione una nota breve (es. "48–52°C al cuore") che compare accanto al nome sul foglio e sulla riga del monitor cucina. Modificabili dall'editor del gruppo, anche sui gruppi importati dalla cassa. |
 | 2026-09-03 | Reportistica | Nuova pagina Reportistica: quattro blocchi — prenotazioni e canali, incassi e cassa, cucina e piatti, Sofia e comunicazioni — su periodo a scelta con confronto automatico col periodo precedente, export csv, foglio di stampa e lettura AI. Al lancio è ristretta agli account del titolare; l'apertura agli altri passa dal permesso dedicato nella matrice ruoli. |
 | 2026-09-03 | Fiscalità | Nuova vista Fiscalità: registro documenti per periodo con totali e filtri, dettaglio per documento, CSV registro e corrispettivi per aliquota, stampa A4 del riepilogo. Visibile di default al solo titolare (permesso dedicato, concedibile per ruolo). |

@@ -26648,6 +26648,82 @@ app.post('/orders/:id/courses/:n/recall', authenticate, requirePermission('order
     }
 });
 
+// Annulla la CHIAMATA: l'uscita lanciata torna in coda (QUEUED), come se il
+// fuoco non fosse mai partito — il rimedio per il «Chiama» sul tavolo
+// sbagliato. Solo finché la cucina non ha iniziato: alla prima riga in
+// preparazione (o oltre) l'annullo rifiuta — da lì in poi si storna, non si
+// riavvolge. Diverso dal recall qui sopra, che disfa la PROPOSTA (QUEUED →
+// DRAFT) prima di qualunque fuoco.
+app.post('/orders/:id/courses/:n/unfire', authenticate, requireAnyPermission('orders:expedite', 'orders:take'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(req, res))) return;
+        const orderId = parseInt(req.params.id, 10);
+        const courseNo = parseInt(req.params.n, 10);
+        if (!Number.isFinite(orderId) || !Number.isFinite(courseNo)) {
+            return res.status(400).json({ error: 'Parametri non validi' });
+        }
+
+        const client = await pool.connect();
+        let unfired: any[] = [];
+        let started = false;
+        try {
+            await client.query('BEGIN');
+            const busyRows = await client.query(
+                `SELECT 1 FROM order_items
+                 WHERE order_id = $1 AND course_no = $2 AND tenant_id = $3
+                   AND status IN ('PREPARING','READY','SERVED') LIMIT 1`,
+                [orderId, courseNo, req.tenantId!]
+            );
+            if (busyRows.rows.length > 0) {
+                started = true;
+                await client.query('ROLLBACK');
+            } else {
+                const upd = await client.query(
+                    `UPDATE order_items
+                     SET status = 'QUEUED', fired_at = NULL, station_start_at = NULL, started_at = NULL
+                     WHERE order_id = $1 AND course_no = $2 AND tenant_id = $3 AND status = 'SENT'
+                     RETURNING id, station_id, name_snapshot, qty`,
+                    [orderId, courseNo, req.tenantId!]
+                );
+                unfired = upd.rows;
+                if (unfired.length === 0) {
+                    await client.query('ROLLBACK');
+                } else {
+                    await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId });
+                    await client.query('COMMIT');
+                }
+            }
+        } catch (err) {
+            await client.query('ROLLBACK').catch(() => {});
+            throw err;
+        } finally {
+            client.release();
+        }
+        if (started) {
+            return res.status(409).json({ error: 'La cucina ha già iniziato: le righe si stornano, la chiamata non si annulla' });
+        }
+        if (unfired.length === 0) {
+            return res.status(409).json({ error: "L'uscita non è stata chiamata" });
+        }
+
+        const view = await loadOrderView(req.tenantId!, orderId);
+        try {
+            socketService?.broadcastToAll(req.tenantId!, 'course:unfired', { order_id: orderId, course_no: courseNo });
+            // Le card devono sparire SUBITO dai monitor coinvolti, non al poll.
+            for (const st of new Set(unfired.map((i: any) => i.station_id))) {
+                socketService?.broadcastToStation(req.tenantId!, st as number | null, 'kds:unfired', {
+                    order_id: orderId, course_no: courseNo,
+                });
+            }
+        } catch (_) {}
+        outboxKick();
+        res.json(view);
+    } catch (err: any) {
+        console.error('POST /orders/:id/courses/:n/unfire error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 // --- Monitor di partita (PR 4) ----------------------------------------------
 // Ogni schermo di cucina vede solo la propria coda. La riga porta con sé il
 // tavolo, l'uscita e gli allergeni della prenotazione: il cuoco non deve

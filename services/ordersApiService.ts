@@ -176,6 +176,15 @@ class OrdersApiService {
       headers: getHeaders(),
     });
   }
+
+  /** Annulla la CHIAMATA di un'uscita già lanciata: torna in coda, come se
+   *  il fuoco non fosse mai partito. 409 se la cucina ha già iniziato. */
+  async unfireCourse(orderId: number, courseNo: number): Promise<OrderWithItems> {
+    return apiRequest<OrderWithItems>(`${API_URL}/orders/${orderId}/courses/${courseNo}/unfire`, {
+      method: 'POST',
+      headers: getHeaders(),
+    });
+  }
 }
 
 export const ordersApiService = new OrdersApiService();
