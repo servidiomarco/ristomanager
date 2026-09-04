@@ -7,12 +7,13 @@ import { staffChatApiService } from '../services/staffChatApiService';
 import { channelThreadKey, staffMessagePreview, type StaffMessage } from '../services/staffChat';
 import {
   getKdsQueue, getKdsServed, setKdsItemStatus, getMenuCatalogue, getKdsRevisions, ackKdsRevision,
-  callWaiterForCourse, serveCourse, getOrderTimeline,
+  callWaiterForCourse, serveCourse, getOrderTimeline, ordersApiService,
   type KdsItem, type KdsCourseState, type KdsOtherItem, type KdsFullItem, type KdsComingItem, type KdsServedCourse, type MenuCatalogue, type OrderRevision,
   type OrderTimelineEvent,
 } from '../services/ordersApiService';
 import { getKitchenServiceSummary, type KitchenServiceSummary } from '../services/apiService';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
+import { weightLabel } from './comande/orderView';
 import { chime } from '../utils/chime';
 import { ModalShell, EmptyState, SearchField, SegmentedControl, StatusPill, dsButton } from './ds';
 
@@ -568,6 +569,10 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   // Tocco sul chip: «dove va questo piatto?» — modal coi tavoli, divisi fra
   // in lavorazione e in arrivo.
   const [chipDetail, setChipDetail] = useState<string | null>(null);
+  // Correzione del peso di una riga al peso: i tagli non sono precisi, e il
+  // peso vero lo sa la cucina dopo la pesata. Il prezzo si ricalcola sul
+  // server, la traccia va nel registro attività.
+  const [weightEdit, setWeightEdit] = useState<KdsItem | null>(null);
   const [litChip, setLitChip] = useState<string | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const flashChip = useCallback((name: string) => setFlashDish({ name, tick: Date.now() }), []);
@@ -944,6 +949,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                 revisions={revisionsByOrder.get(g.order_id)}
                 onShowRevisions={() => setRevisionsFor(g.order_id)}
                 onFlashDish={flashChip}
+                onEditWeight={setWeightEdit}
               />
             ))}
           </div>
@@ -1048,6 +1054,14 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           );
         })()}
       </ModalShell>
+
+      {weightEdit && (
+        <WeightEditModal
+          item={weightEdit}
+          onClose={() => setWeightEdit(null)}
+          onSaved={() => { setWeightEdit(null); reload(); }}
+        />
+      )}
 
       {summary && (
         <ModalShell
@@ -1158,7 +1172,9 @@ const OrderCard: React.FC<{
   onShowRevisions?: () => void;
   /** Long press su una riga: accende il chip del piatto nella barra. */
   onFlashDish?: (name: string) => void;
-}> = ({ g, now, stationId, stationNames, modifierNotes, onAdvance, onCallWaiter, waiterCalled, onServeCourse, revisions, onShowRevisions, onFlashDish }) => {
+  /** Apre l'editor del peso su una riga al peso (correzione dopo la pesata). */
+  onEditWeight?: (item: KdsItem) => void;
+}> = ({ g, now, stationId, stationNames, modifierNotes, onAdvance, onCallWaiter, waiterCalled, onServeCourse, revisions, onShowRevisions, onFlashDish, onEditWeight }) => {
   const activeByCourse = new Map(g.cols.map(c => [c.course_no, c]));
   const upcomingByCourse = new Map(g.upcomingCols.map(c => [c.course_no, c]));
   const courseNos = [...new Set([
@@ -1241,6 +1257,7 @@ const OrderCard: React.FC<{
                   called={waiterCalled.has(active.key)}
                   onServeCourse={onServeCourse}
                   onFlashDish={onFlashDish}
+                  onEditWeight={onEditWeight}
                 />
               );
             }
@@ -1303,7 +1320,8 @@ const CourseSection: React.FC<{
   called?: boolean;
   onServeCourse?: (col: Column) => void;
   onFlashDish?: (name: string) => void;
-}> = ({ col, now, stationNames, modifierNotes, onAdvance, onCallWaiter, called, onServeCourse, onFlashDish }) => {
+  onEditWeight?: (item: KdsItem) => void;
+}> = ({ col, now, stationNames, modifierNotes, onAdvance, onCallWaiter, called, onServeCourse, onFlashDish, onEditWeight }) => {
   const start = col.items[0]?.station_start_at ?? col.firedAt;
   const elapsed = minutesSince(start, now);
   const allReady = col.items.every(i => i.status === 'READY');
@@ -1397,6 +1415,22 @@ const CourseSection: React.FC<{
                 >
                   {i.name_snapshot}
                 </span>
+                {/* Il peso del pezzo, correggibile dopo la pesata: span col
+                    ruolo di bottone perché la riga È già un bottone (la
+                    spunta) e due bottoni annidati non sono HTML valido. */}
+                {i.weight_grams != null && onEditWeight && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={e => { e.stopPropagation(); onEditWeight(i); }}
+                    onPointerDown={e => e.stopPropagation()}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onEditWeight(i); } }}
+                    aria-label={`Correggi il peso di ${i.name_snapshot} (ora ${weightLabel(i.weight_grams)})`}
+                    className="mt-0.5 inline-flex flex-shrink-0 cursor-pointer items-center rounded-full bg-[var(--ds-pending-tint)] px-2 py-0.5 text-[12px] font-semibold tabular-nums text-[var(--ds-pending-text)] transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    {weightLabel(i.weight_grams)}
+                  </span>
+                )}
                 {i.status === 'PREPARING' && (
                   <ChevronRight size={15} className="mt-0.5 flex-shrink-0 text-[var(--ds-arriving-text)]" aria-hidden />
                 )}
@@ -1658,6 +1692,68 @@ const PassiveSection: React.FC<{
         )}
       </button>
     </div>
+  );
+};
+
+// La pesata: il taglio vero non è il peso stimato alla battuta. ±10/±50 g,
+// prezzo ricalcolato dal server sul listino della comanda, traccia nel
+// registro attività — un peso ritoccato non è mai una discussione.
+const WeightEditModal: React.FC<{
+  item: KdsItem;
+  onClose: () => void;
+  onSaved: () => void;
+}> = ({ item, onClose, onSaved }) => {
+  const [grams, setGrams] = useState<number>(item.weight_grams ?? 500);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const save = async () => {
+    setBusy(true); setError(null);
+    try {
+      await ordersApiService.setItemWeight(item.id, grams);
+      onSaved();
+    } catch (err: any) {
+      setError(err?.data?.error ?? err?.message ?? 'Correzione non riuscita');
+      setBusy(false);
+    }
+  };
+  const step = (d: number) => setGrams(v => Math.max(50, Math.min(50000, v + d)));
+  return (
+    <ModalShell
+      open
+      onClose={onClose}
+      title={item.name_snapshot}
+      subtitle={`peso battuto ${weightLabel(item.weight_grams ?? 0)}`}
+      size="sm"
+      closeOnEscape
+      bodyClassName="p-5 sm:p-6"
+    >
+      <div className="flex items-center justify-center gap-2">
+        {[-50, -10].map(d => (
+          <button key={d} type="button" onClick={() => step(d)}
+            className="inline-flex h-11 min-w-14 items-center justify-center rounded-full bg-[var(--ds-surface-row)] px-3 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]">
+            {d}
+          </button>
+        ))}
+        <span className="min-w-[96px] text-center text-[24px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+          {grams} g
+        </span>
+        {[10, 50].map(d => (
+          <button key={d} type="button" onClick={() => step(d)}
+            className="inline-flex h-11 min-w-14 items-center justify-center rounded-full bg-[var(--ds-surface-row)] px-3 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]">
+            +{d}
+          </button>
+        ))}
+      </div>
+      {error && <p className="mt-3 text-center text-[14px] text-[var(--ds-critical-text)]">{error}</p>}
+      <button
+        type="button"
+        onClick={save}
+        disabled={busy || grams === item.weight_grams}
+        className={`${dsButton.primary} mt-4 w-full`}
+      >
+        {busy ? 'Salvo…' : `Salva ${weightLabel(grams)}`}
+      </button>
+    </ModalShell>
   );
 };
 

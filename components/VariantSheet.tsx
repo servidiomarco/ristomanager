@@ -31,10 +31,10 @@ export const VariantSheet: React.FC<{
   components?: CatalogueComponents;
   /** Riapertura di una riga in bozza: il foglio parte dallo stato della
    *  riga — è anche il posto dove le varianti troncate si leggono intere. */
-  initial?: { entries: { id: number; n: number }[]; removed?: number[]; note?: string };
+  initial?: { entries: { id: number; n: number }[]; removed?: number[]; note?: string; weight_grams?: number };
   confirmLabel?: string;
   onCancel: () => void;
-  onConfirm: (entries: { id: number; n: number }[], removedComponentIds: number[], note?: string) => void;
+  onConfirm: (entries: { id: number; n: number }[], removedComponentIds: number[], note?: string, weightGrams?: number) => void;
 }> = ({ dish, groups, components = [], initial, confirmLabel, onCancel, onConfirm }) => {
   // Verso e ripetizioni per variante (battitura alla Passepartout): n>0
   // aggiunge n volte (addebito), n<0 toglie (sconto), 0 = non applicata.
@@ -50,6 +50,10 @@ export const VariantSheet: React.FC<{
   // sale», «metà porzione»). Viaggia come nota di riga — KDS e comanda in
   // cucina la stampano già sotto il piatto.
   const [custom, setCustom] = useState(initial?.note ?? '');
+  // Vendita al peso: i grammi del pezzo, chiesti qui alla battuta (stima del
+  // cameriere; il peso vero lo corregge la cucina dopo il taglio). Il prezzo
+  // del piatto è AL KG e l'anteprima sotto si aggiorna col peso.
+  const [grams, setGrams] = useState<number>(() => initial?.weight_grams ?? 500);
   // Guida del gruppo (es. i gradi di cottura spiegati): chiusa di default,
   // il foglio serve a battere — la si apre quando serve ripassarla.
   const [openNotes, setOpenNotes] = useState<Set<number>>(new Set());
@@ -120,7 +124,8 @@ export const VariantSheet: React.FC<{
       footer={
         <button
           type="button"
-          onClick={() => onConfirm(entries, [...removed], custom.trim() || undefined)}
+          onClick={() => onConfirm(entries, [...removed], custom.trim() || undefined,
+            dish.sold_by_weight ? grams : undefined)}
           disabled={missing.length > 0}
           className={`w-full ${dsButton.primary}`}
         >
@@ -128,6 +133,56 @@ export const VariantSheet: React.FC<{
         </button>
       }
     >
+      {dish.sold_by_weight && (
+        <div>
+          <div className="mb-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">
+            Peso · {euro(Math.round(dishCents))} al kg
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {[300, 400, 500, 600, 700, 800, 1000].map(g => (
+              <button
+                key={g}
+                type="button"
+                onClick={() => setGrams(g)}
+                aria-pressed={grams === g}
+                className={`inline-flex h-11 items-center rounded-full px-4 text-[15px] font-semibold tabular-nums transition-colors ${
+                  grams === g
+                    ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                    : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
+                }`}
+              >
+                {g >= 1000 ? `${g / 1000} kg` : `${g} g`}
+              </button>
+            ))}
+          </div>
+          {/* Il fine: i tagli veri non sono tondi. ±10 g, prezzo vivo. */}
+          <div className="mt-2.5 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setGrams(v => Math.max(50, v - 10))}
+              aria-label="Riduci di 10 grammi"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
+            >
+              <Minus size={16} aria-hidden />
+            </button>
+            <span className="min-w-[88px] text-center text-[18px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+              {grams} g
+            </span>
+            <button
+              type="button"
+              onClick={() => setGrams(v => Math.min(50000, v + 10))}
+              aria-label="Aumenta di 10 grammi"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
+            >
+              <Plus size={16} aria-hidden />
+            </button>
+            <span className="ml-auto text-[17px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+              {euro(Math.round(dishCents * grams / 1000))}
+            </span>
+          </div>
+        </div>
+      )}
+
       {components.length > 0 && (
         <div>
           <div className="mb-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">

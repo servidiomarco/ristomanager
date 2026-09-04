@@ -4,7 +4,7 @@ import type { OrderItem, OrderWithItems } from '../../types';
 import { StatusPill } from '../ds';
 import {
   COURSE_BADGE, MAX_COURSES, cartForCourse, cartSum, cartUnitCents, courseLabel,
-  courseStatus, euro, isSent, itemsForCourse, rowCount, rowCountLabel,
+  courseStatus, euro, isSent, itemsForCourse, rowCount, rowCountLabel, weightLabel,
   type CartLine,
   isSystemLine,
 } from './orderView';
@@ -168,6 +168,9 @@ export const CourseList: React.FC<CourseListProps> = ({
                     }`}
                   >
                     {i.name_snapshot}
+                    {i.weight_grams != null && (
+                      <span className="text-[13px] tabular-nums text-[var(--ds-text-muted)]"> · {weightLabel(i.weight_grams)}</span>
+                    )}
                     {((i.modifiers && i.modifiers.length > 0) || i.note) && (
                       <span className="text-[13px] text-[var(--ds-text-muted)]">
                         {' · '}{[...(i.modifiers ?? []).map(m => m.name), ...(i.note ? [i.note] : [])].join(', ')}
@@ -210,6 +213,9 @@ export const CourseList: React.FC<CourseListProps> = ({
                   >
                     <div className="truncate text-[15px] text-[var(--ds-text-primary)]">
                       {l.dish.name}
+                      {l.weight_grams != null && (
+                        <span className="text-[13px] tabular-nums text-[var(--ds-text-muted)]"> · {weightLabel(l.weight_grams)}</span>
+                      )}
                     </div>
                     {(l.modifier_labels.length > 0 || l.note) && (
                       <div className="truncate text-[13px] text-[var(--ds-text-muted)]">

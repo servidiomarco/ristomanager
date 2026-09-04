@@ -764,6 +764,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         vat_rate: newDish.vat_rate ?? defaultVatRate,
         menu_ids: newDish.menu_ids ?? [],
         dish_type: dishType,
+        sold_by_weight: newDish.sold_by_weight === true,
         modifier_group_ids: dishGroupIds,
         // Gli ingredienti si mandano solo per i composti: su un piatto
         // tornato Semplice restano com'erano, ignorati (non cancellati).
@@ -818,7 +819,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     const defaultMenus = Array.isArray(catDefault) && catDefault.length > 0
       ? catDefault
       : defaultMenuId != null ? [defaultMenuId] : [];
-    setNewDish({ name: '', description: '', price: 0, category: firstCat, allergens: [], photo_url: '', vat_rate: defaultVatRate, menu_ids: defaultMenus, dish_type: 'SIMPLE' });
+    setNewDish({ name: '', description: '', price: 0, category: firstCat, allergens: [], photo_url: '', vat_rate: defaultVatRate, menu_ids: defaultMenus, dish_type: 'SIMPLE', sold_by_weight: false });
     setDishGroupIds([]);
     setDishComponents([]);
     setPhotoUploadError(null);
@@ -835,7 +836,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       photo_url: dish.photo_url || '',
       vat_rate: dish.vat_rate ?? 10,
       menu_ids: dish.menu_ids ?? [],
-      dish_type: dish.dish_type ?? 'SIMPLE'
+      dish_type: dish.dish_type ?? 'SIMPLE',
+      sold_by_weight: dish.sold_by_weight === true,
     });
     // Le spunte dei gruppi si leggono dai dish_ids della gestione varianti;
     // gli ingredienti si caricano pigri — servono solo aprendo un composto.
@@ -2590,6 +2592,30 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     </button>
                   ))}
                 </div>
+                {/* Al peso: un solo articolo «Bistecca» col prezzo AL KG al
+                    posto delle grammature finte; i grammi si chiedono alla
+                    battuta e la cucina li corregge dopo la pesata. */}
+                <button
+                  type="button"
+                  onClick={() => setNewDish({ ...newDish, sold_by_weight: !newDish.sold_by_weight })}
+                  aria-pressed={newDish.sold_by_weight === true}
+                  className="flex min-h-[44px] w-full items-center gap-3 rounded-[12px] bg-[var(--ds-surface-row)] px-3 py-2 text-left transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                >
+                  <span
+                    aria-hidden
+                    className={`relative inline-flex h-6 w-10 flex-shrink-0 items-center rounded-full transition-colors ${
+                      newDish.sold_by_weight ? 'bg-[var(--ds-action-bg)]' : 'bg-[var(--ds-border-strong)]'
+                    }`}
+                  >
+                    <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${newDish.sold_by_weight ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-[14px] font-medium text-[var(--ds-text-primary)]">Vendita al peso</span>
+                    <span className="block text-[12px] text-[var(--ds-text-muted)]">
+                      il prezzo qui sopra vale al kg; alla battuta si chiedono i grammi, la cucina li corregge dopo la pesata
+                    </span>
+                  </span>
+                </button>
                 {newDish.dish_type === 'COMPOSED' && (
                   <div className="space-y-2">
                     {dishComponents.map((c, i) => (

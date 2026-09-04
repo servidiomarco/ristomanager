@@ -192,7 +192,9 @@ export const CassaPage: React.FC<CassaPageProps> = ({
   // il piatto nudo e la validazione min del server risponderebbe 400.
   const needsVariantSheet = useCallback(
     (dishId: number) => groupsForDish(dishId).length > 0
-      || (dishes.find(d => d.id === dishId)?.dish_type === 'COMPOSED' && componentsForDish(dishId).length > 0),
+      || (dishes.find(d => d.id === dishId)?.dish_type === 'COMPOSED' && componentsForDish(dishId).length > 0)
+      // Al peso: i grammi si chiedono nel foglio, il server li pretende.
+      || dishes.find(d => d.id === dishId)?.sold_by_weight === true,
     [groupsForDish, componentsForDish, dishes]
   );
   const [variantFor, setVariantFor] = useState<Dish | null>(null);
@@ -453,14 +455,17 @@ export const CassaPage: React.FC<CassaPageProps> = ({
 
   const pushLine = useCallback((
     dish: Dish, entries: { id: number; n: number }[] = [], labels: string[] = [], delta = 0,
-    note?: string, removedIds: number[] = [],
+    note?: string, removedIds: number[] = [], weightGrams?: number,
   ) => {
     // Le bozze restano locali fino all'invio, come in Comande: una sola
     // chiamata di rete invece di una per piatto. Verso, ripetizioni e
-    // ingredienti tolti entrano in chiave come là.
+    // ingredienti tolti entrano in chiave come là. Al peso ogni pezzo è
+    // una riga (qty 1 per il server): la chiave porta l'idem e non fonde.
+    const idem = newIdempotencyKey();
     const key = cartKey(
       dish.id, 1,
-      [...entries.map(e => `${e.id}x${e.n}`), ...removedIds.map(id => `r${id}`)],
+      [...entries.map(e => `${e.id}x${e.n}`), ...removedIds.map(id => `r${id}`),
+       ...(weightGrams != null ? [`w${weightGrams}#${idem}`] : [])],
       note,
     );
     setCart(prev => {
@@ -471,10 +476,11 @@ export const CassaPage: React.FC<CassaPageProps> = ({
         return next;
       }
       return [...prev, {
-        key, idem: newIdempotencyKey(), dish, qty: 1, course_no: 1,
+        key, idem, dish, qty: 1, course_no: 1,
         modifier_ids: entries.map(e => e.id),
         modifiers: entries,
         ...(removedIds.length > 0 ? { removed_component_ids: removedIds } : {}),
+        ...(weightGrams != null ? { weight_grams: weightGrams } : {}),
         modifier_labels: labels,
         modifier_delta_cents: delta, note,
       }];
@@ -484,7 +490,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
   // Conferma dal foglio varianti: etichette e delta cotti come in Comande —
   // le percentuali si mostrano risolte sul prezzo di anagrafica, il conto
   // vero lo rifà il server sul prezzo battuto.
-  const addWithVariants = useCallback((dish: Dish, entries: { id: number; n: number }[], removedIds: number[], note?: string) => {
+  const addWithVariants = useCallback((dish: Dish, entries: { id: number; n: number }[], removedIds: number[], note?: string, weightGrams?: number) => {
     const byId = new Map(groupsForDish(dish.id).flatMap(g => g.modifiers).map(m => [m.id, m]));
     const chosen = entries.filter(e => byId.has(e.id));
     const deltaOf = (m: { price_delta_cents: number; price_delta_pct: string | null }) =>
@@ -504,6 +510,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
         + removed.reduce((s, c) => s + c.removal_delta_cents, 0),
       note,
       removed.map(c => c.id),
+      dish.sold_by_weight ? (weightGrams ?? 500) : undefined,
     );
   }, [groupsForDish, componentsForDish, pushLine]);
 
@@ -526,6 +533,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
       modifier_ids: l.modifier_ids,
       ...(l.modifiers ? { modifiers: l.modifiers } : {}),
       ...(l.removed_component_ids?.length ? { removed_component_ids: l.removed_component_ids } : {}),
+      ...(l.weight_grams != null ? { weight_grams: l.weight_grams } : {}),
       note: l.note ?? null,
       idempotency_key: l.idem,
     }));
@@ -836,7 +844,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
           groups={groupsForDish(variantFor.id)}
           components={variantFor.dish_type === 'COMPOSED' ? componentsForDish(variantFor.id) : []}
           onCancel={() => setVariantFor(null)}
-          onConfirm={(entries, removedIds, note) => { addWithVariants(variantFor, entries, removedIds, note); setVariantFor(null); }}
+          onConfirm={(entries, removedIds, note, weightGrams) => { addWithVariants(variantFor, entries, removedIds, note, weightGrams); setVariantFor(null); }}
         />
       )}
 

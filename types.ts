@@ -74,6 +74,9 @@ export interface Dish {
   /** Solo nel salvataggio: gli ingredienti del piatto composto. Con id =
    *  ritocco (l'id resta stabile), senza id = nuovo, assente = eliminato. */
   components?: { id?: number; name: string; removal_delta_cents?: number }[];
+  /** Vendita al peso: il prezzo è AL KG e la riga di comanda porta i grammi
+   *  (weight_grams). Un solo articolo «Bistecca» al posto delle grammature. */
+  sold_by_weight?: boolean;
 }
 
 /** I menu del ristorante: i due di sistema (Alla carta, Banchetti — non
@@ -740,6 +743,9 @@ export interface OrderItem {
   status: OrderItemStatus;
   /** Snapshot dell'aliquota IVA alla battitura (fallback 10 sui vecchi). */
   vat_rate?: number;
+  /** Grammi del pezzo per le righe al peso (unit_price già = peso × €/kg);
+   *  la cucina lo corregge dopo la pesata e il prezzo si ricalcola. */
+  weight_grams?: number | null;
   note?: string | null;
   queued_at?: string | null;
   fired_at?: string | null;
