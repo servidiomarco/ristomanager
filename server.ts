@@ -11474,9 +11474,12 @@ app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, re
         if (vatRate == null) return res.status(400).json({ error: 'vat_rate deve essere un intero fra 0 e 100' });
         const dishType = req.body?.dish_type == null ? 'SIMPLE' : String(req.body.dish_type);
         if (dishType !== 'SIMPLE' && dishType !== 'COMPOSED') return res.status(400).json({ error: 'dish_type deve essere SIMPLE o COMPOSED' });
+        // Vendita al peso: il prezzo del piatto diventa il prezzo AL KG e la
+        // riga di comanda porterà i grammi (weight_grams).
+        const soldByWeight = req.body?.sold_by_weight === true;
         const result = await queryWithRetry(
-            'INSERT INTO dishes (tenant_id, name, description, price, category, allergens, photo_url, vat_rate, dish_type) VALUES ($7, $1, $2, $3, $4, $5, $6, $8, $9) RETURNING *',
-            [name, description, price, category, allergens, photo_url || null, req.tenantId!, vatRate, dishType]
+            'INSERT INTO dishes (tenant_id, name, description, price, category, allergens, photo_url, vat_rate, dish_type, sold_by_weight) VALUES ($7, $1, $2, $3, $4, $5, $6, $8, $9, $10) RETURNING *',
+            [name, description, price, category, allergens, photo_url || null, req.tenantId!, vatRate, dishType, soldByWeight]
         );
         const newDish = result.rows[0];
 
@@ -11558,8 +11561,9 @@ app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req,
             // deve resettare l'aliquota già impostata. Idem dish_type: il
             // ritorno a SIMPLE non cancella gli ingredienti — restano e la
             // validazione li ignora finché il piatto non torna COMPOSED.
-            'UPDATE dishes SET name = $1, description = $2, price = $3, category = $4, allergens = $5, photo_url = $6, vat_rate = COALESCE($9, vat_rate), dish_type = COALESCE($10, dish_type) WHERE id = $7 AND tenant_id = $8 RETURNING *',
-            [name, description, price, category, allergens, photo_url || null, id, req.tenantId!, vatRate, dishType]
+            'UPDATE dishes SET name = $1, description = $2, price = $3, category = $4, allergens = $5, photo_url = $6, vat_rate = COALESCE($9, vat_rate), dish_type = COALESCE($10, dish_type), sold_by_weight = COALESCE($11, sold_by_weight) WHERE id = $7 AND tenant_id = $8 RETURNING *',
+            [name, description, price, category, allergens, photo_url || null, id, req.tenantId!, vatRate, dishType,
+             typeof req.body?.sold_by_weight === 'boolean' ? req.body.sold_by_weight : null]
         );
         const updatedDish = result.rows[0];
         if (!updatedDish) {
@@ -26220,7 +26224,7 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
             // invisibile a ogni monitor di cucina (collaudo 2/09, Fusillo).
             // Il match esatto, se c'è, vince sugli omonimi.
             const dish = await client.query(
-                `SELECT d.id, d.name, d.price, d.vat_rate, d.dish_type,
+                `SELECT d.id, d.name, d.price, d.vat_rate, d.dish_type, d.sold_by_weight,
                         COALESCE(d.station_id, cs.station_id) AS station_id
                  FROM dishes d
                  LEFT JOIN LATERAL (
@@ -26247,6 +26251,28 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
                 if (p.rows.length > 0) unitPrice = Number(p.rows[0].price_cents);
             }
             if (unitPrice == null) unitPrice = Math.max(0, Math.round(Number(dish.rows[0].price) * 100));
+
+            // Vendita al peso: il prezzo di anagrafica (o di listino) è AL KG
+            // e la riga porta i grammi. Il prezzo della riga si cuoce qui —
+            // peso × prezzo/kg — così conto, KDS e fiscale non sanno nulla
+            // della regola. Una riga per pezzo (qty 1): due bistecche pesano
+            // diverso, e la cucina corregge il peso del singolo taglio.
+            let weightGrams: number | null = null;
+            if (dish.rows[0].sold_by_weight === true) {
+                weightGrams = raw?.weight_grams != null ? Math.round(Number(raw.weight_grams)) : null;
+                if (!Number.isFinite(weightGrams as number) || (weightGrams as number) <= 0 || (weightGrams as number) > 50000) {
+                    await client.query('ROLLBACK'); client.release();
+                    return res.status(400).json({ error: `items[${i}]: «${dish.rows[0].name}» si vende al peso — serve weight_grams (1..50000)` });
+                }
+                if (qty !== 1) {
+                    await client.query('ROLLBACK'); client.release();
+                    return res.status(400).json({ error: `items[${i}]: al peso è una riga per pezzo (qty 1), ogni taglio col suo peso` });
+                }
+                unitPrice = Math.round(unitPrice * (weightGrams as number) / 1000);
+            } else if (raw?.weight_grams != null) {
+                await client.query('ROLLBACK'); client.release();
+                return res.status(400).json({ error: `items[${i}]: il piatto non si vende al peso` });
+            }
 
             // Varianti: accettiamo solo quelle collegate al piatto, altrimenti
             // un client sbagliato potrebbe attaccare "al sangue" a un tiramisù.
@@ -26404,8 +26430,8 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
                 // resta com'era al momento della battitura.
                 `INSERT INTO order_items
                     (tenant_id, order_id, dish_id, name_snapshot, unit_price_cents, modifiers, qty,
-                     course_no, seat_no, station_id, note, created_by_user_id, idempotency_key, vat_rate)
-                 VALUES ($13, $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $14)
+                     course_no, seat_no, station_id, note, created_by_user_id, idempotency_key, vat_rate, weight_grams)
+                 VALUES ($13, $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $14, $15)
                  ON CONFLICT (tenant_id, idempotency_key) DO UPDATE
                     SET qty = EXCLUDED.qty, note = EXCLUDED.note
                     WHERE order_items.status = 'DRAFT' AND order_items.order_id = EXCLUDED.order_id`,
@@ -26414,7 +26440,8 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
                  Number.isFinite(stationId) ? stationId : null,
                  typeof raw?.note === 'string' ? raw.note.slice(0, 300) : null,
                  req.user?.userId ?? null, itemKey, req.tenantId!,
-                 Number.isFinite(Number(dish.rows[0].vat_rate)) ? Number(dish.rows[0].vat_rate) : 10]
+                 Number.isFinite(Number(dish.rows[0].vat_rate)) ? Number(dish.rows[0].vat_rate) : 10,
+                 weightGrams]
             );
         }
 
@@ -26499,6 +26526,82 @@ app.patch('/orders/items/:id', authenticate, requirePermission('orders:take'), a
         res.json({ ...view, ...(sync?.warning ? { bill_warning: sync.warning } : {}) });
     } catch (err: any) {
         console.error('PATCH /orders/items/:id error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Correzione del PESO su una riga al peso: i tagli non sono precisi, e il
+// peso vero lo sa la cucina dopo la pesata — per questo la route è aperta
+// anche a orders:kds. Il prezzo si ricalcola dal listino della comanda
+// (stessa risoluzione della battitura), la traccia va nel registro attività
+// (chi, quando, da→a): un peso ritoccato non è mai una discussione.
+app.post('/orders/items/:id/weight', authenticate, requireAnyPermission('orders:kds', 'orders:take', 'orders:expedite'), async (req, res) => {
+    try {
+        if (!(await ordersEnabledGuard(req, res))) return;
+        const id = parseInt(req.params.id, 10);
+        const grams = Math.round(Number(req.body?.weight_grams));
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        if (!Number.isFinite(grams) || grams <= 0 || grams > 50000) {
+            return res.status(400).json({ error: 'weight_grams deve essere fra 1 e 50000' });
+        }
+
+        const cur = await queryWithRetry(
+            `SELECT oi.order_id, oi.status, oi.weight_grams, oi.name_snapshot, oi.station_id, oi.dish_id,
+                    o.status AS order_status, o.price_list_id,
+                    d.price AS dish_price, d.sold_by_weight
+             FROM order_items oi
+             JOIN orders o ON o.id = oi.order_id
+             LEFT JOIN dishes d ON d.id = oi.dish_id AND d.tenant_id = oi.tenant_id
+             WHERE oi.id = $1 AND oi.tenant_id = $2`,
+            [id, req.tenantId!]
+        );
+        if (cur.rows.length === 0) return res.status(404).json({ error: 'Riga non trovata' });
+        const row = cur.rows[0];
+        if (row.weight_grams == null || row.sold_by_weight !== true) {
+            return res.status(400).json({ error: 'La riga non è al peso' });
+        }
+        if (row.order_status !== 'OPEN') return res.status(409).json({ error: 'La comanda è chiusa' });
+        if (row.status === 'VOIDED') return res.status(409).json({ error: 'Riga stornata' });
+
+        // Prezzo al kg come alla battitura: listino della comanda, poi anagrafica.
+        let perKg: number | null = null;
+        if (row.price_list_id != null) {
+            const p = await queryWithRetry(
+                `SELECT price_cents FROM dish_prices WHERE dish_id = $1 AND price_list_id = $2 AND tenant_id = $3`,
+                [row.dish_id, row.price_list_id, req.tenantId!]
+            );
+            if (p.rows.length > 0) perKg = Number(p.rows[0].price_cents);
+        }
+        if (perKg == null) perKg = Math.max(0, Math.round(Number(row.dish_price) * 100));
+        const newUnit = Math.round(perKg * grams / 1000);
+
+        await queryWithRetry(
+            `UPDATE order_items SET weight_grams = $1, unit_price_cents = $2 WHERE id = $3 AND tenant_id = $4`,
+            [grams, newUnit, id, req.tenantId!]
+        );
+
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.ORDER, row.order_id,
+                row.name_snapshot,
+                { peso_da_g: row.weight_grams, peso_a_g: grams, prezzo_cents: newUnit }
+            );
+        }
+
+        await syncSystemLines(req.tenantId!, row.order_id);
+        const view = await loadOrderView(req.tenantId!, row.order_id);
+        const sync = await resyncBillForOrder(req.tenantId!, row.order_id);
+        try {
+            socketService?.broadcastToAll(req.tenantId!, 'order:updated', view.order);
+            // Il monitor della partita vede il peso nuovo subito, non al poll.
+            socketService?.broadcastToStation(req.tenantId!, row.station_id, 'kds:item', {
+                order_id: row.order_id, item_id: id, weight_grams: grams,
+            });
+        } catch (_) {}
+        res.json({ ...view, ...(sync?.warning ? { bill_warning: sync.warning } : {}) });
+    } catch (err: any) {
+        console.error('POST /orders/items/:id/weight error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
     }
 });
@@ -26827,7 +26930,7 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
         const service = serviceFromQuery(req.query);
         const rows = await queryWithRetry(
             `SELECT oi.id, oi.order_id, oi.course_no, oi.name_snapshot, oi.qty,
-                    oi.modifiers, oi.note, oi.status, oi.station_id,
+                    oi.modifiers, oi.note, oi.status, oi.station_id, oi.weight_grams,
                     oi.fired_at, oi.station_start_at, oi.started_at, oi.ready_at,
                     o.table_id, t.name AS table_name, o.opened_at AS order_opened_at,
                     r.customer_name, r.notes AS reservation_notes,
@@ -26914,7 +27017,7 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
         let full: any[] = [];
         if (orderIds.length > 0) {
             const f = await queryWithRetry(
-                `SELECT id, order_id, course_no, station_id, name_snapshot, qty,
+                `SELECT id, order_id, course_no, station_id, name_snapshot, qty, weight_grams,
                         modifiers, note, status, fired_at, station_start_at, ready_at, served_at
                  FROM order_items
                  WHERE tenant_id = $2 AND order_id = ANY($1::int[])

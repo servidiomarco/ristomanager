@@ -237,11 +237,13 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     [catalogue]
   );
 
-  // Il foglio varianti si apre anche per un composto senza gruppi: gli
-  // ingredienti da togliere stanno lì.
+  // Il foglio varianti si apre anche per un composto senza gruppi (gli
+  // ingredienti da togliere stanno lì) e per i piatti AL PESO: i grammi
+  // si chiedono lì, prima che la riga esista.
   const needsVariantSheet = useCallback(
     (dishId: number) => hasVariants(dishId)
-      || (dishes.find(d => d.id === dishId)?.dish_type === 'COMPOSED' && componentsForDish(dishId).length > 0),
+      || (dishes.find(d => d.id === dishId)?.dish_type === 'COMPOSED' && componentsForDish(dishId).length > 0)
+      || dishes.find(d => d.id === dishId)?.sold_by_weight === true,
     [hasVariants, componentsForDish, dishes]
   );
 
@@ -383,15 +385,19 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   const pushLine = useCallback((
     dish: Dish, courseNo: number, qty: number,
     entries: { id: number; n: number }[], modifierLabels: string[], modifierDelta: number,
-    note?: string, removedIds: number[] = [],
+    note?: string, removedIds: number[] = [], weightGrams?: number,
   ) => {
     // Il verso e le ripetizioni entrano in chiave: «++ prosciutto» e
     // «- prosciutto» sono piatti diversi in cucina, come le cotture. Gli
     // ingredienti tolti idem: «senza cipolla» e il piatto intero sono due
-    // righe.
+    // righe. Al peso ogni PEZZO è una riga a sé (il server pretende qty 1:
+    // due bistecche pesano diverso e la cucina corregge il singolo taglio),
+    // quindi la chiave porta l'idem e non fonde mai.
+    const idem = newIdempotencyKey();
     const key = cartKey(
       dish.id, courseNo,
-      [...entries.map(e => `${e.id}x${e.n}`), ...removedIds.map(id => `r${id}`)],
+      [...entries.map(e => `${e.id}x${e.n}`), ...removedIds.map(id => `r${id}`),
+       ...(weightGrams != null ? [`w${weightGrams}#${idem}`] : [])],
       note,
     );
     setCart(prev => {
@@ -405,10 +411,11 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         // La chiave di idempotenza nasce CON la riga, non all'invio: così il
         // retry di un invio andato in timeout ripresenta la stessa chiave e
         // il server non duplica (vedi ON CONFLICT su order_items).
-        key, idem: newIdempotencyKey(), dish, qty, course_no: courseNo,
+        key, idem, dish, qty, course_no: courseNo,
         modifier_ids: entries.map(e => e.id),
         modifiers: entries,
         ...(removedIds.length > 0 ? { removed_component_ids: removedIds } : {}),
+        ...(weightGrams != null ? { weight_grams: weightGrams } : {}),
         modifier_labels: modifierLabels,
         modifier_delta_cents: modifierDelta,
         ...(note ? { note } : {}),
@@ -431,7 +438,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       ? Math.round(Math.round(Number(dish.price) * 100) * Number(m.price_delta_pct) / 100)
       : m.price_delta_cents;
 
-  const addToCart = (dish: Dish, entries: { id: number; n: number }[] = [], note?: string, removedIds: number[] = []) => {
+  const addToCart = (dish: Dish, entries: { id: number; n: number }[] = [], note?: string, removedIds: number[] = [], weightGrams?: number) => {
     const all = groupsForDish(dish.id).flatMap(g => g.modifiers);
     const byId = new Map(all.map(m => [m.id, m]));
     const chosen = entries.filter(e => byId.has(e.id));
@@ -449,13 +456,14 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         + removed.reduce((s, c) => s + c.removal_delta_cents, 0),
       note,
       removed.map(c => c.id),
+      dish.sold_by_weight ? (weightGrams ?? 500) : undefined,
     );
   };
 
   // Sostituisce varianti e nota di una riga in bozza mantenendo qty e chiave
   // di idempotenza. Se la nuova combinazione coincide con un'altra riga già
   // nel carrello, le due si fondono (stessa regola del tocco sul menu).
-  const updateLine = (lineKey: string, entries: { id: number; n: number }[], note?: string, removedIds: number[] = []) => {
+  const updateLine = (lineKey: string, entries: { id: number; n: number }[], note?: string, removedIds: number[] = [], weightGrams?: number) => {
     setCart(prev => {
       const at = prev.findIndex(l => l.key === lineKey);
       if (at < 0) return prev;
@@ -467,9 +475,14 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       const removed = removedIds
         .map(id => comps.find(c => c.id === id))
         .filter((c): c is NonNullable<typeof c> => c != null);
+      // Il peso resta quello della riga se il foglio non lo cambia; la
+      // chiave delle righe al peso porta l'idem e non fonde mai (una riga
+      // per pezzo).
+      const newWeight = line.dish.sold_by_weight ? (weightGrams ?? line.weight_grams) : undefined;
       const newKey = cartKey(
         line.dish.id, line.course_no,
-        [...chosen.map(e => `${e.id}x${e.n}`), ...removed.map(c => `r${c.id}`)],
+        [...chosen.map(e => `${e.id}x${e.n}`), ...removed.map(c => `r${c.id}`),
+         ...(newWeight != null ? [`w${newWeight}#${line.idem}`] : [])],
         note,
       );
       const updated: CartLine = {
@@ -478,6 +491,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         modifier_ids: chosen.map(e => e.id),
         modifiers: chosen,
         removed_component_ids: removed.length > 0 ? removed.map(c => c.id) : undefined,
+        weight_grams: newWeight,
         modifier_labels: [...chosen.map(e => signedLabel(byId.get(e.id)!.name, e.n)), ...removed.map(c => `Senza ${c.name}`)],
         modifier_delta_cents: chosen.reduce((s, e) => s + e.n * modifierDeltaCents(line.dish, byId.get(e.id)!), 0)
           + removed.reduce((s, c) => s + c.removal_delta_cents, 0),
@@ -503,6 +517,18 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   };
 
   const bumpCart = (key: string, delta: number) => {
+    // Sulle righe al peso il «+» non alza la quantità (il server pretende
+    // una riga per pezzo): aggiunge un ALTRO pezzo dello stesso peso, riga
+    // nuova con la sua chiave. Il «−» toglie la riga (qty è sempre 1).
+    const line = cart.find(l => l.key === key);
+    if (line?.weight_grams != null && delta > 0) {
+      pushLine(
+        line.dish, line.course_no, 1,
+        line.modifiers ?? [], line.modifier_labels, line.modifier_delta_cents,
+        line.note, line.removed_component_ids ?? [], line.weight_grams,
+      );
+      return;
+    }
     setCart(prev => prev.flatMap(l => {
       if (l.key !== key) return [l];
       const qty = l.qty + delta;
@@ -573,6 +599,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         // di bozze vecchie (senza modifiers) viaggiano come sempre.
         ...(l.modifiers ? { modifiers: l.modifiers } : {}),
         ...(l.removed_component_ids?.length ? { removed_component_ids: l.removed_component_ids } : {}),
+        ...(l.weight_grams != null ? { weight_grams: l.weight_grams } : {}),
         note: l.note ?? null,
         // Chiave per riga, stabile dalla nascita della riga: un retry dopo un
         // timeout rimanda le stesse chiavi e il server dedup-a invece di
@@ -1343,7 +1370,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           groups={groupsForDish(variantFor.id)}
           components={variantFor.dish_type === 'COMPOSED' ? componentsForDish(variantFor.id) : []}
           onCancel={() => setVariantFor(null)}
-          onConfirm={(entries, removedIds, note) => { addToCart(variantFor, entries, note, removedIds); setVariantFor(null); }}
+          onConfirm={(entries, removedIds, note, weightGrams) => { addToCart(variantFor, entries, note, removedIds, weightGrams); setVariantFor(null); }}
         />
       )}
       {editLine && (
@@ -1355,10 +1382,11 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
             entries: editLine.modifiers ?? editLine.modifier_ids.map(id => ({ id, n: 1 })),
             removed: editLine.removed_component_ids,
             note: editLine.note,
+            weight_grams: editLine.weight_grams,
           }}
           confirmLabel="Aggiorna"
           onCancel={() => setEditLine(null)}
-          onConfirm={(entries, removedIds, note) => { updateLine(editLine.key, entries, note, removedIds); setEditLine(null); }}
+          onConfirm={(entries, removedIds, note, weightGrams) => { updateLine(editLine.key, entries, note, removedIds, weightGrams); setEditLine(null); }}
         />
       )}
 

@@ -331,6 +331,48 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         expect(di_nuovo.status).toBe(200);
     });
 
+    it('vendita al peso: prezzo al kg, peso obbligatorio, correzione dalla cucina', async () => {
+        const bistecca = await api().post('/dishes').set(bearer(token)).send({
+            name: 'Bistecca Ciclo', description: null, price: 38, category: 'SECONDI', allergens: null,
+            sold_by_weight: true,
+        });
+        expect(bistecca.status).toBe(201);
+        expect(bistecca.body.sold_by_weight).toBe(true);
+
+        const orderId = await nuovaComanda();
+        // Senza peso il server rifiuta; al peso è una riga per pezzo (qty 1).
+        expect((await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [{ dish_id: bistecca.body.id, qty: 1, course_no: 1 }],
+        })).status).toBe(400);
+        expect((await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [{ dish_id: bistecca.body.id, qty: 2, course_no: 1, weight_grams: 550 }],
+        })).status).toBe(400);
+
+        // 550 g a 38 €/kg = 20,90 €, cotto nella riga: conto e KDS non
+        // sanno nulla della regola.
+        const add = await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [
+                { dish_id: bistecca.body.id, qty: 1, course_no: 1, weight_grams: 550 },
+                { dish_id: piatto1, qty: 1, course_no: 1 },
+            ],
+        });
+        expect(add.status).toBe(201);
+        const riga = righe(add.body).find((i: any) => i.name_snapshot === 'Bistecca Ciclo');
+        expect(riga.weight_grams).toBe(550);
+        expect(riga.unit_price_cents).toBe(2090);
+
+        // La cucina pesa il taglio vero: 480 g, prezzo ricalcolato.
+        const w = await api().post(`/orders/items/${riga.id}/weight`).set(bearer(token)).send({ weight_grams: 480 });
+        expect(w.status).toBe(200);
+        const dopo = righe(w.body).find((i: any) => i.id === riga.id);
+        expect(dopo.weight_grams).toBe(480);
+        expect(dopo.unit_price_cents).toBe(1824);
+
+        // Su una riga normale la correzione non ha senso.
+        const normale = righe(add.body).find((i: any) => i.name_snapshot !== 'Bistecca Ciclo');
+        expect((await api().post(`/orders/items/${normale.id}/weight`).set(bearer(token)).send({ weight_grams: 480 })).status).toBe(400);
+    });
+
     it('la chiamata di un\'uscita si annulla finché la cucina non inizia', async () => {
         await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'AUTO_ALL' });
         const orderId = await nuovaComanda();

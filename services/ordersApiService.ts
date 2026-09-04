@@ -27,6 +27,8 @@ export interface NewOrderItem {
   /** Ingredienti tolti da un piatto composto: entrano nello snapshot come
    *  «Senza X» con l'eventuale sconto. Solo su piatti COMPOSED. */
   removed_component_ids?: number[];
+  /** Grammi del pezzo per i piatti al peso (obbligatorio lì, qty 1). */
+  weight_grams?: number;
   station_id?: number | null;
   /** Chiave di idempotenza per riga: il server la vincola per tenant, quindi
    *  rimandare la stessa riga (retry, coda offline) non la duplica mai. */
@@ -185,6 +187,17 @@ class OrdersApiService {
       headers: getHeaders(),
     });
   }
+
+  /** Corregge il peso di una riga al peso (i tagli non sono precisi): il
+   *  prezzo si ricalcola dal listino, la traccia va nel registro attività.
+   *  Aperta anche alla cucina (orders:kds). */
+  async setItemWeight(itemId: number, weightGrams: number): Promise<OrderWithItems> {
+    return apiRequest<OrderWithItems>(`${API_URL}/orders/items/${itemId}/weight`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ weight_grams: weightGrams }),
+    });
+  }
 }
 
 export const ordersApiService = new OrdersApiService();
@@ -241,6 +254,9 @@ export interface KdsItem {
   note: string | null;
   status: 'SENT' | 'PREPARING' | 'READY';
   station_id: number | null;
+  /** Grammi del pezzo per le righe al peso: la card li mostra e la cucina
+   *  li corregge dopo la pesata. */
+  weight_grams?: number | null;
   fired_at: string | null;
   station_start_at: string | null;
   started_at: string | null;

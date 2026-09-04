@@ -42,6 +42,9 @@ export interface CartLine {
   modifier_labels: string[];
   modifier_delta_cents: number;
   note?: string;
+  /** Vendita al peso: grammi del pezzo. Il prezzo del piatto è AL KG e la
+   *  riga vale peso × prezzo/kg; qty resta 1 — ogni taglio pesa diverso. */
+  weight_grams?: number;
 }
 
 /** La chiave che fa collassare due tocchi sullo stesso piatto in una riga da
@@ -51,8 +54,16 @@ export interface CartLine {
 export const cartKey = (dishId: number, courseNo: number, modifierParts: (number | string)[], note?: string): string =>
   `${dishId}|${courseNo}|${[...modifierParts].map(String).sort().join(',')}|${(note ?? '').trim().toLowerCase()}`;
 
+/** «550 g» sotto il chilo, «1,2 kg» sopra: il peso come lo dice la cucina. */
+export const weightLabel = (grams: number): string =>
+  grams >= 1000
+    ? `${(grams / 1000).toLocaleString('it-IT', { maximumFractionDigits: 2 })} kg`
+    : `${grams} g`;
+
 export const cartUnitCents = (l: CartLine): number =>
-  Math.round(Number(l.dish.price) * 100) + l.modifier_delta_cents;
+  (l.weight_grams != null
+    ? Math.round(Math.round(Number(l.dish.price) * 100) * l.weight_grams / 1000)
+    : Math.round(Number(l.dish.price) * 100)) + l.modifier_delta_cents;
 
 export const cartSum = (lines: CartLine[]): number =>
   lines.reduce((s, l) => s + cartUnitCents(l) * l.qty, 0);
