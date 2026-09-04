@@ -432,16 +432,18 @@ const MemberRow: React.FC<{
   const isPct = m.price_delta_pct != null;
   const [name, setName] = useState(m.name);
   const [note, setNote] = useState(m.note ?? '');
+  const [nameEn, setNameEn] = useState(m.name_en ?? '');
   const [amount, setAmount] = useState(() =>
     isPct ? String(Number(m.price_delta_pct)) : m.price_delta_cents === 0 ? '' : (m.price_delta_cents / 100).toFixed(2));
 
   useEffect(() => {
     setName(m.name);
     setNote(m.note ?? '');
+    setNameEn(m.name_en ?? '');
     setAmount(m.price_delta_pct != null
       ? String(Number(m.price_delta_pct))
       : m.price_delta_cents === 0 ? '' : (m.price_delta_cents / 100).toFixed(2));
-  }, [m.id, m.name, m.note, m.price_delta_cents, m.price_delta_pct]);
+  }, [m.id, m.name, m.note, m.name_en, m.price_delta_cents, m.price_delta_pct]);
 
   const commitName = () => {
     const next = name.trim();
@@ -452,6 +454,11 @@ const MemberRow: React.FC<{
   const commitNote = () => {
     const next = note.trim();
     if (next !== (m.note ?? '')) run(() => updateModifier(m.id, { note: next || null }));
+  };
+
+  const commitNameEn = () => {
+    const next = nameEn.trim();
+    if (next !== (m.name_en ?? '')) run(() => updateModifier(m.id, { name_en: next || null }));
   };
 
   const commitAmount = () => {
@@ -479,7 +486,11 @@ const MemberRow: React.FC<{
       <div className={`flex min-h-[44px] items-center gap-2 py-2 ${m.is_active ? '' : 'opacity-60'}`}>
         <span className="min-w-0 flex-1 text-[14px] text-[var(--ds-text-primary)]">
           <span className="block truncate">{m.name}</span>
-          {m.note && <span className="block truncate text-[12px] text-[var(--ds-text-muted)]">{m.note}</span>}
+          {(m.name_en || m.note) && (
+            <span className="block truncate text-[12px] text-[var(--ds-text-muted)]">
+              {[m.name_en, m.note].filter(Boolean).join(' · ')}
+            </span>
+          )}
         </span>
         {deltaLabel(m) && <span className="flex-shrink-0 text-[13px] tabular-nums text-[var(--ds-text-muted)]">{deltaLabel(m)}</span>}
       </div>
@@ -568,18 +579,32 @@ const MemberRow: React.FC<{
           <Trash2 className="h-4 w-4" />
         </button>
       </div>
-      {/* La nota breve dell'opzione: compare sul foglio varianti e accanto
-          al nome sul monitor cucina. w-full = va a capo nel flex-wrap. */}
-      <input
-        className="h-8 w-full rounded-[10px] bg-[var(--ds-surface)] px-3 text-[13px] text-[var(--ds-text-secondary)] placeholder:text-[var(--ds-text-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-        maxLength={300}
-        placeholder="Nota (es. 48–52°C al cuore)"
-        value={note}
-        disabled={busy}
-        onChange={e => setNote(e.target.value)}
-        onBlur={commitNote}
-        onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-      />
+      {/* Nota (foglio varianti E monitor cucina) e traduzione inglese (SOLO
+          foglio del cameriere: in cucina non esce). w-full = a capo nel
+          flex-wrap. */}
+      <div className="flex w-full gap-2">
+        <input
+          className="h-8 min-w-0 flex-1 rounded-[10px] bg-[var(--ds-surface)] px-3 text-[13px] text-[var(--ds-text-secondary)] placeholder:text-[var(--ds-text-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          maxLength={300}
+          placeholder="Nota (es. 48–52°C al cuore)"
+          value={note}
+          disabled={busy}
+          onChange={e => setNote(e.target.value)}
+          onBlur={commitNote}
+          onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+        />
+        <input
+          className="h-8 w-36 flex-none rounded-[10px] bg-[var(--ds-surface)] px-3 text-[13px] text-[var(--ds-text-secondary)] placeholder:text-[var(--ds-text-subtle)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          maxLength={100}
+          placeholder="Inglese (es. Rare)"
+          title="Traduzione per il cameriere: in cucina non esce"
+          value={nameEn}
+          disabled={busy}
+          onChange={e => setNameEn(e.target.value)}
+          onBlur={commitNameEn}
+          onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+        />
+      </div>
     </div>
   );
 };

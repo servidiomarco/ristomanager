@@ -551,6 +551,8 @@ export interface ModifierDeltaInput {
   price_delta_pct?: number | null;
   /** Nota breve dell'opzione; assente = non toccare, vuota/null = cancella. */
   note?: string | null;
+  /** Traduzione inglese del nome (solo foglio cameriere); stessa semantica. */
+  name_en?: string | null;
 }
 
 export const createModifierGroup = async (payload: {

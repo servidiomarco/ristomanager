@@ -222,7 +222,11 @@ export const VariantSheet: React.FC<{
                           {delta > 0 ? '+' : '−'}{euro(Math.abs(delta))}
                         </span>
                       )}
-                      {m.note && <span className="ml-1.5 text-[12px] opacity-60">{m.note}</span>}
+                      {(m.name_en || m.note) && (
+                        <span className="ml-1.5 text-[12px] opacity-60">
+                          {[m.name_en, m.note].filter(Boolean).join(' · ')}
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -257,7 +261,11 @@ export const VariantSheet: React.FC<{
                             {delta > 0 ? '+' : '−'}{euro(Math.abs(delta))}
                           </span>
                         )}
-                        {m.note && <span className="ml-1.5 text-[12px] opacity-60">{m.note}</span>}
+                        {(m.name_en || m.note) && (
+                          <span className="ml-1.5 text-[12px] opacity-60">
+                            {[m.name_en, m.note].filter(Boolean).join(' · ')}
+                          </span>
+                        )}
                       </span>
                       <button
                         type="button"
