@@ -315,6 +315,9 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
     // ricomparire.
     socket.on('course:served', onChange);
     socket.on('course:unserved', onChange);
+    // Chiamata annullata dalla sala: la card deve sparire subito, non al poll.
+    socket.on('course:unfired', onChange);
+    socket.on('kds:unfired', onChange);
     socket.on('orderItem:voided', onChange);
     socket.on('connect', onChange);
     // L'avanzamento di un'ALTRA partita: kds:item viaggia solo nella stanza
@@ -351,6 +354,8 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
       socket.off('kds:item', onChange);
       socket.off('course:served', onChange);
       socket.off('course:unserved', onChange);
+      socket.off('course:unfired', onChange);
+      socket.off('kds:unfired', onChange);
       socket.off('orderItem:voided', onChange);
       socket.off('connect', onChange);
       socket.off('orderItem:status', onSibling);

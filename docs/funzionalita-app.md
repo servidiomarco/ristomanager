@@ -565,8 +565,12 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+<<<<<<< Updated upstream
 | 2026-09-04 | Menu & Banchetti | Note sulle varianti: ogni gruppo ha una guida per sala e cucina (es. i gradi di cottura spiegati, espandibile dal foglio varianti con l'icona info) e ogni opzione una nota breve (es. "48–52°C al cuore") che compare accanto al nome sul foglio e sulla riga del monitor cucina. Modificabili dall'editor del gruppo, anche sui gruppi importati dalla cassa. |
 | 2026-09-03 | Reportistica | Nuova pagina Reportistica: quattro blocchi — prenotazioni e canali, incassi e cassa, cucina e piatti, Sofia e comunicazioni — su periodo a scelta con confronto automatico col periodo precedente, export csv, foglio di stampa e lettura AI. Al lancio è ristretta agli account del titolare; l'apertura agli altri passa dal permesso dedicato nella matrice ruoli. |
+=======
+| 2026-09-04 | Comande, Cucina e Passe | La chiamata di un'uscita si può annullare («annulla chiamata» sulla comanda, quiet accanto allo stato): l'uscita torna in coda come se il fuoco non fosse mai partito e le card spariscono subito dai monitor. Solo finché la cucina non ha iniziato: alla prima riga in preparazione l'annullo rifiuta — da lì si storna. |
+>>>>>>> Stashed changes
 | 2026-09-03 | Fiscalità | Nuova vista Fiscalità: registro documenti per periodo con totali e filtri, dettaglio per documento, CSV registro e corrispettivi per aliquota, stampa A4 del riepilogo. Visibile di default al solo titolare (permesso dedicato, concedibile per ruolo). |
 | 2026-09-03 | Agente vocale "Sofia" | Fix dall'analisi di 2.125 chiamate estive: la verifica di disponibilità valida anche l'orario richiesto e propone i due slot adiacenti invece della lista completa; nuovo tool che salva i promemoria di richiamata (badge "Da richiamare" in Chiamate + push allo staff, funziona anche a prenotazioni sospese); la sospensione viene riletta al cliente col suo messaggio invece di "problema tecnico"; watchdog orario sulla quota ElevenLabs con push all'80% e al 95%; i cognomi con particella non vengono più troncati nei saluti e nelle conferme; "Ferragosto" è una data valida; l'agente conosce data e ora correnti in ora italiana. |
 | 2026-09-03 | Menu & Banchetti | La pagina pubblica del preventivo porta il logo del ristorante in testa e i dettagli completi nel footer (nome, tagline, indirizzo con link alla mappa, telefono, WhatsApp, sito). |
