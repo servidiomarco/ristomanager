@@ -347,3 +347,118 @@ describe('webhook esiti openapi', () => {
         expect(unknownRef.body.ignored).toBe('unknown_ref');
     });
 });
+
+// Scontrino di cassa (RT esterno): il periodo ponte in cui le comande
+// girano nel CRM ma il documento fiscale lo batte il registratore. La
+// registrazione è un documento VERO (provider external_rt, numero del
+// registratore in doc_number), non una proforma: occupa lo slot del
+// documento vivo e sta nei totali documentati.
+describe('scontrino di cassa (RT esterno)', () => {
+    let token: string;
+
+    const closedBill = async (tableName: string, totalCents: number, closeBody: any = {}): Promise<number> => {
+        const room = await api().post('/rooms').set(bearer(token)).send({ name: `Sala RT ${tableName}`, width: 800, height: 600 });
+        const table = await api().post('/tables').set(bearer(token)).send({
+            name: tableName, shape: 'SQUARE', seats: 4, x: 100, y: 700, room_id: room.body.id, status: 'FREE',
+        });
+        const bill = await api().post(`/tables/${table.body.id}/bill`).set(bearer(token)).send({ total_cents: totalCents, covers: 2 });
+        expect(bill.status, JSON.stringify(bill.body)).toBe(201);
+        const billId = bill.body.bill.id as number;
+        const close = await api().post(`/bills/${billId}/close`).set(bearer(token)).send({
+            payments: [{ method: 'CONTANTI', amount_cents: totalCents }], ...closeBody,
+        });
+        expect(close.status, JSON.stringify(close.body)).toBe(200);
+        return billId;
+    };
+
+    const fiscalRow = async (billId: number): Promise<any> => {
+        const bills = await api().get('/bills/open?status=closed').set(bearer(token));
+        return bills.body.bills.find((b: any) => b.id === billId);
+    };
+
+    const waitConfirmed = async (billId: number): Promise<any> => {
+        let row: any = null;
+        for (let i = 0; i < 20; i++) {
+            row = await fiscalRow(billId);
+            if (row?.fiscal_status === 'CONFIRMED') break;
+            await new Promise(r => setTimeout(r, 150));
+        }
+        return row;
+    };
+
+    beforeAll(async () => {
+        token = await ownerToken();
+        // Scenario del ponte: NESSUN provider cloud configurato.
+        const off = await api().put('/settings/fiscal').set(bearer(token)).send({ provider: 'none' });
+        expect(off.status).toBe(200);
+    });
+
+    it('la chiusura con documento Cassa registra il documento col numero RT', async () => {
+        const billId = await closedBill('RT1', 4200, { documento: 'Cassa', rt_doc_number: ' 0042-0007 ' });
+        const row = await waitConfirmed(billId);
+        expect(row.fiscal_status).toBe('CONFIRMED');
+        expect(row.fiscal_doc_type).toBe('RECEIPT');
+        expect(row.fiscal_provider).toBe('external_rt');
+        expect(row.fiscal_doc_number).toBe('0042-0007'); // trimmato
+
+        // Il documento del registratore non si annulla da qui.
+        const voided = await api().post(`/bills/${billId}/fiscal-docs/${row.fiscal_doc_id}/void`).set(bearer(token)).send({});
+        expect(voided.status).toBe(409);
+        expect(voided.body.error).toContain('registratore');
+
+        // Compare nel registro Fiscalità come scontrino, provider dichiarato.
+        const today = new Date().toISOString().slice(0, 10);
+        const reg = await api().get(`/reports/fiscal-registry?from=${today}&to=${today}&doc_type=RECEIPT`).set(bearer(token));
+        const inReg = reg.body.documents.find((d: any) => d.id === row.fiscal_doc_id);
+        expect(inReg).toBeTruthy();
+        expect(inReg.provider).toBe('external_rt');
+        expect(inReg.doc_number).toBe('0042-0007');
+    });
+
+    it('numero oltre 30 caratteri → 400, in chiusura e a posteriori', async () => {
+        const room = await api().post('/rooms').set(bearer(token)).send({ name: 'Sala RT 400', width: 800, height: 600 });
+        const table = await api().post('/tables').set(bearer(token)).send({
+            name: 'RT400', shape: 'SQUARE', seats: 4, x: 100, y: 700, room_id: room.body.id, status: 'FREE',
+        });
+        const bill = await api().post(`/tables/${table.body.id}/bill`).set(bearer(token)).send({ total_cents: 1000, covers: 2 });
+        const long = 'X'.repeat(31);
+        const close = await api().post(`/bills/${bill.body.bill.id}/close`).set(bearer(token)).send({
+            payments: [{ method: 'CONTANTI', amount_cents: 1000 }], documento: 'Cassa', rt_doc_number: long,
+        });
+        expect(close.status).toBe(400);
+        expect(close.body.error).toBe('rt_doc_number_invalid');
+    });
+
+    it('si registra a posteriori, è idempotente e supera la proforma', async () => {
+        // Chiuso con proforma: il cassiere ha battuto in cassa ma nel CRM ha
+        // scelto proforma — si promuove dopo, col numero.
+        const billId = await closedBill('RT2', 2600, { documento: 'Proforma' });
+        const row0 = await waitConfirmed(billId);
+        expect(row0.fiscal_doc_type).toBe('PROFORMA');
+
+        const marked = await api().post(`/bills/${billId}/fiscal-docs`).set(bearer(token)).send({ documento: 'Cassa', rt_doc_number: '0042-0008' });
+        expect(marked.status).toBe(200);
+        expect(marked.body.doc.doc_type).toBe('RECEIPT');
+        expect(marked.body.doc.provider).toBe('external_rt');
+        expect(marked.body.doc.doc_number).toBe('0042-0008');
+
+        const again = await api().post(`/bills/${billId}/fiscal-docs`).set(bearer(token)).send({ documento: 'Cassa' });
+        expect(again.status).toBe(409);
+        expect(again.body.reason).toBe('doc_exists');
+    });
+
+    it('col documento di cassa vivo, l\'emissione cloud non duplica', async () => {
+        const billId = await closedBill('RT3', 3300, { documento: 'Cassa', rt_doc_number: '0042-0009' });
+        const row = await waitConfirmed(billId);
+        expect(row.fiscal_provider).toBe('external_rt');
+
+        // Provider cloud acceso DOPO: un "Emetti scontrino" per sbaglio
+        // ritorna il documento esistente, non ne crea un secondo.
+        await api().put('/settings/fiscal').set(bearer(token)).send({ provider: 'mock', vat_number: '11122211133' });
+        const emit = await api().post(`/bills/${billId}/fiscal-docs`).set(bearer(token)).send({});
+        expect(emit.status).toBe(200);
+        expect(emit.body.doc.id).toBe(row.fiscal_doc_id);
+        expect(emit.body.doc.provider).toBe('external_rt');
+        await api().put('/settings/fiscal').set(bearer(token)).send({ provider: 'none' });
+    });
+});

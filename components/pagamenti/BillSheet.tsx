@@ -17,9 +17,29 @@ export type SettleOpts = {
   cash_settled_cents?: number;
   tip_cents?: number;
   passepartout_documento?: 'Scontrino' | 'Proforma';
-  /** Conti nativi: 'Proforma' = chiusura deliberata senza documento fiscale
-   *  (scontrino o fattura emettibili dopo, dal conto). */
-  documento?: 'Scontrino' | 'Proforma';
+  /** Conti nativi: 'Proforma' = chiusura deliberata senza documento
+   *  fiscale; 'Cassa' = scontrino battuto sull'RT esterno (periodo ponte),
+   *  registrato come documento vero col numero del registratore. */
+  documento?: 'Scontrino' | 'Proforma' | 'Cassa';
+  /** Numero dello scontrino battuto sull'RT (facoltativo, con 'Cassa'). */
+  rt_doc_number?: string;
+};
+
+/* La scelta del documento si ricorda per dispositivo: durante il periodo
+   ponte (scontrini dall'RT) il default diventa "Cassa" dopo il primo uso,
+   e tornerà "Scontrino" quando la cassa smetterà di batterli. Si ricordano
+   solo le due modalità di routine — Proforma e Fattura sono scelte del
+   singolo conto, ricordarle sarebbe una trappola. */
+const DOC_CHOICE_KEY = 'settle-doc-choice';
+const rememberedDocChoice = (): 'Scontrino' | 'Cassa' => {
+  try {
+    const v = localStorage.getItem(DOC_CHOICE_KEY);
+    return v === 'Cassa' ? 'Cassa' : 'Scontrino';
+  } catch { return 'Scontrino'; }
+};
+const rememberDocChoice = (v: string) => {
+  if (v !== 'Scontrino' && v !== 'Cassa') return;
+  try { localStorage.setItem(DOC_CHOICE_KEY, v); } catch { /* storage pieno o negato: pazienza */ }
 };
 
 
@@ -85,7 +105,11 @@ export const SettleDialog: React.FC<{
   // Conto del gestionale: la chiusura in cassa può emettere lo scontrino
   // oppure la proforma (la routine della cassa, nessun documento fiscale).
   const isPP = /^pp:comanda:/.test(String(bill.external_ref ?? ''));
-  const [ppDoc, setPpDoc] = useState<'Scontrino' | 'Proforma' | 'Fattura'>('Scontrino');
+  const [ppDoc, setPpDoc] = useState<'Scontrino' | 'Cassa' | 'Proforma' | 'Fattura'>(() => isPP ? 'Scontrino' : rememberedDocChoice());
+  // Numero dello scontrino battuto sull'RT: testo libero corto, i formati
+  // dei registratori variano.
+  const [rtNumber, setRtNumber] = useState('');
+  const rtNumberClean = rtNumber.trim();
   // Conti nativi: la scelta c'è SEMPRE. Con un provider fiscale attivo
   // "Scontrino" emette davvero; senza, resta la dichiarazione d'intento —
   // ma "Proforma" marca comunque il conto come chiuso senza documento DI
@@ -109,11 +133,15 @@ export const SettleDialog: React.FC<{
       tip_cents: tipCents,
       // «Fattura» chiude comunque con proforma: il documento si emette poi
       // dal conto, dove ci sono i dati del cessionario (come nel pannello
-      // cassa). Sui conti Passepartout la scelta resta Scontrino/Proforma.
+      // cassa). «Cassa» registra lo scontrino battuto sull'RT, col numero se
+      // riportato. Sui conti Passepartout la scelta resta Scontrino/Proforma.
       ...(isPP
-        ? { passepartout_documento: ppDoc === 'Fattura' ? 'Proforma' : ppDoc }
-        : { documento: ppDoc === 'Scontrino' ? 'Scontrino' : 'Proforma' }),
+        ? { passepartout_documento: ppDoc === 'Fattura' || ppDoc === 'Cassa' ? 'Proforma' : ppDoc }
+        : ppDoc === 'Cassa'
+          ? { documento: 'Cassa' as const, ...(rtNumberClean ? { rt_doc_number: rtNumberClean } : {}) }
+          : { documento: ppDoc === 'Scontrino' ? 'Scontrino' as const : 'Proforma' as const }),
     }, { invoiceIntent: !isPP && ppDoc === 'Fattura' });
+    if (!isPP) rememberDocChoice(ppDoc);
   };
 
   const field =
@@ -210,7 +238,7 @@ export const SettleDialog: React.FC<{
             <div>
               <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">{isPP ? 'Documento in cassa' : 'Documento fiscale'}</span>
               <div className="flex gap-1.5">
-                {((isPP ? ['Scontrino', 'Proforma'] : ['Scontrino', 'Proforma', 'Fattura']) as ('Scontrino' | 'Proforma' | 'Fattura')[]).map(d => (
+                {((isPP ? ['Scontrino', 'Proforma'] : ['Scontrino', 'Cassa', 'Proforma', 'Fattura']) as ('Scontrino' | 'Cassa' | 'Proforma' | 'Fattura')[]).map(d => (
                   <button
                     key={d}
                     type="button"
@@ -232,6 +260,24 @@ export const SettleDialog: React.FC<{
                     ? 'Niente scontrino: in cassa esce la proforma.'
                     : 'Nessun documento adesso: scontrino o fattura si emettono dopo, dal conto.'}
                 </p>
+              )}
+              {!isPP && ppDoc === 'Cassa' && (
+                <div className="mt-2.5 space-y-1.5">
+                  <p className="text-[13px] text-[var(--ds-text-muted)]">
+                    Batti lo scontrino sul registratore e riporta qui il numero.
+                  </p>
+                  <input
+                    type="text"
+                    maxLength={30}
+                    autoCorrect="off"
+                    spellCheck={false}
+                    placeholder="Numero scontrino (facoltativo)"
+                    value={rtNumber}
+                    onChange={e => setRtNumber(e.target.value)}
+                    disabled={busy}
+                    className={`${field} !text-left !text-[15px]`}
+                  />
+                </div>
               )}
               {ppDoc === 'Fattura' && (
                 <p className="mt-1.5 text-[13px] text-[var(--ds-text-muted)]">
@@ -663,6 +709,8 @@ export const FiscalCard: React.FC<{
 }> = ({ bill, onChanged }) => {
   const [busy, setBusy] = useState(false);
   const [armed, setArmed] = useState(false);
+  const [rtArmed, setRtArmed] = useState(false);
+  const [rtNumber, setRtNumber] = useState('');
   const [invoiceOpen, setInvoiceOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [printedFlash, setPrintedFlash] = useState(false);
@@ -676,6 +724,9 @@ export const FiscalCard: React.FC<{
   // cassa alla chiusura del tavolo sul gestionale, non il provider cloud.
   const isPP = /^pp:comanda:/.test(String(bill.external_ref ?? ''));
   const viaPP = bill.fiscal_provider === 'passepartout';
+  // Scontrino battuto a mano sull'RT esterno (periodo ponte): documento
+  // vero, ma la carta e l'annullo vivono sul registratore.
+  const viaRT = bill.fiscal_provider === 'external_rt';
   const proforma = bill.fiscal_doc_type === 'PROFORMA';
   const invoice = bill.fiscal_doc_type === 'INVOICE';
   const creditNote = bill.fiscal_doc_type === 'CREDIT_NOTE';
@@ -694,7 +745,7 @@ export const FiscalCard: React.FC<{
     st === 'CONFIRMED' && creditNote ? { tone: 'neutral' as const, label: 'stornata con nota di credito' }
     : st === 'CONFIRMED' && proforma ? { tone: 'neutral' as const, label: 'proforma' }
     : st === 'CONFIRMED' && invoice ? { tone: 'positive' as const, label: 'fattura emessa' }
-    : st === 'CONFIRMED' ? { tone: 'positive' as const, label: viaPP ? 'emesso in cassa' : 'emesso' }
+    : st === 'CONFIRMED' ? { tone: 'positive' as const, label: viaPP || viaRT ? 'emesso in cassa' : 'emesso' }
     : st === 'PENDING' ? { tone: 'pending' as const, label: 'in emissione' }
     : st === 'FAILED' ? { tone: 'critical' as const, label: creditNote ? 'errore nota di credito' : invoice ? 'errore fattura' : 'errore' }
     : st === 'VOIDED' ? { tone: 'neutral' as const, label: 'annullato' }
@@ -746,9 +797,11 @@ export const FiscalCard: React.FC<{
             La nota di credito non è partita: la fattura resta valida.
           </p>
         )}
-        {st === 'CONFIRMED' && !proforma && !invoice && (bill.fiscal_doc_number || bill.fiscal_ref) && (
+        {st === 'CONFIRMED' && !proforma && !invoice && (bill.fiscal_doc_number || bill.fiscal_ref || viaRT) && (
           <p className="text-[13px] text-[var(--ds-text-muted)]">
-            Scontrino {bill.fiscal_doc_number ?? bill.fiscal_ref}{viaPP ? ' · emesso via Passepartout' : ''}
+            {viaRT
+              ? `Scontrino di cassa${bill.fiscal_doc_number ? ` n. ${bill.fiscal_doc_number}` : ''} · battuto sul registratore`
+              : <>Scontrino {bill.fiscal_doc_number ?? bill.fiscal_ref}{viaPP ? ' · emesso via Passepartout' : ''}</>}
           </p>
         )}
         {/* Il documento emesso si consegna: QR per l'ospite (pagina pubblica
@@ -842,7 +895,42 @@ export const FiscalCard: React.FC<{
               Segna proforma
             </button>
           )}
-          {st === 'CONFIRMED' && !viaPP && !invoice && !proforma && !creditNote && bill.fiscal_doc_id != null && (
+          {/* Scontrino battuto in cassa ma non registrato alla chiusura (o
+              proforma da promuovere): si recupera da qui, col numero. */}
+          {!isPP && (st == null || st === 'VOIDED' || nativeProforma || (st === 'CONFIRMED' && creditNote)) && bill.status === 'CLOSED' && (
+            rtArmed ? (
+              <span className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  maxLength={30}
+                  autoCorrect="off"
+                  spellCheck={false}
+                  placeholder="Numero scontrino"
+                  value={rtNumber}
+                  onChange={e => setRtNumber(e.target.value)}
+                  disabled={busy}
+                  className="h-10 w-44 rounded-full border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3.5 text-[13px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]"
+                />
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => run(async () => { await billsApiService.markCassa(bill.id, rtNumber.trim() || undefined); setRtArmed(false); setRtNumber(''); })}
+                  className={quiet}
+                >
+                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                  Registra
+                </button>
+                <button type="button" disabled={busy} onClick={() => setRtArmed(false)} className={quiet}>
+                  Annulla
+                </button>
+              </span>
+            ) : (
+              <button type="button" disabled={busy} onClick={() => setRtArmed(true)} className={quiet}>
+                Scontrino di cassa
+              </button>
+            )
+          )}
+          {st === 'CONFIRMED' && !viaPP && !viaRT && !invoice && !proforma && !creditNote && bill.fiscal_doc_id != null && (
             armed ? (
               <>
                 <button

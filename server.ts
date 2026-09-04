@@ -5259,6 +5259,15 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
         }
         const notes = typeof req.body?.notes === 'string' ? req.body.notes.slice(0, 500) : null;
 
+        // Scontrino battuto sull'RT di cassa (periodo ponte senza provider
+        // cloud): il numero riportato dal cassiere è testo libero — i
+        // formati dei registratori variano — ma corto per costruzione.
+        const rtDocRaw = typeof req.body?.rt_doc_number === 'string' ? req.body.rt_doc_number.trim() : '';
+        if (rtDocRaw.length > 30) {
+            return res.status(400).json({ error: 'rt_doc_number_invalid', message: 'Il numero scontrino supera i 30 caratteri' });
+        }
+        const rtDocNumber = rtDocRaw || null;
+
         // Need the current total + sums to decide between CLOSED and
         // SETTLED_PARTIAL and to sanity-check the caller's values. Fetch
         // under a lock so a webhook-triggered PAID→SETTLED promotion can't
@@ -5397,6 +5406,13 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
                 } else {
                     console.warn('[passepartout] conto', id, 'chiuso ma PASSEPARTOUT_TIPO_PAGAMENTO non configurato: comanda', ppComandaId, 'da chiudere in cassa a mano');
                 }
+            } else if (req.body?.documento === 'Cassa') {
+                // Scontrino emesso dall'RT esterno: il documento fiscale
+                // esiste davvero, solo che l'ha battuto la cassa — si
+                // registra con numero (se riportato) così chiusura cassa e
+                // registro quadrano col registratore, senza binario cloud.
+                registerExternalRtReceipt(req.tenantId!, id, req.user?.userId ?? null, rtDocNumber)
+                    .catch(err => console.error('[fiscal] registrazione scontrino di cassa fallita per conto', id, err?.message));
             } else if (req.body?.documento === 'Proforma') {
                 // Proforma anche per i conti nativi: chiusura DELIBERATA
                 // senza documento fiscale. La riga PROFORMA registra la
@@ -5754,7 +5770,7 @@ app.get('/reports/cash-closure', authenticate, requirePermission('payments:view'
                              THEN 'LUNCH' ELSE 'DINNER' END
                     ) AS shift,
                     fd.doc_type AS fiscal_doc_type, fd.status AS fiscal_status, fd.doc_number AS fiscal_doc_number,
-                    fd.public_token AS fiscal_public_token,
+                    fd.public_token AS fiscal_public_token, fd.provider AS fiscal_provider,
                     COALESCE((SELECT jsonb_agg(jsonb_build_object('method', p.method, 'amount_cents', p.amount_cents) ORDER BY p.recorded_at)
                               FROM table_bill_payments p
                               WHERE p.table_bill_id = b.id AND p.voided_at IS NULL), '[]'::jsonb) AS payments
@@ -5762,7 +5778,7 @@ app.get('/reports/cash-closure', authenticate, requirePermission('payments:view'
              LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
              LEFT JOIN reservations r ON r.id = b.reservation_id AND r.tenant_id = b.tenant_id
              LEFT JOIN LATERAL (
-                 SELECT doc_type, status, doc_number, public_token FROM fiscal_documents
+                 SELECT doc_type, status, doc_number, public_token, provider FROM fiscal_documents
                  WHERE table_bill_id = b.id ORDER BY created_at DESC LIMIT 1
              ) fd ON TRUE
              WHERE b.tenant_id = $1 AND b.status IN ('CLOSED', 'SETTLED_PARTIAL')
@@ -5985,7 +6001,7 @@ app.get('/reports/fiscal-vat-summary', authenticate, requirePermission('fiscal:v
             `SELECT COUNT(*)::int AS docs, COALESCE(SUM(fd.total_cents), 0)::bigint AS total_cents
              FROM fiscal_documents fd
              WHERE ${FISCAL_PERIOD_WHERE}
-               AND fd.doc_type = 'RECEIPT' AND fd.status = 'CONFIRMED' AND fd.provider = 'passepartout'`,
+               AND fd.doc_type = 'RECEIPT' AND fd.status = 'CONFIRMED' AND fd.provider IN ('passepartout', 'external_rt')`,
             params
         );
 
@@ -6242,6 +6258,32 @@ async function registerNativeProforma(tenantId: number, billId: number, userId: 
          ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') AND table_bill_split_id IS NULL AND doc_type <> 'CREDIT_NOTE' DO NOTHING
          RETURNING ${FISCAL_DOC_COLUMNS}`,
         [tenantId, billId, bill.total_cents, userId]
+    );
+    if (!ins.rows[0]) return { skipped: 'doc_exists' };
+    try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: billId, doc: ins.rows[0] }); } catch (_) {}
+    return { doc: ins.rows[0] };
+}
+
+// Scontrino battuto a mano sull'RT di cassa su un conto NATIVO (periodo
+// ponte: comande nel CRM, fiscale ancora sul registratore). A differenza
+// della proforma È un documento fiscale — provider 'external_rt', numero
+// del registratore in doc_number — e sta nei totali documentati come i
+// receipt Passepartout. Supera l'eventuale proforma segnaposto.
+async function registerExternalRtReceipt(tenantId: number, billId: number, userId: number | null, docNumber: string | null): Promise<{ doc?: any; skipped?: string }> {
+    const billRs = await queryWithRetry(
+        `SELECT id, total_cents, status, external_ref FROM table_bills WHERE id = $1 AND tenant_id = $2`,
+        [billId, tenantId]
+    );
+    const bill = billRs.rows[0];
+    if (!bill || bill.status !== 'CLOSED') return { skipped: 'bill_not_closed' };
+    if (passepartoutComandaIdFromRef(bill.external_ref) != null) return { skipped: 'passepartout' }; // il bridge registra da solo l'esito della cassa
+    await supersedeNativeProforma(tenantId, billId);
+    const ins = await queryWithRetry(
+        `INSERT INTO fiscal_documents (tenant_id, table_bill_id, doc_type, provider, status, doc_number, total_cents, created_by_user_id, confirmed_at)
+         VALUES ($1, $2, 'RECEIPT', 'external_rt', 'CONFIRMED', $5, $3, $4, CURRENT_TIMESTAMP)
+         ON CONFLICT (table_bill_id) WHERE status IN ('PENDING', 'CONFIRMED') AND table_bill_split_id IS NULL AND doc_type <> 'CREDIT_NOTE' DO NOTHING
+         RETURNING ${FISCAL_DOC_COLUMNS}`,
+        [tenantId, billId, bill.total_cents, userId, docNumber]
     );
     if (!ins.rows[0]) return { skipped: 'doc_exists' };
     try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: billId, doc: ins.rows[0] }); } catch (_) {}
@@ -6518,6 +6560,26 @@ app.post('/bills/:id/fiscal-docs', authenticate, requirePermission('payments:ful
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid bill id' });
 
+        // documento: 'Cassa' → scontrino battuto sull'RT esterno, anche a
+        // posteriori (conto chiuso senza registrare, o numero riportato il
+        // giorno dopo). Nessuna emissione: si scrive il documento com'è.
+        if (req.body?.documento === 'Cassa') {
+            const rtRaw = typeof req.body?.rt_doc_number === 'string' ? req.body.rt_doc_number.trim() : '';
+            if (rtRaw.length > 30) {
+                return res.status(400).json({ error: 'rt_doc_number_invalid', message: 'Il numero scontrino supera i 30 caratteri' });
+            }
+            const marked = await registerExternalRtReceipt(req.tenantId!, id, req.user?.userId ?? null, rtRaw || null);
+            if (marked.skipped) {
+                const cassaMessages: Record<string, string> = {
+                    bill_not_closed: 'Lo scontrino di cassa si registra su un conto chiuso e saldato per intero',
+                    passepartout: 'Conto del gestionale: l\'esito della cassa lo registra il bridge (chiusura Passepartout)',
+                    doc_exists: 'Il conto ha già un documento vivo',
+                };
+                return res.status(409).json({ error: cassaMessages[marked.skipped] ?? marked.skipped, reason: marked.skipped });
+            }
+            return res.status(200).json({ doc: marked.doc, request: null });
+        }
+
         // documento: 'Proforma' → niente emissione: si registra (anche a
         // posteriori) il segnaposto sul conto chiuso senza documento. Serve
         // per i conti chiusi prima della scelta in dialog, o dimenticati.
@@ -6573,6 +6635,13 @@ app.post('/bills/:id/fiscal-docs/:fid/void', authenticate, requirePermission('pa
         );
         const doc = docRs.rows[0];
         if (!doc) return res.status(404).json({ error: 'Documento non trovato' });
+        // I documenti del registratore (Passepartout o RT battuto a mano)
+        // PRIMA della guardia sul provider_ref: quello di cassa non ne ha
+        // uno — il numero vive in doc_number — e senza questo ordine il 409
+        // uscirebbe col messaggio sbagliato.
+        if (doc.provider === 'passepartout' || doc.provider === 'external_rt') {
+            return res.status(409).json({ error: 'Scontrino emesso dalla cassa: si annulla dal registratore, non da qui' });
+        }
         if (doc.status !== 'CONFIRMED' || !doc.provider_ref) {
             return res.status(409).json({ error: `Solo un documento confermato si può annullare (stato ${doc.status})` });
         }
@@ -6588,10 +6657,6 @@ app.post('/bills/:id/fiscal-docs/:fid/void', authenticate, requirePermission('pa
         // Documento emesso dall'RT di cassa alla chiusura Passepartout: il
         // reso/annullo è un'operazione del registratore, non c'è un provider
         // cloud da chiamare.
-        if (doc.provider === 'passepartout') {
-            return res.status(409).json({ error: 'Scontrino emesso dalla cassa: si annulla dal registratore, non da qui' });
-        }
-
         const driver = getFiscalDriver(doc.provider);
         const raw = await driver.voidEReceipt(doc.provider_ref);
         const upd = await queryWithRetry(
@@ -7413,7 +7478,7 @@ app.get('/scontrino/:token', publicPayLimiter, async (req, res) => runAsPlatform
              JOIN table_bills b ON b.id = fd.table_bill_id AND b.tenant_id = fd.tenant_id
              LEFT JOIN tables t ON t.id = b.table_id AND t.tenant_id = b.tenant_id
              WHERE fd.public_token = $1 AND fd.doc_type = 'RECEIPT'
-               AND fd.provider <> 'passepartout' AND fd.status IN ('CONFIRMED', 'VOIDED')`,
+               AND fd.provider NOT IN ('passepartout', 'external_rt') AND fd.status IN ('CONFIRMED', 'VOIDED')`,
             [token]
         );
         const doc = rs.rows[0];
@@ -30156,7 +30221,9 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
                 [bill.id, req.tenantId!]
             );
             const fd = fdRs.rows[0];
-            if (!fd || fd.provider === 'passepartout') {
+            if (!fd || fd.provider === 'passepartout' || fd.provider === 'external_rt') {
+                // La carta di questi documenti è quella del registratore:
+                // qui non c'è payload da rendere.
                 return res.status(409).json({ error: 'receipt_unavailable', message: 'Nessuno scontrino emesso su questo conto' });
             }
             const identity = businessIdentity(req.tenantId!);
