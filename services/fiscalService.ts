@@ -6,10 +6,12 @@
 // senza rete e il driver si sostituisce senza toccare il flusso.
 //
 // Driver disponibili:
-//  - 'openapi': POST/DELETE /IT-e-receipts (corrispettivi, binario "soluzione
-//    software" — vedi confronto provider). Bearer token e base URL da env:
-//    OPENAPI_INVOICE_TOKEN, OPENAPI_INVOICE_BASE_URL (default sandbox
-//    https://test.invoice.openapi.com).
+//  - 'openapi': corrispettivi su due binari commutabili via
+//    OPENAPI_RECEIPTS_CHANNEL — 'e-receipts' (default, soluzione software,
+//    solo sandbox finché Openapi non apre la produzione) o 'receipts'
+//    (documento commerciale online, il ponte per produzione). Bearer token e
+//    base URL da env: OPENAPI_INVOICE_TOKEN, OPENAPI_INVOICE_BASE_URL
+//    (default sandbox https://test.invoice.openapi.com).
 //  - 'mock': nessuna rete, conferma sempre. Serve ai test API e alle demo
 //    senza credenziali; rifiutato in produzione.
 
@@ -54,6 +56,21 @@ export interface FiscalProviderDriver {
 // Centesimi → stringa euro a due decimali ("1234" → "12.34"), il formato che
 // l'API vuole su ogni importo.
 export const centsToEuroString = (cents: number): string => (Math.round(cents) / 100).toFixed(2);
+
+// Il provider accetta solo Basic Latin + Latin-1 nei campi testo: e' il
+// pattern XSD di FatturaPA sulle Descrizioni, e l'endpoint e-receipts va
+// dritto in 500 con qualunque carattere fuori range (verificato in sandbox
+// il 29/08/2026 con em-dash ed emoji, entrambi plausibili nei nomi dei
+// piatti). Traslittera la tipografia comune, il resto diventa spazio.
+export const toLatin1 = (s: string): string => String(s)
+    .replace(/[\u2010-\u2015\u2212]/g, '-')      // trattini tipografici, en/em dash, minus
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'") // apici curvi
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"') // virgolette curve
+    .replace(/\u2026/g, '...')
+    .replace(/\u20AC/g, 'EUR')                    // il simbolo euro NON e' Latin-1
+    .replace(/[^\x20-\x7E\xA0-\xFF]/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 
 // Aliquota (intero %) → vat_rate_code dell'API. Lo 0 non esiste nell'enum:
 // le operazioni a IVA zero viaggiano coi codici natura N1..N6. 'N2' (non
@@ -114,7 +131,8 @@ export function buildEReceiptPayload(input: BuildEReceiptInput): EReceiptPayload
         .filter(i => Number(i.qty) > 0 && Number(i.unit_price_cents) > 0)
         .map(i => ({
             quantity: Number(i.qty).toFixed(2),
-            description: String(i.name || 'Articolo').slice(0, 1000),
+            // Un nome tutto-emoji si svuota nella traslitterazione: resta 'Articolo'.
+            description: (toLatin1(String(i.name || '')) || 'Articolo').slice(0, 1000),
             unit_price: centsToEuroString(Number(i.unit_price_cents)),
             vat_rate_code: vatRateToCode(Number(i.vat_rate ?? fallbackVat)),
         }));
@@ -208,8 +226,10 @@ export interface BuildInvoiceInput {
     related?: { number: string; date: string };
 }
 
+// Ogni nodo testo passa da toLatin1 prima dell'escape: il pattern XSD vale
+// su tutti i campi liberi (Descrizione, Denominazione, Indirizzo, ...).
 const xmlEscape = (s: string): string =>
-    String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    toLatin1(String(s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
              .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 
 // FatturaPA vuole gli importi al NETTO (imponibile) con l'IVA nei riepiloghi
@@ -351,15 +371,57 @@ class OpenapiDriver implements FiscalProviderDriver {
         return json;
     }
 
+    // Due binari per lo scontrino, stessa semantica a valle (id +
+    // document_number/document_date nella risposta, DELETE per l'annullo):
+    //  - 'e-receipts' (default): la soluzione software, POST /IT-e-receipts.
+    //    A oggi Openapi la attiva SOLO in sandbox ("E-receipts service is
+    //    not ready in PROD yet", verificato 04/09/2026).
+    //  - 'receipts': il documento commerciale online (velocizzatore), POST
+    //    /IT-receipts — il ponte per la produzione finché il binario nuovo
+    //    non apre. Richiede receipts:true + credenziali AdE del delegato
+    //    nella IT-configuration. Stesso payload MENO 'type' e
+    //    'additional_text', che lo schema non prevede.
+    // La scelta è di piattaforma (env), non del tenant: quando E-Receipts
+    // apre in produzione si torna al default cambiando la variabile.
+    private receiptsPath(): string {
+        return process.env.OPENAPI_RECEIPTS_CHANNEL === 'receipts' ? '/IT-receipts' : '/IT-e-receipts';
+    }
+
     async issueEReceipt(payload: EReceiptPayload): Promise<FiscalIssueResult> {
-        const json = await this.call('POST', '/IT-e-receipts', payload);
+        const path = this.receiptsPath();
+        let body: any = payload;
+        if (path === '/IT-receipts') {
+            const { type: _type, additional_text: _at, ...rest } = payload as any;
+            // Enum aliquote diverso dal binario nuovo: qui "10", non "10.00"
+            // (422 verificato in sandbox il 04/09/2026). I codici natura
+            // passano invariati.
+            body = {
+                ...rest,
+                items: (rest.items ?? []).map((i: EReceiptItemPayload) => ({
+                    ...i,
+                    vat_rate_code: /^\d/.test(i.vat_rate_code) ? String(parseFloat(i.vat_rate_code)) : i.vat_rate_code,
+                })),
+            };
+        }
+        const json = await this.call('POST', path, body);
         const ref = json?.data?.id;
         if (!ref) throw new Error(`Openapi: risposta senza id documento: ${JSON.stringify(json).slice(0, 500)}`);
         return { provider_ref: String(ref), raw: json };
     }
 
     async voidEReceipt(providerRef: string): Promise<any> {
-        return this.call('DELETE', `/IT-e-receipts/${encodeURIComponent(providerRef)}`);
+        // L'annullo segue il canale corrente; se il documento era stato
+        // emesso sull'ALTRO binario (switch di canale a documenti vivi), il
+        // 404 fa da segnale e si ritenta sull'altro percorso — mai lasciare
+        // un annullo fiscale a metà per una variabile d'ambiente.
+        const first = this.receiptsPath();
+        const second = first === '/IT-receipts' ? '/IT-e-receipts' : '/IT-receipts';
+        try {
+            return await this.call('DELETE', `${first}/${encodeURIComponent(providerRef)}`);
+        } catch (err: any) {
+            if (!String(err?.message ?? '').includes('404')) throw err;
+            return this.call('DELETE', `${second}/${encodeURIComponent(providerRef)}`);
+        }
     }
 
     async issueInvoice(xml: string): Promise<FiscalIssueResult> {
