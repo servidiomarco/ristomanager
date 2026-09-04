@@ -35,6 +35,12 @@ describe('varianti: crud, gruppi cassa, composti, percentuali', () => {
         db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
         await db.connect();
 
+        // Autosufficienza: il modulo comande serve acceso (orders-bills lo
+        // accende, ma questo file deve reggere anche filtrato da solo o dopo
+        // un test che lo spegne).
+        const flags = await api().put('/settings/features').set(bearer(token)).send({ table_orders_enabled: true });
+        expect(flags.status).toBe(200);
+
         const room = await api().post('/rooms').set(bearer(token)).send({
             name: 'Sala Varianti Test', width: 800, height: 600,
         });
@@ -374,13 +380,21 @@ describe('varianti: crud, gruppi cassa, composti, percentuali', () => {
         expect(ppNote.status).toBe(200);
         expect(ppNote.body.note).toBe('Nota del ristoratore su un gruppo pp.');
 
-        // Il catalogue porta le note ai palmari e al monitor cucina.
+        // La traduzione inglese vive in name_en (solo foglio cameriere):
+        // stessa semantica della nota, e viaggia nel catalogue.
+        const en = await api().put(`/menu/modifiers/${g.body.modifiers[0].id}`).set(bearer(token))
+            .send({ name_en: 'Rare' });
+        expect(en.status).toBe(200);
+        expect(en.body.name_en).toBe('Rare');
+
+        // Il catalogue porta note e traduzioni ai palmari.
         const back = await api().put(`/menu/modifier-groups/${g.body.id}`).set(bearer(token)).send({ note: 'Guida.' });
         expect(back.status).toBe(200);
         const catalogue = await api().get('/menu/catalogue').set(bearer(token));
         const inCat = catalogue.body.modifier_groups.find((x: any) => x.id === g.body.id);
         expect(inCat.note).toBe('Guida.');
         expect(inCat.modifiers[0].note).toBe('48–52 °C');
+        expect(inCat.modifiers[0].name_en).toBe('Rare');
     });
 
     it('la percentuale si risolve sul prezzo battuto e resta nello snapshot', async () => {

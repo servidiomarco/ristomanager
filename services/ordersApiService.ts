@@ -199,7 +199,7 @@ export interface MenuCatalogue {
     /** price_delta_pct: percentuale del prezzo battuto (pg serializza NUMERIC
      *  come stringa); null = sovrapprezzo assoluto. Il foglio la mostra in €
      *  calcolati sul piatto corrente; il conto vero lo fa il server. */
-    modifiers: { id: number; group_id: number; name: string; price_delta_cents: number; price_delta_pct: string | null; note: string | null }[];
+    modifiers: { id: number; group_id: number; name: string; price_delta_cents: number; price_delta_pct: string | null; note: string | null; name_en: string | null }[];
   }[];
   dish_modifier_groups: { dish_id: number; group_id: number }[];
   /** Ingredienti dei piatti composti: pre-inclusi sul foglio varianti, si

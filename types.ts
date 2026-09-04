@@ -675,6 +675,9 @@ export interface Modifier {
   /** Nota breve dell'opzione (es. «48–52°C al cuore»): sul foglio varianti
    *  e accanto al nome sul monitor cucina. */
   note?: string | null;
+  /** Traduzione inglese del nome, SOLO per il foglio del cameriere (clienti
+   *  stranieri): in cucina non esce. */
+  name_en?: string | null;
 }
 
 /** Ingrediente di un piatto composto: pre-incluso, si toglie sull'orderpad

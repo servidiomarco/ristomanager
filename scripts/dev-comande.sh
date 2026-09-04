@@ -166,13 +166,15 @@ WHERE g.name = 'Cottura'
 UPDATE modifier_groups SET note =
   'I gradi di cottura della carne rossa (fiorentina, filetto, costata) si distinguono per la temperatura al cuore del taglio. Al sangue (Rare): superficie ben scottata, cuore rosso e molto caldo, carne tenera e succosa. Media-sangue (Medium-Rare): il grado preferito dai grigliatori — cuore rosso intenso con fascia rosa, grasso ben disciolto. Media (Medium): rosa uniforme al centro, bordi dorati, consistenza più soda e succhi ben distribuiti. Media-ben cotta (Medium-Well): solo una sfumatura rosa al centro, crosta pronunciata, inizia a perdere morbidezza. Ben cotta (Well-Done): interamente bruna, compatta e asciutta. Carni bianche (pollo, tacchino) e maiale: cottura sempre completa, almeno 74°C al cuore, per la sicurezza alimentare.'
 WHERE name = 'Cottura' AND note IS NULL;
-UPDATE modifiers m SET note = v.note, sort_order = v.ord
+-- La temperatura sta nella nota (esce anche in cucina); l'inglese in
+-- name_en, che il monitor cucina non mostra.
+UPDATE modifiers m SET note = v.note, name_en = v.en, sort_order = v.ord
 FROM modifier_groups g,
-     (VALUES ('Al sangue', 'Rare · 48–52°C al cuore', 1),
-             ('Media-sangue', 'Medium-Rare · 53–56°C al cuore', 2),
-             ('Media', 'Medium · 57–62°C al cuore', 3),
-             ('Media-ben cotta', 'Medium-Well · 63–68°C al cuore', 4),
-             ('Ben cotta', 'Well-Done · 70°C e oltre al cuore', 5)) AS v(name, note, ord)
+     (VALUES ('Al sangue', '48–52°C al cuore', 'Rare', 1),
+             ('Media-sangue', '53–56°C al cuore', 'Medium-Rare', 2),
+             ('Media', '57–62°C al cuore', 'Medium', 3),
+             ('Media-ben cotta', '63–68°C al cuore', 'Medium-Well', 4),
+             ('Ben cotta', '70°C e oltre al cuore', 'Well-Done', 5)) AS v(name, note, en, ord)
 WHERE g.name = 'Cottura' AND m.group_id = g.id AND m.name = v.name AND m.note IS NULL;
 
 INSERT INTO modifiers (tenant_id, group_id, name, price_delta_cents, sort_order)
