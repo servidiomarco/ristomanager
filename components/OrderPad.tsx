@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { chime } from '../utils/chime';
 import {
   Check, Loader2, TriangleAlert, X,
 } from 'lucide-react';
@@ -898,6 +899,11 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     }
   };
 
+  // Id del conto aperto nel foglio, in un ref: l'handler socket lo legge
+  // senza che l'effetto si rimonti a ogni apertura.
+  const viewBillIdRef = useRef<number | null>(null);
+  useEffect(() => { viewBillIdRef.current = viewBill?.id ?? null; }, [viewBill?.id]);
+
   // Lo stato dei pagamenti cambia sotto gli occhi (quote via QR, chiusure da
   // altri dispositivi): il foglio conto e la griglia si riallineano da soli.
   useEffect(() => {
@@ -919,6 +925,22 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     };
     socket.on('bill:updated', refresh);
     socket.on('bill:closed', refresh);
+    // Il cliente paga la sua quota col QR/link mentre il conto è aperto: senza
+    // questi due eventi il residuo restava lo snapshot (il refresh li ignorava
+    // e la UI non sapeva del pagamento). Ora si riallinea, e se il pagamento
+    // è sul conto aperto lo si annuncia — suono, vibrazione, riga di stato —
+    // così l'operatore se ne accorge senza fissare il numero.
+    const onPaid = (p: any) => {
+      refresh();
+      if (p?.bill_id != null && p.bill_id === viewBillIdRef.current) {
+        chime();
+        if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(30);
+        const amt = Number(p?.amount_cents);
+        setFlash(Number.isFinite(amt) && amt > 0 ? `Pagamento ricevuto · ${euro(amt)}` : 'Pagamento ricevuto');
+      }
+    };
+    socket.on('bill:split-paid', onPaid);
+    socket.on('bill:settled', onPaid);
     // Comanda intonsa disfatta da un altro device: il tavolo si spegne
     // anche su questa griglia, senza aspettare il prossimo rescan.
     const onOrderDeleted = (p: any) => {
@@ -930,6 +952,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     return () => {
       socket.off('bill:updated', refresh);
       socket.off('bill:closed', refresh);
+      socket.off('bill:split-paid', onPaid);
+      socket.off('bill:settled', onPaid);
       socket.off('order:deleted', onOrderDeleted);
     };
   }, [serviceQuery]);
