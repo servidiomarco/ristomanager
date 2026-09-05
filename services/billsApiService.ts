@@ -33,6 +33,9 @@ export interface CloseBillPayload {
    *  (registrata come segnaposto PROFORMA, sostituibile da scontrino o
    *  fattura emessi dopo). Assente o 'Scontrino' → emissione automatica. */
   documento?: 'Scontrino' | 'Proforma' | 'Cassa';
+  /** Codice lotteria del cliente (8 alfanumerici): va nel documento
+   *  commerciale emesso via provider. Non si abbina allo scontrino parlante. */
+  lottery_code?: string;
   /** Numero dello scontrino battuto sull'RT esterno (con documento 'Cassa'). */
   rt_doc_number?: string;
   /** Solo conti Passepartout: documento della chiusura in cassa.
@@ -165,6 +168,15 @@ class BillsApiService {
       headers: getHeaders(),
       body: JSON.stringify({ documento: 'Proforma' }),
     });
+  }
+
+  /** Dati azienda da P.IVA (API Imprese Openapi): denominazione, sede,
+   *  codice SDI, PEC. Per precompilare il dialog fattura. */
+  async companyLookup(piva: string): Promise<{
+    name: string; vat_number: string; tax_code: string; sdi_code: string; pec: string;
+    address: { street: string; zip: string; city: string; province: string };
+  }> {
+    return apiRequest(`${API_URL}/company-lookup/${encodeURIComponent(piva)}`, { headers: getHeaders() });
   }
 
   /** Registra (anche a posteriori) lo scontrino battuto sull'RT esterno:

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { QRCodeSVG } from 'qrcode.react';
-import { Check, Copy, FileText, Loader2, Printer, QrCode, X, Banknote } from 'lucide-react';
+import { Check, Copy, FileText, Loader2, Printer, QrCode, Search, X, Banknote } from 'lucide-react';
 import { billsApiService, printBill, type BillPaymentInput, type OpenBillRow } from '../../services/billsApiService';
 import { getCustomers } from '../../services/apiService';
 import type { Customer } from '../../types';
@@ -23,6 +23,8 @@ export type SettleOpts = {
   documento?: 'Scontrino' | 'Proforma' | 'Cassa';
   /** Numero dello scontrino battuto sull'RT (facoltativo, con 'Cassa'). */
   rt_doc_number?: string;
+  /** Codice lotteria del cliente (con 'Scontrino' via provider). */
+  lottery_code?: string;
 };
 
 /* La scelta del documento si ricorda per dispositivo: durante il periodo
@@ -110,6 +112,10 @@ export const SettleDialog: React.FC<{
   // dei registratori variano.
   const [rtNumber, setRtNumber] = useState('');
   const rtNumberClean = rtNumber.trim();
+  // Codice lotteria (solo scontrino via provider): 8 alfanumerici AdE.
+  const [lottery, setLottery] = useState('');
+  const lotteryClean = lottery.trim().toUpperCase();
+  const lotteryValid = lotteryClean === '' || /^[A-Z0-9]{8}$/.test(lotteryClean);
   // Conti nativi: la scelta c'è SEMPRE. Con un provider fiscale attivo
   // "Scontrino" emette davvero; senza, resta la dichiarazione d'intento —
   // ma "Proforma" marca comunque il conto come chiuso senza documento DI
@@ -139,7 +145,8 @@ export const SettleDialog: React.FC<{
         ? { passepartout_documento: ppDoc === 'Fattura' || ppDoc === 'Cassa' ? 'Proforma' : ppDoc }
         : ppDoc === 'Cassa'
           ? { documento: 'Cassa' as const, ...(rtNumberClean ? { rt_doc_number: rtNumberClean } : {}) }
-          : { documento: ppDoc === 'Scontrino' ? 'Scontrino' as const : 'Proforma' as const }),
+          : { documento: ppDoc === 'Scontrino' ? 'Scontrino' as const : 'Proforma' as const,
+              ...(ppDoc === 'Scontrino' && lotteryClean ? { lottery_code: lotteryClean } : {}) }),
     }, { invoiceIntent: !isPP && ppDoc === 'Fattura' });
     if (!isPP) rememberDocChoice(ppDoc);
   };
@@ -261,6 +268,26 @@ export const SettleDialog: React.FC<{
                     : 'Nessun documento adesso: scontrino o fattura si emettono dopo, dal conto.'}
                 </p>
               )}
+              {!isPP && ppDoc === 'Scontrino' && (
+                <label className="mt-2.5 block">
+                  <span className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Codice lotteria <span className="font-normal text-[var(--ds-text-muted)]">(facoltativo)</span></span>
+                  <input
+                    type="text"
+                    maxLength={8}
+                    autoCapitalize="characters"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    placeholder="8 caratteri"
+                    value={lottery}
+                    onChange={e => setLottery(e.target.value)}
+                    disabled={busy}
+                    className={`${field} !text-left uppercase tracking-widest`}
+                  />
+                  {!lotteryValid && (
+                    <span className="mt-1 block text-[13px] text-[var(--ds-critical-text)]">Il codice sono 8 lettere o cifre</span>
+                  )}
+                </label>
+              )}
               {!isPP && ppDoc === 'Cassa' && (
                 <div className="mt-2.5 space-y-1.5">
                   <p className="text-[13px] text-[var(--ds-text-muted)]">
@@ -307,7 +334,7 @@ export const SettleDialog: React.FC<{
           <button
             type="button"
             onClick={confirm}
-            disabled={busy}
+            disabled={busy || !lotteryValid}
             className="inline-flex h-11 items-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-6 text-[15px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -535,6 +562,36 @@ export const InvoiceDialog: React.FC<{
     name: '', vat_number: '', tax_code: '', sdi_code: '', pec: '',
     street: '', zip: '', city: '', province: '',
   });
+  // Lookup camerale: P.IVA → denominazione, sede, SDI, PEC. Riempie i campi
+  // al tap esplicito; quello che il cameriere corregge dopo vince comunque.
+  const [lookupBusy, setLookupBusy] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+
+  const lookup = async () => {
+    const piva = buyer.vat_number.replace(/\s/g, '');
+    if (!/^\d{11}$/.test(piva)) { setLookupError('La P.IVA sono 11 cifre'); return; }
+    setLookupBusy(true);
+    setLookupError(null);
+    try {
+      const c = await billsApiService.companyLookup(piva);
+      setBuyer(prev => ({
+        ...prev,
+        name: c.name || prev.name,
+        vat_number: c.vat_number || prev.vat_number,
+        tax_code: c.tax_code || prev.tax_code,
+        sdi_code: c.sdi_code || prev.sdi_code,
+        pec: c.pec || prev.pec,
+        street: c.address.street || prev.street,
+        zip: c.address.zip || prev.zip,
+        city: c.address.city || prev.city,
+        province: c.address.province || prev.province,
+      }));
+    } catch (err: any) {
+      setLookupError(err?.data?.message ?? err?.message ?? 'Ricerca non riuscita');
+    } finally {
+      setLookupBusy(false);
+    }
+  };
 
   // Ricerca in rubrica con debounce: il cameriere digita tre lettere, non
   // scorre cinquecento nomi.
@@ -644,7 +701,19 @@ export const InvoiceDialog: React.FC<{
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
               <span className={label}>P.IVA</span>
-              <input type="text" inputMode="numeric" value={buyer.vat_number} onChange={set('vat_number')} disabled={busy} className={`${field} tabular-nums`} />
+              <div className="flex gap-1.5">
+                <input type="text" inputMode="numeric" value={buyer.vat_number} onChange={set('vat_number')} disabled={busy} className={`${field} tabular-nums`} />
+                {/* Lookup camerale: riempie denominazione, sede, SDI e PEC. */}
+                <button
+                  type="button"
+                  onClick={lookup}
+                  disabled={busy || lookupBusy}
+                  aria-label="Cerca i dati aziendali dalla P.IVA"
+                  className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                >
+                  {lookupBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                </button>
+              </div>
             </label>
             <label className="block">
               <span className={label}>Codice fiscale</span>
@@ -659,6 +728,7 @@ export const InvoiceDialog: React.FC<{
               <input type="email" value={buyer.pec} onChange={set('pec')} disabled={busy} className={field} />
             </label>
           </div>
+          {lookupError && <p className="text-[13px] text-[var(--ds-critical-text)]">{lookupError}</p>}
           <label className="block">
             <span className={label}>Indirizzo</span>
             <input type="text" value={buyer.street} onChange={set('street')} disabled={busy} className={field} />
