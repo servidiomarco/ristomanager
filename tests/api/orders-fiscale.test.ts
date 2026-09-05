@@ -627,6 +627,30 @@ describe('scontrino via registratore locale (rt-local)', () => {
         expect(inv.body.reason).toBe('rt_local_no_invoice');
     });
 
+    it('un secondo trigger nella finestra PENDING non accoda un secondo job (no doppio scontrino)', async () => {
+        const billId = await closedBill('EPSON-DUP', 2500);
+        const row = await waitStatus(billId, 'PENDING');
+        const job1 = await pullRtJob(row.fiscal_doc_id);
+        expect(job1).toBeTruthy();
+
+        // Documento ancora PENDING (agente non ha ancora risposto): una
+        // seconda emissione — come farebbe il webhook di pagamento dopo la
+        // chiusura manuale — NON deve creare un secondo job RT.
+        await api().post(`/bills/${billId}/fiscal-docs`).set(bearer(token)).send({});
+        await api().post(`/bills/${billId}/fiscal-docs`).set(bearer(token)).send({});
+
+        const queue = await api().get('/print-agent/jobs').set('x-print-agent-token', 'test-print-agent-token');
+        const rtJobs = queue.body.jobs.filter((j: any) => j.kind === 'RT_FISCALE' && j.payload?.fiscal_doc_id === row.fiscal_doc_id);
+        expect(rtJobs).toHaveLength(1); // uno solo, non tre
+
+        // Ack del job unico → documento confermato una volta sola.
+        await api().post(`/print-agent/jobs/${job1.id}/claim`).set('x-print-agent-token', 'test-print-agent-token');
+        await api().post(`/print-agent/jobs/${job1.id}/ack`).set('x-print-agent-token', 'test-print-agent-token')
+            .send({ ok: true, result: { doc_number: '0123-0050' } });
+        const done = await waitStatus(billId, 'CONFIRMED');
+        expect(done.fiscal_doc_number).toBe('0123-0050');
+    });
+
     it('l\'errore del registratore porta a FAILED e il retry accoda un job nuovo', async () => {
         const billId = await closedBill('EPSON2', 1800);
         const row = await waitStatus(billId, 'PENDING');
