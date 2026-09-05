@@ -37,7 +37,7 @@ import { ReasonDialog } from './comande/ReasonDialog';
 import { DiscountDialog } from './comande/DiscountDialog';
 import { buildRows, buildMergeGroups, makeReservationForTable, type TableFilter } from './comande/tablesView';
 import {
-  MAX_COURSES, cartForCourse, cartKey, cartSum, courseLabel, euro,
+  COURSE_BADGE, MAX_COURSES, cartForCourse, cartKey, cartSum, courseLabel, euro,
   isSent, isSystemLine, rowCount,
   type CartLine, type RepeatLine,
   saveCartDraft, restoreCartDraft, dropCartDraft,
@@ -508,6 +508,78 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       return next;
     });
   };
+
+  /* ── Spostare piatti fra le uscite ─────────────────────────────────────
+     «Prendiamo anche gli antipasti in prima» a primi già battuti: la riga
+     (o l'uscita intera) si sposta finché è in bozza — locale o sul server.
+     Oltre l'invio la strada resta richiama/storna: la cucina l'ha vista. */
+
+  // Le parti di chiave di una riga così com'è (varianti, senza, peso): per
+  // ricostruire la chiave quando cambia solo l'uscita.
+  const lineKeyParts = (l: CartLine): string[] => [
+    ...(l.modifiers ?? l.modifier_ids.map(id => ({ id, n: 1 }))).map(e => `${e.id}x${e.n}`),
+    ...(l.removed_component_ids ?? []).map(id => `r${id}`),
+    ...(l.weight_grams != null ? [`w${l.weight_grams}#${l.idem}`] : []),
+  ];
+
+  const moveCartLine = (lineKey: string, toCourse: number) => {
+    setCart(prev => {
+      const at = prev.findIndex(l => l.key === lineKey);
+      if (at < 0) return prev;
+      const line = prev[at];
+      if (line.course_no === toCourse) return prev;
+      const newKey = cartKey(line.dish.id, toCourse, lineKeyParts(line), line.note);
+      const moved: CartLine = { ...line, key: newKey, course_no: toCourse };
+      const next = prev.filter((_, i) => i !== at);
+      // Stessa combinazione già nell'uscita di arrivo: le righe si fondono,
+      // come per il tocco sul menu.
+      const dup = next.findIndex(l => l.key === newKey);
+      if (dup >= 0) {
+        next[dup] = { ...next[dup], qty: next[dup].qty + line.qty };
+        return next;
+      }
+      next.splice(at, 0, moved);
+      return next;
+    });
+  };
+
+  const moveServerItem = async (item: OrderItem, toCourse: number) => {
+    if (busy || item.course_no === toCourse) return;
+    setBusy(true); setError(null);
+    try {
+      setOrder(await ordersApiService.patchItem(item.id, { course_no: toCourse }));
+    } catch (err: any) {
+      setError(err?.data?.error ?? err?.message ?? 'Spostamento non riuscito');
+    } finally { setBusy(false); }
+  };
+
+  /** Sposta TUTTE le bozze di un'uscita (locali + server) su un'altra. */
+  const moveCourseTo = async (from: number, to: number) => {
+    if (busy || from === to) return;
+    for (const l of cart.filter(l => l.course_no === from)) moveCartLine(l.key, to);
+    const serverDrafts = (order?.items ?? []).filter(i =>
+      i.status === 'DRAFT' && !isSystemLine(i) && i.course_no === from);
+    if (serverDrafts.length > 0) {
+      setBusy(true); setError(null);
+      try {
+        let view: OrderWithItems | null = null;
+        for (const i of serverDrafts) view = await ordersApiService.patchItem(i.id, { course_no: to });
+        if (view) setOrder(view);
+      } catch (err: any) {
+        setError(err?.data?.error ?? err?.message ?? 'Spostamento non riuscito');
+      } finally { setBusy(false); }
+    }
+    setFlash(`Spostato nella ${courseLabel(to)}`);
+  };
+
+  // Cosa si sta spostando: una riga locale, una riga server in bozza, o
+  // un'uscita intera. Il selettore in fondo al file chiede solo «dove».
+  const [moveFor, setMoveFor] = useState<
+    | { kind: 'line'; key: string; label: string; from: number }
+    | { kind: 'item'; item: OrderItem; from: number }
+    | { kind: 'course'; from: number }
+    | null
+  >(null);
 
   const onDishTap = (dish: Dish) => {
     // Se il piatto ha varianti (o ingredienti da poter togliere) le
@@ -1244,6 +1316,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     onFire: fire,
     onEditLine: (l: CartLine) => setEditLine(l),
     onUnfire: unfire,
+    onMoveLine: (l: CartLine) => setMoveFor({ kind: 'line', key: l.key, label: l.dish.name, from: l.course_no }),
+    onMoveItem: (i: OrderItem) => setMoveFor({ kind: 'item', item: i, from: i.course_no }),
+    onMoveCourse: (n: number) => setMoveFor({ kind: 'course', from: n }),
   };
 
   const browser = (
@@ -1388,6 +1463,53 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         </div>
       </ModalShell>
 
+      {/* Dove va la riga (o l'uscita intera): sei bersagli, quella di
+          partenza spenta. Le uscite già partite restano bersagli validi —
+          la bozza ci entra «da inviare», come una riga aggiunta a mano. */}
+      {moveFor && (
+        <ModalShell
+          open
+          onClose={() => setMoveFor(null)}
+          title={moveFor.kind === 'course'
+            ? `Sposta la ${courseLabel(moveFor.from)}`
+            : `Sposta ${moveFor.kind === 'line' ? moveFor.label : moveFor.item.name_snapshot}`}
+          subtitle={moveFor.kind === 'course'
+            ? 'Tutte le righe non ancora inviate cambiano uscita'
+            : 'In quale uscita va?'}
+          size="sm"
+          closeOnEscape
+          bodyClassName="p-5 sm:p-6"
+        >
+          <div className="grid grid-cols-3 gap-2">
+            {Array.from({ length: MAX_COURSES }, (_, i) => i + 1).map(n => {
+              const status = order.courses.find(c => c.course_no === n)?.status ?? 'PENDING';
+              const sent = isSent(status);
+              return (
+                <button
+                  key={n}
+                  type="button"
+                  disabled={busy || n === moveFor.from}
+                  onClick={() => {
+                    if (moveFor.kind === 'line') moveCartLine(moveFor.key, n);
+                    else if (moveFor.kind === 'item') moveServerItem(moveFor.item, n);
+                    else moveCourseTo(moveFor.from, n);
+                    setMoveFor(null);
+                  }}
+                  className="flex h-16 flex-col items-center justify-center gap-0.5 rounded-[16px] bg-[var(--ds-surface-row)] text-[15px] font-semibold text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+                >
+                  {courseLabel(n)}
+                  {sent && (
+                    <span className="text-[11px] font-medium text-[var(--ds-text-muted)]">
+                      {COURSE_BADGE[status].text}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </ModalShell>
+      )}
+
       {variantFor && (
         <VariantSheet
           dish={variantFor}
@@ -1523,6 +1645,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         onFire={fire}
         onEditLine={(l) => setEditLine(l)}
         onUnfire={unfire}
+        onMoveLine={listProps.onMoveLine}
+        onMoveItem={listProps.onMoveItem}
+        onMoveCourse={listProps.onMoveCourse}
         openedBy={openedByOther}
         onSend={() => submit('course')}
         onSendAll={() => submit('all')}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Ban, ChevronUp, Loader2, Minus, Plus, Send, SendHorizontal, Trash2 } from 'lucide-react';
+import { ArrowUpDown, Ban, ChevronUp, Loader2, Minus, Plus, Send, SendHorizontal, Trash2 } from 'lucide-react';
 import type { OrderItem, OrderWithItems } from '../../types';
 import { StatusPill } from '../ds';
 import {
@@ -39,6 +39,13 @@ interface CourseListProps {
   /** Annulla la chiamata di un'uscita già lanciata (finché la cucina non
    *  ha iniziato): torna in coda, le card spariscono dai monitor. */
   onUnfire?: (courseNo: number) => void;
+  /** Sposta una riga in bozza su un'altra uscita («gli antipasti li
+   *  prendiamo in prima»). Solo bozze: oltre l'invio si richiama o storna. */
+  onMoveLine?: (line: CartLine) => void;
+  /** Come sopra, per una bozza rimasta sul server. */
+  onMoveItem?: (item: OrderItem) => void;
+  /** Sposta TUTTE le bozze dell'uscita su un'altra. */
+  onMoveCourse?: (courseNo: number) => void;
 }
 
 const stepper =
@@ -46,6 +53,7 @@ const stepper =
 
 export const CourseList: React.FC<CourseListProps> = ({
   order, cart, course, onCourse, busy, onBump, onDrop, onVoid, onRecall, onFire, onEditLine, onUnfire,
+  onMoveLine, onMoveItem, onMoveCourse,
 }) => (
   <div className="flex flex-col gap-2">
     {Array.from({ length: MAX_COURSES }, (_, i) => i + 1).map(n => {
@@ -99,6 +107,21 @@ export const CourseList: React.FC<CourseListProps> = ({
             {sent && <StatusPill tone={badge.tone}>{badge.text}</StatusPill>}
             {!sent && serverRows.length > 0 && (
               <StatusPill tone="pending">da inviare</StatusPill>
+            )}
+            {/* Sposta l'uscita intera: solo finché è in bozza — dopo, prima
+                la si riporta in bozza. Quiet come «torna in bozza»: è un
+                rimedio, non un verbo del giro normale. */}
+            {!sent && onMoveCourse
+              && (draftRows.length > 0 || serverRows.some(i => i.status === 'DRAFT')) && (
+              <button
+                type="button"
+                onClick={() => onMoveCourse(n)}
+                disabled={busy}
+                title="Sposta tutte le righe non inviate su un'altra uscita"
+                className="flex-shrink-0 text-[13px] font-medium text-[var(--ds-text-muted)] underline decoration-dotted transition-opacity hover:opacity-70 disabled:opacity-40"
+              >
+                sposta
+              </button>
             )}
             {/* «annulla chiamata» quiet come «torna in bozza»: è il rimedio
                 del tavolo sbagliato, non un verbo del servizio normale. */}
@@ -183,6 +206,18 @@ export const CourseList: React.FC<CourseListProps> = ({
                   <span className="flex-shrink-0 text-[14px] tabular-nums text-[var(--ds-text-muted)]">
                     {euro(i.line_total_cents ?? 0)}
                   </span>
+                  {i.status === 'DRAFT' && i.line_kind === 'DISH' && onMoveItem && (
+                    <button
+                      type="button"
+                      onClick={() => onMoveItem(i)}
+                      disabled={busy}
+                      aria-label={`Sposta ${i.name_snapshot} su un'altra uscita`}
+                      title="Sposta su un'altra uscita"
+                      className={stepper}
+                    >
+                      <ArrowUpDown size={15} />
+                    </button>
+                  )}
                   {i.status !== 'VOIDED' && i.line_kind === 'DISH' && (
                     <button
                       type="button"
@@ -246,6 +281,17 @@ export const CourseList: React.FC<CourseListProps> = ({
                     >
                       <Plus size={15} />
                     </button>
+                    {onMoveLine && (
+                      <button
+                        type="button"
+                        onClick={() => onMoveLine(l)}
+                        aria-label={`Sposta ${l.dish.name} su un'altra uscita`}
+                        title="Sposta su un'altra uscita"
+                        className={stepper}
+                      >
+                        <ArrowUpDown size={15} />
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => onDrop(l.key)}
