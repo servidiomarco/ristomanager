@@ -8,6 +8,7 @@ import { euro } from './cassaView';
 import type { SettleOpts } from '../pagamenti/BillSheet';
 import { BillSheet, InvoiceDialog } from '../pagamenti/BillSheet';
 import { ModalShell } from '../ds';
+import { socketClient } from '../../services/socketClient';
 import { Loader } from '../Loader';
 import { Pagamento } from './Pagamento';
 import { DividiConto } from './DividiConto';
@@ -73,6 +74,23 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
     const row = r.bills.find(b => b.id === billId) ?? null;
     if (row) setBill(row);
   }, [service, billId]);
+
+  // Il cliente paga la sua quota col QR/link mentre il conto è aperto in
+  // cassa: senza questo ascolto il residuo restava lo snapshot di apertura.
+  // Ora si rilegge e si fa avanzare il pulse, che accende il feedback in
+  // Pagamento (lampeggio + suono + vibrazione).
+  const [paymentPulse, setPaymentPulse] = useState(0);
+  useEffect(() => {
+    const socket = socketClient.getSocket();
+    const onPaid = (payload: any) => {
+      if (payload?.bill_id !== billId) return;
+      reloadBill();
+      setPaymentPulse(p => p + 1);
+    };
+    socket?.on('bill:split-paid', onPaid);
+    socket?.on('bill:settled', onPaid);
+    return () => { socket?.off('bill:split-paid', onPaid); socket?.off('bill:settled', onPaid); };
+  }, [billId, reloadBill]);
 
   const openCorreggi = useCallback(async () => {
     setError(null);
@@ -239,6 +257,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
           onShowQr={() => setQrBill(bill)}
           onEdit={openCorreggi}
           embedded
+          paymentPulse={paymentPulse}
         />
       )}
 
