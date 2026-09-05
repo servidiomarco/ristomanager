@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowUpDown, Ban, ChevronUp, ChevronsUpDown, Loader2, Minus, Plus, Send, SendHorizontal, Trash2 } from 'lucide-react';
+import { ArrowUpDown, Ban, ChevronUp, ChevronsUpDown, Loader2, Pencil, Plus, Send, SendHorizontal } from 'lucide-react';
 import type { OrderItem, OrderWithItems } from '../../types';
 import { StatusPill } from '../ds';
 import {
@@ -308,6 +308,11 @@ export const CourseList: React.FC<CourseListProps> = ({
                 <div key={l.key} className={`flex items-center gap-2 transition-opacity ${
                   dnd.drag?.kind === 'line' && dnd.drag.key === l.key ? 'opacity-40' : ''
                 }`}>
+                  {/* La quantità è un prefisso come nelle righe server: lo
+                      stepper in riga non c'è più, si cambia dal foglio. */}
+                  <span className="flex-shrink-0 text-[14px] font-semibold tabular-nums text-[var(--ds-text-muted)]">
+                    {l.qty}×
+                  </span>
                   {/* Le varianti lunghe si troncano: il tocco sul nome apre
                       il foglio varianti della riga, dove si leggono TUTTE e
                       si correggono — chiesto da Marco dal palmare («--- Con
@@ -336,31 +341,20 @@ export const CourseList: React.FC<CourseListProps> = ({
                     {euro(cartUnitCents(l) * l.qty)}
                   </span>
                   <div className="flex flex-shrink-0 items-center gap-1">
-                    {/* L'ultimo pezzo si toglie con il cestino, non con il
-                        meno — stesso patto del menu. Fonde due bottoni in
-                        uno: la riga era troppo affollata e il nome usciva
-                        tagliato. */}
-                    <button
-                      type="button"
-                      onClick={() => (l.qty === 1 ? onDrop(l.key) : onBump(l.key, -1))}
-                      aria-label={l.qty === 1 ? `Togli ${l.dish.name}` : `Uno in meno di ${l.dish.name}`}
-                      className={l.qty === 1
-                        ? 'inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]'
-                        : stepper}
-                    >
-                      {l.qty === 1 ? <Trash2 size={15} /> : <Minus size={15} />}
-                    </button>
-                    <span className="w-6 text-center text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
-                      {l.qty}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => onBump(l.key, +1)}
-                      aria-label={`Uno in più di ${l.dish.name}`}
-                      className={stepper}
-                    >
-                      <Plus size={15} />
-                    </button>
+                    {/* Solo matita e maniglia (chiesto da Marco): quantità,
+                        varianti ed elimina vivono nel foglio di riga che la
+                        matita (o il nome) apre — la riga resta al nome. */}
+                    {onEditLine && (
+                      <button
+                        type="button"
+                        onClick={() => onEditLine(l)}
+                        aria-label={`Modifica ${l.dish.name}: quantità, varianti, elimina`}
+                        title="Quantità, varianti, elimina"
+                        className={stepper}
+                      >
+                        <Pencil size={15} />
+                      </button>
+                    )}
                     {onMoveLine && (
                       <button
                         type="button"

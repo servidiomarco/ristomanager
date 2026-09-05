@@ -32,10 +32,17 @@ export const VariantSheet: React.FC<{
   /** Riapertura di una riga in bozza: il foglio parte dallo stato della
    *  riga — è anche il posto dove le varianti troncate si leggono intere. */
   initial?: { entries: { id: number; n: number }[]; removed?: number[]; note?: string; weight_grams?: number };
+  /** Quantità della riga, quando il foglio È il posto dove si cambia (riga
+   *  in bozza dell'orderpad: sulla riga restano solo matita e maniglia).
+   *  Assente = nessun blocco quantità, il foglio resta quello di sempre
+   *  (Cassa, battuta nuova). Minimo 1: l'eliminazione è un gesto a parte. */
+  initialQty?: number;
+  /** «Elimina riga» nel footer, quiet critica. Assente = non compare. */
+  onDelete?: () => void;
   confirmLabel?: string;
   onCancel: () => void;
-  onConfirm: (entries: { id: number; n: number }[], removedComponentIds: number[], note?: string, weightGrams?: number) => void;
-}> = ({ dish, groups, components = [], initial, confirmLabel, onCancel, onConfirm }) => {
+  onConfirm: (entries: { id: number; n: number }[], removedComponentIds: number[], note?: string, weightGrams?: number, qty?: number) => void;
+}> = ({ dish, groups, components = [], initial, initialQty, onDelete, confirmLabel, onCancel, onConfirm }) => {
   // Verso e ripetizioni per variante (battitura alla Passepartout): n>0
   // aggiunge n volte (addebito), n<0 toglie (sconto), 0 = non applicata.
   // Le scelte singole (cotture) restano chip a +1: un «-- media» non
@@ -72,6 +79,10 @@ export const VariantSheet: React.FC<{
   // Guida del gruppo (es. i gradi di cottura spiegati): chiusa di default,
   // il foglio serve a battere — la si apre quando serve ripassarla.
   const [openNotes, setOpenNotes] = useState<Set<number>>(new Set());
+  // Quantità della riga (solo in modifica dall'orderpad). Al peso resta 1:
+  // due pezzi sono due pesate, quindi due righe.
+  const [qty, setQty] = useState<number>(initialQty ?? 1);
+  const showQty = initialQty != null && !dish.sold_by_weight;
 
   const dishCents = Math.round(Number(dish.price) * 100);
   // Percentuale risolta in € sul prezzo di anagrafica: anteprima leggibile;
@@ -137,17 +148,56 @@ export const VariantSheet: React.FC<{
       ariaLabel={`Varianti per ${dish.name}`}
       bodyClassName="space-y-5 px-5 py-5 sm:px-6"
       footer={
-        <button
-          type="button"
-          onClick={() => onConfirm(entries, [...removed], custom.trim() || undefined,
-            dish.sold_by_weight ? grams : undefined)}
-          disabled={missing.length > 0}
-          className={`w-full ${dsButton.primary}`}
-        >
-          {missing.length > 0 ? `Scegli: ${missing.map(g => g.name).join(', ')}` : (confirmLabel ?? 'Aggiungi')}
-        </button>
+        <div className="flex flex-col gap-3">
+          {onDelete && (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="self-center text-[13px] font-medium text-[var(--ds-critical-text)] underline decoration-dotted transition-opacity hover:opacity-70"
+            >
+              elimina riga
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => onConfirm(entries, [...removed], custom.trim() || undefined,
+              dish.sold_by_weight ? grams : undefined,
+              initialQty != null ? qty : undefined)}
+            disabled={missing.length > 0}
+            className={`w-full ${dsButton.primary}`}
+          >
+            {missing.length > 0 ? `Scegli: ${missing.map(g => g.name).join(', ')}` : (confirmLabel ?? 'Aggiungi')}
+          </button>
+        </div>
       }
     >
+      {showQty && (
+        <div className="flex items-center gap-3">
+          <div className="text-[13px] font-semibold text-[var(--ds-text-muted)]">Quantità</div>
+          <div className="ml-auto flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setQty(v => Math.max(1, v - 1))}
+              disabled={qty <= 1}
+              aria-label="Uno in meno"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+            >
+              <Minus size={16} aria-hidden />
+            </button>
+            <span className="min-w-[32px] text-center text-[18px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+              {qty}
+            </span>
+            <button
+              type="button"
+              onClick={() => setQty(v => Math.min(99, v + 1))}
+              aria-label="Uno in più"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
+            >
+              <Plus size={16} aria-hidden />
+            </button>
+          </div>
+        </div>
+      )}
       {dish.sold_by_weight && (
         <div>
           <div className="mb-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">
