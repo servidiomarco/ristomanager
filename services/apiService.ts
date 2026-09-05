@@ -471,6 +471,9 @@ export interface MenuCategory {
   enabled: boolean;
   /** Menu della categoria (default per i piatti nuovi); null = mai impostato. */
   menu_ids?: number[] | null;
+  /** Gruppi varianti della categoria (default per i piatti nuovi);
+   *  null = nessuna spunta di categoria mai fatta. */
+  modifier_group_ids?: number[] | null;
 }
 
 export const getMenuCategories = async (): Promise<MenuCategory[]> => {
@@ -524,6 +527,17 @@ export const setCategoryMenu = async (category: string, menuId: number, member: 
     method: 'PUT',
     headers: getHeaders(),
     body: JSON.stringify({ category, menu_id: menuId, member }),
+  });
+};
+
+/** Spunta di un gruppo varianti su una categoria: aggancia (o sgancia) in
+ *  blocco tutti i suoi piatti e registra il default per i piatti nuovi.
+ *  Il server broadcasta 'dish:synced' e 'catalogue:updated'. */
+export const setCategoryModifierGroup = async (category: string, groupId: number, member: boolean): Promise<void> => {
+  await apiRequest<{ ok: true }>(`${API_URL}/menu/category-modifier-groups`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify({ category, group_id: groupId, member }),
   });
 };
 

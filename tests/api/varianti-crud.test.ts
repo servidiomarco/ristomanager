@@ -430,4 +430,53 @@ describe('varianti: crud, gruppi cassa, composti, percentuali', () => {
         const still = view.body.items.find((i: any) => i.dish_id === dish.id);
         expect(still.modifiers[0].price_delta_cents).toBe(200);
     });
+
+    it('la spunta di categoria aggancia in blocco e i piatti nuovi nascono col gruppo', async () => {
+        const g = await api().post('/menu/modifier-groups').set(bearer(token)).send({ name: 'Categoria Vrt' });
+        expect(g.status).toBe(201);
+        groupIds.push(g.body.id);
+
+        const catName = 'Categoria Blocco Vrt';
+        const dishA = await newDish('Blocco A Vrt', 10, { category: catName });
+        const dishB = await newDish('Blocco B Vrt', 11, { category: catName });
+
+        // member=true: tutti i piatti della categoria si agganciano.
+        const on = await api().put('/menu/category-modifier-groups').set(bearer(token)).send({
+            category: catName, group_id: g.body.id, member: true,
+        });
+        expect(on.status).toBe(200);
+        expect(on.body.piatti).toBe(2);
+        const admin = await api().get('/menu/modifier-groups').set(bearer(token));
+        const mine = admin.body.groups.find((x: any) => x.id === g.body.id);
+        expect(mine.dish_ids).toEqual(expect.arrayContaining([dishA.id, dishB.id]));
+
+        // Il default vive sulla categoria e la GET lo racconta.
+        const cats = await api().get('/menu/categories').set(bearer(token));
+        const cat = cats.body.categories.find((c: any) => c.name === catName);
+        expect(cat.modifier_group_ids).toEqual([g.body.id]);
+
+        // Piatto nuovo senza il campo: nasce coi gruppi della categoria.
+        const dishC = await newDish('Blocco C Vrt', 12, { category: catName });
+        expect(dishC.modifier_group_ids).toEqual([g.body.id]);
+        // Col campo esplicito (anche vuoto) comanda il client: il form
+        // precompila le spunte, quel che si vede è quel che si salva.
+        const dishD = await newDish('Blocco D Vrt', 13, { category: catName, modifier_group_ids: [] });
+        expect(dishD.modifier_group_ids ?? []).toEqual([]);
+
+        // member=false: si sgancia tutta la categoria e il default sparisce.
+        const off = await api().put('/menu/category-modifier-groups').set(bearer(token)).send({
+            category: catName, group_id: g.body.id, member: false,
+        });
+        expect(off.status).toBe(200);
+        expect(off.body.piatti).toBe(3);
+        const after = await api().get('/menu/modifier-groups').set(bearer(token));
+        expect(after.body.groups.find((x: any) => x.id === g.body.id).dish_ids).toEqual([]);
+        const cats2 = await api().get('/menu/categories').set(bearer(token));
+        expect(cats2.body.categories.find((c: any) => c.name === catName).modifier_group_ids).toEqual([]);
+
+        const ghost = await api().put('/menu/category-modifier-groups').set(bearer(token)).send({
+            category: catName, group_id: 999999, member: true,
+        });
+        expect(ghost.status).toBe(404);
+    });
 });

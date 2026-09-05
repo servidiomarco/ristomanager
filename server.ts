@@ -3821,7 +3821,7 @@ const MENU_CAT_PREFS_KEY = 'menu_category_prefs';
 // la spunta in modale applica in blocco e ogni piatto resta libero dopo.
 // manual: categoria creata a mano dalla modale — esiste anche senza piatti,
 // e la pulizia dei fantasmi nel PUT non deve toccarla.
-type MenuCategoryPref = { enabled: boolean; sort: number; menu_ids?: number[]; manual?: boolean };
+type MenuCategoryPref = { enabled: boolean; sort: number; menu_ids?: number[]; modifier_group_ids?: number[]; manual?: boolean };
 
 async function getMenuCategoryPrefs(tenantId: number): Promise<Record<string, MenuCategoryPref>> {
     const rs = await queryWithRetry(
@@ -3885,6 +3885,9 @@ app.get('/menu/categories', authenticate, async (req, res) => {
                 // Default dei piatti nuovi della categoria; null = mai
                 // impostato (il form ripiega sul menu che si sta guardando).
                 menu_ids: prefs[name]?.menu_ids ?? null,
+                // Gruppi varianti di categoria: i piatti nuovi nascono con
+                // questi; null = nessuna spunta di categoria mai fatta.
+                modifier_group_ids: prefs[name]?.modifier_group_ids ?? null,
             })),
         });
     } catch (err: any) {
@@ -3911,6 +3914,7 @@ app.put('/menu/categories', authenticate, requirePermission('menu:full'), async 
             const name = c.name.trim();
             prefs[name] = { enabled: c.enabled !== false, sort: i };
             if (Array.isArray(existing[name]?.menu_ids)) prefs[name].menu_ids = existing[name].menu_ids;
+            if (Array.isArray(existing[name]?.modifier_group_ids)) prefs[name].modifier_group_ids = existing[name].modifier_group_ids;
             if (existing[name]?.manual) prefs[name].manual = true;
         });
         // Le categorie manuali sopravvivono anche a un client che non le
@@ -4136,6 +4140,101 @@ app.put('/menu/category-menus', authenticate, requirePermission('menu:full'), as
         res.json({ ok: true, piatti: applied });
     } catch (err: any) {
         console.error('PUT /menu/category-menus error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// La spunta di un gruppo varianti su una categoria: come /menu/category-menus,
+// applica in blocco a tutti i piatti della categoria (aggiunge o toglie le
+// righe dish_modifier_groups) e registra il default nel blob prefs per i
+// piatti nuovi. I piatti restano liberi: dopo, ogni scheda si regola da sola —
+// la prossima spunta di categoria riapplica in blocco.
+app.put('/menu/category-modifier-groups', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const category = typeof req.body?.category === 'string' ? req.body.category : '';
+        const groupId = Number(req.body?.group_id);
+        const member = req.body?.member;
+        if (!category.trim() || !Number.isInteger(groupId) || typeof member !== 'boolean') {
+            return res.status(400).json({ error: 'servono category, group_id e member (true/false)' });
+        }
+        const groupRs = await queryWithRetry(
+            'SELECT id, name FROM modifier_groups WHERE id = $1 AND tenant_id = $2',
+            [groupId, req.tenantId!]
+        );
+        if (!groupRs.rows[0]) return res.status(404).json({ error: 'Gruppo non trovato' });
+
+        let applied: number;
+        if (member) {
+            // source 'manual': il legame è dell'operatore e sopravvive agli
+            // import cassa, anche quando il gruppo è un pp:varianti.
+            const ins = await queryWithRetry(
+                `INSERT INTO dish_modifier_groups (tenant_id, dish_id, group_id, source)
+                 SELECT $1, d.id, $2, 'manual' FROM dishes d
+                 WHERE d.tenant_id = $1 AND d.category = $3
+                 ON CONFLICT (dish_id, group_id) DO NOTHING`,
+                [req.tenantId!, groupId, category]
+            );
+            applied = ins.rowCount ?? 0;
+        } else {
+            // Senza filtro sul source, come lo sgancio dalla scheda piatto:
+            // un legame 'pp' tolto qui tornerà col prossimo import — è la
+            // cassa a possederlo.
+            const del = await queryWithRetry(
+                `DELETE FROM dish_modifier_groups dmg USING dishes d
+                 WHERE dmg.dish_id = d.id AND dmg.group_id = $2 AND dmg.tenant_id = $1
+                   AND d.tenant_id = $1 AND d.category = $3`,
+                [req.tenantId!, groupId, category]
+            );
+            applied = del.rowCount ?? 0;
+        }
+
+        const prefs = await getMenuCategoryPrefs(req.tenantId!);
+        const prev = prefs[category.trim()];
+        const next: MenuCategoryPref = prev ?? { enabled: true, sort: Number.MAX_SAFE_INTEGER };
+        // Come per i menu: il default per i piatti nuovi rispecchia i gruppi
+        // che DAVVERO coprono tutta la categoria dopo l'applicazione, non la
+        // sola spunta toccata.
+        const dishCount = await queryWithRetry(
+            'SELECT count(*)::int AS n FROM dishes WHERE tenant_id = $1 AND category = $2',
+            [req.tenantId!, category]
+        );
+        if ((dishCount.rows[0]?.n ?? 0) > 0) {
+            const full = await queryWithRetry(
+                `SELECT g.id FROM modifier_groups g
+                 WHERE g.tenant_id = $1
+                   AND NOT EXISTS (
+                     SELECT 1 FROM dishes d
+                     WHERE d.tenant_id = $1 AND d.category = $2
+                       AND NOT EXISTS (SELECT 1 FROM dish_modifier_groups dmg WHERE dmg.dish_id = d.id AND dmg.group_id = g.id)
+                   )
+                 ORDER BY g.id`,
+                [req.tenantId!, category]
+            );
+            next.modifier_group_ids = full.rows.map((r: any) => Number(r.id));
+        } else {
+            // Categoria ancora vuota: la spunta vale come default puro per i
+            // piatti che nasceranno.
+            const ids = new Set(next.modifier_group_ids ?? []);
+            if (member) ids.add(groupId); else ids.delete(groupId);
+            next.modifier_group_ids = [...ids].sort((a, b) => a - b);
+        }
+        prefs[category.trim()] = next;
+        await saveMenuCategoryPrefs(req.tenantId!, prefs);
+
+        // Due eventi, due pubblici: il CRM ricarica l'anagrafica, i palmari
+        // il catalogue (è lì che vivono i legami piatto↔gruppo).
+        try { socketService?.broadcastToAll(req.tenantId!, 'dish:synced', { categoria: category, group_id: groupId, member, piatti: applied }); } catch (_) {}
+        emitCatalogueUpdated(req.tenantId!, { categoria: category, gruppo_varianti: groupId, member });
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.DISH, groupId, `${groupRs.rows[0].name} × ${category.trim()}`,
+                { category_modifier_group: member ? 'added' : 'removed', piatti: applied }
+            ).catch(() => {});
+        }
+        res.json({ ok: true, piatti: applied });
+    } catch (err: any) {
+        console.error('PUT /menu/category-modifier-groups error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -11725,17 +11824,27 @@ app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, re
         );
         const newDish = result.rows[0];
 
-        // Varianti e ingredienti: semantica di menu_ids — campo assente, non
-        // si tocca; presente, sostituisce l'insieme.
-        if (Array.isArray(req.body?.modifier_group_ids)) {
-            newDish.modifier_group_ids = await replaceDishModifierGroups(req.tenantId!, newDish.id, req.body.modifier_group_ids);
+        // Varianti e ingredienti: presente = sostituisce l'insieme (anche
+        // vuoto: il form precompila i gruppi di categoria, quel che si vede
+        // è quel che si salva); ASSENTE = il piatto nasce coi gruppi della
+        // sua categoria (la spunta in modale Varianti), se ne ha.
+        let wantedGroups: number[] | null = Array.isArray(req.body?.modifier_group_ids)
+            ? req.body.modifier_group_ids.map(Number).filter(Number.isInteger)
+            : null;
+        if (wantedGroups == null) {
+            const catPrefs = await getMenuCategoryPrefs(req.tenantId!);
+            const catGroups = catPrefs[String(category ?? '').trim()]?.modifier_group_ids;
+            if (Array.isArray(catGroups) && catGroups.length > 0) wantedGroups = catGroups;
+        }
+        if (wantedGroups != null) {
+            newDish.modifier_group_ids = await replaceDishModifierGroups(req.tenantId!, newDish.id, wantedGroups);
         }
         if (Array.isArray(req.body?.components)) {
             const out = await replaceDishComponents(req.tenantId!, newDish.id, req.body.components);
             if ('error' in out) return res.status(400).json({ error: out.error });
             newDish.components = out.components;
         }
-        if (Array.isArray(req.body?.modifier_group_ids) || Array.isArray(req.body?.components)) {
+        if (wantedGroups != null || Array.isArray(req.body?.components)) {
             // dish:created non trasporta legami né ingredienti: vivono nel
             // catalogue, e i palmari lo ricaricano su questo evento.
             emitCatalogueUpdated(req.tenantId!, { piatto: newDish.id });

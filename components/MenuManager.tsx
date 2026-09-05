@@ -840,7 +840,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       ? catDefault
       : defaultMenuId != null ? [defaultMenuId] : [];
     setNewDish({ name: '', description: '', price: 0, category: firstCat, allergens: [], photo_url: '', vat_rate: defaultVatRate, menu_ids: defaultMenus, dish_type: 'SIMPLE', sold_by_weight: false, station_id: null });
-    setDishGroupIds([]);
+    // Come i menu: le spunte dei gruppi partono dal default della categoria
+    // (la spunta in modale Varianti), e restano libere.
+    setDishGroupIds(menuCats?.find(c => c.name === firstCat)?.modifier_group_ids ?? []);
     setDishComponents([]);
     setPhotoUploadError(null);
     setIsDishFormOpen(true);
@@ -2454,17 +2456,22 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       value={newDish.category}
                       onChange={e => {
                         const category = e.target.value;
-                        // In creazione la categoria porta i suoi menu di
-                        // default (quelli spuntati in modale Categorie); in
-                        // modifica le spunte del piatto non si toccano.
-                        const catDefault = !isEditingDish
-                          ? menuCats?.find(c => c.name === category)?.menu_ids
+                        // In creazione la categoria porta i suoi menu e i
+                        // suoi gruppi varianti di default (le spunte in
+                        // modale Categorie e Varianti); in modifica le
+                        // spunte del piatto non si toccano.
+                        const cat = !isEditingDish
+                          ? menuCats?.find(c => c.name === category)
                           : null;
+                        const catDefault = cat?.menu_ids;
                         setNewDish(prev => ({
                           ...prev,
                           category,
                           ...(Array.isArray(catDefault) && catDefault.length > 0 ? { menu_ids: catDefault } : {}),
                         }));
+                        if (cat && Array.isArray(cat.modifier_group_ids)) {
+                          setDishGroupIds(cat.modifier_group_ids);
+                        }
                       }}
                     >
                       {/* Le categorie vere del ristorante (incluse quelle
@@ -3996,7 +4003,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         open={variantsOpen}
         onClose={() => setVariantsOpen(false)}
         groups={modifierGroups}
-        onChanged={refreshModifierGroups}
+        dishes={dishes}
+        categories={menuCats ?? []}
+        onChanged={() => { refreshModifierGroups(); refreshMenuCats(); }}
       />
 
       {/* Nuova categoria / rinomina. La rinomina sposta tutti i piatti sul

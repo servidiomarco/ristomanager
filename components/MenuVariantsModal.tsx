@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Check, ChevronDown, ChevronLeft, ChevronUp, Edit2, Loader2, Plus, Trash2 } from 'lucide-react';
-import type { Modifier } from '../types';
+import type { Dish, Modifier } from '../types';
 import {
-  type AdminModifierGroup,
+  type AdminModifierGroup, type MenuCategory,
   createModifier, createModifierGroup, deleteModifier, deleteModifierGroup,
-  saveModifierGroupOrder, saveModifierOrder, updateModifier, updateModifierGroup,
+  saveModifierGroupOrder, saveModifierOrder, setCategoryModifierGroup,
+  updateModifier, updateModifierGroup,
 } from '../services/apiService';
 import { Callout, Field, ModalShell, dsButton, dsIconButton, dsInput, dsTextarea } from './ds';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
@@ -39,10 +40,14 @@ export const MenuVariantsModal: React.FC<{
   open: boolean;
   onClose: () => void;
   groups: AdminModifierGroup[];
+  /** Anagrafica piatti e categorie del padre: servono alla spunta di
+   *  categoria dell'editor gruppo (copertura «n di m»). */
+  dishes: Dish[];
+  categories: MenuCategory[];
   /** Rilettura nel padre dopo ogni scrittura: la lista è sua, la condivide
    *  con l'editor piatto. */
   onChanged: () => void;
-}> = ({ open, onClose, groups, onChanged }) => {
+}> = ({ open, onClose, groups, dishes, categories, onChanged }) => {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +72,8 @@ export const MenuVariantsModal: React.FC<{
     return (
       <GroupEditor
         group={editing}
+        dishes={dishes}
+        categories={categories}
         busy={busy}
         error={error}
         onBack={() => { setEditingId(null); setError(null); }}
@@ -82,7 +89,7 @@ export const MenuVariantsModal: React.FC<{
         open
         onClose={onClose}
         title="Varianti"
-        subtitle="I gruppi si agganciano ai piatti dalla loro scheda"
+        subtitle="Si agganciano dalla scheda del piatto, o qui a intere categorie"
         size="sm"
         bodyClassName="p-2"
       >
@@ -259,12 +266,14 @@ export const MenuVariantsModal: React.FC<{
    come le frecce della modale Categorie: qui non c'è un «Salva» finale. */
 const GroupEditor: React.FC<{
   group: AdminModifierGroup;
+  dishes: Dish[];
+  categories: MenuCategory[];
   busy: boolean;
   error: string | null;
   onBack: () => void;
   onClose: () => void;
   run: (fn: () => Promise<unknown>) => Promise<void>;
-}> = ({ group, busy, error, onBack, onClose, run }) => {
+}> = ({ group, dishes, categories, busy, error, onBack, onClose, run }) => {
   const pp = isPP(group);
   const [name, setName] = useState(group.name);
   const [note, setNote] = useState(group.note ?? '');
@@ -409,6 +418,50 @@ const GroupEditor: React.FC<{
             </button>
           </form>
         )}
+      </div>
+
+      {/* La spunta di categoria: come la spunta di menu in modale Categorie,
+          applica in blocco — aggancia tutti i piatti della categoria, e i
+          piatti nuovi nasceranno col gruppo. Ogni scheda resta libera di
+          sganciarsi dopo: la copertura parziale si legge nel conteggio. */}
+      <div>
+        <div className="mb-1 text-[13px] font-semibold text-[var(--ds-text-muted)]">Categorie</div>
+        {categories.length === 0 ? (
+          <p className="text-[13px] text-[var(--ds-text-muted)]">Nessuna categoria nel menu.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {categories.map(c => {
+              const inCat = dishes.filter(d => (d.category ?? '').trim() === c.name);
+              const covered = inCat.filter(d => group.dish_ids.includes(d.id)).length;
+              const full = inCat.length > 0
+                ? covered === inCat.length
+                : (c.modifier_group_ids ?? []).includes(group.id);
+              const partial = covered > 0 && covered < inCat.length;
+              return (
+                <button
+                  key={c.name}
+                  type="button"
+                  disabled={busy}
+                  aria-pressed={full}
+                  onClick={() => run(() => setCategoryModifierGroup(c.name, group.id, !full))}
+                  title={partial ? `La spunta completa la categoria` : undefined}
+                  className={`inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50 ${
+                    full
+                      ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                      : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
+                  }`}
+                >
+                  {full && <Check size={13} />}
+                  {c.name}
+                  {partial && <span className="text-[11px] tabular-nums opacity-70">{covered} di {inCat.length}</span>}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <p className="mt-1.5 text-[12px] text-[var(--ds-text-muted)]">
+          La spunta aggancia tutti i piatti della categoria, anche i futuri; toglierla li sgancia tutti.
+        </p>
       </div>
 
       {error && <p className="text-[13px] text-[var(--ds-critical-text)]">{error}</p>}
