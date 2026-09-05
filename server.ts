@@ -176,6 +176,7 @@ import {
     type BlacklistSource,
 } from './services/blacklistPolicy.js';
 import { toTitleCase } from './utils/text.js';
+import { clampModifierN, signedModifierLabel, signedModifierDelta } from './utils/modifierScale.js';
 import { getRomeDatePart, getRomeTimePart } from './utils/reservationTime.js';
 import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
 import {
@@ -26652,18 +26653,21 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
             // un client sbagliato potrebbe attaccare "al sangue" a un tiramisù.
             //
             // Due forme nel body. Storica: modifier_ids (ogni id vale +1).
-            // Firmata (battitura alla Passepartout, chiesta da Marco il 2/09):
-            // modifiers: [{id, n}] con n∈[-5..5]\{0} — «++ prosciutto» = due
-            // aggiunte, «-- prosciutto» = doppia rimozione. Il verso e le
-            // ripetizioni si CUOCIONO nello snapshot (nome col prefisso,
-            // delta già moltiplicato: n×prezzo, addebito col +, sconto col −)
+            // Firmata (battitura alla Passepartout, chiesta da Marco il 2/09;
+            // dal 5/09 scala di INTENSITÀ a 4 gradini, vedi
+            // utils/modifierScale.ts): modifiers: [{id, n}] — «+» aggiunta a
+            // pagamento, «Molta» stesso addebito del +, «Senza» in sconto,
+            // «Poca» gratis. Etichetta e delta si CUOCIONO nello snapshot
             // così comanda, monitor, preconto e scontrino leggono giusto
-            // senza sapere nulla della regola. n=1 resta il nome nudo: è la
-            // battitura storica (cotture e scelte), zero regressioni.
+            // senza sapere nulla della regola. Il filtro accetta ancora
+            // |n|≤5 (il dominio storico: un «ripeti giro» su una riga vecchia
+            // non deve perdere la variante) e il clamp a ±2 avviene subito,
+            // così snapshot, duplicati e conteggi lavorano sul valore vero.
             const signedEntries: { id: number; n: number }[] = Array.isArray(raw?.modifiers)
                 ? raw.modifiers
                     .map((e: any) => ({ id: Number(e?.id), n: Number(e?.n) }))
                     .filter((e: any) => Number.isFinite(e.id) && Number.isInteger(e.n) && e.n !== 0 && Math.abs(e.n) <= 5)
+                    .map((e: { id: number; n: number }) => ({ id: e.id, n: clampModifierN(e.n) }))
                 : (Array.isArray(raw?.modifier_ids)
                     ? raw.modifier_ids.map((n: any) => Number(n)).filter((n: number) => Number.isFinite(n)).map((id: number) => ({ id, n: 1 }))
                     : []);
@@ -26674,9 +26678,13 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
                     await client.query('ROLLBACK'); client.release();
                     return res.status(400).json({ error: `items[${i}]: variante ripetuta nel payload — le ripetizioni viaggiano su n` });
                 }
+                // max_select serve all'etichetta: nei gruppi a scelta
+                // singola (cotture) il nome resta nudo, «+ Media» non
+                // significa niente.
                 const mres = await client.query(
-                    `SELECT m.id, m.name, m.price_delta_cents, m.price_delta_pct
+                    `SELECT m.id, m.name, m.price_delta_cents, m.price_delta_pct, g.max_select
                      FROM modifiers m
+                     JOIN modifier_groups g ON g.id = m.group_id AND g.tenant_id = m.tenant_id
                      JOIN dish_modifier_groups dmg ON dmg.group_id = m.group_id AND dmg.tenant_id = m.tenant_id
                      WHERE m.id = ANY($1::int[]) AND dmg.dish_id = $2 AND m.tenant_id = $3 AND m.is_active`,
                     [uniqueIds, dishId, req.tenantId!]
@@ -26700,12 +26708,11 @@ app.post('/orders/:id/items', authenticate, requirePermission('orders:take'), as
                     const baseDelta = m.price_delta_pct != null
                         ? Math.round(unitPrice * Number(m.price_delta_pct) / 100)
                         : Number(m.price_delta_cents);
-                    const prefix = e.n === 1 ? '' : e.n > 0 ? `${'+'.repeat(e.n)} ` : `${'-'.repeat(-e.n)} `;
                     return {
                         id: m.id,
-                        name: `${prefix}${m.name}`,
-                        price_delta_cents: e.n * baseDelta,
-                        n: e.n,
+                        name: signedModifierLabel(m.name, e.n, Number(m.max_select) <= 1),
+                        price_delta_cents: signedModifierDelta(baseDelta, e.n),
+                        n: e.n, // già clampato dal parsing: serve al «ripeti giro»
                     };
                 });
             }

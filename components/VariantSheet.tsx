@@ -4,6 +4,7 @@ import type { Dish } from '../types';
 import type { MenuCatalogue } from '../services/ordersApiService';
 import { Sheet, dsButton, dsInput } from './ds';
 import { euro } from './comande/orderView';
+import { MODIFIER_N_MIN, MODIFIER_N_MAX, clampModifierN, signedModifierLabel, signedModifierDelta } from '../utils/modifierScale';
 
 // ---------------------------------------------------------------------------
 // Foglio varianti condiviso fra palmare (OrderPad) e Cassa — prima viveva
@@ -43,12 +44,13 @@ export const VariantSheet: React.FC<{
   onCancel: () => void;
   onConfirm: (entries: { id: number; n: number }[], removedComponentIds: number[], note?: string, weightGrams?: number, qty?: number) => void;
 }> = ({ dish, groups, components = [], initial, initialQty, onDelete, confirmLabel, onCancel, onConfirm }) => {
-  // Verso e ripetizioni per variante (battitura alla Passepartout): n>0
-  // aggiunge n volte (addebito), n<0 toglie (sconto), 0 = non applicata.
-  // Le scelte singole (cotture) restano chip a +1: un «-- media» non
-  // significa niente.
+  // Verso per variante, scala d'intensità a 4 gradini (utils/modifierScale):
+  // +1 aggiunge a pagamento, +2 «Molta» allo stesso addebito, −1 «Senza» in
+  // sconto, −2 «Poca» gratis, 0 = non applicata. Le scelte singole (cotture)
+  // restano chip a +1: un «Poca media» non significa niente. Il clamp
+  // all'init ripara le bozze localStorage di prima della scala (n fino a ±5).
   const [selected, setSelected] = useState<Map<number, number>>(
-    () => new Map((initial?.entries ?? []).map(e => [e.id, e.n])),
+    () => new Map((initial?.entries ?? []).map(e => [e.id, clampModifierN(e.n)])),
   );
   const [removed, setRemoved] = useState<Set<number>>(
     () => new Set(initial?.removed ?? []),
@@ -104,7 +106,7 @@ export const VariantSheet: React.FC<{
     setSelected(prev => {
       const next = new Map(prev);
       if (n === 0) next.delete(modId);
-      else next.set(modId, Math.max(-5, Math.min(5, n)));
+      else next.set(modId, clampModifierN(n));
       return next;
     });
   };
@@ -132,8 +134,6 @@ export const VariantSheet: React.FC<{
   const entries = [...selected.entries()].map(([id, n]) => ({ id, n }));
   const missing = groups.filter(g => g.min_select > 0
     && g.modifiers.filter(m => (selected.get(m.id) ?? 0) > 0).length < g.min_select);
-  const signedName = (name: string, n: number): string =>
-    n === 0 || n === 1 ? name : n > 0 ? `${'+'.repeat(n)} ${name}` : `${'-'.repeat(-n)} ${name}`;
 
   return (
     <Sheet
@@ -352,15 +352,16 @@ export const VariantSheet: React.FC<{
                 })}
               </div>
             ) : (
-              /* Le aggiunte alla Passepartout: − e + accumulano il verso —
-                 «+ prosciutto», «++ prosciutto», e sotto lo zero la
-                 rimozione «- prosciutto», «-- prosciutto». Il + addebita
-                 n×prezzo, il − sconta (regola concordata con Marco). */
+              /* Le aggiunte: − e + muovono la variante su quattro gradini —
+                 «+ Nduja» (addebito), «Molta Nduja» (stesso addebito),
+                 «Senza Nduja» (sconto), «Poca Nduja» (gratis). Scala ±2
+                 concordata con Marco il 5/09 al posto delle ripetizioni
+                 n×prezzo; la regola vive in utils/modifierScale. */
               <div className="space-y-1.5">
                 {g.modifiers.map(m => {
                   const n = selected.get(m.id) ?? 0;
                   const delta = deltaOf(m);
-                  const deltaTot = n * delta;
+                  const deltaTot = signedModifierDelta(delta, n);
                   const capped = n === 0 && chosen >= g.max_select;
                   return (
                     <div
@@ -370,7 +371,7 @@ export const VariantSheet: React.FC<{
                       }`}
                     >
                       <span className="min-w-0 flex-1 truncate text-[15px] font-medium">
-                        {signedName(m.name, n)}
+                        {signedModifierLabel(m.name, n)}
                         {n !== 0 && deltaTot !== 0 && (
                           <span className="ml-1.5 tabular-nums opacity-75">
                             {deltaTot > 0 ? '+' : '−'}{euro(Math.abs(deltaTot))}
@@ -391,7 +392,8 @@ export const VariantSheet: React.FC<{
                         type="button"
                         onClick={() => setN(g, m.id, n - 1)}
                         aria-label={`Togli ${m.name}`}
-                        className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full transition-colors ${
+                        disabled={n <= MODIFIER_N_MIN}
+                        className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-35 ${
                           n !== 0 ? 'bg-white/15 hover:bg-white/25' : 'bg-[var(--ds-surface)] hover:bg-[var(--ds-border)]'
                         }`}
                       >
@@ -401,7 +403,7 @@ export const VariantSheet: React.FC<{
                         type="button"
                         onClick={() => setN(g, m.id, n + 1)}
                         aria-label={`Aggiungi ${m.name}`}
-                        disabled={capped}
+                        disabled={capped || n >= MODIFIER_N_MAX}
                         className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-35 ${
                           n !== 0 ? 'bg-white/15 hover:bg-white/25' : 'bg-[var(--ds-surface)] hover:bg-[var(--ds-border)]'
                         }`}

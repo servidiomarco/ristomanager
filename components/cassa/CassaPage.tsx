@@ -4,6 +4,7 @@ import { ArrivalStatus, PaymentStatus, ReservationSource, ReservationStatus } fr
 import type { CashSessionView, CashTransactionsView } from '../../types';
 import { Shift } from '../../types';
 import { getRomeDatePart } from '../../utils/reservationTime';
+import { signedModifierLabel, signedModifierDelta } from '../../utils/modifierScale';
 import { getTableMerges } from '../../services/apiService';
 import {
   ordersApiService, getOpenOrderTables, getMenuCatalogue, newIdempotencyKey,
@@ -511,22 +512,23 @@ export const CassaPage: React.FC<CassaPageProps> = ({
   // le percentuali si mostrano risolte sul prezzo di anagrafica, il conto
   // vero lo rifà il server sul prezzo battuto.
   const addWithVariants = useCallback((dish: Dish, entries: { id: number; n: number }[], removedIds: number[], note?: string, weightGrams?: number) => {
-    const byId = new Map(groupsForDish(dish.id).flatMap(g => g.modifiers).map(m => [m.id, m]));
+    // `single` (gruppo a scelta singola) serve all'etichetta: le cotture
+    // restano nome nudo, «+ Media» non significa niente.
+    const byId = new Map(groupsForDish(dish.id).flatMap(g =>
+      g.modifiers.map(m => [m.id, { ...m, single: g.max_select <= 1 }] as const)));
     const chosen = entries.filter(e => byId.has(e.id));
     const deltaOf = (m: { price_delta_cents: number; price_delta_pct: string | null }) =>
       m.price_delta_pct != null
         ? Math.round(Math.round(Number(dish.price) * 100) * Number(m.price_delta_pct) / 100)
         : m.price_delta_cents;
-    const signedLabel = (name: string, n: number) =>
-      n === 1 ? name : n > 0 ? `${'+'.repeat(n)} ${name}` : `${'-'.repeat(-n)} ${name}`;
     const comps = componentsForDish(dish.id);
     const removed = removedIds
       .map(id => comps.find(c => c.id === id))
       .filter((c): c is NonNullable<typeof c> => c != null);
     pushLine(
       dish, chosen,
-      [...chosen.map(e => signedLabel(byId.get(e.id)!.name, e.n)), ...removed.map(c => `Senza ${c.name}`)],
-      chosen.reduce((s, e) => s + e.n * deltaOf(byId.get(e.id)!), 0)
+      [...chosen.map(e => signedModifierLabel(byId.get(e.id)!.name, e.n, byId.get(e.id)!.single)), ...removed.map(c => `Senza ${c.name}`)],
+      chosen.reduce((s, e) => s + signedModifierDelta(deltaOf(byId.get(e.id)!), e.n), 0)
         + removed.reduce((s, c) => s + c.removal_delta_cents, 0),
       note,
       removed.map(c => c.id),

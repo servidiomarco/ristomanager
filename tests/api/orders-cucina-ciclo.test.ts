@@ -557,9 +557,11 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         expect(still.status).toBe(200);
     });
 
-    it('varianti firmate: «++» addebita n volte, «-» sconta, snapshot col prefisso', async () => {
+    it('varianti firmate: scala d\'intensità a 4 gradini, parole nello snapshot', async () => {
         // Le varianti nascono solo dall'import Passepartout: per il test si
-        // seminano a DB, come farebbe l'import.
+        // seminano a DB, come farebbe l'import. «Nduja» senza suffisso: il
+        // genere di Molta/Poca segue l'ultima lettera del nome, e un «Nduja
+        // Ciclo» diventerebbe maschile.
         const db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
         await db.connect();
         const g = await db.query(
@@ -567,31 +569,81 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         const m = await db.query(
             `INSERT INTO modifiers (tenant_id, group_id, name, price_delta_cents) VALUES (1, $1, 'Prosciutto Ciclo', 200) RETURNING id`,
             [g.rows[0].id]);
+        const f = await db.query(
+            `INSERT INTO modifiers (tenant_id, group_id, name, price_delta_cents) VALUES (1, $1, 'Nduja', 150) RETURNING id`,
+            [g.rows[0].id]);
+        // Gruppo a scelta singola: il nome resta nudo («+ Media» non
+        // significa niente).
+        const sg = await db.query(
+            `INSERT INTO modifier_groups (tenant_id, name, min_select, max_select) VALUES (1, 'Cottura Ciclo', 0, 1) RETURNING id`);
+        const sm = await db.query(
+            `INSERT INTO modifiers (tenant_id, group_id, name, price_delta_cents) VALUES (1, $1, 'Media', 0) RETURNING id`,
+            [sg.rows[0].id]);
         await db.query(
-            `INSERT INTO dish_modifier_groups (tenant_id, dish_id, group_id) VALUES (1, $1, $2)`,
-            [piatto1, g.rows[0].id]);
+            `INSERT INTO dish_modifier_groups (tenant_id, dish_id, group_id) VALUES (1, $1, $2), (1, $1, $3)`,
+            [piatto1, g.rows[0].id, sg.rows[0].id]);
         await db.end();
         const modId = m.rows[0].id;
+        const ndujaId = f.rows[0].id;
+        const mediaId = sm.rows[0].id;
 
         const orderId = await nuovaComanda();
         const add = await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
             items: [
+                { dish_id: piatto1, qty: 1, course_no: 1, modifiers: [{ id: modId, n: 1 }] },
                 { dish_id: piatto1, qty: 1, course_no: 1, modifiers: [{ id: modId, n: 2 }] },
                 { dish_id: piatto1, qty: 1, course_no: 1, modifiers: [{ id: modId, n: -1 }] },
+                { dish_id: piatto1, qty: 1, course_no: 1, modifiers: [{ id: modId, n: -2 }] },
+                { dish_id: piatto1, qty: 1, course_no: 1, modifiers: [{ id: ndujaId, n: 2 }] },
+                { dish_id: piatto1, qty: 1, course_no: 1, modifiers: [{ id: mediaId, n: 1 }] },
             ],
         });
         expect(add.status).toBe(201);
         const rows = righe(add.body);
-        // «++»: nome col prefisso, delta 2× in ADDEBITO, totale riga coerente.
-        const plus = rows.find((r: any) => r.modifiers?.[0]?.n === 2);
-        expect(plus.modifiers[0].name).toBe('++ Prosciutto Ciclo');
-        expect(plus.modifiers[0].price_delta_cents).toBe(400);
-        expect(plus.line_total_cents).toBe(1800 + 400);
-        // «-»: rimozione in SCONTO (regola di Marco, come in Passepartout).
-        const minus = rows.find((r: any) => r.modifiers?.[0]?.n === -1);
-        expect(minus.modifiers[0].name).toBe('- Prosciutto Ciclo');
-        expect(minus.modifiers[0].price_delta_cents).toBe(-200);
-        expect(minus.line_total_cents).toBe(1800 - 200);
+        const byName = (name: string) => rows.find((r: any) => r.modifiers?.[0]?.name === name);
+        // «+»: aggiunta a pagamento.
+        const plus = byName('+ Prosciutto Ciclo');
+        expect(plus.modifiers[0].price_delta_cents).toBe(200);
+        expect(plus.line_total_cents).toBe(1800 + 200);
+        // «Molta»: stesso addebito del + (abbondanza, non doppia porzione) —
+        // e il genere segue il nome: Prosciutto → Molto.
+        const molto = byName('Molto Prosciutto Ciclo');
+        expect(molto.modifiers[0].n).toBe(2);
+        expect(molto.modifiers[0].price_delta_cents).toBe(200);
+        expect(molto.line_total_cents).toBe(1800 + 200);
+        // «Senza»: rimozione in SCONTO (regola di Marco).
+        const senza = byName('Senza Prosciutto Ciclo');
+        expect(senza.modifiers[0].price_delta_cents).toBe(-200);
+        expect(senza.line_total_cents).toBe(1800 - 200);
+        // «Poca/Poco»: gratis — il piatto è intero, solo con meno.
+        const poco = byName('Poco Prosciutto Ciclo');
+        expect(poco.modifiers[0].price_delta_cents).toBe(0);
+        expect(poco.line_total_cents).toBe(1800);
+        // Genere femminile dall'ultima lettera: Nduja → Molta.
+        const molta = byName('Molta Nduja');
+        expect(molta.modifiers[0].price_delta_cents).toBe(150);
+        expect(molta.line_total_cents).toBe(1800 + 150);
+        // Gruppo a scelta singola: nome nudo, come le cotture di sempre.
+        const media = byName('Media');
+        expect(media.modifiers[0].n).toBe(1);
+
+        // n fuori scala (bozze/snapshot di prima del cambio, «ripeti giro»):
+        // clamp al gradino, non scarto — la variante non sparisce.
+        const clampId = await nuovaComanda();
+        const clamped = await api().post(`/orders/${clampId}/items`).set(bearer(token)).send({
+            items: [
+                { dish_id: piatto1, qty: 1, course_no: 1, modifiers: [{ id: modId, n: 5 }] },
+                { dish_id: piatto1, qty: 1, course_no: 1, modifiers: [{ id: ndujaId, n: -5 }] },
+            ],
+        });
+        expect(clamped.status).toBe(201);
+        const crows = righe(clamped.body);
+        const cMolto = crows.find((r: any) => r.modifiers?.[0]?.name === 'Molto Prosciutto Ciclo');
+        expect(cMolto.modifiers[0].n).toBe(2);
+        expect(cMolto.modifiers[0].price_delta_cents).toBe(200);
+        const cPoca = crows.find((r: any) => r.modifiers?.[0]?.name === 'Poca Nduja');
+        expect(cPoca.modifiers[0].n).toBe(-2);
+        expect(cPoca.modifiers[0].price_delta_cents).toBe(0);
 
         // La variante resta legata al SUO piatto: su un altro → 400.
         const bad = await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({

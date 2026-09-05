@@ -1,4 +1,5 @@
 import type { CourseStatus, Dish, OrderItem, OrderWithItems } from '../../types';
+import { clampModifierN } from '../../utils/modifierScale';
 import type { PillTone } from '../ds';
 
 // ---------------------------------------------------------------------------
@@ -30,10 +31,11 @@ export interface CartLine {
   qty: number;
   course_no: number;
   modifier_ids: number[];
-  /** Varianti firmate alla Passepartout: n>0 aggiunge (n volte, addebito),
-   *  n<0 toglie (sconto). Assente = battitura storica (tutto a +1). Le
-   *  etichette e il delta qui sopra sono GIÀ cotti col verso e le
-   *  ripetizioni: chi mostra la riga non deve sapere la regola. */
+  /** Varianti firmate, scala d'intensità a 4 gradini (utils/modifierScale):
+   *  +1 aggiunge a pagamento, +2 «Molta» allo stesso addebito, −1 «Senza»
+   *  in sconto, −2 «Poca» gratis. Assente = battitura storica (tutto a +1).
+   *  Le etichette e il delta qui sopra sono GIÀ cotti col verso: chi mostra
+   *  la riga non deve sapere la regola. */
   modifiers?: { id: number; n: number }[];
   /** Ingredienti tolti da un piatto composto. Etichette («Senza X») e sconto
    *  sono GIÀ cotti in modifier_labels/delta come per le varianti: chi
@@ -182,7 +184,10 @@ export const repeatLines = (
       // Lo snapshot porta sempre l'id del modificatore (lo scrive il server
       // alla creazione della riga), quindi ripetere una variante la ripete
       // davvero invece di perderla per strada — verso e ripetizioni compresi.
-      mods.filter(m => m.id != null).map(m => ({ id: m.id as number, n: m.n ?? 1 })),
+      // Il clamp ripara gli snapshot di prima della scala a ±2 (n fino a
+      // ±5): un «ripeti giro» su una riga vecchia non deve né perdere la
+      // variante né rispedirla fuori scala.
+      mods.filter(m => m.id != null).map(m => ({ id: m.id as number, n: clampModifierN(m.n ?? 1) })),
       mods.map(m => m.name),
       mods.reduce((s, m) => s + m.price_delta_cents, 0),
       // I «Senza X» viaggiano nello snapshot con component_id: senza questo
@@ -193,7 +198,7 @@ export const repeatLines = (
   for (const l of cart) {
     push(
       l.dish.id, l.dish.name, Math.round(Number(l.dish.price) * 100), l.qty, l.course_no,
-      l.modifiers ?? l.modifier_ids.map(id => ({ id, n: 1 })),
+      (l.modifiers ?? l.modifier_ids.map(id => ({ id, n: 1 }))).map(e => ({ id: e.id, n: clampModifierN(e.n) })),
       l.modifier_labels, l.modifier_delta_cents,
       l.removed_component_ids ?? [],
     );

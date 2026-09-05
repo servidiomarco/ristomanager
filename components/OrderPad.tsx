@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { chime } from '../utils/chime';
+import { signedModifierLabel, signedModifierDelta } from '../utils/modifierScale';
 import {
   Check, Loader2, TriangleAlert, X,
 } from 'lucide-react';
@@ -424,13 +425,6 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     });
   }, []);
 
-  // Etichetta col verso e le ripetizioni cotti dentro, identica alla regola
-  // dello snapshot server: n=1 nome nudo (battitura storica), poi «++ …» /
-  // «-- …». Il delta è n×prezzo: addebito col +, sconto col − (regola di
-  // Marco, come in Passepartout).
-  const signedLabel = (name: string, n: number): string =>
-    n === 1 ? name : n > 0 ? `${'+'.repeat(n)} ${name}` : `${'-'.repeat(-n)} ${name}`;
-
   // Delta della variante in centesimi: le percentuali si risolvono sul
   // prezzo di anagrafica del piatto — anteprima locale, il conto vero lo
   // rifà il server sul prezzo del listino battuto.
@@ -440,8 +434,10 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       : m.price_delta_cents;
 
   const addToCart = (dish: Dish, entries: { id: number; n: number }[] = [], note?: string, removedIds: number[] = [], weightGrams?: number) => {
-    const all = groupsForDish(dish.id).flatMap(g => g.modifiers);
-    const byId = new Map(all.map(m => [m.id, m]));
+    // `single` (gruppo a scelta singola) serve all'etichetta: le cotture
+    // restano nome nudo, «+ Media» non significa niente.
+    const byId = new Map(groupsForDish(dish.id).flatMap(g =>
+      g.modifiers.map(m => [m.id, { ...m, single: g.max_select <= 1 }] as const)));
     const chosen = entries.filter(e => byId.has(e.id));
     // Gli ingredienti tolti si cuociono come le varianti: etichetta «Senza X»
     // e sconto dentro labels/delta, così ogni superficie li mostra senza
@@ -452,8 +448,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       .filter((c): c is NonNullable<typeof c> => c != null);
     pushLine(
       dish, course, 1, chosen,
-      [...chosen.map(e => signedLabel(byId.get(e.id)!.name, e.n)), ...removed.map(c => `Senza ${c.name}`)],
-      chosen.reduce((s, e) => s + e.n * modifierDeltaCents(dish, byId.get(e.id)!), 0)
+      [...chosen.map(e => signedModifierLabel(byId.get(e.id)!.name, e.n, byId.get(e.id)!.single)), ...removed.map(c => `Senza ${c.name}`)],
+      chosen.reduce((s, e) => s + signedModifierDelta(modifierDeltaCents(dish, byId.get(e.id)!), e.n), 0)
         + removed.reduce((s, c) => s + c.removal_delta_cents, 0),
       note,
       removed.map(c => c.id),
@@ -469,8 +465,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       const at = prev.findIndex(l => l.key === lineKey);
       if (at < 0) return prev;
       const line = prev[at];
-      const all = groupsForDish(line.dish.id).flatMap(g => g.modifiers);
-      const byId = new Map(all.map(m => [m.id, m]));
+      const byId = new Map(groupsForDish(line.dish.id).flatMap(g =>
+        g.modifiers.map(m => [m.id, { ...m, single: g.max_select <= 1 }] as const)));
       const chosen = entries.filter(e => byId.has(e.id));
       const comps = componentsForDish(line.dish.id);
       const removed = removedIds
@@ -496,8 +492,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         modifiers: chosen,
         removed_component_ids: removed.length > 0 ? removed.map(c => c.id) : undefined,
         weight_grams: newWeight,
-        modifier_labels: [...chosen.map(e => signedLabel(byId.get(e.id)!.name, e.n)), ...removed.map(c => `Senza ${c.name}`)],
-        modifier_delta_cents: chosen.reduce((s, e) => s + e.n * modifierDeltaCents(line.dish, byId.get(e.id)!), 0)
+        modifier_labels: [...chosen.map(e => signedModifierLabel(byId.get(e.id)!.name, e.n, byId.get(e.id)!.single)), ...removed.map(c => `Senza ${c.name}`)],
+        modifier_delta_cents: chosen.reduce((s, e) => s + signedModifierDelta(modifierDeltaCents(line.dish, byId.get(e.id)!), e.n), 0)
           + removed.reduce((s, c) => s + c.removal_delta_cents, 0),
         note: note || undefined,
       };
