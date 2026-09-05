@@ -30,7 +30,11 @@ export type PassepartoutOp =
     /** InviaProduzioneComanda (tutte le uscite) — per comande create via WS. */
     | 'invia'
     /** Sequenza di chiusura completa (chiudiComandaCompleta): azione FISCALE. */
-    | 'chiudi';
+    | 'chiudi'
+    /** Introspezione del contratto WCF (?wsdl): elenco operazioni, per
+     *  scoprire da remoto se esiste la scrittura comande (comanda specchio)
+     *  senza documentazione del concessionario. Sola lettura. */
+    | 'wsdl';
 
 export class PassepartoutBridgeError extends Error {
     constructor(

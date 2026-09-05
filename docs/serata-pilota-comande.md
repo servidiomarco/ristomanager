@@ -59,6 +59,13 @@ apre in produzione il binario e-receipts (a quel punto: vedi
 4. Fattura invece dello scontrino: chip "Fattura" — il conto si chiude e la
    fattura si emette dal conto coi dati del cliente (durante il ponte, se il
    provider è spento, la fattura si fa come oggi dal gestionale/commercialista).
+5. **Scontrino parlante** (col codice fiscale): il CF va inserito **sulla
+   cassa PRIMA di battere** — a scontrino emesso non si aggiunge. Il CF è
+   spesso già in anagrafica cliente nel CRM: leggilo da lì. In alternativa
+   proponi la fattura, che è il documento giusto per aziende e professionisti.
+6. **Lotteria degli scontrini**: durante il ponte il codice del cliente si
+   inserisce sull'RT (come oggi). Ricorda: lotteria e parlante si escludono
+   — o il codice lotteria o il codice fiscale, mai entrambi.
 
 **Per tutti — le due trappole**
 - ⚠️ **NON toccare "Importa dal gestionale"** nel dettaglio prenotazione:

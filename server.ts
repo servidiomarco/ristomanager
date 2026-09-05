@@ -3409,6 +3409,20 @@ app.get('/passepartout/status', authenticate, requirePermission('payments:full')
 // Anteprima della comanda attiva su un tavolo del gestionale, già mappata
 // nel formato items del conto CRM. Il nome tavolo è quello di Passepartout
 // (es. "40", "204.", "32bis"), non l'id del tavolo CRM.
+// Elenco operazioni dell'AdapterWS via agente (introspezione ?wsdl, sola
+// lettura): serve a scoprire da remoto se il gestionale espone la scrittura
+// comande — il prerequisito della "comanda specchio" che automatizzerebbe
+// lo scontrino dall'RT. settings:full: è diagnostica di piattaforma.
+app.get('/passepartout/ws-operations', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        const result = await callPassepartout('wsdl', {}, 30_000);
+        res.json(result);
+    } catch (err: any) {
+        if (sendPassepartoutError(res, err)) return;
+        res.status(502).json({ error: 'introspezione fallita', detail: err?.message });
+    }
+});
+
 app.get('/passepartout/tavolo/:nome', authenticate, requirePermission('payments:full'), async (req, res) => {
     try {
         const nome = String(req.params.nome || '').trim();
@@ -5268,6 +5282,16 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
         }
         const rtDocNumber = rtDocRaw || null;
 
+        // Codice lotteria degli scontrini (8 alfanumerici AdE), dettato dal
+        // cliente in cassa: viaggia col conto e finisce nel documento
+        // commerciale all'emissione cloud. Vuoto = niente lotteria. NB: il
+        // codice lotteria non si abbina allo scontrino parlante (col CF).
+        const lotteryRaw = typeof req.body?.lottery_code === 'string' ? req.body.lottery_code.trim().toUpperCase() : '';
+        if (lotteryRaw && !/^[A-Z0-9]{8}$/.test(lotteryRaw)) {
+            return res.status(400).json({ error: 'lottery_code_invalid', message: 'Il codice lotteria sono 8 lettere o cifre' });
+        }
+        const lotteryCode = lotteryRaw || null;
+
         // Need the current total + sums to decide between CLOSED and
         // SETTLED_PARTIAL and to sanity-check the caller's values. Fetch
         // under a lock so a webhook-triggered PAID→SETTLED promotion can't
@@ -5366,13 +5390,14 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
                      ),
                      tip_cents = $4,
                      notes = COALESCE($5, notes),
+                     lottery_code = COALESCE($7, lottery_code),
                      share_token = NULL
                  WHERE id = $1 AND tenant_id = $6
                  RETURNING id, reservation_id, table_id, total_cents, covers, currency,
                            items, status, share_token, opened_at, closed_at,
                            opened_by_user_id, closed_by_user_id, external_ref,
                            cash_settled_cents, tip_cents, notes`,
-                [id, finalStatus, req.user?.userId ?? null, Math.round(tipCents), notesForDb, req.tenantId!]
+                [id, finalStatus, req.user?.userId ?? null, Math.round(tipCents), notesForDb, req.tenantId!, lotteryCode]
             );
             updatedRow = upd.rows[0];
             await client.query('COMMIT');
@@ -6317,7 +6342,7 @@ async function emitFiscalDocForBill(tenantId: number, billId: number, userId: nu
     if (!fiscalId) return { skipped: 'missing_vat_number' };
 
     const billRs = await queryWithRetry(
-        `SELECT id, total_cents, items, status, external_ref FROM table_bills WHERE id = $1 AND tenant_id = $2`,
+        `SELECT id, total_cents, items, status, external_ref, lottery_code FROM table_bills WHERE id = $1 AND tenant_id = $2`,
         [billId, tenantId]
     );
     const bill = billRs.rows[0];
@@ -6387,6 +6412,7 @@ async function emitFiscalDocForBill(tenantId: number, billId: number, userId: nu
         payments: paymentsRs.rows,
         depositCreditCents: depositRs.rows[0].s,
         fallbackVatRate: (await getFiscalVatMap(tenantId)).fallback,
+        lotteryCode: bill.lottery_code ?? null,
     });
 
     // Claim atomico del tentativo: emissione automatica (post-chiusura) e
@@ -6559,6 +6585,20 @@ app.post('/bills/:id/fiscal-docs', authenticate, requirePermission('payments:ful
     try {
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid bill id' });
+
+        // Codice lotteria arrivato col retry manuale (conto chiuso senza, o
+        // cliente che lo porge dopo): si salva sul conto PRIMA di emettere,
+        // così emitFiscalDocForBill lo trova come in chiusura.
+        const lotteryRaw = typeof req.body?.lottery_code === 'string' ? req.body.lottery_code.trim().toUpperCase() : '';
+        if (lotteryRaw) {
+            if (!/^[A-Z0-9]{8}$/.test(lotteryRaw)) {
+                return res.status(400).json({ error: 'lottery_code_invalid', message: 'Il codice lotteria sono 8 lettere o cifre' });
+            }
+            await queryWithRetry(
+                `UPDATE table_bills SET lottery_code = $1 WHERE id = $2 AND tenant_id = $3`,
+                [lotteryRaw, id, req.tenantId!]
+            );
+        }
 
         // documento: 'Cassa' → scontrino battuto sull'RT esterno, anche a
         // posteriori (conto chiuso senza registrare, o numero riportato il
@@ -6824,6 +6864,76 @@ app.post('/bills/:id/fiscal-docs/:fid/credit-note', authenticate, requirePermiss
     }
 });
 
+
+// --- Lookup P.IVA (API Imprese di Openapi) -----------------------------------
+// Il cameriere digita la P.IVA nel dialog fattura e i campi si riempiono:
+// GET /base/{piva} porta denominazione, sede e codice destinatario SDI in una
+// chiamata sola; la PEC si chiede a parte solo se l'SDI manca (ogni chiamata
+// costa, in produzione). Token con scope imprese via OPENAPI_COMPANY_TOKEN
+// (fallback sul token invoice: se non ha lo scope l'errore lo dice chiaro).
+// Base sandbox di default: la produzione è una scelta esplicita, come per il
+// driver fiscale.
+const companyLookupCache = new Map<string, { data: any; refreshedAt: number }>();
+const COMPANY_LOOKUP_TTL_MS = 24 * 60 * 60 * 1000; // i dati camerali non cambiano in serata; il doppio tap non paga due volte
+
+app.get('/company-lookup/:piva', authenticate, requirePermission('payments:full'), async (req, res) => {
+    try {
+        const piva = String(req.params.piva || '').replace(/\s/g, '');
+        if (!/^\d{11}$/.test(piva)) return res.status(400).json({ error: 'piva_invalid', message: 'La P.IVA sono 11 cifre' });
+
+        const cached = companyLookupCache.get(piva);
+        if (cached && Date.now() - cached.refreshedAt <= COMPANY_LOOKUP_TTL_MS) return res.json(cached.data);
+
+        const token = process.env.OPENAPI_COMPANY_TOKEN || process.env.OPENAPI_INVOICE_TOKEN;
+        if (!token) return res.status(503).json({ error: 'not_configured', message: 'Lookup P.IVA non configurato (OPENAPI_COMPANY_TOKEN)' });
+        const base = (process.env.OPENAPI_COMPANY_BASE_URL || 'https://test.imprese.openapi.it').replace(/\/$/, '');
+        const get = async (path: string) => {
+            const r = await fetch(`${base}${path}`, { headers: { 'Authorization': `Bearer ${token}` } });
+            const j: any = await r.json().catch(() => null);
+            return { status: r.status, json: j };
+        };
+
+        const baseRes = await get(`/base/${piva}`);
+        if (baseRes.status === 401 || baseRes.status === 403) {
+            return res.status(503).json({ error: 'not_configured', message: 'Il token Openapi non ha lo scope Imprese: aggiungilo da console.openapi.com o imposta OPENAPI_COMPANY_TOKEN' });
+        }
+        if (baseRes.status === 404 || baseRes.json?.data == null) {
+            return res.status(404).json({ error: 'not_found', message: 'P.IVA non trovata' });
+        }
+        if (baseRes.status >= 400) {
+            return res.status(502).json({ error: 'lookup_failed', message: String(baseRes.json?.message ?? `HTTP ${baseRes.status}`).slice(0, 200) });
+        }
+        const d = baseRes.json.data;
+
+        let pec: string | null = null;
+        if (!d.codice_destinatario) {
+            const pecRes = await get(`/pec/${piva}`);
+            const p = pecRes.json?.data;
+            pec = typeof p?.pec === 'string' ? p.pec : (Array.isArray(p?.pec) ? p.pec[0] : null);
+        }
+
+        const street = [d.toponimo, d.via ?? d.indirizzo, d.civico].filter(Boolean).join(' ').trim();
+        const out = {
+            name: d.denominazione ?? '',
+            vat_number: d.piva ?? piva,
+            tax_code: d.cf ?? '',
+            sdi_code: d.codice_destinatario ?? '',
+            pec: pec ?? '',
+            address: {
+                street,
+                zip: d.cap ?? '',
+                city: d.comune ?? '',
+                province: d.provincia ?? '',
+            },
+        };
+        if (companyLookupCache.size > 500) companyLookupCache.clear();
+        companyLookupCache.set(piva, { data: out, refreshedAt: Date.now() });
+        res.json(out);
+    } catch (err: any) {
+        console.error('GET /company-lookup error:', err?.message);
+        res.status(502).json({ error: 'lookup_failed', message: 'Servizio non raggiungibile' });
+    }
+});
 
 // --- Webhook esiti Openapi ---------------------------------------------------
 // SDI può scartare una fattura GIORNI dopo l'invio, e sul binario classico

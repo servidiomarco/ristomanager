@@ -74,6 +74,27 @@ const handlers: Record<string, Handler> = {
     // Catalogo articoli per l'import menu del CRM (senza immagini: il payload
     // deve stare nel buffer del socket).
     articoli: (p) => getArticoliMenu(typeof p?.ultimaModifica === 'string' ? p.ultimaModifica : undefined),
+    // Introspezione del contratto WCF: scarica ?wsdl dall'AdapterWS e torna
+    // il SOLO elenco operazioni (il contratto intero può superare il buffer
+    // del socket — per quello c'è scripts/passepartout-scopri-ws.mjs in LAN).
+    wsdl: async () => {
+        const base = (process.env.PASSEPARTOUT_WS_URL || '').trim().replace(/\/$/, '');
+        if (!base) throw new Error('PASSEPARTOUT_WS_URL non configurato');
+        for (const suffix of ['?singleWsdl', '?wsdl']) {
+            try {
+                const res = await fetch(base + suffix, { signal: AbortSignal.timeout(15_000) });
+                if (!res.ok) continue;
+                const text = await res.text();
+                const operations = [...new Set([...text.matchAll(/<wsdl:operation name="([^"]+)"/g)].map(m => m[1]))].sort();
+                if (operations.length === 0) continue;
+                const writeCandidates = operations.filter(op =>
+                    /^(Write|Set|Insert|Inserisci|Crea|Nuova?|Apri|Add|Aggiungi|Salva|Registra|Update|Modifica)/i.test(op)
+                    && /Comand|Cont[oi]|Tavol|Rig[ah]/i.test(op));
+                return { source: suffix, size: text.length, operations, write_candidates: writeCandidates };
+            } catch { /* si prova il suffisso successivo */ }
+        }
+        throw new Error('Metadati WCF non esposti: usare scripts/passepartout-scopri-ws.mjs probe dalla LAN');
+    },
     // Chiusura del conto secondo la ricetta del supporto (25/08): invio
     // separato solo se servono righe mai inviate, ContoComanda sempre con
     // noInvio=true, verdetto finale da GetContiGiorno. Il vecchio blocco

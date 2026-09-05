@@ -462,3 +462,71 @@ describe('scontrino di cassa (RT esterno)', () => {
         await api().put('/settings/fiscal').set(bearer(token)).send({ provider: 'none' });
     });
 });
+
+// Lotteria degli scontrini: il codice dettato in cassa viaggia sul conto e
+// finisce nel payload trasmesso; arriva anche col retry manuale per il
+// cliente che lo porge dopo la chiusura.
+describe('lotteria degli scontrini', () => {
+    let token: string;
+
+    beforeAll(async () => {
+        token = await ownerToken();
+        const on = await api().put('/settings/fiscal').set(bearer(token)).send({ provider: 'mock', vat_number: '11122211133' });
+        expect(on.status).toBe(200);
+    });
+
+    afterAll(async () => {
+        await api().put('/settings/fiscal').set(bearer(token)).send({ provider: 'none' });
+    });
+
+    const openBill = async (tableName: string, totalCents: number): Promise<number> => {
+        const room = await api().post('/rooms').set(bearer(token)).send({ name: `Sala Lotto ${tableName}`, width: 800, height: 600 });
+        const table = await api().post('/tables').set(bearer(token)).send({
+            name: tableName, shape: 'SQUARE', seats: 4, x: 100, y: 700, room_id: room.body.id, status: 'FREE',
+        });
+        const bill = await api().post(`/tables/${table.body.id}/bill`).set(bearer(token)).send({ total_cents: totalCents, covers: 2 });
+        expect(bill.status, JSON.stringify(bill.body)).toBe(201);
+        return bill.body.bill.id as number;
+    };
+
+    it('il codice della chiusura finisce nel documento, normalizzato', async () => {
+        const billId = await openBill('LOTTO1', 2500);
+        const badCode = await api().post(`/bills/${billId}/close`).set(bearer(token)).send({
+            payments: [{ method: 'POS_FISICO', amount_cents: 2500 }], lottery_code: 'corto',
+        });
+        expect(badCode.status).toBe(400);
+        expect(badCode.body.error).toBe('lottery_code_invalid');
+
+        const close = await api().post(`/bills/${billId}/close`).set(bearer(token)).send({
+            payments: [{ method: 'POS_FISICO', amount_cents: 2500 }], lottery_code: 'abc123xy',
+        });
+        expect(close.status).toBe(200);
+        let res: any = null;
+        for (let i = 0; i < 20; i++) {
+            res = await api().post(`/bills/${billId}/fiscal-docs`).set(bearer(token)).send({});
+            if (res.status === 200 && res.body?.doc?.status === 'CONFIRMED') break;
+            await new Promise(r => setTimeout(r, 150));
+        }
+        expect(res.body.doc.status).toBe('CONFIRMED');
+        expect(res.body.request.lottery_code).toBe('ABC123XY'); // maiuscolo
+    });
+
+    it('il codice arriva anche col retry manuale, dopo annullo e riemissione', async () => {
+        const billId = await openBill('LOTTO2', 1500);
+        await api().post(`/bills/${billId}/close`).set(bearer(token)).send({
+            payments: [{ method: 'POS_FISICO', amount_cents: 1500 }],
+        });
+        let res: any = null;
+        for (let i = 0; i < 20; i++) {
+            res = await api().post(`/bills/${billId}/fiscal-docs`).set(bearer(token)).send({});
+            if (res.status === 200 && res.body?.doc?.status === 'CONFIRMED') break;
+            await new Promise(r => setTimeout(r, 150));
+        }
+        // "Scusi, avrei il codice lotteria": annullo e riemissione col codice.
+        const voided = await api().post(`/bills/${billId}/fiscal-docs/${res.body.doc.id}/void`).set(bearer(token)).send({});
+        expect(voided.status).toBe(200);
+        const emit = await api().post(`/bills/${billId}/fiscal-docs`).set(bearer(token)).send({ lottery_code: 'ZZ99AA11' });
+        expect(emit.status).toBe(200);
+        expect(emit.body.request.lottery_code).toBe('ZZ99AA11');
+    });
+});
