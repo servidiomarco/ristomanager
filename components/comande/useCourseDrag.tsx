@@ -134,6 +134,12 @@ export function useCourseDrag({ disabled, canDropOn, onDrop }: UseCourseDragOpti
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onCancel);
+      const bodyStyle = document.body.style as CSSStyleDeclaration & { webkitUserSelect?: string };
+      bodyStyle.userSelect = '';
+      bodyStyle.webkitUserSelect = '';
+      // Se la selezione era già partita prima dello spegnimento, la lente
+      // resta a schermo: si scarta anche quella.
+      try { window.getSelection()?.removeAllRanges(); } catch { /* niente */ }
       s = null;
       setDrag(null);
       setOverCourse(null);
@@ -172,6 +178,13 @@ export function useCourseDrag({ disabled, canDropOn, onDrop }: UseCourseDragOpti
     const start = (payload: DragPayload, e: React.PointerEvent<HTMLElement>) => {
       if (optsRef.current.disabled || s) return;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
+      // iOS: il tocco tenuto avvia la SELEZIONE TESTO (lente + Copy) e la
+      // estende ai testi vicini al bottone — contextmenu bloccato non basta.
+      // Si spegne la selezione sull'intera pagina per la durata del gesto e
+      // si ripristina al teardown.
+      const bodyStyle = document.body.style as CSSStyleDeclaration & { webkitUserSelect?: string };
+      bodyStyle.userSelect = 'none';
+      bodyStyle.webkitUserSelect = 'none';
       s = {
         payload,
         startX: e.clientX, startY: e.clientY,
@@ -208,8 +221,15 @@ export function useCourseDrag({ disabled, canDropOn, onDrop }: UseCourseDragOpti
     // Il tocco tenuto sul bottone evoca il menu contestuale del browser:
     // qui è una maniglia.
     onContextMenu: e => e.preventDefault(),
-    // Statico e solo sul bottone: il resto della riga continua a scorrere.
-    style: { touchAction: 'none' },
+    // touch-action statico e solo sul bottone (il resto della riga continua
+    // a scorrere); selezione e callout iOS spenti sulla maniglia stessa —
+    // per i testi VICINI ci pensa lo start, sul body.
+    style: {
+      touchAction: 'none',
+      userSelect: 'none',
+      WebkitUserSelect: 'none',
+      WebkitTouchCallout: 'none',
+    } as React.CSSProperties,
   });
 
   // Prima posizione del ghost appena montato: il primo pointermove dopo il
