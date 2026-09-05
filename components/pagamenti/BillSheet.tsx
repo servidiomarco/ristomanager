@@ -797,6 +797,9 @@ export const FiscalCard: React.FC<{
   // Scontrino battuto a mano sull'RT esterno (periodo ponte): documento
   // vero, ma la carta e l'annullo vivono sul registratore.
   const viaRT = bill.fiscal_provider === 'external_rt';
+  // Scontrino emesso DAL CRM attraverso il registratore in sala (driver
+  // rt-local): copia e QR sono nostri, l'annullo resta sull'RT.
+  const viaLocalRt = bill.fiscal_provider === 'rt-local';
   const proforma = bill.fiscal_doc_type === 'PROFORMA';
   const invoice = bill.fiscal_doc_type === 'INVOICE';
   const creditNote = bill.fiscal_doc_type === 'CREDIT_NOTE';
@@ -1000,7 +1003,7 @@ export const FiscalCard: React.FC<{
               </button>
             )
           )}
-          {st === 'CONFIRMED' && !viaPP && !viaRT && !invoice && !proforma && !creditNote && bill.fiscal_doc_id != null && (
+          {st === 'CONFIRMED' && !viaPP && !viaRT && !viaLocalRt && !invoice && !proforma && !creditNote && bill.fiscal_doc_id != null && (
             armed ? (
               <>
                 <button

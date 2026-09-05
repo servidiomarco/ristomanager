@@ -530,3 +530,116 @@ describe('lotteria degli scontrini', () => {
         expect(emit.body.request.lottery_code).toBe('ZZ99AA11');
     });
 });
+
+// Driver rt-local (Epson in sala): il backend non tocca il registratore —
+// accoda un job RT_FISCALE, l'agente in LAN parla col fiscale ePOS e l'ack
+// riporta il numero. Qui si esercita tutto il giro simulando l'agente.
+describe('scontrino via registratore locale (rt-local)', () => {
+    let token: string;
+
+    const closedBill = async (tableName: string, totalCents: number): Promise<number> => {
+        const room = await api().post('/rooms').set(bearer(token)).send({ name: `Sala Rt ${tableName}`, width: 800, height: 600 });
+        const table = await api().post('/tables').set(bearer(token)).send({
+            name: tableName, shape: 'SQUARE', seats: 4, x: 100, y: 700, room_id: room.body.id, status: 'FREE',
+        });
+        const bill = await api().post(`/tables/${table.body.id}/bill`).set(bearer(token)).send({ total_cents: totalCents, covers: 2 });
+        expect(bill.status, JSON.stringify(bill.body)).toBe(201);
+        const billId = bill.body.bill.id as number;
+        const close = await api().post(`/bills/${billId}/close`).set(bearer(token)).send({
+            payments: [{ method: 'POS_FISICO', amount_cents: totalCents }],
+        });
+        expect(close.status).toBe(200);
+        return billId;
+    };
+
+    const fiscalRow = async (billId: number): Promise<any> => {
+        const bills = await api().get('/bills/open?status=closed').set(bearer(token));
+        return bills.body.bills.find((b: any) => b.id === billId);
+    };
+
+    const waitStatus = async (billId: number, wanted: string): Promise<any> => {
+        let row: any = null;
+        for (let i = 0; i < 20; i++) {
+            row = await fiscalRow(billId);
+            if (row?.fiscal_status === wanted) break;
+            await new Promise(r => setTimeout(r, 150));
+        }
+        return row;
+    };
+
+    const pullRtJob = async (docId: number): Promise<any> => {
+        for (let i = 0; i < 20; i++) {
+            const queue = await api().get('/print-agent/jobs').set('x-print-agent-token', 'test-print-agent-token');
+            const job = queue.body.jobs.find((j: any) => j.kind === 'RT_FISCALE' && j.payload?.fiscal_doc_id === docId);
+            if (job) return job;
+            await new Promise(r => setTimeout(r, 150));
+        }
+        return null;
+    };
+
+    beforeAll(async () => {
+        token = await ownerToken();
+        const on = await api().put('/settings/fiscal').set(bearer(token)).send({ provider: 'rt-local', vat_number: '11122211133' });
+        expect(on.status, JSON.stringify(on.body)).toBe(200);
+    });
+
+    afterAll(async () => {
+        await api().put('/settings/fiscal').set(bearer(token)).send({ provider: 'none' });
+    });
+
+    it('l\'emissione resta PENDING finché l\'ack dell\'agente porta il numero', async () => {
+        const billId = await closedBill('EPSON1', 4400);
+        const row = await waitStatus(billId, 'PENDING');
+        expect(row.fiscal_status).toBe('PENDING');
+        expect(row.fiscal_provider).toBe('rt-local');
+
+        const job = await pullRtJob(row.fiscal_doc_id);
+        expect(job, 'job RT_FISCALE in coda').toBeTruthy();
+        expect(job.printer).toBe('rt');
+        expect(job.payload.bill_id).toBe(billId);
+        expect(Array.isArray(job.payload.payload.items)).toBe(true);
+
+        const ack = await api().post(`/print-agent/jobs/${job.id}/ack`)
+            .set('x-print-agent-token', 'test-print-agent-token')
+            .send({ ok: true, result: { doc_number: '0123-0045', zrep_number: '0123', receipt_number: '45' } });
+        expect(ack.status).toBe(200);
+
+        const done = await waitStatus(billId, 'CONFIRMED');
+        expect(done.fiscal_status).toBe('CONFIRMED');
+        expect(done.fiscal_doc_number).toBe('0123-0045');
+
+        // L'annullo non passa dal CRM; la fattura nemmeno, col registratore.
+        const voided = await api().post(`/bills/${billId}/fiscal-docs/${done.fiscal_doc_id}/void`).set(bearer(token)).send({});
+        expect(voided.status).toBe(409);
+        expect(voided.body.error).toContain('registratore');
+        const inv = await api().post(`/bills/${billId}/invoices`).set(bearer(token)).send({ buyer: { name: 'X' } });
+        expect(inv.status).toBe(409);
+        expect(inv.body.reason).toBe('rt_local_no_invoice');
+    });
+
+    it('l\'errore del registratore porta a FAILED e il retry accoda un job nuovo', async () => {
+        const billId = await closedBill('EPSON2', 1800);
+        const row = await waitStatus(billId, 'PENDING');
+        const job = await pullRtJob(row.fiscal_doc_id);
+        const nack = await api().post(`/print-agent/jobs/${job.id}/ack`)
+            .set('x-print-agent-token', 'test-print-agent-token')
+            .send({ ok: false, error: 'RT: EPTR_REC_EMPTY carta esaurita' });
+        expect(nack.status).toBe(200);
+
+        const failed = await waitStatus(billId, 'FAILED');
+        expect(failed.fiscal_status).toBe('FAILED');
+        expect(failed.fiscal_error).toContain('carta esaurita');
+
+        // "Riprova" dal conto: documento nuovo PENDING e job nuovo in coda.
+        const retry = await api().post(`/bills/${billId}/fiscal-docs`).set(bearer(token)).send({});
+        expect(retry.status).toBe(200);
+        expect(retry.body.doc.status).toBe('PENDING');
+        const job2 = await pullRtJob(retry.body.doc.id);
+        expect(job2, 'secondo job RT_FISCALE').toBeTruthy();
+        await api().post(`/print-agent/jobs/${job2.id}/ack`)
+            .set('x-print-agent-token', 'test-print-agent-token')
+            .send({ ok: true, result: { doc_number: '0123-0046' } });
+        const done = await waitStatus(billId, 'CONFIRMED');
+        expect(done.fiscal_doc_number).toBe('0123-0046');
+    });
+});

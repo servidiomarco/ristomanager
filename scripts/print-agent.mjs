@@ -372,6 +372,113 @@ async function drainPrinter(name, dest, jobs) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Registratore telematico Epson (FP-81II) — Fiscal ePOS-Print, XML su HTTP
+// ---------------------------------------------------------------------------
+// Il job RT_FISCALE non è ESC/POS: si POSTa un documento fiscale XML a
+// fpmate.cgi sull'IP del registratore e si riporta al backend il numero che
+// l'RT assegna (zRep-progressivo). Env:
+//   RT_FISCAL_HOST      IP del registratore (obbligatoria per abilitare)
+//   RT_FISCAL_DEVID     device id ePOS (default local_printer)
+//   RT_FISCAL_REPARTI   mappa aliquota→reparto, es. "10=1,22=2,4=3":
+//                       i reparti dell'RT portano l'IVA configurata dal
+//                       tecnico — la mappa DEVE rispecchiarla, o l'aliquota
+//                       stampata sarà sbagliata. Nessun default: senza
+//                       mappa il job fallisce con errore chiaro.
+const RT_HOST = (process.env.RT_FISCAL_HOST || '').trim();
+const RT_DEVID = process.env.RT_FISCAL_DEVID || 'local_printer';
+const RT_REPARTI = new Map((process.env.RT_FISCAL_REPARTI || '').split(',').map(s => s.trim()).filter(Boolean).map(kv => {
+  const [vat, rep] = kv.split('=');
+  return [String(parseFloat(vat)), String(parseInt(rep, 10))];
+}));
+
+const xmlAttr = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// Dal payload del documento (lo stesso trasmesso al provider cloud) all'XML
+// fiscale Epson. Importi con punto decimale, quantità a 2 decimali.
+function buildRtXml(p) {
+  const lines = [];
+  for (const i of p.items ?? []) {
+    const code = String(i.vat_rate_code ?? '');
+    if (!/^\d/.test(code)) throw new Error(`aliquota '${code}': le nature IVA non sono mappabili sui reparti RT`);
+    const rep = RT_REPARTI.get(String(parseFloat(code)));
+    if (!rep) throw new Error(`aliquota ${code} senza reparto in RT_FISCAL_REPARTI`);
+    lines.push(`<printRecItem description="${xmlAttr(String(i.description).slice(0, 38))}" quantity="${xmlAttr(Number(i.quantity).toFixed(2))}" unitPrice="${xmlAttr(Number(i.unit_price).toFixed(2))}" department="${rep}" justification="1" />`);
+  }
+  const discount = parseFloat(p.discount || '0');
+  if (discount > 0) {
+    lines.push('<printRecSubtotal option="0" />');
+    lines.push(`<printRecSubtotalAdjustment adjustmentType="1" description="Sconto" amount="${discount.toFixed(2)}" justification="2" />`);
+  }
+  const uncollected = parseFloat(p.services_uncollected_amount || '0');
+  if (uncollected > 0) throw new Error('sospeso/non riscosso non supportato sul binario RT (v1): incassare o fatturare');
+  const pay = (amount, type, desc) => {
+    const a = parseFloat(amount || '0');
+    if (a > 0) lines.push(`<printRecTotal payment="${a.toFixed(2)}" paymentType="${type}" index="1" description="${desc}" justification="1" />`);
+  };
+  pay(p.cash_payment_amount, 0, 'Contanti');
+  pay(p.electronic_payment_amount, 2, 'Elettronico');
+  pay(p.ticket_restaurant_payment_amount, 3, 'Buoni pasto');
+  if (p.lottery_code) {
+    // Codice lotteria: va dichiarato PRIMA delle righe secondo le specifiche
+    // ePOS più recenti — il collaudo sul firmware reale dirà se questo tag
+    // è supportato; in caso contrario l'RT risponde errore e il documento
+    // si riemette senza codice.
+    lines.unshift(`<printRecLotteryID code="${xmlAttr(p.lottery_code)}" />`);
+  }
+  return `<printerFiscalReceipt><beginFiscalReceipt />${lines.join('')}<endFiscalReceipt /></printerFiscalReceipt>`;
+}
+
+async function handleRtFiscale(job) {
+  if (!RT_HOST) {
+    // Senza registratore configurato il job resta in coda (niente ack):
+    // uscirà appena l'operatore imposta RT_FISCAL_HOST. Avvisa una volta.
+    if (!warnedUnknown.has('rt')) { warnedUnknown.add('rt'); log('RT_FISCAL_HOST non configurato: job RT in attesa'); }
+    return;
+  }
+  let xml;
+  try {
+    xml = buildRtXml(job.payload?.payload ?? {});
+  } catch (err) {
+    log(`job ${job.id} [rt]: documento non componibile (${err.message})`);
+    await api(`/print-agent/jobs/${job.id}/ack`, { method: 'POST', body: JSON.stringify({ ok: false, error: err.message }) }).catch(() => {});
+    return;
+  }
+  try {
+    const res = await fetch(`http://${RT_HOST}/cgi-bin/fpmate.cgi?devid=${encodeURIComponent(RT_DEVID)}&timeout=10000`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/xml; charset=utf-8' },
+      body: `<?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>${xml}</s:Body></s:Envelope>`,
+      signal: AbortSignal.timeout(15_000),
+    });
+    const text = await res.text();
+    const success = /success\s*=\s*"(?:true|1)"/i.test(text);
+    if (!success) {
+      const code = text.match(/code\s*=\s*"([^"]*)"/i)?.[1] ?? `HTTP ${res.status}`;
+      const status = text.match(/status\s*=\s*"([^"]*)"/i)?.[1] ?? '';
+      log(`job ${job.id} [rt]: il registratore ha rifiutato (${code} ${status})`);
+      await api(`/print-agent/jobs/${job.id}/ack`, { method: 'POST', body: JSON.stringify({ ok: false, error: `RT: ${code} ${status}`.trim() }) });
+      return;
+    }
+    // addInfo: zRepNumber + fiscalReceiptNumber compongono il numero del
+    // documento commerciale come lo stampa l'RT (es. 0123-0045).
+    const info = {};
+    for (const m of text.matchAll(/<info>\s*<name>([^<]+)<\/name>\s*<value>([^<]*)<\/value>/g)) info[m[1]] = m[2];
+    const zrep = info.zRepNumber ?? info.zRep ?? '';
+    const num = info.fiscalReceiptNumber ?? '';
+    const docNumber = zrep && num ? `${String(zrep).padStart(4, '0')}-${String(num).padStart(4, '0')}` : (num || null);
+    log(`job ${job.id} [rt]: documento ${docNumber ?? '(numero non letto)'} emesso`);
+    await api(`/print-agent/jobs/${job.id}/ack`, {
+      method: 'POST',
+      body: JSON.stringify({ ok: true, result: { doc_number: docNumber, zrep_number: zrep || null, receipt_number: num || null, receipt_date: info.fiscalReceiptDate ?? null, receipt_time: info.fiscalReceiptTime ?? null, receipt_amount: info.fiscalReceiptAmount ?? null } }),
+    });
+  } catch (err) {
+    // Registratore spento o irraggiungibile: NIENTE ack — il job resta in
+    // coda e il documento PENDING, si ritenta al giro dopo.
+    log(`job ${job.id} [rt]: registratore non raggiungibile (${err.message}), ritento`);
+  }
+}
+
 async function tick() {
   let jobs;
   try {
@@ -382,6 +489,13 @@ async function tick() {
     if (!apiDown) { apiDown = true; log('backend non raggiungibile:', err.message); }
     return;
   }
+
+  // I documenti fiscali del registratore viaggiano su un canale proprio,
+  // in serie (l'RT è transazionale: un documento alla volta).
+  for (const job of jobs.filter(j => j.kind === 'RT_FISCALE')) {
+    await handleRtFiscale(job);
+  }
+  jobs = jobs.filter(j => j.kind !== 'RT_FISCALE');
 
   // Raggruppa per stampante: ogni destinazione ha la sua coda indipendente,
   // una termica spenta in cucina non blocca i preconti al banco.

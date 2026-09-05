@@ -17,6 +17,7 @@ const PROVIDER_LABELS: Record<FiscalProviderSetting, string> = {
     none: 'Disattivato',
     openapi: 'Openapi (cloud)',
     mock: 'Demo (senza trasmissione)',
+    'rt-local': 'Registratore in sala (Epson RT)',
 };
 
 const inputCls = 'h-10 w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)] disabled:opacity-50';

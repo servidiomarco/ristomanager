@@ -35,6 +35,28 @@ downstream (numero/data, copia, registro, webhook):
    configurazione e rimuovere la variabile — si torna al binario nuovo
    (più economico) senza toccare il codice.
 
+## 1c. Scontrini SUBITO, senza credenziali AdE: registratore in sala (rt-local)
+
+Terza via, per chi ha già un RT (il Frantoio: Epson FP-81II). Il CRM emette
+ATTRAVERSO il registratore: provider `rt-local` nelle impostazioni fiscali →
+il documento resta "in emissione" e viaggia come job verso l'agente di
+stampa in sala, che parla col fiscale Epson (ePOS-Print XML su
+`fpmate.cgi`) e riporta il numero (zRep-progressivo). Copia digitale via QR
+e registro Fiscalità funzionano come col cloud; l'annullo si fa dall'RT.
+
+Configurazione dell'AGENTE in sala (env, accanto a PRINTERS):
+- `RT_FISCAL_HOST` — IP del registratore;
+- `RT_FISCAL_REPARTI` — mappa aliquota→reparto dell'RT, es. `10=1,22=2,4=3`:
+  DEVE rispecchiare i reparti configurati dal tecnico (l'IVA stampata è
+  quella del reparto). Senza mappa il job fallisce con errore chiaro;
+- `RT_FISCAL_DEVID` — device id ePOS (default `local_printer`).
+
+Collaudo di prima accensione (ATTENZIONE: ogni emissione è un documento
+fiscale VERO): un conto piccolo, verifica numero sul tagliando = numero nel
+CRM, poi annullo dall'RT. Il tag lotteria (`printRecLotteryID`) va provato
+sul firmware reale: se rifiutato, si riemette senza codice. Il "sospeso/non
+riscosso" non è supportato su questo binario (v1): incassare o fatturare.
+
 ## 1. Console Openapi (account awmrac@gmail.com) — solo umano
 
 1. Attivare il servizio **Invoice** in produzione: contratto/credito
