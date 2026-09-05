@@ -30487,6 +30487,29 @@ app.get('/print-agent/jobs', printAgentAuth, async (req: any, res) => {
     }
 });
 
+// Claim atomico di un job prima di lavorarlo: obbligatorio per i documenti
+// fiscali (RT_FISCALE), che non si emettono due volte. Vince un solo
+// chiamante — PENDING → PRINTING — e il poll vede solo i PENDING, quindi un
+// secondo poll (o un secondo agente) trova il job già preso. Un job PRINTING
+// che non riceve mai l'ack resta bloccato di proposito: un documento fiscale
+// mezzo-emesso non si ritenta alla cieca (il retry è il bottone sul conto,
+// che accoda un job NUOVO).
+app.post('/print-agent/jobs/:id/claim', printAgentAuth, async (req: any, res) => {
+    try {
+        const id = Number(req.params.id);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+        const upd = await queryWithRetry(
+            `UPDATE print_jobs SET status = 'PRINTING'
+             WHERE id = $1 AND tenant_id = $2 AND status = 'PENDING' RETURNING id`,
+            [id, req.printAgentTenantId]
+        );
+        res.json({ claimed: (upd.rowCount ?? 0) > 0 });
+    } catch (err: any) {
+        console.error('POST /print-agent/jobs/:id/claim error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.post('/print-agent/jobs/:id/ack', printAgentAuth, async (req: any, res) => {
     try {
         const id = Number(req.params.id);
