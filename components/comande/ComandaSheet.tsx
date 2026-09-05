@@ -39,6 +39,9 @@ interface ComandaSheetProps {
   onFire?: (courseNo: number) => void;
   onEditLine?: (line: CartLine) => void;
   onUnfire?: (courseNo: number) => void;
+  onMoveLine?: (line: CartLine) => void;
+  onMoveItem?: (item: OrderItem) => void;
+  onMoveCourse?: (courseNo: number) => void;
   /** «di Luca» / «dalla cassa» quando la comanda l'ha aperta qualcun altro. */
   openedBy?: string | null;
   onSend: () => void;
@@ -49,7 +52,8 @@ interface ComandaSheetProps {
 
 export const ComandaSheet: React.FC<ComandaSheetProps> = ({
   open, onClose, order, cart, dishes, categories, course, onCourse, busy,
-  onBump, onDrop, onVoid, onRecall, onFire, onEditLine, onUnfire, openedBy, onSend, onSendAll, onRepeat, onRepeatAll,
+  onBump, onDrop, onVoid, onRecall, onFire, onEditLine, onUnfire, onMoveLine, onMoveItem, onMoveCourse,
+  openedBy, onSend, onSendAll, onRepeat, onRepeatAll,
 }) => {
   const [tab, setTab] = useState<SheetTab>('course');
 
@@ -137,6 +141,9 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
           onFire={onFire}
           onEditLine={onEditLine}
           onUnfire={onUnfire}
+          onMoveLine={onMoveLine}
+          onMoveItem={onMoveItem}
+          onMoveCourse={onMoveCourse}
         />
       ) : lines.length === 0 ? (
         <EmptyState icon={UtensilsCrossed}>Il tavolo non ha ancora ordinato niente.</EmptyState>
