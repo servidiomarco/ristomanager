@@ -245,6 +245,26 @@ export const CassaPage: React.FC<CassaPageProps> = ({
     return () => { events.forEach(e => socket?.off(e, onChange)); };
   }, [reloadSession]);
 
+  // Conto aperto in pagamento: se il cliente paga la sua quota col QR/link,
+  // il residuo qui era fermo (payingBill è uno snapshot). Ora si riallinea in
+  // tempo reale e si fa avanzare il pulse per il feedback in Pagamento.
+  const [paymentPulse, setPaymentPulse] = useState(0);
+  useEffect(() => {
+    const id = payingBill?.id;
+    if (id == null) return;
+    const socket = socketClient.getSocket();
+    const onPaid = (payload: any) => {
+      if (payload?.bill_id !== id) return;
+      getOpenBills(serviceFilter, { status: 'open' })
+        .then(r => { const row = r.bills.find(b => b.id === id); if (row) setPayingBill(row); })
+        .catch(() => {});
+      setPaymentPulse(p => p + 1);
+    };
+    socket?.on('bill:split-paid', onPaid);
+    socket?.on('bill:settled', onPaid);
+    return () => { socket?.off('bill:split-paid', onPaid); socket?.off('bill:settled', onPaid); };
+  }, [payingBill?.id, serviceFilter]);
+
   /* ── Stato dei tavoli ────────────────────────────────────────────────── */
 
   useEffect(() => {
@@ -743,6 +763,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
           quotaCents={quotaCents}
           onSplit={() => setScreen('split')}
           onShowQr={() => setOpenBill(payingBill)}
+          paymentPulse={paymentPulse}
         />
       ) : screen === 'table' && order ? (
         <TavoloAttivo

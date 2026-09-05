@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Loader2, QrCode } from 'lucide-react';
+import { chime } from '../../utils/chime';
 import type { BillPaymentInput, OpenBillRow } from '../../services/billsApiService';
 import { Callout, SegmentedControl, StatusPill } from '../ds';
 import { METHODS, methodLabel, nextAmountText, settleMath, settlePayments } from '../pagamenti/settleView';
@@ -43,12 +44,30 @@ interface PagamentoProps {
    *  incasso sta in vista senza scroll. Default false: in CassaPage la resa
    *  resta identica byte per byte (regola additiva del piano). */
   embedded?: boolean;
+  /** Contatore che avanza a ogni pagamento online/POS incassato mentre la
+   *  schermata è aperta (dal socket bill:split-paid nel container). Il cambio
+   *  fa lampeggiare il residuo, suona e vibra: l'operatore vede il pagamento
+   *  arrivare senza fissare il numero. */
+  paymentPulse?: number;
 }
 
 export const Pagamento: React.FC<PagamentoProps> = ({
-  bill, busy, error, fiscalReady, quotaCents, onBack, onSettle, onSplit, onShowQr, onEdit, embedded = false,
+  bill, busy, error, fiscalReady, quotaCents, onBack, onSettle, onSplit, onShowQr, onEdit, embedded = false, paymentPulse = 0,
 }) => {
   const residual = bill.residual_cents;
+  // Feedback "pagamento ricevuto": lampeggio one-shot + suono + vibrazione al
+  // salire del pulse (non al primo render — solo agli incassi successivi).
+  const [flash, setFlash] = useState(false);
+  const firstPulse = useRef(true);
+  useEffect(() => {
+    if (firstPulse.current) { firstPulse.current = false; return; }
+    setFlash(true);
+    chime();
+    if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(30);
+    const t = setTimeout(() => setFlash(false), 1600);
+    return () => clearTimeout(t);
+  }, [paymentPulse]);
+  const flashCls = flash ? 'animate-flash-row rounded-[8px]' : '';
   const [movements, setMovements] = useState<BillPaymentInput[]>([]);
   const [method, setMethod] = useState<BillPaymentInput['method']>('CONTANTI');
   const [amount, setAmount] = useState(
@@ -238,7 +257,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
               </div>
             )}
             {online > 0 && (
-              <div className="flex justify-between gap-2">
+              <div className={`flex justify-between gap-2 ${flashCls}`}>
                 <span className="text-[var(--ds-text-secondary)]">Pagato online</span>
                 <span className="tabular-nums text-[var(--ds-text-secondary)]">{euro(online)}</span>
               </div>
@@ -257,7 +276,7 @@ export const Pagamento: React.FC<PagamentoProps> = ({
             </Callout>
           )}
 
-          <div className="mt-4">
+          <div className={`mt-4 ${flash ? 'animate-flash-row rounded-[12px] p-2 -m-2' : ''}`}>
             <div className="text-[13px] text-[var(--ds-pending-text)]">Residuo</div>
             <div className="text-[40px] font-semibold leading-none tabular-nums tracking-[-0.02em] text-[var(--ds-text-primary)]">
               {euro(math.remaining)}

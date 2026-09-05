@@ -569,6 +569,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-05 | Cassa | Pagamento online al tavolo (QR/link) mentre la cassa è aperta: il residuo si aggiorna in tempo reale e un lampeggio con suono e vibrazione segnala l'incasso appena avviene, senza fissare il numero. |
 | 2026-09-05 | Fiscalità | Driver rt-local: lo scontrino si emette dal CRM attraverso il registratore Epson in sala (numero, copia digitale e registro allineati), senza credenziali AdE né provider cloud. |
 | 2026-09-05 | Fiscalità · Pagamenti | Lookup P.IVA nel dialog fattura (denominazione, sede, SDI, PEC dai registri camerali con una lente accanto al campo) e campo codice lotteria alla chiusura con scontrino via provider. Regole scontrino parlante e lotteria nella checklist pilota. |
 | 2026-09-04 | Fiscalità · Pagamenti | Documento "Cassa" alla chiusura conto: lo scontrino battuto sull'RT si registra col suo numero (anche a posteriori) e appare come "scontrino di cassa" in chiusura e nel registro. Checklist della serata pilota comande in docs/serata-pilota-comande.md. |
