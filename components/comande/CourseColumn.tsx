@@ -40,16 +40,18 @@ interface CourseListProps {
   /** Annulla la chiamata di un'uscita già lanciata (finché la cucina non
    *  ha iniziato): torna in coda, le card spariscono dai monitor. */
   onUnfire?: (courseNo: number) => void;
-  /** Sposta una riga in bozza su un'altra uscita («gli antipasti li
-   *  prendiamo in prima»). Solo bozze: oltre l'invio si richiama o storna. */
+  /** Sposta una riga in bozza su un'altra uscita. SENZA BOTTONE in riga dal
+   *  collaudo al telefono («due icone con le frecce» — la maniglia di riga
+   *  doppiava quella di testata e affollava la riga): oggi si sposta
+   *  l'uscita intera; il cablaggio resta per ridare un ingresso per-riga. */
   onMoveLine?: (line: CartLine) => void;
   /** Come sopra, per una bozza rimasta sul server. */
   onMoveItem?: (item: OrderItem) => void;
   /** Sposta TUTTE le bozze dell'uscita su un'altra. */
   onMoveCourse?: (courseNo: number) => void;
-  /** Il drop del trascinamento: stesse tre operazioni del selettore, via
-   *  gesto. Il ⇅ della riga e lo «sposta» della testata fanno da maniglia:
-   *  tocco secco = selettore, tenuto e mosso = drag. */
+  /** Il drop del trascinamento: stesse operazioni del selettore, via gesto.
+   *  Il ⇅ della testata fa da maniglia: tocco secco = selettore, tenuto e
+   *  mosso = drag. */
   onDragLine?: (key: string, to: number) => void;
   onDragItem?: (item: OrderItem, to: number) => void;
   onDragCourse?: (from: number, to: number) => void;
@@ -152,12 +154,16 @@ export const CourseList: React.FC<CourseListProps> = ({
               {courseMovable && (
                 <>
                   <span aria-hidden className="h-3.5 w-px flex-shrink-0 bg-[var(--ds-border-strong)]" />
+                  {/* Bersaglio gonfiato oltre il testo (margini negativi +
+                      padding): a 13px nudi il dito mancava e il tocco cadeva
+                      sull'etichetta accanto — «sposta non funziona» al
+                      collaudo su iPhone. */}
                   <button
                     type="button"
                     onClick={() => onMoveCourse!(n)}
                     disabled={busy}
                     title="Sposta tutte le righe non inviate su un'altra uscita"
-                    className="flex-shrink-0 text-[13px] font-medium text-[var(--ds-text-muted)] underline decoration-dotted transition-opacity hover:opacity-70 disabled:opacity-40"
+                    className="-mx-2 -my-3 flex-shrink-0 px-2 py-3 text-[13px] font-medium text-[var(--ds-text-muted)] underline decoration-dotted transition-opacity hover:opacity-70 disabled:opacity-40"
                   >
                     sposta
                   </button>
@@ -266,19 +272,6 @@ export const CourseList: React.FC<CourseListProps> = ({
                   <span className="flex-shrink-0 text-[14px] tabular-nums text-[var(--ds-text-muted)]">
                     {euro(i.line_total_cents ?? 0)}
                   </span>
-                  {i.status === 'DRAFT' && i.line_kind === 'DISH' && onMoveItem && (
-                    <button
-                      type="button"
-                      onClick={() => onMoveItem(i)}
-                      disabled={busy}
-                      aria-label={`Sposta ${i.name_snapshot} su un'altra uscita`}
-                      title="Tocca per scegliere l'uscita, trascina per spostare"
-                      {...grip({ kind: 'item', item: i, from: i.course_no })}
-                      className={stepper}
-                    >
-                      <ArrowUpDown size={15} />
-                    </button>
-                  )}
                   {i.status !== 'VOIDED' && i.line_kind === 'DISH' && (
                     <button
                       type="button"
@@ -350,18 +343,6 @@ export const CourseList: React.FC<CourseListProps> = ({
                     >
                       <Plus size={15} />
                     </button>
-                    {onMoveLine && (
-                      <button
-                        type="button"
-                        onClick={() => onMoveLine(l)}
-                        aria-label={`Sposta ${l.dish.name} su un'altra uscita`}
-                        title="Tocca per scegliere l'uscita, trascina per spostare"
-                        {...grip({ kind: 'line', key: l.key, label: l.dish.name, qty: l.qty, from: l.course_no })}
-                        className={stepper}
-                      >
-                        <ArrowUpDown size={15} />
-                      </button>
-                    )}
                   </div>
                 </div>
               ))}
