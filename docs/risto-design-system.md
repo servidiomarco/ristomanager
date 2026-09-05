@@ -1009,6 +1009,18 @@ is the one failure everybody notices. Capture the pointer, or a finger leaving t
 freezes the swipe half-open. Pair with a one-time hint that plays on first visit per surface,
 skipped for fine pointers and under `prefers-reduced-motion`.
 
+**Drag from a button-handle** (`useCourseDrag`, la comanda) — when a row needs a vertical drag
+inside a scrolling list, do not fight the scroll: make an *existing button* the handle. Tap
+stays the button's action (the picker), held-and-moved past an 8px slop becomes the drag —
+which allows a static `touch-action: none` on the button alone, no long-press, no non-passive
+`touchmove` tricks. Window-level listeners with stable identities (an engine created once,
+options read through a ref) so a socket-driven remount mid-drag cannot orphan them; ghost
+follows the pointer via direct `style.transform` (no re-render per frame); hit-testing is
+`elementFromPoint` + a `data-*` attribute on every target with the ghost `pointer-events:
+none`; autoscroll is a rAF loop with 48px hot zones on the single scroller found by walking
+up `overflowY`. Suppress the release click with a flag, or the tap-action fires after every
+drop.
+
 **Toast** [der] — `surface` fill, `rounded.lg`, `border` hairline, `elevation.raised`, at
 `z.toast`. Variants take state families via a leading icon and `tint-border`. Auto-dismiss
 after 5s — **except errors, which persist until dismissed.** Announced via `aria-live="polite"`.
