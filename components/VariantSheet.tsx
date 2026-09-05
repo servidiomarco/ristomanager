@@ -52,8 +52,23 @@ export const VariantSheet: React.FC<{
   const [custom, setCustom] = useState(initial?.note ?? '');
   // Vendita al peso: i grammi del pezzo, chiesti qui alla battuta (stima del
   // cameriere; il peso vero lo corregge la cucina dopo il taglio). Il prezzo
-  // del piatto è AL KG e l'anteprima sotto si aggiorna col peso.
-  const [grams, setGrams] = useState<number>(() => initial?.weight_grams ?? 500);
+  // del piatto è AL KG e l'anteprima sotto si aggiorna col peso. Range e
+  // punto di partenza vengono dalla SCHEDA del piatto (un filetto non parte
+  // da 500 g come una bistecca); i default coprono i piatti senza scheda.
+  const wMin = dish.weight_min_grams ?? 300;
+  const wMax = Math.max(dish.weight_max_grams ?? 1000, wMin);
+  const wDef = Math.min(Math.max(dish.weight_default_grams ?? 500, wMin), wMax);
+  const [grams, setGrams] = useState<number>(() => initial?.weight_grams ?? wDef);
+  // Chip equispaziati sul range, arrotondati ai 50 g: pochi bersagli larghi,
+  // il fine lo fa lo stepper.
+  const weightChips = React.useMemo(() => {
+    const span = wMax - wMin;
+    const step = span <= 0 ? 50 : Math.max(50, Math.round(span / 5 / 50) * 50);
+    const out: number[] = [];
+    for (let g = wMin; g < wMax && out.length < 6; g += step) out.push(g);
+    out.push(wMax);
+    return [...new Set(out)];
+  }, [wMin, wMax]);
   // Guida del gruppo (es. i gradi di cottura spiegati): chiusa di default,
   // il foglio serve a battere — la si apre quando serve ripassarla.
   const [openNotes, setOpenNotes] = useState<Set<number>>(new Set());
@@ -139,7 +154,7 @@ export const VariantSheet: React.FC<{
             Peso · {euro(Math.round(dishCents))} al kg
           </div>
           <div className="flex flex-wrap gap-2">
-            {[300, 400, 500, 600, 700, 800, 1000].map(g => (
+            {weightChips.map(g => (
               <button
                 key={g}
                 type="button"
@@ -159,7 +174,7 @@ export const VariantSheet: React.FC<{
           <div className="mt-2.5 flex items-center gap-3">
             <button
               type="button"
-              onClick={() => setGrams(v => Math.max(50, v - 10))}
+              onClick={() => setGrams(v => Math.max(wMin, v - 10))}
               aria-label="Riduci di 10 grammi"
               className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
             >
@@ -170,7 +185,7 @@ export const VariantSheet: React.FC<{
             </span>
             <button
               type="button"
-              onClick={() => setGrams(v => Math.min(50000, v + 10))}
+              onClick={() => setGrams(v => Math.min(wMax, v + 10))}
               aria-label="Aumenta di 10 grammi"
               className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)]"
             >
