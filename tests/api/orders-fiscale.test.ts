@@ -599,6 +599,16 @@ describe('scontrino via registratore locale (rt-local)', () => {
         expect(job.payload.bill_id).toBe(billId);
         expect(Array.isArray(job.payload.payload.items)).toBe(true);
 
+        // Claim atomico: il primo vince, un secondo poll sullo stesso job
+        // fiscale NON deve poter emettere (niente doppio scontrino).
+        const claim1 = await api().post(`/print-agent/jobs/${job.id}/claim`).set('x-print-agent-token', 'test-print-agent-token');
+        expect(claim1.body.claimed).toBe(true);
+        const claim2 = await api().post(`/print-agent/jobs/${job.id}/claim`).set('x-print-agent-token', 'test-print-agent-token');
+        expect(claim2.body.claimed).toBe(false);
+        // Il job claimato non ricompare nel poll (non è più PENDING).
+        const afterClaim = await api().get('/print-agent/jobs').set('x-print-agent-token', 'test-print-agent-token');
+        expect(afterClaim.body.jobs.some((j: any) => j.id === job.id)).toBe(false);
+
         const ack = await api().post(`/print-agent/jobs/${job.id}/ack`)
             .set('x-print-agent-token', 'test-print-agent-token')
             .send({ ok: true, result: { doc_number: '0123-0045', zrep_number: '0123', receipt_number: '45' } });

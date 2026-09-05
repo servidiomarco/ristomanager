@@ -436,6 +436,15 @@ async function handleRtFiscale(job) {
     if (!warnedUnknown.has('rt')) { warnedUnknown.add('rt'); log('RT_FISCAL_HOST non configurato: job RT in attesa'); }
     return;
   }
+  // Claim atomico PRIMA di toccare il registratore: un documento fiscale non
+  // si emette due volte. Se un altro poll/agente ha già preso il job, esce.
+  try {
+    const c = await api(`/print-agent/jobs/${job.id}/claim`, { method: 'POST' });
+    if (!c?.claimed) return;
+  } catch (err) {
+    log(`job ${job.id} [rt]: claim fallito (${err.message}), ritento`);
+    return;
+  }
   let xml;
   try {
     xml = buildRtXml(job.payload?.payload ?? {});
@@ -461,16 +470,16 @@ async function handleRtFiscale(job) {
       return;
     }
     // addInfo: zRepNumber + fiscalReceiptNumber compongono il numero del
-    // documento commerciale come lo stampa l'RT (es. 0123-0045).
-    const info = {};
-    for (const m of text.matchAll(/<info>\s*<name>([^<]+)<\/name>\s*<value>([^<]*)<\/value>/g)) info[m[1]] = m[2];
-    const zrep = info.zRepNumber ?? info.zRep ?? '';
-    const num = info.fiscalReceiptNumber ?? '';
-    const docNumber = zrep && num ? `${String(zrep).padStart(4, '0')}-${String(num).padStart(4, '0')}` : (num || null);
+    // documento commerciale come lo stampa l'RT (es. 0933-0045). L'FP-81II
+    // li restituisce come tag diretti, non incapsulati in <info>.
+    const tag = (name) => text.match(new RegExp(`<${name}>([^<]*)</${name}>`, 'i'))?.[1]?.trim() ?? '';
+    const zrep = tag('zRepNumber');
+    const num = tag('fiscalReceiptNumber');
+    const docNumber = zrep && num ? `${zrep.padStart(4, '0')}-${num.padStart(4, '0')}` : (num || null);
     log(`job ${job.id} [rt]: documento ${docNumber ?? '(numero non letto)'} emesso`);
     await api(`/print-agent/jobs/${job.id}/ack`, {
       method: 'POST',
-      body: JSON.stringify({ ok: true, result: { doc_number: docNumber, zrep_number: zrep || null, receipt_number: num || null, receipt_date: info.fiscalReceiptDate ?? null, receipt_time: info.fiscalReceiptTime ?? null, receipt_amount: info.fiscalReceiptAmount ?? null } }),
+      body: JSON.stringify({ ok: true, result: { doc_number: docNumber, zrep_number: zrep || null, receipt_number: num || null, receipt_date: tag('fiscalReceiptDate') || null, receipt_time: tag('fiscalReceiptTime') || null, receipt_amount: tag('fiscalReceiptAmount') || null } }),
     });
   } catch (err) {
     // Registratore spento o irraggiungibile: NIENTE ack — il job resta in
@@ -517,6 +526,15 @@ async function tick() {
   await Promise.all([...byPrinter.entries()].map(([name, list]) => drainPrinter(name, PRINTERS.get(name), list)));
 }
 
+// I tick non si sovrappongono: un'emissione RT lenta (fetch fino a 15s) non
+// deve far partire un secondo tick che ripesca gli stessi job.
+let ticking = false;
+async function safeTick() {
+  if (ticking) return;
+  ticking = true;
+  try { await tick(); } finally { ticking = false; }
+}
+
 log(`print-agent avviato: backend ${API_URL}, stampanti [${[...PRINTERS.entries()].map(([n, d]) => `${n}=${d.host}:${d.port}`).join(', ')}], poll ${POLL_MS}ms`);
-setInterval(tick, POLL_MS);
-tick();
+setInterval(safeTick, POLL_MS);
+safeTick();
