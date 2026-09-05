@@ -268,7 +268,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 **Comande (palmare cameriere)**
 - Griglia tavoli del servizio con stato comanda; catalogo piatti per categoria con ricerca; uso a una mano, su telefono la comanda vive in uno sheet dietro il totale. Aprendo un tavolo su telefono il pad prende tutto lo schermo (la barra dell'app si toglie di mezzo, in cima resta la scheda del tavolo con la freccia indietro); la ricerca piatti si apre dalla lente nella testata del tavolo, sul velo trasparente come la ricerca globale, e i risultati si aggiungono con un tocco senza perdere di vista la comanda.
 - **Vista compatta a scelta dell'operatore** (menu ⋮ del tavolo): la lista piatti passa a righe fitte in una scheda unica — 6–7 piatti in vista invece di 3, bersagli sempre a 44px. La preferenza è personale e resta salvata sul dispositivo.
-- **Uscite/portate**: ogni riga si assegna a un'uscita; varianti libere per riga ("senza sale, metà porzione…"), quantità, coperti ±1.
+- **Uscite/portate**: ogni riga si assegna a un'uscita, e finché è in bozza si **sposta** su un'altra — la singola riga (freccine sulla riga) o l'uscita intera («sposta» in testata), per il classico «prendiamo anche gli antipasti in prima» a primi già battuti; varianti libere per riga ("senza sale, metà porzione…"), quantità, coperti ±1.
 - Le righe restano sul palmare finché non si preme **Invia** (una sola trasmissione, robusta anche con rete instabile); le righe non inviate **sopravvivono all'uscita dal tavolo** come bozza locale, e al ritorno un avviso dichiara che non sono in cucina.
 - **Il cameriere batte i tempi**: sull'uscita proposta il bottone **Chiama** la lancia in cucina dal palmare — per le sale dove le uscite le chiama chi è al tavolo, non il passe. "Torna in bozza" annulla una proposta, e l'uscita si rimanda anche dopo.
 - **Chiusura a un tocco** sul conto del tavolo: **Scontrino contanti** e **Scontrino POS** incassano l'importo pieno ed emettono il documento in un gesto; **Preconto** stampa in sala; "Incassa con la cassa" apre il pannello completo (dividi, misto, sospeso, mancia) per chi ha il permesso di cassa.
@@ -569,6 +569,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-05 | Comande, Cucina e Passe | I piatti in bozza si spostano fra le uscite: la singola riga (bottone sulla riga) o l'uscita intera («sposta» in testata), con selettore delle sei uscite. Vale per le bozze locali e per quelle sul server; un'uscita già partita prima si riporta in bozza. |
 | 2026-09-05 | Cassa | Pagamento online al tavolo (QR/link) mentre la cassa è aperta: il residuo si aggiorna in tempo reale e un lampeggio con suono e vibrazione segnala l'incasso appena avviene, senza fissare il numero. |
 | 2026-09-05 | Fiscalità | Driver rt-local: lo scontrino si emette dal CRM attraverso il registratore Epson in sala (numero, copia digitale e registro allineati), senza credenziali AdE né provider cloud. |
 | 2026-09-05 | Fiscalità · Pagamenti | Lookup P.IVA nel dialog fattura (denominazione, sede, SDI, PEC dai registri camerali con una lente accanto al campo) e campo codice lotteria alla chiusura con scontrino via provider. Regole scontrino parlante e lotteria nella checklist pilota. |
