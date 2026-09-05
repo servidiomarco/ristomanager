@@ -11709,9 +11709,19 @@ app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, re
         // Vendita al peso: il prezzo del piatto diventa il prezzo AL KG e la
         // riga di comanda porterà i grammi (weight_grams).
         const soldByWeight = req.body?.sold_by_weight === true;
+        // Range e punto di partenza del peso: guida per chip e stepper del
+        // foglio di battuta (un filetto non parte da 500 g come una
+        // bistecca). Grammi interi 1..50000, null = default della UI.
+        const wOpt = (v: any): number | null => {
+            if (v == null) return null;
+            const n = Math.round(Number(v));
+            return Number.isFinite(n) && n > 0 && n <= 50000 ? n : null;
+        };
         const result = await queryWithRetry(
-            'INSERT INTO dishes (tenant_id, name, description, price, category, allergens, photo_url, vat_rate, dish_type, sold_by_weight, station_id) VALUES ($7, $1, $2, $3, $4, $5, $6, $8, $9, $10, $11) RETURNING *',
-            [name, description, price, category, allergens, photo_url || null, req.tenantId!, vatRate, dishType, soldByWeight, station.value]
+            'INSERT INTO dishes (tenant_id, name, description, price, category, allergens, photo_url, vat_rate, dish_type, sold_by_weight, weight_min_grams, weight_max_grams, weight_default_grams, station_id) VALUES ($7, $1, $2, $3, $4, $5, $6, $8, $9, $10, $11, $12, $13, $14) RETURNING *',
+            [name, description, price, category, allergens, photo_url || null, req.tenantId!, vatRate, dishType, soldByWeight,
+             wOpt(req.body?.weight_min_grams), wOpt(req.body?.weight_max_grams), wOpt(req.body?.weight_default_grams),
+             station.value]
         );
         const newDish = result.rows[0];
 
@@ -11790,16 +11800,34 @@ app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req,
         if (dishType !== null && dishType !== 'SIMPLE' && dishType !== 'COMPOSED') return res.status(400).json({ error: 'dish_type deve essere SIMPLE o COMPOSED' });
         const station = await resolveDishStation(req.tenantId!, req.body?.station_id);
         if ('error' in station) return res.status(400).json({ error: station.error });
+        const wOptUpd = (v: any): number | null => {
+            if (v == null) return null;
+            const n = Math.round(Number(v));
+            return Number.isFinite(n) && n > 0 && n <= 50000 ? n : null;
+        };
         const result = await queryWithRetry(
             // COALESCE sul body: un client vecchio che non manda vat_rate non
             // deve resettare l'aliquota già impostata. Idem dish_type: il
             // ritorno a SIMPLE non cancella gli ingredienti — restano e la
             // validazione li ignora finché il piatto non torna COMPOSED.
-            // station_id non può usare COALESCE: null esplicito significa
-            // "torna a seguire la categoria", quindi serve il flag touched.
-            'UPDATE dishes SET name = $1, description = $2, price = $3, category = $4, allergens = $5, photo_url = $6, vat_rate = COALESCE($9, vat_rate), dish_type = COALESCE($10, dish_type), sold_by_weight = COALESCE($11, sold_by_weight), station_id = CASE WHEN $12::boolean THEN $13::int ELSE station_id END WHERE id = $7 AND tenant_id = $8 RETURNING *',
+            // Range peso: `undefined` = client vecchio, non toccare (come
+            // vat_rate); presente — anche null — sostituisce, così un campo
+            // svuotato in scheda torna al default della UI.
+            // station_id, stessa semantica ma via resolveDishStation: il null
+            // esplicito significa "torna a seguire la categoria", quindi
+            // niente COALESCE — serve il flag touched.
+            `UPDATE dishes SET name = $1, description = $2, price = $3, category = $4, allergens = $5, photo_url = $6,
+                    vat_rate = COALESCE($9, vat_rate), dish_type = COALESCE($10, dish_type), sold_by_weight = COALESCE($11, sold_by_weight),
+                    weight_min_grams = CASE WHEN $12 THEN $13 ELSE weight_min_grams END,
+                    weight_max_grams = CASE WHEN $14 THEN $15 ELSE weight_max_grams END,
+                    weight_default_grams = CASE WHEN $16 THEN $17 ELSE weight_default_grams END,
+                    station_id = CASE WHEN $18::boolean THEN $19::int ELSE station_id END
+             WHERE id = $7 AND tenant_id = $8 RETURNING *`,
             [name, description, price, category, allergens, photo_url || null, id, req.tenantId!, vatRate, dishType,
              typeof req.body?.sold_by_weight === 'boolean' ? req.body.sold_by_weight : null,
+             req.body?.weight_min_grams !== undefined, wOptUpd(req.body?.weight_min_grams),
+             req.body?.weight_max_grams !== undefined, wOptUpd(req.body?.weight_max_grams),
+             req.body?.weight_default_grams !== undefined, wOptUpd(req.body?.weight_default_grams),
              station.touched, station.value]
         );
         const updatedDish = result.rows[0];

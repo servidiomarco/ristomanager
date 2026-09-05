@@ -782,6 +782,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         // null esplicito = «segui la categoria»: il server lo distingue dal
         // campo assente (che non tocca il valore salvato).
         station_id: newDish.station_id ?? null,
+        weight_min_grams: newDish.weight_min_grams ?? null,
+        weight_max_grams: newDish.weight_max_grams ?? null,
+        weight_default_grams: newDish.weight_default_grams ?? null,
         modifier_group_ids: dishGroupIds,
         // Gli ingredienti si mandano solo per i composti: su un piatto
         // tornato Semplice restano com'erano, ignorati (non cancellati).
@@ -856,6 +859,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       dish_type: dish.dish_type ?? 'SIMPLE',
       sold_by_weight: dish.sold_by_weight === true,
       station_id: dish.station_id ?? null,
+      weight_min_grams: dish.weight_min_grams ?? null,
+      weight_max_grams: dish.weight_max_grams ?? null,
+      weight_default_grams: dish.weight_default_grams ?? null,
     });
     // Le spunte dei gruppi si leggono dai dish_ids della gestione varianti;
     // gli ingredienti si caricano pigri — servono solo aprendo un composto.
@@ -2666,6 +2672,37 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     </span>
                   </span>
                 </button>
+                {/* Il range del piatto e da dove parte lo stepper: un filetto
+                    non parte da 500 g come una bistecca. Vuoto = default
+                    della UI (300–1000, parte da 500). Solo guida di battuta:
+                    la bilancia dice sempre l'ultima parola. */}
+                {newDish.sold_by_weight === true && (
+                  <div className="grid grid-cols-3 gap-2">
+                    {([
+                      ['weight_min_grams', 'da (g)', '300'],
+                      ['weight_max_grams', 'a (g)', '1000'],
+                      ['weight_default_grams', 'parte da (g)', '500'],
+                    ] as const).map(([field, label, ph]) => (
+                      <label key={field} className="block">
+                        <span className="mb-1 block text-[12px] font-medium text-[var(--ds-text-muted)]">{label}</span>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={1}
+                          max={50000}
+                          step={10}
+                          placeholder={ph}
+                          className={dsInput}
+                          value={newDish[field] ?? ''}
+                          onChange={e => {
+                            const n = Math.round(Number(e.target.value));
+                            setNewDish({ ...newDish, [field]: e.target.value === '' || !Number.isFinite(n) || n <= 0 ? null : n });
+                          }}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                )}
                 {newDish.dish_type === 'COMPOSED' && (
                   <div className="space-y-2">
                     {dishComponents.map((c, i) => (
