@@ -77,6 +77,12 @@ export interface Dish {
   /** Vendita al peso: il prezzo è AL KG e la riga di comanda porta i grammi
    *  (weight_grams). Un solo articolo «Bistecca» al posto delle grammature. */
   sold_by_weight?: boolean;
+  /** Range e punto di partenza del peso alla battuta (guida per chip e
+   *  stepper del foglio; null = default della UI). Il server accetta
+   *  comunque il peso vero della bilancia. */
+  weight_min_grams?: number | null;
+  weight_max_grams?: number | null;
+  weight_default_grams?: number | null;
 }
 
 /** I menu del ristorante: i due di sistema (Alla carta, Banchetti — non

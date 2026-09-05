@@ -570,6 +570,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 | Data | Sezione | Modifica |
 |---|---|---|
 | 2026-09-05 | Comande, Cucina e Passe | I piatti in bozza si spostano fra le uscite: la singola riga (bottone sulla riga) o l'uscita intera («sposta» in testata), con selettore delle sei uscite. Vale per le bozze locali e per quelle sul server; un'uscita già partita prima si riporta in bozza. |
+| 2026-09-05 | Menu, Comande, Cucina e Cassa | I piatti al peso hanno range e punto di partenza propri, impostati in scheda («da/a/parte da», in grammi): il foglio di battuta genera i chip sul range del piatto e lo stepper parte e si ferma lì — un filetto non parte da 500 g come una bistecca. Campi vuoti = default (300–1000, parte da 500). |
 | 2026-09-05 | Cassa | Pagamento online al tavolo (QR/link) mentre la cassa è aperta: il residuo si aggiorna in tempo reale e un lampeggio con suono e vibrazione segnala l'incasso appena avviene, senza fissare il numero. |
 | 2026-09-05 | Fiscalità | Driver rt-local: lo scontrino si emette dal CRM attraverso il registratore Epson in sala (numero, copia digitale e registro allineati), senza credenziali AdE né provider cloud. |
 | 2026-09-05 | Fiscalità · Pagamenti | Lookup P.IVA nel dialog fattura (denominazione, sede, SDI, PEC dai registri camerali con una lente accanto al campo) e campo codice lotteria alla chiusura con scontrino via provider. Regole scontrino parlante e lotteria nella checklist pilota. |
