@@ -8,6 +8,7 @@ import {
   type CartLine,
   isSystemLine,
 } from './orderView';
+import { useCourseDrag, type DragPayload } from './useCourseDrag';
 
 // ---------------------------------------------------------------------------
 // La comanda come la legge il passe: sei uscite in colonna, quella che si sta
@@ -46,6 +47,12 @@ interface CourseListProps {
   onMoveItem?: (item: OrderItem) => void;
   /** Sposta TUTTE le bozze dell'uscita su un'altra. */
   onMoveCourse?: (courseNo: number) => void;
+  /** Il drop del trascinamento: stesse tre operazioni del selettore, via
+   *  gesto. Il ⇅ della riga e lo «sposta» della testata fanno da maniglia:
+   *  tocco secco = selettore, tenuto e mosso = drag. */
+  onDragLine?: (key: string, to: number) => void;
+  onDragItem?: (item: OrderItem, to: number) => void;
+  onDragCourse?: (from: number, to: number) => void;
 }
 
 const stepper =
@@ -53,8 +60,25 @@ const stepper =
 
 export const CourseList: React.FC<CourseListProps> = ({
   order, cart, course, onCourse, busy, onBump, onDrop, onVoid, onRecall, onFire, onEditLine, onUnfire,
-  onMoveLine, onMoveItem, onMoveCourse,
-}) => (
+  onMoveLine, onMoveItem, onMoveCourse, onDragLine, onDragItem, onDragCourse,
+}) => {
+  const dnd = useCourseDrag({
+    disabled: busy,
+    canDropOn: n => !isSent(courseStatus(order, n)),
+    onDrop: (p: DragPayload, to: number) => {
+      if (p.kind === 'line') onDragLine?.(p.key, to);
+      else if (p.kind === 'item') onDragItem?.(p.item, to);
+      else onDragCourse?.(p.from, to);
+    },
+  });
+  // Maniglia solo se il drop ha un gestore: senza, il bottone resta il
+  // bottone di sempre.
+  const grip = (p: DragPayload) => {
+    const wired = p.kind === 'line' ? !!onDragLine : p.kind === 'item' ? !!onDragItem : !!onDragCourse;
+    return wired ? dnd.handleProps(p) : {};
+  };
+
+  return (
   <div className="flex flex-col gap-2">
     {Array.from({ length: MAX_COURSES }, (_, i) => i + 1).map(n => {
       const serverRows = itemsForCourse(order, n);
@@ -73,6 +97,14 @@ export const CourseList: React.FC<CourseListProps> = ({
       const live = serverRows.filter(i => i.status !== 'VOIDED');
       const unfirable = status === 'FIRED' && live.length > 0 && live.every(i => i.status === 'SENT');
 
+      // Feedback del trascinamento: il bersaglio sotto il puntatore prende
+      // il ring dell'uscita corrente («qui»), le uscite partite si smorzano
+      // (non sono bersagli), la sorgente resta come placeholder attenuato.
+      const dragging = dnd.drag != null;
+      const isDropTarget = dragging && dnd.overCourse === n;
+      const isDragSource = dnd.drag?.kind === 'course' && dnd.drag.from === n;
+      const dimmedTarget = dragging && sent;
+
       if (serverRows.length === 0 && draftRows.length === 0 && !current) {
         // L'uscita vuota resta un bersaglio: portarci sopra il prossimo piatto
         // deve costare un tocco, non un menu.
@@ -80,8 +112,11 @@ export const CourseList: React.FC<CourseListProps> = ({
           <button
             key={n}
             type="button"
+            data-course-drop={n}
             onClick={() => onCourse(n)}
-            className="flex min-h-[52px] w-full items-center gap-2 rounded-[16px] border border-dashed border-[var(--ds-border-strong)] px-4 text-left text-[15px] text-[var(--ds-text-muted)] transition-colors hover:border-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className={`flex min-h-[52px] w-full items-center gap-2 rounded-[16px] border border-dashed border-[var(--ds-border-strong)] px-4 text-left text-[15px] text-[var(--ds-text-muted)] transition-colors hover:border-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+              isDropTarget ? 'ring-2 ring-[var(--ds-action-bg)] border-transparent' : ''
+            }`}
           >
             <Plus size={16} aria-hidden /> {courseLabel(n)}
           </button>
@@ -91,9 +126,12 @@ export const CourseList: React.FC<CourseListProps> = ({
       return (
         <section
           key={n}
-          className={`rounded-[16px] p-3 ${
+          data-course-drop={n}
+          className={`rounded-[16px] p-3 transition-opacity ${
             sent ? 'bg-[var(--ds-surface-row)]' : 'bg-[var(--ds-surface)]'
-          } ${current ? 'ring-2 ring-[var(--ds-action-bg)]' : ''}`}
+          } ${isDropTarget ? 'ring-2 ring-[var(--ds-action-bg)]' : current ? 'ring-2 ring-[var(--ds-action-bg)]' : ''} ${
+            dimmedTarget || isDragSource ? 'opacity-60' : ''
+          }`}
         >
           <div className="flex items-center gap-2">
             <button
@@ -117,8 +155,9 @@ export const CourseList: React.FC<CourseListProps> = ({
                 type="button"
                 onClick={() => onMoveCourse(n)}
                 disabled={busy}
-                title="Sposta tutte le righe non inviate su un'altra uscita"
-                className="flex-shrink-0 text-[13px] font-medium text-[var(--ds-text-muted)] underline decoration-dotted transition-opacity hover:opacity-70 disabled:opacity-40"
+                title="Tocca per scegliere l'uscita, trascina per spostare"
+                {...grip({ kind: 'course', from: n, count: draftRows.length + serverRows.filter(i => i.status === 'DRAFT').length })}
+                className="flex-shrink-0 select-none text-[13px] font-medium text-[var(--ds-text-muted)] underline decoration-dotted transition-opacity hover:opacity-70 disabled:opacity-40"
               >
                 sposta
               </button>
@@ -179,7 +218,9 @@ export const CourseList: React.FC<CourseListProps> = ({
           {(serverRows.length > 0 || draftRows.length > 0) && (
             <div className="mt-2 flex flex-col gap-1">
               {serverRows.map(i => (
-                <div key={i.id} className="flex items-center gap-2 text-[15px]">
+                <div key={i.id} className={`flex items-center gap-2 text-[15px] transition-opacity ${
+                  dnd.drag?.kind === 'item' && dnd.drag.item.id === i.id ? 'opacity-40' : ''
+                }`}>
                   <span className="flex-shrink-0 text-[14px] font-semibold tabular-nums text-[var(--ds-text-muted)]">
                     {i.qty}×
                   </span>
@@ -212,7 +253,8 @@ export const CourseList: React.FC<CourseListProps> = ({
                       onClick={() => onMoveItem(i)}
                       disabled={busy}
                       aria-label={`Sposta ${i.name_snapshot} su un'altra uscita`}
-                      title="Sposta su un'altra uscita"
+                      title="Tocca per scegliere l'uscita, trascina per spostare"
+                      {...grip({ kind: 'item', item: i, from: i.course_no })}
                       className={stepper}
                     >
                       <ArrowUpDown size={15} />
@@ -233,7 +275,9 @@ export const CourseList: React.FC<CourseListProps> = ({
               ))}
 
               {draftRows.map(l => (
-                <div key={l.key} className="flex items-center gap-2">
+                <div key={l.key} className={`flex items-center gap-2 transition-opacity ${
+                  dnd.drag?.kind === 'line' && dnd.drag.key === l.key ? 'opacity-40' : ''
+                }`}>
                   {/* Le varianti lunghe si troncano: il tocco sul nome apre
                       il foglio varianti della riga, dove si leggono TUTTE e
                       si correggono — chiesto da Marco dal palmare («--- Con
@@ -286,7 +330,8 @@ export const CourseList: React.FC<CourseListProps> = ({
                         type="button"
                         onClick={() => onMoveLine(l)}
                         aria-label={`Sposta ${l.dish.name} su un'altra uscita`}
-                        title="Sposta su un'altra uscita"
+                        title="Tocca per scegliere l'uscita, trascina per spostare"
+                        {...grip({ kind: 'line', key: l.key, label: l.dish.name, qty: l.qty, from: l.course_no })}
                         className={stepper}
                       >
                         <ArrowUpDown size={15} />
@@ -314,8 +359,10 @@ export const CourseList: React.FC<CourseListProps> = ({
         </section>
       );
     })}
+    {dnd.ghost}
   </div>
-);
+  );
+};
 
 /* ── SendFooter ───────────────────────────────────────────────────────────
    Due azioni, e la differenza fra loro è tutto il senso delle uscite: «Invia»

@@ -1319,6 +1319,10 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     onMoveLine: (l: CartLine) => setMoveFor({ kind: 'line', key: l.key, label: l.dish.name, from: l.course_no }),
     onMoveItem: (i: OrderItem) => setMoveFor({ kind: 'item', item: i, from: i.course_no }),
     onMoveCourse: (n: number) => setMoveFor({ kind: 'course', from: n }),
+    // Il drop del trascinamento passa dalle stesse tre strade del selettore.
+    onDragLine: moveCartLine,
+    onDragItem: moveServerItem,
+    onDragCourse: moveCourseTo,
   };
 
   const browser = (
@@ -1648,6 +1652,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         onMoveLine={listProps.onMoveLine}
         onMoveItem={listProps.onMoveItem}
         onMoveCourse={listProps.onMoveCourse}
+        onDragLine={moveCartLine}
+        onDragItem={moveServerItem}
+        onDragCourse={moveCourseTo}
         openedBy={openedByOther}
         onSend={() => submit('course')}
         onSendAll={() => submit('all')}
