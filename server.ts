@@ -11677,9 +11677,29 @@ const parseVatRate = (raw: any): number | null => {
     return Number.isInteger(n) && n >= 0 && n <= 100 ? n : null;
 };
 
+// Partita del singolo piatto (dishes.station_id): il routing di comanda fa
+// già COALESCE(piatto, categoria) — vedi POST /orders/:id/items — quindi qui
+// basta rendere il campo scrivibile. undefined = il client non lo tocca
+// (palmari e form vecchi), null = torna a seguire la categoria, numero =
+// partita che deve appartenere al tenant.
+const resolveDishStation = async (
+    tenantId: number,
+    raw: any
+): Promise<{ touched: boolean; value: number | null } | { error: string }> => {
+    if (raw === undefined) return { touched: false, value: null };
+    if (raw === null || raw === '') return { touched: true, value: null };
+    const id = Number(raw);
+    if (!Number.isInteger(id)) return { error: 'station_id non valido' };
+    const r = await queryWithRetry('SELECT id FROM stations WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
+    if (!r.rows[0]) return { error: 'station_id non valido' };
+    return { touched: true, value: id };
+};
+
 app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { name, description, price, category, allergens, photo_url } = req.body;
+        const station = await resolveDishStation(req.tenantId!, req.body?.station_id);
+        if ('error' in station) return res.status(400).json({ error: station.error });
         const vatRate = req.body?.vat_rate == null
             ? (await getFiscalVatMap(req.tenantId!)).dish_default
             : parseVatRate(req.body.vat_rate);
@@ -11698,9 +11718,10 @@ app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, re
             return Number.isFinite(n) && n > 0 && n <= 50000 ? n : null;
         };
         const result = await queryWithRetry(
-            'INSERT INTO dishes (tenant_id, name, description, price, category, allergens, photo_url, vat_rate, dish_type, sold_by_weight, weight_min_grams, weight_max_grams, weight_default_grams) VALUES ($7, $1, $2, $3, $4, $5, $6, $8, $9, $10, $11, $12, $13) RETURNING *',
+            'INSERT INTO dishes (tenant_id, name, description, price, category, allergens, photo_url, vat_rate, dish_type, sold_by_weight, weight_min_grams, weight_max_grams, weight_default_grams, station_id) VALUES ($7, $1, $2, $3, $4, $5, $6, $8, $9, $10, $11, $12, $13, $14) RETURNING *',
             [name, description, price, category, allergens, photo_url || null, req.tenantId!, vatRate, dishType, soldByWeight,
-             wOpt(req.body?.weight_min_grams), wOpt(req.body?.weight_max_grams), wOpt(req.body?.weight_default_grams)]
+             wOpt(req.body?.weight_min_grams), wOpt(req.body?.weight_max_grams), wOpt(req.body?.weight_default_grams),
+             station.value]
         );
         const newDish = result.rows[0];
 
@@ -11777,6 +11798,8 @@ app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req,
         if (req.body?.vat_rate != null && vatRate == null) return res.status(400).json({ error: 'vat_rate deve essere un intero fra 0 e 100' });
         const dishType = req.body?.dish_type == null ? null : String(req.body.dish_type);
         if (dishType !== null && dishType !== 'SIMPLE' && dishType !== 'COMPOSED') return res.status(400).json({ error: 'dish_type deve essere SIMPLE o COMPOSED' });
+        const station = await resolveDishStation(req.tenantId!, req.body?.station_id);
+        if ('error' in station) return res.status(400).json({ error: station.error });
         const wOptUpd = (v: any): number | null => {
             if (v == null) return null;
             const n = Math.round(Number(v));
@@ -11790,17 +11813,22 @@ app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req,
             // Range peso: `undefined` = client vecchio, non toccare (come
             // vat_rate); presente — anche null — sostituisce, così un campo
             // svuotato in scheda torna al default della UI.
+            // station_id, stessa semantica ma via resolveDishStation: il null
+            // esplicito significa "torna a seguire la categoria", quindi
+            // niente COALESCE — serve il flag touched.
             `UPDATE dishes SET name = $1, description = $2, price = $3, category = $4, allergens = $5, photo_url = $6,
                     vat_rate = COALESCE($9, vat_rate), dish_type = COALESCE($10, dish_type), sold_by_weight = COALESCE($11, sold_by_weight),
                     weight_min_grams = CASE WHEN $12 THEN $13 ELSE weight_min_grams END,
                     weight_max_grams = CASE WHEN $14 THEN $15 ELSE weight_max_grams END,
-                    weight_default_grams = CASE WHEN $16 THEN $17 ELSE weight_default_grams END
+                    weight_default_grams = CASE WHEN $16 THEN $17 ELSE weight_default_grams END,
+                    station_id = CASE WHEN $18::boolean THEN $19::int ELSE station_id END
              WHERE id = $7 AND tenant_id = $8 RETURNING *`,
             [name, description, price, category, allergens, photo_url || null, id, req.tenantId!, vatRate, dishType,
              typeof req.body?.sold_by_weight === 'boolean' ? req.body.sold_by_weight : null,
              req.body?.weight_min_grams !== undefined, wOptUpd(req.body?.weight_min_grams),
              req.body?.weight_max_grams !== undefined, wOptUpd(req.body?.weight_max_grams),
-             req.body?.weight_default_grams !== undefined, wOptUpd(req.body?.weight_default_grams)]
+             req.body?.weight_default_grams !== undefined, wOptUpd(req.body?.weight_default_grams),
+             station.touched, station.value]
         );
         const updatedDish = result.rows[0];
         if (!updatedDish) {

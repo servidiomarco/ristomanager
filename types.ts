@@ -83,6 +83,11 @@ export interface Dish {
   weight_min_grams?: number | null;
   weight_max_grams?: number | null;
   weight_default_grams?: number | null;
+  /** Partita di produzione del singolo piatto: vince sulla mappa
+   *  categoria→partita (le patatine nei Contorni a menu, ma battute agli
+   *  Antipasti). NULL = segui la categoria. Non tocca dove il piatto
+   *  compare sull'orderpad, che raggruppa solo per categoria. */
+  station_id?: number | null;
 }
 
 /** I menu del ristorante: i due di sistema (Alla carta, Banchetti — non
