@@ -6435,10 +6435,23 @@ async function emitFiscalDocForBill(tenantId: number, billId: number, userId: nu
     // PENDING; l'ack del job (kind RT_FISCALE) lo porta a CONFIRMED col
     // numero del registratore, o a FAILED con l'errore fiscale.
     if (providerName === 'rt-local') {
+        // Un solo job vivo per documento: l'emissione RT è ASINCRONA (il doc
+        // resta PENDING finché l'agente non risponde), e in quella finestra
+        // una seconda emitFiscalDocForBill — chiusura manuale + webhook di
+        // pagamento sullo stesso conto — accoderebbe un secondo job e
+        // farebbe stampare due scontrini. Il claim su attempts (sincrono) non
+        // copre questa finestra; il NOT EXISTS sì. fiscal_doc_id è nel payload
+        // jsonb, filtro sull'espressione.
         await queryWithRetry(
             `INSERT INTO print_jobs (tenant_id, kind, payload, printer, created_by_user_id)
-             VALUES ($1, 'RT_FISCALE', $2, 'rt', $3)`,
-            [tenantId, JSON.stringify({ fiscal_doc_id: doc.id, bill_id: billId, payload }), userId]
+             SELECT $1, 'RT_FISCALE', $2::jsonb, 'rt', $3
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM print_jobs
+                 WHERE tenant_id = $1 AND kind = 'RT_FISCALE'
+                   AND status IN ('PENDING', 'PRINTING')
+                   AND (payload->>'fiscal_doc_id')::bigint = $4
+             )`,
+            [tenantId, JSON.stringify({ fiscal_doc_id: doc.id, bill_id: billId, payload }), userId, doc.id]
         );
         const pending = await queryWithRetry(
             `SELECT ${FISCAL_DOC_COLUMNS} FROM fiscal_documents WHERE id = $1`, [doc.id]
