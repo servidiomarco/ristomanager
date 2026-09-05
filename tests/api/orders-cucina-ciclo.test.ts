@@ -334,10 +334,14 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
     it('vendita al peso: prezzo al kg, peso obbligatorio, correzione dalla cucina', async () => {
         const bistecca = await api().post('/dishes').set(bearer(token)).send({
             name: 'Bistecca Ciclo', description: null, price: 38, category: 'SECONDI', allergens: null,
-            sold_by_weight: true,
+            sold_by_weight: true, weight_min_grams: 200, weight_max_grams: 1500, weight_default_grams: 700,
         });
         expect(bistecca.status).toBe(201);
         expect(bistecca.body.sold_by_weight).toBe(true);
+        // Range e punto di partenza: guida della battuta, salvati in scheda.
+        expect(bistecca.body.weight_min_grams).toBe(200);
+        expect(bistecca.body.weight_max_grams).toBe(1500);
+        expect(bistecca.body.weight_default_grams).toBe(700);
 
         const orderId = await nuovaComanda();
         // Senza peso il server rifiuta; al peso è una riga per pezzo (qty 1).
