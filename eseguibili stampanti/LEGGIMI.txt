@@ -1,0 +1,62 @@
+STAMPANTI DEL VECCHIO FRANTOIO — script di emergenza e diagnosi
+================================================================
+
+COME FUNZIONA, IN BREVE
+-----------------------
+C'e' UN SOLO agente di stampa (un programma) sul server Windows di
+sala. Quello stesso agente gestisce sia le stampanti termiche
+(antipasti, bar, preconti, foglietto QR) sia il registratore
+fiscale Epson FP-81II da cui escono gli scontrini.
+
+Normalmente parte DA SOLO quando si accende il server, tramite il
+task di Windows "RistoManager Print Agent" (Utilita' di
+pianificazione), e si riavvia da solo se cade. Nella stragrande
+maggioranza dei casi non devi toccare niente.
+
+Questi file servono SOLO quando qualcosa non va.
+
+
+I FILE
+------
+1) avvia-agente-stampa.cmd
+   AVVIO DI EMERGENZA. Usalo se non escono ne' scontrini ne'
+   comande e sospetti che l'agente sia fermo. Doppio click: parte
+   una finestra nera che resta aperta (e' l'agente in funzione —
+   non chiuderla). Prima del primo uso vai a incollare il token
+   dentro al file (istruzioni nel file stesso).
+   NON usarlo se il task di Windows sta gia' facendo girare
+   l'agente: due agenti insieme fanno confusione. In dubbio, prima
+   riavvia il server (l'agente riparte da solo).
+
+2) test-registratore-fiscale.cmd
+   Chiede al registratore Epson se e' vivo, SENZA stampare niente.
+   Usalo quando lo scontrino non esce: ti dice se il registratore
+   risponde o se e' spento / scollegato / con IP cambiato.
+
+3) test-termiche.cmd
+   Controlla se le stampanti termiche di sala rispondono, SENZA
+   stampare niente. Usalo quando un preconto o una comanda non
+   esce: ti dice quale stampante non e' raggiungibile.
+
+
+COSA CONTROLLARE PER PRIMO, SE QUALCOSA NON ESCE
+------------------------------------------------
+- Il server di sala e' acceso?
+- Nel gestionale, Impostazioni > Sala & Cucina: l'agente di stampa
+  risulta "online"?
+- La stampante specifica (o il registratore) e' accesa, con carta,
+  collegata alla rete? (usa gli script di test qui sopra)
+- Se l'agente sembra fermo: riavvia il server (riparte da solo),
+  oppure in emergenza usa avvia-agente-stampa.cmd.
+
+
+NOTE FISCALI DA RICORDARE
+-------------------------
+- La CHIUSURA FISCALE giornaliera (Z) del registratore si fa UNA
+  volta sola al giorno, da un solo sistema. Non farla due volte.
+- Il "Fondo e chiusura" nel gestionale (modulo Cassa) e' solo il
+  conteggio dei contanti: NON e' la chiusura fiscale.
+- La mappa reparti->IVA dell'RT e': reparto 1 = 22%, reparto 2 =
+  10% (confermata il 05/09/2026). Se il tecnico della cassa cambia
+  i reparti, va aggiornata nel file di avvio, o l'IVA stampata
+  sara' sbagliata.
