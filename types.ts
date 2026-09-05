@@ -77,6 +77,11 @@ export interface Dish {
   /** Vendita al peso: il prezzo è AL KG e la riga di comanda porta i grammi
    *  (weight_grams). Un solo articolo «Bistecca» al posto delle grammature. */
   sold_by_weight?: boolean;
+  /** Partita di produzione del singolo piatto: vince sulla mappa
+   *  categoria→partita (le patatine nei Contorni a menu, ma battute agli
+   *  Antipasti). NULL = segui la categoria. Non tocca dove il piatto
+   *  compare sull'orderpad, che raggruppa solo per categoria. */
+  station_id?: number | null;
 }
 
 /** I menu del ristorante: i due di sistema (Alla carta, Banchetti — non

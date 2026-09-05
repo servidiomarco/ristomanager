@@ -13,6 +13,7 @@ import { DishDetailModal } from './DishDetailModal';
 import { CustomerPickerModal } from './CustomerPickerModal';
 import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, createMenuCategory, renameMenuCategory, deleteMenuCategory, getBanquetShareLink, sendBanquetQuoteEmail, sendBanquetQuoteWhatsApp, getModifierGroups, getDishComponents, type AdminModifierGroup, type MenuImportResult, type MenuTranslateResult, type MenuCategory } from '../services/apiService';
 import { socketClient } from '../services/socketClient';
+import { getSalaConfig, type SalaStation } from '../services/salaApiService';
 import { MenuVariantsModal } from './MenuVariantsModal';
 import { billsApiService } from '../services/billsApiService';
 import { QRCodeSVG } from 'qrcode.react';
@@ -656,6 +657,19 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   // centesimi solo al salvataggio.
   const [dishGroupIds, setDishGroupIds] = useState<number[]>([]);
   const [dishComponents, setDishComponents] = useState<{ id?: number; name: string; sconto: string }[]>([]);
+  // Partite di cucina per la select «Partita» del form piatto. Best-effort:
+  // un ristorante senza modulo comande resta a lista vuota e il campo non
+  // compare — il piatto continua a seguire la mappa per categoria.
+  const [salaStations, setSalaStations] = useState<SalaStation[]>([]);
+  const [categoryStations, setCategoryStations] = useState<Record<string, number>>({});
+  useEffect(() => {
+    getSalaConfig()
+      .then(cfg => {
+        setSalaStations(cfg.stations);
+        setCategoryStations(cfg.category_stations);
+      })
+      .catch(() => {});
+  }, []);
 
   // New Banquet Menu State
   const [newBanquet, setNewBanquet] = useState<Partial<BanquetMenu>>({
@@ -765,6 +779,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         menu_ids: newDish.menu_ids ?? [],
         dish_type: dishType,
         sold_by_weight: newDish.sold_by_weight === true,
+        // null esplicito = «segui la categoria»: il server lo distingue dal
+        // campo assente (che non tocca il valore salvato).
+        station_id: newDish.station_id ?? null,
         modifier_group_ids: dishGroupIds,
         // Gli ingredienti si mandano solo per i composti: su un piatto
         // tornato Semplice restano com'erano, ignorati (non cancellati).
@@ -819,7 +836,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     const defaultMenus = Array.isArray(catDefault) && catDefault.length > 0
       ? catDefault
       : defaultMenuId != null ? [defaultMenuId] : [];
-    setNewDish({ name: '', description: '', price: 0, category: firstCat, allergens: [], photo_url: '', vat_rate: defaultVatRate, menu_ids: defaultMenus, dish_type: 'SIMPLE', sold_by_weight: false });
+    setNewDish({ name: '', description: '', price: 0, category: firstCat, allergens: [], photo_url: '', vat_rate: defaultVatRate, menu_ids: defaultMenus, dish_type: 'SIMPLE', sold_by_weight: false, station_id: null });
     setDishGroupIds([]);
     setDishComponents([]);
     setPhotoUploadError(null);
@@ -838,6 +855,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       menu_ids: dish.menu_ids ?? [],
       dish_type: dish.dish_type ?? 'SIMPLE',
       sold_by_weight: dish.sold_by_weight === true,
+      station_id: dish.station_id ?? null,
     });
     // Le spunte dei gruppi si leggono dai dish_ids della gestione varianti;
     // gli ingredienti si caricano pigri — servono solo aprendo un composto.
@@ -2472,6 +2490,38 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       ))}
                     </select>
                   </Field>
+                  {/* Dove ESCE il piatto in cucina, non dove compare a menu:
+                      le patatine restano nei Contorni sull'orderpad ma
+                      possono uscire agli Antipasti. Vince sulla mappa per
+                      categoria; il default la dichiara per non scegliere al
+                      buio. Ricalcolata alla battuta: le comande già lanciate
+                      non si spostano. */}
+                  {salaStations.length > 0 && (
+                    <Field label="Partita di cucina">
+                      <select
+                        className={dsSelect}
+                        value={newDish.station_id ?? ''}
+                        onChange={e => setNewDish({ ...newDish, station_id: e.target.value === '' ? null : Number(e.target.value) })}
+                      >
+                        <option value="">
+                          {(() => {
+                            const cat = (newDish.category || '').toLowerCase();
+                            const mappedId = Object.entries(categoryStations)
+                              .find(([c]) => c.toLowerCase() === cat)?.[1];
+                            const mapped = salaStations.find(s => s.id === mappedId);
+                            return mapped
+                              ? `Segui la categoria (${mapped.name})`
+                              : 'Segui la categoria (senza partita)';
+                          })()}
+                        </option>
+                        {/* Le spente restano in lista solo se già assegnate
+                            al piatto, o la select mentirebbe sul valore. */}
+                        {salaStations.filter(s => s.is_active || s.id === newDish.station_id).map(s => (
+                          <option key={s.id} value={s.id}>{s.name}{s.is_active ? '' : ' (spenta)'}</option>
+                        ))}
+                      </select>
+                    </Field>
+                  )}
                 </div>
                 <Field label="Descrizione">
                   <textarea

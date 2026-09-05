@@ -11677,9 +11677,29 @@ const parseVatRate = (raw: any): number | null => {
     return Number.isInteger(n) && n >= 0 && n <= 100 ? n : null;
 };
 
+// Partita del singolo piatto (dishes.station_id): il routing di comanda fa
+// già COALESCE(piatto, categoria) — vedi POST /orders/:id/items — quindi qui
+// basta rendere il campo scrivibile. undefined = il client non lo tocca
+// (palmari e form vecchi), null = torna a seguire la categoria, numero =
+// partita che deve appartenere al tenant.
+const resolveDishStation = async (
+    tenantId: number,
+    raw: any
+): Promise<{ touched: boolean; value: number | null } | { error: string }> => {
+    if (raw === undefined) return { touched: false, value: null };
+    if (raw === null || raw === '') return { touched: true, value: null };
+    const id = Number(raw);
+    if (!Number.isInteger(id)) return { error: 'station_id non valido' };
+    const r = await queryWithRetry('SELECT id FROM stations WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
+    if (!r.rows[0]) return { error: 'station_id non valido' };
+    return { touched: true, value: id };
+};
+
 app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { name, description, price, category, allergens, photo_url } = req.body;
+        const station = await resolveDishStation(req.tenantId!, req.body?.station_id);
+        if ('error' in station) return res.status(400).json({ error: station.error });
         const vatRate = req.body?.vat_rate == null
             ? (await getFiscalVatMap(req.tenantId!)).dish_default
             : parseVatRate(req.body.vat_rate);
@@ -11690,8 +11710,8 @@ app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, re
         // riga di comanda porterà i grammi (weight_grams).
         const soldByWeight = req.body?.sold_by_weight === true;
         const result = await queryWithRetry(
-            'INSERT INTO dishes (tenant_id, name, description, price, category, allergens, photo_url, vat_rate, dish_type, sold_by_weight) VALUES ($7, $1, $2, $3, $4, $5, $6, $8, $9, $10) RETURNING *',
-            [name, description, price, category, allergens, photo_url || null, req.tenantId!, vatRate, dishType, soldByWeight]
+            'INSERT INTO dishes (tenant_id, name, description, price, category, allergens, photo_url, vat_rate, dish_type, sold_by_weight, station_id) VALUES ($7, $1, $2, $3, $4, $5, $6, $8, $9, $10, $11) RETURNING *',
+            [name, description, price, category, allergens, photo_url || null, req.tenantId!, vatRate, dishType, soldByWeight, station.value]
         );
         const newDish = result.rows[0];
 
@@ -11768,14 +11788,19 @@ app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req,
         if (req.body?.vat_rate != null && vatRate == null) return res.status(400).json({ error: 'vat_rate deve essere un intero fra 0 e 100' });
         const dishType = req.body?.dish_type == null ? null : String(req.body.dish_type);
         if (dishType !== null && dishType !== 'SIMPLE' && dishType !== 'COMPOSED') return res.status(400).json({ error: 'dish_type deve essere SIMPLE o COMPOSED' });
+        const station = await resolveDishStation(req.tenantId!, req.body?.station_id);
+        if ('error' in station) return res.status(400).json({ error: station.error });
         const result = await queryWithRetry(
             // COALESCE sul body: un client vecchio che non manda vat_rate non
             // deve resettare l'aliquota già impostata. Idem dish_type: il
             // ritorno a SIMPLE non cancella gli ingredienti — restano e la
             // validazione li ignora finché il piatto non torna COMPOSED.
-            'UPDATE dishes SET name = $1, description = $2, price = $3, category = $4, allergens = $5, photo_url = $6, vat_rate = COALESCE($9, vat_rate), dish_type = COALESCE($10, dish_type), sold_by_weight = COALESCE($11, sold_by_weight) WHERE id = $7 AND tenant_id = $8 RETURNING *',
+            // station_id non può usare COALESCE: null esplicito significa
+            // "torna a seguire la categoria", quindi serve il flag touched.
+            'UPDATE dishes SET name = $1, description = $2, price = $3, category = $4, allergens = $5, photo_url = $6, vat_rate = COALESCE($9, vat_rate), dish_type = COALESCE($10, dish_type), sold_by_weight = COALESCE($11, sold_by_weight), station_id = CASE WHEN $12::boolean THEN $13::int ELSE station_id END WHERE id = $7 AND tenant_id = $8 RETURNING *',
             [name, description, price, category, allergens, photo_url || null, id, req.tenantId!, vatRate, dishType,
-             typeof req.body?.sold_by_weight === 'boolean' ? req.body.sold_by_weight : null]
+             typeof req.body?.sold_by_weight === 'boolean' ? req.body.sold_by_weight : null,
+             station.touched, station.value]
         );
         const updatedDish = result.rows[0];
         if (!updatedDish) {

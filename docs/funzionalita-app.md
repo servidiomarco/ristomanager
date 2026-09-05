@@ -277,6 +277,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 
 **Cucina (KDS)**
 - Coda comande **per partita** (es. Pizzeria, Primi…), con avanzamento riga Inviato → In preparazione → Pronto, note del piatto, colonna "In arrivo", filtro turno. Ogni monitor si sottoscrive alla propria partita.
+- L'instradamento verso le partite segue la **mappa categorie→partita** (Impostazioni → Sala & Cucina), ma il **singolo piatto può avere la sua partita** dalla scheda in Menu ("Partita di cucina"): le patatine restano nei Contorni sull'orderpad e escono agli Antipasti. L'assegnazione sul piatto vince sulla categoria, sopravvive agli import dalla cassa e vale solo per le battute successive — le comande già lanciate non si spostano.
 - **Modifiche dopo il lancio in evidenza**: storno di una riga inviata, piatti aggiunti a un'uscita già lanciata, "riporta" e trasferimento di tavolo accendono sulla card la pill rossa **"modificata"** — il tocco mostra cosa è cambiato, chi e quando (con la motivazione dello storno); **Ok** spegne l'avviso su tutti gli schermi. Suona come una comanda nuova.
 - **Le altre partite della stessa uscita** in piede di card: un pallino colorato per partita (in coda / in lavorazione / pronta) con nome e numero di piatti — la pasta sa quanto manca alla griglia prima di calare. Un tocco espande le loro righe in sola lettura; mai mischiate con le proprie, che si toccano per segnare pronto.
 - **Consegnate**: accanto a "In lavorazione" c'è l'archivio del servito, **raggruppato per comanda** — una card per tavolo con le sue uscite in ordine e la comanda **intera**: i piatti della propria partita in chiaro, quelli delle altre attenuati col nome della partita — la risposta a "il 12 dice che manca il piatto: l'abbiamo mandato?". Sola consultazione: la card lascia il monitor solo al servito, mai al pronto; segnarla servita da un monitor la chiude su tutti.
@@ -569,6 +570,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-05 | Comande, Cucina e Passe | Partita di cucina assegnabile al singolo piatto dalla scheda in Menu: vince sulla mappa per categoria senza toccare dove il piatto compare sull'orderpad (le patatine nei Contorni a menu, in uscita agli Antipasti); sopravvive agli import dalla cassa. |
 | 2026-09-05 | Cassa | Pagamento online al tavolo (QR/link) mentre la cassa è aperta: il residuo si aggiorna in tempo reale e un lampeggio con suono e vibrazione segnala l'incasso appena avviene, senza fissare il numero. |
 | 2026-09-05 | Fiscalità | Driver rt-local: lo scontrino si emette dal CRM attraverso il registratore Epson in sala (numero, copia digitale e registro allineati), senza credenziali AdE né provider cloud. |
 | 2026-09-05 | Fiscalità · Pagamenti | Lookup P.IVA nel dialog fattura (denominazione, sede, SDI, PEC dai registri camerali con una lente accanto al campo) e campo codice lotteria alla chiusura con scontrino via provider. Regole scontrino parlante e lotteria nella checklist pilota. |
