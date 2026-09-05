@@ -464,7 +464,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   // Sostituisce varianti e nota di una riga in bozza mantenendo qty e chiave
   // di idempotenza. Se la nuova combinazione coincide con un'altra riga già
   // nel carrello, le due si fondono (stessa regola del tocco sul menu).
-  const updateLine = (lineKey: string, entries: { id: number; n: number }[], note?: string, removedIds: number[] = [], weightGrams?: number) => {
+  const updateLine = (lineKey: string, entries: { id: number; n: number }[], note?: string, removedIds: number[] = [], weightGrams?: number, qty?: number) => {
     setCart(prev => {
       const at = prev.findIndex(l => l.key === lineKey);
       if (at < 0) return prev;
@@ -489,6 +489,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       const updated: CartLine = {
         ...line,
         key: newKey,
+        // La quantità arriva dal foglio di riga (stepper accanto a matita e
+        // maniglia non ce n'è più); assente = invariata.
+        qty: qty ?? line.qty,
         modifier_ids: chosen.map(e => e.id),
         modifiers: chosen,
         removed_component_ids: removed.length > 0 ? removed.map(c => c.id) : undefined,
@@ -501,7 +504,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       const next = prev.filter((_, i) => i !== at);
       const dup = next.findIndex(l => l.key === newKey);
       if (dup >= 0) {
-        next[dup] = { ...next[dup], qty: next[dup].qty + line.qty };
+        next[dup] = { ...next[dup], qty: next[dup].qty + updated.qty };
         return next;
       }
       next.splice(at, 0, updated);
@@ -1534,9 +1537,11 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
             note: editLine.note,
             weight_grams: editLine.weight_grams,
           }}
+          initialQty={editLine.qty}
+          onDelete={() => { dropLine(editLine.key); setEditLine(null); }}
           confirmLabel="Aggiorna"
           onCancel={() => setEditLine(null)}
-          onConfirm={(entries, removedIds, note, weightGrams) => { updateLine(editLine.key, entries, note, removedIds, weightGrams); setEditLine(null); }}
+          onConfirm={(entries, removedIds, note, weightGrams, qty) => { updateLine(editLine.key, entries, note, removedIds, weightGrams, qty); setEditLine(null); }}
         />
       )}
 
