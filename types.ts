@@ -382,7 +382,7 @@ export interface TableBillItem {
 // PENDING → CONFIRMED/FAILED; l'annullo porta a VOIDED. Un solo documento
 // vivo (PENDING/CONFIRMED) per conto.
 export type FiscalDocumentStatus = 'PENDING' | 'CONFIRMED' | 'FAILED' | 'VOIDED';
-export type FiscalProviderSetting = 'none' | 'openapi' | 'mock';
+export type FiscalProviderSetting = 'none' | 'openapi' | 'mock' | 'rt-local';
 
 export interface FiscalDocument {
   id: number;

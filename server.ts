@@ -6136,7 +6136,7 @@ app.get('/reports/fiscal-documents/:id', authenticate, requirePermission('fiscal
 
 const FISCAL_PROVIDER_KEY = 'fiscal_provider';
 const FISCAL_VAT_NUMBER_KEY = 'fiscal_vat_number';
-const FISCAL_PROVIDERS = ['none', 'openapi', 'mock'] as const;
+const FISCAL_PROVIDERS = ['none', 'openapi', 'mock', 'rt-local'] as const;
 
 async function getFiscalProviderSetting(tenantId: number): Promise<string> {
     try {
@@ -6430,6 +6430,23 @@ async function emitFiscalDocForBill(tenantId: number, billId: number, userId: nu
     );
     if ((claim.rowCount ?? 0) === 0) return { skipped: 'in_progress' };
 
+    // rt-local: l'RT Epson sta nella LAN del ristorante, il backend no —
+    // in mezzo c'è la coda dell'agente di stampa. Il documento resta
+    // PENDING; l'ack del job (kind RT_FISCALE) lo porta a CONFIRMED col
+    // numero del registratore, o a FAILED con l'errore fiscale.
+    if (providerName === 'rt-local') {
+        await queryWithRetry(
+            `INSERT INTO print_jobs (tenant_id, kind, payload, printer, created_by_user_id)
+             VALUES ($1, 'RT_FISCALE', $2, 'rt', $3)`,
+            [tenantId, JSON.stringify({ fiscal_doc_id: doc.id, bill_id: billId, payload }), userId]
+        );
+        const pending = await queryWithRetry(
+            `SELECT ${FISCAL_DOC_COLUMNS} FROM fiscal_documents WHERE id = $1`, [doc.id]
+        );
+        try { socketService?.broadcastToAll(tenantId, 'fiscal:updated', { bill_id: billId, doc: pending.rows[0] }); } catch (_) {}
+        return { doc: pending.rows[0] };
+    }
+
     let finalRow: any;
     try {
         const driver = getFiscalDriver(providerName);
@@ -6652,7 +6669,9 @@ app.post('/bills/:id/fiscal-docs', authenticate, requirePermission('payments:ful
         // Il payload trasmesso viaggia nella risposta dell'emissione manuale:
         // è quello che si guarda quando lo scontrino non torna.
         const reqRs = await queryWithRetry(`SELECT request FROM fiscal_documents WHERE id = $1`, [outcome.doc.id]);
-        res.status(outcome.doc.status === 'CONFIRMED' ? 200 : 502).json({ doc: outcome.doc, request: reqRs.rows[0]?.request ?? null });
+        // PENDING è un esito valido per rt-local: il registratore risponde
+        // via ack dell'agente, l'UI segue dal socket.
+        res.status(outcome.doc.status === 'FAILED' ? 502 : 200).json({ doc: outcome.doc, request: reqRs.rows[0]?.request ?? null });
     } catch (err: any) {
         console.error('POST /bills/:id/fiscal-docs error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
@@ -6679,8 +6698,8 @@ app.post('/bills/:id/fiscal-docs/:fid/void', authenticate, requirePermission('pa
         // PRIMA della guardia sul provider_ref: quello di cassa non ne ha
         // uno — il numero vive in doc_number — e senza questo ordine il 409
         // uscirebbe col messaggio sbagliato.
-        if (doc.provider === 'passepartout' || doc.provider === 'external_rt') {
-            return res.status(409).json({ error: 'Scontrino emesso dalla cassa: si annulla dal registratore, non da qui' });
+        if (doc.provider === 'passepartout' || doc.provider === 'external_rt' || doc.provider === 'rt-local') {
+            return res.status(409).json({ error: 'Scontrino emesso dal registratore: l\'annullo si fa dall\'RT (o dalla cassa), non da qui' });
         }
         if (doc.status !== 'CONFIRMED' || !doc.provider_ref) {
             return res.status(409).json({ error: `Solo un documento confermato si può annullare (stato ${doc.status})` });
@@ -7022,6 +7041,11 @@ app.post('/bills/:id/invoices', authenticate, requirePermission('payments:full')
         const providerName = await getFiscalProviderSetting(req.tenantId!);
         if (providerName === 'none') {
             return res.status(409).json({ error: 'Nessun provider fiscale configurato (Impostazioni → Scontrino elettronico)', reason: 'not_configured' });
+        }
+        if (providerName === 'rt-local') {
+            // Il registratore emette scontrini, non fatture SDI: la fattura
+            // resta sul binario cloud (o sul gestionale, durante il ponte).
+            return res.status(409).json({ error: 'Col registratore di cassa la fattura non parte da qui: serve il provider cloud', reason: 'rt_local_no_invoice' });
         }
         const sellerRes = await resolveFiscalSeller(req.tenantId!);
         if ('missing' in sellerRes) {
@@ -30467,6 +30491,54 @@ app.post('/print-agent/jobs/:id/ack', printAgentAuth, async (req: any, res) => {
     try {
         const id = Number(req.params.id);
         if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+
+        // RT_FISCALE: l'ack non chiude solo il job, chiude il DOCUMENTO.
+        // ok + result.doc_number → CONFIRMED col numero del registratore;
+        // ok:false → FAILED subito (niente 20 tentativi ciechi: un errore
+        // fiscale si guarda, il retry è il bottone "Riprova" che accoda un
+        // job nuovo). Un doc già VOIDED/CONFIRMED non si tocca.
+        const jobRs = await queryWithRetry(
+            `SELECT kind, payload FROM print_jobs WHERE id = $1 AND tenant_id = $2`,
+            [id, req.printAgentTenantId]
+        );
+        const job = jobRs.rows[0];
+        if (job?.kind === 'RT_FISCALE') {
+            const docId = Number(job.payload?.fiscal_doc_id);
+            const billId = Number(job.payload?.bill_id);
+            const ok = Boolean(req.body?.ok);
+            const result = req.body?.result ?? {};
+            const docNumber = typeof result.doc_number === 'string' && result.doc_number.trim() ? result.doc_number.trim().slice(0, 30) : null;
+            // Niente parametri riusati in contesti di tipo diverso (42P08):
+            // i valori condizionali si calcolano qui, il SQL resta piatto.
+            await queryWithRetry(
+                `UPDATE print_jobs SET status = $2, printed_at = $3, error = $4
+                 WHERE id = $1 AND tenant_id = $5`,
+                [id, ok ? 'PRINTED' : 'FAILED', ok ? new Date() : null,
+                 ok ? null : String(req.body?.error ?? 'errore RT').slice(0, 500), req.printAgentTenantId]
+            );
+            if (Number.isFinite(docId)) {
+                const upd = await queryWithRetry(
+                    `UPDATE fiscal_documents
+                     SET status = CASE WHEN status <> 'PENDING' THEN status ELSE $2 END,
+                         doc_number = COALESCE($3, doc_number),
+                         provider_ref = COALESCE($3, provider_ref),
+                         response = $4::jsonb,
+                         confirmed_at = CASE WHEN status = 'PENDING' AND $6 THEN CURRENT_TIMESTAMP ELSE confirmed_at END,
+                         error = $5
+                     WHERE id = $1 AND tenant_id = $7
+                     RETURNING ${FISCAL_DOC_COLUMNS}`,
+                    [docId, ok ? 'CONFIRMED' : 'FAILED', docNumber,
+                     JSON.stringify({ data: { document_number: docNumber, ...result } }),
+                     ok ? null : String(req.body?.error ?? 'errore RT').slice(0, 1000),
+                     ok, req.printAgentTenantId]
+                );
+                if (upd.rows[0]) {
+                    try { socketService?.broadcastToAll(req.printAgentTenantId, 'fiscal:updated', { bill_id: billId, doc: upd.rows[0] }); } catch (_) {}
+                }
+            }
+            return res.json({ ok: true });
+        }
+
         if (req.body?.ok) {
             // Stesso perimetro del poll: solo i job del tenant dell'agente.
             await queryWithRetry(
