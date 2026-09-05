@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowUpDown, Ban, ChevronUp, Loader2, Minus, Plus, Send, SendHorizontal, Trash2 } from 'lucide-react';
+import { ArrowUpDown, Ban, ChevronUp, ChevronsUpDown, Loader2, Minus, Plus, Send, SendHorizontal, Trash2 } from 'lucide-react';
 import type { OrderItem, OrderWithItems } from '../../types';
 import { StatusPill } from '../ds';
 import {
@@ -40,18 +40,18 @@ interface CourseListProps {
   /** Annulla la chiamata di un'uscita già lanciata (finché la cucina non
    *  ha iniziato): torna in coda, le card spariscono dai monitor. */
   onUnfire?: (courseNo: number) => void;
-  /** Sposta una riga in bozza su un'altra uscita. SENZA BOTTONE in riga dal
-   *  collaudo al telefono («due icone con le frecce» — la maniglia di riga
-   *  doppiava quella di testata e affollava la riga): oggi si sposta
-   *  l'uscita intera; il cablaggio resta per ridare un ingresso per-riga. */
+  /** Sposta una riga in bozza su un'altra uscita («gli antipasti li
+   *  prendiamo in prima»). Solo bozze: oltre l'invio si richiama o storna. */
   onMoveLine?: (line: CartLine) => void;
   /** Come sopra, per una bozza rimasta sul server. */
   onMoveItem?: (item: OrderItem) => void;
   /** Sposta TUTTE le bozze dell'uscita su un'altra. */
   onMoveCourse?: (courseNo: number) => void;
   /** Il drop del trascinamento: stesse operazioni del selettore, via gesto.
-   *  Il ⇅ della testata fa da maniglia: tocco secco = selettore, tenuto e
-   *  mosso = drag. */
+   *  Due maniglie con due icone APPOSTA diverse (collaudo al telefono: due
+   *  icone uguali si confondevano): il ⇅ in fondo alla riga muove la riga,
+   *  la ⇕ a cavallo dell'angolo in alto a sinistra muove l'uscita intera.
+   *  Tocco secco = selettore, tenuto e mosso = drag. */
   onDragLine?: (key: string, to: number) => void;
   onDragItem?: (item: OrderItem, to: number) => void;
   onDragCourse?: (from: number, to: number) => void;
@@ -81,12 +81,15 @@ export const CourseList: React.FC<CourseListProps> = ({
   };
 
   return (
-  <div className="flex flex-col gap-2">
+  <div className="flex flex-col gap-5 pt-4">
     {Array.from({ length: MAX_COURSES }, (_, i) => i + 1).map(n => {
       const serverRows = itemsForCourse(order, n);
       const draftRows = cartForCourse(cart, n);
       const status = courseStatus(order, n);
       const sent = isSent(status);
+      // «In corso in cucina»: la card si accende — bordo pieno più spesso e
+      // fondo tinto (famiglia arriving, la stessa della pillola «in cucina»).
+      const fired = status === 'FIRED';
       const current = n === course;
       const badge = COURSE_BADGE[status];
       // Righe rimaste in coda dentro un'uscita GIÀ partita (aggiunte dopo il
@@ -127,66 +130,67 @@ export const CourseList: React.FC<CourseListProps> = ({
         );
       }
 
+      // La testata «dentro» la card non c'è più: etichetta, stato e maniglia
+      // dell'uscita vivono A CAVALLO del bordo (metà sopra, metà sotto) —
+      // ridisegno chiesto da Marco al collaudo. Ne resta una riga interna
+      // solo quando ci sono azioni (Chiama, torna in bozza, annulla).
+      const hasActions = (unfirable && !!onUnfire) || (strandedQueued && !!onFire) || status === 'QUEUED';
+
       return (
         <section
           key={n}
           data-course-drop={n}
-          className={`rounded-[16px] p-3 transition-opacity ${
-            sent ? 'bg-[var(--ds-surface-row)]' : 'bg-[var(--ds-surface)]'
+          className={`relative rounded-[16px] p-3 pt-4 transition-opacity ${
+            fired
+              ? 'border-2 border-[var(--ds-arriving-solid)] bg-[var(--ds-arriving-tint)]'
+              : sent
+                ? 'border border-[var(--ds-border-strong)] bg-[var(--ds-surface-row)]'
+                : 'border border-[var(--ds-border-strong)] bg-[var(--ds-surface)]'
           } ${isDropTarget ? 'ring-2 ring-[var(--ds-action-bg)]' : current ? 'ring-2 ring-[var(--ds-action-bg)]' : ''} ${
             dimmedTarget || isDragSource ? 'opacity-60' : ''
           }`}
         >
-          <div className="flex items-center gap-2">
-            {/* «1ª uscita | sposta» a sinistra, la maniglia ⇅ a destra:
-                layout chiesto da Marco — la riga piatto era troppo affollata
-                e il nome usciva tagliato. Il testo apre il selettore, la
-                maniglia trascina (e al tocco secco apre lo stesso selettore). */}
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <button
-                type="button"
-                onClick={() => onCourse(n)}
-                aria-pressed={current}
-                className="min-w-0 flex-shrink truncate text-left text-[14px] font-semibold text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-              >
-                {courseLabel(n)}
-              </button>
-              {courseMovable && (
-                <>
-                  <span aria-hidden className="h-3.5 w-px flex-shrink-0 bg-[var(--ds-border-strong)]" />
-                  {/* Bersaglio gonfiato oltre il testo (margini negativi +
-                      padding): a 13px nudi il dito mancava e il tocco cadeva
-                      sull'etichetta accanto — «sposta non funziona» al
-                      collaudo su iPhone. */}
-                  <button
-                    type="button"
-                    onClick={() => onMoveCourse!(n)}
-                    disabled={busy}
-                    title="Sposta tutte le righe non inviate su un'altra uscita"
-                    className="-mx-2 -my-3 flex-shrink-0 px-2 py-3 text-[13px] font-medium text-[var(--ds-text-muted)] underline decoration-dotted transition-opacity hover:opacity-70 disabled:opacity-40"
-                  >
-                    sposta
-                  </button>
-                </>
-              )}
-            </div>
-            {sent && <StatusPill tone={badge.tone}>{badge.text}</StatusPill>}
-            {!sent && serverRows.length > 0 && (
-              <StatusPill tone="pending">da inviare</StatusPill>
-            )}
-            {courseMovable && (
-              <button
-                type="button"
-                onClick={() => onMoveCourse!(n)}
-                disabled={busy}
-                aria-label={`Sposta la ${courseLabel(n)} su un'altra uscita`}
-                title="Tocca per scegliere l'uscita, trascina per spostare"
-                {...grip({ kind: 'course', from: n, count: draftRows.length + serverRows.filter(i => i.status === 'DRAFT').length })}
-                className={stepper}
-              >
-                <ArrowUpDown size={15} />
-              </button>
-            )}
+          {/* La maniglia dell'uscita intera, nell'angolo in alto a sinistra:
+              icona ⇕ APPOSTA diversa dal ⇅ di riga (due icone uguali si
+              confondevano al telefono). Tocco = selettore, trascinata = drag. */}
+          {courseMovable && (
+            <button
+              type="button"
+              onClick={() => onMoveCourse!(n)}
+              disabled={busy}
+              aria-label={`Sposta la ${courseLabel(n)} su un'altra uscita`}
+              title="Tocca per scegliere l'uscita, trascina per spostare l'uscita intera"
+              {...grip({ kind: 'course', from: n, count: draftRows.length + serverRows.filter(i => i.status === 'DRAFT').length })}
+              className="absolute left-3 top-0 z-10 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] ring-1 ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              <ChevronsUpDown size={15} />
+            </button>
+          )}
+          {/* La pill col nome dell'uscita, a cavallo del bordo in alto al
+              centro. Il tocco la elegge uscita corrente, come l'etichetta
+              di prima. */}
+          <button
+            type="button"
+            onClick={() => onCourse(n)}
+            aria-pressed={current}
+            className={`absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full px-3 py-1 text-[12px] font-semibold ring-1 ring-inset transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+              current
+                ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] ring-transparent'
+                : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] ring-[var(--ds-border-strong)]'
+            }`}
+          >
+            {courseLabel(n)}
+          </button>
+          {(sent || serverRows.length > 0) && (
+            <span className="absolute right-3 top-0 z-10 -translate-y-1/2">
+              {sent
+                ? <StatusPill tone={badge.tone}>{badge.text}</StatusPill>
+                : <StatusPill tone="pending">da inviare</StatusPill>}
+            </span>
+          )}
+
+          {hasActions && (
+          <div className="flex items-center justify-end gap-2">
             {/* «annulla chiamata» quiet come «torna in bozza»: è il rimedio
                 del tavolo sbagliato, non un verbo del servizio normale. */}
             {unfirable && onUnfire && (
@@ -239,9 +243,10 @@ export const CourseList: React.FC<CourseListProps> = ({
               </>
             )}
           </div>
+          )}
 
           {(serverRows.length > 0 || draftRows.length > 0) && (
-            <div className="mt-2 flex flex-col gap-1">
+            <div className={`${hasActions ? 'mt-2' : 'mt-1'} flex flex-col gap-1`}>
               {serverRows.map(i => (
                 <div key={i.id} className={`flex items-center gap-2 text-[15px] transition-opacity ${
                   dnd.drag?.kind === 'item' && dnd.drag.item.id === i.id ? 'opacity-40' : ''
@@ -281,6 +286,19 @@ export const CourseList: React.FC<CourseListProps> = ({
                       className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       <Ban size={15} />
+                    </button>
+                  )}
+                  {i.status === 'DRAFT' && i.line_kind === 'DISH' && onMoveItem && (
+                    <button
+                      type="button"
+                      onClick={() => onMoveItem(i)}
+                      disabled={busy}
+                      aria-label={`Sposta ${i.name_snapshot} su un'altra uscita`}
+                      title="Tocca per scegliere l'uscita, trascina per spostare"
+                      {...grip({ kind: 'item', item: i, from: i.course_no })}
+                      className={stepper}
+                    >
+                      <ArrowUpDown size={15} />
                     </button>
                   )}
                 </div>
@@ -343,6 +361,18 @@ export const CourseList: React.FC<CourseListProps> = ({
                     >
                       <Plus size={15} />
                     </button>
+                    {onMoveLine && (
+                      <button
+                        type="button"
+                        onClick={() => onMoveLine(l)}
+                        aria-label={`Sposta ${l.dish.name} su un'altra uscita`}
+                        title="Tocca per scegliere l'uscita, trascina per spostare"
+                        {...grip({ kind: 'line', key: l.key, label: l.dish.name, qty: l.qty, from: l.course_no })}
+                        className={stepper}
+                      >
+                        <ArrowUpDown size={15} />
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
