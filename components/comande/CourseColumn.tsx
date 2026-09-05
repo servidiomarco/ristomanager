@@ -101,6 +101,8 @@ export const CourseList: React.FC<CourseListProps> = ({
       // il ring dell'uscita corrente («qui»), le uscite partite si smorzano
       // (non sono bersagli), la sorgente resta come placeholder attenuato.
       const dragging = dnd.drag != null;
+      const courseMovable = !sent && !!onMoveCourse
+        && (draftRows.length > 0 || serverRows.some(i => i.status === 'DRAFT'));
       const isDropTarget = dragging && dnd.overCourse === n;
       const isDragSource = dnd.drag?.kind === 'course' && dnd.drag.from === n;
       const dimmedTarget = dragging && sent;
@@ -134,32 +136,49 @@ export const CourseList: React.FC<CourseListProps> = ({
           }`}
         >
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => onCourse(n)}
-              aria-pressed={current}
-              className="min-w-0 flex-1 truncate text-left text-[14px] font-semibold text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-            >
-              {courseLabel(n)}
-            </button>
+            {/* «1ª uscita | sposta» a sinistra, la maniglia ⇅ a destra:
+                layout chiesto da Marco — la riga piatto era troppo affollata
+                e il nome usciva tagliato. Il testo apre il selettore, la
+                maniglia trascina (e al tocco secco apre lo stesso selettore). */}
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onCourse(n)}
+                aria-pressed={current}
+                className="min-w-0 flex-shrink truncate text-left text-[14px] font-semibold text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              >
+                {courseLabel(n)}
+              </button>
+              {courseMovable && (
+                <>
+                  <span aria-hidden className="h-3.5 w-px flex-shrink-0 bg-[var(--ds-border-strong)]" />
+                  <button
+                    type="button"
+                    onClick={() => onMoveCourse!(n)}
+                    disabled={busy}
+                    title="Sposta tutte le righe non inviate su un'altra uscita"
+                    className="flex-shrink-0 text-[13px] font-medium text-[var(--ds-text-muted)] underline decoration-dotted transition-opacity hover:opacity-70 disabled:opacity-40"
+                  >
+                    sposta
+                  </button>
+                </>
+              )}
+            </div>
             {sent && <StatusPill tone={badge.tone}>{badge.text}</StatusPill>}
             {!sent && serverRows.length > 0 && (
               <StatusPill tone="pending">da inviare</StatusPill>
             )}
-            {/* Sposta l'uscita intera: solo finché è in bozza — dopo, prima
-                la si riporta in bozza. Quiet come «torna in bozza»: è un
-                rimedio, non un verbo del giro normale. */}
-            {!sent && onMoveCourse
-              && (draftRows.length > 0 || serverRows.some(i => i.status === 'DRAFT')) && (
+            {courseMovable && (
               <button
                 type="button"
-                onClick={() => onMoveCourse(n)}
+                onClick={() => onMoveCourse!(n)}
                 disabled={busy}
+                aria-label={`Sposta la ${courseLabel(n)} su un'altra uscita`}
                 title="Tocca per scegliere l'uscita, trascina per spostare"
                 {...grip({ kind: 'course', from: n, count: draftRows.length + serverRows.filter(i => i.status === 'DRAFT').length })}
-                className="flex-shrink-0 select-none text-[13px] font-medium text-[var(--ds-text-muted)] underline decoration-dotted transition-opacity hover:opacity-70 disabled:opacity-40"
+                className={stepper}
               >
-                sposta
+                <ArrowUpDown size={15} />
               </button>
             )}
             {/* «annulla chiamata» quiet come «torna in bozza»: è il rimedio
@@ -306,13 +325,19 @@ export const CourseList: React.FC<CourseListProps> = ({
                     {euro(cartUnitCents(l) * l.qty)}
                   </span>
                   <div className="flex flex-shrink-0 items-center gap-1">
+                    {/* L'ultimo pezzo si toglie con il cestino, non con il
+                        meno — stesso patto del menu. Fonde due bottoni in
+                        uno: la riga era troppo affollata e il nome usciva
+                        tagliato. */}
                     <button
                       type="button"
-                      onClick={() => onBump(l.key, -1)}
-                      aria-label={`Uno in meno di ${l.dish.name}`}
-                      className={stepper}
+                      onClick={() => (l.qty === 1 ? onDrop(l.key) : onBump(l.key, -1))}
+                      aria-label={l.qty === 1 ? `Togli ${l.dish.name}` : `Uno in meno di ${l.dish.name}`}
+                      className={l.qty === 1
+                        ? 'inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]'
+                        : stepper}
                     >
-                      <Minus size={15} />
+                      {l.qty === 1 ? <Trash2 size={15} /> : <Minus size={15} />}
                     </button>
                     <span className="w-6 text-center text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
                       {l.qty}
@@ -337,14 +362,6 @@ export const CourseList: React.FC<CourseListProps> = ({
                         <ArrowUpDown size={15} />
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => onDrop(l.key)}
-                      aria-label={`Togli ${l.dish.name}`}
-                      className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-critical-text)] transition-colors hover:bg-[var(--ds-critical-tint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                    >
-                      <Trash2 size={15} />
-                    </button>
                   </div>
                 </div>
               ))}
