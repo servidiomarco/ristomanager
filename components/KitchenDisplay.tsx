@@ -1043,17 +1043,20 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           const isWaiting = (r: KdsComingItem) => r.status === 'QUEUED'
             || (r.status === 'SENT' && r.station_start_at != null && new Date(r.station_start_at).getTime() > now);
           const group = (list: KdsComingItem[]) => {
-            const m = new Map<string, { table: string; course: number; qty: number }>();
+            const m = new Map<string, { table: string; course: number; qty: number; mods: string }>();
             for (const r of list) {
               const table = r.table_name ?? '—';
-              const key = `${table}:${r.course_no}`;
-              const cur = m.get(key) ?? { table, course: r.course_no, qty: 0 };
+              // Le varianti entrano in chiave: «al sangue» e «ben cotta»
+              // sono due lavori diversi, come sulle righe della card.
+              const mods = (r.modifiers ?? []).map(mm => mm.name).join(', ');
+              const key = `${table}:${r.course_no}:${mods}`;
+              const cur = m.get(key) ?? { table, course: r.course_no, qty: 0, mods };
               cur.qty += r.qty;
               m.set(key, cur);
             }
             return [...m.values()].sort((a, b) => a.table.localeCompare(b.table, undefined, { numeric: true }) || a.course - b.course);
           };
-          const Section = ({ label, dot, list }: { label: string; dot: string; list: { table: string; course: number; qty: number }[] }) => (
+          const Section = ({ label, dot, list }: { label: string; dot: string; list: { table: string; course: number; qty: number; mods: string }[] }) => (
             <div>
               <div className="mb-1.5 flex items-center gap-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">
                 <span aria-hidden className={`h-2 w-2 rounded-full ${dot}`} />
@@ -1064,10 +1067,15 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
               ) : (
                 <div className="flex flex-col items-start gap-1.5">
                   {list.map(e => (
-                    <span key={`${e.table}-${e.course}`} className="inline-flex items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3 py-1.5 text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                    <span key={`${e.table}-${e.course}-${e.mods}`} className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-full bg-[var(--ds-surface-row)] px-3 py-1.5 text-[15px] font-semibold text-[var(--ds-text-primary)]">
                       <span className="tabular-nums">{e.qty}×</span>
                       T{e.table}
                       <span className="text-[13px] font-medium text-[var(--ds-text-muted)]">{courseShort(e.course)}</span>
+                      {/* La cottura nella famiglia delle varianti, come la
+                          riga «↳» sulla card: è la stessa informazione. */}
+                      {e.mods && (
+                        <span className="text-[13px] font-medium text-[var(--ds-pending-text)]">{e.mods}</span>
+                      )}
                     </span>
                   ))}
                 </div>
