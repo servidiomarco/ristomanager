@@ -1019,4 +1019,41 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         expect(fullBar.some((r: any) => r.course_no === BAR)).toBe(true);
         await db.end();
     });
+
+    it('il monitor senza partita non vede le uscite Bar e Dolci', async () => {
+        // Bibite e dolci senza partita non sono lavoro di nessun monitor: li
+        // prepara il banco (stampa + passe). Prima finivano sullo schermo
+        // senza partita, in mezzo ai piatti veri.
+        const BAR = 99, DOLCI = 98;
+        const food = await api().post('/dishes').set(bearer(token)).send({
+            name: 'Frittura Neutra Test', description: null, price: 12, category: 'Neutra KDS Test', allergens: null,
+        });
+        const drink = await api().post('/dishes').set(bearer(token)).send({
+            name: 'Acqua Neutra Test', description: null, price: 2, category: 'Bar Collaudo', allergens: null,
+        });
+        const dessert = await api().post('/dishes').set(bearer(token)).send({
+            name: 'Panna Cotta Neutra Test', description: null, price: 5, category: 'Dolci Collaudo', allergens: null,
+        });
+
+        await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'AUTO_ALL' });
+        const orderId = await nuovaComanda();
+        await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [
+                { dish_id: food.body.id, qty: 1, course_no: 1 },
+                { dish_id: drink.body.id, qty: 1, course_no: BAR },
+                { dish_id: dessert.body.id, qty: 1, course_no: DOLCI },
+            ],
+        });
+        await api().post(`/orders/${orderId}/send`).set(bearer(token)).send({});
+
+        // Coda, barra dei piatti e card a binario: il piatto sì, Bar e Dolci mai.
+        const queue = await api().get('/kds/queue').set(bearer(token));
+        expect(queue.status).toBe(200);
+        const mine = queue.body.items.filter((i: any) => i.order_id === orderId);
+        expect(mine.some((i: any) => i.name_snapshot === 'Frittura Neutra Test')).toBe(true);
+        expect(mine.some((i: any) => i.course_no === BAR || i.course_no === DOLCI)).toBe(false);
+        const fullRows = queue.body.full.filter((r: any) => r.order_id === orderId);
+        expect(fullRows.some((r: any) => r.course_no === BAR || r.course_no === DOLCI)).toBe(false);
+        expect(queue.body.coming.some((c: any) => c.course_no === BAR || c.course_no === DOLCI)).toBe(false);
+    });
 });

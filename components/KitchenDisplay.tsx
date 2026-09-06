@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { isBarCourse, isDessertCourse, ordinal } from '../utils/courses';
+import { isBarCourse, isDessertCourse, isOffSequenceCourse, ordinal } from '../utils/courses';
 import { Bell, BellOff, BellRing, Check, ChevronRight, CookingPot, Loader2, MessagesSquare, Pencil, Play, Search, TriangleAlert, Users, WifiOff, X } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
 import { useAuth } from '../contexts/AuthContext';
@@ -582,12 +582,13 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           allergens: col.allergens,
           cols: [],
           upcomingCols: [],
-          // L'Uscita Bar non entra nel binario delle partite di cucina: agli
-          // antipasti non interessa se sulla comanda c'è acqua, vino o birra.
-          // Resta solo dove è lavoro proprio (righe di questa partita) o sul
-          // monitor senza partita, che vede tutto per definizione.
+          // Bar e Dolci non entrano nel binario delle partite di cucina: agli
+          // antipasti non interessa se sulla comanda c'è acqua, vino o un
+          // tiramisù. Restano solo dove sono lavoro proprio (righe di questa
+          // partita); il monitor senza partita non le vede mai. Il server già
+          // non le manda — il filtro copre il transitorio di un server vecchio.
           rows: full.filter(r => r.order_id === col.order_id
-            && (stationId == null || !isBarCourse(r.course_no) || r.station_id === stationId)),
+            && (!isOffSequenceCourse(r.course_no) || (stationId != null && r.station_id === stationId))),
         });
       }
       map.get(col.order_id)!.cols.push(col);
