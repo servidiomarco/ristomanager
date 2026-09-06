@@ -357,7 +357,7 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 
 ## Stampa termica e print agent
 
-- **Stampanti termiche di rete** censite dalle Impostazioni (nome, IP, porta); un **agente di stampa** sulla rete del ristorante ritira i lavori dal cloud — aggiungere una stampante diventa effettivo in pochi secondi, e lo stato online/offline dell'agente è visibile in Impostazioni.
+- **Stampanti termiche di rete** censite dalle Impostazioni (nome, IP, porta, **cicalino alla stampa** attivabile per stampante — la termica di cucina suona quando arriva la comanda, il banco resta muto); un **agente di stampa** sulla rete del ristorante ritira i lavori dal cloud — aggiungere una stampante diventa effettivo in pochi secondi, e lo stato online/offline dell'agente è visibile in Impostazioni.
 - Si stampano: **comande per partita** (ognuna sulla propria stampante), **preconti** (con acconto già versato, residuo vero e riepilogo IVA), **QR del conto al tavolo**; instradamento per funzione configurabile.
 - Tentativi automatici in caso di errore; una stampante inceppata non blocca le altre stampe.
 - Dal browser si stampano inoltre: lista prenotazioni, inventario, lista della spesa, report HACCP, scheda banchetto.
@@ -571,6 +571,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-06 | Comande, Cucina e Passe | Cicalino alla stampa attivabile per stampante (campanella in Impostazioni → Sala & Cucina): l'agente antepone il beep ESC/POS a ogni lavoro verso le termiche col flag acceso — la cucina sente la comanda che arriva. |
 | 2026-09-06 | Tutta l'app | Spento il pull-to-refresh di Chrome Android: trascinare il dito in giù a comanda aperta ricaricava la pagina e buttava fuori dalle comande (su iPhone non succede); lo scroll delle liste resta identico. |
 | 2026-09-06 | Comande, Cucina e Passe | La griglia tavoli segna le comande aperte con una chiamata sola a /orders/open invece di una sonda sui primi 60 tavoli: con più di 60 tavoli la comanda aperta a fondo lista spariva dalla griglia a ogni riavvio dell'app (e la bozza non inviata sembrava persa — era lì, bastava riaprire il tavolo). |
 | 2026-09-05 | Comande, Cucina e Passe | Le varianti firmate passano dalla scala ±5 a ripetizioni (n×prezzo) a una scala d'intensità a 4 gradini con le parole in comanda: «+ Nduja» (addebito), «Molta Nduja» (stesso addebito), «Senza Nduja» (sconto), «Poca Nduja» (gratis); Molta/Poca accordate al nome. Le righe già battute conservano etichette e prezzi di allora. |

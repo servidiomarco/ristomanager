@@ -177,6 +177,7 @@ import {
 } from './services/blacklistPolicy.js';
 import { toTitleCase } from './utils/text.js';
 import { clampModifierN, signedModifierLabel, signedModifierDelta } from './utils/modifierScale.js';
+import { BAR_COURSE_NO } from './utils/courses.js';
 import { getRomeDatePart, getRomeTimePart } from './utils/reservationTime.js';
 import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
 import {
@@ -3822,7 +3823,7 @@ const MENU_CAT_PREFS_KEY = 'menu_category_prefs';
 // la spunta in modale applica in blocco e ogni piatto resta libero dopo.
 // manual: categoria creata a mano dalla modale — esiste anche senza piatti,
 // e la pulizia dei fantasmi nel PUT non deve toccarla.
-type MenuCategoryPref = { enabled: boolean; sort: number; menu_ids?: number[]; modifier_group_ids?: number[]; manual?: boolean };
+type MenuCategoryPref = { enabled: boolean; sort: number; menu_ids?: number[]; modifier_group_ids?: number[]; manual?: boolean; bar?: boolean };
 
 async function getMenuCategoryPrefs(tenantId: number): Promise<Record<string, MenuCategoryPref>> {
     const rs = await queryWithRetry(
@@ -3889,6 +3890,9 @@ app.get('/menu/categories', authenticate, async (req, res) => {
                 // Gruppi varianti di categoria: i piatti nuovi nascono con
                 // questi; null = nessuna spunta di categoria mai fatta.
                 modifier_group_ids: prefs[name]?.modifier_group_ids ?? null,
+                // Categoria da bar: sul palmare i suoi piatti vanno dritti
+                // nell'uscita Bar.
+                bar: prefs[name]?.bar === true,
             })),
         });
     } catch (err: any) {
@@ -3916,6 +3920,7 @@ app.put('/menu/categories', authenticate, requirePermission('menu:full'), async 
             prefs[name] = { enabled: c.enabled !== false, sort: i };
             if (Array.isArray(existing[name]?.menu_ids)) prefs[name].menu_ids = existing[name].menu_ids;
             if (Array.isArray(existing[name]?.modifier_group_ids)) prefs[name].modifier_group_ids = existing[name].modifier_group_ids;
+            if (existing[name]?.bar) prefs[name].bar = true;
             if (existing[name]?.manual) prefs[name].manual = true;
         });
         // Le categorie manuali sopravvivono anche a un client che non le
@@ -4236,6 +4241,42 @@ app.put('/menu/category-modifier-groups', authenticate, requirePermission('menu:
         res.json({ ok: true, piatti: applied });
     } catch (err: any) {
         console.error('PUT /menu/category-modifier-groups error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// La spunta «bar» su una categoria: sul palmare i suoi piatti (bibite, vini,
+// amari) vanno dritti nell'uscita Bar alla battuta. Vive nel blob prefs come
+// le altre proprietà di categoria; il palmare la riceve dal catalogue.
+app.put('/menu/category-bar', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const category = typeof req.body?.category === 'string' ? req.body.category.trim() : '';
+        const bar = req.body?.bar;
+        if (!category || typeof bar !== 'boolean') {
+            return res.status(400).json({ error: 'servono category e bar (true/false)' });
+        }
+        if (!(await menuCategoryExists(req.tenantId!, category))) {
+            return res.status(404).json({ error: 'Categoria non trovata' });
+        }
+        const prefs = await getMenuCategoryPrefs(req.tenantId!);
+        const next: MenuCategoryPref = prefs[category] ?? { enabled: true, sort: Number.MAX_SAFE_INTEGER };
+        if (bar) next.bar = true; else delete next.bar;
+        prefs[category] = next;
+        await saveMenuCategoryPrefs(req.tenantId!, prefs);
+        // Due eventi, due pubblici: il CRM ricarica le categorie, i palmari
+        // il catalogue (è da lì che leggono le prefs).
+        try { socketService?.broadcastToAll(req.tenantId!, 'dish:synced', { categoria: category, bar }); } catch (_) {}
+        emitCatalogueUpdated(req.tenantId!, { categoria: category, bar });
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.DISH, 0, category,
+                { category_bar: bar }
+            ).catch(() => {});
+        }
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('PUT /menu/category-bar error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -26138,6 +26179,10 @@ async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: n
             [JSON.stringify({
                 order_id: orderId,
                 course_no: courseNo,
+                // L'agente di stampa storico compone «{n}a USCITA» da solo:
+                // l'etichetta pronta serve al Bar (e a qualunque uscita
+                // futura fuori dalla numerazione).
+                course_label: courseNo === BAR_COURSE_NO ? 'BAR' : `${courseNo}a USCITA`,
                 table_name: tableName,
                 covers,
                 station_name: station.name,
@@ -27059,18 +27104,25 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
         }
 
         const proposedCourses = [...new Set(queued.rows.map((r: any) => r.course_no))].sort((a, b) => a - b);
+        // Il Bar è fuori dalla sequenza delle portate: bibite e vini partono
+        // subito in ogni modalità automatica, e non contano come «qualcosa in
+        // cucina» né come «prima uscita» per la logica qui sotto. In MANUAL
+        // resta al passe come tutto il resto.
+        const kitchenCourses = proposedCourses.filter((c: number) => c !== BAR_COURSE_NO);
+        const barProposed = proposedCourses.includes(BAR_COURSE_NO);
         // AUTO_NEXT lancia la prima uscita proposta solo se il tavolo non ha
         // già qualcosa in cucina: se c'è, la prossima partirà dal servito.
         // Non "solo la 1" come AUTO_FIRST: un dolce ordinato a fine pasto,
         // a tavolo ormai vuoto di piatti, deve partire da solo.
         let autoNextFirst: number[] = [];
-        if (mode === 'AUTO_NEXT' && proposedCourses.length > 0) {
+        if (mode === 'AUTO_NEXT' && kitchenCourses.length > 0) {
             const inFlight = await client.query(
                 `SELECT 1 FROM order_items
-                 WHERE order_id = $1 AND status IN ('SENT','PREPARING','READY') LIMIT 1`,
-                [orderId]
+                 WHERE order_id = $1 AND status IN ('SENT','PREPARING','READY')
+                   AND course_no <> $2 LIMIT 1`,
+                [orderId, BAR_COURSE_NO]
             );
-            if (inFlight.rows.length === 0) autoNextFirst = [proposedCourses[0]];
+            if (inFlight.rows.length === 0) autoNextFirst = [kitchenCourses[0]];
         }
         // Un'uscita che aveva GIÀ righe lanciate e ne riceve altre è una
         // modifica della card a video, non una card nuova: le righe nuove
@@ -27087,8 +27139,8 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
         );
         const alreadyFired: number[] = prev.rows.map((r: any) => r.course_no);
         const byMode = mode === 'AUTO_ALL' ? proposedCourses
-                     : mode === 'AUTO_FIRST' ? proposedCourses.filter(c => c === 1)
-                     : mode === 'AUTO_NEXT' ? autoNextFirst
+                     : mode === 'AUTO_FIRST' ? proposedCourses.filter(c => c === 1 || c === BAR_COURSE_NO)
+                     : mode === 'AUTO_NEXT' ? (barProposed ? [...autoNextFirst, BAR_COURSE_NO] : autoNextFirst)
                      : [];
         const toFire = [...new Set([...byMode, ...alreadyFired])].sort((a, b) => a - b);
         const fired: number[] = [];
@@ -28114,9 +28166,12 @@ app.post('/orders/:id/courses/:n/serve', authenticate, requireAnyPermission('ord
         let nextFired: number | null = null;
         let nextItems: any[] = [];
         if (mode === 'AUTO_NEXT') {
+            // Il Bar non è la «prossima uscita» di nessuno: se è in coda
+            // (recall a mano) resta lì finché non lo si chiama.
             const nq = await client.query(
-                `SELECT MIN(course_no) AS n FROM order_items WHERE order_id = $1 AND status = 'QUEUED'`,
-                [orderId]
+                `SELECT MIN(course_no) AS n FROM order_items
+                 WHERE order_id = $1 AND status = 'QUEUED' AND course_no <> $2`,
+                [orderId, BAR_COURSE_NO]
             );
             if (nq.rows[0]?.n != null) {
                 const n = Number(nq.rows[0].n);
@@ -30642,7 +30697,7 @@ app.get('/print-agent/config', printAgentAuth, async (req: any, res) => {
         // L'agente si autentica col token d'installazione, non col JWT:
         // il tenant è quello risolto dal token (printAgentAuth).
         const rows = await queryWithRetry(
-            `SELECT name, host, port FROM printers
+            `SELECT name, host, port, buzzer FROM printers
              WHERE tenant_id = $1 AND kind = 'THERMAL' AND is_active ORDER BY name`,
             [req.printAgentTenantId]
         );
@@ -30801,7 +30856,7 @@ app.get('/sala/config', authenticate, async (req, res) => {
         const [fireMode, stations, printers, jobs, printRoutes, categories, catMap] = await Promise.all([
             getCourseFireMode(req.tenantId!),
             queryWithRetry(`SELECT id, name, color, sort_order, is_active, printer FROM stations WHERE tenant_id = $1 ORDER BY sort_order, id`, [req.tenantId!]),
-            queryWithRetry(`SELECT id, name, host, port, kind, is_active, notes FROM printers WHERE tenant_id = $1 ORDER BY kind, name`, [req.tenantId!]),
+            queryWithRetry(`SELECT id, name, host, port, kind, is_active, buzzer, notes FROM printers WHERE tenant_id = $1 ORDER BY kind, name`, [req.tenantId!]),
             queryWithRetry(`SELECT status, COUNT(*)::int AS n FROM print_jobs WHERE tenant_id = $1 AND status IN ('PENDING','FAILED') GROUP BY status`, [req.tenantId!]),
             getPrintRoutes(req.tenantId!),
             queryWithRetry(`SELECT DISTINCT category FROM dishes WHERE tenant_id = $1 AND category IS NOT NULL AND category <> '' ORDER BY category`, [req.tenantId!]),
@@ -30980,10 +31035,11 @@ app.post('/sala/printers', authenticate, requirePermission('settings:full'), asy
         if (!/^[a-z0-9.\-]+$/i.test(host)) return res.status(400).json({ error: 'Indirizzo non valido' });
         if (!Number.isInteger(port) || port < 1 || port > 65535) return res.status(400).json({ error: 'Porta non valida' });
         const ins = await queryWithRetry(
-            `INSERT INTO printers (tenant_id, name, host, port, kind, notes)
-             VALUES ($6, $1, $2, $3, $4, $5)
-             RETURNING id, name, host, port, kind, is_active, notes`,
-            [name, host, port, kind, req.body?.notes ? String(req.body.notes).slice(0, 300) : null, req.tenantId!]
+            `INSERT INTO printers (tenant_id, name, host, port, kind, buzzer, notes)
+             VALUES ($7, $1, $2, $3, $4, $5, $6)
+             RETURNING id, name, host, port, kind, is_active, buzzer, notes`,
+            [name, host, port, kind, req.body?.buzzer === true,
+             req.body?.notes ? String(req.body.notes).slice(0, 300) : null, req.tenantId!]
         );
         res.status(201).json(ins.rows[0]);
     } catch (err: any) {
@@ -31006,11 +31062,13 @@ app.put('/sala/printers/:id', authenticate, requirePermission('settings:full'), 
                 host = COALESCE($2, host),
                 port = COALESCE($3, port),
                 is_active = COALESCE($4, is_active),
-                notes = COALESCE($5, notes)
-             WHERE id = $1 AND tenant_id = $6
-             RETURNING id, name, host, port, kind, is_active, notes`,
+                buzzer = COALESCE($5, buzzer),
+                notes = COALESCE($6, notes)
+             WHERE id = $1 AND tenant_id = $7
+             RETURNING id, name, host, port, kind, is_active, buzzer, notes`,
             [id, host, port,
              typeof req.body?.is_active === 'boolean' ? req.body.is_active : null,
+             typeof req.body?.buzzer === 'boolean' ? req.body.buzzer : null,
              req.body?.notes != null ? String(req.body.notes).slice(0, 300) : null,
              req.tenantId!]
         );
@@ -31086,7 +31144,7 @@ const salaSnapshot = async (tenantId: number): Promise<any> => {
     const [fireMode, stations, printers] = await Promise.all([
         getCourseFireMode(tenantId),
         queryWithRetry(`SELECT name, color, printer, is_active FROM stations WHERE tenant_id = $1 ORDER BY sort_order, id`, [tenantId]),
-        queryWithRetry(`SELECT name, host, port, kind, is_active, notes FROM printers WHERE tenant_id = $1 ORDER BY id`, [tenantId]),
+        queryWithRetry(`SELECT name, host, port, kind, is_active, buzzer, notes FROM printers WHERE tenant_id = $1 ORDER BY id`, [tenantId]),
     ]);
     const catMap = await queryWithRetry(
         `SELECT cs.category, s.name AS station_name
@@ -31173,14 +31231,14 @@ app.post('/sala/profiles/:id/activate', authenticate, requirePermission('setting
         for (const pr of Array.isArray(payload?.printers) ? payload.printers : []) {
             if (!PRINTER_NAME_RE.test(String(pr?.name ?? ''))) continue;
             await client.query(
-                `INSERT INTO printers (tenant_id, name, host, port, kind, is_active, notes)
-                 VALUES ($7, $1, $2, $3, $4, $5, $6)
+                `INSERT INTO printers (tenant_id, name, host, port, kind, is_active, buzzer, notes)
+                 VALUES ($8, $1, $2, $3, $4, $5, $6, $7)
                  ON CONFLICT (tenant_id, name) DO UPDATE SET
                     host = EXCLUDED.host, port = EXCLUDED.port, kind = EXCLUDED.kind,
-                    is_active = EXCLUDED.is_active, notes = EXCLUDED.notes`,
+                    is_active = EXCLUDED.is_active, buzzer = EXCLUDED.buzzer, notes = EXCLUDED.notes`,
                 [pr.name, String(pr.host ?? ''), Number(pr.port) || 9100,
                  pr.kind === 'FISCAL' ? 'FISCAL' : 'THERMAL', pr.is_active !== false,
-                 pr.notes ?? null, req.tenantId!]
+                 pr.buzzer === true, pr.notes ?? null, req.tenantId!]
             );
         }
         for (const st of Array.isArray(payload?.stations) ? payload.stations : []) {

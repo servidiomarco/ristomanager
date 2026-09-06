@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { CookingPot, ChevronDown, Loader2, Monitor, Printer, Plus, Trash2, Wifi, WifiOff, Receipt } from 'lucide-react';
+import { Bell, BellOff, CookingPot, ChevronDown, Loader2, Monitor, Printer, Plus, Trash2, Wifi, WifiOff, Receipt } from 'lucide-react';
 import { getFeatureFlags, updateFeatureFlags, FeatureFlags } from '../services/apiService';
 import {
   getSalaConfig, setFireMode, createStation, updateStation,
@@ -375,6 +375,20 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                   <span className="text-[13px] font-medium text-[var(--ds-text-primary)]">{p.name}</span>
                   <span className="text-[12px] text-[var(--ds-text-muted)] ml-2">{p.host}:{p.port}</span>
                 </div>
+                {/* Cicalino alla stampa: il flag arriva all'agente LAN via
+                    config e antepone il beep ESC/POS a ogni job. Acceso in
+                    cucina («la comanda si deve sentire»), spento al banco. */}
+                <button type="button" disabled={!canEdit || saving || !p.is_active}
+                  aria-pressed={p.buzzer}
+                  title={p.buzzer ? 'Cicalino alla stampa acceso: tocca per spegnerlo' : 'Cicalino alla stampa spento: tocca per accenderlo'}
+                  onClick={() => act(() => updatePrinter(p.id, { buzzer: !p.buzzer }))}
+                  className={`inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:opacity-50 ${
+                    p.buzzer
+                      ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
+                      : 'text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
+                  }`}>
+                  {p.buzzer ? <Bell size={14} /> : <BellOff size={14} />}
+                </button>
                 <button type="button" disabled={!canEdit || saving || testingId === p.id || !p.is_active}
                   onClick={async () => {
                     setTestingId(p.id);
