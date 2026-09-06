@@ -11,6 +11,8 @@ describe('sconto sul conto', () => {
     let tavolo: number;
     let tavoloManuale: number;
     let billId: number;
+    let roomId: number;
+    let dishId: number;
 
     beforeAll(async () => {
         token = await ownerToken();
@@ -26,6 +28,7 @@ describe('sconto sul conto', () => {
             height: 600,
         });
         expect(room.status).toBe(201);
+        roomId = room.body.id;
         for (const [name, x, setId] of [
             ['SC1', 100, (id: number) => { tavolo = id; }],
             ['SC2', 300, (id: number) => { tavoloManuale = id; }],
@@ -45,6 +48,7 @@ describe('sconto sul conto', () => {
             allergens: null,
         });
         expect(dish.status).toBe(201);
+        dishId = dish.body.id;
 
         const order = await api().post('/orders').set(bearer(token)).send({ table_id: tavolo });
         expect(order.status).toBe(201);
@@ -139,6 +143,46 @@ describe('sconto sul conto', () => {
         });
         expect(giusto.status).toBe(200);
         expect(giusto.body.bill.total_cents).toBe(2100);
+    });
+
+    it('sconto pari all\'intero conto: totale zero, niente centesimo fantasma, chiusura saldata', async () => {
+        // Tavolo suo: sul tavolo del primo test la chiusura riuserebbe il
+        // conto già mezzo incassato dello stesso servizio.
+        const table = await api().post('/tables').set(bearer(token)).send({
+            name: 'SC3', shape: 'SQUARE', seats: 4, x: 500, y: 100,
+            room_id: roomId, status: 'FREE',
+        });
+        expect(table.status).toBe(201);
+
+        const order = await api().post('/orders').set(bearer(token)).send({ table_id: table.body.id });
+        expect(order.status).toBe(201);
+        const orderId = order.body.order.id as number;
+        await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [{ dish_id: dishId, qty: 1 }],
+        });
+        await api().post(`/orders/${orderId}/send`).set(bearer(token)).send({});
+        const closed = await api().post(`/orders/${orderId}/close`).set(bearer(token)).send({});
+        expect(closed.status).toBe(200);
+        const zeroBillId = closed.body.bill.id as number;
+        expect(closed.body.bill.total_cents).toBe(1250);
+
+        // Il vecchio CHECK > 0 lasciava qui 1 centesimo da incassare che non
+        // esisteva (T206, 6/09/2026): ora il conto scende davvero a zero.
+        const offerto = await api().post(`/bills/${zeroBillId}/discount`).set(bearer(token)).send({
+            discount_type: 'AMOUNT', discount_value: 12.5, reason: 'offre la casa',
+        });
+        expect(offerto.status).toBe(200);
+        expect(offerto.body.bill.total_cents).toBe(0);
+
+        const open = await api().get('/bills/open').set(bearer(token));
+        const row = open.body.bills.find((b: any) => b.id === zeroBillId);
+        expect(row.residual_cents).toBe(0);
+
+        // Si chiude senza registrare incassi e risulta saldato per intero.
+        const chiuso = await api().post(`/bills/${zeroBillId}/close`).set(bearer(token)).send({});
+        expect(chiuso.status).toBe(200);
+        expect(chiuso.body.status).toBe('CLOSED');
+        expect(chiuso.body.total_cents).toBe(0);
     });
 
     it('un conto aperto a mano (senza comanda) non si sconta: il totale è digitato', async () => {
