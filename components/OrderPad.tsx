@@ -12,7 +12,7 @@ import { getTableMerges } from '../services/apiService';
 import {
   ordersApiService, getMenuCatalogue, newIdempotencyKey, closeOrder, updateOrder, fireCourse, deleteEmptyOrder, deleteWholeOrder,
   voidItem, setOrderDiscount, transferOrder, getOpenOrderTables,
-  type MenuCatalogue, type NewOrderItem, type CloseOrderResult,
+  type MenuCatalogue, type NewOrderItem, type CloseOrderResult, type SendOrderResult,
 } from '../services/ordersApiService';
 import { BillSheet, InvoiceDialog } from './pagamenti/BillSheet';
 import { StampaCopiaButton } from './pagamenti/StampaCopiaButton';
@@ -154,6 +154,15 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   // mentre il tavolo aspetta.
   const [justClosed, setJustClosed] = useState<CloseOrderResult['bill'] | null>(null);
   const [openTables, setOpenTables] = useState<Set<number>>(new Set());
+  // Comande CREATE da questo dispositivo: solo queste si disfano uscendo dal
+  // tavolo. Un altro palmare stava componendo (il suo carrello è locale, la
+  // comanda sul server sembra intonsa): entrare a guardare e tornare indietro
+  // gliela cancellava sotto i piedi, e il suo Invia moriva con «Comanda non
+  // trovata» (Tav. 19, servizio del 6/09).
+  const createdOrdersRef = useRef<Set<number>>(new Set());
+  // Specchio dell'id comanda aperta per i listener socket montati su altre
+  // dipendenze (l'avviso di comanda eliminata lo legge senza rimontarsi).
+  const openOrderIdRef = useRef<number | null>(null);
   // Conti attivi non incassati nel servizio selezionato, per tavolo: la
   // comanda è chiusa ma il tavolo non è libero finché non si paga. Toccare
   // un tavolo in questo stato apre IL CONTO (stato pagamenti compreso),
@@ -343,6 +352,11 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           { table_id: id, reservation_id: res?.id, covers },
           newIdempotencyKey(),
         );
+        // `reused` = la comanda esisteva già (creata da un altro palmare che
+        // ha vinto la corsa): non è nostra, uscendo non va disfatta.
+        if (!(view as OrderWithItems & { reused?: boolean }).reused) {
+          createdOrdersRef.current.add(view.order.id);
+        }
       }
       setOrder(view);
       setTableId(id);
@@ -698,11 +712,37 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         // raddoppiare la comanda in cucina.
         idempotency_key: l.idem,
       }));
-      const key = newIdempotencyKey();
-      if (payload.length > 0) await ordersApiService.addItems(order.order.id, payload, key);
-      const sent = await ordersApiService.send(
-        order.order.id, scope === 'course' ? course : undefined, key,
-      );
+      const sendTo = async (orderId: number): Promise<SendOrderResult> => {
+        const key = newIdempotencyKey();
+        if (payload.length > 0) await ordersApiService.addItems(orderId, payload, key);
+        return ordersApiService.send(orderId, scope === 'course' ? course : undefined, key);
+      };
+      let sent: SendOrderResult;
+      let recovered = false;
+      try {
+        sent = await sendTo(order.order.id);
+      } catch (err: any) {
+        // 404: la comanda è sparita sotto i piedi — disfatta o eliminata da
+        // un altro dispositivo mentre qui si componeva (Tav. 19, 6/09). Le
+        // righe sono nel carrello locale: se ne apre un'altra sullo stesso
+        // tavolo e si rimanda da soli, invece di far ribattere tutto. Le
+        // chiavi di idempotenza per riga restano le stesse, quindi anche
+        // questo retry non raddoppia mai la cucina.
+        if (err?.status !== 404 || order.order.table_id == null) throw err;
+        let freshView = await ordersApiService.getOrderByTable(order.order.table_id, serviceQuery);
+        if (!freshView) {
+          freshView = await ordersApiService.openOrder(
+            { table_id: order.order.table_id, reservation_id: reservation?.id, covers: order.order.covers },
+            newIdempotencyKey(),
+          );
+          if (!(freshView as OrderWithItems & { reused?: boolean }).reused) {
+            createdOrdersRef.current.add(freshView.order.id);
+          }
+        }
+        dropCartDraft(order.order.id);
+        sent = await sendTo(freshView.order.id);
+        recovered = true;
+      }
       setOrder(sent);
       setCart(prev => (scope === 'course' ? prev.filter(l => l.course_no !== course) : []));
       setComandaOpen(false);
@@ -712,10 +752,14 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       setCourse(Math.min(MAX_COURSES, (maxSent.length ? Math.max(...maxSent) : 0) + 1));
       const fired = sent.fired_courses.length;
       const queued = sent.queued_courses.length;
+      // «Riaperta»: l'invio è passato, ma su una comanda nuova — se un
+      // collega aveva eliminato apposta quella vecchia, deve saperlo.
       setFlash(
-        fired && queued ? `Uscita in cucina; ${queued === 1 ? "un'altra è" : `${queued} sono`} in attesa al passe`
-        : fired ? 'Comanda in cucina'
-        : 'Proposta al passe — in attesa di lancio'
+        (recovered ? 'Comanda riaperta · ' : '') + (
+          fired && queued ? `Uscita in cucina; ${queued === 1 ? "un'altra è" : `${queued} sono`} in attesa al passe`
+          : fired ? 'Comanda in cucina'
+          : 'Proposta al passe — in attesa di lancio'
+        )
       );
     } catch (err: any) {
       setError(err?.data?.error ?? err?.message ?? 'Invio non riuscito');
@@ -848,9 +892,15 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   // guardia vera sta sul server (409 su qualunque comanda non vuota): qui
   // il controllo evita solo la chiamata inutile. Con una bozza nel
   // carrello la comanda resta viva: la bozza è lavoro da non perdere.
+  //
+  // Si disfa SOLO ciò che questo dispositivo ha creato in questa sessione:
+  // una comanda altrui che sembra vuota è quasi sempre un collega che sta
+  // ancora componendo sul suo palmare (il carrello è locale fino all'Invia)
+  // — cancellargliela faceva fallire il suo invio e ribattere tutto.
   const leaveTable = () => {
     const o = order;
     const untouched = o != null && cart.length === 0
+      && createdOrdersRef.current.has(o.order.id)
       && o.items.every(i => isSystemLine(i))
       && o.courses.every(c => c.status === 'PENDING');
     if (untouched) {
@@ -1058,6 +1108,12 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       if (p?.table_id != null) {
         setOpenTables(prev => { const n = new Set(prev); n.delete(p.table_id); return n; });
       }
+      // Era LA comanda aperta su questo palmare: dirlo subito, non alla
+      // prossima Invia. Il carrello è locale e sopravvive; l'invio riapre
+      // una comanda nuova da solo.
+      if (p?.order_id != null && p.order_id === openOrderIdRef.current) {
+        setError('Comanda eliminata da un altro dispositivo — le righe non inviate restano qui e ripartono con Invia.');
+      }
     };
     socket.on('order:deleted', onOrderDeleted);
     return () => {
@@ -1074,6 +1130,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   // il prossimo invio o una riapertura. Filtrato sulla comanda aperta: gli
   // eventi delle altre non devono far scaricare niente.
   const openOrderId = order?.order.id ?? null;
+  useEffect(() => { openOrderIdRef.current = openOrderId; }, [openOrderId]);
   useEffect(() => {
     const socket = socketClient.getSocket();
     if (!socket || openOrderId == null) return;
