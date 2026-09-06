@@ -496,8 +496,8 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         // arrivano anche loro, con la partita addosso — il monitor le
         // attenua invece di nasconderle.
         expect(row.items).toEqual(expect.arrayContaining([
-            { name: 'Tagliata Collaudo', qty: 1, station_id: griglia.body.id },
-            { name: 'Patate Ciclo', qty: 2, station_id: fritti.body.id },
+            { name: 'Tagliata Collaudo', qty: 1, station_id: griglia.body.id, weight_grams: null },
+            { name: 'Patate Ciclo', qty: 2, station_id: fritti.body.id, weight_grams: null },
         ]));
         expect(row.items).toHaveLength(2);
     });

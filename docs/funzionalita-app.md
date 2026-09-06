@@ -287,6 +287,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 - **Le altre partite della stessa uscita** in piede di card: un pallino colorato per partita (in coda / in lavorazione / pronta) con nome e numero di piatti — la pasta sa quanto manca alla griglia prima di calare. Un tocco espande le loro righe in sola lettura; mai mischiate con le proprie, che si toccano per segnare pronto.
 - **Consegnate**: accanto a "In lavorazione" c'è l'archivio del servito, **raggruppato per comanda** — una card per tavolo con le sue uscite in ordine e la comanda **intera**: i piatti della propria partita in chiaro, quelli delle altre attenuati col nome della partita — la risposta a "il 12 dice che manca il piatto: l'abbiamo mandato?". Sola consultazione: la card lascia il monitor solo al servito, mai al pronto; segnarla servita da un monitor la chiude su tutti.
 - I messaggi del canale **Cucina** della chat staff compaiono come **striscia sul monitor** (con la campana delle comande): "finito il branzino" arriva senza aprire la chat.
+- Nelle **uscite compresse in una riga** (uscite servite o di altre partite sulla card, uscite in arrivo, Consegnate) i piatti uguali si sommano; le righe **al peso** si sommano solo a **parità di peso**, col peso nel nome («2× Tagliata · 1 kg») — pesi diversi restano voci distinte.
 
 **Passe (expediter)**
 - Vista di sincronia delle uscite: **Chiama** un'uscita quando la sala è pronta, ricalcola i tempi di partenza, quattro modalità di lancio (tutte automatiche, solo la prima, a consumo — la successiva parte quando la precedente è servita —, manuale).
@@ -575,6 +576,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-06 | Comande, Cucina e Passe | Nelle uscite compresse in una riga sul monitor cucina (uscite della card, in arrivo, Consegnate) le righe al peso si sommano solo a parità di peso, col peso nel nome («2× Tagliata · 1 kg»): pesi diversi restano voci distinte invece di collassare in un conteggio muto. |
 | 2026-09-06 | Comande, Cucina e Passe | Presenza sul tavolo: aprendo un tavolo su cui un altro palmare sta componendo, un banner dice chi c'è e da quanto («Ci sta lavorando anche Rosa · da 3′»), aggiornato in tempo reale. Nessun blocco: si continua a lavorare, ma nessuno batte più gli stessi piatti senza sapere dell'altro. |
 | 2026-09-06 | Fiscalità | «Stampa proforma»: il conto chiuso con proforma si stampa sulla termica anche in un secondo momento — bottone nell'esito di chiusura (Cassa e pannello Incasso) e nella scheda del conto in Pagamenti. Stesso foglio del preconto, titolo «PROFORMA», senza QR di pagamento; con l'agente di stampa non aggiornato il titolo resta «PRECONTO». |
 | 2026-09-06 | Impostazioni · Pagamenti | Coperto e servizio si regolano dalle impostazioni (card «Coperto e servizio» in Pagamenti): coperto fisso a persona e servizio percentuale sui piatti, applicati come righe del conto; a zero le righe non compaiono. Prima si potevano cambiare solo a mano sul database. |
