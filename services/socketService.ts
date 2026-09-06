@@ -3,14 +3,34 @@ import { Server as HTTPServer } from 'http';
 import type { Reservation, Table, Room, Dish, BanquetMenu, UserRole, TableMerge, TableHiddenOverride, RoomClosedOverride } from '../types.js';
 import { AuthService, TokenPayload } from '../auth/authService.js';
 import { isAllowedOrigin } from './corsAllowlist.js';
+import pool from '../db.js';
 
 // Extended socket type with user data
 interface AuthenticatedSocket extends Socket {
   user?: TokenPayload;
 }
 
+/** Un palmare che sta componendo su un tavolo, per il banner di presenza. */
+interface PadOccupant {
+  socket_id: string;
+  name: string;
+  since: number;
+}
+
 export class SocketService {
   private io: SocketIOServer;
+
+  // Presenza sui tavoli del palmare comande: chi sta componendo dove.
+  // Effimera per costruzione — vive nella memoria del processo e muore col
+  // socket: niente DB, niente lock da rubare o da far scadere. Serve solo
+  // al banner «ci sta lavorando anche X»: la corsa del 6/09 ha mostrato che
+  // due camerieri sullo stesso tavolo non si vedevano, e uno cancellava o
+  // ribatteva il lavoro dell'altro senza saperlo.
+  // tenant → tavolo → socketId → occupante.
+  private padPresence = new Map<number, Map<number, Map<string, PadOccupant>>>();
+  // users.full_name per il banner, con fallback alla parte locale
+  // dell'email. Cache di processo: i nomi non cambiano a metà servizio.
+  private padNames = new Map<number, string>();
 
   constructor(httpServer: HTTPServer) {
     this.io = new SocketIOServer(httpServer, {
@@ -119,10 +139,78 @@ export class SocketService {
         console.log(`[${socket.id}] Unsubscribed from tenant:${tenantId}:station:${stationId}`);
       });
 
+      // Presenza del palmare comande. L'enter risponde nell'ack con chi c'è
+      // già (il nuovo arrivato deve saperlo SUBITO, non al prossimo evento);
+      // ogni variazione va in broadcast al tenant come orderpad:presence.
+      socket.on('orderpad:enter', async (tableId: number, ack?: (others: PadOccupant[]) => void) => {
+        if (!Number.isFinite(tableId)) return;
+        this.padLeaveAll(tenantId, socket.id);
+        const name = await this.padDisplayName(socket.user!);
+        // Disconnesso durante la query del nome: il disconnect ha già pulito,
+        // scrivere ora lascerebbe un fantasma «ci sta lavorando» per sempre.
+        if (!socket.connected) return;
+        this.padTable(tenantId, tableId).set(socket.id, { socket_id: socket.id, name, since: Date.now() });
+        this.padBroadcast(tenantId, tableId);
+        if (typeof ack === 'function') {
+          ack(this.padOccupants(tenantId, tableId).filter(o => o.socket_id !== socket.id));
+        }
+      });
+
+      socket.on('orderpad:leave', (tableId: number) => {
+        if (!Number.isFinite(tableId)) return;
+        if (this.padTable(tenantId, tableId).delete(socket.id)) {
+          this.padBroadcast(tenantId, tableId);
+        }
+      });
+
       socket.on('disconnect', () => {
         console.log(`[${new Date().toISOString()}] Client disconnected: ${socket.id}`);
+        this.padLeaveAll(tenantId, socket.id);
       });
     });
+  }
+
+  private padTable(tenantId: number, tableId: number): Map<string, PadOccupant> {
+    let tables = this.padPresence.get(tenantId);
+    if (!tables) { tables = new Map(); this.padPresence.set(tenantId, tables); }
+    let occ = tables.get(tableId);
+    if (!occ) { occ = new Map(); tables.set(tableId, occ); }
+    return occ;
+  }
+
+  private padOccupants(tenantId: number, tableId: number): PadOccupant[] {
+    return Array.from(this.padPresence.get(tenantId)?.get(tableId)?.values() ?? []);
+  }
+
+  private padBroadcast(tenantId: number, tableId: number) {
+    this.io.to(this.tenantRoom(tenantId)).emit('orderpad:presence', {
+      table_id: tableId,
+      occupants: this.padOccupants(tenantId, tableId),
+    });
+  }
+
+  /** Toglie il socket da ogni tavolo (un palmare compone su uno alla volta;
+   *  su disconnect la presenza deve morire col socket, o resta un fantasma
+   *  «ci sta lavorando» per sempre). */
+  private padLeaveAll(tenantId: number, socketId: string) {
+    const tables = this.padPresence.get(tenantId);
+    if (!tables) return;
+    for (const [tableId, occ] of tables) {
+      if (occ.delete(socketId)) this.padBroadcast(tenantId, tableId);
+      if (occ.size === 0) tables.delete(tableId);
+    }
+  }
+
+  private async padDisplayName(user: TokenPayload): Promise<string> {
+    const cached = this.padNames.get(user.userId);
+    if (cached) return cached;
+    let name = user.email.split('@')[0];
+    try {
+      const r = await pool.query(`SELECT full_name FROM users WHERE id = $1`, [user.userId]);
+      if (r.rows[0]?.full_name) name = String(r.rows[0].full_name);
+    } catch { /* fallback: parte locale dell'email */ }
+    this.padNames.set(user.userId, name);
+    return name;
   }
 
   // Fase B5: tutti i broadcast di dominio passano da qui — mai io.emit
