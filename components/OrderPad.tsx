@@ -38,7 +38,7 @@ import { ReasonDialog } from './comande/ReasonDialog';
 import { DiscountDialog } from './comande/DiscountDialog';
 import { buildRows, buildMergeGroups, makeReservationForTable, type TableFilter } from './comande/tablesView';
 import {
-  COURSE_BADGE, MAX_COURSES, cartForCourse, cartKey, cartSum, courseLabel, euro,
+  BAR_COURSE_NO, COURSE_BADGE, MAX_COURSES, cartForCourse, cartKey, cartSum, courseLabel, euro,
   isSent, isSystemLine, rowCount,
   type CartLine, type RepeatLine,
   saveCartDraft, restoreCartDraft, dropCartDraft,
@@ -102,6 +102,15 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       // menu_ids assente = anagrafica di un server vecchio: il piatto resta.
       && (cartaMenuId == null || !Array.isArray(d.menu_ids) || d.menu_ids.includes(cartaMenuId)));
   }, [allDishes, catalogue, cartaMenuId]);
+  // Categorie da bar (spunta «bar» in modale Categorie): i loro piatti vanno
+  // dritti nell'uscita Bar alla battuta, qualunque uscita sia selezionata —
+  // bibite e vini non stanno nella sequenza delle portate.
+  const barCategories = useMemo(() => new Set(
+    Object.entries(catalogue?.category_prefs ?? {})
+      .filter(([, p]) => (p as { bar?: boolean }).bar === true)
+      .map(([name]) => name)
+  ), [catalogue]);
+  const showBar = barCategories.size > 0;
   const [tableId, setTableId] = useState<number | null>(null);
   const [order, setOrder] = useState<OrderWithItems | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -349,7 +358,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       setDishQuery('');
       // Nuova uscita = quella dopo l'ultima già mandata, così il cameriere
       // non deve ricordarsi a che punto era.
-      const maxSent = view.courses.filter(c => c.status !== 'PENDING').map(c => c.course_no);
+      // Il Bar non conta: un tavolo che ha preso solo l'aperitivo riparte
+      // dalla 1ª uscita, non dalla 6ª.
+      const maxSent = view.courses.filter(c => c.status !== 'PENDING' && c.course_no !== BAR_COURSE_NO).map(c => c.course_no);
       setCourse(maxSent.length ? Math.min(MAX_COURSES, Math.max(...maxSent) + 1) : 1);
     } catch (err: any) {
       setError(err?.message ?? 'Impossibile aprire la comanda');
@@ -450,7 +461,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       .map(id => comps.find(c => c.id === id))
       .filter((c): c is NonNullable<typeof c> => c != null);
     pushLine(
-      dish, course, 1, chosen,
+      dish, dish.category && barCategories.has(dish.category) ? BAR_COURSE_NO : course, 1, chosen,
       [...chosen.map(e => signedModifierLabel(byId.get(e.id)!.name, e.n, byId.get(e.id)!.single)), ...removed.map(c => `Senza ${c.name}`)],
       chosen.reduce((s, e) => s + signedModifierDelta(modifierDeltaCents(dish, byId.get(e.id)!), e.n), 0)
         + removed.reduce((s, c) => s + c.removal_delta_cents, 0),
@@ -615,14 +626,17 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
 
   // Il meno sulla riga del menu tocca solo la riga senza varianti: quale delle
   // due cotture togliere non lo sa nessuno, e quella si toglie dalla comanda.
-  const removeFromCart = (dish: Dish) => bumpCart(cartKey(dish.id, course, []), -1);
+  const removeFromCart = (dish: Dish) => bumpCart(
+    cartKey(dish.id, dish.category && barCategories.has(dish.category) ? BAR_COURSE_NO : course, []), -1);
 
   /** Ripete una riga già ordinata nell'uscita in composizione. Non tocca il
    *  server: diventa una bozza come tutte le altre, e parte con Invia. */
   const repeatLine = (line: RepeatLine, qty: number) => {
     if (!line.dish) return;
+    // Un altro giro di vino torna al Bar, non nell'uscita in composizione.
+    const to = line.dish.category && barCategories.has(line.dish.category) ? BAR_COURSE_NO : course;
     pushLine(
-      line.dish, course, qty, line.modifiers, line.modifier_labels, line.modifier_delta_cents,
+      line.dish, to, qty, line.modifiers, line.modifier_labels, line.modifier_delta_cents,
       undefined, line.removed_component_ids,
     );
   };
@@ -691,7 +705,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       setComandaOpen(false);
       // Si riparte dalla prima uscita libera: il cameriere non deve ricordarsi
       // dove era arrivato, e non riapre per sbaglio un'uscita già partita.
-      const maxSent = sent.courses.filter(c => c.status !== 'PENDING').map(c => c.course_no);
+      const maxSent = sent.courses.filter(c => c.status !== 'PENDING' && c.course_no !== BAR_COURSE_NO).map(c => c.course_no);
       setCourse(Math.min(MAX_COURSES, (maxSent.length ? Math.max(...maxSent) : 0) + 1));
       const fired = sent.fired_courses.length;
       const queued = sent.queued_courses.length;
@@ -1311,7 +1325,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   for (const l of courseLines) if (l.dish.category) markedCategories.add(l.dish.category);
 
   const listProps = {
-    order, cart, course, onCourse: setCourse, busy,
+    order, cart, course, onCourse: setCourse, busy, showBar,
     onBump: bumpCart, onDrop: dropLine,
     onVoid: (i: OrderItem) => setVoidTarget(i),
     onRecall: recall,
@@ -1487,7 +1501,12 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           bodyClassName="p-5 sm:p-6"
         >
           <div className="grid grid-cols-3 gap-2">
-            {Array.from({ length: MAX_COURSES }, (_, i) => i + 1).map(n => {
+            {[
+              ...Array.from({ length: MAX_COURSES }, (_, i) => i + 1),
+              // Il Bar come bersaglio: per il vino battuto a mano in 2ª, o
+              // per svuotare il Bar verso una portata.
+              ...(showBar || moveFor.from === BAR_COURSE_NO ? [BAR_COURSE_NO] : []),
+            ].map(n => {
               const status = order.courses.find(c => c.course_no === n)?.status ?? 'PENDING';
               const sent = isSent(status);
               return (
@@ -1588,7 +1607,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       <div className={`flex-shrink-0 ${density === 'compact' ? 'mt-2' : 'mt-4'}`}>
         {density !== 'compact' && <SectionHeader>Uscita</SectionHeader>}
         <div className={density === 'compact' ? '' : 'mt-1'}>
-          <CourseChips order={order} cart={cart} course={course} onCourse={setCourse} />
+          <CourseChips order={order} cart={cart} course={course} onCourse={setCourse} showBar={showBar} />
         </div>
       </div>
 
@@ -1637,6 +1656,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       />
 
       <ComandaSheet
+        showBar={showBar}
         open={comandaOpen}
         onClose={() => setComandaOpen(false)}
         order={order}

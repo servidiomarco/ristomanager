@@ -26182,7 +26182,7 @@ async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: n
                 // L'agente di stampa storico compone «{n}a USCITA» da solo:
                 // l'etichetta pronta serve al Bar (e a qualunque uscita
                 // futura fuori dalla numerazione).
-                course_label: courseNo === BAR_COURSE_NO ? 'BAR' : `${courseNo}a USCITA`,
+                course_label: courseNo === BAR_COURSE_NO ? 'Bar' : `${courseNo}a USCITA`,
                 table_name: tableName,
                 covers,
                 station_name: station.name,

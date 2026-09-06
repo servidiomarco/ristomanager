@@ -3,6 +3,7 @@ import { ArrowUpDown, Ban, ChevronUp, ChevronsUpDown, Loader2, Pencil, Plus, Sen
 import type { OrderItem, OrderWithItems } from '../../types';
 import { StatusPill } from '../ds';
 import {
+  BAR_COURSE_NO,
   COURSE_BADGE, MAX_COURSES, cartForCourse, cartSum, cartUnitCents, courseLabel,
   courseStatus, euro, isSent, itemsForCourse, rowCount, rowCountLabel, weightLabel,
   type CartLine,
@@ -55,6 +56,9 @@ interface CourseListProps {
   onDragLine?: (key: string, to: number) => void;
   onDragItem?: (item: OrderItem, to: number) => void;
   onDragCourse?: (from: number, to: number) => void;
+  /** Sezione «Bar» in testa alla comanda: c'è quando il ristorante ha
+   *  categorie da bar, o quando l'uscita Bar ha già righe. */
+  showBar?: boolean;
 }
 
 const stepper =
@@ -62,7 +66,7 @@ const stepper =
 
 export const CourseList: React.FC<CourseListProps> = ({
   order, cart, course, onCourse, busy, onBump, onDrop, onVoid, onRecall, onFire, onEditLine, onUnfire,
-  onMoveLine, onMoveItem, onMoveCourse, onDragLine, onDragItem, onDragCourse,
+  onMoveLine, onMoveItem, onMoveCourse, onDragLine, onDragItem, onDragCourse, showBar,
 }) => {
   const dnd = useCourseDrag({
     disabled: busy,
@@ -80,9 +84,18 @@ export const CourseList: React.FC<CourseListProps> = ({
     return wired ? dnd.handleProps(p) : {};
   };
 
+  // Il Bar sta in testa: le bibite escono prima degli antipasti. La sezione
+  // compare anche senza flag quando l'uscita ha righe (comunque arrivate).
+  const courseNos = [
+    ...(showBar || course === BAR_COURSE_NO
+      || itemsForCourse(order, BAR_COURSE_NO).length > 0
+      || cartForCourse(cart, BAR_COURSE_NO).length > 0
+        ? [BAR_COURSE_NO] : []),
+    ...Array.from({ length: MAX_COURSES }, (_, i) => i + 1),
+  ];
   return (
   <div className="flex flex-col gap-5 pt-4">
-    {Array.from({ length: MAX_COURSES }, (_, i) => i + 1).map(n => {
+    {courseNos.map(n => {
       const serverRows = itemsForCourse(order, n);
       const draftRows = cartForCourse(cart, n);
       const status = courseStatus(order, n);
@@ -454,7 +467,7 @@ export const SendFooter: React.FC<SendFooterProps> = ({
         type="button"
         onClick={onSend}
         disabled={busy || courseCount === 0}
-        className="inline-flex h-12 flex-shrink-0 items-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-6 text-[17px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        className="inline-flex h-12 flex-shrink-0 items-center gap-2 rounded-full bg-[var(--ds-surface)] px-6 text-[17px] font-semibold text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         {busy ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
         Invia
@@ -465,7 +478,7 @@ export const SendFooter: React.FC<SendFooterProps> = ({
         type="button"
         onClick={onSendAll}
         disabled={busy}
-        className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-[var(--ds-surface)] text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-[var(--ds-action-bg)] text-[15px] font-medium text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         <SendHorizontal size={16} aria-hidden />
         Invia tutto · {euro(allTotal)}

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { isBarCourse, ordinal } from '../utils/courses';
 import { BarChart3, Bell, BellOff, Check, Loader2, Play, RotateCcw, TriangleAlert, WifiOff } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
 import { socketClient } from '../services/socketClient';
@@ -21,7 +22,8 @@ import { SectionHeader, StatusPill, dsButton } from './ds';
 // se ne accorgerebbe da solo.
 // ---------------------------------------------------------------------------
 
-const ORDINALS = ['', '1ª', '2ª', '3ª', '4ª', '5ª', '6ª'];
+// «1ª uscita» … e «Uscita Bar» (utils/courses): femminile di «uscita» salvo.
+const courseName = (n: number): string => isBarCourse(n) ? 'Uscita Bar' : `${ordinal(n)} uscita`;
 const SOUND_KEY = 'passe.sound';
 
 const mmss = (seconds: number): string => {
@@ -237,7 +239,7 @@ export const ExpediterDisplay: React.FC = () => {
                       T{s.table_name ?? '—'}
                     </span>
                     <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--ds-text-muted)]">
-                      {ORDINALS[s.course_no] ?? s.course_no} uscita · servita da {mmss(agoS)}
+                      {courseName(s.course_no)} · servita da {mmss(agoS)}
                     </span>
                     <button
                       type="button"
@@ -292,7 +294,7 @@ const CourseRow: React.FC<{
           T{c.table_name ?? '—'}
         </div>
         <div className="text-[13px] text-[var(--ds-text-muted)]">
-          {ORDINALS[c.course_no] ?? c.course_no} uscita
+          {courseName(c.course_no)}
         </div>
       </div>
 

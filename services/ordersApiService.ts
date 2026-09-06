@@ -218,9 +218,10 @@ export interface MenuCatalogue {
   /** Ingredienti dei piatti composti: pre-inclusi sul foglio varianti, si
    *  battono in negativo (removed_component_ids sulla riga). */
   dish_components: { id: number; dish_id: number; name: string; removal_delta_cents: number; sort_order: number }[];
-  /** Preferenze delle categorie decise in Menu: ordine (sort) e accensione.
-   *  Categoria assente = accesa, in coda. */
-  category_prefs?: Record<string, { enabled: boolean; sort: number }>;
+  /** Preferenze delle categorie decise in Menu: ordine (sort), accensione e
+   *  la spunta «bar» (i piatti della categoria vanno dritti nell'uscita Bar).
+   *  Categoria assente = accesa, in coda, non bar. */
+  category_prefs?: Record<string, { enabled: boolean; sort: number; bar?: boolean }>;
 }
 
 export const getMenuCatalogue = async (): Promise<MenuCatalogue> =>
