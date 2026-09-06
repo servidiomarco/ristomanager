@@ -21,7 +21,8 @@ import {
   buildMergeGroups, buildRows, makeReservationForTable, type TableFilter,
 } from '../comande/tablesView';
 import { ReasonDialog } from '../comande/ReasonDialog';
-import { cartKey, type CartLine } from '../comande/orderView';
+import {
+  BAR_COURSE_NO, cartKey, type CartLine } from '../comande/orderView';
 import { CodaServizio } from './CodaServizio';
 import { SelezionaTavolo } from './SelezionaTavolo';
 import { TavoloAttivo } from './TavoloAttivo';
@@ -182,6 +183,18 @@ export const CassaPage: React.FC<CassaPageProps> = ({
     const ids = catalogue.dish_modifier_groups.filter(l => l.dish_id === dishId).map(l => l.group_id);
     return catalogue.modifier_groups.filter(g => ids.includes(g.id));
   }, [catalogue]);
+
+  // Categorie da bar (spunta in modale Categorie): come sul palmare, le
+  // bibite battute in cassa vanno nell'uscita Bar, non nella 1ª — così i
+  // monitor di cucina non se le vedono passare davanti.
+  const barCategories = useMemo(() => new Set(
+    Object.entries(catalogue?.category_prefs ?? {})
+      .filter(([, p]) => (p as { bar?: boolean }).bar === true)
+      .map(([name]) => name)
+  ), [catalogue]);
+  const courseFor = useCallback((dish: Dish): number =>
+    dish.category && barCategories.has(dish.category) ? BAR_COURSE_NO : 1,
+  [barCategories]);
 
   const componentsForDish = useCallback(
     (dishId: number) => (catalogue?.dish_components ?? []).filter(c => c.dish_id === dishId),
@@ -483,8 +496,9 @@ export const CassaPage: React.FC<CassaPageProps> = ({
     // ingredienti tolti entrano in chiave come là. Al peso ogni pezzo è
     // una riga (qty 1 per il server): la chiave porta l'idem e non fonde.
     const idem = newIdempotencyKey();
+    const courseNo = courseFor(dish);
     const key = cartKey(
-      dish.id, 1,
+      dish.id, courseNo,
       [...entries.map(e => `${e.id}x${e.n}`), ...removedIds.map(id => `r${id}`),
        ...(weightGrams != null ? [`w${weightGrams}#${idem}`] : [])],
       note,
@@ -497,7 +511,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
         return next;
       }
       return [...prev, {
-        key, idem, dish, qty: 1, course_no: 1,
+        key, idem, dish, qty: 1, course_no: courseNo,
         modifier_ids: entries.map(e => e.id),
         modifiers: entries,
         ...(removedIds.length > 0 ? { removed_component_ids: removedIds } : {}),
@@ -506,7 +520,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
         modifier_delta_cents: delta, note,
       }];
     });
-  }, []);
+  }, [courseFor]);
 
   // Conferma dal foglio varianti: etichette e delta cotti come in Comande —
   // le percentuali si mostrano risolte sul prezzo di anagrafica, il conto
