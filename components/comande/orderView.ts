@@ -146,6 +146,10 @@ export interface RepeatLine {
   removed_component_ids: number[];
   modifier_labels: string[];
   modifier_delta_cents: number;
+  /** Grammi del pezzo per le righe al peso: pesi diversi sono righe diverse
+   *  (il prezzo è per pezzo) e la ripetizione ripropone lo stesso peso —
+   *  stima come alla battuta, la cucina corregge dopo la pesata. */
+  weight_grams: number | null;
 }
 
 export const repeatLines = (
@@ -156,12 +160,14 @@ export const repeatLines = (
   const push = (
     dishId: number | null, name: string, unitCents: number, qty: number, courseNo: number,
     modifierEntries: { id: number; n: number }[], modifierLabels: string[], modifierDelta: number,
-    removedIds: number[] = [],
+    removedIds: number[] = [], weightGrams: number | null = null,
   ) => {
     // Il verso e le ripetizioni entrano in chiave: «++ prosciutto» e
     // «- prosciutto» non collassano nella stessa riga. Gli ingredienti tolti
-    // idem: «senza cipolla» e il piatto intero sono due righe.
-    const key = `${dishId ?? name}|${modifierEntries.map(e => `${e.id}x${e.n}`).sort().join(',')}|${[...removedIds].sort().join(',')}`;
+    // idem: «senza cipolla» e il piatto intero sono due righe. Il peso pure:
+    // due filetti da 150 e 300 g non hanno lo stesso prezzo, sommarli su una
+    // voce sola mentirebbe sull'unitario.
+    const key = `${dishId ?? name}|${modifierEntries.map(e => `${e.id}x${e.n}`).sort().join(',')}|${[...removedIds].sort().join(',')}|${weightGrams ?? ''}`;
     const at = byKey.get(key);
     if (at) {
       at.qty += qty;
@@ -179,6 +185,7 @@ export const repeatLines = (
       removed_component_ids: removedIds,
       modifier_labels: modifierLabels,
       modifier_delta_cents: modifierDelta,
+      weight_grams: weightGrams,
     });
   };
 
@@ -199,14 +206,22 @@ export const repeatLines = (
       // I «Senza X» viaggiano nello snapshot con component_id: senza questo
       // la ripetizione perderebbe la rimozione per strada.
       mods.filter(m => m.component_id != null).map(m => m.component_id as number),
+      i.weight_grams ?? null,
     );
   }
   for (const l of cart) {
     push(
-      l.dish.id, l.dish.name, Math.round(Number(l.dish.price) * 100), l.qty, l.course_no,
+      // Al peso il prezzo di anagrafica è AL KG: l'unitario della riga è già
+      // peso × €/kg, come per le righe arrivate dal server.
+      l.dish.id, l.dish.name,
+      l.weight_grams != null
+        ? Math.round(Math.round(Number(l.dish.price) * 100) * l.weight_grams / 1000)
+        : Math.round(Number(l.dish.price) * 100),
+      l.qty, l.course_no,
       (l.modifiers ?? l.modifier_ids.map(id => ({ id, n: 1 }))).map(e => ({ id: e.id, n: clampModifierN(e.n) })),
       l.modifier_labels, l.modifier_delta_cents,
       l.removed_component_ids ?? [],
+      l.weight_grams ?? null,
     );
   }
 

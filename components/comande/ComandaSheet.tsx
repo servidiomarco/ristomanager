@@ -5,7 +5,7 @@ import { EmptyState, SectionHeader, Sheet, SegmentedControl } from '../ds';
 import { CourseList, SendFooter } from './CourseColumn';
 import {
   cartForCourse, cartSum, courseLabel, euro, groupByCategory, isSystemLine, ordinal,
-  repeatLines, repeatQty, repeatTotal, rowCount, rowCountLabel,
+  repeatLines, repeatQty, repeatTotal, rowCount, rowCountLabel, weightLabel,
   type CartLine, type RepeatLine,
 } from './orderView';
 
@@ -177,6 +177,11 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
                         {l.name}
+                        {/* Il peso distingue le righe: due filetti da 150 e
+                            300 g non sono lo stesso piatto due volte. */}
+                        {l.weight_grams != null && (
+                          <span className="text-[13px] font-normal tabular-nums text-[var(--ds-text-muted)]"> · {weightLabel(l.weight_grams)}</span>
+                        )}
                       </div>
                       {/* Dove è già uscito e quanto costa il singolo: le due
                           cose che servono per decidere se rifarlo. */}

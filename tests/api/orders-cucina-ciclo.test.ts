@@ -377,6 +377,50 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         expect((await api().post(`/orders/items/${normale.id}/weight`).set(bearer(token)).send({ weight_grams: 480 })).status).toBe(400);
     });
 
+    it('cambiare il prezzo in scheda aggiorna il listino: la battuta usa il prezzo nuovo', async () => {
+        // Il bug di produzione (6/09, filetto): il listino di default nasceva
+        // dal backfill al boot e nessuno lo aggiornava più — la scheda diceva
+        // 90 €/kg, la battuta addebitava il prezzo vecchio. Qui si ricrea la
+        // storia: piatto al peso, riga di listino ferma al prezzo vecchio,
+        // poi la modifica in scheda deve trascinare il listino con sé.
+        const filetto = await api().post('/dishes').set(bearer(token)).send({
+            name: 'Filetto Listino', description: null, price: 38, category: 'SECONDI', allergens: null,
+            sold_by_weight: true, weight_min_grams: 150, weight_max_grams: 800, weight_default_grams: 150,
+        });
+        expect(filetto.status).toBe(201);
+
+        // La creazione scrive il listino di default (prima non lo faceva:
+        // ci pensava solo il backfill al riavvio successivo).
+        const db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
+        await db.connect();
+        const creato = await db.query(
+            `SELECT dp.price_cents FROM dish_prices dp
+             JOIN menu_price_lists pl ON pl.id = dp.price_list_id
+             WHERE dp.dish_id = $1 AND pl.is_default`, [filetto.body.id]);
+        expect(creato.rows[0]?.price_cents).toBe(3800);
+        await db.end();
+
+        // La scheda passa a 90 €/kg: il listino deve seguire.
+        const upd = await api().put(`/dishes/${filetto.body.id}`).set(bearer(token)).send({
+            name: 'Filetto Listino', description: null, price: 90, category: 'SECONDI', allergens: null,
+        });
+        expect(upd.status).toBe(200);
+
+        // 150 g × 90 €/kg = 13,50 € — il prezzo che palmare e cassa mostrano.
+        const orderId = await nuovaComanda();
+        const add = await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [{ dish_id: filetto.body.id, qty: 1, course_no: 1, weight_grams: 150 }],
+        });
+        expect(add.status).toBe(201);
+        const riga = righe(add.body).find((i: any) => i.name_snapshot === 'Filetto Listino');
+        expect(riga.unit_price_cents).toBe(1350);
+
+        // E la pesata della cucina ricalcola sul prezzo nuovo, non sul vecchio.
+        const w = await api().post(`/orders/items/${riga.id}/weight`).set(bearer(token)).send({ weight_grams: 200 });
+        expect(w.status).toBe(200);
+        expect(righe(w.body).find((i: any) => i.id === riga.id).unit_price_cents).toBe(1800);
+    });
+
     it('la chiamata di un\'uscita si annulla finché la cucina non inizia', async () => {
         await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'AUTO_ALL' });
         const orderId = await nuovaComanda();

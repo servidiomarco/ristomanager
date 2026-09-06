@@ -559,13 +559,30 @@ export const CassaPage: React.FC<CassaPageProps> = ({
   }, [groupsForDish, componentsForDish, pushLine]);
 
   const changeQty = useCallback((key: string, delta: number) => {
-    setCart(prev => prev.flatMap(l => {
-      if (l.key !== key) return [l];
-      const qty = l.qty + delta;
-      // A zero la riga sparisce: la cucina non l'ha vista, non c'è niente da
-      // stornare e nessuna conferma da chiedere.
-      return qty <= 0 ? [] : [{ ...l, qty }];
-    }));
+    setCart(prev => {
+      const line = prev.find(l => l.key === key);
+      // Al peso il «+» non alza la quantità (il server pretende una riga per
+      // pezzo): aggiunge un ALTRO pezzo dello stesso peso, riga nuova con la
+      // sua chiave — come sul palmare. Il «−» toglie la riga (qty sempre 1).
+      if (line?.weight_grams != null && delta > 0) {
+        const idem = newIdempotencyKey();
+        const newKey = cartKey(
+          line.dish.id, line.course_no,
+          [...(line.modifiers ?? []).map(e => `${e.id}x${e.n}`),
+           ...(line.removed_component_ids ?? []).map(id => `r${id}`),
+           `w${line.weight_grams}#${idem}`],
+          line.note,
+        );
+        return [...prev, { ...line, key: newKey, idem, qty: 1 }];
+      }
+      return prev.flatMap(l => {
+        if (l.key !== key) return [l];
+        const qty = l.qty + delta;
+        // A zero la riga sparisce: la cucina non l'ha vista, non c'è niente da
+        // stornare e nessuna conferma da chiedere.
+        return qty <= 0 ? [] : [{ ...l, qty }];
+      });
+    });
   }, []);
 
   const sendDrafts = useCallback(async (current: OrderWithItems): Promise<OrderWithItems> => {
