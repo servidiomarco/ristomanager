@@ -2717,7 +2717,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           inputMode="numeric"
                           min={1}
                           max={50000}
-                          step={10}
+                          // step=1: con min=1 e step=10 la griglia dei valori
+                          // «validi» del browser era 1, 11, …, 141, 151 — un
+                          // onesto 150 g non salvava. Le frecce a ±1 bastano:
+                          // qui si digita, non si scorre.
+                          step={1}
                           placeholder={ph}
                           className={dsInput}
                           value={newDish[field] ?? ''}
