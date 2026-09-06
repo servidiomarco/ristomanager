@@ -14,6 +14,9 @@ export interface SalaStation {
   is_active: boolean;
   /** Nome logico della termica del centro; null = solo monitor KDS. */
   printer: string | null;
+  /** Pronto automatico: la partita lavora solo di carta (nessun monitor),
+   *  le sue righe nascono già pronte al lancio e non bloccano l'uscita. */
+  auto_ready: boolean;
 }
 
 export interface SalaPrinter {
@@ -102,7 +105,7 @@ export const createStation = (input: { name: string; color?: string | null; prin
     method: 'POST', headers: getHeaders(), body: JSON.stringify(input),
   });
 
-export const updateStation = (id: number, input: Partial<Pick<SalaStation, 'name' | 'color' | 'is_active' | 'printer'>>): Promise<SalaStation> =>
+export const updateStation = (id: number, input: Partial<Pick<SalaStation, 'name' | 'color' | 'is_active' | 'printer' | 'auto_ready'>>): Promise<SalaStation> =>
   apiRequest(`${API_URL}/sala/stations/${id}`, {
     method: 'PUT', headers: getHeaders(), body: JSON.stringify(input),
   });
