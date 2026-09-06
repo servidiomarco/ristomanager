@@ -33,6 +33,7 @@
   },
   "menu": {
     "myShare": "La mia parte · {{amount}}",
+    "fullBill": "Pago tutto il conto · {{amount}}",
     "perItem": "Pago quello che ho preso",
     "customAmount": "Un importo diverso"
   },

@@ -315,7 +315,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 
 **Conto al tavolo per l'ospite (pay-at-table)**
 - Il cameriere stampa un **QR**; l'ospite paga dal telefono, senza app e senza login.
-- **Dividi il conto**: quota uguale, importo libero o **per riga** ("io ho preso solo l'antipasto"), con etichetta facoltativa del pagante.
+- **Dividi il conto**: quota uguale, importo libero, **per riga** ("io ho preso solo l'antipasto") o **tutto il conto** in un tocco ("offro io": paga l'intero residuo, quote degli altri già scalate), con etichetta facoltativa del pagante.
 - Gestione sicura della concorrenza: due ospiti non possono pagare la stessa quota; le quote abbandonate si liberano da sole e un controllo periodico recupera anche i pagamenti il cui esito si fosse perso.
 - Pagina bilingue IT/EN, aggiornata ogni 5 secondi.
 
@@ -574,6 +574,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-06 | Pagamenti (pay-at-table) | Bottone «Pago tutto il conto» sulla pagina del QR: l'ospite salda l'intero residuo in un tocco, importo calcolato dal server al momento del claim (le quote prese dagli altri nel frattempo si scalano da sole). Nascosto quando coincide con «La mia parte». |
 | 2026-09-06 | Comande, Cucina e Passe | Uscita Dolci: spuntando «dolci» sulle categorie in modale Categorie (dolci, gelati), i loro piatti vanno da soli in un'uscita Dolci in coda alla comanda, che parte all'invio senza chiamata — il meccanismo del Bar, dal verso opposto. Etichetta «Dolci» su palmare, monitor e comanda stampata. |
 | 2026-09-06 | Comande, Cucina e Passe | L'invio non muore più con «Comanda non trovata»: se la comanda è stata disfatta o eliminata da un altro dispositivo mentre il cameriere componeva, il palmare ne riapre una sullo stesso tavolo e rimanda da solo — le righe non si ribattono. La comanda vuota uscendo dal tavolo si disfa solo dal dispositivo che l'ha creata (entrare a guardare non cancella più il lavoro di un collega), e se la comanda aperta viene eliminata altrove il palmare lo dice subito. |
 | 2026-09-06 | Comande, Cucina e Passe | «Elimina la comanda» dal menu ⋮ del tavolo: via la comanda intera (righe già in cucina comprese) finché non c'è un conto, con motivazione obbligatoria che finisce nel registro attività; serve il permesso di storno, i monitor di cucina si aggiornano da soli. |
