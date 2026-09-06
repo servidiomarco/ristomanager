@@ -1013,6 +1013,10 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   // corrente), so the debounced save considered them "typed content" and the
   // next standard booking restored a walk-in's current-time slot as its own.
   const [openedAsWalkIn, setOpenedAsWalkIn] = useState(false);
+  // True se la prenotazione aperta in modifica aveva già un contatto. Un
+  // walk-in nasce legittimamente senza telefono né email: pretenderli quando
+  // si ritocca solo i coperti bloccherebbe il salvataggio a posteriori.
+  const [editingHadContact, setEditingHadContact] = useState(true);
 
   // Map-view: assign a free table to an unassigned reservation
   const [assignTableModal, setAssignTableModal] = useState<Table | null>(null);
@@ -1996,6 +2000,7 @@ export const ReservationList: React.FC<ReservationListProps> = ({
 
       const table = tables.find(t => t.id === res.table_id);
       setModalRoomFilter(table ? table.room_id : 'ALL');
+      setEditingHadContact(!!(res.phone && res.phone.trim()) || !!(res.email && res.email.trim()));
       setIsEditing(true);
       setIsFormOpen(true);
   };
@@ -2994,6 +2999,11 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       }
   };
 
+  // Il contatto (telefono o email) è obbligatorio per le prenotazioni normali,
+  // mai per un walk-in nuovo né per una prenotazione che già non ne aveva
+  // (tipicamente un walk-in di cui si stanno correggendo i coperti).
+  const contactRequired = isEditing ? editingHadContact : !openedAsWalkIn;
+
   const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       // Every field these checks guard lives on step 1, and Salva is live on
@@ -3003,10 +3013,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
       if (!formData.customer_name || !formData.reservation_time) { setFormStep(0); return; }
       // Almeno un canale di contatto è richiesto (telefono OPPURE email).
       // Le prenotazioni web arrivano spesso con sola email — non forziamo il
-      // telefono quando l'email è già presente.
+      // telefono quando l'email è già presente. Eccezione: i walk-in (in
+      // registrazione o in modifica successiva) nascono senza contatti e
+      // devono restare salvabili così.
       const hasPhone = !!(formData.phone && formData.phone.trim());
       const hasEmail = !!(formData.email && formData.email.trim());
-      if (!hasPhone && !hasEmail) {
+      if (contactRequired && !hasPhone && !hasEmail) {
           setFormStep(0);
           showToast('Inserisci un contatto (telefono o email).', 'error');
           return;
@@ -5216,12 +5228,12 @@ export const ReservationList: React.FC<ReservationListProps> = ({
                                 <div>
                                     <label className="mb-1.5 block text-[14px] font-medium text-[var(--ds-text-secondary)]">
                                         Telefono
-                                        {!(formData.email && formData.email.trim()) && <span className="text-[var(--ds-critical-text)]"> *</span>}
+                                        {contactRequired && !(formData.email && formData.email.trim()) && <span className="text-[var(--ds-critical-text)]"> *</span>}
                                     </label>
                                     <div className="relative">
                                         <input
                                             type="tel"
-                                            required={!(formData.email && formData.email.trim())}
+                                            required={contactRequired && !(formData.email && formData.email.trim())}
                                             className={`${dsInput} ${formData.phone ? 'pr-10' : ''}`}
                                             value={formData.phone || ''}
                                             onChange={e => {
