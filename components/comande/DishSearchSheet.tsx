@@ -11,9 +11,9 @@ import { euro } from './orderView';
 // mostrare. Il velo è trasparente apposta: dietro si continua a vedere la
 // comanda, e il contatore che sale sul risultato toccato è la conferma.
 // La ricerca resta aperta a ogni aggiunta, così «due bruschette e una
-// burrata» è una ricerca sola. Si chiude da sola solo sui piatti con
-// varianti, perché la sheet delle varianti (z-50) vive sotto questo velo
-// (z-100).
+// burrata» è una ricerca sola. Si chiude da sola solo sui piatti il cui tap
+// apre il foglio varianti (peso, obbligatori), perché la sheet delle
+// varianti (z-50) vive sotto questo velo (z-100).
 // ---------------------------------------------------------------------------
 
 interface DishSearchSheetProps {
@@ -23,6 +23,9 @@ interface DishSearchSheetProps {
    *  contatore sul risultato è la conferma che il tocco ha aggiunto. */
   qtyInCourse: Map<number, number>;
   hasVariants: (dishId: number) => boolean;
+  /** true se il tap apre il foglio varianti invece di aggiungere: solo lì la
+   *  ricerca si chiude. Default: hasVariants (comportamento storico). */
+  tapOpensSheet?: (dishId: number) => boolean;
   onAdd: (dish: Dish) => void;
   onClose: () => void;
 }
@@ -30,7 +33,7 @@ interface DishSearchSheetProps {
 const MAX_HITS = 30;
 
 export const DishSearchSheet: React.FC<DishSearchSheetProps> = ({
-  open, dishes, qtyInCourse, hasVariants, onAdd, onClose,
+  open, dishes, qtyInCourse, hasVariants, tapOpensSheet = hasVariants, onAdd, onClose,
 }) => {
   const [query, setQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -112,7 +115,7 @@ export const DishSearchSheet: React.FC<DishSearchSheetProps> = ({
                 <button
                   key={d.id}
                   type="button"
-                  onClick={() => { onAdd(d); if (variants) onClose(); }}
+                  onClick={() => { onAdd(d); if (tapOpensSheet(d.id)) onClose(); }}
                   className="mx-3 flex min-h-[52px] w-[calc(100%-1.5rem)] items-center gap-3 rounded-[14px] px-3 py-2.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
                   <div className="min-w-0 flex-1">

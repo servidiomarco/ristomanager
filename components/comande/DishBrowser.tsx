@@ -29,6 +29,10 @@ interface DishBrowserProps {
    *  sul palmare, dove la comanda è dietro un foglio e non a fianco. */
   markedCategories: Set<string>;
   hasVariants: (dishId: number) => boolean;
+  /** true se il TAP apre il foglio invece di aggiungere (peso, obbligatori):
+   *  esclude il «−» rapido. Default: hasVariants — il comportamento storico,
+   *  che la Cassa conserva senza passare la prop. */
+  tapOpensSheet?: (dishId: number) => boolean;
   onAdd: (dish: Dish) => void;
   onRemove: (dish: Dish) => void;
   /** Tocco lungo sul piatto: apre le varianti anche dove il tocco semplice
@@ -49,7 +53,7 @@ interface DishBrowserProps {
 
 export const DishBrowser: React.FC<DishBrowserProps> = ({
   dishes, categories, category, onCategory, query, onQuery,
-  qtyInCourse, markedCategories, hasVariants, onAdd, onRemove, onLongPress, layout,
+  qtyInCourse, markedCategories, hasVariants, tapOpensSheet = hasVariants, onAdd, onRemove, onLongPress, layout,
   showSearch = true, density = 'comfortable',
 }) => {
   const q = query.trim().toLowerCase();
@@ -90,10 +94,10 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
   // preferenza cambia quanto si vede, mai come si tocca.
   const rowControls = (d: Dish) => {
     const qty = qtyInCourse.get(d.id) ?? 0;
-    // Con le varianti non si toglie da qui: quale delle due «al sangue»
-    // andrebbe via non lo sa nessuno. Si toglie dalla comanda, dove le righe
-    // sono distinte.
-    const canRemove = qty > 0 && !hasVariants(d.id);
+    // Il «−» opera dove il tap aggiunge: sui piatti che aprono il foglio al
+    // tap (peso, obbligatori) non si toglie da qui. Fra più righe con varianti
+    // diverse decide removeFromCart in OrderPad, o si toglie dalla comanda.
+    const canRemove = qty > 0 && !tapOpensSheet(d.id);
     return (
       <div className="flex flex-shrink-0 items-center gap-2">
         {canRemove && (
@@ -208,6 +212,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
               dishes={dishes}
               qtyInCourse={qtyInCourse}
               hasVariants={hasVariants}
+              tapOpensSheet={tapOpensSheet}
               onAdd={onAdd}
               onClose={() => setSearchOpen(false)}
             />

@@ -289,14 +289,30 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     [catalogue]
   );
 
-  // Il foglio varianti si apre anche per un composto senza gruppi (gli
-  // ingredienti da togliere stanno lì) e per i piatti AL PESO: i grammi
-  // si chiedono lì, prima che la riga esista.
-  const needsVariantSheet = useCallback(
+  // Il piatto HA un foglio da mostrare (varianti, ingredienti da togliere,
+  // peso): governa il chevron in griglia e il tocco lungo, non più il tap.
+  const hasVariantSheet = useCallback(
     (dishId: number) => hasVariants(dishId)
       || (dishes.find(d => d.id === dishId)?.dish_type === 'COMPOSED' && componentsForDish(dishId).length > 0)
       || dishes.find(d => d.id === dishId)?.sold_by_weight === true,
     [hasVariants, componentsForDish, dishes]
+  );
+
+  // Il catalogo (/menu/catalogue) spedisce solo gruppi e modificatori attivi,
+  // quindi «g.modifiers.length > 0» rispecchia il LEAST della validazione
+  // server: un obbligatorio coi membri tutti spenti non blocca il piatto.
+  const hasMandatoryGroup = useCallback(
+    (dishId: number) => groupsForDish(dishId).some(g => g.min_select > 0 && g.modifiers.length > 0),
+    [groupsForDish]
+  );
+
+  // Il tap apre il foglio solo quando la riga non può nascere liscia: al peso
+  // i grammi servono prima che la riga esista; con un gruppo obbligatorio la
+  // riga nuda prenderebbe un 400 all'invio.
+  const requiresSheetOnTap = useCallback(
+    (dishId: number) => dishes.find(d => d.id === dishId)?.sold_by_weight === true
+      || hasMandatoryGroup(dishId),
+    [dishes, hasMandatoryGroup]
   );
 
   // La prenotazione del giorno/turno selezionati per un tavolo: nome e
@@ -493,7 +509,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       ? Math.round(Math.round(Number(dish.price) * 100) * Number(m.price_delta_pct) / 100)
       : m.price_delta_cents;
 
-  const addToCart = (dish: Dish, entries: { id: number; n: number }[] = [], note?: string, removedIds: number[] = [], weightGrams?: number) => {
+  const addToCart = (dish: Dish, entries: { id: number; n: number }[] = [], note?: string, removedIds: number[] = [], weightGrams?: number, qty = 1) => {
     // `single` (gruppo a scelta singola) serve all'etichetta: le cotture
     // restano nome nudo, «+ Media» non significa niente.
     const byId = new Map(groupsForDish(dish.id).flatMap(g =>
@@ -507,7 +523,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       .map(id => comps.find(c => c.id === id))
       .filter((c): c is NonNullable<typeof c> => c != null);
     pushLine(
-      dish, forcedCourse(dish) ?? course, 1, chosen,
+      dish, forcedCourse(dish) ?? course, dish.sold_by_weight ? 1 : qty, chosen,
       [...chosen.map(e => signedModifierLabel(byId.get(e.id)!.name, e.n, byId.get(e.id)!.single)), ...removed.map(c => `Senza ${c.name}`)],
       chosen.reduce((s, e) => s + signedModifierDelta(modifierDeltaCents(dish, byId.get(e.id)!), e.n), 0)
         + removed.reduce((s, c) => s + c.removal_delta_cents, 0),
@@ -520,6 +536,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   // Sostituisce varianti e nota di una riga in bozza mantenendo qty e chiave
   // di idempotenza. Se la nuova combinazione coincide con un'altra riga già
   // nel carrello, le due si fondono (stessa regola del tocco sul menu).
+  // Con quantità scelta minore della riga E configurazione diversa, la riga
+  // si DIVIDE: modifica su quei pezzi, il resto rimane com'era — è la via
+  // per «2× battuti, uno al sangue».
   const updateLine = (lineKey: string, entries: { id: number; n: number }[], note?: string, removedIds: number[] = [], weightGrams?: number, qty?: number) => {
     setCart(prev => {
       const at = prev.findIndex(l => l.key === lineKey);
@@ -557,6 +576,25 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           + removed.reduce((s, c) => s + c.removal_delta_cents, 0),
         note: note || undefined,
       };
+      // Split: config CAMBIATA (la cartKey è la definizione di configurazione:
+      // varianti firmate, senza, peso, nota — ordine-insensibile) e quantità
+      // scelta MINORE della riga → la nuova config vale per le unità scelte,
+      // il resto rimane com'era, con chiave e idem ORIGINALI (il retry di un
+      // invio in timeout continua a dedupare). La parte nuova non è mai
+      // esistita: idem nuovo, mai condiviso fra due righe. Al peso non capita
+      // (qty sempre 1). newKey ≠ line.key qui, quindi il resto non può
+      // rifondersi con la parte nuova.
+      if (newKey !== line.key && updated.qty < line.qty) {
+        const next = [...prev];
+        next[at] = { ...line, qty: line.qty - updated.qty };
+        const dup = next.findIndex(l => l.key === newKey);
+        if (dup >= 0) {
+          next[dup] = { ...next[dup], qty: next[dup].qty + updated.qty };
+          return next;
+        }
+        next.splice(at + 1, 0, { ...updated, idem: newIdempotencyKey() });
+        return next;
+      }
       const next = prev.filter((_, i) => i !== at);
       const dup = next.findIndex(l => l.key === newKey);
       if (dup >= 0) {
@@ -641,10 +679,10 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   >(null);
 
   const onDishTap = (dish: Dish) => {
-    // Se il piatto ha varianti (o ingredienti da poter togliere) le
-    // chiediamo: «al sangue» o «ben cotta» non è un dettaglio che si
-    // aggiusta a voce dopo.
-    if (needsVariantSheet(dish.id)) setVariantFor(dish);
+    // Il tap aggiunge liscio: le varianti facoltative si scelgono dopo, dal
+    // foglio di riga o col tocco lungo. Il foglio si apre subito solo dove
+    // la riga liscia non può esistere: cottura obbligatoria e peso.
+    if (requiresSheetOnTap(dish.id)) setVariantFor(dish);
     else addToCart(dish);
   };
 
@@ -670,10 +708,18 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
 
   const dropLine = (key: string) => setCart(prev => prev.filter(l => l.key !== key));
 
-  // Il meno sulla riga del menu tocca solo la riga senza varianti: quale delle
-  // due cotture togliere non lo sa nessuno, e quella si toglie dalla comanda.
-  const removeFromCart = (dish: Dish) => bumpCart(
-    cartKey(dish.id, forcedCourse(dish) ?? course, []), -1);
+  // Il meno sulla riga del menu scala prima la riga liscia; senza riga liscia,
+  // se nell'uscita il piatto ha UNA sola riga non c'è ambiguità e si scala
+  // quella. Con più righe (due cotture diverse) non decide nessuno: si toglie
+  // dalla comanda, dove le righe sono distinte. Il peso resta fuori (una riga
+  // per pezzo, si toglie dalla comanda).
+  const removeFromCart = (dish: Dish) => {
+    const to = forcedCourse(dish) ?? course;
+    const plainKey = cartKey(dish.id, to, []);
+    if (cart.some(l => l.key === plainKey)) { bumpCart(plainKey, -1); return; }
+    const lines = cart.filter(l => l.dish.id === dish.id && l.course_no === to && l.weight_grams == null);
+    if (lines.length === 1) bumpCart(lines[0].key, -1);
+  };
 
   /** Ripete una riga già ordinata nell'uscita in composizione. Non tocca il
    *  server: diventa una bozza come tutte le altre, e parte con Invia. */
@@ -1515,7 +1561,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       onQuery={setDishQuery}
       qtyInCourse={qtyInCourse}
       markedCategories={markedCategories}
-      hasVariants={needsVariantSheet}
+      hasVariants={hasVariantSheet}
+      tapOpensSheet={requiresSheetOnTap}
       onAdd={onDishTap}
       onRemove={removeFromCart}
       onLongPress={setVariantFor}
@@ -1722,8 +1769,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           dish={variantFor}
           groups={groupsForDish(variantFor.id)}
           components={variantFor.dish_type === 'COMPOSED' ? componentsForDish(variantFor.id) : []}
+          initialQty={1}
           onCancel={() => setVariantFor(null)}
-          onConfirm={(entries, removedIds, note, weightGrams) => { addToCart(variantFor, entries, note, removedIds, weightGrams); setVariantFor(null); }}
+          onConfirm={(entries, removedIds, note, weightGrams, qty) => { addToCart(variantFor, entries, note, removedIds, weightGrams, qty ?? 1); setVariantFor(null); }}
         />
       )}
       {editLine && (
@@ -1832,7 +1880,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         open={dishSearchOpen}
         dishes={dishes}
         qtyInCourse={qtyInCourse}
-        hasVariants={needsVariantSheet}
+        hasVariants={hasVariantSheet}
+        tapOpensSheet={requiresSheetOnTap}
         onAdd={onDishTap}
         onClose={() => setDishSearchOpen(false)}
       />
