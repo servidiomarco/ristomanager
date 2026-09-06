@@ -180,7 +180,7 @@ Postazione "alla porta" per la gestione degli arrivi.
 - **Swipe per il check-in**: si scorre la riga per segnare "Arrivato".
 - Percorso completo del tavolo: Arrivato → In uscita → Libera tavolo; no-show, rimetti in attesa, rimuovi tavolo.
 - **Assegnazione tavolo guidata**: il selettore etichetta ogni tavolo come Adatto / Piccolo / Grande / Occupato / Attuale, e permette lo **scambio di tavolo tra due prenotazioni** con conferma.
-- **Walk-in** in due tocchi (nome, coperti, telefono, note), apribile da qualunque pagina col "+" globale.
+- **Walk-in** in due tocchi (nome, coperti, telefono, note), apribile da qualunque pagina col "+" globale. Il telefono resta facoltativo anche modificando il walk-in dopo (es. correzione coperti): il contatto obbligatorio vale solo per le prenotazioni normali.
 - Timeline degli arrivi con azioni rapide.
 
 ---
@@ -578,6 +578,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-06 | Reception & Arrivi, Prenotazioni | Modificare una prenotazione nata senza contatti (il walk-in tipico) non pretende più telefono o email: prima bastava correggere i coperti perché il telefono tornasse obbligatorio e il salvataggio si bloccasse. |
 | 2026-09-06 | Menu | I campi del peso in scheda piatto («da/a/parte da», in grammi) accettano qualunque grammatura intera: prima il browser rifiutava i valori fuori dalla griglia dei 10 g (150 compreso, per il disallineamento col minimo) e la scheda non si salvava. |
 | 2026-09-06 | Comande, Cucina e Passe | La barra dei piatti raggruppati fa un chip per variante: «1× Pasta al pomodoro · fusilli» e «1× Pasta al pomodoro · tagliatelle» invece di un «2× Pasta al pomodoro» che non dice cosa iniziare. Ingranditi i pallini di stato sul binario delle card (14→20 px): si vedono da un metro. |
 | 2026-09-06 | Menu, Comande e Cassa | Il prezzo cambiato in scheda piatto (o dal sync Passepartout) ora aggiorna anche il listino usato dalla battuta: prima il listino restava al valore vecchio e il conto addebitava un prezzo diverso da quello mostrato — sui piatti al peso l'errore cresceva coi grammi. Le righe di listino già divergenti si riallineano da sole al deploy. Sistemata anche la ripetizione delle righe al peso («Ripeti giro» e «+» in Cassa): un altro pezzo allo stesso peso, col prezzo giusto, invece di un invio rifiutato. |
