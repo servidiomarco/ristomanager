@@ -472,6 +472,18 @@ const BillBody: React.FC<{ bill: BillLike }> = ({ bill }) => {
 
       <FormCard>
         <dl className="space-y-1.5 text-[14px]">
+          {/* Sconto (di comanda o di conto): senza questa riga la somma del
+              Dettaglio non torna col Totale e la differenza resta muta. */}
+          {(() => {
+            const itemsSum = (bill.items ?? []).reduce((s, i) => s + i.unit_price_cents * i.qty, 0);
+            const discountShown = itemsSum > 0 ? Math.max(0, itemsSum - bill.total_cents) : 0;
+            return discountShown > 0 ? (
+              <div className="flex justify-between text-[var(--ds-critical-text)]">
+                <dt>Sconto</dt>
+                <dd className="tabular-nums">−{euro(discountShown)}</dd>
+              </div>
+            ) : null;
+          })()}
           <div className="flex justify-between font-semibold text-[var(--ds-text-primary)]">
             <dt>Totale</dt>
             <dd className="tabular-nums">{euro(bill.total_cents)}</dd>

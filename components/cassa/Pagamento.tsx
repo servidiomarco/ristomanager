@@ -39,6 +39,9 @@ interface PagamentoProps {
   /** Correzione del conto (storno righe contestate): se assente il verbo
    *  non compare — in CassaPage la via resta il tavolo attivo. */
   onEdit?: () => void;
+  /** Sconto sul conto: la comanda qui è già chiusa, quindi passa da
+   *  POST /bills/:id/discount, non dallo sconto di comanda. */
+  onDiscount?: () => void;
   /** Dentro un modal (PagamentoSheet): niente testata propria — il guscio ha
    *  già titolo e chiusura — e terza colonna su schermo largo, così l'intero
    *  incasso sta in vista senza scroll. Default false: in CassaPage la resa
@@ -52,7 +55,7 @@ interface PagamentoProps {
 }
 
 export const Pagamento: React.FC<PagamentoProps> = ({
-  bill, busy, error, fiscalReady, quotaCents, onBack, onSettle, onSplit, onShowQr, onEdit, embedded = false, paymentPulse = 0,
+  bill, busy, error, fiscalReady, quotaCents, onBack, onSettle, onSplit, onShowQr, onEdit, onDiscount, embedded = false, paymentPulse = 0,
 }) => {
   const residual = bill.residual_cents;
   // Feedback "pagamento ricevuto": lampeggio one-shot + suono + vibrazione al
@@ -91,6 +94,11 @@ export const Pagamento: React.FC<PagamentoProps> = ({
   const staffPaid = bill.staff_paid_cents ?? 0;
   const online = Math.max(0, bill.paid_cents - deposit - staffPaid);
   const alreadyPaid = deposit + staffPaid + online;
+
+  // Sconto complessivo (di comanda e di conto): la somma delle righe meno il
+  // totale. Si mostra perché il totale, da solo, non spiega la differenza.
+  const itemsSum = (bill.items ?? []).reduce((s, i) => s + i.unit_price_cents * i.qty, 0);
+  const discountShown = itemsSum > 0 ? Math.max(0, itemsSum - bill.total_cents) : 0;
 
   const addMovement = () => {
     if (math.applied <= 0) return;
@@ -172,7 +180,9 @@ export const Pagamento: React.FC<PagamentoProps> = ({
           : `Ammanco ${euro(math.shortfall)}: il conto resterà parziale.`}
       </p>
 
-      <div className="mt-2 flex gap-2">
+      {/* flex-wrap: con Correggi e Sconto insieme, su telefono la conferma
+          scende su una riga sua invece di comprimersi. */}
+      <div className="mt-2 flex flex-wrap gap-2">
         {onEdit && (
           <button
             type="button"
@@ -181,6 +191,16 @@ export const Pagamento: React.FC<PagamentoProps> = ({
             className="inline-flex h-12 flex-shrink-0 items-center rounded-full bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
           >
             Correggi
+          </button>
+        )}
+        {onDiscount && (
+          <button
+            type="button"
+            onClick={onDiscount}
+            disabled={busy}
+            className="inline-flex h-12 flex-shrink-0 items-center rounded-full bg-[var(--ds-surface)] px-5 text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40"
+          >
+            Sconto
           </button>
         )}
         <button
@@ -237,6 +257,12 @@ export const Pagamento: React.FC<PagamentoProps> = ({
         <section className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
           <h2 className="text-[13px] font-semibold text-[var(--ds-text-muted)]">Riepilogo</h2>
           <dl className="mt-3 space-y-1.5 text-[14px]">
+            {discountShown > 0 && (
+              <div className="flex justify-between gap-2">
+                <dt className="text-[var(--ds-critical-text)]">Sconto</dt>
+                <dd className="tabular-nums text-[var(--ds-critical-text)]">−{euro(discountShown)}</dd>
+              </div>
+            )}
             <div className="flex justify-between gap-2">
               <dt className="text-[var(--ds-text-secondary)]">Totale conto</dt>
               <dd className="tabular-nums text-[var(--ds-text-primary)]">{euro(bill.total_cents)}</dd>

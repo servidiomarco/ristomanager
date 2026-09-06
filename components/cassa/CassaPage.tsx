@@ -11,7 +11,7 @@ import {
   updateOrder, voidItem, closeOrder, setOrderDiscount,
   type MenuCatalogue, type NewOrderItem, type ServiceBill,
 } from '../../services/ordersApiService';
-import { billsApiService, getOpenBills, printBill, type OpenBillRow } from '../../services/billsApiService';
+import { billsApiService, getOpenBills, printBill, setBillDiscount, type OpenBillRow } from '../../services/billsApiService';
 import { cashApiService } from '../../services/cashApiService';
 import { socketClient } from '../../services/socketClient';
 import { useOpenBills } from '../pagamenti/useOpenBills';
@@ -131,6 +131,8 @@ export const CassaPage: React.FC<CassaPageProps> = ({
   const [customerOpen, setCustomerOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [discountOpen, setDiscountOpen] = useState(false);
+  // Sconto in fase di incasso: vive sul CONTO (la comanda è già chiusa).
+  const [billDiscountOpen, setBillDiscountOpen] = useState(false);
   const [txLoading, setTxLoading] = useState(false);
 
   // Contare il cassetto è della direzione: senza il permesso la schermata
@@ -392,6 +394,26 @@ export const CassaPage: React.FC<CassaPageProps> = ({
       setError(err?.data?.error ?? err?.message ?? 'Sconto non applicato');
     } finally { setBusyBillId(null); }
   }, [order]);
+
+  const applyBillDiscount = useCallback(async (
+    p: { discount_type: 'PERCENT' | 'AMOUNT'; discount_value: number; reason: string } | null,
+  ) => {
+    if (!payingBill) return;
+    setBusyBillId(-1); setError(null);
+    try {
+      await setBillDiscount(payingBill.id, p);
+      // La riga di /bills/open porta residuo e aggregati già ricalcolati:
+      // il totale nudo della risposta non basta alla schermata Pagamento.
+      const fresh = await getOpenBills(serviceFilter, { status: 'open' });
+      const row = fresh.bills.find(b => b.id === payingBill.id);
+      if (row) setPayingBill(row);
+      await bills.reload();
+      setBillDiscountOpen(false);
+    } catch (err: any) {
+      setError(err?.data?.error ?? err?.message ?? 'Sconto non applicato');
+      setBillDiscountOpen(false);
+    } finally { setBusyBillId(null); }
+  }, [payingBill, serviceFilter, bills]);
 
   /** Associare un cliente a un walk-in CREA la visita: nel modello la visita è
    *  la prenotazione, quindi si apre una prenotazione «adesso», già seduta, e
@@ -805,6 +827,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
           quotaCents={quotaCents}
           onSplit={() => setScreen('split')}
           onShowQr={() => setOpenBill(payingBill)}
+          onDiscount={() => setBillDiscountOpen(true)}
           paymentPulse={paymentPulse}
         />
       ) : screen === 'table' && order ? (
@@ -887,6 +910,18 @@ export const CassaPage: React.FC<CassaPageProps> = ({
           onCancel={() => setDiscountOpen(false)}
           onClear={() => applyDiscount(null)}
           onConfirm={applyDiscount}
+        />
+      )}
+
+      {payingBill && billDiscountOpen && (
+        <DiscountDialog
+          title="Sconto sul conto"
+          currentReason={payingBill.discount_reason ?? null}
+          hasDiscount={payingBill.discount_type != null}
+          busy={busyBillId != null}
+          onCancel={() => setBillDiscountOpen(false)}
+          onClear={() => applyBillDiscount(null)}
+          onConfirm={applyBillDiscount}
         />
       )}
 

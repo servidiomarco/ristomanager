@@ -300,6 +300,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 - Modulo dedicato sotto Servizio: **coda dei conti del servizio** con contatore tavoli, tavolo attivo con comanda, cliente della visita, incasso e chiusura fiscale in un'unica vista.
 - **Sessione di cassa** per servizio: fondo iniziale, movimenti, contato a fine turno con differenza e nota obbligatoria; transazioni del servizio consultabili.
 - Pannello di incasso completo: più metodi sullo stesso conto (contanti, POS, Satispay, buoni pasto, gift card, sospeso, omaggio), resto calcolato, mancia, dividi conto, QR pay-at-table, scelta del documento (scontrino / proforma / fattura).
+- **Sconto sul conto** anche in fase di incasso (percentuale o importo, con motivazione obbligatoria e nome di chi lo concede): a comanda chiusa lo sconto vive sul conto, si somma agli eventuali sconti di comanda, e compare come riga negativa su schermo e sul preconto stampato — così le righe tornano col totale. Non si scende mai sotto il già incassato (lì serve un rimborso) e un conto aperto a mano non si sconta: il totale lì è digitato.
 - **Correggi conto**: se il cliente contesta una portata mai ricevuta, dal pagamento si apre l'elenco righe e si storna quella sbagliata con motivazione — il totale si riallinea da solo, anche a comanda già chiusa.
 - Ruolo dedicato **CASSA** e permessi `cash:*`; "Apri in Comande" porta al tavolo per lavorare uscite e lanci.
 
@@ -578,6 +579,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-06 | Pagamenti, conto al tavolo e cassa | Sconto anche nelle operazioni di cassa: dal pannello di incasso (Cassa, Comande e Pagamenti) si applica uno sconto sul conto — percentuale o importo, motivazione obbligatoria — pure a comanda chiusa; la riga «Sconto» compare nel riepilogo, nella scheda conto e sul preconto stampato. |
 | 2026-09-06 | Reception & Arrivi, Prenotazioni | Modificare una prenotazione nata senza contatti (il walk-in tipico) non pretende più telefono o email: prima bastava correggere i coperti perché il telefono tornasse obbligatorio e il salvataggio si bloccasse. |
 | 2026-09-06 | Menu | I campi del peso in scheda piatto («da/a/parte da», in grammi) accettano qualunque grammatura intera: prima il browser rifiutava i valori fuori dalla griglia dei 10 g (150 compreso, per il disallineamento col minimo) e la scheda non si salvava. |
 | 2026-09-06 | Comande, Cucina e Passe | La barra dei piatti raggruppati fa un chip per variante: «1× Pasta al pomodoro · fusilli» e «1× Pasta al pomodoro · tagliatelle» invece di un «2× Pasta al pomodoro» che non dice cosa iniziare. Ingranditi i pallini di stato sul binario delle card (14→20 px): si vedono da un metro. |

@@ -344,6 +344,10 @@ export interface OpenBillRow {
   fiscal_related_doc_id?: number | null;
   /** "pp:comanda:<id>" quando il conto nasce da una comanda Passepartout. */
   external_ref?: string | null;
+  /** Sconto di CONTO (operazioni di cassa), sopra gli sconti per comanda. */
+  discount_type?: 'PERCENT' | 'AMOUNT' | null;
+  discount_value?: string | number | null;
+  discount_reason?: string | null;
   /** Movimenti vivi del libro cassa: come è stato pagato il conto. */
   payments?: BillPaymentRow[];
   /** Comande ancora aperte su questo conto: il tavolo sta ancora ordinando. */
@@ -396,6 +400,18 @@ export const getOpenBills = async (
  *  correzione in cassa (storno di una portata contestata). */
 export const getBillOrder = async (billId: number): Promise<any> =>
   apiRequest(`${API_URL}/bills/${billId}/order`, { headers: getHeaders() });
+
+/** Sconto sul conto (operazioni di cassa): a comanda chiusa lo sconto di
+ *  comanda non si può più toccare, questo sì. `null` lo rimuove. */
+export const setBillDiscount = async (
+  billId: number,
+  payload: { discount_type: 'PERCENT' | 'AMOUNT'; discount_value: number; reason: string } | null,
+): Promise<{ bill: any }> =>
+  apiRequest(`${API_URL}/bills/${billId}/discount`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(payload ?? {}),
+  });
 
 /** Accoda la stampa del preconto sulla termica in sala. L'origin serve al
  *  server per comporre l'URL del QR: solo il client sa da che host è servita
