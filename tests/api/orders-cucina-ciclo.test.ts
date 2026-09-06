@@ -715,4 +715,93 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         const dopo = await api().get('/menu/categories').set(bearer(token));
         expect(dopo.body.categories.find((c: any) => c.name === 'Bar Collaudo').bar).toBe(false);
     });
+
+    it('la carta segue i monitor: aggiunta col banner, storno e annullo chiamata stampati', async () => {
+        const db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
+        await db.connect();
+        // Una partita CON stampante: senza printer i job non si accodano.
+        const st = await db.query(
+            `INSERT INTO stations (tenant_id, name, printer, sort_order) VALUES (1, 'Partita Stampa Test', 'termica-test', 90) RETURNING id`);
+        const stationId = Number(st.rows[0].id);
+        const dish = await api().post('/dishes').set(bearer(token)).send({
+            name: 'Spritz Stampa Test', description: null, price: 6, category: 'Bar Collaudo',
+            allergens: null, station_id: stationId,
+        });
+        expect(dish.status).toBe(201);
+        const jobsOf = async (orderId: number) => (await db.query(
+            `SELECT kind, payload FROM print_jobs WHERE (payload->>'order_id')::int = $1 ORDER BY id`,
+            [orderId]
+        )).rows;
+
+        await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'MANUAL' });
+        const orderId = await nuovaComanda();
+        await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [{ dish_id: dish.body.id, qty: 1, course_no: 1 }],
+        });
+        await api().post(`/orders/${orderId}/send`).set(bearer(token)).send({});
+        const fired = await api().post(`/orders/${orderId}/courses/1/fire`).set(bearer(token)).send({});
+        expect(fired.status).toBe(200);
+        let jobs = await jobsOf(orderId);
+        expect(jobs).toHaveLength(1);
+        expect(jobs[0].kind).toBe('COMANDA');
+        expect(jobs[0].payload.variation).toBeUndefined();
+
+        // Righe aggiunte all'uscita già partita: partono subito e il ticket
+        // porta il banner AGGIUNTA (kind COMANDA: sono piatti da fare).
+        const add2 = await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [{ dish_id: dish.body.id, qty: 2, course_no: 1, note: 'senza ghiaccio' }],
+        });
+        expect(add2.status).toBe(201);
+        await api().post(`/orders/${orderId}/send`).set(bearer(token)).send({});
+        jobs = await jobsOf(orderId);
+        expect(jobs).toHaveLength(2);
+        expect(jobs[1].kind).toBe('COMANDA');
+        expect(jobs[1].payload.variation).toBe('AGGIUNTA');
+        expect(jobs[1].payload.items[0].qty).toBe(2);
+
+        // Storno parziale di una riga già in cucina: kind dedicato (un agente
+        // vecchio non deve stamparlo come piatti da fare), quantità stornata
+        // e motivo sul ticket.
+        const view = await api().get(`/orders/${orderId}`).set(bearer(token));
+        const riga2 = righe(view.body).find((i: any) => i.qty === 2);
+        const storno = await api().post(`/orders/items/${riga2.id}/void`).set(bearer(token))
+            .send({ reason: 'Cliente ha cambiato idea', qty: 1 });
+        expect(storno.status).toBe(200);
+        jobs = await jobsOf(orderId);
+        expect(jobs).toHaveLength(3);
+        expect(jobs[2].kind).toBe('COMANDA_ANNULLO');
+        expect(jobs[2].payload.variation).toBe('STORNO');
+        expect(jobs[2].payload.items[0].qty).toBe(1);
+        expect(jobs[2].payload.reason).toBe('Cliente ha cambiato idea');
+
+        // Annullo chiamata: comanda fresca, lancio e riavvolgi — il ticket
+        // di annullo esce dalla stessa termica del lancio.
+        const secondaId = await nuovaComanda();
+        await api().post(`/orders/${secondaId}/items`).set(bearer(token)).send({
+            items: [{ dish_id: dish.body.id, qty: 1, course_no: 1 }],
+        });
+        await api().post(`/orders/${secondaId}/send`).set(bearer(token)).send({});
+        await api().post(`/orders/${secondaId}/courses/1/fire`).set(bearer(token)).send({});
+        const unfire = await api().post(`/orders/${secondaId}/courses/1/unfire`).set(bearer(token)).send({});
+        expect(unfire.status).toBe(200);
+        const jobs2 = await jobsOf(secondaId);
+        expect(jobs2).toHaveLength(2);
+        expect(jobs2[1].kind).toBe('COMANDA_ANNULLO');
+        expect(jobs2[1].payload.variation).toBe('ANNULLO CHIAMATA');
+
+        // Una riga MAI lanciata stornata non stampa niente: la cucina non
+        // l'ha mai vista.
+        const terzaId = await nuovaComanda();
+        const addDraft = await api().post(`/orders/${terzaId}/items`).set(bearer(token)).send({
+            items: [{ dish_id: dish.body.id, qty: 1, course_no: 1 }],
+        });
+        const draftRow = righe(addDraft.body)[0];
+        const stornoDraft = await api().post(`/orders/items/${draftRow.id}/void`).set(bearer(token))
+            .send({ reason: 'Battuto per errore' });
+        expect(stornoDraft.status).toBe(200);
+        expect(await jobsOf(terzaId)).toHaveLength(0);
+
+        await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'AUTO_ALL' });
+        await db.end();
+    });
 });
