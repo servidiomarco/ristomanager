@@ -26256,6 +26256,24 @@ async function fireCourseInTx(client: any, tenantId: number, orderId: number, co
         [orderId, courseNo, tenantId]
     );
     if (upd.rows.length > 0) {
+        // Partite col «pronto automatico» (auto_ready): lavorano solo di
+        // carta — stampante sì, monitor no — e nessuno potrà mai premere
+        // «pronto». Le loro righe nascono già READY al lancio, o l'uscita
+        // resterebbe bloccata per sempre ad aspettarle al passe.
+        const auto = await client.query(
+            `UPDATE order_items oi
+             SET status = 'READY', started_at = CURRENT_TIMESTAMP, ready_at = CURRENT_TIMESTAMP
+             FROM stations s
+             WHERE oi.id = ANY($1::int[]) AND s.id = oi.station_id
+               AND s.tenant_id = oi.tenant_id AND s.auto_ready
+             RETURNING oi.id, oi.started_at, oi.ready_at`,
+            [upd.rows.map((r: any) => r.id)]
+        );
+        const autoById = new Map<number, any>(auto.rows.map((r: any) => [r.id, r]));
+        for (const r of upd.rows) {
+            const a = autoById.get(r.id);
+            if (a) { r.status = 'READY'; r.started_at = a.started_at; r.ready_at = a.ready_at; }
+        }
         // Righe aggiunte a un'uscita GIÀ partita: il ticket è identico a un
         // lancio, e in cucina si confonde con una ristampa. Il banner
         // «AGGIUNTA» dice che la card a video è cresciuta.
@@ -26269,6 +26287,28 @@ async function fireCourseInTx(client: any, tenantId: number, orderId: number, co
             prior.rows.length > 0 ? { label: 'AGGIUNTA' } : undefined);
     }
     return upd.rows;
+}
+
+// Un'uscita fatta SOLO di partite a pronto automatico è pronta nell'istante
+// del lancio, ma nessun monitor la avanzerà mai: il course:ready che di
+// norma parte dall'avanzamento KDS qui non partirebbe da nessuno, e la
+// lampada del passe (e dell'OrderPad) resterebbe spenta. Da chiamare DOPO
+// il commit, mai dentro la transazione.
+async function broadcastCourseReadyIfAutoComplete(tenantId: number, orderId: number, courseNo: number, fired: any[]): Promise<void> {
+    if (!fired.some((r: any) => r.status === 'READY')) return;
+    try {
+        const course = await queryWithRetry(
+            `SELECT status FROM order_items
+             WHERE order_id = $1 AND course_no = $2 AND tenant_id = $3 AND status <> 'VOIDED'`,
+            [orderId, courseNo, tenantId]
+        );
+        const live = course.rows;
+        if (live.length > 0 && live.every((r: any) => r.status === 'READY' || r.status === 'SERVED')) {
+            socketService?.broadcastToAll(tenantId, 'course:ready', {
+                order_id: orderId, course_no: courseNo, sync_delta_s: 0,
+            });
+        }
+    } catch (_) {}
 }
 
 // Al lancio, oltre ai monitor KDS, la carta: le righe di ogni partita escono
@@ -26297,9 +26337,28 @@ async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: n
     const stationIds = [...new Set(firedRows.map(r => r.station_id).filter((s: any) => s != null))];
     if (stationIds.length === 0) return;
     const st = await client.query(
-        `SELECT id, name, printer FROM stations WHERE id = ANY($1::int[]) AND tenant_id = $2 AND printer IS NOT NULL`,
+        `SELECT id, name, printer, full_course FROM stations WHERE id = ANY($1::int[]) AND tenant_id = $2 AND printer IS NOT NULL`,
         [stationIds, tenantId]
     );
+
+    // La partita col flag «uscita intera» (gli antipasti, che impiattano
+    // guardando cosa esce insieme) vuole in coda al ticket anche i piatti
+    // delle altre partite della stessa uscita. Si rilegge l'uscita INTERA
+    // dal DB, non i soli firedRows: su un'AGGIUNTA il resto dell'uscita è
+    // partito prima e nelle righe appena lanciate non c'è.
+    let courseRows: any[] | null = null;
+    if (st.rows.some((s: any) => s.full_course)) {
+        const all = await client.query(
+            `SELECT oi.qty, oi.name_snapshot, oi.station_id, s.name AS station_name
+             FROM order_items oi
+             LEFT JOIN stations s ON s.id = oi.station_id AND s.tenant_id = oi.tenant_id
+             WHERE oi.order_id = $1 AND oi.course_no = $2 AND oi.tenant_id = $3
+               AND oi.line_kind = 'DISH' AND oi.status NOT IN ('DRAFT','VOIDED')
+             ORDER BY oi.id`,
+            [orderId, courseNo, tenantId]
+        );
+        courseRows = all.rows;
+    }
 
     for (const station of st.rows) {
         const items = firedRows
@@ -26312,6 +26371,19 @@ async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: n
             }));
         if (items.length === 0) continue;
         const kind = variation && variation.label !== 'AGGIUNTA' ? 'COMANDA_ANNULLO' : 'COMANDA';
+        // Solo sul ticket dei piatti da fare: sull'annullo il contesto
+        // dell'uscita confonde (elenca piatti che invece si fanno).
+        const others = station.full_course && kind === 'COMANDA' && courseRows
+            ? (() => {
+                const byStation = new Map<string, { qty: number; name: string }[]>();
+                for (const r of courseRows.filter((r: any) => r.station_id !== station.id)) {
+                    const label = r.station_name ?? 'Senza partita';
+                    if (!byStation.has(label)) byStation.set(label, []);
+                    byStation.get(label)!.push({ qty: Number(r.qty), name: r.name_snapshot });
+                }
+                return [...byStation.entries()].map(([station_name, its]) => ({ station_name, items: its }));
+            })()
+            : [];
         await client.query(
             `INSERT INTO print_jobs (tenant_id, kind, payload, printer)
              VALUES ($3, $4, $1, $2)`,
@@ -26330,6 +26402,9 @@ async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: n
                 items,
                 ...(variation ? { variation: variation.label } : {}),
                 ...(variation?.reason ? { reason: variation.reason } : {}),
+                // Le altre partite dell'uscita, per la partita che vede
+                // l'uscita intera. Un agente vecchio ignora il campo.
+                ...(others.length > 0 ? { others } : {}),
             }), station.printer, tenantId, kind]
         );
     }
@@ -27326,9 +27401,10 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
                      : [];
         const toFire = [...new Set([...byMode, ...alreadyFired])].sort((a, b) => a - b);
         const fired: number[] = [];
+        const firedRowsByCourse = new Map<number, any[]>();
         for (const c of toFire) {
             const rows = await fireCourseInTx(client, req.tenantId!, orderId, c);
-            if (rows.length > 0) fired.push(c);
+            if (rows.length > 0) { fired.push(c); firedRowsByCourse.set(c, rows); }
         }
 
         // L'invio (e l'eventuale lancio automatico) viaggia con la stessa
@@ -27364,6 +27440,10 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
             }
         } catch (_) {}
         outboxKick();
+
+        for (const c of fired) {
+            await broadcastCourseReadyIfAutoComplete(req.tenantId!, orderId, c, firedRowsByCourse.get(c) ?? []);
+        }
 
         for (const c of fired.filter(c => alreadyFired.includes(c))) {
             const addedIds = new Set(queued.rows.filter((r: any) => r.course_no === c).map((r: any) => r.id));
@@ -27466,10 +27546,15 @@ app.post('/orders/:id/courses/:n/unfire', authenticate, requireAnyPermission('or
         let started = false;
         try {
             await client.query('BEGIN');
+            // Il READY delle partite a pronto automatico non è lavoro di un
+            // cuoco — è il lancio stesso: non blocca l'annullo della chiamata.
             const busyRows = await client.query(
-                `SELECT 1 FROM order_items
-                 WHERE order_id = $1 AND course_no = $2 AND tenant_id = $3
-                   AND status IN ('PREPARING','READY','SERVED') LIMIT 1`,
+                `SELECT 1 FROM order_items oi
+                 LEFT JOIN stations s ON s.id = oi.station_id AND s.tenant_id = oi.tenant_id
+                 WHERE oi.order_id = $1 AND oi.course_no = $2 AND oi.tenant_id = $3
+                   AND (oi.status IN ('PREPARING','SERVED')
+                        OR (oi.status = 'READY' AND NOT COALESCE(s.auto_ready, false)))
+                 LIMIT 1`,
                 [orderId, courseNo, req.tenantId!]
             );
             if (busyRows.rows.length > 0) {
@@ -27477,9 +27562,14 @@ app.post('/orders/:id/courses/:n/unfire', authenticate, requireAnyPermission('or
                 await client.query('ROLLBACK');
             } else {
                 const upd = await client.query(
-                    `UPDATE order_items
-                     SET status = 'QUEUED', fired_at = NULL, station_start_at = NULL, started_at = NULL
-                     WHERE order_id = $1 AND course_no = $2 AND tenant_id = $3 AND status = 'SENT'
+                    `UPDATE order_items oi
+                     SET status = 'QUEUED', fired_at = NULL, station_start_at = NULL,
+                         started_at = NULL, ready_at = NULL
+                     WHERE oi.order_id = $1 AND oi.course_no = $2 AND oi.tenant_id = $3
+                       AND (oi.status = 'SENT'
+                            OR (oi.status = 'READY' AND EXISTS (
+                                SELECT 1 FROM stations s
+                                WHERE s.id = oi.station_id AND s.tenant_id = oi.tenant_id AND s.auto_ready)))
                      RETURNING id, station_id, name_snapshot, qty, modifiers, note`,
                     [orderId, courseNo, req.tenantId!]
                 );
@@ -27667,7 +27757,7 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
         // in arrivo.
         const coming = await queryWithRetry(
             `SELECT oi.name_snapshot, oi.qty, oi.status, oi.station_start_at,
-                    oi.course_no, t.name AS table_name
+                    oi.course_no, oi.weight_grams, t.name AS table_name
              FROM order_items oi
              JOIN orders o ON o.id = oi.order_id
              LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
@@ -27717,7 +27807,7 @@ app.get('/kds/served', authenticate, requirePermission('orders:kds'), async (req
              )
              SELECT oi.order_id, oi.course_no, t.name AS table_name, r.customer_name,
                     MAX(oi.served_at) AS served_at,
-                    jsonb_agg(jsonb_build_object('name', oi.name_snapshot, 'qty', oi.qty, 'station_id', oi.station_id) ORDER BY oi.id) AS items
+                    jsonb_agg(jsonb_build_object('name', oi.name_snapshot, 'qty', oi.qty, 'station_id', oi.station_id, 'weight_grams', oi.weight_grams) ORDER BY oi.id) AS items
              FROM order_items oi
              JOIN mine m ON m.order_id = oi.order_id AND m.course_no = oi.course_no
              JOIN orders o ON o.id = oi.order_id
@@ -28163,6 +28253,8 @@ app.post('/orders/:id/courses/:n/fire', authenticate, requireAnyPermission('orde
             }
         } catch (_) {}
 
+        await broadcastCourseReadyIfAutoComplete(req.tenantId!, orderId, courseNo, fired);
+
         if (wasAlreadyFired) {
             await recordOrderRevision(req.tenantId!, {
                 orderId, courseNo,
@@ -28394,6 +28486,9 @@ app.post('/orders/:id/courses/:n/serve', authenticate, requireAnyPermission('ord
                 }
             }
         } catch (_) {}
+        if (nextFired != null) {
+            await broadcastCourseReadyIfAutoComplete(req.tenantId!, orderId, nextFired, nextItems);
+        }
         outboxKick();
 
         res.json({ order_id: orderId, course_no: courseNo, items: upd.rows, next_fired_course: nextFired });
@@ -31121,7 +31216,7 @@ app.get('/sala/config', authenticate, async (req, res) => {
     try {
         const [fireMode, stations, printers, jobs, printRoutes, categories, catMap] = await Promise.all([
             getCourseFireMode(req.tenantId!),
-            queryWithRetry(`SELECT id, name, color, sort_order, is_active, printer FROM stations WHERE tenant_id = $1 ORDER BY sort_order, id`, [req.tenantId!]),
+            queryWithRetry(`SELECT id, name, color, sort_order, is_active, printer, auto_ready, full_course FROM stations WHERE tenant_id = $1 ORDER BY sort_order, id`, [req.tenantId!]),
             queryWithRetry(`SELECT id, name, host, port, kind, is_active, buzzer, notes FROM printers WHERE tenant_id = $1 ORDER BY kind, name`, [req.tenantId!]),
             queryWithRetry(`SELECT status, COUNT(*)::int AS n FROM print_jobs WHERE tenant_id = $1 AND status IN ('PENDING','FAILED') GROUP BY status`, [req.tenantId!]),
             getPrintRoutes(req.tenantId!),
@@ -31245,10 +31340,10 @@ app.post('/sala/stations', authenticate, requirePermission('settings:full'), asy
         const printer = req.body?.printer != null ? String(req.body.printer) : null;
         if (printer !== null && !PRINTER_NAME_RE.test(printer)) return res.status(400).json({ error: 'Stampante non valida' });
         const ins = await queryWithRetry(
-            `INSERT INTO stations (tenant_id, name, color, sort_order, printer)
-             VALUES ($4, $1, $2, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM stations WHERE tenant_id = $4), $3)
-             RETURNING id, name, color, sort_order, is_active, printer`,
-            [name, req.body?.color ?? null, printer, req.tenantId!]
+            `INSERT INTO stations (tenant_id, name, color, sort_order, printer, auto_ready, full_course)
+             VALUES ($4, $1, $2, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM stations WHERE tenant_id = $4), $3, $5, $6)
+             RETURNING id, name, color, sort_order, is_active, printer, auto_ready, full_course`,
+            [name, req.body?.color ?? null, printer, req.tenantId!, req.body?.auto_ready === true, req.body?.full_course === true]
         );
         res.status(201).json(ins.rows[0]);
     } catch (err: any) {
@@ -31275,12 +31370,16 @@ app.put('/sala/stations/:id', authenticate, requirePermission('settings:full'), 
                 name = COALESCE($2, name),
                 color = COALESCE($3, color),
                 is_active = COALESCE($4, is_active),
-                printer = CASE WHEN $5 THEN $6 ELSE printer END
+                printer = CASE WHEN $5 THEN $6 ELSE printer END,
+                auto_ready = COALESCE($8, auto_ready),
+                full_course = COALESCE($9, full_course)
              WHERE id = $1 AND tenant_id = $7
-             RETURNING id, name, color, sort_order, is_active, printer`,
+             RETURNING id, name, color, sort_order, is_active, printer, auto_ready, full_course`,
             [id, name, req.body?.color ?? null,
              typeof req.body?.is_active === 'boolean' ? req.body.is_active : null,
-             touchPrinter, printer, req.tenantId!]
+             touchPrinter, printer, req.tenantId!,
+             typeof req.body?.auto_ready === 'boolean' ? req.body.auto_ready : null,
+             typeof req.body?.full_course === 'boolean' ? req.body.full_course : null]
         );
         if (upd.rows.length === 0) return res.status(404).json({ error: 'Partita non trovata' });
         res.json(upd.rows[0]);
@@ -31409,7 +31508,7 @@ app.post('/sala/printers/:id/test', authenticate, requirePermission('settings:fu
 const salaSnapshot = async (tenantId: number): Promise<any> => {
     const [fireMode, stations, printers] = await Promise.all([
         getCourseFireMode(tenantId),
-        queryWithRetry(`SELECT name, color, printer, is_active FROM stations WHERE tenant_id = $1 ORDER BY sort_order, id`, [tenantId]),
+        queryWithRetry(`SELECT name, color, printer, is_active, auto_ready, full_course FROM stations WHERE tenant_id = $1 ORDER BY sort_order, id`, [tenantId]),
         queryWithRetry(`SELECT name, host, port, kind, is_active, buzzer, notes FROM printers WHERE tenant_id = $1 ORDER BY id`, [tenantId]),
     ]);
     const catMap = await queryWithRetry(
@@ -31511,13 +31610,14 @@ app.post('/sala/profiles/:id/activate', authenticate, requirePermission('setting
             const stName = String(st?.name ?? '').trim();
             if (!stName) continue;
             await client.query(
-                `INSERT INTO stations (tenant_id, name, color, sort_order, printer, is_active)
-                 VALUES ($5, $1, $2, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM stations WHERE tenant_id = $5), $3, $4)
+                `INSERT INTO stations (tenant_id, name, color, sort_order, printer, is_active, auto_ready, full_course)
+                 VALUES ($5, $1, $2, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM stations WHERE tenant_id = $5), $3, $4, $6, $7)
                  ON CONFLICT (tenant_id, lower(name)) DO UPDATE SET
-                    color = EXCLUDED.color, printer = EXCLUDED.printer, is_active = EXCLUDED.is_active`,
+                    color = EXCLUDED.color, printer = EXCLUDED.printer, is_active = EXCLUDED.is_active,
+                    auto_ready = EXCLUDED.auto_ready, full_course = EXCLUDED.full_course`,
                 [stName, st.color ?? null,
                  st.printer != null && PRINTER_NAME_RE.test(String(st.printer)) ? st.printer : null,
-                 st.is_active !== false, req.tenantId!]
+                 st.is_active !== false, req.tenantId!, st.auto_ready === true, st.full_course === true]
             );
         }
         for (const fn of Object.keys(PRINT_ROUTE_KEYS) as PrintRouteFn[]) {

@@ -50,6 +50,23 @@ const minutesSince = (iso: string | null, now: number): number =>
 const minutesUntil = (iso: string | null, now: number): number =>
   iso ? Math.ceil((new Date(iso).getTime() - now) / 60000) : 0;
 
+// Nelle uscite compresse in una riga aggregata le righe al peso si sommano
+// solo a parità di peso, col peso nel nome («2× Tagliata · 1 kg»): pesi
+// diversi sono piatti diversi, come le varianti.
+const dishKey = (name: string, grams?: number | null): string =>
+  grams != null ? `${name} · ${weightLabel(grams)}` : name;
+
+// Il riassunto di un'uscita non ancora sul fuoco: stessi piatti (e stesso
+// peso) sommati su una voce sola, invece di una ripetizione per riga.
+const summarizeItems = (its: { name_snapshot: string; qty: number; weight_grams?: number | null }[]): string => {
+  const m = new Map<string, number>();
+  for (const i of its) {
+    const k = dishKey(i.name_snapshot, i.weight_grams);
+    m.set(k, (m.get(k) ?? 0) + i.qty);
+  }
+  return [...m.entries()].map(([name, qty]) => `${qty} ${name}`).join(', ');
+};
+
 // Verde fino a 5', ambra fino a 10', poi rosso. Il colore non è l'unica
 // informazione: accanto c'è sempre il numero. Le famiglie del design system
 // invertono già da sole fra tema chiaro e scuro.
@@ -617,11 +634,13 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   const allDay = useMemo(() => {
     const totals = new Map<string, { ahead: number; working: number }>();
     for (const r of coming) {
-      const cur = totals.get(r.name_snapshot) ?? { ahead: 0, working: 0 };
+      // Un chip per pezzatura: «2× Bistecca · 500 g» e «1× Bistecca · 1 kg»
+      // sono lavori diversi sulla griglia, non tre bistecche.
+      const cur = totals.get(dishKey(r.name_snapshot, r.weight_grams)) ?? { ahead: 0, working: 0 };
       const waiting = r.status === 'QUEUED'
         || (r.status === 'SENT' && r.station_start_at != null && new Date(r.station_start_at).getTime() > now);
       if (waiting) cur.ahead += r.qty; else cur.working += r.qty;
-      totals.set(r.name_snapshot, cur);
+      totals.set(dishKey(r.name_snapshot, r.weight_grams), cur);
     }
     return [...totals.entries()].sort((a, b) =>
       ((b[1].ahead + b[1].working) - (a[1].ahead + a[1].working)) || a[0].localeCompare(b[0]));
@@ -895,7 +914,10 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                           // invece di due righe uguali): è metà del rumore.
                           const aggregate = (its: typeof c.items): string => {
                             const byName = new Map<string, number>();
-                            for (const i of its) byName.set(i.name, (byName.get(i.name) ?? 0) + i.qty);
+                            for (const i of its) {
+                              const k = dishKey(i.name, i.weight_grams);
+                              byName.set(k, (byName.get(k) ?? 0) + i.qty);
+                            }
                             return [...byName.entries()].map(([name, qty]) => `${qty}× ${name}`).join(' · ');
                           };
                           const mine = c.items.filter(i => stationId == null || i.station_id === stationId);
@@ -998,7 +1020,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                     T{col.table_name} · {courseShort(col.course_no)}
                   </div>
                   <div className="text-[13px] text-[var(--ds-text-muted)]">
-                    {col.items.map(i => `${i.qty} ${i.name_snapshot}`).join(', ')}
+                    {summarizeItems(col.items)}
                   </div>
                   <div className="mt-1.5 flex items-center gap-2">
                     <span className="text-[14px] font-semibold text-[var(--ds-text-primary)] tabular-nums">
@@ -1031,7 +1053,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
         bodyClassName="p-5 sm:p-6"
       >
         {(() => {
-          const rows = coming.filter(r => r.name_snapshot === chipDetail);
+          const rows = coming.filter(r => dishKey(r.name_snapshot, r.weight_grams) === chipDetail);
           const isWaiting = (r: KdsComingItem) => r.status === 'QUEUED'
             || (r.status === 'SENT' && r.station_start_at != null && new Date(r.station_start_at).getTime() > now);
           const group = (list: KdsComingItem[]) => {
@@ -1390,7 +1412,7 @@ const OrderCard: React.FC<{
                       </span>
                     </div>
                     <div className="mt-0.5 text-[13px] text-[var(--ds-text-muted)]">
-                      {soon.items.map(i => `${i.qty} ${i.name_snapshot}`).join(', ')}
+                      {summarizeItems(soon.items)}
                     </div>
                     {/* 44px: si preme con le mani sporche, non col mouse. */}
                     <button
@@ -1574,7 +1596,7 @@ const CourseSection: React.FC<{
                 if (longPressed.current) { longPressed.current = false; return; }
                 onAdvance(i, ready ? 'PREPARING' : 'READY');
               }}
-              onPointerDown={() => pressStart(i.name_snapshot)}
+              onPointerDown={() => pressStart(dishKey(i.name_snapshot, i.weight_grams))}
               onPointerUp={pressEnd}
               onPointerLeave={pressEnd}
               onPointerCancel={pressEnd}
@@ -1715,7 +1737,10 @@ const PassiveSection: React.FC<{
   const mine = rows.filter(r => stationId == null || r.station_id === stationId);
   const aggregateEntries = (rs: KdsFullItem[]): [string, number][] => {
     const byName = new Map<string, number>();
-    for (const r of rs) byName.set(r.name_snapshot, (byName.get(r.name_snapshot) ?? 0) + r.qty);
+    for (const r of rs) {
+      const k = dishKey(r.name_snapshot, r.weight_grams);
+      byName.set(k, (byName.get(k) ?? 0) + r.qty);
+    }
     return [...byName.entries()];
   };
   const aggregate = (rs: KdsFullItem[]): string =>

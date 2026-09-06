@@ -304,8 +304,8 @@ export interface KdsFullItem {
   station_id: number | null;
   name_snapshot: string;
   qty: number;
-  /** Grammi del pezzo per le righe al peso: il modal della comanda intera
-   *  li mostra accanto al nome. Il server li manda già. */
+  /** Grammi del pezzo per le righe al peso: le uscite compresse aggregano
+   *  solo a parità di peso, col peso nel nome. */
   weight_grams?: number | null;
   modifiers: { id?: number | null; name: string; price_delta_cents: number }[] | null;
   note: string | null;
@@ -322,6 +322,9 @@ export interface KdsFullItem {
 export interface KdsComingItem {
   name_snapshot: string;
   qty: number;
+  /** Grammi del pezzo per le righe al peso: la barra fa un chip per
+   *  pezzatura, col peso nel nome. */
+  weight_grams?: number | null;
   status: 'QUEUED' | 'SENT' | 'PREPARING';
   station_start_at: string | null;
   course_no: number;
@@ -354,7 +357,7 @@ export interface KdsServedCourse {
   table_name: string | null;
   customer_name: string | null;
   served_at: string;
-  items: { name: string; qty: number; station_id: number | null }[];
+  items: { name: string; qty: number; station_id: number | null; weight_grams?: number | null }[];
 }
 
 export const getKdsServed = async (stationId: number | null): Promise<{ courses: KdsServedCourse[] }> =>
