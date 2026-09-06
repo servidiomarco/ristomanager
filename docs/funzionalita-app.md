@@ -572,6 +572,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-06 | Comande, Cucina e Passe | Sui ticket di storno e annullo chiamata le righe piatto escono barrate col tratteggio («-- 1 x Acqua ----»): la riga che non vale più si riconosce a colpo d'occhio. |
 | 2026-09-06 | Comande, Cucina e Passe | La comanda stampata segue i monitor: righe aggiunte a un'uscita già partita escono col banner «AGGIUNTA»; storno di una riga già in cucina e annullo chiamata stampano un ticket dedicato (quantità e motivo per lo storno) sulla stessa termica del lancio. Richiede l'agente di stampa aggiornato: quello vecchio arena i ticket di annullo invece di stamparli come piatti da fare. |
 | 2026-09-06 | Comande, Cucina e Passe | L'uscita Bar lanciata dice «al bar», non «in cucina», sulla pill di stato della comanda. |
 | 2026-09-06 | Comande, Cucina e Passe · Cassa | Storno parziale: su una riga da 2 o più pezzi il dialogo di storno (comanda e cassa) chiede quanti stornarne — la riga resta viva in cucina con la quantità scalata, i pezzi stornati diventano una riga a sé con motivazione, e il monitor avvisa solo di quelli. Default riga intera, come prima. |

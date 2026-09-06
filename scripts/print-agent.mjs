@@ -338,7 +338,12 @@ function renderComandaAnnullo(p) {
 
   push(GS, 0x21, 0x01);
   for (const i of p.items ?? []) {
-    text(`${i.qty} x ${i.name}\n`);
+    // Il «barrato» delle termiche: l'ESC/POS non sa sovrastampare un tratto
+    // sul testo, quindi la riga annullata si attraversa col tratteggio —
+    // «-- 1 x ACQUA GAS ----»: si legge cosa era, e si legge che non vale.
+    const label = `-- ${i.qty} x ${i.name} `;
+    const cut = label.length > COLS - 2 ? label.slice(0, COLS - 3) + ' ' : label;
+    text(cut + '-'.repeat(Math.max(2, COLS - cut.length)) + '\n');
     push(GS, 0x21, 0x00);
     for (const m of i.modifiers ?? []) text(`    + ${m}\n`);
     if (i.note) text(`    ** ${i.note}\n`);
