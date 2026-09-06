@@ -5634,6 +5634,13 @@ app.post('/bills/:id/close', authenticate, requirePermission('payments:full'), a
                 // emessi dopo la superano da soli.
                 registerNativeProforma(req.tenantId!, id, req.user?.userId ?? null)
                     .catch(err => console.error('[fiscal] registrazione proforma fallita per conto', id, err?.message));
+            } else if (Number(updatedRow.total_cents) === 0) {
+                // Conto interamente scontato: non c'è corrispettivo da
+                // documentare e il provider un documento da 0 € lo rifiuta.
+                // La riga PROFORMA registra che la chiusura a zero è stata
+                // una scelta, non uno scontrino dimenticato.
+                registerNativeProforma(req.tenantId!, id, req.user?.userId ?? null)
+                    .catch(err => console.error('[fiscal] registrazione proforma fallita per conto', id, err?.message));
             } else {
                 emitFiscalDocForBill(req.tenantId!, id, req.user?.userId ?? null)
                     .catch(err => console.error('[fiscal] emissione post-chiusura fallita per conto', id, err?.message));
@@ -28887,11 +28894,14 @@ async function syncBillTotalInTx(client: any, tenantId: number, billId: number):
         bill.discount_type, bill.discount_value
     );
 
-    // Aggiorniamo SUBITO il totale (CHECK > 0: minimo tecnico 1 centesimo) così
-    // il trigger di somma sulle quote vede il nuovo tetto quando, più sotto,
-    // ridimensioniamo l'acconto. Lo snapshot righe lo riscriviamo alla fine.
+    // Aggiorniamo SUBITO il totale così il trigger di somma sulle quote vede
+    // il nuovo tetto quando, più sotto, ridimensioniamo l'acconto. Lo
+    // snapshot righe lo riscriviamo alla fine. Zero è un totale legittimo
+    // (sconto pari all'intero conto): il vecchio minimo tecnico di 1 cent
+    // (CHECK > 0, rilassato dalla migration conto-totale-zero) lasciava in
+    // cassa un centesimo da incassare che non esisteva — T206, 6/09/2026.
     await client.query(
-        `UPDATE table_bills SET total_cents = GREATEST($2, 1) WHERE id = $1`,
+        `UPDATE table_bills SET total_cents = GREATEST($2, 0) WHERE id = $1`,
         [billId, newTotal]
     );
 
