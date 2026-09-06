@@ -5751,6 +5751,98 @@ app.post('/bills/:id/reopen', authenticate, requirePermission('cash:void_payment
     }
 });
 
+// Sconto sul CONTO, per le operazioni di cassa: al momento dell'incasso la
+// comanda è già chiusa e il suo sconto (POST /orders/:id/discount) non si può
+// più toccare. Stessa validazione e stesso permesso `orders:void` — regalare
+// soldi è lo stesso gesto, cambia solo il momento. Si applica sopra gli
+// eventuali sconti per comanda (compongono in syncBillTotalInTx) e vale solo
+// per i conti nati da una comanda: su un conto aperto a mano il totale è
+// digitato, non ricostruibile dalle righe, e il riallineamento lo azzererebbe.
+app.post('/bills/:id/discount', authenticate, requirePermission('orders:void'), async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'id non valido' });
+
+        const clear = req.body?.discount_type == null;
+        let type: string | null = null;
+        let value: number | null = null;
+        let reason: string | null = null;
+        if (!clear) {
+            type = req.body.discount_type;
+            if (type !== 'PERCENT' && type !== 'AMOUNT') {
+                return res.status(400).json({ error: "discount_type deve essere PERCENT o AMOUNT" });
+            }
+            value = Number(req.body.discount_value);
+            if (!Number.isFinite(value) || value <= 0) {
+                return res.status(400).json({ error: 'discount_value deve essere > 0' });
+            }
+            if (type === 'PERCENT' && value > 100) {
+                return res.status(400).json({ error: 'Uno sconto percentuale non può superare il 100%' });
+            }
+            const raw = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+            if (raw.length < 3) {
+                return res.status(400).json({ error: 'Serve una motivazione (almeno 3 caratteri)' });
+            }
+            reason = raw.slice(0, 300);
+        }
+
+        await client.query('BEGIN');
+        const cur = await client.query(
+            `SELECT b.id, b.status,
+                    EXISTS (SELECT 1 FROM orders o WHERE o.table_bill_id = b.id) AS has_orders
+             FROM table_bills b WHERE b.id = $1 AND b.tenant_id = $2 FOR UPDATE`,
+            [id, req.tenantId!]
+        );
+        if (cur.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Conto non trovato' });
+        }
+        if (!['OPEN', 'LOCKED', 'SETTLED', 'SETTLED_PARTIAL'].includes(cur.rows[0].status)) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ error: 'Il conto non è più modificabile', status: cur.rows[0].status });
+        }
+        if (!cur.rows[0].has_orders) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ error: 'Il conto è stato aperto a mano: correggi il totale invece di scontarlo' });
+        }
+
+        await client.query(
+            `UPDATE table_bills
+             SET discount_type = $2, discount_value = $3, discount_reason = $4, discount_by_user_id = $5
+             WHERE id = $1`,
+            [id, type, value, reason, clear ? null : (req.user?.userId ?? null)]
+        );
+        const synced = await syncBillTotalInTx(client, req.tenantId!, id);
+        await client.query('COMMIT');
+
+        try { socketService?.broadcastToAll(req.tenantId!, 'bill:updated', synced.bill); } catch (_) {}
+
+        LogService.logActivity(
+            req.tenantId!,
+            req.user?.userId ?? null, req.user?.email ?? '', req.user?.email ?? '',
+            ActivityAction.UPDATE, ResourceType.RESERVATION, undefined,
+            clear
+                ? `Sconto rimosso dal conto #${id}`
+                : `Sconto ${type === 'PERCENT' ? `${value}%` : `${value} €`} sul conto #${id}`,
+            { discount_type: type, discount_value: value, reason, total_after_cents: synced.computed_total_cents }
+        ).catch(() => {});
+
+        res.json({ bill: synced.bill, released_split_ids: synced.released_split_ids });
+    } catch (err: any) {
+        await client.query('ROLLBACK').catch(() => {});
+        if (err instanceof BillSyncError) {
+            // Il caso concreto: sconto sotto il già incassato → serve un
+            // rimborso, non uno sconto più grande.
+            return res.status(409).json({ error: err.message, ...err.detail });
+        }
+        console.error('POST /bills/:id/discount error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    } finally {
+        client.release();
+    }
+});
+
 
 // Registra un movimento di incasso a conto ancora aperto — l'ospite che va
 // via prima e paga la sua parte in contanti al banco, il POS passato a metà
@@ -28759,7 +28851,8 @@ async function maintainDepositCredit(client: any, tenantId: number, billId: numb
 
 async function syncBillTotalInTx(client: any, tenantId: number, billId: number): Promise<any> {
     const billRs = await client.query(
-        `SELECT id, reservation_id, total_cents, status FROM table_bills WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+        `SELECT id, reservation_id, total_cents, status, discount_type, discount_value
+         FROM table_bills WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
         [billId, tenantId]
     );
     if (billRs.rowCount === 0) throw new BillSyncError('Conto non trovato', { bill_id: billId });
@@ -28784,9 +28877,14 @@ async function syncBillTotalInTx(client: any, tenantId: number, billId: number):
          GROUP BY o.id, o.discount_type, o.discount_value`,
         [billId]
     );
-    const newTotal: number = totalRs.rows.reduce(
-        (sum: number, r: any) => sum + applyDiscount(Number(r.subtotal), r.discount_type, r.discount_value),
-        0
+    // Lo sconto di CONTO (operazioni di cassa) si applica DOPO la somma delle
+    // comande, sopra gli eventuali sconti per comanda: i due compongono.
+    const newTotal: number = applyDiscount(
+        totalRs.rows.reduce(
+            (sum: number, r: any) => sum + applyDiscount(Number(r.subtotal), r.discount_type, r.discount_value),
+            0
+        ),
+        bill.discount_type, bill.discount_value
     );
 
     // Aggiorniamo SUBITO il totale (CHECK > 0: minimo tecnico 1 centesimo) così
@@ -28856,7 +28954,8 @@ async function syncBillTotalInTx(client: any, tenantId: number, billId: number):
          RETURNING id, reservation_id, table_id, total_cents, covers, currency,
                    items, status, share_token, opened_at, closed_at,
                    opened_by_user_id, closed_by_user_id, external_ref,
-                   cash_settled_cents, tip_cents, notes`,
+                   cash_settled_cents, tip_cents, notes,
+                   discount_type, discount_value, discount_reason`,
         [billId, JSON.stringify(items)]
     );
     return { bill: upd.rows[0], released_split_ids: released, computed_total_cents: newTotal };
@@ -30055,6 +30154,7 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
             `SELECT b.id, b.reservation_id, b.table_id, b.total_cents, b.covers,
                     b.currency, b.items, b.status, b.share_token, b.opened_at, b.closed_at,
                     b.cash_settled_cents, b.tip_cents, b.external_ref,
+                    b.discount_type, b.discount_value, b.discount_reason,
                     t.name AS table_name,
                     r.customer_name,
                     -- Il servizio del conto arriva dalla comanda; per un conto
@@ -31017,6 +31117,14 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
             qty: Number(i.qty ?? 1),
             total_cents: Number(i.unit_price_cents ?? 0) * Number(i.qty ?? 1),
         }));
+        // Con uno sconto (di comanda o di conto) la somma delle righe supera il
+        // totale: senza una riga negativa il foglio in mano al cliente non
+        // torna. Riga normale apposta — gli agenti già installati la stampano
+        // senza aggiornarsi, e le righe tornano ESATTAMENTE col TOTALE.
+        const discountForPrint = items.reduce((s: number, i: any) => s + i.total_cents, 0) - bill.total_cents;
+        if (items.length > 0 && discountForPrint > 0) {
+            items.push({ name: 'Sconto', qty: 1, total_cents: -discountForPrint });
+        }
 
         // Acconto già versato e residuo, così il preconto stampato mostra
         // "Acconto −€X / Da pagare €Y" invece del solo totale.

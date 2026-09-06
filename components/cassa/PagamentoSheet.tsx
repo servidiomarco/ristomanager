@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { billsApiService, getOpenBills, getBillOrder, printBill, type OpenBillRow } from '../../services/billsApiService';
+import { billsApiService, getOpenBills, getBillOrder, printBill, setBillDiscount, type OpenBillRow } from '../../services/billsApiService';
 import { voidItem } from '../../services/ordersApiService';
 import type { OrderItem, OrderWithItems } from '../../types';
 import { ReasonDialog } from '../comande/ReasonDialog';
+import { DiscountDialog } from '../comande/DiscountDialog';
 import { isSystemLine } from '../comande/orderView';
 import { euro } from './cassaView';
 import type { SettleOpts } from '../pagamenti/BillSheet';
@@ -52,6 +53,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
   const [editOrder, setEditOrder] = useState<OrderWithItems | null>(null);
   const [voidTarget, setVoidTarget] = useState<OrderItem | null>(null);
   const [invoiceOpen, setInvoiceOpen] = useState(false);
+  const [discountOpen, setDiscountOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -114,6 +116,22 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
       setBusy(false);
     }
   }, [reloadBill]);
+
+  const applyDiscount = useCallback(async (
+    p: { discount_type: 'PERCENT' | 'AMOUNT'; discount_value: number; reason: string } | null,
+  ) => {
+    if (!bill) return;
+    setBusy(true); setError(null);
+    try {
+      await setBillDiscount(bill.id, p);
+      await reloadBill();
+      setDiscountOpen(false);
+    } catch (err: any) {
+      setError(err?.data?.error ?? err?.message ?? 'Sconto non applicato');
+      // Il dialog copre il Callout dell'errore: si chiude per farlo leggere.
+      setDiscountOpen(false);
+    } finally { setBusy(false); }
+  }, [bill, reloadBill]);
 
   const settle = useCallback(async (opts?: SettleOpts, meta?: { invoiceIntent?: boolean }) => {
     if (!bill) return;
@@ -257,6 +275,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
           onSplit={() => setScreen('split')}
           onShowQr={() => setQrBill(bill)}
           onEdit={openCorreggi}
+          onDiscount={() => setDiscountOpen(true)}
           embedded
           paymentPulse={paymentPulse}
         />
@@ -270,6 +289,18 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
           initialQuery={(esito?.bill ?? bill)!.customer_name ?? undefined}
           onCancel={() => setInvoiceOpen(false)}
           onDone={() => { setInvoiceOpen(false); onClose(); }}
+        />
+      )}
+
+      {bill && discountOpen && (
+        <DiscountDialog
+          title="Sconto sul conto"
+          currentReason={bill.discount_reason ?? null}
+          hasDiscount={bill.discount_type != null}
+          busy={busy}
+          onCancel={() => setDiscountOpen(false)}
+          onClear={() => applyDiscount(null)}
+          onConfirm={applyDiscount}
         />
       )}
 

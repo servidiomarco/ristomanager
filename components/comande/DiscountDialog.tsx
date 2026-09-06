@@ -14,10 +14,13 @@ export const DiscountDialog: React.FC<{
   currentReason: string | null;
   hasDiscount: boolean;
   busy: boolean;
+  /** «Sconto sulla comanda» (default) o «Sconto sul conto» in cassa, dove la
+   *  comanda è già chiusa e lo sconto vive sul conto. */
+  title?: string;
   onCancel: () => void;
   onClear: () => void;
   onConfirm: (p: { discount_type: 'PERCENT' | 'AMOUNT'; discount_value: number; reason: string }) => void;
-}> = ({ currentReason, hasDiscount, busy, onCancel, onClear, onConfirm }) => {
+}> = ({ currentReason, hasDiscount, busy, title, onCancel, onClear, onConfirm }) => {
   const [type, setType] = useState<'PERCENT' | 'AMOUNT'>('PERCENT');
   const [value, setValue] = useState('');
   const [reason, setReason] = useState(currentReason ?? '');
@@ -28,7 +31,7 @@ export const DiscountDialog: React.FC<{
     <ModalShell
       open
       onClose={onCancel}
-      title="Sconto sulla comanda"
+      title={title ?? 'Sconto sulla comanda'}
       subtitle="Resta a registro con il tuo nome: serve a spiegare la differenza a fine servizio."
       size="sm"
       closeOnEscape
