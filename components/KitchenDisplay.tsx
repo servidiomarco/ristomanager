@@ -56,6 +56,17 @@ const minutesUntil = (iso: string | null, now: number): number =>
 const dishKey = (name: string, grams?: number | null): string =>
   grams != null ? `${name} · ${weightLabel(grams)}` : name;
 
+// La variante spacca il chip della barra come la pezzatura: «fusilli» e
+// «tagliatelle» sono due lavori diversi, e un «2× Pasta al pomodoro» muto
+// non dice al cuoco cosa iniziare. La chiave composta fa anche da titolo
+// del dettaglio «dove va».
+const modsLabel = (mods?: { name: string }[] | null): string =>
+  (mods ?? []).map(m => m.name).join(', ');
+const chipKey = (name: string, grams?: number | null, mods?: { name: string }[] | null): string => {
+  const m = modsLabel(mods);
+  return dishKey(name, grams) + (m ? ` · ${m}` : '');
+};
+
 // Il riassunto di un'uscita non ancora sul fuoco: stessi piatti (e stesso
 // peso) sommati su una voce sola, invece di una ripetizione per riga.
 const summarizeItems = (its: { name_snapshot: string; qty: number; weight_grams?: number | null }[]): string => {
@@ -632,15 +643,22 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   // cotto, non è più lavoro di nessuno. Utile quando le card scorrono fuori
   // schermo: la barra è l'unico posto letto a colpo d'occhio.
   const allDay = useMemo(() => {
-    const totals = new Map<string, { ahead: number; working: number }>();
+    const totals = new Map<string, { dish: string; mods: string; ahead: number; working: number }>();
     for (const r of coming) {
-      // Un chip per pezzatura: «2× Bistecca · 500 g» e «1× Bistecca · 1 kg»
-      // sono lavori diversi sulla griglia, non tre bistecche.
-      const cur = totals.get(dishKey(r.name_snapshot, r.weight_grams)) ?? { ahead: 0, working: 0 };
+      // Un chip per pezzatura E per variante: «2× Bistecca · 500 g» e
+      // «1× Pasta al pomodoro · fusilli» sono lavori diversi, non conteggi
+      // da sommare. Piatto e variante restano separati per tingere la
+      // variante come la riga «↳» sulla card.
+      const key = chipKey(r.name_snapshot, r.weight_grams, r.modifiers);
+      const cur = totals.get(key) ?? {
+        dish: dishKey(r.name_snapshot, r.weight_grams),
+        mods: modsLabel(r.modifiers),
+        ahead: 0, working: 0,
+      };
       const waiting = r.status === 'QUEUED'
         || (r.status === 'SENT' && r.station_start_at != null && new Date(r.station_start_at).getTime() > now);
       if (waiting) cur.ahead += r.qty; else cur.working += r.qty;
-      totals.set(dishKey(r.name_snapshot, r.weight_grams), cur);
+      totals.set(key, cur);
     }
     return [...totals.entries()].sort((a, b) =>
       ((b[1].ahead + b[1].working) - (a[1].ahead + a[1].working)) || a[0].localeCompare(b[0]));
@@ -795,22 +813,32 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             {/* Solo i chip scorrono: la pill delle note sta FUORI dall'area a
                 scorrimento, sempre visibile a destra qualunque sia la coda. */}
             <div ref={barRef} className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
-              {allDay.map(([name, t]) => (
+              {allDay.map(([key, t]) => (
                 // Il chip si tocca: apre i tavoli a cui è destinato il piatto.
                 <button
-                  key={name}
+                  key={key}
                   type="button"
-                  data-chip={name}
-                  onClick={() => setChipDetail(name)}
-                  aria-label={`Dove va ${name}`}
+                  data-chip={key}
+                  onClick={() => setChipDetail(key)}
+                  aria-label={`Dove va ${key}`}
                   className={`inline-flex flex-shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[14px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
-                    litChip === name
+                    litChip === key
                       ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
                       : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
                   }`}
                 >
                   <span className="tabular-nums">{t.ahead + t.working}×</span>
-                  <span>{name}</span>
+                  <span>{t.dish}</span>
+                  {/* La variante nella tinta delle varianti, come la riga
+                      «↳» sulla card; sul chip acceso passa al fg del chip,
+                      o l'ambra sul fondo action non si legge. */}
+                  {t.mods && (
+                    <span className={`text-[13px] font-medium ${
+                      litChip === key ? 'text-[var(--ds-action-fg)]' : 'text-[var(--ds-pending-text)]'
+                    }`}>
+                      {t.mods}
+                    </span>
+                  )}
                   {/* La quota sul fuoco: tondo ambra pieno che batte come il
                       pallino della card — si vede anche con la coda lunga.
                       text SU tint invertiti come coppia bg/fg: contrasto alto
@@ -1053,24 +1081,23 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
         bodyClassName="p-5 sm:p-6"
       >
         {(() => {
-          const rows = coming.filter(r => dishKey(r.name_snapshot, r.weight_grams) === chipDetail);
+          // Il chip è già UNA variante: la chiave composta filtra e il
+          // titolo del modal la porta — le pill non la ripetono (§10).
+          const rows = coming.filter(r => chipKey(r.name_snapshot, r.weight_grams, r.modifiers) === chipDetail);
           const isWaiting = (r: KdsComingItem) => r.status === 'QUEUED'
             || (r.status === 'SENT' && r.station_start_at != null && new Date(r.station_start_at).getTime() > now);
           const group = (list: KdsComingItem[]) => {
-            const m = new Map<string, { table: string; course: number; qty: number; mods: string }>();
+            const m = new Map<string, { table: string; course: number; qty: number }>();
             for (const r of list) {
               const table = r.table_name ?? '—';
-              // Le varianti entrano in chiave: «al sangue» e «ben cotta»
-              // sono due lavori diversi, come sulle righe della card.
-              const mods = (r.modifiers ?? []).map(mm => mm.name).join(', ');
-              const key = `${table}:${r.course_no}:${mods}`;
-              const cur = m.get(key) ?? { table, course: r.course_no, qty: 0, mods };
+              const key = `${table}:${r.course_no}`;
+              const cur = m.get(key) ?? { table, course: r.course_no, qty: 0 };
               cur.qty += r.qty;
               m.set(key, cur);
             }
             return [...m.values()].sort((a, b) => a.table.localeCompare(b.table, undefined, { numeric: true }) || a.course - b.course);
           };
-          const Section = ({ label, dot, list }: { label: string; dot: string; list: { table: string; course: number; qty: number; mods: string }[] }) => (
+          const Section = ({ label, dot, list }: { label: string; dot: string; list: { table: string; course: number; qty: number }[] }) => (
             <div>
               <div className="mb-1.5 flex items-center gap-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">
                 <span aria-hidden className={`h-2 w-2 rounded-full ${dot}`} />
@@ -1081,15 +1108,10 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
               ) : (
                 <div className="flex flex-col items-start gap-1.5">
                   {list.map(e => (
-                    <span key={`${e.table}-${e.course}-${e.mods}`} className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-full bg-[var(--ds-surface-row)] px-3 py-1.5 text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                    <span key={`${e.table}-${e.course}`} className="inline-flex items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3 py-1.5 text-[15px] font-semibold text-[var(--ds-text-primary)]">
                       <span className="tabular-nums">{e.qty}×</span>
                       T{e.table}
                       <span className="text-[13px] font-medium text-[var(--ds-text-muted)]">{courseShort(e.course)}</span>
-                      {/* La cottura nella famiglia delle varianti, come la
-                          riga «↳» sulla card: è la stessa informazione. */}
-                      {e.mods && (
-                        <span className="text-[13px] font-medium text-[var(--ds-pending-text)]">{e.mods}</span>
-                      )}
                     </span>
                   ))}
                 </div>
@@ -1409,7 +1431,7 @@ const OrderCard: React.FC<{
               const wait = minutesUntil(soon.items[0]?.station_start_at ?? null, now);
               return (
                 <div key={no} className="relative">
-                  <span aria-hidden className="absolute -left-[25px] top-3 h-3.5 w-3.5 rounded-full bg-[var(--ds-border-strong)] ring-4 ring-[var(--ds-canvas)]" />
+                  <span aria-hidden className="absolute -left-[28px] top-2.5 h-5 w-5 rounded-full bg-[var(--ds-border-strong)] ring-4 ring-[var(--ds-canvas)]" />
                   <div className="rounded-[16px] border-2 border-dashed border-[var(--ds-border-strong)] px-2.5 py-2">
                     <div className="flex items-baseline gap-2 text-[13px]">
                       <span className="font-semibold text-[var(--ds-text-primary)]">
@@ -1513,7 +1535,7 @@ const CourseSection: React.FC<{
           binario. Fermo e verde quando tutto è pronto. */}
       <span
         aria-hidden
-        className={`absolute -left-[25px] top-3 h-3.5 w-3.5 rounded-full ring-4 ring-[var(--ds-canvas)] ${
+        className={`absolute -left-[28px] top-2.5 h-5 w-5 rounded-full ring-4 ring-[var(--ds-canvas)] ${
           allReady ? 'bg-[var(--ds-seated-solid)]' : 'animate-pulse bg-[var(--ds-pending-solid)]'
         }`}
       />
@@ -1604,7 +1626,7 @@ const CourseSection: React.FC<{
                 if (longPressed.current) { longPressed.current = false; return; }
                 onAdvance(i, ready ? 'PREPARING' : 'READY');
               }}
-              onPointerDown={() => pressStart(dishKey(i.name_snapshot, i.weight_grams))}
+              onPointerDown={() => pressStart(chipKey(i.name_snapshot, i.weight_grams, i.modifiers))}
               onPointerUp={pressEnd}
               onPointerLeave={pressEnd}
               onPointerCancel={pressEnd}
@@ -1771,7 +1793,7 @@ const PassiveSection: React.FC<{
     <div className="relative">
       <span
         aria-hidden
-        className={`absolute -left-[25px] top-3 h-3.5 w-3.5 rounded-full ring-4 ring-[var(--ds-canvas)] ${
+        className={`absolute -left-[28px] top-2.5 h-5 w-5 rounded-full ring-4 ring-[var(--ds-canvas)] ${
           served ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-border-strong)]'
         }`}
       />
