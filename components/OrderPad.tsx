@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { chime } from '../utils/chime';
 import { signedModifierLabel, signedModifierDelta } from '../utils/modifierScale';
 import {
-  Check, Loader2, TriangleAlert, X,
+  Check, Loader2, TriangleAlert, Users, X,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import type { Dish, RestaurantMenu, Reservation, Table, TableMerge, OrderWithItems, OrderItem } from '../types';
@@ -65,6 +65,16 @@ import {
 // Stessa famiglia di chiavi del tema (ristocrm_theme): preferenza personale,
 // per dispositivo.
 const DENSITY_KEY = 'ristocrm_orderpad_density';
+
+// Banner di presenza: chi altro sta componendo su questo tavolo. Il tempo
+// solo col nome singolo — con due nomi la riga supera il dato che porta.
+const presenceLabel = (mates: { name: string; since: number }[]): string => {
+  if (mates.length === 1) {
+    const min = Math.floor((Date.now() - mates[0].since) / 60_000);
+    return `Ci sta lavorando anche ${mates[0].name} · ${min < 1 ? 'da ora' : `da ${min}′`}`;
+  }
+  return `Ci stanno lavorando anche ${mates.map(m => m.name).join(' e ')}`;
+};
 
 interface OrderPadProps {
   /** Tavolo da aprire subito (arrivando da Cassa · «Apri in Comande»). */
@@ -163,6 +173,11 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   // Specchio dell'id comanda aperta per i listener socket montati su altre
   // dipendenze (l'avviso di comanda eliminata lo legge senza rimontarsi).
   const openOrderIdRef = useRef<number | null>(null);
+  // Presenza soft: gli ALTRI palmari che stanno componendo su questo tavolo.
+  // Niente lock — si vede chi c'è e si continua a lavorare: il subentro e il
+  // doppio cameriere sul tavolo grande restano possibili, ma nessuno batte
+  // più gli stessi piatti senza sapere dell'altro (corsa del 6/09).
+  const [tableMates, setTableMates] = useState<{ socket_id: string; name: string; since: number }[]>([]);
   // Conti attivi non incassati nel servizio selezionato, per tavolo: la
   // comanda è chiusa ma il tavolo non è libero finché non si paga. Toccare
   // un tavolo in questo stato apre IL CONTO (stato pagamenti compreso),
@@ -1131,6 +1146,40 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   // eventi delle altre non devono far scaricare niente.
   const openOrderId = order?.order.id ?? null;
   useEffect(() => { openOrderIdRef.current = openOrderId; }, [openOrderId]);
+
+  // Presenza sul tavolo: all'ingresso ci si annuncia e l'ack dice chi c'è
+  // già; le variazioni arrivano via orderpad:presence. Sul reconnect ci si
+  // riannuncia (il server ha perso la presenza col vecchio socket), e
+  // all'uscita ci si toglie. Il filtro sul proprio socket_id sta qui: il
+  // broadcast è uguale per tutti.
+  useEffect(() => {
+    const socket = socketClient.getSocket();
+    if (!socket || tableId == null) return;
+    const enter = () => socket.emit('orderpad:enter', tableId,
+      (others: { socket_id: string; name: string; since: number }[]) => setTableMates(others ?? []));
+    enter();
+    socket.on('connect', enter);
+    const onPresence = (p: any) => {
+      if (p?.table_id !== tableId) return;
+      setTableMates((p.occupants ?? []).filter((o: any) => o.socket_id !== socket.id));
+    };
+    socket.on('orderpad:presence', onPresence);
+    return () => {
+      socket.emit('orderpad:leave', tableId);
+      socket.off('connect', enter);
+      socket.off('orderpad:presence', onPresence);
+      setTableMates([]);
+    };
+  }, [tableId]);
+
+  // Il «da N′» del banner cammina da solo: un tick al minuto finché c'è
+  // qualcuno, così non resta scritto «da 1′» per mezz'ora.
+  const [, setPresenceTick] = useState(0);
+  useEffect(() => {
+    if (tableMates.length === 0) return;
+    const t = setInterval(() => setPresenceTick(n => n + 1), 60_000);
+    return () => clearInterval(t);
+  }, [tableMates.length]);
   useEffect(() => {
     const socket = socketClient.getSocket();
     if (!socket || openOrderId == null) return;
@@ -1154,6 +1203,11 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     <>
       {error && <ErrorBar message={error} onDismiss={() => setError(null)} />}
       {flash && <Callout tone="positive" icon={Check}>{flash}</Callout>}
+      {tableMates.length > 0 && (
+        <Callout tone="info" icon={Users}>
+          {presenceLabel(tableMates)}
+        </Callout>
+      )}
     </>
   );
 
