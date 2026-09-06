@@ -302,6 +302,9 @@ export interface KdsFullItem {
   station_id: number | null;
   name_snapshot: string;
   qty: number;
+  /** Grammi del pezzo per le righe al peso: le uscite compresse aggregano
+   *  solo a parità di peso, col peso nel nome. */
+  weight_grams?: number | null;
   modifiers: { id?: number | null; name: string; price_delta_cents: number }[] | null;
   note: string | null;
   status: 'QUEUED' | 'SENT' | 'PREPARING' | 'READY' | 'SERVED';
@@ -349,7 +352,7 @@ export interface KdsServedCourse {
   table_name: string | null;
   customer_name: string | null;
   served_at: string;
-  items: { name: string; qty: number; station_id: number | null }[];
+  items: { name: string; qty: number; station_id: number | null; weight_grams?: number | null }[];
 }
 
 export const getKdsServed = async (stationId: number | null): Promise<{ courses: KdsServedCourse[] }> =>
