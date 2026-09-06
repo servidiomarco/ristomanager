@@ -621,11 +621,13 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   const allDay = useMemo(() => {
     const totals = new Map<string, { ahead: number; working: number }>();
     for (const r of coming) {
-      const cur = totals.get(r.name_snapshot) ?? { ahead: 0, working: 0 };
+      // Un chip per pezzatura: «2× Bistecca · 500 g» e «1× Bistecca · 1 kg»
+      // sono lavori diversi sulla griglia, non tre bistecche.
+      const cur = totals.get(dishKey(r.name_snapshot, r.weight_grams)) ?? { ahead: 0, working: 0 };
       const waiting = r.status === 'QUEUED'
         || (r.status === 'SENT' && r.station_start_at != null && new Date(r.station_start_at).getTime() > now);
       if (waiting) cur.ahead += r.qty; else cur.working += r.qty;
-      totals.set(r.name_snapshot, cur);
+      totals.set(dishKey(r.name_snapshot, r.weight_grams), cur);
     }
     return [...totals.entries()].sort((a, b) =>
       ((b[1].ahead + b[1].working) - (a[1].ahead + a[1].working)) || a[0].localeCompare(b[0]));
@@ -1037,7 +1039,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
         bodyClassName="p-5 sm:p-6"
       >
         {(() => {
-          const rows = coming.filter(r => r.name_snapshot === chipDetail);
+          const rows = coming.filter(r => dishKey(r.name_snapshot, r.weight_grams) === chipDetail);
           const isWaiting = (r: KdsComingItem) => r.status === 'QUEUED'
             || (r.status === 'SENT' && r.station_start_at != null && new Date(r.station_start_at).getTime() > now);
           const group = (list: KdsComingItem[]) => {
@@ -1490,7 +1492,7 @@ const CourseSection: React.FC<{
                 if (longPressed.current) { longPressed.current = false; return; }
                 onAdvance(i, ready ? 'PREPARING' : 'READY');
               }}
-              onPointerDown={() => pressStart(i.name_snapshot)}
+              onPointerDown={() => pressStart(dishKey(i.name_snapshot, i.weight_grams))}
               onPointerUp={pressEnd}
               onPointerLeave={pressEnd}
               onPointerCancel={pressEnd}
