@@ -477,6 +477,8 @@ export interface MenuCategory {
   /** Categoria da bar: sul palmare i suoi piatti vanno dritti nell'uscita
    *  Bar. */
   bar?: boolean;
+  /** Categoria da dolci: come il bar, ma nell'uscita Dolci in coda. */
+  dessert?: boolean;
 }
 
 export const getMenuCategories = async (): Promise<MenuCategory[]> => {
@@ -540,6 +542,16 @@ export const setCategoryBar = async (category: string, bar: boolean): Promise<vo
     method: 'PUT',
     headers: getHeaders(),
     body: JSON.stringify({ category, bar }),
+  });
+};
+
+/** Spunta «dolci» su una categoria: i suoi piatti (dolci, gelati) vanno
+ *  dritti nell'uscita Dolci, in coda al servizio e senza chiamata. */
+export const setCategoryDessert = async (category: string, dessert: boolean): Promise<void> => {
+  await apiRequest<{ ok: true }>(`${API_URL}/menu/category-dessert`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify({ category, dessert }),
   });
 };
 

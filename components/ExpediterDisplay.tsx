@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { isBarCourse, ordinal } from '../utils/courses';
+import { isBarCourse, isDessertCourse, ordinal } from '../utils/courses';
 import { BarChart3, Bell, BellOff, Check, Loader2, Play, RotateCcw, TriangleAlert, WifiOff } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
 import { socketClient } from '../services/socketClient';
@@ -23,7 +23,7 @@ import { SectionHeader, StatusPill, dsButton } from './ds';
 // ---------------------------------------------------------------------------
 
 // «1ª uscita» … e «Uscita Bar» (utils/courses): femminile di «uscita» salvo.
-const courseName = (n: number): string => isBarCourse(n) ? 'Uscita Bar' : `${ordinal(n)} uscita`;
+const courseName = (n: number): string => isBarCourse(n) ? 'Uscita Bar' : isDessertCourse(n) ? 'Uscita Dolci' : `${ordinal(n)} uscita`;
 const SOUND_KEY = 'passe.sound';
 
 const mmss = (seconds: number): string => {

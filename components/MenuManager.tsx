@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Dish, RestaurantMenu, BanquetMenu, BanquetCourse, BanquetStatus, Shift, COMMON_ALLERGENS, VAT_RATES, Customer, Table, TableMerge, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
-import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, Layers, SlidersHorizontal, Share2, MessageCircle, Martini } from 'lucide-react';
+import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, Layers, SlidersHorizontal, Share2, MessageCircle, Martini, IceCreamCone } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { getRomeDatePart } from '../utils/reservationTime';
 import { printBanquet } from '../utils/printBanquet';
@@ -11,7 +11,7 @@ import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BanquetPaymentsModal } from './BanquetPaymentsModal';
 import { DishDetailModal } from './DishDetailModal';
 import { CustomerPickerModal } from './CustomerPickerModal';
-import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, setCategoryBar, createMenuCategory, renameMenuCategory, deleteMenuCategory, getBanquetShareLink, sendBanquetQuoteEmail, sendBanquetQuoteWhatsApp, getModifierGroups, getDishComponents, type AdminModifierGroup, type MenuImportResult, type MenuTranslateResult, type MenuCategory } from '../services/apiService';
+import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, setCategoryBar, setCategoryDessert, createMenuCategory, renameMenuCategory, deleteMenuCategory, getBanquetShareLink, sendBanquetQuoteEmail, sendBanquetQuoteWhatsApp, getModifierGroups, getDishComponents, type AdminModifierGroup, type MenuImportResult, type MenuTranslateResult, type MenuCategory } from '../services/apiService';
 import { socketClient } from '../services/socketClient';
 import { getSalaConfig, type SalaStation } from '../services/salaApiService';
 import { MenuVariantsModal } from './MenuVariantsModal';
@@ -291,6 +291,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     setCatMenuBusy(`${catName}|bar`);
     try {
       await setCategoryBar(catName, bar);
+      refreshMenuCats();
+    } catch { /* la pill resta com'era: nessun falso ok */ }
+    finally { setCatMenuBusy(null); }
+  };
+  // La spunta «dolci»: come «bar», ma verso l'uscita Dolci in coda.
+  const handleToggleCategoryDessert = async (catName: string, dessert: boolean) => {
+    setCatMenuBusy(`${catName}|dessert`);
+    try {
+      await setCategoryDessert(catName, dessert);
       refreshMenuCats();
     } catch { /* la pill resta com'era: nessun falso ok */ }
     finally { setCatMenuBusy(null); }
@@ -3979,6 +3988,25 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     >
                       <Martini size={12} />
                       Bar
+                    </button>
+                    {/* La spunta «dolci»: sul palmare i piatti della categoria
+                        vanno dritti nell'uscita Dolci, in coda al servizio. */}
+                    <button
+                      type="button"
+                      disabled={catMenuBusy === `${cat.name}|dessert`}
+                      onClick={() => handleToggleCategoryDessert(cat.name, cat.dessert !== true)}
+                      aria-pressed={cat.dessert === true}
+                      title={cat.dessert
+                        ? `${cat.name} esce nell'uscita Dolci — togli la spunta`
+                        : `In comanda ${cat.name} va dritta nell'uscita Dolci`}
+                      className={`inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                        cat.dessert
+                          ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                          : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
+                      } ${catMenuBusy === `${cat.name}|dessert` ? 'opacity-50' : ''}`}
+                    >
+                      <IceCreamCone size={12} />
+                      Dolci
                     </button>
                   </div>
                 </div>
