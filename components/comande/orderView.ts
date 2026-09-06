@@ -17,7 +17,7 @@ export const euro = (cents: number): string =>
 export const MAX_COURSES = 6;
 
 import { isBarCourse } from '../../utils/courses';
-export { BAR_COURSE_NO, isBarCourse, ordinal, courseLabel } from '../../utils/courses';
+export { BAR_COURSE_NO, DESSERT_COURSE_NO, isBarCourse, isDessertCourse, ordinal, courseLabel } from '../../utils/courses';
 
 export interface CartLine {
   key: string;

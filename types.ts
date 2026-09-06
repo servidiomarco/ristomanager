@@ -371,7 +371,9 @@ export type TableBillStatus =
 
 // 'deposit' = l'acconto/caparra della prenotazione portato nel conto come quota
 // PAID: abbassa il residuo senza toccare il totale. Non è un claim di un cliente.
-export type SplitKind = 'equal_share' | 'fixed_amount' | 'per_item' | 'deposit';
+// 'full_bill' = l'ospite paga l'intero residuo; l'importo lo decide il server
+// sotto lock, mai il client.
+export type SplitKind = 'equal_share' | 'fixed_amount' | 'per_item' | 'full_bill' | 'deposit';
 
 export type SplitStatus =
   | 'CLAIMED'     // guest reserved the amount, gateway order pending

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { billsApiService, getOpenBills, getBillOrder, type OpenBillRow } from '../../services/billsApiService';
+import { billsApiService, getOpenBills, getBillOrder, printBill, type OpenBillRow } from '../../services/billsApiService';
 import { voidItem } from '../../services/ordersApiService';
 import type { OrderItem, OrderWithItems } from '../../types';
 import { ReasonDialog } from '../comande/ReasonDialog';
@@ -166,6 +166,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
           tableName={esito.bill.table_name}
           closedAt={esito.bill.closed_at ?? null}
           docNumber={esito.bill.fiscal_ref ?? esito.bill.fiscal_doc_number ?? null}
+          onPrintProforma={() => printBill(esito.bill.id, 'PROFORMA')}
           busy={busy}
           onRetryDocument={async () => {
             setBusy(true);

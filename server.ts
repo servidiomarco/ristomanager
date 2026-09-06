@@ -177,7 +177,7 @@ import {
 } from './services/blacklistPolicy.js';
 import { toTitleCase } from './utils/text.js';
 import { clampModifierN, signedModifierLabel, signedModifierDelta } from './utils/modifierScale.js';
-import { BAR_COURSE_NO } from './utils/courses.js';
+import { BAR_COURSE_NO, DESSERT_COURSE_NO, isOffSequenceCourse } from './utils/courses.js';
 import { getRomeDatePart, getRomeTimePart } from './utils/reservationTime.js';
 import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
 import {
@@ -3823,7 +3823,7 @@ const MENU_CAT_PREFS_KEY = 'menu_category_prefs';
 // la spunta in modale applica in blocco e ogni piatto resta libero dopo.
 // manual: categoria creata a mano dalla modale — esiste anche senza piatti,
 // e la pulizia dei fantasmi nel PUT non deve toccarla.
-type MenuCategoryPref = { enabled: boolean; sort: number; menu_ids?: number[]; modifier_group_ids?: number[]; manual?: boolean; bar?: boolean };
+type MenuCategoryPref = { enabled: boolean; sort: number; menu_ids?: number[]; modifier_group_ids?: number[]; manual?: boolean; bar?: boolean; dessert?: boolean };
 
 async function getMenuCategoryPrefs(tenantId: number): Promise<Record<string, MenuCategoryPref>> {
     const rs = await queryWithRetry(
@@ -3893,6 +3893,9 @@ app.get('/menu/categories', authenticate, async (req, res) => {
                 // Categoria da bar: sul palmare i suoi piatti vanno dritti
                 // nell'uscita Bar.
                 bar: prefs[name]?.bar === true,
+                // Categoria da dolci: come il bar, ma nell'uscita Dolci in
+                // coda al servizio.
+                dessert: prefs[name]?.dessert === true,
             })),
         });
     } catch (err: any) {
@@ -4277,6 +4280,42 @@ app.put('/menu/category-bar', authenticate, requirePermission('menu:full'), asyn
         res.json({ ok: true });
     } catch (err: any) {
         console.error('PUT /menu/category-bar error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// La spunta «dolci» su una categoria: come la spunta «bar», ma i piatti
+// vanno nell'uscita Dolci — l'altra uscita fuori numerazione, in coda al
+// servizio, che parte senza chiamata.
+app.put('/menu/category-dessert', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const category = typeof req.body?.category === 'string' ? req.body.category.trim() : '';
+        const dessert = req.body?.dessert;
+        if (!category || typeof dessert !== 'boolean') {
+            return res.status(400).json({ error: 'servono category e dessert (true/false)' });
+        }
+        if (!(await menuCategoryExists(req.tenantId!, category))) {
+            return res.status(404).json({ error: 'Categoria non trovata' });
+        }
+        const prefs = await getMenuCategoryPrefs(req.tenantId!);
+        const next: MenuCategoryPref = prefs[category] ?? { enabled: true, sort: Number.MAX_SAFE_INTEGER };
+        if (dessert) next.dessert = true; else delete next.dessert;
+        prefs[category] = next;
+        await saveMenuCategoryPrefs(req.tenantId!, prefs);
+        // Due eventi, due pubblici: il CRM ricarica le categorie, i palmari
+        // il catalogue (è da lì che leggono le prefs).
+        try { socketService?.broadcastToAll(req.tenantId!, 'dish:synced', { categoria: category, dessert }); } catch (_) {}
+        emitCatalogueUpdated(req.tenantId!, { categoria: category, dessert });
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.DISH, 0, category,
+                { category_dessert: dessert }
+            ).catch(() => {});
+        }
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('PUT /menu/category-dessert error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -7812,8 +7851,8 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         if (!token || token.length < 20) return res.status(404).json({ error: 'Not found' });
 
         const kind = String(req.body?.kind || '');
-        if (kind !== 'equal_share' && kind !== 'fixed_amount' && kind !== 'per_item') {
-            return res.status(400).json({ error: 'kind must be equal_share, fixed_amount or per_item' });
+        if (kind !== 'equal_share' && kind !== 'fixed_amount' && kind !== 'per_item' && kind !== 'full_bill') {
+            return res.status(400).json({ error: 'kind must be equal_share, fixed_amount, per_item or full_bill' });
         }
         const rawLabel = typeof req.body?.claimant_label === 'string' ? req.body.claimant_label.trim().slice(0, 40) : '';
         const claimantLabel = rawLabel || null;
@@ -7926,6 +7965,12 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
         } else if (kind === 'equal_share') {
             const covers = Math.max(1, Number(bill.covers) || 1);
             amount = Math.min(residual, Math.ceil(bill.total_cents / covers));
+        } else if (kind === 'full_bill') {
+            // «Paga tutto il conto»: l'importo è il residuo calcolato qui sotto
+            // lock, non quello visto dal client — la pagina pubblica va a poll
+            // di 5s e una quota presa nel frattempo renderebbe stale il numero
+            // sul bottone.
+            amount = residual;
         } else {
             const raw = Number(req.body?.amount_cents);
             if (!Number.isFinite(raw) || raw <= 0) {
@@ -22772,6 +22817,84 @@ app.put('/settings/payment-link-expiry', authenticate, requirePermission('settin
 });
 
 // ============================================
+// COPERTO E SERVIZIO (righe di sistema delle comande)
+// ============================================
+
+// Gli importi che syncSystemLines applica a ogni comanda: coperto fisso a
+// persona e servizio percentuale sull'imponibile dei piatti. Fin qui vivevano
+// solo come chiavi app_settings scrivibili a mano sul DB; le aliquote IVA
+// delle due righe restano in /settings/fiscal (mappatura IVA).
+const readChargeSettings = async (tenantId: number) => {
+    const rs = await queryWithRetry(
+        `SELECT key, int_value FROM app_settings
+         WHERE tenant_id = $1 AND key IN ('cover_charge_cents','service_charge_percent')`,
+        [tenantId]
+    );
+    const map = Object.fromEntries(rs.rows.map((r: any) => [r.key, Number(r.int_value ?? 0)]));
+    return {
+        cover_charge_cents: Math.max(0, map.cover_charge_cents ?? 0),
+        service_charge_percent: Math.max(0, map.service_charge_percent ?? 0),
+    };
+};
+
+app.get('/settings/charges', authenticate, async (req, res) => {
+    try {
+        res.json(await readChargeSettings(req.tenantId!));
+    } catch (err) {
+        console.error('GET /settings/charges error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/settings/charges', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        // Update parziale: si scrive solo la chiave presente nel body. Le
+        // comande aperte si adeguano alla prossima mutazione — syncSystemLines
+        // rilegge questi valori a ogni battitura, non serve toccarle qui.
+        const writes: Array<[key: string, value: number]> = [];
+        if (req.body?.cover_charge_cents !== undefined) {
+            const n = Number(req.body.cover_charge_cents);
+            // Cap a 100 €: un coperto oltre è quasi certamente un errore di
+            // unità (euro battuti nel campo dei centesimi).
+            if (!Number.isInteger(n) || n < 0 || n > 10000) {
+                return res.status(400).json({ error: 'cover_charge_cents deve essere un intero fra 0 e 10000 (centesimi)' });
+            }
+            writes.push(['cover_charge_cents', n]);
+        }
+        if (req.body?.service_charge_percent !== undefined) {
+            const n = Number(req.body.service_charge_percent);
+            if (!Number.isInteger(n) || n < 0 || n > 100) {
+                return res.status(400).json({ error: 'service_charge_percent deve essere un intero fra 0 e 100' });
+            }
+            writes.push(['service_charge_percent', n]);
+        }
+        for (const [key, value] of writes) {
+            await queryWithRetry(
+                `INSERT INTO app_settings (tenant_id, key, int_value, updated_at)
+                 VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                 ON CONFLICT (tenant_id, key) DO UPDATE
+                   SET int_value = EXCLUDED.int_value, updated_at = CURRENT_TIMESTAMP`,
+                [req.tenantId!, key, value]
+            );
+        }
+        const next = await readChargeSettings(req.tenantId!);
+        if (writes.length > 0 && req.user) {
+            LogService.logActivity(
+                req.tenantId!,
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.SETTINGS,
+                0,
+                `Coperto e servizio: coperto ${(next.cover_charge_cents / 100).toFixed(2)} €, servizio ${next.service_charge_percent}%`
+            );
+        }
+        res.json(next);
+    } catch (err) {
+        console.error('PUT /settings/charges error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
 // POLICY BLACKLIST PER FONTE (blacklistPolicy) — card #27
 // ============================================
 
@@ -26198,7 +26321,9 @@ async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: n
                 // L'agente di stampa storico compone «{n}a USCITA» da solo:
                 // l'etichetta pronta serve al Bar (e a qualunque uscita
                 // futura fuori dalla numerazione).
-                course_label: courseNo === BAR_COURSE_NO ? 'Bar' : `${courseNo}a USCITA`,
+                course_label: courseNo === BAR_COURSE_NO ? 'Bar'
+                    : courseNo === DESSERT_COURSE_NO ? 'Dolci'
+                    : `${courseNo}a USCITA`,
                 table_name: tableName,
                 covers,
                 station_name: station.name,
@@ -27160,12 +27285,13 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
         }
 
         const proposedCourses = [...new Set(queued.rows.map((r: any) => r.course_no))].sort((a, b) => a - b);
-        // Il Bar è fuori dalla sequenza delle portate: bibite e vini partono
-        // subito in ogni modalità automatica, e non contano come «qualcosa in
-        // cucina» né come «prima uscita» per la logica qui sotto. In MANUAL
-        // resta al passe come tutto il resto.
-        const kitchenCourses = proposedCourses.filter((c: number) => c !== BAR_COURSE_NO);
-        const barProposed = proposedCourses.includes(BAR_COURSE_NO);
+        // Bar e Dolci sono fuori dalla sequenza delle portate: bibite (e
+        // dolci/gelati, che non aspettano una chiamata) partono subito in
+        // ogni modalità automatica, e non contano come «qualcosa in cucina»
+        // né come «prima uscita» per la logica qui sotto. In MANUAL restano
+        // al passe come tutto il resto.
+        const kitchenCourses = proposedCourses.filter((c: number) => !isOffSequenceCourse(c));
+        const offSequenceProposed = proposedCourses.filter((c: number) => isOffSequenceCourse(c));
         // AUTO_NEXT lancia la prima uscita proposta solo se il tavolo non ha
         // già qualcosa in cucina: se c'è, la prossima partirà dal servito.
         // Non "solo la 1" come AUTO_FIRST: un dolce ordinato a fine pasto,
@@ -27175,8 +27301,8 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
             const inFlight = await client.query(
                 `SELECT 1 FROM order_items
                  WHERE order_id = $1 AND status IN ('SENT','PREPARING','READY')
-                   AND course_no <> $2 LIMIT 1`,
-                [orderId, BAR_COURSE_NO]
+                   AND course_no <> ALL($2::int[]) LIMIT 1`,
+                [orderId, [BAR_COURSE_NO, DESSERT_COURSE_NO]]
             );
             if (inFlight.rows.length === 0) autoNextFirst = [kitchenCourses[0]];
         }
@@ -27195,8 +27321,8 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
         );
         const alreadyFired: number[] = prev.rows.map((r: any) => r.course_no);
         const byMode = mode === 'AUTO_ALL' ? proposedCourses
-                     : mode === 'AUTO_FIRST' ? proposedCourses.filter(c => c === 1 || c === BAR_COURSE_NO)
-                     : mode === 'AUTO_NEXT' ? (barProposed ? [...autoNextFirst, BAR_COURSE_NO] : autoNextFirst)
+                     : mode === 'AUTO_FIRST' ? proposedCourses.filter(c => c === 1 || isOffSequenceCourse(c))
+                     : mode === 'AUTO_NEXT' ? [...autoNextFirst, ...offSequenceProposed]
                      : [];
         const toFire = [...new Set([...byMode, ...alreadyFired])].sort((a, b) => a - b);
         const fired: number[] = [];
@@ -30789,6 +30915,11 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
         // 'QR' stampa il foglietto col solo codice da appoggiare al tavolo;
         // 'PRECONTO' (default) il dettaglio completo. Il solo-QR senza un QR
         // non ha senso: conto chiuso o origin mancante → 409, non un foglio vuoto.
+        // 'PROFORMA' è la ristampa del conto chiuso con proforma: stesso job
+        // PRECONTO (gli agenti già installati lo stampano senza aggiornarsi),
+        // ma col titolo giusto e SENZA il QR di pagamento — sul conto saldato
+        // «inquadra per pagare» manderebbe l'ospite su un conto già chiuso.
+        const proformaPrint = req.body?.kind === 'PROFORMA';
         const kind = req.body?.kind === 'QR' ? 'QR' : 'PRECONTO';
         if (kind === 'QR' && !shareUrl) {
             return res.status(409).json({ error: 'qr_unavailable', message: 'Il conto non ha più un QR valido' });
@@ -30810,7 +30941,10 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
                 // snapshot GREZZO (items qui sopra è già ridotto e non ha i
                 // prezzi unitari). L'agente vecchio ignora il campo.
                 vat_breakdown: vatBreakdownFromItems(Array.isArray(bill.items) ? bill.items : null, bill.total_cents),
-                share_url: shareUrl,
+                // title: l'agente aggiornato la mette in testa al foglio;
+                // quello vecchio ignora il campo e stampa «PRECONTO».
+                ...(proformaPrint ? { title: 'PROFORMA' } : {}),
+                share_url: proformaPrint ? null : shareUrl,
             }), req.user?.userId ?? null, printer, kind, req.tenantId!]
         );
         res.status(201).json({ id: ins.rows[0].id, status: 'PENDING' });

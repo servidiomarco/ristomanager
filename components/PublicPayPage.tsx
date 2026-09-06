@@ -31,7 +31,7 @@ interface Props {
   token: string;
 }
 
-type Mode = 'menu' | 'equal' | 'fixed' | 'items' | 'claimed' | 'error';
+type Mode = 'menu' | 'equal' | 'full' | 'fixed' | 'items' | 'claimed' | 'error';
 
 export const PublicPayPage: React.FC<Props> = ({ token }) => {
   const { t, i18n, ready } = useTranslation(PAY_NAMESPACE, { useSuspense: false });
@@ -88,11 +88,12 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
   }, [load, notFound]);
 
   const handleEqualShare = () => { setMode('equal'); setErrorMsg(null); };
+  const handleFullBill = () => { setMode('full'); setErrorMsg(null); };
   const handleFixedAmount = () => { setMode('fixed'); setErrorMsg(null); };
   const handlePerItem = () => { setMode('items'); setErrorMsg(null); setPickedItems([]); };
   const handleBack = () => { setMode('menu'); setErrorMsg(null); };
 
-  const submitClaim = async (kind: 'equal_share' | 'fixed_amount' | 'per_item') => {
+  const submitClaim = async (kind: 'equal_share' | 'full_bill' | 'fixed_amount' | 'per_item') => {
     setSubmitting(true);
     setErrorMsg(null);
     try {
@@ -295,6 +296,18 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
             >
               {t('menu.myShare', { amount: formatEur(equalShareCents, lang) })}
             </button>
+            {/* Nascosto quando coincide con «La mia parte» (es. un solo coperto
+                o residuo sotto la quota): due bottoni con lo stesso importo
+                confonderebbero e basta. */}
+            {bill.residual_cents !== equalShareCents && (
+              <button
+                type="button"
+                onClick={handleFullBill}
+                className="w-full h-14 rounded-[14px] bg-[var(--ds-surface)] text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] font-semibold text-base hover:bg-[var(--ds-surface-row)] active:scale-[0.99] transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              >
+                {t('menu.fullBill', { amount: residualEur })}
+              </button>
+            )}
             {bill.per_item_available && (bill.items ?? []).some(i => !i.taken) && (
               <button
                 type="button"
@@ -389,7 +402,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
           </div>
         )}
 
-        {(mode === 'equal' || mode === 'fixed') && (
+        {(mode === 'equal' || mode === 'full' || mode === 'fixed') && (
           <div className="rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] p-4 space-y-3">
             <button
               type="button"
@@ -431,7 +444,7 @@ export const PublicPayPage: React.FC<Props> = ({ token }) => {
 
             <button
               type="button"
-              onClick={() => submitClaim(mode === 'equal' ? 'equal_share' : 'fixed_amount')}
+              onClick={() => submitClaim(mode === 'equal' ? 'equal_share' : mode === 'full' ? 'full_bill' : 'fixed_amount')}
               disabled={submitting}
               className="w-full h-12 rounded-[14px] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] font-semibold hover:bg-[var(--ds-action-bg-hover)] active:scale-[0.99] transition disabled:opacity-40 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
             >

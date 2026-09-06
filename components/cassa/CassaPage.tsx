@@ -22,7 +22,7 @@ import {
 } from '../comande/tablesView';
 import { ReasonDialog } from '../comande/ReasonDialog';
 import {
-  BAR_COURSE_NO, cartKey, type CartLine } from '../comande/orderView';
+  BAR_COURSE_NO, DESSERT_COURSE_NO, cartKey, type CartLine } from '../comande/orderView';
 import { CodaServizio } from './CodaServizio';
 import { SelezionaTavolo } from './SelezionaTavolo';
 import { TavoloAttivo } from './TavoloAttivo';
@@ -184,17 +184,25 @@ export const CassaPage: React.FC<CassaPageProps> = ({
     return catalogue.modifier_groups.filter(g => ids.includes(g.id));
   }, [catalogue]);
 
-  // Categorie da bar (spunta in modale Categorie): come sul palmare, le
-  // bibite battute in cassa vanno nell'uscita Bar, non nella 1ª — così i
-  // monitor di cucina non se le vedono passare davanti.
+  // Categorie da bar e da dolci (spunte in modale Categorie): come sul
+  // palmare, bibite e dolci battuti in cassa vanno nelle loro uscite fuori
+  // numerazione, non nella 1ª — così i monitor di cucina non se li vedono
+  // passare davanti.
   const barCategories = useMemo(() => new Set(
     Object.entries(catalogue?.category_prefs ?? {})
       .filter(([, p]) => (p as { bar?: boolean }).bar === true)
       .map(([name]) => name)
   ), [catalogue]);
+  const dessertCategories = useMemo(() => new Set(
+    Object.entries(catalogue?.category_prefs ?? {})
+      .filter(([, p]) => (p as { dessert?: boolean }).dessert === true)
+      .map(([name]) => name)
+  ), [catalogue]);
   const courseFor = useCallback((dish: Dish): number =>
-    dish.category && barCategories.has(dish.category) ? BAR_COURSE_NO : 1,
-  [barCategories]);
+    dish.category && barCategories.has(dish.category) ? BAR_COURSE_NO
+    : dish.category && dessertCategories.has(dish.category) ? DESSERT_COURSE_NO
+    : 1,
+  [barCategories, dessertCategories]);
 
   const componentsForDish = useCallback(
     (dishId: number) => (catalogue?.dish_components ?? []).filter(c => c.dish_id === dishId),
@@ -725,6 +733,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
           // Niente try/catch: successo ed errore li mostra il bottone stesso,
           // vicino al dito — l'errore di pagina qui non si vede.
           onPrintReceipt={() => printBill(esito.bill.id, 'SCONTRINO')}
+          onPrintProforma={() => printBill(esito.bill.id, 'PROFORMA')}
           busy={busyBillId != null}
           onRetryDocument={async () => {
             setBusyBillId(esito.bill.id);

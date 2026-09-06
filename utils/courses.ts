@@ -11,15 +11,29 @@
 
 export const BAR_COURSE_NO = 99;
 
+/** I Dolci sono la seconda uscita fuori numerazione, col meccanismo del Bar
+ *  (partono da soli, senza chiamata) ma dal verso opposto: il Bar sta in
+ *  testa al servizio, i dolci in coda. 98 < 99 così negli elenchi ordinati
+ *  per course_no stanno subito dopo le portate. */
+export const DESSERT_COURSE_NO = 98;
+
 export const isBarCourse = (n: number): boolean => n === BAR_COURSE_NO;
+
+export const isDessertCourse = (n: number): boolean => n === DESSERT_COURSE_NO;
+
+/** Le uscite fuori dalla sequenza delle portate: partono da sole in ogni
+ *  modalità automatica e non contano per la logica «prossima uscita». */
+export const isOffSequenceCourse = (n: number): boolean =>
+    isBarCourse(n) || isDessertCourse(n);
 
 const ORDINALS = ['', '1ª', '2ª', '3ª', '4ª', '5ª', '6ª'];
 
-/** «1ª»…«6ª», «Bar» per l'uscita bar; oltre il 6 il numero nudo (non
- *  esprimibile dal palmare, ma un client sbagliato non deve rompere nulla). */
+/** «1ª»…«6ª», «Bar» e «Dolci» per le uscite fuori numerazione; oltre il 6 il
+ *  numero nudo (non esprimibile dal palmare, ma un client sbagliato non deve
+ *  rompere nulla). */
 export const ordinal = (n: number): string =>
-    isBarCourse(n) ? 'Bar' : ORDINALS[n] ?? `${n}ª`;
+    isBarCourse(n) ? 'Bar' : isDessertCourse(n) ? 'Dolci' : ORDINALS[n] ?? `${n}ª`;
 
-/** «1ª uscita» … «6ª uscita», «Bar». */
+/** «1ª uscita» … «6ª uscita», «Bar», «Dolci». */
 export const courseLabel = (n: number): string =>
-    isBarCourse(n) ? 'Bar' : `${ordinal(n)} uscita`;
+    isBarCourse(n) ? 'Bar' : isDessertCourse(n) ? 'Dolci' : `${ordinal(n)} uscita`;

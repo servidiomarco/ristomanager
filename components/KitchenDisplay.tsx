@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { isBarCourse, ordinal } from '../utils/courses';
+import { isBarCourse, isDessertCourse, ordinal } from '../utils/courses';
 import { Bell, BellOff, BellRing, Check, ChevronRight, CookingPot, Loader2, MessagesSquare, Pencil, Play, Search, TriangleAlert, WifiOff, X } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
 import { useAuth } from '../contexts/AuthContext';
@@ -39,8 +39,8 @@ const LAMP_ALERT_MIN = 4;
 
 // «1ª uscita» … e «Uscita Bar»: il Bar è un'uscita fuori numerazione
 // (utils/courses), e nelle frasi mantiene il femminile di «uscita».
-const courseName = (n: number): string => isBarCourse(n) ? 'Uscita Bar' : `${ordinal(n)} uscita`;
-const courseShort = (n: number): string => isBarCourse(n) ? 'Bar' : `${ordinal(n)} usc.`;
+const courseName = (n: number): string => isBarCourse(n) ? 'Uscita Bar' : isDessertCourse(n) ? 'Uscita Dolci' : `${ordinal(n)} uscita`;
+const courseShort = (n: number): string => isBarCourse(n) ? 'Bar' : isDessertCourse(n) ? 'Dolci' : `${ordinal(n)} usc.`;
 
 // Mai negativo: `now` avanza a scatti di 15 secondi e può risultare indietro
 // rispetto a un timestamp appena scritto dal server, che mostrerebbe "-1′".
