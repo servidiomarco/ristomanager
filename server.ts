@@ -177,7 +177,6 @@ import {
 } from './services/blacklistPolicy.js';
 import { toTitleCase } from './utils/text.js';
 import { clampModifierN, signedModifierLabel, signedModifierDelta } from './utils/modifierScale.js';
-import { BAR_COURSE_NO } from './utils/courses.js';
 import { getRomeDatePart, getRomeTimePart } from './utils/reservationTime.js';
 import { buildEReceiptPayload, buildFatturaPaXml, getFiscalDriver, type FiscalSeller, type InvoiceBuyer } from './services/fiscalService.js';
 import {
@@ -3823,7 +3822,7 @@ const MENU_CAT_PREFS_KEY = 'menu_category_prefs';
 // la spunta in modale applica in blocco e ogni piatto resta libero dopo.
 // manual: categoria creata a mano dalla modale — esiste anche senza piatti,
 // e la pulizia dei fantasmi nel PUT non deve toccarla.
-type MenuCategoryPref = { enabled: boolean; sort: number; menu_ids?: number[]; modifier_group_ids?: number[]; manual?: boolean; bar?: boolean };
+type MenuCategoryPref = { enabled: boolean; sort: number; menu_ids?: number[]; modifier_group_ids?: number[]; manual?: boolean };
 
 async function getMenuCategoryPrefs(tenantId: number): Promise<Record<string, MenuCategoryPref>> {
     const rs = await queryWithRetry(
@@ -3890,9 +3889,6 @@ app.get('/menu/categories', authenticate, async (req, res) => {
                 // Gruppi varianti di categoria: i piatti nuovi nascono con
                 // questi; null = nessuna spunta di categoria mai fatta.
                 modifier_group_ids: prefs[name]?.modifier_group_ids ?? null,
-                // Categoria da bar: sul palmare i suoi piatti vanno dritti
-                // nell'uscita Bar.
-                bar: prefs[name]?.bar === true,
             })),
         });
     } catch (err: any) {
@@ -3920,7 +3916,6 @@ app.put('/menu/categories', authenticate, requirePermission('menu:full'), async 
             prefs[name] = { enabled: c.enabled !== false, sort: i };
             if (Array.isArray(existing[name]?.menu_ids)) prefs[name].menu_ids = existing[name].menu_ids;
             if (Array.isArray(existing[name]?.modifier_group_ids)) prefs[name].modifier_group_ids = existing[name].modifier_group_ids;
-            if (existing[name]?.bar) prefs[name].bar = true;
             if (existing[name]?.manual) prefs[name].manual = true;
         });
         // Le categorie manuali sopravvivono anche a un client che non le
@@ -4241,42 +4236,6 @@ app.put('/menu/category-modifier-groups', authenticate, requirePermission('menu:
         res.json({ ok: true, piatti: applied });
     } catch (err: any) {
         console.error('PUT /menu/category-modifier-groups error:', err);
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
-
-// La spunta «bar» su una categoria: sul palmare i suoi piatti (bibite, vini,
-// amari) vanno dritti nell'uscita Bar alla battuta. Vive nel blob prefs come
-// le altre proprietà di categoria; il palmare la riceve dal catalogue.
-app.put('/menu/category-bar', authenticate, requirePermission('menu:full'), async (req, res) => {
-    try {
-        const category = typeof req.body?.category === 'string' ? req.body.category.trim() : '';
-        const bar = req.body?.bar;
-        if (!category || typeof bar !== 'boolean') {
-            return res.status(400).json({ error: 'servono category e bar (true/false)' });
-        }
-        if (!(await menuCategoryExists(req.tenantId!, category))) {
-            return res.status(404).json({ error: 'Categoria non trovata' });
-        }
-        const prefs = await getMenuCategoryPrefs(req.tenantId!);
-        const next: MenuCategoryPref = prefs[category] ?? { enabled: true, sort: Number.MAX_SAFE_INTEGER };
-        if (bar) next.bar = true; else delete next.bar;
-        prefs[category] = next;
-        await saveMenuCategoryPrefs(req.tenantId!, prefs);
-        // Due eventi, due pubblici: il CRM ricarica le categorie, i palmari
-        // il catalogue (è da lì che leggono le prefs).
-        try { socketService?.broadcastToAll(req.tenantId!, 'dish:synced', { categoria: category, bar }); } catch (_) {}
-        emitCatalogueUpdated(req.tenantId!, { categoria: category, bar });
-        if (req.user) {
-            LogService.logActivity(
-                req.tenantId!, req.user.userId, req.user.email, req.user.email,
-                ActivityAction.UPDATE, ResourceType.DISH, 0, category,
-                { category_bar: bar }
-            ).catch(() => {});
-        }
-        res.json({ ok: true });
-    } catch (err: any) {
-        console.error('PUT /menu/category-bar error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -26179,10 +26138,6 @@ async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: n
             [JSON.stringify({
                 order_id: orderId,
                 course_no: courseNo,
-                // L'agente di stampa storico compone «{n}a USCITA» da solo:
-                // l'etichetta pronta serve al Bar (e a qualunque uscita
-                // futura fuori dalla numerazione).
-                course_label: courseNo === BAR_COURSE_NO ? 'BAR' : `${courseNo}a USCITA`,
                 table_name: tableName,
                 covers,
                 station_name: station.name,
@@ -27104,25 +27059,18 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
         }
 
         const proposedCourses = [...new Set(queued.rows.map((r: any) => r.course_no))].sort((a, b) => a - b);
-        // Il Bar è fuori dalla sequenza delle portate: bibite e vini partono
-        // subito in ogni modalità automatica, e non contano come «qualcosa in
-        // cucina» né come «prima uscita» per la logica qui sotto. In MANUAL
-        // resta al passe come tutto il resto.
-        const kitchenCourses = proposedCourses.filter((c: number) => c !== BAR_COURSE_NO);
-        const barProposed = proposedCourses.includes(BAR_COURSE_NO);
         // AUTO_NEXT lancia la prima uscita proposta solo se il tavolo non ha
         // già qualcosa in cucina: se c'è, la prossima partirà dal servito.
         // Non "solo la 1" come AUTO_FIRST: un dolce ordinato a fine pasto,
         // a tavolo ormai vuoto di piatti, deve partire da solo.
         let autoNextFirst: number[] = [];
-        if (mode === 'AUTO_NEXT' && kitchenCourses.length > 0) {
+        if (mode === 'AUTO_NEXT' && proposedCourses.length > 0) {
             const inFlight = await client.query(
                 `SELECT 1 FROM order_items
-                 WHERE order_id = $1 AND status IN ('SENT','PREPARING','READY')
-                   AND course_no <> $2 LIMIT 1`,
-                [orderId, BAR_COURSE_NO]
+                 WHERE order_id = $1 AND status IN ('SENT','PREPARING','READY') LIMIT 1`,
+                [orderId]
             );
-            if (inFlight.rows.length === 0) autoNextFirst = [kitchenCourses[0]];
+            if (inFlight.rows.length === 0) autoNextFirst = [proposedCourses[0]];
         }
         // Un'uscita che aveva GIÀ righe lanciate e ne riceve altre è una
         // modifica della card a video, non una card nuova: le righe nuove
@@ -27139,8 +27087,8 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
         );
         const alreadyFired: number[] = prev.rows.map((r: any) => r.course_no);
         const byMode = mode === 'AUTO_ALL' ? proposedCourses
-                     : mode === 'AUTO_FIRST' ? proposedCourses.filter(c => c === 1 || c === BAR_COURSE_NO)
-                     : mode === 'AUTO_NEXT' ? (barProposed ? [...autoNextFirst, BAR_COURSE_NO] : autoNextFirst)
+                     : mode === 'AUTO_FIRST' ? proposedCourses.filter(c => c === 1)
+                     : mode === 'AUTO_NEXT' ? autoNextFirst
                      : [];
         const toFire = [...new Set([...byMode, ...alreadyFired])].sort((a, b) => a - b);
         const fired: number[] = [];
@@ -28166,12 +28114,9 @@ app.post('/orders/:id/courses/:n/serve', authenticate, requireAnyPermission('ord
         let nextFired: number | null = null;
         let nextItems: any[] = [];
         if (mode === 'AUTO_NEXT') {
-            // Il Bar non è la «prossima uscita» di nessuno: se è in coda
-            // (recall a mano) resta lì finché non lo si chiama.
             const nq = await client.query(
-                `SELECT MIN(course_no) AS n FROM order_items
-                 WHERE order_id = $1 AND status = 'QUEUED' AND course_no <> $2`,
-                [orderId, BAR_COURSE_NO]
+                `SELECT MIN(course_no) AS n FROM order_items WHERE order_id = $1 AND status = 'QUEUED'`,
+                [orderId]
             );
             if (nq.rows[0]?.n != null) {
                 const n = Number(nq.rows[0].n);
