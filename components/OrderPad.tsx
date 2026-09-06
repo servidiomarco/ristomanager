@@ -10,7 +10,7 @@ import { Shift } from '../types';
 import { getRomeDatePart } from '../utils/reservationTime';
 import { getTableMerges } from '../services/apiService';
 import {
-  ordersApiService, getMenuCatalogue, newIdempotencyKey, closeOrder, updateOrder, fireCourse, deleteEmptyOrder,
+  ordersApiService, getMenuCatalogue, newIdempotencyKey, closeOrder, updateOrder, fireCourse, deleteEmptyOrder, deleteWholeOrder,
   voidItem, setOrderDiscount, transferOrder, getOpenOrderTables,
   type MenuCatalogue, type NewOrderItem, type CloseOrderResult,
 } from '../services/ordersApiService';
@@ -140,6 +140,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   // troncano in lista): stesso foglio della battitura, precompilato.
   const [editLine, setEditLine] = useState<CartLine | null>(null);
   const [closing, setClosing] = useState(false);
+  // «Elimina la comanda» dal menu ⋮: la comanda di prova o aperta per
+  // sbaglio, via intera finché non c'è un conto. Motivazione obbligatoria.
+  const [deleteOrderOpen, setDeleteOrderOpen] = useState(false);
   const [voidTarget, setVoidTarget] = useState<OrderItem | null>(null);
   const [discountOpen, setDiscountOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
@@ -857,6 +860,26 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     setTableId(null); setOrder(null); setCart([]); setComandaOpen(false);
   };
 
+  // Elimina la comanda INTERA (righe battute comprese) con motivazione: il
+  // server la pretende e la mette nel log attività. Il conto è il confine —
+  // con un conto aperto la strada è la Cassa, non questa.
+  const deleteOrderNow = async (motivo: string) => {
+    const o = order;
+    if (!o || busy) return;
+    setBusy(true); setError(null);
+    try {
+      await deleteWholeOrder(o.order.id, motivo);
+      dropCartDraft(o.order.id);
+      setDeleteOrderOpen(false);
+      setOpenTables(prev => { const n = new Set(prev); if (o.order.table_id != null) n.delete(o.order.table_id); return n; });
+      setTableId(null); setOrder(null); setCart([]); setComandaOpen(false);
+      setFlash('Comanda eliminata');
+    } catch (err: any) {
+      setError(err?.data?.error ?? err?.message ?? 'Eliminazione non riuscita');
+      setDeleteOrderOpen(false);
+    } finally { setBusy(false); }
+  };
+
   const recall = async (courseNo: number) => {
     if (!order || busy) return;
     setBusy(true); setError(null);
@@ -1383,6 +1406,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       onDiscount={() => setDiscountOpen(true)}
       onTransfer={() => setTransferOpen(true)}
       onClearDrafts={clearDrafts}
+      onDeleteOrder={hasPermission('orders:void') && order.order.table_bill_id == null
+        ? () => setDeleteOrderOpen(true)
+        : undefined}
     />
   );
 
@@ -1446,6 +1472,17 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           maxQty={voidTarget.qty}
           onCancel={() => setVoidTarget(null)}
           onConfirm={(reason, qty) => doVoid(voidTarget, reason, qty)}
+        />
+      )}
+
+      {deleteOrderOpen && (
+        <ReasonDialog
+          title={`Elimina la comanda del Tav. ${table?.name ?? tableId}`}
+          hint="Via tutte le righe, anche quelle già in cucina. La motivazione resta nel registro attività."
+          confirmLabel="Elimina la comanda"
+          busy={busy}
+          onCancel={() => setDeleteOrderOpen(false)}
+          onConfirm={reason => deleteOrderNow(reason)}
         />
       )}
 
