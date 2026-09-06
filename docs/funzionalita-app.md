@@ -573,6 +573,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-06 | Comande, Cucina e Passe | L'invio non muore più con «Comanda non trovata»: se la comanda è stata disfatta o eliminata da un altro dispositivo mentre il cameriere componeva, il palmare ne riapre una sullo stesso tavolo e rimanda da solo — le righe non si ribattono. La comanda vuota uscendo dal tavolo si disfa solo dal dispositivo che l'ha creata (entrare a guardare non cancella più il lavoro di un collega), e se la comanda aperta viene eliminata altrove il palmare lo dice subito. |
 | 2026-09-06 | Comande, Cucina e Passe | «Elimina la comanda» dal menu ⋮ del tavolo: via la comanda intera (righe già in cucina comprese) finché non c'è un conto, con motivazione obbligatoria che finisce nel registro attività; serve il permesso di storno, i monitor di cucina si aggiornano da soli. |
 | 2026-09-06 | Comande, Cucina e Passe | L'uscita Bar non compare sui monitor delle partite di cucina (né in coda né nella card della comanda intera): la vede solo la partita del bar. E anche in Cassa le categorie da bar battono nell'uscita Bar, come sul palmare. Una bibita spostata apposta in un'uscita di cucina resta visibile: legarla all'uscita è una scelta di sincronia. |
 | 2026-09-06 | Comande, Cucina e Passe | Sui ticket di storno e annullo chiamata le righe piatto escono barrate col tratteggio («-- 1 x Acqua ----»): la riga che non vale più si riconosce a colpo d'occhio. |
