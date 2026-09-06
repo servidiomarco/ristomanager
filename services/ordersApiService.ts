@@ -320,6 +320,9 @@ export interface KdsFullItem {
 export interface KdsComingItem {
   name_snapshot: string;
   qty: number;
+  /** Grammi del pezzo per le righe al peso: la barra fa un chip per
+   *  pezzatura, col peso nel nome. */
+  weight_grams?: number | null;
   status: 'QUEUED' | 'SENT' | 'PREPARING';
   station_start_at: string | null;
   course_no: number;

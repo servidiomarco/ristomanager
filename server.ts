@@ -27755,7 +27755,7 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
         // in arrivo.
         const coming = await queryWithRetry(
             `SELECT oi.name_snapshot, oi.qty, oi.status, oi.station_start_at,
-                    oi.course_no, t.name AS table_name
+                    oi.course_no, oi.weight_grams, t.name AS table_name
              FROM order_items oi
              JOIN orders o ON o.id = oi.order_id
              LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
