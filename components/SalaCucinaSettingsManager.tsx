@@ -298,6 +298,25 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
                   }`}>
                   pronto auto
                 </button>
+                {/* Solo con una termica: il flag riguarda la carta, a schermo
+                    le altre partite ci sono già nel piede della card. */}
+                {s.printer && (
+                  <button
+                    type="button" role="switch" aria-checked={s.full_course}
+                    disabled={!canEdit || saving}
+                    title="La comanda stampata porta in coda, in piccolo, anche i piatti delle altre partite della stessa uscita"
+                    onClick={() => act(
+                      () => updateStation(s.id, { full_course: !s.full_course }),
+                      s.full_course ? `${s.name}: in comanda solo i propri piatti` : `${s.name}: in comanda anche il resto dell'uscita`
+                    )}
+                    className={`text-[12px] px-2 py-0.5 rounded-full border transition-colors disabled:opacity-50 ${
+                      s.full_course
+                        ? 'border-transparent bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
+                        : 'border-[var(--ds-border)] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
+                    }`}>
+                    uscita intera
+                  </button>
+                )}
                 <button type="button" disabled={!canEdit || saving}
                   onClick={() => act(() => updateStation(s.id, { is_active: !s.is_active }))}
                   className="text-[12px] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] disabled:opacity-50">
@@ -321,6 +340,7 @@ export const SalaCucinaSettingsManager: React.FC<Props> = ({ showToast }) => {
           <p className="text-[12px] text-[var(--ds-text-muted)] mt-1.5">
             "Solo schermo" = la partita lavora dal monitor Cucina. Con una stampante, al lancio dell'uscita esce anche la comanda di carta.
             «Pronto auto» = la partita non ha un monitor: le sue righe si segnano pronte da sole al lancio e l'uscita non resta ad aspettarle.
+            «Uscita intera» = la carta porta in coda, in piccolo, anche i piatti delle altre partite della stessa uscita — per chi impiatta guardando cosa esce insieme.
           </p>
         </section>
 

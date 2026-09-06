@@ -308,6 +308,16 @@ function renderComanda(p) {
     push(GS, 0x21, 0x01);
   }
   push(GS, 0x21, 0x00);
+  // «Uscita intera» della partita: sotto il tratteggio, in corpo normale,
+  // cosa fanno le altre partite nella stessa uscita — contesto per chi
+  // impiatta guardando cosa esce insieme, non piatti da fare qui.
+  if (Array.isArray(p.others) && p.others.length > 0) {
+    text('-'.repeat(COLS) + '\n');
+    for (const o of p.others) {
+      text(`${(o.station_name ?? '').toUpperCase()}\n`);
+      for (const i of o.items ?? []) text(`  ${i.qty} x ${i.name}\n`);
+    }
+  }
   text('\n\n');
   push(GS, 0x56, 0x42, 0x00);
   return Buffer.from(bytes);

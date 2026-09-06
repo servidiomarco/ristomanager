@@ -912,6 +912,66 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         await db.end();
     });
 
+    it('«uscita intera»: la comanda della partita col flag porta anche i piatti delle altre partite', async () => {
+        const db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
+        await db.connect();
+        const stA = await db.query(
+            `INSERT INTO stations (tenant_id, name, printer, sort_order) VALUES (1, 'Antipasti Intera Test', 'termica-test', 93) RETURNING id`);
+        const stG = await db.query(
+            `INSERT INTO stations (tenant_id, name, printer, sort_order) VALUES (1, 'Griglia Intera Test', 'termica-test', 94) RETURNING id`);
+        const antipastiId = Number(stA.rows[0].id);
+        const grigliaId = Number(stG.rows[0].id);
+
+        // Il flag si accende dalla rotta delle partite e riappare in config.
+        const flagOn = await api().put(`/sala/stations/${antipastiId}`).set(bearer(token)).send({ full_course: true });
+        expect(flagOn.status).toBe(200);
+        expect(flagOn.body.full_course).toBe(true);
+        const cfg = await api().get('/sala/config').set(bearer(token));
+        expect(cfg.body.stations.find((s: any) => s.id === antipastiId).full_course).toBe(true);
+        expect(cfg.body.stations.find((s: any) => s.id === grigliaId).full_course).toBe(false);
+
+        const anti = await api().post('/dishes').set(bearer(token)).send({
+            name: 'Carpaccio Intera Test', description: null, price: 12, category: 'ANTIPASTI',
+            allergens: null, station_id: antipastiId,
+        });
+        const grill = await api().post('/dishes').set(bearer(token)).send({
+            name: 'Tagliata Intera Test', description: null, price: 22, category: 'SECONDI',
+            allergens: null, station_id: grigliaId,
+        });
+
+        await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'MANUAL' });
+        const orderId = await nuovaComanda();
+        await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [
+                { dish_id: anti.body.id, qty: 1, course_no: 1 },
+                { dish_id: grill.body.id, qty: 2, course_no: 1 },
+            ],
+        });
+        await api().post(`/orders/${orderId}/send`).set(bearer(token)).send({});
+        const fired = await api().post(`/orders/${orderId}/courses/1/fire`).set(bearer(token)).send({});
+        expect(fired.status).toBe(200);
+
+        const jobs = (await db.query(
+            `SELECT payload FROM print_jobs WHERE (payload->>'order_id')::int = $1 ORDER BY id`,
+            [orderId]
+        )).rows;
+        expect(jobs).toHaveLength(2);
+        const antiJob = jobs.find(j => j.payload.station_name === 'Antipasti Intera Test');
+        const grillJob = jobs.find(j => j.payload.station_name === 'Griglia Intera Test');
+        // Il ticket della partita col flag: i suoi piatti come sempre, e in
+        // coda le altre partite dell'uscita col loro nome.
+        expect(antiJob.payload.items).toHaveLength(1);
+        expect(antiJob.payload.others).toEqual([
+            { station_name: 'Griglia Intera Test', items: [{ qty: 2, name: 'Tagliata Intera Test' }] },
+        ]);
+        // La partita senza flag stampa il ticket di sempre, senza coda.
+        expect(grillJob.payload.others).toBeUndefined();
+
+        await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'AUTO_ALL' });
+        await api().put(`/sala/stations/${antipastiId}`).set(bearer(token)).send({ full_course: false });
+        await db.end();
+    });
+
     it('il monitor di partita non vede l\'uscita Bar delle altre partite', async () => {
         const BAR = 99;
         const db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
