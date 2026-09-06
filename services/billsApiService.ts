@@ -399,10 +399,12 @@ export const getBillOrder = async (billId: number): Promise<any> =>
 
 /** Accoda la stampa del preconto sulla termica in sala. L'origin serve al
  *  server per comporre l'URL del QR: solo il client sa da che host è servita
- *  la SPA (IP in LAN, dominio in produzione). */
+ *  la SPA (IP in LAN, dominio in produzione). 'PROFORMA' è la ristampa del
+ *  conto chiuso con proforma: stesso foglio del preconto ma col titolo
+ *  giusto e senza il QR di pagamento. */
 export const printBill = async (
   billId: number,
-  kind: 'PRECONTO' | 'QR' | 'SCONTRINO' = 'PRECONTO',
+  kind: 'PRECONTO' | 'QR' | 'SCONTRINO' | 'PROFORMA' = 'PRECONTO',
 ): Promise<{ id: number; status: string }> =>
   apiRequest<{ id: number; status: string }>(`${API_URL}/print-jobs`, {
     method: 'POST',

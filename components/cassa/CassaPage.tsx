@@ -733,6 +733,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
           // Niente try/catch: successo ed errore li mostra il bottone stesso,
           // vicino al dito — l'errore di pagina qui non si vede.
           onPrintReceipt={() => printBill(esito.bill.id, 'SCONTRINO')}
+          onPrintProforma={() => printBill(esito.bill.id, 'PROFORMA')}
           busy={busyBillId != null}
           onRetryDocument={async () => {
             setBusyBillId(esito.bill.id);

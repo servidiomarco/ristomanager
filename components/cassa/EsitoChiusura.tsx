@@ -40,6 +40,10 @@ interface EsitoChiusuraProps {
   /** Promessa vera, non fire-and-forget: l'esito (spunta o errore) lo mostra
    *  il bottone stesso, addosso al gesto. */
   onPrintReceipt?: () => Promise<unknown>;
+  /** Stampa della proforma sulla termica: il foglio del preconto col titolo
+   *  giusto, da consegnare al cliente che lo chiede. Resta possibile anche
+   *  dopo, dal conto in Pagamenti. */
+  onPrintProforma?: () => Promise<unknown>;
   busy: boolean;
   onRetryDocument: () => void;
   /** Rinuncia al documento: il conto resta chiuso, senza fiscale. */
@@ -57,7 +61,7 @@ const HEAD: Record<Esito, { label: string; tone: 'positive' | 'pending' | 'neutr
 };
 
 export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
-  esito, totalCents, tableName, closedAt, docNumber, receiptToken, onPrintReceipt, busy,
+  esito, totalCents, tableName, closedAt, docNumber, receiptToken, onPrintReceipt, onPrintProforma, busy,
   onRetryDocument, onMarkProforma, onIssueReceipt, onIssueInvoice, onReopen, onBackToQueue,
 }) => {
   const head = HEAD[esito];
@@ -106,6 +110,15 @@ export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
               )}
             </div>
           </div>
+        )}
+
+        {esito === 'proforma' && onPrintProforma && (
+          <StampaCopiaButton
+            onPrint={onPrintProforma}
+            label="Stampa proforma"
+            sentLabel="Proforma in stampa"
+            className="mt-4"
+          />
         )}
 
         <div className="mt-5 flex flex-wrap gap-2 border-t border-[var(--ds-border)] pt-4">
