@@ -17,6 +17,10 @@ export interface SalaStation {
   /** Pronto automatico: la partita lavora solo di carta (nessun monitor),
    *  le sue righe nascono già pronte al lancio e non bloccano l'uscita. */
   auto_ready: boolean;
+  /** La comanda stampata porta anche i piatti delle altre partite della
+   *  stessa uscita (in corpo piccolo, per partita). Per chi impiatta
+   *  guardando cosa esce insieme — gli antipasti. */
+  full_course: boolean;
 }
 
 export interface SalaPrinter {
@@ -105,7 +109,7 @@ export const createStation = (input: { name: string; color?: string | null; prin
     method: 'POST', headers: getHeaders(), body: JSON.stringify(input),
   });
 
-export const updateStation = (id: number, input: Partial<Pick<SalaStation, 'name' | 'color' | 'is_active' | 'printer' | 'auto_ready'>>): Promise<SalaStation> =>
+export const updateStation = (id: number, input: Partial<Pick<SalaStation, 'name' | 'color' | 'is_active' | 'printer' | 'auto_ready' | 'full_course'>>): Promise<SalaStation> =>
   apiRequest(`${API_URL}/sala/stations/${id}`, {
     method: 'PUT', headers: getHeaders(), body: JSON.stringify(input),
   });
