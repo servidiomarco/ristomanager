@@ -27643,6 +27643,7 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
                     oi.modifiers, oi.note, oi.status, oi.station_id, oi.weight_grams,
                     oi.fired_at, oi.station_start_at, oi.started_at, oi.ready_at,
                     o.table_id, t.name AS table_name, o.opened_at AS order_opened_at,
+                    o.covers AS order_covers,
                     r.customer_name, r.notes AS reservation_notes,
                     u.full_name AS opened_by_name,
                     c.dietary_notes AS customer_dietary_notes
