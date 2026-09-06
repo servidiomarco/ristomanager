@@ -266,6 +266,8 @@ export interface KdsItem {
   table_name: string | null;
   /** Quando il tavolo ha aperto: la testata della card è l'inizio del binario. */
   order_opened_at: string | null;
+  /** I coperti della comanda: la testata della card li mostra accanto al tavolo. */
+  order_covers: number | null;
   customer_name: string | null;
   /** Chi ha preso la comanda: la card del monitor lo mostra. */
   opened_by_name: string | null;

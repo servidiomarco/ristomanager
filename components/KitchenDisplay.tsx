@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { isBarCourse, isDessertCourse, ordinal } from '../utils/courses';
-import { Bell, BellOff, BellRing, Check, ChevronRight, CookingPot, Loader2, MessagesSquare, Pencil, Play, Search, TriangleAlert, WifiOff, X } from 'lucide-react';
+import { Bell, BellOff, BellRing, Check, ChevronRight, CookingPot, Loader2, MessagesSquare, Pencil, Play, Search, TriangleAlert, Users, WifiOff, X } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
 import { useAuth } from '../contexts/AuthContext';
 import { socketClient } from '../services/socketClient';
@@ -110,6 +110,8 @@ interface OrderGroup {
   openedBy: string | null;
   /** Quando il tavolo ha aperto: la testata è l'inizio del binario. */
   openedAt: string | null;
+  /** I coperti del tavolo: in cucina dimensionano l'uscita a colpo d'occhio. */
+  covers: number | null;
   allergens: string | null;
   /** Le uscite attive su questa partita (le sezioni distese). */
   cols: Column[];
@@ -565,6 +567,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           customer_name: col.customer_name,
           openedBy: col.openedBy,
           openedAt: col.items[0]?.order_opened_at ?? null,
+          covers: col.items[0]?.order_covers ?? null,
           allergens: col.allergens,
           cols: [],
           upcomingCols: [],
@@ -595,6 +598,16 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   // Tocco sul chip: «dove va questo piatto?» — modal coi tavoli, divisi fra
   // in lavorazione e in arrivo.
   const [chipDetail, setChipDetail] = useState<string | null>(null);
+  // Tocco sulla testata della card: la comanda per intero in un modal,
+  // uscita per uscita — consultazione, le spunte restano sulle card.
+  // Il modal legge la versione VIVA del gruppo finché la comanda è a schermo
+  // (le righe avanzano mentre lo si guarda) e tiene l'istantanea se nel
+  // frattempo è stata servita: chiudersi da solo sotto il dito sarebbe
+  // peggio di un dato fermo.
+  const [orderDetail, setOrderDetail] = useState<OrderGroup | null>(null);
+  const detailGroup = orderDetail
+    ? orderGroups.find(g => g.order_id === orderDetail.order_id) ?? orderDetail
+    : null;
   // Correzione del peso di una riga al peso: i tagli non sono precisi, e il
   // peso vero lo sa la cucina dopo la pesata. Il prezzo si ricalcola sul
   // server, la traccia va nel registro attività.
@@ -979,6 +992,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                 onServeCourse={passeEnabled ? undefined : serveColumn}
                 revisions={revisionsByOrder.get(g.order_id)}
                 onShowRevisions={() => setRevisionsFor(g.order_id)}
+                onShowOrder={() => setOrderDetail(g)}
                 onFlashDish={flashChip}
                 onEditWeight={setWeightEdit}
               />
@@ -1092,6 +1106,76 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             </div>
           );
         })()}
+      </ModalShell>
+
+      {/* La comanda per intero, dal tocco sulla testata della card: tutte le
+          uscite in ordine, ogni riga con varianti e note — consultazione in
+          grande, le spunte restano sulle card. */}
+      <ModalShell
+        open={detailGroup != null}
+        onClose={() => setOrderDetail(null)}
+        title={`T${detailGroup?.table_name ?? '—'} · comanda`}
+        subtitle={[
+          detailGroup?.covers ? `${detailGroup.covers} copert${detailGroup.covers === 1 ? 'o' : 'i'}` : null,
+          detailGroup?.customer_name ?? null,
+          detailGroup?.openedBy ? `di ${detailGroup.openedBy}` : null,
+        ].filter(Boolean).join(' · ') || undefined}
+        size="md"
+        closeOnEscape
+        bodyClassName="p-5 sm:p-6"
+      >
+        {detailGroup && (
+          <div className="space-y-4">
+            {detailGroup.allergens && (
+              <div className="flex items-start gap-1.5 rounded-[12px] bg-[var(--ds-critical-tint)] px-3 py-2 text-[14px] font-medium text-[var(--ds-critical-text)]">
+                <TriangleAlert size={15} className="mt-0.5 flex-shrink-0" aria-hidden />
+                <span>{detailGroup.allergens}</span>
+              </div>
+            )}
+            {[...new Set(detailGroup.rows.map(r => r.course_no))].sort((a, b) => a - b).map(no => {
+              const list = detailGroup.rows.filter(r => r.course_no === no);
+              const served = list.every(r => r.status === 'SERVED');
+              const state = served
+                ? `servita${(() => { const at = list.reduce<string | null>((max, r) => (r.served_at && (!max || r.served_at > max) ? r.served_at : max), null); return at ? ` ${getRomeTimePart(at)}` : ''; })()}`
+                : list.every(r => r.status === 'QUEUED') ? 'in coda'
+                : list.every(r => r.status === 'READY' || r.status === 'SERVED') ? 'pronta'
+                : 'in lavorazione';
+              return (
+                <div key={no}>
+                  <div className="mb-1 flex items-baseline gap-2">
+                    <span className="text-[14px] font-semibold text-[var(--ds-text-primary)]">
+                      {courseName(no)}
+                    </span>
+                    <span className="ml-auto flex-shrink-0 text-[13px] tabular-nums text-[var(--ds-text-muted)]">
+                      {state}
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    {list.map(r => (
+                      // La riga servita si attenua, come sulla card: il fatto
+                      // lo dice il testo, non un'opacità sotto contrasto.
+                      <div key={r.id} className={served || r.status === 'SERVED' ? 'text-[var(--ds-text-muted)]' : 'text-[var(--ds-text-primary)]'}>
+                        <div className="flex items-baseline gap-2 text-[16px] leading-snug">
+                          <span className="w-6 flex-shrink-0 text-right font-semibold tabular-nums">{r.qty}×</span>
+                          <span className="min-w-0">
+                            {r.name_snapshot}
+                            {r.weight_grams != null ? ` · ${weightLabel(r.weight_grams)}` : ''}
+                          </span>
+                        </div>
+                        {r.modifiers && r.modifiers.length > 0 && (
+                          <div className="ml-8 text-[14px] font-medium text-[var(--ds-pending-text)]">
+                            ↳ {r.modifiers.map(m => m.id != null && modifierNotes.get(m.id) ? `${m.name} · ${modifierNotes.get(m.id)}` : m.name).join(', ')}
+                          </div>
+                        )}
+                        {r.note && <div className="ml-8 text-[14px] text-[var(--ds-text-muted)]">↳ {r.note}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </ModalShell>
 
       {weightEdit && (
@@ -1209,11 +1293,13 @@ const OrderCard: React.FC<{
   onServeCourse?: (col: Column) => void;
   revisions?: OrderRevision[];
   onShowRevisions?: () => void;
+  /** Tocco sulla testata: la comanda per intero in un modal. */
+  onShowOrder?: () => void;
   /** Long press su una riga: accende il chip del piatto nella barra. */
   onFlashDish?: (name: string) => void;
   /** Apre l'editor del peso su una riga al peso (correzione dopo la pesata). */
   onEditWeight?: (item: KdsItem) => void;
-}> = ({ g, now, stationId, stationNames, modifierNotes, onAdvance, onCallWaiter, waiterCalled, onServeCourse, revisions, onShowRevisions, onFlashDish, onEditWeight }) => {
+}> = ({ g, now, stationId, stationNames, modifierNotes, onAdvance, onCallWaiter, waiterCalled, onServeCourse, revisions, onShowRevisions, onShowOrder, onFlashDish, onEditWeight }) => {
   const activeByCourse = new Map(g.cols.map(c => [c.course_no, c]));
   const upcomingByCourse = new Map(g.upcomingCols.map(c => [c.course_no, c]));
   const courseNos = [...new Set([
@@ -1229,27 +1315,45 @@ const OrderCard: React.FC<{
     // lampada) vive sulla card della SUA uscita, non sull'insieme.
     <div className="flex max-h-full w-72 flex-shrink-0 flex-col">
       <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
-      <div className="px-3 py-2.5">
-        <div className="flex items-baseline gap-2">
-          <span className="text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
-            T{g.table_name ?? '—'}
-          </span>
-          {/* L'ora in cui il tavolo ha aperto: il primo fatto del binario. */}
-          {g.openedAt && (
-            <span className="ml-auto text-[14px] tabular-nums text-[var(--ds-text-muted)]">
-              {getRomeTimePart(g.openedAt)}
+      <div className="px-1 py-1">
+        {/* La testata si tocca: apre la comanda per intero in un modal.
+            Stesso patto delle sezioni compresse — riassunto sempre,
+            dettaglio a richiesta. Il bottone «modificata» resta fuori. */}
+        <button
+          type="button"
+          onClick={onShowOrder}
+          aria-label={`Comanda intera del tavolo ${g.table_name ?? '—'}`}
+          className="block w-full rounded-[16px] px-2 py-1.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        >
+          <div className="flex items-baseline gap-2">
+            <span className="text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
+              T{g.table_name ?? '—'}
             </span>
-          )}
-        </div>
-        {/* «di Luca», non un'etichetta lunga: in cucina serve solo sapere a
-            chi chiedere. Cliente e operatore su una riga sola. */}
-        {(g.customer_name || g.openedBy) && (
-          <div className="text-[13px] text-[var(--ds-text-muted)]">
-            {g.customer_name ?? ''}
-            {g.customer_name && g.openedBy ? ' · ' : ''}
-            {g.openedBy ? `di ${g.openedBy}` : ''}
+            {/* I coperti: dimensionano l'uscita a colpo d'occhio («4 primi
+                su 6 coperti: due saltano il primo»). */}
+            {g.covers != null && g.covers > 0 && (
+              <span className="inline-flex items-center gap-1 text-[14px] font-medium tabular-nums text-[var(--ds-text-muted)]">
+                <Users size={13} className="translate-y-px" aria-hidden />
+                {g.covers}
+              </span>
+            )}
+            {/* L'ora in cui il tavolo ha aperto: il primo fatto del binario. */}
+            {g.openedAt && (
+              <span className="ml-auto text-[14px] tabular-nums text-[var(--ds-text-muted)]">
+                {getRomeTimePart(g.openedAt)}
+              </span>
+            )}
           </div>
-        )}
+          {/* «di Luca», non un'etichetta lunga: in cucina serve solo sapere a
+              chi chiedere. Cliente e operatore su una riga sola. */}
+          {(g.customer_name || g.openedBy) && (
+            <div className="text-[13px] text-[var(--ds-text-muted)]">
+              {g.customer_name ?? ''}
+              {g.customer_name && g.openedBy ? ' · ' : ''}
+              {g.openedBy ? `di ${g.openedBy}` : ''}
+            </div>
+          )}
+        </button>
         {/* Comanda cambiata dopo il lancio: rosso pieno per scelta di Marco
             (29/08) — l'ambra tinta annegava fra venti card nel picco, e qui
             la modifica È un'interruzione: continuare a cucinare un piatto
@@ -1258,7 +1362,7 @@ const OrderCard: React.FC<{
           <button
             type="button"
             onClick={onShowRevisions}
-            className="mt-2 flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-[12px] bg-[var(--ds-critical-solid)] px-3 text-[14px] font-semibold text-[var(--ds-critical-fg)] transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="mb-1 mt-1.5 flex min-h-[44px] w-full items-center justify-center gap-1.5 rounded-[12px] bg-[var(--ds-critical-solid)] px-3 text-[14px] font-semibold text-[var(--ds-critical-fg)] transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <Pencil size={14} aria-hidden />
             modificata{revisions.length > 1 ? ` · ${revisions.length}` : ''}
