@@ -4,7 +4,7 @@ import type { OrderItem, OrderWithItems } from '../../types';
 import { StatusPill } from '../ds';
 import {
   BAR_COURSE_NO,
-  COURSE_BADGE, MAX_COURSES, cartForCourse, cartSum, cartUnitCents, courseLabel,
+  courseBadge, MAX_COURSES, cartForCourse, cartSum, cartUnitCents, courseLabel,
   courseStatus, euro, isSent, itemsForCourse, rowCount, rowCountLabel, weightLabel,
   type CartLine,
   isSystemLine,
@@ -104,7 +104,7 @@ export const CourseList: React.FC<CourseListProps> = ({
       // fondo tinto (famiglia arriving, la stessa della pillola «in cucina»).
       const fired = status === 'FIRED';
       const current = n === course;
-      const badge = COURSE_BADGE[status];
+      const badge = courseBadge(status, n);
       // Righe rimaste in coda dentro un'uscita GIÀ partita (aggiunte dopo il
       // lancio in un fire mode che non le fa partire da solo, o dati vecchi):
       // il «Chiama» deve coprirle, o restano orfane — l'uscita non risulta
