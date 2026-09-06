@@ -3644,6 +3644,14 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
                 );
                 if (up.rows[0]?.inserted) creati++; else aggiornati++;
                 const dishId: number = up.rows[0].id;
+                // Il prezzo della cassa vale anche come prezzo battuto: senza
+                // questo il listino resta al valore del backfill e le comande
+                // addebitano il prezzo vecchio (vedi syncDefaultListPrice).
+                await syncDefaultListPrice(
+                    req.tenantId!, dishId,
+                    Number.isFinite(Number(a.prezzo)) ? Number(a.prezzo) : 0,
+                    (sql, params) => client.query(sql, params),
+                );
                 if (up.rows[0]?.inserted) {
                     // SELECT su menus, non VALUES: un id rimasto nel blob
                     // dopo l'eliminazione di un menu non deve far saltare
@@ -11881,6 +11889,30 @@ const resolveDishStation = async (
     return { touched: true, value: id };
 };
 
+// Il prezzo battuto si risolve dal listino della comanda (dish_prices) e solo
+// in mancanza dall'anagrafica — ma nessuna superficie scrive ancora i listini:
+// il backfill al boot fotografava il prezzo e ogni modifica successiva
+// (scheda piatto, import Passepartout) lasciava il listino fermo al valore
+// vecchio. Palmare e cassa mostrano l'anagrafica, il conto addebita il
+// listino: sui piatti al peso la forbice si moltiplica per i grammi (6/09,
+// filetto — anteprima al €/kg nuovo, battuta al €/kg vecchio). Finché una UI
+// dei listini non esiste, ogni scrittura del prezzo passa da qui e tiene
+// allineato il listino di default. `run`: la connessione della transazione
+// quando c'è (import), il pool altrimenti.
+const syncDefaultListPrice = async (
+    tenantId: number, dishId: number, price: any,
+    run: (sql: string, params: any[]) => Promise<any> = (sql, params) => queryWithRetry(sql, params),
+): Promise<void> => {
+    const cents = Math.round(Number(price) * 100);
+    if (!Number.isFinite(cents)) return;
+    await run(
+        `INSERT INTO dish_prices (tenant_id, dish_id, price_list_id, price_cents)
+         SELECT $1, $2, id, $3 FROM menu_price_lists WHERE tenant_id = $1 AND is_default
+         ON CONFLICT (dish_id, price_list_id) DO UPDATE SET price_cents = EXCLUDED.price_cents`,
+        [tenantId, dishId, Math.max(0, cents)]
+    );
+};
+
 app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { name, description, price, category, allergens, photo_url } = req.body;
@@ -11910,6 +11942,7 @@ app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, re
              station.value]
         );
         const newDish = result.rows[0];
+        await syncDefaultListPrice(req.tenantId!, newDish.id, newDish.price);
 
         // Varianti e ingredienti: presente = sostituisce l'insieme (anche
         // vuoto: il form precompila i gruppi di categoria, quel che si vede
@@ -12030,6 +12063,7 @@ app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req,
         if (!updatedDish) {
             return res.status(404).json({ error: 'Dish not found' });
         }
+        await syncDefaultListPrice(req.tenantId!, updatedDish.id, updatedDish.price);
 
         // menu_ids assente = client vecchio: le appartenenze restano come
         // sono (stessa logica del COALESCE su vat_rate). Presente = le
