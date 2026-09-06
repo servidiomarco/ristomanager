@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { api, bearer, ownerToken } from './helpers';
 
 // Sconto sul CONTO (operazioni di cassa): al momento dell'incasso la comanda
@@ -60,6 +60,17 @@ describe('sconto sul conto', () => {
         expect(closed.status).toBe(200);
         billId = closed.body.bill.id as number;
         expect(closed.body.bill.total_cents).toBe(2500);
+    });
+
+    afterAll(async () => {
+        // I file girano in sequenza sullo stesso server: questo viene prima di
+        // orders-bills, che parte asserendo i flag SPENTI e li riaccende da sé.
+        // Lasciarli accesi qui fa fallire quella asserzione e trascina in 403
+        // tutti i file cassa a valle (successo davvero, run 34051090136).
+        await api().put('/settings/features').set(bearer(token)).send({
+            table_orders_enabled: false,
+            pay_at_table_enabled: false,
+        });
     });
 
     it('valida tipo, valore e motivazione come lo sconto di comanda', async () => {
