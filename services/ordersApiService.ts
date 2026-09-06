@@ -325,6 +325,8 @@ export interface KdsComingItem {
   /** Grammi del pezzo per le righe al peso: la barra fa un chip per
    *  pezzatura, col peso nel nome. */
   weight_grams?: number | null;
+  /** Varianti della riga: il dettaglio «dove va» separa le cotture. */
+  modifiers?: { id?: number | null; name: string; price_delta_cents: number }[] | null;
   status: 'QUEUED' | 'SENT' | 'PREPARING';
   station_start_at: string | null;
   course_no: number;
