@@ -11,13 +11,12 @@ import type { PillTone } from '../ds';
 export const euro = (cents: number): string =>
   (cents / 100).toLocaleString('it-IT', { style: 'currency', currency: 'EUR' });
 
-/** Le uscite sono sei. Non è un limite tecnico: è quante ne regge un servizio
- *  prima che il passe smetta di leggerle. */
+/** Le uscite di cucina sono sei. Non è un limite tecnico: è quante ne regge
+ *  un servizio prima che il passe smetta di leggerle. Il Bar è un'uscita a
+ *  parte (utils/courses): bibite e vini non stanno nella sequenza. */
 export const MAX_COURSES = 6;
 
-const ORDINALS = ['', '1ª', '2ª', '3ª', '4ª', '5ª', '6ª'];
-export const ordinal = (n: number): string => ORDINALS[n] ?? `${n}ª`;
-export const courseLabel = (n: number): string => `${ordinal(n)} uscita`;
+export { BAR_COURSE_NO, isBarCourse, ordinal, courseLabel } from '../../utils/courses';
 
 export interface CartLine {
   key: string;

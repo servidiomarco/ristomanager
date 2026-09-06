@@ -1,7 +1,7 @@
 import React from 'react';
 import type { OrderWithItems } from '../../types';
 import {
-  MAX_COURSES, cartForCourse, courseLabel, courseStatus, isSent, itemsForCourse, ordinal,
+  BAR_COURSE_NO, MAX_COURSES, cartForCourse, courseLabel, courseStatus, isSent, itemsForCourse, ordinal,
   type CartLine,
 } from './orderView';
 
@@ -20,11 +20,20 @@ export const CourseChips: React.FC<{
   cart: CartLine[];
   course: number;
   onCourse: (next: number) => void;
-}> = ({ order, cart, course, onCourse }) => (
+  /** Pastiglia «Bar» in testa: c'è quando il ristorante ha categorie da bar
+   *  (o quando l'uscita Bar ha già righe, comunque arrivate). */
+  showBar?: boolean;
+}> = ({ order, cart, course, onCourse, showBar }) => (
   // Margine negativo con padding uguale: lo scorrimento orizzontale ritaglia
   // anche in verticale, e senza questo l'ombra sotto le pastiglie esce tagliata.
   <div className="-my-1.5 flex gap-2 overflow-x-auto py-1.5 scrollbar-hide">
-    {Array.from({ length: MAX_COURSES }, (_, i) => i + 1).map(n => {
+    {[
+      ...(showBar || course === BAR_COURSE_NO
+        || cartForCourse(cart, BAR_COURSE_NO).length > 0
+        || itemsForCourse(order, BAR_COURSE_NO).length > 0
+          ? [BAR_COURSE_NO] : []),
+      ...Array.from({ length: MAX_COURSES }, (_, i) => i + 1),
+    ].map(n => {
       const active = n === course;
       const sent = isSent(courseStatus(order, n));
       const filled =

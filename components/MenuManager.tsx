@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Dish, RestaurantMenu, BanquetMenu, BanquetCourse, BanquetStatus, Shift, COMMON_ALLERGENS, VAT_RATES, Customer, Table, TableMerge, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
-import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, Layers, SlidersHorizontal, Share2, MessageCircle } from 'lucide-react';
+import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, Layers, SlidersHorizontal, Share2, MessageCircle, Martini } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { getRomeDatePart } from '../utils/reservationTime';
 import { printBanquet } from '../utils/printBanquet';
@@ -11,7 +11,7 @@ import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BanquetPaymentsModal } from './BanquetPaymentsModal';
 import { DishDetailModal } from './DishDetailModal';
 import { CustomerPickerModal } from './CustomerPickerModal';
-import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, createMenuCategory, renameMenuCategory, deleteMenuCategory, getBanquetShareLink, sendBanquetQuoteEmail, sendBanquetQuoteWhatsApp, getModifierGroups, getDishComponents, type AdminModifierGroup, type MenuImportResult, type MenuTranslateResult, type MenuCategory } from '../services/apiService';
+import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, setCategoryBar, createMenuCategory, renameMenuCategory, deleteMenuCategory, getBanquetShareLink, sendBanquetQuoteEmail, sendBanquetQuoteWhatsApp, getModifierGroups, getDishComponents, type AdminModifierGroup, type MenuImportResult, type MenuTranslateResult, type MenuCategory } from '../services/apiService';
 import { socketClient } from '../services/socketClient';
 import { getSalaConfig, type SalaStation } from '../services/salaApiService';
 import { MenuVariantsModal } from './MenuVariantsModal';
@@ -282,6 +282,17 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       // ricaricano via App e le pill si riallineano da sole.
       await setCategoryMenu(catName, menuId, member);
     } catch { /* le pill restano com'erano: nessun falso ok */ }
+    finally { setCatMenuBusy(null); }
+  };
+  // La spunta «bar»: i piatti della categoria vanno dritti nell'uscita Bar
+  // del palmare. Rifetch esplicito: la spunta vive nelle prefs di categoria,
+  // e qui serve la riga aggiornata subito, non al prossimo dish:synced.
+  const handleToggleCategoryBar = async (catName: string, bar: boolean) => {
+    setCatMenuBusy(`${catName}|bar`);
+    try {
+      await setCategoryBar(catName, bar);
+      refreshMenuCats();
+    } catch { /* la pill resta com'era: nessun falso ok */ }
     finally { setCatMenuBusy(null); }
   };
   const [reorderBusy, setReorderBusy] = useState(false);
@@ -3950,6 +3961,25 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                         </button>
                       );
                     })}
+                    {/* La spunta «bar»: sul palmare i piatti della categoria
+                        vanno dritti nell'uscita Bar — bibite, vini, amari. */}
+                    <button
+                      type="button"
+                      disabled={catMenuBusy === `${cat.name}|bar`}
+                      onClick={() => handleToggleCategoryBar(cat.name, cat.bar !== true)}
+                      aria-pressed={cat.bar === true}
+                      title={cat.bar
+                        ? `${cat.name} esce al Bar — togli la spunta`
+                        : `In comanda ${cat.name} va dritta nell'uscita Bar`}
+                      className={`inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                        cat.bar
+                          ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                          : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
+                      } ${catMenuBusy === `${cat.name}|bar` ? 'opacity-50' : ''}`}
+                    >
+                      <Martini size={12} />
+                      Bar
+                    </button>
                   </div>
                 </div>
                 <button

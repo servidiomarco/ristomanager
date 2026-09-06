@@ -651,4 +651,68 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         });
         expect(bad.status).toBe(400);
     });
+
+    it('uscita Bar: la spunta di categoria arriva al palmare, e il Bar parte subito nei lanci automatici', async () => {
+        const BAR = 99; // BAR_COURSE_NO: l'uscita riservata alle bibite
+        const drink = await api().post('/dishes').set(bearer(token)).send({
+            name: 'Gin Tonic Collaudo', description: null, price: 8, category: 'Bar Collaudo', allergens: null,
+        });
+        expect(drink.status).toBe(201);
+
+        // La spunta «bar» sulla categoria: esposta in /menu/categories e nel
+        // catalogue (è da lì che il palmare decide l'instradamento).
+        const on = await api().put('/menu/category-bar').set(bearer(token)).send({ category: 'Bar Collaudo', bar: true });
+        expect(on.status).toBe(200);
+        const cats = await api().get('/menu/categories').set(bearer(token));
+        expect(cats.body.categories.find((c: any) => c.name === 'Bar Collaudo').bar).toBe(true);
+        const catalogue = await api().get('/menu/catalogue').set(bearer(token));
+        expect(catalogue.body.category_prefs['Bar Collaudo'].bar).toBe(true);
+        const ghost = await api().put('/menu/category-bar').set(bearer(token)).send({ category: 'Categoria Fantasma', bar: true });
+        expect(ghost.status).toBe(404);
+
+        // AUTO_FIRST: parte la prima uscita E il Bar — le bibite non
+        // aspettano il passe.
+        await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'AUTO_FIRST' });
+        const primaId = await nuovaComanda();
+        await api().post(`/orders/${primaId}/items`).set(bearer(token)).send({
+            items: [
+                { dish_id: piatto1, qty: 1, course_no: 1 },
+                { dish_id: piatto2, qty: 1, course_no: 2 },
+                { dish_id: drink.body.id, qty: 1, course_no: BAR },
+            ],
+        });
+        const sent = await api().post(`/orders/${primaId}/send`).set(bearer(token)).send({});
+        expect(sent.status).toBe(200);
+        expect(sent.body.fired_courses).toEqual([1, BAR]);
+        expect(sent.body.queued_courses).toEqual([2]);
+
+        // AUTO_NEXT con roba già in cucina: un giro di bibite parte lo
+        // stesso, un'uscita di cucina nuova resta al passe. Comanda fresca,
+        // così il Bar non risulta «già lanciato» e la regola si vede nuda.
+        await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'AUTO_NEXT' });
+        const secondaId = await nuovaComanda();
+        await api().post(`/orders/${secondaId}/items`).set(bearer(token)).send({
+            items: [{ dish_id: piatto1, qty: 1, course_no: 1 }],
+        });
+        const avvio = await api().post(`/orders/${secondaId}/send`).set(bearer(token)).send({});
+        expect(avvio.body.fired_courses).toEqual([1]);
+        const giro = await api().post(`/orders/${secondaId}/items`).set(bearer(token)).send({
+            items: [
+                { dish_id: piatto2, qty: 1, course_no: 2 },
+                { dish_id: drink.body.id, qty: 1, course_no: BAR },
+            ],
+        });
+        expect(giro.status).toBe(201);
+        const sent2 = await api().post(`/orders/${secondaId}/send`).set(bearer(token)).send({});
+        expect(sent2.status).toBe(200);
+        expect(sent2.body.fired_courses).toEqual([BAR]);
+        expect(sent2.body.queued_courses).toEqual([2]);
+
+        // Il default della suite resta AUTO_ALL, e la spunta si toglie.
+        await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'AUTO_ALL' });
+        const off = await api().put('/menu/category-bar').set(bearer(token)).send({ category: 'Bar Collaudo', bar: false });
+        expect(off.status).toBe(200);
+        const dopo = await api().get('/menu/categories').set(bearer(token));
+        expect(dopo.body.categories.find((c: any) => c.name === 'Bar Collaudo').bar).toBe(false);
+    });
 });
