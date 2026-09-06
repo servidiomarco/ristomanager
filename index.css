@@ -383,11 +383,19 @@
 /* ===========================================================================
    Base typography & resets
    ========================================================================= */
-html { font-family: var(--font-sans); }
+html {
+  font-family: var(--font-sans);
+  /* Chrome Android: il dito che tira giù la pagina è il pull-to-refresh, e
+     mid-servizio ricarica l'app buttando fuori dalla comanda (collaudo 6/9;
+     su iPhone in PWA non esiste). Spento qui, dove basta un rigo: lo scroll
+     interno delle liste non c'entra e resta identico. */
+  overscroll-behavior-y: none;
+}
 
 body {
   background: var(--color-surface-2);
   color: var(--color-fg);
+  overscroll-behavior-y: none;
   /* Match Inter's apparent size: Hanken Grotesk's x-height is ~0.50 vs Inter's
      ~0.545, so normalize to Inter's x-height aspect (+~9%). */
   font-size-adjust: 0.545;
