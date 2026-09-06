@@ -44,17 +44,17 @@ if (PRINTERS.size === 0 && process.env.PRINTER_IP) {
 function applyConfig(cfg) {
   const list = Array.isArray(cfg?.printers) ? cfg.printers : [];
   if (list.length === 0) return;
-  const next = new Map(list.map(p => [p.name, { host: p.host, port: Number(p.port || 9100) }]));
+  const next = new Map(list.map(p => [p.name, { host: p.host, port: Number(p.port || 9100), buzzer: p.buzzer === true }]));
   const changed = next.size !== PRINTERS.size
     || [...next.entries()].some(([n, d]) => {
       const cur = PRINTERS.get(n);
-      return !cur || cur.host !== d.host || cur.port !== d.port;
+      return !cur || cur.host !== d.host || cur.port !== d.port || Boolean(cur.buzzer) !== d.buzzer;
     });
   if (changed) {
     PRINTERS.clear();
     for (const [n, d] of next) PRINTERS.set(n, d);
     warnedUnknown.clear();
-    log(`mappa stampanti aggiornata dal backend: [${[...PRINTERS.entries()].map(([n, d]) => `${n}=${d.host}:${d.port}`).join(', ')}]`);
+    log(`mappa stampanti aggiornata dal backend: [${[...PRINTERS.entries()].map(([n, d]) => `${n}=${d.host}:${d.port}${d.buzzer ? '+cicalino' : ''}`).join(', ')}]`);
   }
 }
 
@@ -70,6 +70,13 @@ const log = (...a) => console.log(new Date().toISOString(), ...a);
 // ---------------------------------------------------------------------------
 const ESC = 0x1b, GS = 0x1d;
 const COLS = 42; // font A su 80mm; se la carta mostra righe corte, portare a 48
+
+// Cicalino ESC B n t: n beep da t*100ms circa. È il comando delle termiche
+// di questa famiglia (PRP-300 comprese); si antepone al job SOLO per le
+// stampanti col flag `buzzer` acceso nel registro — la cucina deve sentire
+// la comanda che arriva, il banco dei preconti no. Se un modello non lo
+// supporta al peggio ignora la sequenza: si spegne il flag e via.
+const BEEP = Buffer.from([ESC, 0x42, 3, 2]);
 
 const euro = cents => (cents / 100).toFixed(2).replace('.', ',');
 
@@ -362,8 +369,11 @@ async function drainPrinter(name, dest, jobs) {
       continue;
     }
     try {
-      await sendToPrinter(dest, rendered);
-      log(`job ${job.id} [${name}]: stampato (${rendered.length} byte)`);
+      // Cicalino prima dei byte di stampa: il suono parte col job, non a
+      // taglio avvenuto.
+      const payload = dest.buzzer ? Buffer.concat([BEEP, rendered]) : rendered;
+      await sendToPrinter(dest, payload);
+      log(`job ${job.id} [${name}]: stampato (${rendered.length} byte${dest.buzzer ? ', con cicalino' : ''})`);
       await api(`/print-agent/jobs/${job.id}/ack`, { method: 'POST', body: JSON.stringify({ ok: true }) });
     } catch (err) {
       log(`job ${job.id} [${name}]: stampante non raggiungibile (${err.message}), ritento`);

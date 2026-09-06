@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { isBarCourse, ordinal } from '../utils/courses';
 import { Bell, BellOff, BellRing, Check, ChevronRight, CookingPot, Loader2, MessagesSquare, Pencil, Play, Search, TriangleAlert, WifiOff, X } from 'lucide-react';
 import { useNow } from '../hooks/useNow';
 import { useAuth } from '../contexts/AuthContext';
@@ -36,7 +37,10 @@ const SOUND_KEY = 'kds.sound';
 // altre partite finiscono: il bordo lampeggia.
 const LAMP_ALERT_MIN = 4;
 
-const ORDINALS = ['', '1ª', '2ª', '3ª', '4ª', '5ª', '6ª'];
+// «1ª uscita» … e «Uscita Bar»: il Bar è un'uscita fuori numerazione
+// (utils/courses), e nelle frasi mantiene il femminile di «uscita».
+const courseName = (n: number): string => isBarCourse(n) ? 'Uscita Bar' : `${ordinal(n)} uscita`;
+const courseShort = (n: number): string => isBarCourse(n) ? 'Bar' : `${ordinal(n)} usc.`;
 
 // Mai negativo: `now` avanza a scatti di 15 secondi e può risultare indietro
 // rispetto a un timestamp appena scritto dal server, che mostrerebbe "-1′".
@@ -547,7 +551,12 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           allergens: col.allergens,
           cols: [],
           upcomingCols: [],
-          rows: full.filter(r => r.order_id === col.order_id),
+          // L'Uscita Bar non entra nel binario delle partite di cucina: agli
+          // antipasti non interessa se sulla comanda c'è acqua, vino o birra.
+          // Resta solo dove è lavoro proprio (righe di questa partita) o sul
+          // monitor senza partita, che vede tutto per definizione.
+          rows: full.filter(r => r.order_id === col.order_id
+            && (stationId == null || !isBarCourse(r.course_no) || r.station_id === stationId)),
         });
       }
       map.get(col.order_id)!.cols.push(col);
@@ -888,7 +897,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                             <div key={c.course_no} className="text-[14px]">
                               <div className="flex items-baseline gap-2">
                                 <span className="flex-shrink-0 font-medium text-[var(--ds-text-primary)]">
-                                  {ORDINALS[c.course_no] ?? c.course_no}
+                                  {ordinal(c.course_no)}
                                 </span>
                                 <span className="min-w-0 flex-1 font-medium text-[var(--ds-text-primary)]">
                                   {aggregate(mine)}
@@ -972,7 +981,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                   className="flex-shrink-0 rounded-[16px] border-2 border-dashed border-[var(--ds-border-strong)] px-3 py-2"
                 >
                   <div className="text-[15px] font-semibold text-[var(--ds-text-primary)]">
-                    T{col.table_name} · {ORDINALS[col.course_no] ?? col.course_no} usc.
+                    T{col.table_name} · {courseShort(col.course_no)}
                   </div>
                   <div className="text-[13px] text-[var(--ds-text-muted)]">
                     {col.items.map(i => `${i.qty} ${i.name_snapshot}`).join(', ')}
@@ -1036,7 +1045,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                     <span key={`${e.table}-${e.course}`} className="inline-flex items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3 py-1.5 text-[15px] font-semibold text-[var(--ds-text-primary)]">
                       <span className="tabular-nums">{e.qty}×</span>
                       T{e.table}
-                      <span className="text-[13px] font-medium text-[var(--ds-text-muted)]">{ORDINALS[e.course] ?? e.course} usc.</span>
+                      <span className="text-[13px] font-medium text-[var(--ds-text-muted)]">{courseShort(e.course)}</span>
                     </span>
                   ))}
                 </div>
@@ -1270,7 +1279,7 @@ const OrderCard: React.FC<{
                   <div className="rounded-[16px] border-2 border-dashed border-[var(--ds-border-strong)] px-2.5 py-2">
                     <div className="flex items-baseline gap-2 text-[13px]">
                       <span className="font-semibold text-[var(--ds-text-primary)]">
-                        {ORDINALS[no] ?? no} uscita
+                        {courseName(no)}
                       </span>
                       <span className="ml-auto font-semibold tabular-nums text-[var(--ds-text-primary)]">
                         fra {Math.max(wait, 1)}′
@@ -1385,7 +1394,7 @@ const CourseSection: React.FC<{
       >
       <div className="flex items-baseline gap-2 pr-1">
         <span className="text-[14px] font-semibold text-[var(--ds-text-primary)]">
-          {ORDINALS[col.course_no] ?? col.course_no} uscita
+          {courseName(col.course_no)}
         </span>
         <span className={`ml-auto text-[17px] font-semibold tabular-nums ${timerTone(elapsed)}`}>
           {elapsed}′
@@ -1633,12 +1642,12 @@ const PassiveSection: React.FC<{
         type="button"
         onClick={() => setOpen(o => !o)}
         aria-expanded={open}
-        aria-label={`${ORDINALS[courseNo] ?? courseNo} uscita: mostra i piatti`}
+        aria-label={`${courseName(courseNo)}: mostra i piatti`}
         className="block w-full rounded-[16px] bg-[var(--ds-surface)] px-2.5 py-2 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         <div className="flex items-baseline gap-2 pr-1 text-[13px]">
           <span className="font-medium text-[var(--ds-text-muted)]">
-            {ORDINALS[courseNo] ?? courseNo} uscita
+            {courseName(courseNo)}
           </span>
           <span className="ml-auto flex-shrink-0 tabular-nums text-[var(--ds-text-muted)]">
             {served
@@ -1854,10 +1863,10 @@ const TimelinePane: React.FC<{
   const label = (e: OrderTimelineEvent): string => {
     switch (e.kind) {
       case 'opened': return `comanda aperta${e.by ? ` · ${e.by}` : ''}`;
-      case 'course_fired': return `${ORDINALS[e.course_no] ?? e.course_no} uscita chiamata`;
-      case 'course_started': return `${ORDINALS[e.course_no] ?? e.course_no} uscita in lavorazione`;
-      case 'course_ready': return `${ORDINALS[e.course_no] ?? e.course_no} uscita pronta${e.sync_delta_s >= 60 ? ` · sincronia ${mins(e.sync_delta_s)}′` : ''}`;
-      case 'course_served': return `${ORDINALS[e.course_no] ?? e.course_no} uscita servita${e.lamp_s != null && e.lamp_s >= 60 ? ` · ${mins(e.lamp_s)}′ sotto la lampada` : ''}`;
+      case 'course_fired': return `${courseName(e.course_no)} chiamata`;
+      case 'course_started': return `${courseName(e.course_no)} in lavorazione`;
+      case 'course_ready': return `${courseName(e.course_no)} pronta${e.sync_delta_s >= 60 ? ` · sincronia ${mins(e.sync_delta_s)}′` : ''}`;
+      case 'course_served': return `${courseName(e.course_no)} servita${e.lamp_s != null && e.lamp_s >= 60 ? ` · ${mins(e.lamp_s)}′ sotto la lampada` : ''}`;
       case 'revision': return `${e.summary} · ${e.by}`;
     }
   };

@@ -474,6 +474,9 @@ export interface MenuCategory {
   /** Gruppi varianti della categoria (default per i piatti nuovi);
    *  null = nessuna spunta di categoria mai fatta. */
   modifier_group_ids?: number[] | null;
+  /** Categoria da bar: sul palmare i suoi piatti vanno dritti nell'uscita
+   *  Bar. */
+  bar?: boolean;
 }
 
 export const getMenuCategories = async (): Promise<MenuCategory[]> => {
@@ -527,6 +530,16 @@ export const setCategoryMenu = async (category: string, menuId: number, member: 
     method: 'PUT',
     headers: getHeaders(),
     body: JSON.stringify({ category, menu_id: menuId, member }),
+  });
+};
+
+/** Spunta «bar» su una categoria: sul palmare i suoi piatti (bibite, vini,
+ *  amari) vanno dritti nell'uscita Bar alla battuta. */
+export const setCategoryBar = async (category: string, bar: boolean): Promise<void> => {
+  await apiRequest<{ ok: true }>(`${API_URL}/menu/category-bar`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify({ category, bar }),
   });
 };
 

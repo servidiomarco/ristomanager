@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Minus, Plus } from 'lucide-react';
 import { ModalShell, dsButton, dsInput } from '../ds';
 
 // Estratto da OrderPad quando Cassa ha avuto bisogno dello stesso dialogo
@@ -15,11 +15,18 @@ export const ReasonDialog: React.FC<{
   hint: string;
   confirmLabel: string;
   busy: boolean;
+  /** Sopra 1 compare il selettore di quantità: «erano 2, ne torna indietro
+   *  1». Parte dalla riga intera, che resta lo storno di sempre. */
+  maxQty?: number;
   onCancel: () => void;
-  onConfirm: (reason: string) => void;
-}> = ({ title, hint, confirmLabel, busy, onCancel, onConfirm }) => {
+  onConfirm: (reason: string, qty?: number) => void;
+}> = ({ title, hint, confirmLabel, busy, maxQty, onCancel, onConfirm }) => {
   const [reason, setReason] = useState('');
+  const [qty, setQty] = useState(maxQty ?? 1);
+  const partial = maxQty != null && maxQty > 1;
   const PRESETS = ['Errore di battitura', 'Cliente ha cambiato idea', 'Piatto non riuscito', 'Ingrediente finito'];
+  const stepper =
+    'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
   return (
     <ModalShell
       open
@@ -32,15 +39,43 @@ export const ReasonDialog: React.FC<{
       footer={
         <button
           type="button"
-          onClick={() => onConfirm(reason.trim())}
+          onClick={() => onConfirm(reason.trim(), partial ? qty : undefined)}
           disabled={busy || reason.trim().length < 3}
           className={dsButton.critical}
         >
           {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-          {confirmLabel}
+          {partial && qty < maxQty! ? `Storna ${qty} di ${maxQty}` : confirmLabel}
         </button>
       }
     >
+      {partial && (
+        <div className="flex items-center justify-between gap-3 rounded-[14px] bg-[var(--ds-surface-row)] p-2 pl-4">
+          <span className="text-[14px] text-[var(--ds-text-secondary)]">Quantità</span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setQty(q => Math.max(1, q - 1))}
+              disabled={busy || qty <= 1}
+              aria-label="Storna un pezzo in meno"
+              className={stepper}
+            >
+              <Minus size={16} />
+            </button>
+            <span className="min-w-[64px] text-center text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+              {qty} di {maxQty}
+            </span>
+            <button
+              type="button"
+              onClick={() => setQty(q => Math.min(maxQty!, q + 1))}
+              disabled={busy || qty >= maxQty!}
+              aria-label="Storna un pezzo in più"
+              className={stepper}
+            >
+              <Plus size={16} />
+            </button>
+          </div>
+        </div>
+      )}
       <div className="flex flex-wrap gap-2">
         {PRESETS.map(pr => (
           <button

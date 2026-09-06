@@ -23,6 +23,9 @@ export interface SalaPrinter {
   port: number;
   kind: 'THERMAL' | 'FISCAL';
   is_active: boolean;
+  /** Cicalino alla stampa: l'agente antepone il beep ESC/POS a ogni job
+   *  verso questa termica. Per la cucina, non per il banco. */
+  buzzer: boolean;
   notes: string | null;
 }
 
@@ -109,7 +112,7 @@ export const createPrinter = (input: { name: string; host: string; port?: number
     method: 'POST', headers: getHeaders(), body: JSON.stringify(input),
   });
 
-export const updatePrinter = (id: number, input: Partial<Pick<SalaPrinter, 'host' | 'port' | 'is_active' | 'notes'>>): Promise<SalaPrinter> =>
+export const updatePrinter = (id: number, input: Partial<Pick<SalaPrinter, 'host' | 'port' | 'is_active' | 'buzzer' | 'notes'>>): Promise<SalaPrinter> =>
   apiRequest(`${API_URL}/sala/printers/${id}`, {
     method: 'PUT', headers: getHeaders(), body: JSON.stringify(input),
   });
