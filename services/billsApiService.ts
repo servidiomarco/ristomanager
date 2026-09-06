@@ -1,6 +1,6 @@
 import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
-import type { BillPaymentMethod, CashClosureReport, CustomerBilling, FiscalDocument, FiscalProviderSetting, TableBill, TableBillWithSplits } from '../types';
+import type { BillPaymentMethod, CashClosureReport, CustomerBilling, FiscalClosureRow, FiscalClosureView, FiscalDocument, FiscalProviderSetting, TableBill, TableBillWithSplits } from '../types';
 import { buildApiError } from './apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
@@ -148,6 +148,31 @@ class BillsApiService {
     const suffix = date ? `?date=${encodeURIComponent(date)}` : '';
     return apiRequest<CashClosureReport>(`${API_URL}/reports/cash-closure${suffix}`, {
       headers: getHeaders(),
+    });
+  }
+
+  /** Chiusura fiscale della giornata: la fotografia dei documenti del giorno
+   *  più l'eventuale riga di chiusura (default oggi). */
+  async getFiscalClosure(date?: string): Promise<FiscalClosureView> {
+    const suffix = date ? `?date=${encodeURIComponent(date)}` : '';
+    return apiRequest<FiscalClosureView>(`${API_URL}/fiscal/closure${suffix}`, {
+      headers: getHeaders(),
+    });
+  }
+
+  /** Chiude la giornata fiscale: la Z su rt-local, il riscontro su openapi,
+   *  la registrazione del tagliando sul ponte. 409 = già chiusa o documenti
+   *  da sistemare; 400 = manca la nota sul delta. */
+  async closeFiscalDay(body: {
+    date: string;
+    zrep_number?: string;
+    rt_total_cents?: number | null;
+    note?: string;
+  }): Promise<{ closure: FiscalClosureRow }> {
+    return apiRequest(`${API_URL}/fiscal/closure`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(body),
     });
   }
 
