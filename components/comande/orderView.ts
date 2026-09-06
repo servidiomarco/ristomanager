@@ -16,6 +16,7 @@ export const euro = (cents: number): string =>
  *  parte (utils/courses): bibite e vini non stanno nella sequenza. */
 export const MAX_COURSES = 6;
 
+import { isBarCourse } from '../../utils/courses';
 export { BAR_COURSE_NO, isBarCourse, ordinal, courseLabel } from '../../utils/courses';
 
 export interface CartLine {
@@ -106,6 +107,12 @@ export const COURSE_BADGE: Record<CourseStatus, { text: string; tone: PillTone }
   READY:   { text: 'pronta',    tone: 'positive' },
   SERVED:  { text: 'servita',   tone: 'neutral' },
 };
+
+/** Il badge dell'uscita, col Bar che parla la sua lingua: lanciata dice
+ *  «al bar», non «in cucina» — al banco non c'è nessuna cucina. Gli altri
+ *  stati restano quelli di COURSE_BADGE. */
+export const courseBadge = (status: CourseStatus, courseNo: number): { text: string; tone: PillTone } =>
+  isBarCourse(courseNo) && status === 'FIRED' ? { text: 'al bar', tone: 'info' } : COURSE_BADGE[status];
 
 /** Lo stato di un'uscita ai fini della lettura: `courses` arriva dal server e
  *  copre solo le uscite che esistono già. */

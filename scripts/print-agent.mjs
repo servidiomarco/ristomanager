@@ -281,7 +281,9 @@ function renderComanda(p) {
   push(GS, 0x21, 0x11);      // double w+h
   text(`TAV ${p.table_name ?? '-'}\n`);
   push(GS, 0x21, 0x01);      // solo double height
-  text(`${p.course_no}a USCITA - ${(p.station_name ?? '').toUpperCase()}\n`);
+  // course_label arriva dal server («Bar», «2a USCITA»): il fallback compone
+  // il numero per i job accodati da un server più vecchio dell'agente.
+  text(`${p.course_label ?? `${p.course_no}a USCITA`} - ${(p.station_name ?? '').toUpperCase()}\n`);
   push(GS, 0x21, 0x00);
   const now = new Date();
   text(`${p.covers ?? '-'} coperti - ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}\n`);

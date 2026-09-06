@@ -572,6 +572,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-06 | Comande, Cucina e Passe | L'uscita Bar lanciata dice «al bar», non «in cucina», sulla pill di stato della comanda. |
 | 2026-09-06 | Comande, Cucina e Passe · Cassa | Storno parziale: su una riga da 2 o più pezzi il dialogo di storno (comanda e cassa) chiede quanti stornarne — la riga resta viva in cucina con la quantità scalata, i pezzi stornati diventano una riga a sé con motivazione, e il monitor avvisa solo di quelli. Default riga intera, come prima. |
 | 2026-09-06 | Comande, Cucina e Passe | Uscita Bar: spuntando «bar» sulle categorie in modale Categorie (bibite, vini, amari), i loro piatti battuti in comanda vanno da soli in un'uscita Bar dedicata, in testa alla comanda; nei lanci automatici il Bar parte subito con l'invio, senza toccare la sequenza delle portate. Etichetta «Bar» su palmare, monitor e comanda stampata. |
 | 2026-09-06 | Comande, Cucina e Passe | Cicalino alla stampa attivabile per stampante (campanella in Impostazioni → Sala & Cucina): l'agente antepone il beep ESC/POS a ogni lavoro verso le termiche col flag acceso — la cucina sente la comanda che arriva. |

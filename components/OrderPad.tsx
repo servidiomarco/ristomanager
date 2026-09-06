@@ -38,7 +38,7 @@ import { ReasonDialog } from './comande/ReasonDialog';
 import { DiscountDialog } from './comande/DiscountDialog';
 import { buildRows, buildMergeGroups, makeReservationForTable, type TableFilter } from './comande/tablesView';
 import {
-  BAR_COURSE_NO, COURSE_BADGE, MAX_COURSES, cartForCourse, cartKey, cartSum, courseLabel, euro,
+  BAR_COURSE_NO, MAX_COURSES, cartForCourse, cartKey, cartSum, courseBadge, courseLabel, euro,
   isSent, isSystemLine, rowCount,
   type CartLine, type RepeatLine,
   saveCartDraft, restoreCartDraft, dropCartDraft,
@@ -1526,7 +1526,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
                   {courseLabel(n)}
                   {sent && (
                     <span className="text-[11px] font-medium text-[var(--ds-text-muted)]">
-                      {COURSE_BADGE[status].text}
+                      {courseBadge(status, n).text}
                     </span>
                   )}
                 </button>
