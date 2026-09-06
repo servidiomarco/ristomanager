@@ -26138,6 +26138,10 @@ async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: n
             [JSON.stringify({
                 order_id: orderId,
                 course_no: courseNo,
+                // L'agente di stampa storico compone «{n}a USCITA» da solo:
+                // l'etichetta pronta serve al Bar (e a qualunque uscita
+                // futura fuori dalla numerazione).
+                course_label: courseNo === BAR_COURSE_NO ? 'Bar' : `${courseNo}a USCITA`,
                 table_name: tableName,
                 covers,
                 station_name: station.name,
@@ -29081,21 +29085,77 @@ app.post('/orders/items/:id/void', authenticate, requirePermission('orders:void'
         if (reason.length < 3) {
             return res.status(400).json({ error: 'Serve una motivazione (almeno 3 caratteri)' });
         }
-
-        const upd = await queryWithRetry(
-            `UPDATE order_items
-             SET status = 'VOIDED', voided_at = CURRENT_TIMESTAMP,
-                 voided_by_user_id = $2, void_reason = $3
-             WHERE id = $1 AND tenant_id = $4 AND status <> 'VOIDED'
-             RETURNING *`,
-            [id, req.user?.userId ?? null, reason.slice(0, 300), req.tenantId!]
-        );
-        if (upd.rows.length === 0) {
-            const cur = await queryWithRetry(`SELECT status FROM order_items WHERE id = $1 AND tenant_id = $2`, [id, req.tenantId!]);
-            if (cur.rows.length === 0) return res.status(404).json({ error: 'Riga non trovata' });
-            return res.status(409).json({ error: 'Riga già stornata' });
+        // Quantità parziale: «erano 2 branzini, ne torna indietro 1». Assente
+        // o >= della riga = storno intero, come è sempre stato.
+        const reqQty = req.body?.qty == null ? null : parseInt(String(req.body.qty), 10);
+        if (reqQty != null && (!Number.isFinite(reqQty) || reqQty < 1)) {
+            return res.status(400).json({ error: 'Quantità non valida' });
         }
-        const item = upd.rows[0];
+
+        let item: any;
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+            const cur = await client.query(
+                `SELECT * FROM order_items WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+                [id, req.tenantId!]
+            );
+            if (cur.rows.length === 0) {
+                await client.query('ROLLBACK');
+                return res.status(404).json({ error: 'Riga non trovata' });
+            }
+            if (cur.rows[0].status === 'VOIDED') {
+                await client.query('ROLLBACK');
+                return res.status(409).json({ error: 'Riga già stornata' });
+            }
+            const voidQty = reqQty == null ? cur.rows[0].qty : Math.min(reqQty, cur.rows[0].qty);
+            if (voidQty >= cur.rows[0].qty) {
+                const upd = await client.query(
+                    `UPDATE order_items
+                     SET status = 'VOIDED', voided_at = CURRENT_TIMESTAMP,
+                         voided_by_user_id = $2, void_reason = $3
+                     WHERE id = $1 AND tenant_id = $4
+                     RETURNING *`,
+                    [id, req.user?.userId ?? null, reason.slice(0, 300), req.tenantId!]
+                );
+                item = upd.rows[0];
+            } else {
+                // Storno parziale: la riga si divide. Quella originale resta
+                // viva con la quantità scalata — così tiene il suo id e il suo
+                // stato, e la cucina che la sta lavorando non perde nulla — e
+                // lo storno diventa una riga VOIDED a sé, che porta a bilancio
+                // solo i pezzi buttati. I timestamp si copiano: valgono per la
+                // riga, non per il pezzo, e senza fired_at la revisione al
+                // monitor non partirebbe.
+                await client.query(
+                    `UPDATE order_items SET qty = qty - $3 WHERE id = $1 AND tenant_id = $2`,
+                    [id, req.tenantId!, voidQty]
+                );
+                const ins = await client.query(
+                    `INSERT INTO order_items
+                        (tenant_id, order_id, dish_id, name_snapshot, unit_price_cents, modifiers,
+                         qty, course_no, seat_no, station_id, status, note,
+                         queued_at, fired_at, station_start_at, started_at, ready_at, served_at,
+                         voided_at, voided_by_user_id, void_reason,
+                         created_by_user_id, created_at, line_kind, vat_rate, weight_grams)
+                     SELECT tenant_id, order_id, dish_id, name_snapshot, unit_price_cents, modifiers,
+                         $3, course_no, seat_no, station_id, 'VOIDED', note,
+                         queued_at, fired_at, station_start_at, started_at, ready_at, served_at,
+                         CURRENT_TIMESTAMP, $4, $5,
+                         created_by_user_id, created_at, line_kind, vat_rate, weight_grams
+                     FROM order_items WHERE id = $1 AND tenant_id = $2
+                     RETURNING *`,
+                    [id, req.tenantId!, voidQty, req.user?.userId ?? null, reason.slice(0, 300)]
+                );
+                item = ins.rows[0];
+            }
+            await client.query('COMMIT');
+        } catch (err) {
+            await client.query('ROLLBACK').catch(() => {});
+            throw err;
+        } finally {
+            client.release();
+        }
 
         await syncSystemLines(req.tenantId!, item.order_id);
         const view = await loadOrderView(req.tenantId!, item.order_id);

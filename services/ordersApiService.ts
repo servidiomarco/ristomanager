@@ -218,9 +218,10 @@ export interface MenuCatalogue {
   /** Ingredienti dei piatti composti: pre-inclusi sul foglio varianti, si
    *  battono in negativo (removed_component_ids sulla riga). */
   dish_components: { id: number; dish_id: number; name: string; removal_delta_cents: number; sort_order: number }[];
-  /** Preferenze delle categorie decise in Menu: ordine (sort) e accensione.
-   *  Categoria assente = accesa, in coda. */
-  category_prefs?: Record<string, { enabled: boolean; sort: number }>;
+  /** Preferenze delle categorie decise in Menu: ordine (sort), accensione e
+   *  la spunta «bar» (i piatti della categoria vanno dritti nell'uscita Bar).
+   *  Categoria assente = accesa, in coda, non bar. */
+  category_prefs?: Record<string, { enabled: boolean; sort: number; bar?: boolean }>;
 }
 
 export const getMenuCatalogue = async (): Promise<MenuCatalogue> =>
@@ -542,10 +543,12 @@ export const updateOrder = async (
 
 // --- Storni, sconti, trasferimenti -------------------------------------------
 
-/** Storno di una riga già inviata: la motivazione è obbligatoria. */
-export const voidItem = async (itemId: number, reason: string): Promise<OrderWithItems> =>
+/** Storno di una riga già inviata: la motivazione è obbligatoria. `qty`
+ *  storna solo una parte della riga (il server la divide in due); assente
+ *  = riga intera. */
+export const voidItem = async (itemId: number, reason: string, qty?: number): Promise<OrderWithItems> =>
   apiRequest<OrderWithItems>(`${API_URL}/orders/items/${itemId}/void`, {
-    method: 'POST', headers: getHeaders(), body: JSON.stringify({ reason }),
+    method: 'POST', headers: getHeaders(), body: JSON.stringify({ reason, ...(qty != null ? { qty } : {}) }),
   });
 
 export const setOrderDiscount = async (

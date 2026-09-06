@@ -51,13 +51,15 @@ interface ComandaSheetProps {
   onSendAll: () => void;
   onRepeat: (line: RepeatLine, qty: number) => void;
   onRepeatAll: (lines: RepeatLine[]) => void;
+  /** Sezione «Bar» in testa alla lista uscite (categorie da bar attive). */
+  showBar?: boolean;
 }
 
 export const ComandaSheet: React.FC<ComandaSheetProps> = ({
   open, onClose, order, cart, dishes, categories, course, onCourse, busy,
   onBump, onDrop, onVoid, onRecall, onFire, onEditLine, onUnfire, onMoveLine, onMoveItem, onMoveCourse,
   onDragLine, onDragItem, onDragCourse,
-  openedBy, onSend, onSendAll, onRepeat, onRepeatAll,
+  openedBy, onSend, onSendAll, onRepeat, onRepeatAll, showBar,
 }) => {
   const [tab, setTab] = useState<SheetTab>('course');
 
@@ -133,6 +135,7 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
     >
       {tab === 'course' ? (
         <CourseList
+          showBar={showBar}
           order={order}
           cart={cart}
           course={course}
