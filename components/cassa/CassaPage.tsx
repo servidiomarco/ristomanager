@@ -610,10 +610,10 @@ export const CassaPage: React.FC<CassaPageProps> = ({
     }
   }, [order]);
 
-  const doVoid = useCallback(async (item: OrderItem, reason: string) => {
+  const doVoid = useCallback(async (item: OrderItem, reason: string, qty?: number) => {
     setBusyBillId(-1);
     try {
-      setOrder(await voidItem(item.id, reason));
+      setOrder(await voidItem(item.id, reason, qty));
       setVoidTarget(null);
     } catch (err: any) {
       setError(err?.data?.error ?? err?.message ?? 'Storno non riuscito');
@@ -852,12 +852,13 @@ export const CassaPage: React.FC<CassaPageProps> = ({
 
       {voidTarget && (
         <ReasonDialog
-          title={`Storna ${voidTarget.qty}× ${voidTarget.name_snapshot}`}
+          title={voidTarget.qty > 1 ? `Storna ${voidTarget.name_snapshot}` : `Storna 1× ${voidTarget.name_snapshot}`}
           hint="Resta in comanda come riga negativa, e la motivazione ferma la cucina."
           confirmLabel="Storna la riga"
           busy={busyBillId != null}
+          maxQty={voidTarget.qty}
           onCancel={() => setVoidTarget(null)}
-          onConfirm={reason => doVoid(voidTarget, reason)}
+          onConfirm={(reason, qty) => doVoid(voidTarget, reason, qty)}
         />
       )}
 
