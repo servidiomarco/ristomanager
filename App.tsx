@@ -48,6 +48,7 @@ import { ReservationNotesManager } from './components/ReservationNotesManager';
 import { ReservationAllergensManager } from './components/ReservationAllergensManager';
 import { AutoDepositManager } from './components/AutoDepositManager';
 import { PaymentLinkExpiryManager } from './components/PaymentLinkExpiryManager';
+import { ChargeSettingsManager } from './components/ChargeSettingsManager';
 import { BlacklistPolicyManager } from './components/BlacklistPolicyManager';
 import { PayAtTableSettingsManager } from './components/PayAtTableSettingsManager';
 import { FiscalSettingsManager } from './components/FiscalSettingsManager';
@@ -3204,6 +3205,15 @@ const App: React.FC = () => {
                     <PayAtTableSettingsManager showToast={addToast} />
                   </CardErrorBoundary>
                 )}
+                {/* Coperto a persona e servizio percentuale: le righe di
+                    sistema che finiscono su ogni comanda. A zero non compaiono. */}
+                <SettingsDisclosure
+                  icon={ConciergeBell}
+                  title="Coperto e servizio"
+                  description="Coperto fisso a persona e servizio percentuale sui piatti, come righe del conto."
+                >
+                  <ChargeSettingsManager showToast={addToast} />
+                </SettingsDisclosure>
                 {/* Card #28: i link inviati e non pagati scadono da soli dopo
                     N ore, col messaggio delle prenotazioni non confermate. */}
                 <SettingsDisclosure

@@ -310,7 +310,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 > **Una regola sola**: la **Cassa è il banco** (si incassa lì, durante il servizio), **Pagamenti è il libro** (si rilegge lì, anche a distanza di giorni). Il vecchio tab "Conti aperti" di Pagamenti è stato ritirato: incassare e chiudere i conti si fa solo dalla pagina Cassa, e le due pagine si rimandano a vicenda — il report di chiusura segnala i conti ancora da incassare con un collegamento alla Cassa, il cassetto chiuso rimanda alla chiusura del giorno in Pagamenti.
 
 **Conto del tavolo (dalla Cassa)**
-- **Scheda conto**: righe, sconti, coperto; Da pagare / Già pagato / Incassato dai clienti / Da rimborsare; mancia; incassi dello staff (contanti/POS) registrati anche a conto aperto; chiusura in cassa; annullo con storno morbido (tutto resta a registro).
+- **Scheda conto**: righe, sconti, coperto (importo di coperto e servizio regolabili in Impostazioni → Pagamenti); Da pagare / Già pagato / Incassato dai clienti / Da rimborsare; mancia; incassi dello staff (contanti/POS) registrati anche a conto aperto; chiusura in cassa; annullo con storno morbido (tutto resta a registro).
 - Gli **acconti/caparre già pagati si scalano da soli** dal conto del tavolo.
 
 **Conto al tavolo per l'ospite (pay-at-table)**
@@ -496,7 +496,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 - **Profilo** — pagina di partenza dopo il login; notifiche push del dispositivo.
 - **Ristorante** — orari settimanali per turno con passo slot e slot disattivabili; chiusure programmate (giornata o singolo turno, con motivo); sale chiuse e tavoli nascosti programmati; **promemoria** ricorrenti (destinatari per ruolo, frequenza); modulo **Sala & Cucina** (partite, mappatura categorie→partita, monitor o stampante, stampanti di rete, profili di setup salvabili, registratori telematici); **documenti legali e identità pubblica** (nome pubblico, tagline, telefono, indirizzo, link Maps, **logo caricabile** in due varianti, normale e per tema scuro — compare sulla pagina di prenotazione online e in testa all'app, scambiato col tema come nelle email —, ragione sociale, P.IVA, contatti privacy/DPO, fornitori e tempi di conservazione).
 - **Prenotazioni** — interruttore prenotazioni web; blocchi per data/turno; **limiti di occupazione per sala** (la soglia della conferma automatica); **canali di risposta per fonte** (ordine e fallback email/WhatsApp/SMS); note rapide e intolleranze a chip (riordinabili); **caparra automatica** (soglia coperti, € a persona); **blacklist** per fonte (blocca o avvisa).
-- **Pagamenti** — gateway Revolut e SumUp (anche uno per flusso), conto al tavolo on/off, scadenza automatica dei link.
+- **Pagamenti** — gateway Revolut e SumUp (anche uno per flusso), conto al tavolo on/off, **coperto e servizio** (coperto fisso a persona e servizio percentuale sui piatti, come righe del conto; a zero non compaiono), scadenza automatica dei link.
 - **Fiscalità** — dati esercente, provider scontrino, mappa e aliquote IVA.
 - **Comunicazioni** — SMTP/Resend (invio), IMAP (ricezione), libreria **media** per gli allegati, messaggi rapidi della chat staff.
 - **AI** — agente vocale (messaggio iniziale, soglia gruppi, sospensioni, doppio turno), risposte AI ai messaggi + base di conoscenza, prompt logica tavoli.
@@ -574,6 +574,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-06 | Impostazioni · Pagamenti | Coperto e servizio si regolano dalle impostazioni (card «Coperto e servizio» in Pagamenti): coperto fisso a persona e servizio percentuale sui piatti, applicati come righe del conto; a zero le righe non compaiono. Prima si potevano cambiare solo a mano sul database. |
 | 2026-09-06 | Pagamenti (pay-at-table) | Bottone «Pago tutto il conto» sulla pagina del QR: l'ospite salda l'intero residuo in un tocco, importo calcolato dal server al momento del claim (le quote prese dagli altri nel frattempo si scalano da sole). Nascosto quando coincide con «La mia parte». |
 | 2026-09-06 | Comande, Cucina e Passe | Uscita Dolci: spuntando «dolci» sulle categorie in modale Categorie (dolci, gelati), i loro piatti vanno da soli in un'uscita Dolci in coda alla comanda, che parte all'invio senza chiamata — il meccanismo del Bar, dal verso opposto. Etichetta «Dolci» su palmare, monitor e comanda stampata. |
 | 2026-09-06 | Comande, Cucina e Passe | L'invio non muore più con «Comanda non trovata»: se la comanda è stata disfatta o eliminata da un altro dispositivo mentre il cameriere componeva, il palmare ne riapre una sullo stesso tavolo e rimanda da solo — le righe non si ribattono. La comanda vuota uscendo dal tavolo si disfa solo dal dispositivo che l'ha creata (entrare a guardare non cancella più il lavoro di un collega), e se la comanda aperta viene eliminata altrove il palmare lo dice subito. |

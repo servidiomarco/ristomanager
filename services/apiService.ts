@@ -1627,6 +1627,29 @@ export const updatePaymentLinkExpirySettings = async (
   });
 };
 
+// Coperto e servizio: gli importi delle righe di sistema delle comande.
+// Le aliquote IVA delle due righe stanno nella mappatura IVA (Fiscalità).
+export interface ChargeSettings {
+  cover_charge_cents: number;
+  service_charge_percent: number;
+}
+
+export const getChargeSettings = async (): Promise<ChargeSettings> => {
+  return apiRequest<ChargeSettings>(`${API_URL}/settings/charges`, {
+    headers: getHeaders(false),
+  });
+};
+
+export const updateChargeSettings = async (
+  updates: Partial<ChargeSettings>
+): Promise<ChargeSettings> => {
+  return apiRequest<ChargeSettings>(`${API_URL}/settings/charges`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify(updates),
+  });
+};
+
 // ============================================
 // LEGAL SETTINGS (per-tenant identity used to generate legal documents)
 // ============================================
