@@ -681,6 +681,18 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     if (!line.dish) return;
     // Un altro giro di vino torna al Bar, non nell'uscita in composizione.
     const to = forcedCourse(line.dish) ?? course;
+    // Al peso: stessa stima della riga d'origine, una riga per pezzo (la
+    // chiave porta l'idem e non fonde) — senza i grammi il server rifiuta
+    // l'intero invio.
+    if (line.weight_grams != null) {
+      for (let k = 0; k < qty; k++) {
+        pushLine(
+          line.dish, to, 1, line.modifiers, line.modifier_labels, line.modifier_delta_cents,
+          undefined, line.removed_component_ids, line.weight_grams,
+        );
+      }
+      return;
+    }
     pushLine(
       line.dish, to, qty, line.modifiers, line.modifier_labels, line.modifier_delta_cents,
       undefined, line.removed_component_ids,

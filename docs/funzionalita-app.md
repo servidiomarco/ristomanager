@@ -578,6 +578,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-06 | Menu, Comande e Cassa | Il prezzo cambiato in scheda piatto (o dal sync Passepartout) ora aggiorna anche il listino usato dalla battuta: prima il listino restava al valore vecchio e il conto addebitava un prezzo diverso da quello mostrato — sui piatti al peso l'errore cresceva coi grammi. Le righe di listino già divergenti si riallineano da sole al deploy. Sistemata anche la ripetizione delle righe al peso («Ripeti giro» e «+» in Cassa): un altro pezzo allo stesso peso, col prezzo giusto, invece di un invio rifiutato. |
 | 2026-09-06 | Comande, Cucina e Passe | La testata della card del monitor cucina mostra i coperti del tavolo accanto al nome, e si tocca: apre la comanda per intero in un modal — uscite in ordine con varianti, note e stato, avviso allergie in testa. Consultazione: le spunte restano sulle card. |
 | 2026-09-06 | Comande, Cucina e Passe | Il dettaglio «dove va questo piatto» (tocco sul chip della barra del monitor cucina) mostra anche le cotture: «al sangue» e «ben cotta» sono pill separate, nella tinta delle varianti come sulla card. |
 | 2026-09-06 | Stampa termica | «Uscita intera» per partita (Impostazioni → Sala & Cucina): la comanda stampata della partita porta in coda, in piccolo, anche i piatti delle altre partite della stessa uscita — l'antipastista impiatta sapendo cosa esce insieme. Spento di default; serve l'agente di stampa aggiornato, quello vecchio stampa il ticket di sempre. |
