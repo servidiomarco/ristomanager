@@ -110,7 +110,7 @@ La sezione centrale del CRM: elenco, mappa tavoli e scheda prenotazione in un'un
 - Rilevazione conflitti sul tavolo (considera anche le comande aperte) e blocco dei tavoli in sale chiuse.
 - Ogni prenotazione con telefono **aggiorna automaticamente la rubrica clienti**.
 - Prenotazione senza tavolo → l'AI **suggerisce un'assegnazione** secondo le regole scritte dal ristoratore; lo staff conferma o ignora.
-- Annullamenti e nuove prenotazioni web generano una notifica push ai responsabili.
+- Annullamenti e nuove prenotazioni web generano una notifica push ai responsabili e ai camerieri.
 
 **Mappa tavoli integrata**
 - Stato tavoli per sala con misuratore di occupazione, assegnazione con un tocco, **unione e divisione tavoli**, tavoli nascosti per turno, auto-assegnazione.
@@ -282,6 +282,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 
 **Cucina (KDS)**
 - Coda comande **per partita** (es. Pizzeria, Primi…), con avanzamento riga Inviato → In preparazione → Pronto, note del piatto, colonna "In arrivo", filtro turno. Ogni monitor si sottoscrive alla propria partita.
+- **Le uscite Bar e Dolci non passano dai monitor di cucina**: né in coda, né nella card della comanda intera, né sulla barra dei piatti — nemmeno sul monitor senza partita. Le lavora il banco (stampa e passe); compaiono solo sul monitor della partita a cui le loro righe sono espressamente assegnate (es. una partita Bar o Pasticceria). Un piatto spostato a mano in un'uscita di cucina resta invece visibile come sempre.
 - L'instradamento verso le partite segue la **mappa categorie→partita** (Impostazioni → Sala & Cucina), ma il **singolo piatto può avere la sua partita** dalla scheda in Menu ("Partita di cucina"): le patatine restano nei Contorni sull'orderpad e escono agli Antipasti. L'assegnazione sul piatto vince sulla categoria, sopravvive agli import dalla cassa e vale solo per le battute successive — le comande già lanciate non si spostano.
 - **Pronto automatico per partita** (Impostazioni → Sala & Cucina, «pronto auto» sulla partita): per i centri che lavorano solo di carta — stampante sì, monitor no — le righe si segnano pronte da sole al lancio, e l'uscita non resta bloccata ad aspettare un «pronto» che nessuno può premere. La comanda esce comunque dalla termica; l'annullo chiamata riavvolge anche questi pronti automatici.
 - **Modifiche dopo il lancio in evidenza**: storno di una riga inviata, piatti aggiunti a un'uscita già lanciata, "riporta" e trasferimento di tavolo accendono sulla card la pill rossa **"modificata"** — il tocco mostra cosa è cambiato, chi e quando (con la motivazione dello storno); **Ok** spegne l'avviso su tutti gli schermi. Suona come una comanda nuova.
@@ -411,7 +412,7 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 
 - **Campanella** con contatore e pannello rapido + pagina completa con filtri per categoria (Prenotazioni, Messaggi, Chiamate, Email, Pagamenti, Sistema).
 - Ogni notifica è **persistente** (si ritrova anche se il browser era chiuso) e porta dritti all'entità: prenotazione, conversazione, thread.
-- **Notifiche push** sul telefono (PWA) per gli eventi importanti: nuova prenotazione web, richiesta da confermare, annullamento, pagamento ricevuto, sotto scorta, messaggio in chat.
+- **Notifiche push** sul telefono (PWA) per gli eventi importanti: nuova prenotazione web, richiesta da confermare, annullamento, pagamento ricevuto, sotto scorta, messaggio in chat. Le notifiche di prenotazione arrivano anche ai camerieri, oltre che ai responsabili.
 - **Badge sull'icona dell'app** con il totale delle cose da attenzionare, aggiornato anche ad app chiusa.
 
 ---
@@ -579,6 +580,8 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-06 | Comande, Cucina e Passe | La regola «l'uscita Bar non passa dai monitor di cucina» si estende ai Dolci e al monitor senza partita: le due uscite fuori numerazione non compaiono più su nessun monitor di cucina (coda, card a binario, barra dei piatti, Consegnate) — restano solo dove le loro righe sono lavoro assegnato alla partita (es. un monitor Bar). |
+| 2026-09-06 | Notifiche | Le notifiche push di prenotazione (nuova, annullata, modificata — dal CRM, dal sito e dai canali dell'agente) arrivano anche al ruolo cameriere, prima erano dei soli responsabili. |
 | 2026-09-06 | Stampa termica | Una termica spenta non blocca più le stampe delle altre: la coda dell'agente serve una quota di lavori per stampante invece di una finestra unica in ordine d'arrivo — prima i lavori incagliati della termica giù finivano per fare da tappo a comande, preconti e scontrini del registratore (successo il 6/09 in pieno servizio). |
 | 2026-09-06 | Pagamenti, conto al tavolo e cassa | Il conto interamente scontato scende davvero a 0,00 € e si chiude saldato (registrato come proforma): prima restava un centesimo tecnico da incassare che non esisteva. |
 | 2026-09-06 | Pagamenti, conto al tavolo e cassa | Sconto anche nelle operazioni di cassa: dal pannello di incasso (Cassa, Comande e Pagamenti) si applica uno sconto sul conto — percentuale o importo, motivazione obbligatoria — pure a comanda chiusa; la riga «Sconto» compare nel riepilogo, nella scheda conto e sul preconto stampato. |

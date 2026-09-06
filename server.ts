@@ -2422,7 +2422,7 @@ app.post('/reservations', authenticate, requirePermission('reservations:full'), 
         const reservationLabel = reservationPushLabel(reservation_time);
         pushSendToRoles(
             req.tenantId!,
-            ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
+            ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER'],
             {
                 category: 'reservation',
                 title: 'Nuova prenotazione',
@@ -2603,7 +2603,7 @@ app.put('/reservations/:id', authenticate, requirePermission('reservations:full'
             const reservationLabel = reservationPushLabel(asUtcInstant(updatedReservation.reservation_time));
             pushSendToRoles(
                 req.tenantId!,
-                ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
+                ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER'],
                 {
                     category: 'reservation',
                     title: 'Prenotazione annullata',
@@ -25622,7 +25622,7 @@ const handlePublicReservationCreate = async (tenantId: number, req: express.Requ
 
         pushSendToRoles(
             tenantId,
-            ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
+            ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER'],
             {
                 category: 'reservation',
                 title: confirmedNow ? 'Prenotazione web confermata' : 'Nuova richiesta prenotazione',
@@ -27564,7 +27564,10 @@ app.post('/orders/:id/send', authenticate, requirePermission('orders:take'), asy
                     order_id: orderId, course_no: c, table_id: view.order.table_id, items: firedItems,
                 });
                 // Ogni monitor riceve solo le righe della propria partita.
+                // Bar e Dolci non arrivano al monitor senza partita: niente
+                // kds:fired lì, o lo schermo suona per lavoro che non vede.
                 for (const st of new Set(firedItems.map((i: any) => i.station_id))) {
+                    if (st == null && isOffSequenceCourse(c)) continue;
                     socketService?.broadcastToStation(req.tenantId!, st as number | null, 'kds:fired', {
                         order_id: orderId, course_no: c, table_id: view.order.table_id,
                         items: firedItems.filter((i: any) => i.station_id === st),
@@ -27801,8 +27804,13 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
                AND o.service_date = $2 AND o.shift = $3
                AND ($1::int IS NULL OR oi.station_id = $1)
                AND ($1::int IS NOT NULL OR oi.station_id IS NULL)
+               -- Bar e Dolci non passano dai monitor di cucina: le lavora il
+               -- banco (stampa + passe). Restano solo dove sono lavoro
+               -- assegnato a una partita (es. un monitor Bar); il monitor
+               -- senza partita non le vede mai.
+               AND NOT ($1::int IS NULL AND oi.course_no IN ($5, $6))
              ORDER BY oi.station_start_at NULLS FIRST, oi.id`,
-            [stationId, service.service_date, service.shift, req.tenantId!]
+            [stationId, service.service_date, service.shift, req.tenantId!, BAR_COURSE_NO, DESSERT_COURSE_NO]
         );
 
         // Lo stato dell'uscita serve al monitor per sapere se sta facendo
@@ -27860,9 +27868,11 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
         const orderIds = [...new Set(rows.rows.map((r: any) => r.order_id))];
         let full: any[] = [];
         if (orderIds.length > 0) {
-            // L'uscita Bar non passa davanti alle partite di cucina: sul
-            // monitor filtrato restano solo le SUE righe (un piatto spostato
-            // a mano nell'uscita Bar va comunque cucinato). Le bibite
+            // Le uscite Bar e Dolci non entrano nel binario della comanda:
+            // agli antipasti non interessa se sul tavolo c'è acqua, vino o un
+            // tiramisù in coda. Restano solo dove sono lavoro proprio (righe
+            // assegnate a QUESTA partita); il monitor senza partita non le
+            // vede mai — le lavora il banco, le coordina il passe. Le bibite
             // spostate apposta in un'uscita di cucina invece si vedono:
             // legarle all'uscita è stata una scelta di sincronia.
             const f = await queryWithRetry(
@@ -27871,9 +27881,9 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
                  FROM order_items
                  WHERE tenant_id = $2 AND order_id = ANY($1::int[])
                    AND status NOT IN ('DRAFT','VOIDED')
-                   AND NOT ($3::int IS NOT NULL AND course_no = $4 AND station_id IS DISTINCT FROM $3)
+                   AND (course_no NOT IN ($3, $4) OR ($5::int IS NOT NULL AND station_id = $5))
                  ORDER BY course_no, id`,
-                [orderIds, req.tenantId!, stationId, BAR_COURSE_NO]
+                [orderIds, req.tenantId!, BAR_COURSE_NO, DESSERT_COURSE_NO, stationId]
             );
             full = f.rows;
         }
@@ -27898,8 +27908,9 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
                AND o.service_date = $2 AND o.shift = $3
                AND oi.status IN ('QUEUED','SENT','PREPARING')
                AND ($1::int IS NULL OR oi.station_id = $1)
-               AND ($1::int IS NOT NULL OR oi.station_id IS NULL)`,
-            [stationId, service.service_date, service.shift, req.tenantId!]
+               AND ($1::int IS NOT NULL OR oi.station_id IS NULL)
+               AND NOT ($1::int IS NULL AND oi.course_no IN ($5, $6))`,
+            [stationId, service.service_date, service.shift, req.tenantId!, BAR_COURSE_NO, DESSERT_COURSE_NO]
         );
 
         res.json({ station_id: stationId, ...service, items: rows.rows, courses, others, full, coming: coming.rows });
@@ -27937,6 +27948,8 @@ app.get('/kds/served', authenticate, requirePermission('orders:kds'), async (req
                   AND o.service_date = $2 AND o.shift = $3
                   AND ($1::int IS NULL OR oi.station_id = $1)
                   AND ($1::int IS NOT NULL OR oi.station_id IS NULL)
+                  -- Come la coda: Bar e Dolci mai sul monitor senza partita.
+                  AND NOT ($1::int IS NULL AND oi.course_no IN ($5, $6))
              )
              SELECT oi.order_id, oi.course_no, t.name AS table_name, r.customer_name,
                     MAX(oi.served_at) AS served_at,
@@ -27950,7 +27963,7 @@ app.get('/kds/served', authenticate, requirePermission('orders:kds'), async (req
              GROUP BY oi.order_id, oi.course_no, t.name, r.customer_name
              ORDER BY MAX(oi.served_at) DESC
              LIMIT 100`,
-            [stationId, service.service_date, service.shift, req.tenantId!]
+            [stationId, service.service_date, service.shift, req.tenantId!, BAR_COURSE_NO, DESSERT_COURSE_NO]
         );
         res.json({ station_id: stationId, ...service, courses: rows.rows });
     } catch (err: any) {
@@ -28379,6 +28392,7 @@ app.post('/orders/:id/courses/:n/fire', authenticate, requireAnyPermission('orde
                 table_id: view.order.table_id, items: fired,
             });
             for (const st of new Set(fired.map((i: any) => i.station_id))) {
+                if (st == null && isOffSequenceCourse(courseNo)) continue;
                 socketService?.broadcastToStation(req.tenantId!, st as number | null, 'kds:fired', {
                     order_id: orderId, course_no: courseNo, table_id: view.order.table_id,
                     items: fired.filter((i: any) => i.station_id === st),
@@ -28455,6 +28469,7 @@ app.post('/orders/:id/courses/:n/refire', authenticate, requirePermission('order
 
         try {
             for (const st of new Set(upd.rows.map((i: any) => i.station_id))) {
+                if (st == null && isOffSequenceCourse(courseNo)) continue;
                 socketService?.broadcastToStation(req.tenantId!, st as number | null, 'kds:fired', {
                     order_id: orderId, course_no: courseNo,
                     items: upd.rows.filter((i: any) => i.station_id === st),
@@ -28612,6 +28627,7 @@ app.post('/orders/:id/courses/:n/serve', authenticate, requireAnyPermission('ord
                     order_id: orderId, course_no: nextFired, table_id: ord.rows[0].table_id, items: nextItems,
                 });
                 for (const st of new Set(nextItems.map((i: any) => i.station_id))) {
+                    if (st == null && isOffSequenceCourse(nextFired)) continue;
                     socketService?.broadcastToStation(req.tenantId!, st as number | null, 'kds:fired', {
                         order_id: orderId, course_no: nextFired, table_id: ord.rows[0].table_id,
                         items: nextItems.filter((i: any) => i.station_id === st),
