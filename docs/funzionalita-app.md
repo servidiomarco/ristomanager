@@ -571,6 +571,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-06 | Comande, Cucina e Passe | La griglia tavoli segna le comande aperte con una chiamata sola a /orders/open invece di una sonda sui primi 60 tavoli: con più di 60 tavoli la comanda aperta a fondo lista spariva dalla griglia a ogni riavvio dell'app (e la bozza non inviata sembrava persa — era lì, bastava riaprire il tavolo). |
 | 2026-09-05 | Comande, Cucina e Passe | Le varianti firmate passano dalla scala ±5 a ripetizioni (n×prezzo) a una scala d'intensità a 4 gradini con le parole in comanda: «+ Nduja» (addebito), «Molta Nduja» (stesso addebito), «Senza Nduja» (sconto), «Poca Nduja» (gratis); Molta/Poca accordate al nome. Le righe già battute conservano etichette e prezzi di allora. |
 | 2026-09-05 | Comande, Cucina e Passe | Riga in bozza ridotta a matita + maniglia: quantità come prefisso («2×»), la matita (o il tocco sul nome) apre il foglio di riga con quantità, varianti, nota ed «elimina riga» in un posto solo; via lo stepper e il cestino dalla riga, il nome del piatto resta intero. |
 | 2026-09-05 | Menu & Banchetti | I gruppi di varianti si agganciano anche a un'intera categoria di piatti, dall'editor del gruppo: la spunta applica in blocco (con copertura parziale «3 di 7»), i piatti nuovi della categoria nascono col gruppo, la scheda piatto resta libera di sganciarsi. |
