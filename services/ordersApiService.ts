@@ -477,6 +477,14 @@ export const unserveCourse = async (orderId: number, courseNo: number): Promise<
 export const deleteEmptyOrder = async (orderId: number): Promise<unknown> =>
   apiRequest(`${API_URL}/orders/${orderId}`, { method: 'DELETE', headers: getHeaders() });
 
+/** Elimina la comanda INTERA, righe battute comprese — la comanda di prova
+ *  o aperta per sbaglio, finché non c'è un conto. Motivazione obbligatoria
+ *  (va nel log attività) e permesso di storno lato server. */
+export const deleteWholeOrder = async (orderId: number, motivo: string): Promise<unknown> =>
+  apiRequest(`${API_URL}/orders/${orderId}?forza=1`, {
+    method: 'DELETE', headers: getHeaders(), body: JSON.stringify({ motivo }),
+  });
+
 /** Un evento della vita della comanda, per la timeline (consultazione). */
 export type OrderTimelineEvent =
   | { kind: 'opened'; at: string; by: string | null }

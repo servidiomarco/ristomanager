@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ArrowLeft, ArrowRightLeft, Check, MoreVertical, Minus, Percent, Plus, Receipt, Rows3, Search, Trash2, Users,
+  ArrowLeft, ArrowRightLeft, Ban, Check, MoreVertical, Minus, Percent, Plus, Receipt, Rows3, Search, Trash2, Users,
 } from 'lucide-react';
 import { Sheet, StatusPill } from '../ds';
 import { euro, rowCountLabel } from './orderView';
@@ -38,6 +38,10 @@ interface OrderTopBarProps {
   onDiscount: () => void;
   onTransfer: () => void;
   onClearDrafts: () => void;
+  /** Elimina la comanda INTERA (righe battute comprese), finché non c'è un
+   *  conto. Assente = chi guarda non ha il permesso di storno: la voce non
+   *  compare. */
+  onDeleteOrder?: () => void;
 }
 
 const stepper =
@@ -47,7 +51,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
   tableName, guestName, totalCents, rows, covers, sentCourses, busy,
   billDisabled, clearDisabled, wide,
   onSearch, densityCompact, onToggleDensity,
-  onBack, onCovers, onBill, onDiscount, onTransfer, onClearDrafts,
+  onBack, onCovers, onBill, onDiscount, onTransfer, onClearDrafts, onDeleteOrder,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -88,6 +92,12 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
       disabled: false, critical: false, active: densityCompact === true,
     }] : []),
     { icon: Trash2, label: 'Svuota le righe non inviate', onClick: onClearDrafts, disabled: clearDisabled, critical: true },
+    // In fondo, dopo lo svuota-bozze: è il gesto più pesante del menu — via
+    // TUTTA la comanda, righe già in cucina comprese.
+    ...(onDeleteOrder ? [{
+      icon: Ban, label: 'Elimina la comanda', onClick: onDeleteOrder,
+      disabled: false, critical: true,
+    }] : []),
   ];
 
   const menuTrigger = (
