@@ -22817,6 +22817,84 @@ app.put('/settings/payment-link-expiry', authenticate, requirePermission('settin
 });
 
 // ============================================
+// COPERTO E SERVIZIO (righe di sistema delle comande)
+// ============================================
+
+// Gli importi che syncSystemLines applica a ogni comanda: coperto fisso a
+// persona e servizio percentuale sull'imponibile dei piatti. Fin qui vivevano
+// solo come chiavi app_settings scrivibili a mano sul DB; le aliquote IVA
+// delle due righe restano in /settings/fiscal (mappatura IVA).
+const readChargeSettings = async (tenantId: number) => {
+    const rs = await queryWithRetry(
+        `SELECT key, int_value FROM app_settings
+         WHERE tenant_id = $1 AND key IN ('cover_charge_cents','service_charge_percent')`,
+        [tenantId]
+    );
+    const map = Object.fromEntries(rs.rows.map((r: any) => [r.key, Number(r.int_value ?? 0)]));
+    return {
+        cover_charge_cents: Math.max(0, map.cover_charge_cents ?? 0),
+        service_charge_percent: Math.max(0, map.service_charge_percent ?? 0),
+    };
+};
+
+app.get('/settings/charges', authenticate, async (req, res) => {
+    try {
+        res.json(await readChargeSettings(req.tenantId!));
+    } catch (err) {
+        console.error('GET /settings/charges error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/settings/charges', authenticate, requirePermission('settings:full'), async (req, res) => {
+    try {
+        // Update parziale: si scrive solo la chiave presente nel body. Le
+        // comande aperte si adeguano alla prossima mutazione — syncSystemLines
+        // rilegge questi valori a ogni battitura, non serve toccarle qui.
+        const writes: Array<[key: string, value: number]> = [];
+        if (req.body?.cover_charge_cents !== undefined) {
+            const n = Number(req.body.cover_charge_cents);
+            // Cap a 100 €: un coperto oltre è quasi certamente un errore di
+            // unità (euro battuti nel campo dei centesimi).
+            if (!Number.isInteger(n) || n < 0 || n > 10000) {
+                return res.status(400).json({ error: 'cover_charge_cents deve essere un intero fra 0 e 10000 (centesimi)' });
+            }
+            writes.push(['cover_charge_cents', n]);
+        }
+        if (req.body?.service_charge_percent !== undefined) {
+            const n = Number(req.body.service_charge_percent);
+            if (!Number.isInteger(n) || n < 0 || n > 100) {
+                return res.status(400).json({ error: 'service_charge_percent deve essere un intero fra 0 e 100' });
+            }
+            writes.push(['service_charge_percent', n]);
+        }
+        for (const [key, value] of writes) {
+            await queryWithRetry(
+                `INSERT INTO app_settings (tenant_id, key, int_value, updated_at)
+                 VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                 ON CONFLICT (tenant_id, key) DO UPDATE
+                   SET int_value = EXCLUDED.int_value, updated_at = CURRENT_TIMESTAMP`,
+                [req.tenantId!, key, value]
+            );
+        }
+        const next = await readChargeSettings(req.tenantId!);
+        if (writes.length > 0 && req.user) {
+            LogService.logActivity(
+                req.tenantId!,
+                req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.SETTINGS,
+                0,
+                `Coperto e servizio: coperto ${(next.cover_charge_cents / 100).toFixed(2)} €, servizio ${next.service_charge_percent}%`
+            );
+        }
+        res.json(next);
+    } catch (err) {
+        console.error('PUT /settings/charges error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ============================================
 // POLICY BLACKLIST PER FONTE (blacklistPolicy) — card #27
 // ============================================
 
