@@ -804,4 +804,52 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'AUTO_ALL' });
         await db.end();
     });
+
+    it('il monitor di partita non vede l\'uscita Bar delle altre partite', async () => {
+        const BAR = 99;
+        const db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
+        await db.connect();
+        const stC = await db.query(
+            `INSERT INTO stations (tenant_id, name, sort_order) VALUES (1, 'Cucina KDS Test', 91) RETURNING id`);
+        const stB = await db.query(
+            `INSERT INTO stations (tenant_id, name, sort_order) VALUES (1, 'Bar KDS Test', 92) RETURNING id`);
+        const cucinaId = Number(stC.rows[0].id);
+        const barId = Number(stB.rows[0].id);
+        const food = await api().post('/dishes').set(bearer(token)).send({
+            name: 'Crostino KDS Test', description: null, price: 7, category: 'SECONDI',
+            allergens: null, station_id: cucinaId,
+        });
+        const drink = await api().post('/dishes').set(bearer(token)).send({
+            name: 'Chinotto KDS Test', description: null, price: 3, category: 'Bar Collaudo',
+            allergens: null, station_id: barId,
+        });
+
+        const orderId = await nuovaComanda();
+        await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [
+                { dish_id: food.body.id, qty: 1, course_no: 1 },
+                { dish_id: drink.body.id, qty: 1, course_no: BAR },
+            ],
+        });
+        // AUTO_ALL: l'invio lancia tutto, uscita Bar compresa.
+        await api().post(`/orders/${orderId}/send`).set(bearer(token)).send({});
+
+        // Il monitor di cucina: la sua riga sì, l'uscita Bar mai — né in coda
+        // né nella card a binario della comanda intera.
+        const cucina = await api().get(`/kds/queue?station_id=${cucinaId}`).set(bearer(token));
+        expect(cucina.status).toBe(200);
+        expect(cucina.body.items.some((i: any) => i.course_no === BAR)).toBe(false);
+        const fullCucina = cucina.body.full.filter((r: any) => r.order_id === orderId);
+        expect(fullCucina.some((r: any) => r.course_no === BAR)).toBe(false);
+        expect(fullCucina.some((r: any) => r.course_no === 1)).toBe(true);
+
+        // Il monitor del bar vede la sua uscita, e il resto della comanda
+        // come contesto.
+        const bar = await api().get(`/kds/queue?station_id=${barId}`).set(bearer(token));
+        expect(bar.status).toBe(200);
+        expect(bar.body.items.some((i: any) => i.course_no === BAR)).toBe(true);
+        const fullBar = bar.body.full.filter((r: any) => r.order_id === orderId);
+        expect(fullBar.some((r: any) => r.course_no === BAR)).toBe(true);
+        await db.end();
+    });
 });

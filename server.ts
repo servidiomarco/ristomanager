@@ -26230,6 +26230,27 @@ app.delete('/orders/:id', authenticate, requirePermission('orders:take'), async 
         const id = parseInt(req.params.id, 10);
         if (!Number.isFinite(id)) { client.release(); return res.status(400).json({ error: 'id non valido' }); }
 
+        // ?forza=1: elimina la comanda INTERA, righe battute comprese — il
+        // rimedio per la comanda di prova o aperta per sbaglio, finché non
+        // c'è un conto. Motivazione obbligatoria (finisce nel log attività:
+        // una comanda che sparisce senza un perché a fine mese è un ammanco)
+        // e permesso di storno, non di battuta: è distruttiva quanto uno
+        // storno di tutte le righe insieme.
+        const forza = req.query?.forza === '1';
+        // Nel body, non nell'URL: la motivazione può nominare l'ospite e le
+        // query string finiscono nei log di accesso.
+        const motivo = String(req.body?.motivo ?? '').trim();
+        if (forza) {
+            if (motivo.length < 3) {
+                client.release();
+                return res.status(400).json({ error: 'Serve una motivazione (almeno 3 caratteri)' });
+            }
+            if (!(await RolePermissionService.hasPermission(req.user!.tenantId, req.user!.role, 'orders:void'))) {
+                client.release();
+                return res.status(403).json({ error: 'Permesso insufficiente per eliminare una comanda battuta' });
+            }
+        }
+
         await client.query('BEGIN');
         const o = await client.query(
             `SELECT id, status, table_id, table_bill_id FROM orders WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
@@ -26239,16 +26260,23 @@ app.delete('/orders/:id', authenticate, requirePermission('orders:take'), async 
         if (!order) { await client.query('ROLLBACK'); client.release(); return res.status(404).json({ error: 'Comanda non trovata' }); }
         if (order.status !== 'OPEN' || order.table_bill_id != null) {
             await client.query('ROLLBACK'); client.release();
-            return res.status(409).json({ error: 'La comanda non è più vuota: non si disfa' });
+            // Col conto aperto la comanda non si elimina più da qui: i
+            // pagamenti (anche parziali) vivono sul conto, e cancellare
+            // l'ordine sotto di loro lascerebbe un incasso orfano.
+            return res.status(409).json({ error: forza
+                ? 'La comanda ha già un conto: si chiude o si annulla dalla Cassa'
+                : 'La comanda non è più vuota: non si disfa' });
         }
-        const touched = await client.query(
-            `SELECT 1 FROM order_items
-             WHERE order_id = $1 AND (line_kind = 'DISH' OR status <> 'DRAFT') LIMIT 1`,
-            [id]
-        );
-        if (touched.rows.length > 0) {
-            await client.query('ROLLBACK'); client.release();
-            return res.status(409).json({ error: 'La comanda ha righe battute: non si disfa' });
+        if (!forza) {
+            const touched = await client.query(
+                `SELECT 1 FROM order_items
+                 WHERE order_id = $1 AND (line_kind = 'DISH' OR status <> 'DRAFT') LIMIT 1`,
+                [id]
+            );
+            if (touched.rows.length > 0) {
+                await client.query('ROLLBACK'); client.release();
+                return res.status(409).json({ error: 'La comanda ha righe battute: non si disfa' });
+            }
         }
         await client.query(`DELETE FROM order_items WHERE order_id = $1`, [id]);
         await client.query(`DELETE FROM orders WHERE id = $1 AND tenant_id = $2`, [id, req.tenantId!]);
@@ -26257,7 +26285,17 @@ app.delete('/orders/:id', authenticate, requirePermission('orders:take'), async 
 
         try {
             socketService?.broadcastToAll(req.tenantId!, 'order:deleted', { order_id: id, table_id: order.table_id });
+            // Le card di un'uscita già chiamata devono sparire anche dai
+            // monitor: l'evento degli storni fa già rileggere KDS e passe.
+            if (forza) socketService?.broadcastToAll(req.tenantId!, 'orderItem:voided', { order_id: id });
         } catch (_) {}
+        if (forza && req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.DELETE, ResourceType.ORDER, id, `comanda #${id}`,
+                { table_id: order.table_id, motivo }
+            ).catch(() => {});
+        }
         res.json({ ok: true, order_id: id, table_id: order.table_id });
     } catch (err: any) {
         await client.query('ROLLBACK').catch(() => {});
@@ -27472,14 +27510,20 @@ app.get('/kds/queue', authenticate, requirePermission('orders:kds'), async (req,
         const orderIds = [...new Set(rows.rows.map((r: any) => r.order_id))];
         let full: any[] = [];
         if (orderIds.length > 0) {
+            // L'uscita Bar non passa davanti alle partite di cucina: sul
+            // monitor filtrato restano solo le SUE righe (un piatto spostato
+            // a mano nell'uscita Bar va comunque cucinato). Le bibite
+            // spostate apposta in un'uscita di cucina invece si vedono:
+            // legarle all'uscita è stata una scelta di sincronia.
             const f = await queryWithRetry(
                 `SELECT id, order_id, course_no, station_id, name_snapshot, qty, weight_grams,
                         modifiers, note, status, fired_at, station_start_at, ready_at, served_at
                  FROM order_items
                  WHERE tenant_id = $2 AND order_id = ANY($1::int[])
                    AND status NOT IN ('DRAFT','VOIDED')
+                   AND NOT ($3::int IS NOT NULL AND course_no = $4 AND station_id IS DISTINCT FROM $3)
                  ORDER BY course_no, id`,
-                [orderIds, req.tenantId!]
+                [orderIds, req.tenantId!, stationId, BAR_COURSE_NO]
             );
             full = f.rows;
         }
