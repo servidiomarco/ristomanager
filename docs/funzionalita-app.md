@@ -364,7 +364,7 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 ## Stampa termica e print agent
 
 - **Stampanti termiche di rete** censite dalle Impostazioni (nome, IP, porta, **cicalino alla stampa** attivabile per stampante — la termica di cucina suona quando arriva la comanda, il banco resta muto); un **agente di stampa** sulla rete del ristorante ritira i lavori dal cloud — aggiungere una stampante diventa effettivo in pochi secondi, e lo stato online/offline dell'agente è visibile in Impostazioni.
-- Si stampano: **comande per partita** (ognuna sulla propria stampante), **preconti** (con acconto già versato, residuo vero e riepilogo IVA), **QR del conto al tavolo**; instradamento per funzione configurabile. La carta segue i monitor anche dopo il lancio: righe **aggiunte** a un'uscita già partita escono col banner «AGGIUNTA», **storno** di una riga già in cucina (con quantità e motivo) e **annullo chiamata** stampano un ticket dedicato sulla stessa termica.
+- Si stampano: **comande per partita** (ognuna sulla propria stampante), **preconti** (con acconto già versato, residuo vero e riepilogo IVA), **QR del conto al tavolo**; instradamento per funzione configurabile. La carta segue i monitor anche dopo il lancio: righe **aggiunte** a un'uscita già partita escono col banner «AGGIUNTA», **storno** di una riga già in cucina (con quantità e motivo) e **annullo chiamata** stampano un ticket dedicato sulla stessa termica. Con **«Uscita intera»** acceso sulla partita (Impostazioni → Sala & Cucina), la sua comanda porta in coda, in corpo piccolo sotto un tratteggio, anche i piatti delle altre partite della stessa uscita — per chi impiatta guardando cosa esce insieme, tipicamente gli antipasti.
 - Tentativi automatici in caso di errore; una stampante inceppata non blocca le altre stampe.
 - Dal browser si stampano inoltre: lista prenotazioni, inventario, lista della spesa, report HACCP, scheda banchetto.
 
@@ -577,6 +577,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-06 | Stampa termica | «Uscita intera» per partita (Impostazioni → Sala & Cucina): la comanda stampata della partita porta in coda, in piccolo, anche i piatti delle altre partite della stessa uscita — l'antipastista impiatta sapendo cosa esce insieme. Spento di default; serve l'agente di stampa aggiornato, quello vecchio stampa il ticket di sempre. |
 | 2026-09-06 | Comande, Cucina e Passe | La barra dei piatti raggruppati del monitor cucina porta il peso nei chip: un chip per pezzatura («2× Bistecca · 500 g»), col dettaglio «dove va» filtrato sulla stessa pezzatura. |
 | 2026-09-06 | Comande, Cucina e Passe | «Pronto auto» sulla partita (Impostazioni → Sala & Cucina): per i centri con sola stampante e senza monitor le righe si segnano pronte da sole al lancio — l'uscita non resta più bloccata ad aspettare un «pronto» che nessuno può premere. La comanda esce comunque dalla termica; l'annullo chiamata riavvolge anche i pronti automatici. |
 | 2026-09-06 | Comande, Cucina e Passe | Nelle uscite compresse in una riga sul monitor cucina (uscite della card, in arrivo, Consegnate) le righe al peso si sommano solo a parità di peso, col peso nel nome («2× Tagliata · 1 kg»): pesi diversi restano voci distinte invece di collassare in un conteggio muto. |
