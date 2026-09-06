@@ -180,4 +180,48 @@ describe('orders & bills', () => {
         expect(chiuso.body.cash_settled_cents).toBe(5000);
         expect(chiuso.body.share_token).toBeNull();
     });
+
+    // «Paga tutto il conto» dal QR: kind full_bill, importo deciso dal server
+    // sotto lock — il client non manda cifre, quindi non può eccedere per una
+    // vista stale del residuo.
+    it('il claim full_bill prende esattamente il residuo e satura il conto', async () => {
+        const room = await api().post('/rooms').set(bearer(token)).send({
+            name: 'Sala Test Full Bill', width: 800, height: 600,
+        });
+        expect(room.status).toBe(201);
+        const table = await api().post('/tables').set(bearer(token)).send({
+            name: 'TC4', shape: 'SQUARE', seats: 4, x: 700, y: 100,
+            room_id: room.body.id, status: 'FREE',
+        });
+        expect(table.status).toBe(201);
+
+        const bill = await api().post(`/tables/${table.body.id}/bill`).set(bearer(token)).send({
+            total_cents: 6000,
+            covers: 3,
+        });
+        expect(bill.status).toBe(201);
+        const shareToken = bill.body.bill.share_token as string;
+
+        // Un ospite ha già preso una quota: il full_bill deve coprire il resto,
+        // non il totale.
+        const quota = await api().post(`/pay/${shareToken}/claim`).send({
+            kind: 'fixed_amount', amount_cents: 1000, claimant_label: 'Anna',
+        });
+        expect(quota.status).toBe(201);
+        expect(quota.body.amount_cents).toBe(1000);
+
+        const tutto = await api().post(`/pay/${shareToken}/claim`).send({
+            kind: 'full_bill', claimant_label: 'Marco',
+        });
+        expect(tutto.status).toBe(201);
+        expect(tutto.body.amount_cents).toBe(5000);
+
+        const vista = await api().get(`/pay/${shareToken}`);
+        expect(vista.status).toBe(200);
+        expect(vista.body.residual_cents).toBe(0);
+
+        const saturo = await api().post(`/pay/${shareToken}/claim`).send({ kind: 'full_bill' });
+        expect(saturo.status).toBe(409);
+        expect(saturo.body.error).toBe('Bill already fully claimed');
+    });
 });

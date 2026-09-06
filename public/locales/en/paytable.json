@@ -33,6 +33,7 @@
   },
   "menu": {
     "myShare": "My share · {{amount}}",
+    "fullBill": "I'll pay the whole bill · {{amount}}",
     "perItem": "I'll pay what I had",
     "customAmount": "A different amount"
   },

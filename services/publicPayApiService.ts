@@ -4,7 +4,7 @@
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
 
-export type PublicSplitKind = 'equal_share' | 'fixed_amount' | 'per_item';
+export type PublicSplitKind = 'equal_share' | 'fixed_amount' | 'per_item' | 'full_bill';
 export type PublicSplitStatus = 'CLAIMED' | 'PAID' | 'ABANDONED' | 'RELEASED' | 'REFUNDED';
 
 export interface PublicSplitView {
