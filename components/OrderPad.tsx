@@ -11,7 +11,7 @@ import { getRomeDatePart } from '../utils/reservationTime';
 import { getTableMerges } from '../services/apiService';
 import {
   ordersApiService, getMenuCatalogue, newIdempotencyKey, closeOrder, updateOrder, fireCourse, deleteEmptyOrder,
-  voidItem, setOrderDiscount, transferOrder,
+  voidItem, setOrderDiscount, transferOrder, getOpenOrderTables,
   type MenuCatalogue, type NewOrderItem, type CloseOrderResult,
 } from '../services/ordersApiService';
 import { BillSheet, InvoiceDialog } from './pagamenti/BillSheet';
@@ -367,11 +367,14 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     if (tableId != null) return; // griglia non a schermo: niente da scandire
     let cancelled = false;
     (async () => {
-      const found = new Set<number>();
-      await Promise.all(tables.slice(0, 60).map(async t => {
-        try { if (await ordersApiService.getOrderByTable(t.id, serviceQuery)) found.add(t.id); } catch { /* ignora */ }
-      }));
-      if (!cancelled) setOpenTables(found);
+      // Una chiamata sola a /orders/open, non una sonda per tavolo: la sonda
+      // era tagliata ai primi 60 tavoli e in produzione ce ne sono 124 — la
+      // comanda aperta a fondo lista spariva dalla griglia a ogni riavvio
+      // dell'app (Tav. 3, collaudo del 5/9).
+      try {
+        const res = await getOpenOrderTables(serviceQuery);
+        if (!cancelled) setOpenTables(new Set(res.table_ids));
+      } catch { /* ignora: la griglia resta senza l'evidenza comande */ }
     })();
     (async () => {
       try {
