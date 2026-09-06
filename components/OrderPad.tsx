@@ -1523,12 +1523,16 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     cart.reduce((s, l) => s + l.qty, 0)
     + order.items.reduce((s, i) => s + (i.status === 'DRAFT' && !isSystemLine(i) ? i.qty : 0), 0);
 
+  // Il badge conta le bozze nell'uscita dove una battuta finirebbe: per le
+  // categorie bar/dolci è l'uscita forzata, non quella selezionata — sennò
+  // l'acqua battuta dalla 1ª finisce nel Bar e il numerino resta a zero.
   const qtyInCourse = new Map<number, number>();
-  for (const l of courseLines) {
-    qtyInCourse.set(l.dish.id, (qtyInCourse.get(l.dish.id) ?? 0) + l.qty);
-  }
   const markedCategories = new Set<string>();
-  for (const l of courseLines) if (l.dish.category) markedCategories.add(l.dish.category);
+  for (const l of cart) {
+    if (l.course_no !== (forcedCourse(l.dish) ?? course)) continue;
+    qtyInCourse.set(l.dish.id, (qtyInCourse.get(l.dish.id) ?? 0) + l.qty);
+    if (l.dish.category) markedCategories.add(l.dish.category);
+  }
 
   const listProps = {
     order, cart, course, onCourse: setCourse, busy, showBar, showDessert,
