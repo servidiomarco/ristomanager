@@ -93,6 +93,44 @@ describe('revisioni comanda', () => {
         expect(await revisioniDi(orderId2)).toHaveLength(0);
     });
 
+    it('lo storno parziale divide la riga: quella viva scala, lo scarto resta a bilancio', async () => {
+        const orderId = await nuovaComanda();
+        const add = await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({
+            items: [{ dish_id: piatto1, qty: 3, course_no: 1 }],
+        });
+        expect(add.status).toBe(201);
+        await api().post(`/orders/${orderId}/send`).set(bearer(token)).send({});
+
+        const sentItem = righe((await api().get(`/orders/${orderId}`).set(bearer(token))).body)
+            .find((i: any) => i.status === 'SENT');
+        const voided = await api().post(`/orders/items/${sentItem.id}/void`).set(bearer(token))
+            .send({ reason: 'piatto non riuscito', qty: 1 });
+        expect(voided.status).toBe(200);
+
+        // La riga originale resta viva (stesso id, stesso stato) con 2 pezzi;
+        // lo storno è una riga VOIDED nuova da 1 pezzo.
+        const rows = righe(voided.body);
+        const alive = rows.find((i: any) => i.id === sentItem.id);
+        expect(alive.status).toBe('SENT');
+        expect(alive.qty).toBe(2);
+        const scarto = rows.find((i: any) => i.status === 'VOIDED');
+        expect(scarto.qty).toBe(1);
+        expect(scarto.void_reason).toBe('piatto non riuscito');
+
+        // La cucina viene avvisata del pezzo stornato, non della riga intera.
+        const revs = await revisioniDi(orderId);
+        expect(revs).toHaveLength(1);
+        expect(revs[0].summary).toContain('1× Branzino Revisioni');
+
+        // Una quantità pari (o oltre) alla riga è lo storno intero di sempre.
+        const all = await api().post(`/orders/items/${sentItem.id}/void`).set(bearer(token))
+            .send({ reason: 'cliente ha cambiato idea', qty: 99 });
+        expect(all.status).toBe(200);
+        const aliveAfter = righe(all.body).find((i: any) => i.id === sentItem.id);
+        expect(aliveAfter.status).toBe('VOIDED');
+        expect(aliveAfter.qty).toBe(2);
+    });
+
     it("l'aggiunta su un'uscita già lanciata genera una revisione 'added'; la prima non ne genera", async () => {
         const orderId = await nuovaComanda();
         await api().post(`/orders/${orderId}/items`).set(bearer(token)).send({

@@ -102,10 +102,10 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
     }
   }, [billId]);
 
-  const stornaRiga = useCallback(async (item: OrderItem, reason: string) => {
+  const stornaRiga = useCallback(async (item: OrderItem, reason: string, qty?: number) => {
     setBusy(true); setError(null);
     try {
-      setEditOrder(await voidItem(item.id, reason));
+      setEditOrder(await voidItem(item.id, reason, qty));
       setVoidTarget(null);
       await reloadBill();
     } catch (err: any) {
@@ -274,12 +274,13 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
 
       {voidTarget && (
         <ReasonDialog
-          title={`Storna ${voidTarget.qty}× ${voidTarget.name_snapshot}`}
+          title={voidTarget.qty > 1 ? `Storna ${voidTarget.name_snapshot}` : `Storna 1× ${voidTarget.name_snapshot}`}
           hint="Il cliente non l'ha ricevuta: la motivazione resta sul conto e in cucina."
           confirmLabel="Storna la riga"
           busy={busy}
+          maxQty={voidTarget.qty}
           onCancel={() => setVoidTarget(null)}
-          onConfirm={reason => stornaRiga(voidTarget, reason)}
+          onConfirm={(reason, qty) => stornaRiga(voidTarget, reason, qty)}
         />
       )}
 
