@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { Client } from 'pg';
 import { api, bearer, ownerToken } from './helpers';
 
 // Documento commerciale (fase 3 fatturazione) col driver mock: settings,
@@ -675,5 +676,38 @@ describe('scontrino via registratore locale (rt-local)', () => {
             .send({ ok: true, result: { doc_number: '0123-0046' } });
         const done = await waitStatus(billId, 'CONFIRMED');
         expect(done.fiscal_doc_number).toBe('0123-0046');
+    });
+
+    it('una termica giù non affama le altre: il poll dà una quota per stampante', async () => {
+        // Il tappo del 6/09: la termica antipasti spenta accumula job
+        // PENDING finché i più vecchi non riempiono l'intera finestra del
+        // poll — e bar, preconti e scontrini RT smettono di uscire. Ora la
+        // finestra è per stampante: dodici job incagliati su una termica
+        // morta non devono nascondere quello nuovo della termica viva.
+        const db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
+        await db.connect();
+        const ids: number[] = [];
+        try {
+            for (let i = 0; i < 12; i++) {
+                const r = await db.query(
+                    `INSERT INTO print_jobs (tenant_id, kind, payload, printer)
+                     VALUES (1, 'TEST', '{}'::jsonb, 'termica-giu') RETURNING id`);
+                ids.push(r.rows[0].id);
+            }
+            const r = await db.query(
+                `INSERT INTO print_jobs (tenant_id, kind, payload, printer)
+                 VALUES (1, 'TEST', '{}'::jsonb, 'termica-viva') RETURNING id`);
+            ids.push(r.rows[0].id);
+            const vivaId = r.rows[0].id;
+
+            const queue = await api().get('/print-agent/jobs').set('x-print-agent-token', 'test-print-agent-token');
+            expect(queue.status).toBe(200);
+            const viva = queue.body.jobs.find((j: any) => j.id === vivaId);
+            expect(viva, 'il job della termica viva deve stare nel poll').toBeTruthy();
+            expect(queue.body.jobs.filter((j: any) => j.printer === 'termica-giu').length).toBeLessThanOrEqual(10);
+        } finally {
+            await db.query(`DELETE FROM print_jobs WHERE id = ANY($1::int[])`, [ids]);
+            await db.end();
+        }
     });
 });

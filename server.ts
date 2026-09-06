@@ -31225,9 +31225,22 @@ app.get('/print-agent/jobs', printAgentAuth, async (req: any, res) => {
     try {
         // Coda scopata sul tenant del token: un agente vede e ritira solo i
         // preconti del proprio ristorante.
+        //
+        // Quota PER STAMPANTE, non LIMIT globale: l'agente lavora ogni
+        // termica per conto suo proprio perché una spenta non fermi le
+        // altre, ma col vecchio `ORDER BY id LIMIT 10` i job incagliati
+        // della termica giù finivano per riempire l'intera finestra e
+        // affamare tutto — successo il 6/09 in pieno servizio: antipasti
+        // spenta dalle 18:28, dalle 20:38 non uscivano più nemmeno bar,
+        // preconti e scontrini RT. Dieci a testa: la coda di una stampante
+        // morta resta in attesa senza mai fare da tappo alle vive.
         const rows = await queryWithRetry(
-            `SELECT id, kind, payload, printer, attempts FROM print_jobs
-             WHERE status = 'PENDING' AND tenant_id = $1 ORDER BY id LIMIT 10`,
+            `SELECT id, kind, payload, printer, attempts FROM (
+                 SELECT id, kind, payload, printer, attempts,
+                        row_number() OVER (PARTITION BY printer ORDER BY id) AS rn
+                 FROM print_jobs
+                 WHERE status = 'PENDING' AND tenant_id = $1
+             ) code WHERE rn <= 10 ORDER BY id`,
             [req.printAgentTenantId]
         );
         res.json({ jobs: rows.rows });

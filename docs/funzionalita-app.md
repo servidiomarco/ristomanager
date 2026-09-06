@@ -579,6 +579,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-06 | Stampa termica | Una termica spenta non blocca più le stampe delle altre: la coda dell'agente serve una quota di lavori per stampante invece di una finestra unica in ordine d'arrivo — prima i lavori incagliati della termica giù finivano per fare da tappo a comande, preconti e scontrini del registratore (successo il 6/09 in pieno servizio). |
 | 2026-09-06 | Pagamenti, conto al tavolo e cassa | Il conto interamente scontato scende davvero a 0,00 € e si chiude saldato (registrato come proforma): prima restava un centesimo tecnico da incassare che non esisteva. |
 | 2026-09-06 | Pagamenti, conto al tavolo e cassa | Sconto anche nelle operazioni di cassa: dal pannello di incasso (Cassa, Comande e Pagamenti) si applica uno sconto sul conto — percentuale o importo, motivazione obbligatoria — pure a comanda chiusa; la riga «Sconto» compare nel riepilogo, nella scheda conto e sul preconto stampato. |
 | 2026-09-06 | Reception & Arrivi, Prenotazioni | Modificare una prenotazione nata senza contatti (il walk-in tipico) non pretende più telefono o email: prima bastava correggere i coperti perché il telefono tornasse obbligatorio e il salvataggio si bloccasse. |
