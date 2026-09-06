@@ -911,6 +911,24 @@ export const FiscalCard: React.FC<{
         )}
         {error && <p className="text-[13px] text-[var(--ds-critical-text)]">{error}</p>}
         <div className="flex flex-wrap items-center gap-2">
+          {/* La proforma si ristampa quando serve, anche a giorni di
+              distanza: stesso foglio del preconto, titolo «PROFORMA»,
+              senza QR di pagamento. */}
+          {st === 'CONFIRMED' && proforma && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => run(async () => {
+                await printBill(bill.id, 'PROFORMA');
+                setPrintedFlash(true);
+                setTimeout(() => setPrintedFlash(false), 4000);
+              })}
+              className={quiet}
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+              {printedFlash ? 'Proforma in stampa' : 'Stampa proforma'}
+            </button>
+          )}
           {isPP && st !== 'CONFIRMED' && st !== 'PENDING' && bill.status === 'CLOSED' && (
             <button
               type="button"

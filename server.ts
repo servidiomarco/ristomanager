@@ -30915,6 +30915,11 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
         // 'QR' stampa il foglietto col solo codice da appoggiare al tavolo;
         // 'PRECONTO' (default) il dettaglio completo. Il solo-QR senza un QR
         // non ha senso: conto chiuso o origin mancante → 409, non un foglio vuoto.
+        // 'PROFORMA' è la ristampa del conto chiuso con proforma: stesso job
+        // PRECONTO (gli agenti già installati lo stampano senza aggiornarsi),
+        // ma col titolo giusto e SENZA il QR di pagamento — sul conto saldato
+        // «inquadra per pagare» manderebbe l'ospite su un conto già chiuso.
+        const proformaPrint = req.body?.kind === 'PROFORMA';
         const kind = req.body?.kind === 'QR' ? 'QR' : 'PRECONTO';
         if (kind === 'QR' && !shareUrl) {
             return res.status(409).json({ error: 'qr_unavailable', message: 'Il conto non ha più un QR valido' });
@@ -30936,7 +30941,10 @@ app.post('/print-jobs', authenticate, requirePermission('orders:take'), async (r
                 // snapshot GREZZO (items qui sopra è già ridotto e non ha i
                 // prezzi unitari). L'agente vecchio ignora il campo.
                 vat_breakdown: vatBreakdownFromItems(Array.isArray(bill.items) ? bill.items : null, bill.total_cents),
-                share_url: shareUrl,
+                // title: l'agente aggiornato la mette in testa al foglio;
+                // quello vecchio ignora il campo e stampa «PRECONTO».
+                ...(proformaPrint ? { title: 'PROFORMA' } : {}),
+                share_url: proformaPrint ? null : shareUrl,
             }), req.user?.userId ?? null, printer, kind, req.tenantId!]
         );
         res.status(201).json({ id: ins.rows[0].id, status: 'PENDING' });

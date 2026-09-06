@@ -16,12 +16,16 @@ interface StampaCopiaButtonProps {
   /** 'row' sta su una superficie piena; 'outline' su un fondo già a tono di
    *  riga, dove il grigio incassato sparirebbe. */
   variant?: 'row' | 'outline';
+  /** Il documento in stampa, quando non è la copia dello scontrino
+   *  (es. «Stampa proforma» / «Proforma in stampa»). */
+  label?: string;
+  sentLabel?: string;
   className?: string;
 }
 
 const SENT_MS = 4000;
 
-export const StampaCopiaButton: React.FC<StampaCopiaButtonProps> = ({ onPrint, variant = 'row', className = '' }) => {
+export const StampaCopiaButton: React.FC<StampaCopiaButtonProps> = ({ onPrint, variant = 'row', label = 'Stampa copia', sentLabel = 'Copia in stampa', className = '' }) => {
   const [state, setState] = useState<'idle' | 'sending' | 'sent'>('idle');
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<number | null>(null);
@@ -59,7 +63,7 @@ export const StampaCopiaButton: React.FC<StampaCopiaButtonProps> = ({ onPrint, v
       >
         {state === 'sent' ? (
           <span className="animate-view-in inline-flex items-center gap-1.5">
-            <Check size={15} aria-hidden /> Copia in stampa
+            <Check size={15} aria-hidden /> {sentLabel}
           </span>
         ) : state === 'sending' ? (
           <>
@@ -67,7 +71,7 @@ export const StampaCopiaButton: React.FC<StampaCopiaButtonProps> = ({ onPrint, v
           </>
         ) : (
           <>
-            <Printer size={15} aria-hidden /> Stampa copia
+            <Printer size={15} aria-hidden /> {label}
           </>
         )}
       </button>

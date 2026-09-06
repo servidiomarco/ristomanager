@@ -99,7 +99,9 @@ function renderPreconto(p) {
   push(ESC, 0x47, 1);
   push(ESC, 0x61, 1);        // center
   push(GS, 0x21, 0x11);      // double w+h
-  text('PRECONTO\n');
+  // title: «PROFORMA» sulla ristampa del conto chiuso con proforma; assente
+  // sui preconti normali (e sui job di backend più vecchi di questo campo).
+  text(`${p.title ?? 'PRECONTO'}\n`);
   push(GS, 0x21, 0x00);
   text(`Tavolo ${p.table_name ?? '-'} - ${p.covers} coperti\n`);
   text('-'.repeat(COLS) + '\n');
