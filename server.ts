@@ -6307,6 +6307,187 @@ app.get('/reports/fiscal-documents/:id', authenticate, requirePermission('fiscal
 });
 
 // ============================================
+// CHIUSURA FISCALE DELLA GIORNATA (docs/chiusura-fiscale-plan.md)
+// ============================================
+// La giornata è di CALENDARIO Europe/Rome, non il service_date del CRM: è
+// come ragionano l'RT e l'Agenzia. Cosa significa "chiudere" dipende dal
+// provider del tenant — la Z vera via agente (rt-local), un riscontro
+// registrato (openapi), la registrazione manuale del tagliando (il ponte
+// Passepartout, dove la chiusura in cassa resta sempre possibile).
+
+// La fotografia fiscale di un giorno: documenti per tipo e stato, il totale
+// corrispettivi CRM (soli scontrini CONFIRMED — "scontrino di cassa"
+// external_rt compreso: è doc_type RECEIPT), e i conti chiusi rimasti senza
+// documento. È quello che la card mostra prima del bottone, e quello che la
+// chiusura congela nella riga.
+async function fiscalDaySnapshot(tenantId: number, date: string): Promise<{
+    docs: { doc_type: string; status: string; count: number; total_cents: number }[];
+    receipts: { count: number; total_cents: number };
+    pending_count: number;
+    failed_count: number;
+    bills_without_doc: number;
+}> {
+    const docsRs = await queryWithRetry(
+        `SELECT doc_type, status, COUNT(*)::int AS count, COALESCE(SUM(total_cents), 0)::bigint AS total_cents
+         FROM fiscal_documents
+         WHERE tenant_id = $1 AND (created_at AT TIME ZONE 'Europe/Rome')::date = $2::date
+         GROUP BY doc_type, status`,
+        [tenantId, date]
+    );
+    const docs = docsRs.rows.map((r: any) => ({ ...r, total_cents: Number(r.total_cents) }));
+    const sumBy = (pred: (r: any) => boolean, field: 'count' | 'total_cents') =>
+        docs.filter(pred).reduce((n: number, r: any) => n + Number(r[field]), 0);
+    // I conti del giorno senza un documento CONFIRMED: dimenticanze da
+    // sistemare prima di chiudere (si avvisa, non si blocca — come la
+    // sessione di cassa coi conti aperti).
+    const billsRs = await queryWithRetry(
+        `SELECT COUNT(*)::int AS n FROM table_bills b
+         WHERE b.tenant_id = $1 AND b.status IN ('CLOSED', 'SETTLED_PARTIAL')
+           AND b.closed_at IS NOT NULL
+           AND (b.closed_at AT TIME ZONE 'Europe/Rome')::date = $2::date
+           AND NOT EXISTS (SELECT 1 FROM fiscal_documents fd
+                           WHERE fd.table_bill_id = b.id AND fd.tenant_id = b.tenant_id
+                             AND fd.status = 'CONFIRMED')`,
+        [tenantId, date]
+    );
+    return {
+        docs,
+        receipts: {
+            count: sumBy(r => r.doc_type === 'RECEIPT' && r.status === 'CONFIRMED', 'count'),
+            total_cents: sumBy(r => r.doc_type === 'RECEIPT' && r.status === 'CONFIRMED', 'total_cents'),
+        },
+        pending_count: sumBy(r => r.status === 'PENDING', 'count'),
+        failed_count: sumBy(r => r.status === 'FAILED', 'count'),
+        bills_without_doc: billsRs.rows[0].n,
+    };
+}
+
+app.get('/fiscal/closure', authenticate, requirePermission('payments:view'), async (req, res) => {
+    try {
+        const raw = typeof req.query.date === 'string' ? req.query.date : '';
+        const date = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : getRomeDatePart(new Date());
+        const provider = await getFiscalProviderSetting(req.tenantId!);
+        const snapshot = await fiscalDaySnapshot(req.tenantId!, date);
+        // L'ULTIMA riga, FAILED compresa: la card deve poter mostrare
+        // l'errore della Z fallita accanto al bottone per riprovare.
+        const rowRs = await queryWithRetry(
+            `SELECT * FROM fiscal_closures WHERE tenant_id = $1 AND closure_date = $2::date
+             ORDER BY id DESC LIMIT 1`,
+            [req.tenantId!, date]
+        );
+        res.json({ date, provider, closure: rowRs.rows[0] ?? null, ...snapshot });
+    } catch (err: any) {
+        console.error('GET /fiscal/closure error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+app.post('/fiscal/closure', authenticate, requirePermission('cash:close_session'), async (req, res) => {
+    try {
+        const date = typeof req.body?.date === 'string' ? req.body.date.trim() : '';
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            return res.status(400).json({ error: 'Serve la data della giornata (YYYY-MM-DD)' });
+        }
+        // Un giorno futuro non si chiude: le stringhe ISO si confrontano.
+        if (date > getRomeDatePart(new Date())) {
+            return res.status(400).json({ error: 'La giornata non è ancora cominciata' });
+        }
+        const note = typeof req.body?.note === 'string' ? req.body.note.trim().slice(0, 1000) : '';
+        const zrepRaw = typeof req.body?.zrep_number === 'string' ? req.body.zrep_number.trim().slice(0, 20) : '';
+        const rtTotal = req.body?.rt_total_cents != null ? Math.round(Number(req.body.rt_total_cents)) : null;
+        if (rtTotal !== null && (!Number.isFinite(rtTotal) || rtTotal < 0)) {
+            return res.status(400).json({ error: 'Totale del registratore non valido' });
+        }
+
+        const provider = await getFiscalProviderSetting(req.tenantId!);
+        const snapshot = await fiscalDaySnapshot(req.tenantId!, date);
+
+        // La Z è irreversibile e una seconda uscirebbe a zero: una chiusura
+        // viva (PENDING o CONFIRMED) blocca. L'unique fiscal_closures_giornata
+        // difende la stessa regola dalla race fra due click.
+        const existing = await queryWithRetry(
+            `SELECT * FROM fiscal_closures WHERE tenant_id = $1 AND closure_date = $2::date AND status <> 'FAILED'`,
+            [req.tenantId!, date]
+        );
+        if (existing.rows.length > 0) {
+            return res.status(409).json({ error: 'La giornata è già chiusa', closure: existing.rows[0] });
+        }
+
+        // openapi: nessuna Z esiste — la chiusura è la firma di un riscontro,
+        // e un riscontro con documenti in emissione o falliti è bucato.
+        if ((provider === 'openapi' || provider === 'mock') && (snapshot.pending_count > 0 || snapshot.failed_count > 0)) {
+            return res.status(409).json({
+                error: 'Ci sono documenti in emissione o falliti: sistemali prima di chiudere la giornata',
+                pending_count: snapshot.pending_count,
+                failed_count: snapshot.failed_count,
+            });
+        }
+
+        // Registrazione manuale (il ponte): il delta col tagliando va
+        // spiegato — stessa regola della differenza di cassa.
+        const manual = provider !== 'rt-local' && provider !== 'openapi' && provider !== 'mock';
+        if (manual && rtTotal !== null && rtTotal !== snapshot.receipts.total_cents && !note) {
+            return res.status(400).json({
+                error: 'Il totale del registratore non combacia col CRM: serve una nota sulla differenza',
+                crm_total_cents: snapshot.receipts.total_cents,
+            });
+        }
+
+        const u = await queryWithRetry(`SELECT full_name FROM users WHERE id = $1 AND tenant_id = $2`, [req.user?.userId ?? 0, req.tenantId!]);
+        const byName = u.rows[0]?.full_name || req.user?.email || 'operatore';
+
+        const pendingZ = provider === 'rt-local';
+        let inserted: any;
+        try {
+            const ins = await queryWithRetry(
+                `INSERT INTO fiscal_closures
+                    (tenant_id, closure_date, provider, status, zrep_number, rt_total_cents,
+                     crm_docs_count, crm_total_cents, breakdown, note,
+                     requested_by_user_id, requested_by_name, confirmed_at)
+                 VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12,
+                         CASE WHEN $13::boolean THEN CURRENT_TIMESTAMP END)
+                 RETURNING *`,
+                // Niente parametri riusati in contesti di tipo diverso
+                // (42P08): la conferma viaggia come boolean suo, non come
+                // confronto sul $ dello status.
+                [req.tenantId!, date, provider,
+                 pendingZ ? 'PENDING' : 'CONFIRMED',
+                 pendingZ ? null : (zrepRaw || null),
+                 pendingZ ? null : rtTotal,
+                 snapshot.receipts.count, snapshot.receipts.total_cents,
+                 JSON.stringify({ docs: snapshot.docs, bills_without_doc: snapshot.bills_without_doc }),
+                 note || null, req.user?.userId ?? null, byName, !pendingZ]
+            );
+            inserted = ins.rows[0];
+        } catch (err: any) {
+            if (err?.code !== '23505') throw err;
+            return res.status(409).json({ error: 'La giornata è già chiusa' });
+        }
+
+        if (pendingZ) {
+            // La Z viaggia come i documenti rt-local: un job per l'agente in
+            // sala, la riga resta PENDING finché il registratore non risponde.
+            // L'indice print_jobs_z_one_per_closure garantisce un solo job.
+            try {
+                await queryWithRetry(
+                    `INSERT INTO print_jobs (tenant_id, kind, payload, printer, created_by_user_id)
+                     VALUES ($1, 'RT_CHIUSURA', $2::jsonb, 'rt', $3)`,
+                    [req.tenantId!, JSON.stringify({ closure_id: inserted.id, date }), req.user?.userId ?? null]
+                );
+            } catch (err: any) {
+                if (err?.code !== '23505') throw err;
+            }
+        }
+
+        try { socketService?.broadcastToAll(req.tenantId!, 'fiscal:closure-updated', { closure: inserted }); } catch (_) {}
+        res.status(201).json({ closure: inserted, ...snapshot });
+    } catch (err: any) {
+        console.error('POST /fiscal/closure error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// ============================================
 // DOCUMENTI FISCALI — documento commerciale (fase 3 fatturazione)
 // ============================================
 // Il driver (Openapi sandbox / mock) e il payload builder stanno in
@@ -31059,6 +31240,41 @@ app.post('/print-agent/jobs/:id/ack', printAgentAuth, async (req: any, res) => {
                 );
                 if (upd.rows[0]) {
                     try { socketService?.broadcastToAll(req.printAgentTenantId, 'fiscal:updated', { bill_id: billId, doc: upd.rows[0] }); } catch (_) {}
+                }
+            }
+            return res.json({ ok: true });
+        }
+
+        // RT_CHIUSURA: come RT_FISCALE, l'ack chiude la CHIUSURA, non solo il
+        // job. ok → CONFIRMED col numero Z; ok:false → FAILED subito (la Z
+        // fallita si guarda, il retry è un nuovo POST /fiscal/closure — la
+        // riga FAILED non blocca l'unique di giornata).
+        if (job?.kind === 'RT_CHIUSURA') {
+            const closureId = Number(job.payload?.closure_id);
+            const ok = Boolean(req.body?.ok);
+            const result = req.body?.result ?? {};
+            const zrep = typeof result.zrep_number === 'string' && result.zrep_number.trim() ? result.zrep_number.trim().slice(0, 20) : null;
+            await queryWithRetry(
+                `UPDATE print_jobs SET status = $2, printed_at = $3, error = $4
+                 WHERE id = $1 AND tenant_id = $5`,
+                [id, ok ? 'PRINTED' : 'FAILED', ok ? new Date() : null,
+                 ok ? null : String(req.body?.error ?? 'errore RT').slice(0, 500), req.printAgentTenantId]
+            );
+            if (Number.isFinite(closureId)) {
+                const upd = await queryWithRetry(
+                    `UPDATE fiscal_closures
+                     SET status = CASE WHEN status <> 'PENDING' THEN status ELSE $2 END,
+                         zrep_number = COALESCE($3, zrep_number),
+                         raw = $4::jsonb,
+                         confirmed_at = CASE WHEN status = 'PENDING' AND $5 THEN CURRENT_TIMESTAMP ELSE confirmed_at END,
+                         error = $6
+                     WHERE id = $1 AND tenant_id = $7
+                     RETURNING *`,
+                    [closureId, ok ? 'CONFIRMED' : 'FAILED', zrep, JSON.stringify(result ?? null),
+                     ok, ok ? null : String(req.body?.error ?? 'errore RT').slice(0, 1000), req.printAgentTenantId]
+                );
+                if (upd.rows[0]) {
+                    try { socketService?.broadcastToAll(req.printAgentTenantId, 'fiscal:closure-updated', { closure: upd.rows[0] }); } catch (_) {}
                 }
             }
             return res.json({ ok: true });

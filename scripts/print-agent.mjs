@@ -555,6 +555,56 @@ async function handleRtFiscale(job) {
   }
 }
 
+// Chiusura giornaliera (rapporto Z): stesso trasporto dei documenti, un
+// comando diverso. La Z stampa il riepilogo, azzera i totalizzatori e
+// trasmette i corrispettivi — è lenta, quindi timeout suo. ATTENZIONE al
+// caso limite (identico all'emissione documento): se il fetch scade ma l'RT
+// aveva già eseguito, il retry comanderebbe una seconda Z, che esce a zero
+// — rumorosa ma non dannosa. Il timeout generoso serve a non arrivarci.
+async function handleRtChiusura(job) {
+  if (!RT_HOST) {
+    if (!warnedUnknown.has('rt')) { warnedUnknown.add('rt'); log('RT_FISCAL_HOST non configurato: job RT in attesa'); }
+    return;
+  }
+  try {
+    const c = await api(`/print-agent/jobs/${job.id}/claim`, { method: 'POST' });
+    if (!c?.claimed) return;
+  } catch (err) {
+    log(`job ${job.id} [rt-z]: claim fallito (${err.message}), ritento`);
+    return;
+  }
+  try {
+    const xml = '<printerFiscalReport><printZReport operator="1" /></printerFiscalReport>';
+    const res = await fetch(`http://${RT_HOST}/cgi-bin/fpmate.cgi?devid=${encodeURIComponent(RT_DEVID)}&timeout=60000`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/xml; charset=utf-8' },
+      body: `<?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>${xml}</s:Body></s:Envelope>`,
+      signal: AbortSignal.timeout(70_000),
+    });
+    const text = await res.text();
+    const success = /success\s*=\s*"(?:true|1)"/i.test(text);
+    if (!success) {
+      const code = text.match(/code\s*=\s*"([^"]*)"/i)?.[1] ?? `HTTP ${res.status}`;
+      const status = text.match(/status\s*=\s*"([^"]*)"/i)?.[1] ?? '';
+      log(`job ${job.id} [rt-z]: il registratore ha rifiutato la chiusura (${code} ${status})`);
+      await api(`/print-agent/jobs/${job.id}/ack`, { method: 'POST', body: JSON.stringify({ ok: false, error: `RT: ${code} ${status}`.trim() }) });
+      return;
+    }
+    // Il numero della Z appena eseguita: il collaudo sul firmware reale dirà
+    // se l'FP-81II lo riporta qui — in assenza la chiusura si conferma senza
+    // numero, che resta sul tagliando.
+    const tag = (name) => text.match(new RegExp(`<${name}>([^<]*)</${name}>`, 'i'))?.[1]?.trim() ?? '';
+    const zrep = tag('zRepNumber');
+    log(`job ${job.id} [rt-z]: chiusura giornaliera eseguita${zrep ? ` (Z ${zrep})` : ''}`);
+    await api(`/print-agent/jobs/${job.id}/ack`, {
+      method: 'POST',
+      body: JSON.stringify({ ok: true, result: { zrep_number: zrep || null } }),
+    });
+  } catch (err) {
+    log(`job ${job.id} [rt-z]: registratore non raggiungibile (${err.message}), ritento`);
+  }
+}
+
 async function tick() {
   let jobs;
   try {
@@ -571,7 +621,12 @@ async function tick() {
   for (const job of jobs.filter(j => j.kind === 'RT_FISCALE')) {
     await handleRtFiscale(job);
   }
-  jobs = jobs.filter(j => j.kind !== 'RT_FISCALE');
+  // La chiusura Z dopo i documenti: se nello stesso giro c'è ancora uno
+  // scontrino da emettere, deve entrare nella giornata che si sta chiudendo.
+  for (const job of jobs.filter(j => j.kind === 'RT_CHIUSURA')) {
+    await handleRtChiusura(job);
+  }
+  jobs = jobs.filter(j => j.kind !== 'RT_FISCALE' && j.kind !== 'RT_CHIUSURA');
 
   // Raggruppa per stampante: ogni destinazione ha la sua coda indipendente,
   // una termica spenta in cucina non blocca i preconti al banco.
