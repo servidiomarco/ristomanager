@@ -26133,7 +26133,17 @@ async function fireCourseInTx(client: any, tenantId: number, orderId: number, co
         [orderId, courseNo, tenantId]
     );
     if (upd.rows.length > 0) {
-        await enqueueCoursePrintsInTx(client, tenantId, orderId, courseNo, upd.rows);
+        // Righe aggiunte a un'uscita GIÀ partita: il ticket è identico a un
+        // lancio, e in cucina si confonde con una ristampa. Il banner
+        // «AGGIUNTA» dice che la card a video è cresciuta.
+        const prior = await client.query(
+            `SELECT 1 FROM order_items
+             WHERE order_id = $1 AND course_no = $2 AND tenant_id = $3
+               AND fired_at IS NOT NULL AND NOT (id = ANY($4::int[])) LIMIT 1`,
+            [orderId, courseNo, tenantId, upd.rows.map((r: any) => r.id)]
+        );
+        await enqueueCoursePrintsInTx(client, tenantId, orderId, courseNo, upd.rows,
+            prior.rows.length > 0 ? { label: 'AGGIUNTA' } : undefined);
     }
     return upd.rows;
 }
@@ -26144,7 +26154,12 @@ async function fireCourseInTx(client: any, tenantId: number, orderId: number, co
 // Partite senza stampante (printer NULL) restano solo a schermo. Best-effort
 // NON è questo: un errore qui annulla il lancio, ed è voluto — un'uscita
 // lanciata di cui la cucina non sa niente è il caso peggiore.
-async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: number, courseNo: number, firedRows: any[]): Promise<void> {
+// `variation` cambia il senso del ticket: 'AGGIUNTA' resta kind COMANDA
+// (sono piatti da fare, un agente vecchio li stampa comunque giusti, solo
+// senza banner); 'ANNULLO CHIAMATA' e 'STORNO' viaggiano col kind
+// COMANDA_ANNULLO — un agente vecchio NON deve poterli stampare come piatti
+// da cucinare, e su un kind sconosciuto si arena senza stampare.
+async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: number, courseNo: number, firedRows: any[], variation?: { label: 'AGGIUNTA' | 'ANNULLO CHIAMATA' | 'STORNO'; reason?: string | null }): Promise<void> {
     const ctx = await client.query(
         `SELECT o.covers, t.name AS table_name
          FROM orders o LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
@@ -26173,9 +26188,10 @@ async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: n
                 note: r.note ?? null,
             }));
         if (items.length === 0) continue;
+        const kind = variation && variation.label !== 'AGGIUNTA' ? 'COMANDA_ANNULLO' : 'COMANDA';
         await client.query(
             `INSERT INTO print_jobs (tenant_id, kind, payload, printer)
-             VALUES ($3, 'COMANDA', $1, $2)`,
+             VALUES ($3, $4, $1, $2)`,
             [JSON.stringify({
                 order_id: orderId,
                 course_no: courseNo,
@@ -26187,7 +26203,9 @@ async function enqueueCoursePrintsInTx(client: any, tenantId: number, orderId: n
                 covers,
                 station_name: station.name,
                 items,
-            }), station.printer, tenantId]
+                ...(variation ? { variation: variation.label } : {}),
+                ...(variation?.reason ? { reason: variation.reason } : {}),
+            }), station.printer, tenantId, kind]
         );
     }
 }
@@ -27298,13 +27316,18 @@ app.post('/orders/:id/courses/:n/unfire', authenticate, requireAnyPermission('or
                     `UPDATE order_items
                      SET status = 'QUEUED', fired_at = NULL, station_start_at = NULL, started_at = NULL
                      WHERE order_id = $1 AND course_no = $2 AND tenant_id = $3 AND status = 'SENT'
-                     RETURNING id, station_id, name_snapshot, qty`,
+                     RETURNING id, station_id, name_snapshot, qty, modifiers, note`,
                     [orderId, courseNo, req.tenantId!]
                 );
                 unfired = upd.rows;
                 if (unfired.length === 0) {
                     await client.query('ROLLBACK');
                 } else {
+                    // La carta come i monitor: se il lancio aveva stampato,
+                    // l'annullo stampa — stessa transazione, per lo stesso
+                    // motivo del fuoco (una chiamata annullata di cui la
+                    // partita non sa niente è un'uscita cucinata a vuoto).
+                    await enqueueCoursePrintsInTx(client, req.tenantId!, orderId, courseNo, unfired, { label: 'ANNULLO CHIAMATA' });
                     await outboxEnqueueInTx(client, req.tenantId!, 'order:updated', `order:${orderId}`, { order_id: orderId });
                     await client.query('COMMIT');
                 }
@@ -29199,6 +29222,14 @@ app.post('/orders/items/:id/void', authenticate, requirePermission('orders:void'
                     [id, req.tenantId!, voidQty, req.user?.userId ?? null, reason.slice(0, 300)]
                 );
                 item = ins.rows[0];
+            }
+            // La riga era già in cucina: oltre alla revisione a monitor, la
+            // carta — il centro che lavora di stampa (il bar) deve leggere lo
+            // storno dove ha letto la comanda. item porta la quantità
+            // stornata sia nello storno intero sia nel parziale (riga divisa).
+            if (item.fired_at) {
+                await enqueueCoursePrintsInTx(client, req.tenantId!, item.order_id, item.course_no, [item],
+                    { label: 'STORNO', reason: item.void_reason });
             }
             await client.query('COMMIT');
         } catch (err) {

@@ -284,6 +284,13 @@ function renderComanda(p) {
   // course_label arriva dal server («Bar», «2a USCITA»): il fallback compone
   // il numero per i job accodati da un server più vecchio dell'agente.
   text(`${p.course_label ?? `${p.course_no}a USCITA`} - ${(p.station_name ?? '').toUpperCase()}\n`);
+  // «AGGIUNTA»: righe entrate in un'uscita già partita — senza banner il
+  // ticket si confonde con una ristampa del lancio.
+  if (p.variation) {
+    push(ESC, 0x45, 1);
+    text(`*** ${p.variation} ***\n`);
+    push(ESC, 0x45, 0);
+  }
   push(GS, 0x21, 0x00);
   const now = new Date();
   text(`${p.covers ?? '-'} coperti - ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}\n`);
@@ -299,6 +306,46 @@ function renderComanda(p) {
     push(GS, 0x21, 0x01);
   }
   push(GS, 0x21, 0x00);
+  text('\n\n');
+  push(GS, 0x56, 0x42, 0x00);
+  return Buffer.from(bytes);
+}
+
+// Annullo chiamata o storno di righe già in cucina: il ticket dice di NON
+// fare (o buttare) i piatti elencati — kind apposta, così un agente vecchio
+// che non lo conosce si arena invece di stamparli come piatti da cucinare.
+function renderComandaAnnullo(p) {
+  const bytes = [];
+  const push = (...b) => bytes.push(...b);
+  const text = s => push(...Buffer.from(s, 'latin1'));
+
+  push(ESC, 0x40);
+  push(ESC, 0x74, 16);
+  push(ESC, 0x47, 1);        // doppia battuta
+  push(ESC, 0x61, 1);        // center
+  push(GS, 0x21, 0x11);      // double w+h
+  push(ESC, 0x45, 1);
+  text(`${p.variation ?? 'ANNULLO'}\n`);
+  push(ESC, 0x45, 0);
+  text(`TAV ${p.table_name ?? '-'}\n`);
+  push(GS, 0x21, 0x01);      // solo double height
+  text(`${p.course_label ?? `${p.course_no}a USCITA`} - ${(p.station_name ?? '').toUpperCase()}\n`);
+  push(GS, 0x21, 0x00);
+  const now = new Date();
+  text(`${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}\n`);
+  text('-'.repeat(COLS) + '\n');
+  push(ESC, 0x61, 0);        // left
+
+  push(GS, 0x21, 0x01);
+  for (const i of p.items ?? []) {
+    text(`${i.qty} x ${i.name}\n`);
+    push(GS, 0x21, 0x00);
+    for (const m of i.modifiers ?? []) text(`    + ${m}\n`);
+    if (i.note) text(`    ** ${i.note}\n`);
+    push(GS, 0x21, 0x01);
+  }
+  push(GS, 0x21, 0x00);
+  if (p.reason) text(`\nmotivo: ${p.reason}\n`);
   text('\n\n');
   push(GS, 0x56, 0x42, 0x00);
   return Buffer.from(bytes);
@@ -362,6 +409,7 @@ async function drainPrinter(name, dest, jobs) {
                : job.kind === 'SCONTRINO' ? renderScontrino(job.payload)
                : job.kind === 'QR' ? renderQr(job.payload)
                : job.kind === 'COMANDA' ? renderComanda(job.payload)
+               : job.kind === 'COMANDA_ANNULLO' ? renderComandaAnnullo(job.payload)
                : job.kind === 'TEST' ? renderTest(job.payload)
                : null;
       if (!rendered) throw new Error(`kind sconosciuto: ${job.kind}`);

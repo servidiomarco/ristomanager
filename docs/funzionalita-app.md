@@ -359,7 +359,7 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 ## Stampa termica e print agent
 
 - **Stampanti termiche di rete** censite dalle Impostazioni (nome, IP, porta, **cicalino alla stampa** attivabile per stampante — la termica di cucina suona quando arriva la comanda, il banco resta muto); un **agente di stampa** sulla rete del ristorante ritira i lavori dal cloud — aggiungere una stampante diventa effettivo in pochi secondi, e lo stato online/offline dell'agente è visibile in Impostazioni.
-- Si stampano: **comande per partita** (ognuna sulla propria stampante), **preconti** (con acconto già versato, residuo vero e riepilogo IVA), **QR del conto al tavolo**; instradamento per funzione configurabile.
+- Si stampano: **comande per partita** (ognuna sulla propria stampante), **preconti** (con acconto già versato, residuo vero e riepilogo IVA), **QR del conto al tavolo**; instradamento per funzione configurabile. La carta segue i monitor anche dopo il lancio: righe **aggiunte** a un'uscita già partita escono col banner «AGGIUNTA», **storno** di una riga già in cucina (con quantità e motivo) e **annullo chiamata** stampano un ticket dedicato sulla stessa termica.
 - Tentativi automatici in caso di errore; una stampante inceppata non blocca le altre stampe.
 - Dal browser si stampano inoltre: lista prenotazioni, inventario, lista della spesa, report HACCP, scheda banchetto.
 
@@ -572,6 +572,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-06 | Comande, Cucina e Passe | La comanda stampata segue i monitor: righe aggiunte a un'uscita già partita escono col banner «AGGIUNTA»; storno di una riga già in cucina e annullo chiamata stampano un ticket dedicato (quantità e motivo per lo storno) sulla stessa termica del lancio. Richiede l'agente di stampa aggiornato: quello vecchio arena i ticket di annullo invece di stamparli come piatti da fare. |
 | 2026-09-06 | Comande, Cucina e Passe | L'uscita Bar lanciata dice «al bar», non «in cucina», sulla pill di stato della comanda. |
 | 2026-09-06 | Comande, Cucina e Passe · Cassa | Storno parziale: su una riga da 2 o più pezzi il dialogo di storno (comanda e cassa) chiede quanti stornarne — la riga resta viva in cucina con la quantità scalata, i pezzi stornati diventano una riga a sé con motivazione, e il monitor avvisa solo di quelli. Default riga intera, come prima. |
 | 2026-09-06 | Comande, Cucina e Passe | Uscita Bar: spuntando «bar» sulle categorie in modale Categorie (bibite, vini, amari), i loro piatti battuti in comanda vanno da soli in un'uscita Bar dedicata, in testa alla comanda; nei lanci automatici il Bar parte subito con l'invio, senza toccare la sequenza delle portate. Etichetta «Bar» su palmare, monitor e comanda stampata. |
