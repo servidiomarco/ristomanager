@@ -4,6 +4,7 @@ import type { OrderItem, OrderWithItems } from '../../types';
 import { StatusPill } from '../ds';
 import {
   BAR_COURSE_NO,
+  DESSERT_COURSE_NO,
   courseBadge, MAX_COURSES, cartForCourse, cartSum, cartUnitCents, courseLabel,
   courseStatus, euro, isSent, itemsForCourse, rowCount, rowCountLabel, weightLabel,
   type CartLine,
@@ -59,6 +60,8 @@ interface CourseListProps {
   /** Sezione «Bar» in testa alla comanda: c'è quando il ristorante ha
    *  categorie da bar, o quando l'uscita Bar ha già righe. */
   showBar?: boolean;
+  /** Sezione «Dolci» in coda: stessa regola, per le categorie da dolci. */
+  showDessert?: boolean;
 }
 
 const stepper =
@@ -66,7 +69,7 @@ const stepper =
 
 export const CourseList: React.FC<CourseListProps> = ({
   order, cart, course, onCourse, busy, onBump, onDrop, onVoid, onRecall, onFire, onEditLine, onUnfire,
-  onMoveLine, onMoveItem, onMoveCourse, onDragLine, onDragItem, onDragCourse, showBar,
+  onMoveLine, onMoveItem, onMoveCourse, onDragLine, onDragItem, onDragCourse, showBar, showDessert,
 }) => {
   const dnd = useCourseDrag({
     disabled: busy,
@@ -84,14 +87,19 @@ export const CourseList: React.FC<CourseListProps> = ({
     return wired ? dnd.handleProps(p) : {};
   };
 
-  // Il Bar sta in testa: le bibite escono prima degli antipasti. La sezione
-  // compare anche senza flag quando l'uscita ha righe (comunque arrivate).
+  // Il Bar sta in testa: le bibite escono prima degli antipasti. I Dolci in
+  // coda: escono per ultimi. Le sezioni compaiono anche senza flag quando
+  // l'uscita ha righe (comunque arrivate).
   const courseNos = [
     ...(showBar || course === BAR_COURSE_NO
       || itemsForCourse(order, BAR_COURSE_NO).length > 0
       || cartForCourse(cart, BAR_COURSE_NO).length > 0
         ? [BAR_COURSE_NO] : []),
     ...Array.from({ length: MAX_COURSES }, (_, i) => i + 1),
+    ...(showDessert || course === DESSERT_COURSE_NO
+      || itemsForCourse(order, DESSERT_COURSE_NO).length > 0
+      || cartForCourse(cart, DESSERT_COURSE_NO).length > 0
+        ? [DESSERT_COURSE_NO] : []),
   ];
   return (
   <div className="flex flex-col gap-5 pt-4">

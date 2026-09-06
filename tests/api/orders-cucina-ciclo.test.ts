@@ -716,6 +716,69 @@ describe('ciclo cucina (stati linee, fuoco, passe)', () => {
         expect(dopo.body.categories.find((c: any) => c.name === 'Bar Collaudo').bar).toBe(false);
     });
 
+    it('uscita Dolci: la spunta di categoria arriva al palmare, e i Dolci partono subito nei lanci automatici', async () => {
+        const DOLCI = 98; // DESSERT_COURSE_NO: l'uscita in coda, senza chiamata
+        const dolce = await api().post('/dishes').set(bearer(token)).send({
+            name: 'Tiramisù Collaudo', description: null, price: 6, category: 'Dolci Collaudo', allergens: null,
+        });
+        expect(dolce.status).toBe(201);
+
+        // La spunta «dolci» sulla categoria: esposta in /menu/categories e
+        // nel catalogue, come la spunta «bar».
+        const on = await api().put('/menu/category-dessert').set(bearer(token)).send({ category: 'Dolci Collaudo', dessert: true });
+        expect(on.status).toBe(200);
+        const cats = await api().get('/menu/categories').set(bearer(token));
+        expect(cats.body.categories.find((c: any) => c.name === 'Dolci Collaudo').dessert).toBe(true);
+        const catalogue = await api().get('/menu/catalogue').set(bearer(token));
+        expect(catalogue.body.category_prefs['Dolci Collaudo'].dessert).toBe(true);
+        const ghost = await api().put('/menu/category-dessert').set(bearer(token)).send({ category: 'Categoria Fantasma', dessert: true });
+        expect(ghost.status).toBe(404);
+
+        // AUTO_FIRST: parte la prima uscita E i Dolci — come il Bar, niente
+        // chiamata dal passe.
+        await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'AUTO_FIRST' });
+        const primaId = await nuovaComanda();
+        await api().post(`/orders/${primaId}/items`).set(bearer(token)).send({
+            items: [
+                { dish_id: piatto1, qty: 1, course_no: 1 },
+                { dish_id: piatto2, qty: 1, course_no: 2 },
+                { dish_id: dolce.body.id, qty: 1, course_no: DOLCI },
+            ],
+        });
+        const sent = await api().post(`/orders/${primaId}/send`).set(bearer(token)).send({});
+        expect(sent.status).toBe(200);
+        expect(sent.body.fired_courses).toEqual([1, DOLCI]);
+        expect(sent.body.queued_courses).toEqual([2]);
+
+        // AUTO_NEXT con roba già in cucina: il dolce ordinato a fine giro
+        // parte lo stesso, un'uscita di cucina nuova resta al passe.
+        await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'AUTO_NEXT' });
+        const secondaId = await nuovaComanda();
+        await api().post(`/orders/${secondaId}/items`).set(bearer(token)).send({
+            items: [{ dish_id: piatto1, qty: 1, course_no: 1 }],
+        });
+        const avvio = await api().post(`/orders/${secondaId}/send`).set(bearer(token)).send({});
+        expect(avvio.body.fired_courses).toEqual([1]);
+        const giro = await api().post(`/orders/${secondaId}/items`).set(bearer(token)).send({
+            items: [
+                { dish_id: piatto2, qty: 1, course_no: 2 },
+                { dish_id: dolce.body.id, qty: 1, course_no: DOLCI },
+            ],
+        });
+        expect(giro.status).toBe(201);
+        const sent2 = await api().post(`/orders/${secondaId}/send`).set(bearer(token)).send({});
+        expect(sent2.status).toBe(200);
+        expect(sent2.body.fired_courses).toEqual([DOLCI]);
+        expect(sent2.body.queued_courses).toEqual([2]);
+
+        // Il default della suite resta AUTO_ALL, e la spunta si toglie.
+        await api().put('/sala/fire-mode').set(bearer(token)).send({ mode: 'AUTO_ALL' });
+        const off = await api().put('/menu/category-dessert').set(bearer(token)).send({ category: 'Dolci Collaudo', dessert: false });
+        expect(off.status).toBe(200);
+        const dopo = await api().get('/menu/categories').set(bearer(token));
+        expect(dopo.body.categories.find((c: any) => c.name === 'Dolci Collaudo').dessert).toBe(false);
+    });
+
     it('la carta segue i monitor: aggiunta col banner, storno e annullo chiamata stampati', async () => {
         const db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
         await db.connect();

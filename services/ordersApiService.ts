@@ -219,9 +219,9 @@ export interface MenuCatalogue {
    *  battono in negativo (removed_component_ids sulla riga). */
   dish_components: { id: number; dish_id: number; name: string; removal_delta_cents: number; sort_order: number }[];
   /** Preferenze delle categorie decise in Menu: ordine (sort), accensione e
-   *  la spunta «bar» (i piatti della categoria vanno dritti nell'uscita Bar).
-   *  Categoria assente = accesa, in coda, non bar. */
-  category_prefs?: Record<string, { enabled: boolean; sort: number; bar?: boolean }>;
+   *  le spunte «bar» e «dolci» (i piatti della categoria vanno dritti
+   *  nell'uscita Bar o Dolci). Categoria assente = accesa, in coda, normale. */
+  category_prefs?: Record<string, { enabled: boolean; sort: number; bar?: boolean; dessert?: boolean }>;
 }
 
 export const getMenuCatalogue = async (): Promise<MenuCatalogue> =>
