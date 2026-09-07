@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Info, Minus, Plus, Utensils } from 'lucide-react';
+import { Info, Minus, Plus, Trash2, Utensils } from 'lucide-react';
 import type { Dish } from '../types';
 import type { MenuCatalogue } from '../services/ordersApiService';
 import { Sheet, dsButton, dsInput } from './ds';
@@ -170,15 +170,6 @@ export const VariantSheet: React.FC<{
       bodyClassName="space-y-5 px-5 py-5 sm:px-6"
       footer={
         <div className="flex flex-col gap-3">
-          {onDelete && (
-            <button
-              type="button"
-              onClick={onDelete}
-              className="self-center text-[13px] font-medium text-[var(--ds-critical-text)] underline decoration-dotted transition-opacity hover:opacity-70"
-            >
-              elimina riga
-            </button>
-          )}
           {added > 0 && (
             <p className="text-center text-[13px] font-medium text-[var(--ds-text-muted)]">
               {added === 1 ? '1 riga aggiunta' : `${added} righe aggiunte`}
@@ -194,16 +185,32 @@ export const VariantSheet: React.FC<{
               Aggiungi un altro
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => onConfirm(entries, [...removed], custom.trim() || undefined,
-              dish.sold_by_weight ? grams : undefined,
-              initialQty != null ? qty : undefined)}
-            disabled={missing.length > 0}
-            className={`w-full ${dsButton.primary}`}
-          >
-            {missing.length > 0 ? `Scegli: ${missing.map(g => g.name).join(', ')}` : (confirmLabel ?? 'Aggiungi')}
-          </button>
+          {/* L'elimina è quiet accanto al primario pieno (§7.5): il peso
+              visivo sta su quello che si vuole, non su quello che si
+              potrebbe rimpiangere — stesso cestino tinto delle righe menu. */}
+          <div className="flex items-center gap-2">
+            {onDelete && (
+              <button
+                type="button"
+                onClick={onDelete}
+                aria-label="Elimina riga"
+                title="Elimina riga"
+                className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              >
+                <Trash2 size={16} />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => onConfirm(entries, [...removed], custom.trim() || undefined,
+                dish.sold_by_weight ? grams : undefined,
+                initialQty != null ? qty : undefined)}
+              disabled={missing.length > 0}
+              className={`min-w-0 flex-1 ${dsButton.primary}`}
+            >
+              {missing.length > 0 ? `Scegli: ${missing.map(g => g.name).join(', ')}` : (confirmLabel ?? 'Aggiungi')}
+            </button>
+          </div>
         </div>
       }
     >

@@ -585,6 +585,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-07 | Comande, Cucina e Passe | Via la matita doppione dalle righe in bozza della comanda: il foglio di riga si apre già dal tocco sul nome. Nel foglio, «elimina riga» non è più un link tratteggiato ma il cestino tinto accanto al bottone principale — il peso visivo resta su quello che si vuole fare. |
 | 2026-09-07 | Comande, Cucina e Passe | La card dell'uscita nella colonna Comanda si elegge corrente toccandola ovunque — bordo, fondo, spazio fra le righe — non più solo dalla pill sul bordo; i controlli interni (storna, sposta, stepper) restano loro. |
 | 2026-09-07 | Comande, Cucina e Passe | La pista delle uscite (1ª–6ª, con Bar e Dolci quando ci sono) resta sempre in vista anche su desktop: fissa in testa alla colonna Comanda — con la comanda lunga i selettori scorrevano via e cambiare uscita voleva dire andarli a cercare. Sul piatto battuto i badge diventano due: il conteggio e, separato, il badge dell'uscita con l'icona di destinazione (si tocca per spostare). |
 | 2026-09-07 | Comande, Cucina e Passe | La riga del piatto nel menu del palmare mostra l'uscita di destinazione appena c'è battuto («2ª uscita», «Bar» — nel numerino della griglia su desktop): un tocco sul chip apre il selettore e sposta il battuto di quel piatto in un'altra uscita, senza cercare la riga in comanda. |
