@@ -43,7 +43,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
   const [screen, setScreen] = useState<Screen>('payment');
   const [quotaCents, setQuotaCents] = useState<number | null>(null);
   const [quotaItemUnits, setQuotaItemUnits] = useState<{ order_item_id: number; units: number }[] | null>(null);
-  const [esito, setEsito] = useState<{ kind: Esito; bill: OpenBillRow } | null>(null);
+  const [esito, setEsito] = useState<{ kind: Esito; bill: OpenBillRow; paidNowCents?: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fiscalReady, setFiscalReady] = useState(false);
@@ -151,7 +151,8 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
         row?.fiscal_status ?? null,
         row?.fiscal_doc_type ?? null,
       );
-      setEsito({ kind, bill: row ?? { ...bill, closed_at: result.closed_at } });
+      const paidNowCents = (opts?.payments ?? []).reduce((s, p) => s + p.amount_cents, 0);
+      setEsito({ kind, bill: row ?? { ...bill, closed_at: result.closed_at }, paidNowCents });
       setScreen('esito');
       // Intento «Fattura»: niente strada a metà — l'emissione si apre da
       // sola, precompilata col cliente della visita se c'è.
@@ -182,6 +183,8 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
         <EsitoChiusura
           esito={esito.kind}
           totalCents={esito.bill.total_cents}
+          paidNowCents={esito.paidNowCents ?? null}
+          residualCents={esito.bill.residual_cents ?? null}
           tableName={esito.bill.table_name}
           closedAt={esito.bill.closed_at ?? null}
           docNumber={esito.bill.fiscal_ref ?? esito.bill.fiscal_doc_number ?? null}
