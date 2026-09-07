@@ -162,7 +162,15 @@ export const CourseList: React.FC<CourseListProps> = ({
         <section
           key={n}
           data-course-drop={n}
-          className={`relative rounded-[16px] p-3 pt-4 transition-opacity ${
+          // Tutta la card elegge l'uscita corrente, non solo la pill sul
+          // bordo: il tocco sul fondo o fra le righe fa quello che l'occhio
+          // si aspetta. I controlli interni restano loro — il guard lascia
+          // passare solo i tocchi che non atterrano su un bottone.
+          onClick={e => {
+            if ((e.target as HTMLElement).closest('button, a, input, textarea')) return;
+            onCourse(n);
+          }}
+          className={`relative cursor-pointer rounded-[16px] p-3 pt-4 transition-opacity ${
             fired
               ? 'border-2 border-[var(--ds-arriving-solid)] bg-[var(--ds-arriving-tint)]'
               : sent
