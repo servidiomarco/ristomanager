@@ -1,7 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { AlertCircle } from 'lucide-react';
-import { billsApiService } from '../../services/billsApiService';
-import { socketClient } from '../../services/socketClient';
 import type { CashClosureBillRow, CashClosureReport } from '../../types';
 import { Callout, FormCard, StatusPill } from '../ds';
 import { formatEuro } from './paymentsView';
@@ -66,7 +64,10 @@ const docPill = (b: CashClosureBillRow) => {
 };
 
 export const ChiusuraCassa: React.FC<{
-  date?: string;
+  /** Il report del giorno arriva da useCashClosure in PagamentiPage: lo
+   *  condivide con la riga «Giornata» sopra i tab. */
+  report: CashClosureReport | null;
+  error?: string | null;
   /** Turno dalla topbar: filtra incassi, coperti e lista dei conti.
    *  Assente = «Tutti», l'intera giornata di servizio. */
   shift?: 'LUNCH' | 'DINNER';
@@ -79,38 +80,8 @@ export const ChiusuraCassa: React.FC<{
    *  che vive lo scontrino elettronico (emetti, riprova, annulla). */
   selectedId?: number | null;
   onSelectBill?: (id: number) => void;
-}> = ({ date, shift, openCount = 0, openResidualCents = 0, onOpenCassa, selectedId, onSelectBill }) => {
-  const [report, setReport] = useState<CashClosureReport | null>(null);
-  const [error, setError] = useState<string | null>(null);
+}> = ({ report, error, shift, openCount = 0, openResidualCents = 0, onOpenCassa, selectedId, onSelectBill }) => {
   const [docFilter, setDocFilter] = useState<DocFilter>('all');
-
-  const fetchReport = useCallback(async () => {
-    try {
-      setError(null);
-      setReport(await billsApiService.getCashClosure(date));
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }, [date]);
-
-  useEffect(() => { fetchReport(); }, [fetchReport]);
-
-  // I numeri si muovono mentre il servizio incassa: ogni evento di conto
-  // rilegge, con debounce perché una chiusura emette più eventi in raffica.
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    const onEvent = () => {
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => { fetchReport(); }, 500);
-    };
-    const socket = socketClient.getSocket();
-    const events = ['bill:closed', 'bill:settled', 'bill:split-paid', 'bill:payment-recorded', 'bill:payment-voided', 'bill:split-refunded', 'fiscal:updated'];
-    events.forEach(e => socket?.on(e, onEvent));
-    return () => {
-      if (timer.current) clearTimeout(timer.current);
-      events.forEach(e => socket?.off(e, onEvent));
-    };
-  }, [fetchReport]);
 
   // Prima il turno della topbar, poi il filtro documento: i conteggi sui
   // chip parlano di quello che la lista sta davvero mostrando.
