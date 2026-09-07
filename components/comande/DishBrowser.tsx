@@ -3,6 +3,7 @@ import { ChevronDown, Minus, Plus, Search, Trash2 } from 'lucide-react';
 import type { Dish } from '../../types';
 import { SearchField } from '../ds';
 import { euro } from './orderView';
+import { isBarCourse, isDessertCourse, ordinal } from '../../utils/courses';
 import { DishSearchSheet } from './DishSearchSheet';
 
 // ---------------------------------------------------------------------------
@@ -35,6 +36,12 @@ interface DishBrowserProps {
   tapOpensSheet?: (dishId: number) => boolean;
   onAdd: (dish: Dish) => void;
   onRemove: (dish: Dish) => void;
+  /** L'uscita dove una battuta di questo piatto finisce (forzata o in
+   *  composizione): col battuto in corso compare sul piatto come chip. */
+  courseOf?: (dish: Dish) => number;
+  /** Tocco sul chip dell'uscita: sposta il battuto di quel piatto — apre il
+   *  selettore «dove» di OrderPad. Senza handler il chip non compare. */
+  onCourseTap?: (dish: Dish) => void;
   /** Tocco lungo sul piatto: apre le varianti anche dove il tocco semplice
    *  aggiunge al volo — è la via alla variante libera sui piatti senza
    *  varianti di menu. */
@@ -53,11 +60,16 @@ interface DishBrowserProps {
 
 export const DishBrowser: React.FC<DishBrowserProps> = ({
   dishes, categories, category, onCategory, query, onQuery,
-  qtyInCourse, markedCategories, hasVariants, tapOpensSheet = hasVariants, onAdd, onRemove, onLongPress, layout,
+  qtyInCourse, markedCategories, hasVariants, tapOpensSheet = hasVariants, onAdd, onRemove, courseOf, onCourseTap, onLongPress, layout,
   showSearch = true, density = 'comfortable',
 }) => {
   const q = query.trim().toLowerCase();
   const [searchOpen, setSearchOpen] = useState(false);
+
+  const courseTag = (n: number): string =>
+    isBarCourse(n) ? 'Bar' : isDessertCourse(n) ? 'Dolci' : `${ordinal(n)} uscita`;
+  const courseTagShort = (n: number): string =>
+    isBarCourse(n) ? 'Bar' : isDessertCourse(n) ? 'Dolci' : ordinal(n);
 
   // Tocco lungo con ref (non closure): un re-render a metà pressione — il
   // carrello ne provoca di continuo — non deve lasciare timer orfani che
@@ -100,6 +112,18 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     const canRemove = qty > 0 && !tapOpensSheet(d.id);
     return (
       <div className="flex flex-shrink-0 items-center gap-2">
+        {/* Dove sta andando il battuto: compare al primo pezzo, e si tocca
+            per spostarlo — «gli antipasti in seconda» senza aprire niente. */}
+        {qty > 0 && courseOf && onCourseTap && (
+          <button
+            type="button"
+            onClick={() => onCourseTap(d)}
+            aria-label={`Sposta ${d.name} in un'altra uscita`}
+            className="inline-flex h-11 flex-shrink-0 items-center whitespace-nowrap rounded-full bg-[var(--ds-surface-row)] px-3 text-[13px] font-semibold text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            {courseTag(courseOf(d))}
+          </button>
+        )}
         {canRemove && (
           // L'ultimo pezzo si toglie con il cestino, non con il meno: «meno
           // uno» da uno è togliere il piatto, e dirlo con l'icona giusta
@@ -237,28 +261,41 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {visible.length === 0 ? empty : visible.map(d => {
               const qty = qtyInCourse.get(d.id) ?? 0;
+              // Il chip dell'uscita è un FRATELLO in overlay, non un figlio:
+              // un bottone dentro il bottone della scheda non è HTML valido.
+              const tappableBadge = qty > 0 && courseOf && onCourseTap;
               return (
-                <button
-                  key={d.id}
-                  type="button"
-                  {...press(d)}
-                  className={`relative flex min-h-[76px] select-none flex-col justify-center gap-0.5 rounded-[16px] bg-[var(--ds-surface)] px-4 py-3 text-left shadow-[var(--ds-shadow-card)] transition-transform hover:bg-[var(--ds-surface-row)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
-                    qty > 0 ? 'ring-2 ring-[var(--ds-action-bg)]' : ''
-                  }`}
-                >
-                  <span className="truncate pr-8 text-[15px] font-semibold text-[var(--ds-text-primary)]">
-                    {d.name}
-                  </span>
-                  <span className="flex items-center gap-1 text-[14px] tabular-nums text-[var(--ds-text-muted)]">
-                    {euro(Math.round(Number(d.price) * 100))}
-                    {hasVariants(d.id) && <ChevronDown size={15} aria-hidden />}
-                  </span>
-                  {qty > 0 && (
+                <div key={d.id} className="relative">
+                  <button
+                    type="button"
+                    {...press(d)}
+                    className={`flex min-h-[76px] w-full select-none flex-col justify-center gap-0.5 rounded-[16px] bg-[var(--ds-surface)] px-4 py-3 text-left shadow-[var(--ds-shadow-card)] transition-transform hover:bg-[var(--ds-surface-row)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                      qty > 0 ? 'ring-2 ring-[var(--ds-action-bg)]' : ''
+                    }`}
+                  >
+                    <span className={`truncate text-[15px] font-semibold text-[var(--ds-text-primary)] ${tappableBadge ? 'pr-16' : 'pr-8'}`}>
+                      {d.name}
+                    </span>
+                    <span className="flex items-center gap-1 text-[14px] tabular-nums text-[var(--ds-text-muted)]">
+                      {euro(Math.round(Number(d.price) * 100))}
+                      {hasVariants(d.id) && <ChevronDown size={15} aria-hidden />}
+                    </span>
+                  </button>
+                  {qty > 0 && (tappableBadge ? (
+                    <button
+                      type="button"
+                      onClick={() => onCourseTap!(d)}
+                      aria-label={`Sposta ${d.name} in un'altra uscita`}
+                      className="absolute right-2.5 top-2.5 inline-flex h-9 items-center gap-1 whitespace-nowrap rounded-full bg-[var(--ds-action-bg)] px-2.5 text-[12px] font-semibold tabular-nums text-[var(--ds-action-fg)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    >
+                      {qty} · {courseTagShort(courseOf!(d))}
+                    </button>
+                  ) : (
                     <span className="absolute right-3 top-3 inline-flex h-6 min-w-[24px] items-center justify-center rounded-full bg-[var(--ds-action-bg)] px-1.5 text-[12px] font-semibold tabular-nums text-[var(--ds-action-fg)]">
                       {qty}
                     </span>
-                  )}
-                </button>
+                  ))}
+                </div>
               );
             })}
           </div>
