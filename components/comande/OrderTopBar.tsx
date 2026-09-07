@@ -230,11 +230,14 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
     return (
       <>
         <div className="flex items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
+          {/* Cerchio pieno in accent: la freccia nuda con sfondo solo in hover
+              era invisibile su touch, l'unico controllo della riga senza
+              forma. */}
           <button
             type="button"
             onClick={onBack}
             aria-label="Torna alla scelta del tavolo"
-            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <ArrowLeft size={20} />
           </button>
@@ -274,11 +277,13 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
     <>
       <div className="rounded-[20px] bg-[var(--ds-surface)] p-2.5 shadow-[var(--ds-shadow-card)]">
         <div className="flex items-center gap-1">
+          {/* Cerchio pieno in accent: su touch l'hover non esiste, quindi la
+              freccia senza sfondo non leggeva come bersaglio. */}
           <button
             type="button"
             onClick={onBack}
             aria-label="Torna alla scelta del tavolo"
-            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             <ArrowLeft size={20} />
           </button>
