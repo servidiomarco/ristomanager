@@ -585,7 +585,7 @@ export async function createReservation(
         const reservationLabel = d.reservationPushLabel(d.asUtcInstant(created.reservation_time));
         d.pushSendToRoles(
             tenantId,
-            ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
+            ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER'],
             {
                 category: 'reservation',
                 title: channel.pushTitles.created,
@@ -770,7 +770,7 @@ export async function cancelReservation(
         const reservationLabel = d.reservationPushLabel(d.asUtcInstant(cancelled.reservation_time));
         d.pushSendToRoles(
             tenantId,
-            ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
+            ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER'],
             {
                 category: 'reservation',
                 title: channel.pushTitles.cancelled,
@@ -979,7 +979,7 @@ export async function modifyReservation(
         const reservationLabel = d.reservationPushLabel(d.asUtcInstant(after.reservation_time));
         d.pushSendToRoles(
             tenantId,
-            ['OWNER', 'GENERAL_MANAGER', 'MANAGER'],
+            ['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'WAITER'],
             {
                 category: 'reservation',
                 title: channel.pushTitles.modified,
