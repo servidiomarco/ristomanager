@@ -97,6 +97,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
   const [fiscalReady, setFiscalReady] = useState(false);
   // L'importo scelto in «Dividi conto»: precompila il pannello di incasso.
   const [quotaCents, setQuotaCents] = useState<number | null>(null);
+  const [quotaItemUnits, setQuotaItemUnits] = useState<{ order_item_id: number; units: number }[] | null>(null);
   const [esito, setEsito] = useState<{ kind: Esito; bill: OpenBillRow } | null>(null);
 
   // L'emissione dello scontrino è asincrona: l'esito si apre spesso col
@@ -473,6 +474,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
     setEsito(null);
     setPayingBill(null);
     setQuotaCents(null);
+    setQuotaItemUnits(null);
     setOrder(null);
     setTableId(null);
     setError(null);
@@ -814,7 +816,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
           bill={payingBill}
           residualCents={payingBill.residual_cents}
           onBack={() => setScreen('payment')}
-          onUseAmount={cents => { setQuotaCents(cents); setScreen('payment'); }}
+          onUseAmount={(cents, itemUnits) => { setQuotaCents(cents); setQuotaItemUnits(itemUnits ?? null); setScreen('payment'); }}
         />
       ) : screen === 'payment' && payingBill ? (
         <Pagamento
@@ -825,6 +827,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
           onBack={() => { setScreen(order ? 'table' : 'queue'); setError(null); }}
           onSettle={opts => settle(payingBill, opts)}
           quotaCents={quotaCents}
+          quotaItemUnits={quotaItemUnits}
           onSplit={() => setScreen('split')}
           onShowQr={() => setOpenBill(payingBill)}
           onDiscount={() => setBillDiscountOpen(true)}

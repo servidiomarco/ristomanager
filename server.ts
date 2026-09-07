@@ -5429,6 +5429,18 @@ function parseStaffBillPayment(raw: any): { method: string; amount_cents: number
         return { error: 'amount_cents must be a positive integer' };
     }
     const meta = raw?.meta && typeof raw.meta === 'object' && !Array.isArray(raw.meta) ? raw.meta : null;
+    // meta.item_units = [{order_item_id, units}]: quali piatti copre questo
+    // incasso (quota «per piatti» della cassa). Solo memoria per non
+    // riproporli al giro dopo — il denaro resta l'amount, come sempre.
+    if (meta && meta.item_units !== undefined) {
+        const ius = Array.isArray(meta.item_units) ? meta.item_units : null;
+        if (!ius || ius.some((u: any) =>
+            !u || !Number.isInteger(Number(u.order_item_id)) || Number(u.order_item_id) <= 0
+               || !Number.isInteger(Number(u.units)) || Number(u.units) <= 0)) {
+            return { error: 'meta.item_units must be an array of {order_item_id, units} with positive integers' };
+        }
+        meta.item_units = ius.map((u: any) => ({ order_item_id: Number(u.order_item_id), units: Number(u.units) }));
+    }
     return { method, amount_cents: amount, meta };
 }
 
@@ -7832,6 +7844,18 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => runAsPlatform(async
         for (const r of claimedItemRows.rows) {
             for (const id of (Array.isArray(r.item_ids) ? r.item_ids : [])) takenItemIds.add(Number(id));
         }
+        // Anche i piatti coperti da un incasso staff (quota «per piatti» in
+        // cassa) sono presi — pure a riga parziale: la quota dal QR prende la
+        // riga intera e farebbe ripagare la parte già incassata.
+        const staffItemRows = await queryWithRetry(
+            `SELECT meta->'item_units' AS item_units FROM table_bill_payments
+             WHERE table_bill_id = $1 AND voided_at IS NULL
+               AND jsonb_typeof(meta->'item_units') = 'array'`,
+            [bill.id]
+        );
+        for (const r of staffItemRows.rows) {
+            for (const u of (Array.isArray(r.item_units) ? r.item_units : [])) takenItemIds.add(Number(u?.order_item_id));
+        }
         const billItems: any[] = Array.isArray(bill.items) ? bill.items : [];
         const itemsSum = billItems.reduce(
             (n: number, i: any) => n + Number(i.unit_price_cents || 0) * Number(i.qty || 0), 0
@@ -8068,6 +8092,17 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
             const taken = new Set<number>();
             for (const r of takenRs.rows) {
                 for (const id of (Array.isArray(r.item_ids) ? r.item_ids : [])) taken.add(Number(id));
+            }
+            // …e nemmeno un piatto già coperto (anche in parte) da un incasso
+            // staff: la quota dal QR prende la riga intera.
+            const staffTakenRs = await client.query(
+                `SELECT meta->'item_units' AS item_units FROM table_bill_payments
+                 WHERE table_bill_id = $1 AND voided_at IS NULL
+                   AND jsonb_typeof(meta->'item_units') = 'array'`,
+                [bill.id]
+            );
+            for (const r of staffTakenRs.rows) {
+                for (const u of (Array.isArray(r.item_units) ? r.item_units : [])) taken.add(Number(u?.order_item_id));
             }
             const conflict = requested.filter((id: number) => taken.has(id));
             if (conflict.length > 0) {
@@ -30303,10 +30338,53 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
             [staleDate, staleShift, req.tenantId!]
         );
 
+        // Piatti già coperti, per conto: dalle quote ospite con item_ids (la
+        // riga intera) e dagli incassi staff con meta.item_units (anche a
+        // unità). Il dividi conto «per piatti» li legge per non riproporre
+        // quello che è già stato pagato.
+        const billIds = rows.rows.map((b: any) => b.id);
+        const takenByBill = new Map<number, Map<number, number>>();
+        const addTaken = (billId: number, oid: number, units: number) => {
+            if (!Number.isFinite(oid) || !Number.isFinite(units) || units <= 0) return;
+            const m = takenByBill.get(billId) ?? new Map<number, number>();
+            m.set(oid, (m.get(oid) ?? 0) + units);
+            takenByBill.set(billId, m);
+        };
+        if (billIds.length > 0) {
+            const staffUnits = await queryWithRetry(
+                `SELECT table_bill_id, meta->'item_units' AS item_units
+                 FROM table_bill_payments
+                 WHERE table_bill_id = ANY($1::int[]) AND tenant_id = $2 AND voided_at IS NULL
+                   AND jsonb_typeof(meta->'item_units') = 'array'`,
+                [billIds, req.tenantId!]
+            );
+            for (const r of staffUnits.rows) {
+                for (const u of (Array.isArray(r.item_units) ? r.item_units : [])) {
+                    addTaken(r.table_bill_id, Number(u?.order_item_id), Number(u?.units));
+                }
+            }
+            const splitUnits = await queryWithRetry(
+                `SELECT table_bill_id, item_ids FROM table_bill_splits
+                 WHERE table_bill_id = ANY($1::int[]) AND tenant_id = $2
+                   AND status IN ('CLAIMED','PAID') AND item_ids IS NOT NULL`,
+                [billIds, req.tenantId!]
+            );
+            const itemsByBill = new Map<number, any[]>(rows.rows.map((b: any) => [b.id, Array.isArray(b.items) ? b.items : []]));
+            for (const r of splitUnits.rows) {
+                const snapshot = itemsByBill.get(r.table_bill_id) ?? [];
+                for (const id of (Array.isArray(r.item_ids) ? r.item_ids : [])) {
+                    const it = snapshot.find((i: any) => Number(i.order_item_id) === Number(id));
+                    addTaken(r.table_bill_id, Number(id), Number(it?.qty ?? 1));
+                }
+            }
+        }
+
         res.json({
             service,
             bills: rows.rows.map((b: any) => ({
                 ...b,
+                item_taken_units: [...(takenByBill.get(b.id) ?? new Map())]
+                    .map(([order_item_id, units]) => ({ order_item_id, units })),
                 service_date: b.service_date instanceof Date
                     ? b.service_date.toISOString().slice(0, 10)
                     : b.service_date,
