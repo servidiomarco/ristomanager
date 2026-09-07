@@ -42,6 +42,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
   const [loadError, setLoadError] = useState<string | null>(null);
   const [screen, setScreen] = useState<Screen>('payment');
   const [quotaCents, setQuotaCents] = useState<number | null>(null);
+  const [quotaItemUnits, setQuotaItemUnits] = useState<{ order_item_id: number; units: number }[] | null>(null);
   const [esito, setEsito] = useState<{ kind: Esito; bill: OpenBillRow } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -261,7 +262,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
           bill={bill}
           residualCents={bill.residual_cents}
           onBack={() => setScreen('payment')}
-          onUseAmount={cents => { setQuotaCents(cents); setScreen('payment'); }}
+          onUseAmount={(cents, itemUnits) => { setQuotaCents(cents); setQuotaItemUnits(itemUnits ?? null); setScreen('payment'); }}
         />
       ) : (
         <Pagamento
@@ -270,6 +271,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
           error={error}
           fiscalReady={fiscalReady}
           quotaCents={quotaCents}
+          quotaItemUnits={quotaItemUnits}
           onBack={onClose}
           onSettle={settle}
           onSplit={() => setScreen('split')}

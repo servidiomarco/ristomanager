@@ -32,8 +32,9 @@ interface DividiContoProps {
   /** Il residuo corrente, già al netto di quello che è entrato. */
   residualCents: number;
   onBack: () => void;
-  /** Porta l'importo scelto al pannello di incasso. */
-  onUseAmount: (cents: number) => void;
+  /** Porta l'importo scelto al pannello di incasso; per la quota «per piatti»
+   *  anche le unità spuntate, che l'incasso ricorda in meta.item_units. */
+  onUseAmount: (cents: number, itemUnits?: { order_item_id: number; units: number }[]) => void;
 }
 
 export const DividiConto: React.FC<DividiContoProps> = ({
@@ -63,6 +64,14 @@ export const DividiConto: React.FC<DividiContoProps> = ({
     [items]
   );
   const perItemAvailable = items.length > 0 && itemsSum === bill.total_cents;
+  // Unità già coperte per riga (quote dal QR e incassi «per piatti»
+  // precedenti): quelle non si ripropongono.
+  const takenOf = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const t of bill.item_taken_units ?? []) m.set(t.order_item_id, t.units);
+    return (it: { qty: number; order_item_id?: number }) =>
+      Math.min(it.qty, it.order_item_id != null ? (m.get(it.order_item_id) ?? 0) : 0);
+  }, [bill.item_taken_units]);
   // Unità scelte per riga (una riga da 3 coperti si prende anche a metà:
   // «due dei quattro caffè li paga lui»). Il conto ricaricato azzera la
   // scelta: il residuo è cambiato sotto, meglio ripartire che sbagliare.
@@ -71,9 +80,15 @@ export const DividiConto: React.FC<DividiContoProps> = ({
   const pickedSum = items.reduce((n, i, ix) => n + (picked[ix] ?? 0) * i.unit_price_cents, 0);
   const pickedCount = picked.reduce((n, u) => n + u, 0);
   const bump = (ix: number, delta: number) => setPicked(p =>
-    p.map((u, i) => i === ix ? Math.max(0, Math.min(items[ix].qty, u + delta)) : u));
+    p.map((u, i) => i === ix ? Math.max(0, Math.min(items[ix].qty - takenOf(items[ix]), u + delta)) : u));
   const toggleRow = (ix: number) => setPicked(p =>
-    p.map((u, i) => i === ix ? (u > 0 ? 0 : items[ix].qty) : u));
+    p.map((u, i) => i === ix ? (u > 0 ? 0 : items[ix].qty - takenOf(items[ix])) : u));
+  // La spunta viaggia con l'incasso solo se copre esattamente l'importo: se
+  // il residuo la taglia, non si sa più quali piatti sono davvero coperti.
+  const pickedUnits = pickedSum <= residualCents
+    ? items.flatMap((it, ix) => (picked[ix] ?? 0) > 0 && it.order_item_id != null
+        ? [{ order_item_id: it.order_item_id, units: picked[ix] }] : [])
+    : [];
 
   const chosen = mode === 'equal' ? perPart
     : mode === 'amount' ? Math.min(typed, residualCents)
@@ -190,6 +205,26 @@ export const DividiConto: React.FC<DividiContoProps> = ({
             <div className="space-y-1.5">
               {items.map((it, ix) => {
                 const units = picked[ix] ?? 0;
+                const taken = takenOf(it);
+                const remaining = it.qty - taken;
+                if (remaining <= 0) {
+                  return (
+                    <div key={ix} className="flex min-h-[44px] items-center gap-3 rounded-[14px] bg-[var(--ds-surface-row)] px-3 py-1.5 opacity-60">
+                      <span className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-border-strong)] text-white">
+                        <Check size={12} />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[14px] font-medium text-[var(--ds-text-secondary)]">
+                          {it.qty > 1 ? `${it.qty}× ` : ''}{it.name}
+                        </span>
+                        <span className="block text-[12px] text-[var(--ds-text-muted)]">già pagata</span>
+                      </span>
+                      <span className="flex-shrink-0 text-[13px] tabular-nums text-[var(--ds-text-muted)]">
+                        {euro(it.unit_price_cents * it.qty)}
+                      </span>
+                    </div>
+                  );
+                }
                 return (
                   <div
                     key={ix}
@@ -213,14 +248,14 @@ export const DividiConto: React.FC<DividiContoProps> = ({
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[14px] font-medium text-[var(--ds-text-primary)]">
-                          {it.qty > 1 ? `${it.qty}× ` : ''}{it.name}
+                          {remaining > 1 ? `${remaining}× ` : ''}{it.name}
                         </span>
                         <span className="block text-[12px] tabular-nums text-[var(--ds-text-muted)]">
-                          {euro(it.unit_price_cents)}{it.qty > 1 ? ' l’uno' : ''}
+                          {euro(it.unit_price_cents)}{remaining > 1 ? ' l’uno' : ''}{taken > 0 ? ` · ${taken} già ${taken === 1 ? 'pagato' : 'pagati'}` : ''}
                         </span>
                       </span>
                     </button>
-                    {it.qty > 1 && (
+                    {remaining > 1 && (
                       <div className="flex flex-shrink-0 items-center gap-1 rounded-full bg-[var(--ds-surface)] px-1.5 py-1">
                         <button
                           type="button"
@@ -232,12 +267,12 @@ export const DividiConto: React.FC<DividiContoProps> = ({
                           <Minus size={14} />
                         </button>
                         <span className="min-w-[34px] text-center text-[13px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
-                          {units}/{it.qty}
+                          {units}/{remaining}
                         </span>
                         <button
                           type="button"
                           onClick={() => bump(ix, 1)}
-                          disabled={units >= it.qty}
+                          disabled={units >= remaining}
                           aria-label={`Un ${it.name} in più`}
                           className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
                         >
@@ -277,7 +312,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
             </div>
             <button
               type="button"
-              onClick={() => onUseAmount(chosen)}
+              onClick={() => onUseAmount(chosen, mode === 'items' && pickedUnits.length > 0 ? pickedUnits : undefined)}
               disabled={chosen <= 0}
               className="inline-flex h-11 flex-shrink-0 items-center rounded-full bg-[var(--ds-action-bg)] px-5 text-[15px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
             >
