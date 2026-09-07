@@ -127,7 +127,10 @@ class AuthApiService {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Content-Type': 'application/json'
-          }
+          },
+          // Col refresh token il server spegne SOLO la sessione di questo
+          // dispositivo: gli altri palmari sullo stesso account restano dentro.
+          body: JSON.stringify({ refreshToken: this.getRefreshToken() })
         });
       } catch {
         // Ignore errors during logout
@@ -169,8 +172,15 @@ class AuthApiService {
         });
 
         if (!response.ok) {
-          this.clearAuth();
-          this.triggerSessionExpired();
+          // Solo un rifiuto ESPLICITO del server (token revocato o scaduto)
+          // chiude la sessione. Un 5xx — Railway che riavvia, un deploy — è
+          // transitorio: i token restano e il prossimo tentativo riprova.
+          // Per mesi qualunque risposta non-ok buttava fuori, ed era uno dei
+          // logout "a caso" durante il servizio.
+          if (response.status === 400 || response.status === 401 || response.status === 403) {
+            this.clearAuth();
+            this.triggerSessionExpired();
+          }
           return false;
         }
 
@@ -182,8 +192,8 @@ class AuthApiService {
 
         return true;
       } catch {
-        this.clearAuth();
-        this.triggerSessionExpired();
+        // Errore di rete (WiFi del ristorante): nessun logout, il refresh
+        // token in storage è ancora valido e riproveremo.
         return false;
       } finally {
         this.isRefreshing = false;
@@ -199,6 +209,48 @@ class AuthApiService {
       };
     }
     return null;
+  }
+
+  // Scadenza dell'access token, letta dal claim exp del JWT (il payload è
+  // base64url, non cifrato). null se il token manca o non si decodifica.
+  private accessTokenExpiryMs(): number | null {
+    const token = this.getAccessToken();
+    if (!token) return null;
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      return typeof payload.exp === 'number' ? payload.exp * 1000 : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // Rinnova se l'access token è scaduto o sta per scadere. Chiamato dal
+  // session keeper: rinnovare in anticipo evita che la scadenza cada nel
+  // mezzo di un'azione (il 401+retry funziona, ma il socket resta giù
+  // finché qualcuno non rifà una richiesta).
+  async refreshIfExpiring(): Promise<void> {
+    if (!this.getRefreshToken()) return;
+    const expiry = this.accessTokenExpiryMs();
+    if (expiry !== null && expiry - Date.now() > 30 * 60 * 1000) return;
+    await this.refreshToken();
+  }
+
+  // Tiene viva la sessione durante il servizio: controllo ogni minuto, più
+  // un controllo immediato quando il dispositivo si risveglia (palmare con
+  // lo schermo spento per ore) o torna in rete — i timer in background sui
+  // tablet vengono sospesi, gli eventi no. Ritorna la funzione di stop.
+  startSessionKeeper(): () => void {
+    const check = () => { void this.refreshIfExpiring(); };
+    const interval = window.setInterval(check, 60 * 1000);
+    const onVisible = () => { if (!document.hidden) check(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', check);
+    check();
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', check);
+    };
   }
 
   // Get current user from API

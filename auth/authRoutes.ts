@@ -93,7 +93,9 @@ router.post('/logout', authenticate, async (req: Request, res: Response) => {
         req.user.email
       );
 
-      await AuthService.logout(req.user.userId);
+      // Col refreshToken nel body si chiude solo la sessione di questo
+      // dispositivo; senza, tutte (vedi AuthService.logout).
+      await AuthService.logout(req.user.userId, req.body?.refreshToken);
     }
     res.json({ success: true });
   } catch (error) {
