@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowUpDown, Ban, ChevronUp, ChevronsUpDown, Loader2, Pencil, Plus, Send, SendHorizontal } from 'lucide-react';
+import { ArrowUpDown, Ban, ChevronUp, ChevronsUpDown, Loader2, Plus, Send, SendHorizontal } from 'lucide-react';
 import { CourseChips } from './CourseChips';
 import type { OrderItem, OrderWithItems } from '../../types';
 import { StatusPill } from '../ds';
@@ -371,20 +371,9 @@ export const CourseList: React.FC<CourseListProps> = ({
                     {euro(cartUnitCents(l) * l.qty)}
                   </span>
                   <div className="flex flex-shrink-0 items-center gap-1">
-                    {/* Solo matita e maniglia (chiesto da Marco): quantità,
-                        varianti ed elimina vivono nel foglio di riga che la
-                        matita (o il nome) apre — la riga resta al nome. */}
-                    {onEditLine && (
-                      <button
-                        type="button"
-                        onClick={() => onEditLine(l)}
-                        aria-label={`Modifica ${l.dish.name}: quantità, varianti, elimina`}
-                        title="Quantità, varianti, elimina"
-                        className={stepper}
-                      >
-                        <Pencil size={15} />
-                      </button>
-                    )}
+                    {/* Niente matita: il tocco sul nome apre già il foglio di
+                        riga (quantità, varianti, elimina). Resta solo la
+                        maniglia di spostamento. */}
                     {onMoveLine && (
                       <button
                         type="button"
