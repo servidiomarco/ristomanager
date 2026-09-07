@@ -472,9 +472,11 @@ export interface BillPayment {
   void_reason: string | null;
 }
 
-// Riga della chiusura di cassa giornaliera: totale incassato per metodo.
+// Riga della chiusura di cassa giornaliera: totale incassato per metodo e
+// turno (il client somma i turni quando la vista è «Tutti»).
 export interface CashClosureMethodRow {
   method: BillPaymentMethod;
+  shift: 'LUNCH' | 'DINNER';
   amount_cents: number;
   movements: number;
 }

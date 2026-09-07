@@ -332,7 +332,8 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 - Alla ricezione del pagamento il cliente riceve la conferma e lo stato si aggiorna ovunque in tempo reale.
 
 **Chiusura di cassa (tab "Chiusura" in Pagamenti)**
-- Report giornaliero per **metodo di pagamento** (Contanti, Online, Satispay, Buoni pasto, Gift card, Omaggio, Sospeso) e per **documento** (Scontrino, Fattura, Proforma, Senza documento), più mance, acconti maturati e ammanchi. Sotto il totale, i **coperti serviti** del giorno, divisi fra pranzo e cena. Filtro per turno; storni esclusi dai totali. Consultabile per qualunque data passata col datepicker della barra in alto.
+- Report giornaliero per **metodo di pagamento** (Contanti, Online, Satispay, Buoni pasto, Gift card, Omaggio, Sospeso) e per **documento** (Scontrino, Fattura, Proforma, Senza documento), più mance, acconti maturati e ammanchi. Sotto il totale, i **coperti serviti**. Il toggle turno della barra in alto governa tutta la pagina: **Pranzo**, **Cena** o **Tutti** — incassi, coperti (con la divisione pranzo · cena in vista Tutti) e lista dei conti. Storni esclusi dai totali; consultabile per qualunque data passata col datepicker.
+- Il giorno del report è il **giorno di servizio**: la cena incassata dopo mezzanotte resta nella serata a cui appartiene, non scivola nel giorno dopo. Vale anche per un sospeso saldato a distanza di giorni — torna sulla serata del suo conto.
 - Se sul giorno restano conti con un residuo, il report li conta e li rimanda alla Cassa ("Apri la Cassa"); il KPI **Residuo conti** in testa alla pagina dice quanto manca all'appello.
 - Un tocco su un conto chiuso apre la sua **scheda** nel pannello, con lo **scontrino elettronico**: emetti su un conto senza documento, riprova un'emissione fallita, annulla, passa a fattura.
 
@@ -581,6 +582,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-07 | Pagamenti, conto al tavolo e cassa | La chiusura di cassa segue il toggle turno della topbar su tutta la pagina (incassi e coperti compresi: Pranzo, Cena o Tutti), e il giorno del report è il giorno di servizio — la cena incassata dopo mezzanotte resta nella sua serata invece di scivolare nel giorno dopo. |
 | 2026-09-07 | Pagamenti, conto al tavolo e cassa | La card «Incassi del giorno» della chiusura di cassa mostra anche i coperti serviti, sotto il totale: il numero del giorno con accanto la divisione pranzo · cena. |
 | 2026-09-06 | Comande, Cucina e Passe | La regola «l'uscita Bar non passa dai monitor di cucina» si estende ai Dolci e al monitor senza partita: le due uscite fuori numerazione non compaiono più su nessun monitor di cucina (coda, card a binario, barra dei piatti, Consegnate) — restano solo dove le loro righe sono lavoro assegnato alla partita (es. un monitor Bar). |
 | 2026-09-06 | Notifiche | Le notifiche push di prenotazione (nuova, annullata, modificata — dal CRM, dal sito e dai canali dell'agente) arrivano anche al ruolo cameriere, prima erano dei soli responsabili. |

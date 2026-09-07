@@ -67,8 +67,8 @@ const docPill = (b: CashClosureBillRow) => {
 
 export const ChiusuraCassa: React.FC<{
   date?: string;
-  /** Turno dalla topbar: filtra la lista dei conti (i totali per metodo
-   *  restano dell'intera giornata — è la cassa che si conta a fine serata). */
+  /** Turno dalla topbar: filtra incassi, coperti e lista dei conti.
+   *  Assente = «Tutti», l'intera giornata di servizio. */
   shift?: 'LUNCH' | 'DINNER';
   /** Conti con ancora un residuo: qui sono solo un rimando — si incassano
    *  in Cassa, non da questa pagina. */
@@ -124,18 +124,31 @@ export const ChiusuraCassa: React.FC<{
     return c;
   }, [bills]);
   const visibleBills = docFilter === 'all' ? bills : bills.filter(b => docKind(b) === docFilter);
-  // I coperti del giorno dai conti chiusi, divisi per turno. Sempre l'intera
-  // giornata, come i totali per metodo: la card è la cassa che si conta a
-  // fine serata, non segue il toggle della topbar.
+  // Gli incassi per metodo del turno in vista (il server li manda divisi per
+  // turno; con «Tutti» qui si sommano). Stessa logica per i coperti, dai
+  // conti chiusi: la card dice sempre quello che il toggle della topbar
+  // sta chiedendo — pranzo, cena o l'intera giornata di servizio.
+  const methods = useMemo(() => {
+    const rows = (report?.methods ?? []).filter(m => !shift || m.shift === shift);
+    const byMethod = new Map<string, { method: string; amount_cents: number; movements: number }>();
+    for (const m of rows) {
+      const cur = byMethod.get(m.method) ?? { method: m.method, amount_cents: 0, movements: 0 };
+      cur.amount_cents += m.amount_cents;
+      cur.movements += m.movements;
+      byMethod.set(m.method, cur);
+    }
+    return [...byMethod.values()].sort((a, b) => b.amount_cents - a.amount_cents);
+  }, [report, shift]);
+  const totalCents = methods.reduce((n, m) => n + m.amount_cents, 0);
   const covers = useMemo(() => {
     const sum = (rows: CashClosureBillRow[]) => rows.reduce((n, b) => n + (b.covers || 0), 0);
     const all = report?.bills ?? [];
     return {
       lunch: sum(all.filter(b => b.shift === 'LUNCH')),
       dinner: sum(all.filter(b => b.shift === 'DINNER')),
-      total: sum(all),
+      total: sum(shift ? all.filter(b => b.shift === shift) : all),
     };
-  }, [report]);
+  }, [report, shift]);
   // Con "Tutti" i turni in vista, le righe si raggruppano per turno: lo
   // stesso numero di tavolo esiste a pranzo E a cena, e senza sezioni la
   // lista del giorno sembrerebbe piena di doppioni.
@@ -151,7 +164,6 @@ export const ChiusuraCassa: React.FC<{
   }
   if (!report) return null;
 
-  const hasMovements = report.methods.length > 0;
 
   return (
     <div className="space-y-3">
@@ -177,10 +189,10 @@ export const ChiusuraCassa: React.FC<{
         </Callout>
       )}
 
-      <FormCard title={`Incassi del ${report.date.split('-').reverse().join('/')}`}>
-        {hasMovements ? (
+      <FormCard title={`Incassi del ${report.date.split('-').reverse().join('/')}${shift ? ` · ${shift === 'LUNCH' ? 'pranzo' : 'cena'}` : ''}`}>
+        {methods.length > 0 ? (
           <dl className="space-y-1.5 text-[14px]">
-            {report.methods.map(m => (
+            {methods.map(m => (
               <div key={m.method} className="flex justify-between text-[var(--ds-text-secondary)]">
                 <dt>
                   {METHOD_LABELS[m.method] ?? m.method}
@@ -191,16 +203,16 @@ export const ChiusuraCassa: React.FC<{
             ))}
             <div className="flex justify-between border-t border-[var(--ds-border)] pt-1.5 font-semibold text-[var(--ds-text-primary)]">
               <dt>Totale</dt>
-              <dd className="tabular-nums">{formatEuro(report.total_cents)}</dd>
+              <dd className="tabular-nums">{formatEuro(totalCents)}</dd>
             </div>
             {/* I coperti serviti accanto agli incassi: è il numero che dà il
-                senso al totale (lo scontrino medio si fa a mente). Divisi per
-                turno quando il giorno ne ha due. */}
+                senso al totale (lo scontrino medio si fa a mente). Con
+                «Tutti» in vista, la divisione pranzo · cena accanto. */}
             {covers.total > 0 && (
               <div className="flex justify-between border-t border-[var(--ds-border)] pt-1.5 text-[var(--ds-text-secondary)]">
                 <dt>
                   Coperti
-                  {covers.lunch > 0 && covers.dinner > 0 && (
+                  {!shift && covers.lunch > 0 && covers.dinner > 0 && (
                     <span className="ml-1.5 text-[12px] tabular-nums text-[var(--ds-text-muted)]">
                       pranzo {covers.lunch} · cena {covers.dinner}
                     </span>
@@ -211,7 +223,9 @@ export const ChiusuraCassa: React.FC<{
             )}
           </dl>
         ) : (
-          <p className="text-[14px] text-[var(--ds-text-muted)]">Nessun incasso registrato.</p>
+          <p className="text-[14px] text-[var(--ds-text-muted)]">
+            {shift ? `Nessun incasso a ${shift === 'LUNCH' ? 'pranzo' : 'cena'}.` : 'Nessun incasso registrato.'}
+          </p>
         )}
       </FormCard>
 
