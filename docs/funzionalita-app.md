@@ -301,7 +301,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 **Cassa (banco del cassiere)**
 - Modulo dedicato sotto Servizio: **coda dei conti del servizio** con contatore tavoli, tavolo attivo con comanda, cliente della visita, incasso e chiusura fiscale in un'unica vista.
 - **Sessione di cassa** per servizio: fondo iniziale, movimenti, contato a fine turno con differenza e nota obbligatoria; transazioni del servizio consultabili.
-- Pannello di incasso completo: più metodi sullo stesso conto (contanti, POS, Satispay, buoni pasto, gift card, sospeso, omaggio), resto calcolato, mancia, dividi conto, QR pay-at-table, scelta del documento (scontrino / proforma / fattura).
+- Pannello di incasso completo: più metodi sullo stesso conto (contanti, POS, Satispay, buoni pasto, gift card, sospeso, omaggio), resto calcolato, mancia, dividi conto — in parti uguali, per importo o **per piatti** (si spunta cosa ha preso la persona, anche metà di una riga da più pezzi, e la quota si calcola da sola; come dal QR, solo sui conti senza sconto) —, QR pay-at-table, scelta del documento (scontrino / proforma / fattura).
 - **Sconto sul conto** anche in fase di incasso (percentuale o importo, con motivazione obbligatoria e nome di chi lo concede): a comanda chiusa lo sconto vive sul conto, si somma agli eventuali sconti di comanda, e compare come riga negativa su schermo e sul preconto stampato — così le righe tornano col totale. Non si scende mai sotto il già incassato (lì serve un rimborso) e un conto aperto a mano non si sconta: il totale lì è digitato. Uno sconto pari all'intero conto porta il totale a zero: il conto si chiude saldato senza incassare nulla, registrato come proforma (un documento fiscale da 0 € non esiste).
 - **Correggi conto**: se il cliente contesta una portata mai ricevuta, dal pagamento si apre l'elenco righe e si storna quella sbagliata con motivazione — il totale si riallinea da solo, anche a comanda già chiusa.
 - Ruolo dedicato **CASSA** e permessi `cash:*`; "Apri in Comande" porta al tavolo per lavorare uscite e lanci.
@@ -583,6 +583,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-07 | Pagamenti, conto al tavolo e cassa | «Per piatti» nel dividi conto della cassa: si spuntano i piatti che la persona ha preso (anche una parte di una riga da più pezzi) e la quota si calcola da sola, come già dal QR al tavolo. Solo sui conti senza sconto, dove le righe quadrano col totale. |
 | 2026-09-07 | Utenti, ruoli e permessi | Sessioni per dispositivo: più device sullo stesso account convivono, il rinnovo dei token è anticipato e tollera blip di rete e riavvii del server (niente più logout a metà servizio), il logout scollega solo il dispositivo da cui è fatto. |
 | 2026-09-07 | Fiscalità | Nel registro documenti ogni giorno porta in testata il totale del filtro attivo («Tot.»): con la chip Proforma selezionata, accanto a «domenica 6 settembre» c'è il totale delle proforma di quel giorno. Calcolato sul periodo intero, giusto anche quando la lista pagina. |
 | 2026-09-07 | Pagamenti, conto al tavolo e cassa | Riga «Giornata» sotto i tab Chiusura/Link: totale incassato e coperti dell'intero giorno di servizio, sempre a vista qualunque turno o tab sia selezionato. |

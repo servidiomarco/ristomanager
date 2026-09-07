@@ -1,7 +1,7 @@
-import React, { useMemo, useState } from 'react';
-import { ArrowLeft, Minus, Plus } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, Check, Minus, Plus } from 'lucide-react';
 import type { OpenBillRow } from '../../services/billsApiService';
-import { Callout, StatusPill } from '../ds';
+import { StatusPill } from '../ds';
 import { euro } from './cassaView';
 
 /* ── Passo 4a · dividi conto ──────────────────────────────────────────────
@@ -17,11 +17,15 @@ import { euro } from './cassaView';
    qui perché spiegano perché il residuo è più basso, ma non si toccano — una
    quota prenotata da un telefono scade da sola.
 
-   Per articolo non c'è: resta dal QR, lato ospite (docs/cassa-plan.md §12).
-   Due piastrelle e non tre disabilitate — una terza spenta con una spiegazione
-   accanto genera una telefonata, la sua assenza no. */
+   «Per piatti» segue lo stesso modello: la spunta dei piatti è solo la
+   calcolatrice della quota — niente claim persistito, l'importo arriva al
+   pannello come ogni altra quota. Vale la stessa regola del QR: righe che
+   quadrano col totale, altrimenti la piastrella non c'è (con uno sconto in
+   mezzo, pagare «la propria riga» addebiterebbe più del dovuto) — una
+   piastrella spenta con una spiegazione accanto genera una telefonata, la
+   sua assenza no. */
 
-type Mode = 'equal' | 'amount';
+type Mode = 'equal' | 'amount' | 'items';
 
 interface DividiContoProps {
   bill: OpenBillRow;
@@ -51,7 +55,29 @@ export const DividiConto: React.FC<DividiContoProps> = ({
     return Number.isFinite(n) && n > 0 ? Math.round(n * 100) : 0;
   }, [amount]);
 
-  const chosen = mode === 'equal' ? perPart : Math.min(typed, residualCents);
+  // Per piatti: la stessa regola del QR — serve il dettaglio righe e la somma
+  // deve quadrare col totale (uno sconto sul conto la fa divergere).
+  const items = useMemo(() => bill.items ?? [], [bill.items]);
+  const itemsSum = useMemo(
+    () => items.reduce((n, i) => n + i.unit_price_cents * i.qty, 0),
+    [items]
+  );
+  const perItemAvailable = items.length > 0 && itemsSum === bill.total_cents;
+  // Unità scelte per riga (una riga da 3 coperti si prende anche a metà:
+  // «due dei quattro caffè li paga lui»). Il conto ricaricato azzera la
+  // scelta: il residuo è cambiato sotto, meglio ripartire che sbagliare.
+  const [picked, setPicked] = useState<number[]>(() => items.map(() => 0));
+  useEffect(() => { setPicked(items.map(() => 0)); }, [items]);
+  const pickedSum = items.reduce((n, i, ix) => n + (picked[ix] ?? 0) * i.unit_price_cents, 0);
+  const pickedCount = picked.reduce((n, u) => n + u, 0);
+  const bump = (ix: number, delta: number) => setPicked(p =>
+    p.map((u, i) => i === ix ? Math.max(0, Math.min(items[ix].qty, u + delta)) : u));
+  const toggleRow = (ix: number) => setPicked(p =>
+    p.map((u, i) => i === ix ? (u > 0 ? 0 : items[ix].qty) : u));
+
+  const chosen = mode === 'equal' ? perPart
+    : mode === 'amount' ? Math.min(typed, residualCents)
+    : Math.min(pickedSum, residualCents);
   const after = Math.max(0, residualCents - chosen);
 
   const deposit = bill.deposit_credit_cents ?? 0;
@@ -79,7 +105,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
       </div>
 
       <div className="mx-auto w-full min-h-0 max-w-[900px] flex-1 space-y-4 overflow-y-auto px-4 pb-6 lg:px-8">
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className={`grid gap-3 ${perItemAvailable ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
           <button
             type="button"
             onClick={() => setMode('equal')}
@@ -111,6 +137,26 @@ export const DividiConto: React.FC<DividiContoProps> = ({
               es. {euro(Math.min(1000, residualCents))} su {euro(residualCents)}
             </div>
           </button>
+
+          {perItemAvailable && (
+            <button
+              type="button"
+              onClick={() => setMode('items')}
+              className={`rounded-[20px] p-4 text-left transition-colors ${
+                mode === 'items'
+                  ? 'bg-[var(--ds-arriving-tint)] ring-2 ring-[var(--ds-arriving-solid)]'
+                  : 'bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] hover:bg-[var(--ds-surface-row)]'
+              }`}
+            >
+              <div className="text-[16px] font-semibold text-[var(--ds-text-primary)]">Per piatti</div>
+              <div className="mt-0.5 text-[13px] text-[var(--ds-text-muted)]">spunta cosa ha preso</div>
+              <div className="mt-2 text-[13px] font-medium text-[var(--ds-arriving-text)]">
+                {pickedCount > 0
+                  ? `${pickedCount} ${pickedCount === 1 ? 'piatto' : 'piatti'} · ${euro(pickedSum)}`
+                  : 'come dal QR al tavolo'}
+              </div>
+            </button>
+          )}
         </div>
 
         <section className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
@@ -139,6 +185,69 @@ export const DividiConto: React.FC<DividiContoProps> = ({
                   <Plus size={14} />
                 </button>
               </div>
+            </div>
+          ) : mode === 'items' ? (
+            <div className="space-y-1.5">
+              {items.map((it, ix) => {
+                const units = picked[ix] ?? 0;
+                return (
+                  <div
+                    key={ix}
+                    className={`flex items-center gap-2 rounded-[14px] px-3 py-1.5 transition-colors ${
+                      units > 0 ? 'bg-[var(--ds-arriving-tint)]' : 'bg-[var(--ds-surface-row)]'
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => toggleRow(ix)}
+                      className="flex min-h-[44px] min-w-0 flex-1 items-center gap-3 text-left"
+                    >
+                      <span
+                        className={`inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full ${
+                          units > 0
+                            ? 'bg-[var(--ds-arriving-solid)] text-white'
+                            : 'border border-[var(--ds-border-strong)]'
+                        }`}
+                      >
+                        {units > 0 && <Check size={12} />}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[14px] font-medium text-[var(--ds-text-primary)]">
+                          {it.qty > 1 ? `${it.qty}× ` : ''}{it.name}
+                        </span>
+                        <span className="block text-[12px] tabular-nums text-[var(--ds-text-muted)]">
+                          {euro(it.unit_price_cents)}{it.qty > 1 ? ' l’uno' : ''}
+                        </span>
+                      </span>
+                    </button>
+                    {it.qty > 1 && (
+                      <div className="flex flex-shrink-0 items-center gap-1 rounded-full bg-[var(--ds-surface)] px-1.5 py-1">
+                        <button
+                          type="button"
+                          onClick={() => bump(ix, -1)}
+                          disabled={units <= 0}
+                          aria-label={`Un ${it.name} in meno`}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+                        >
+                          <Minus size={14} />
+                        </button>
+                        <span className="min-w-[34px] text-center text-[13px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                          {units}/{it.qty}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => bump(ix, 1)}
+                          disabled={units >= it.qty}
+                          aria-label={`Un ${it.name} in più`}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40"
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <label className="block">
@@ -213,10 +322,6 @@ export const DividiConto: React.FC<DividiContoProps> = ({
             )}
           </section>
         )}
-
-        <Callout tone="info">
-          Le quote degli ospiti si dividono anche per articolo, dal QR al tavolo.
-        </Callout>
       </div>
     </div>
   );
