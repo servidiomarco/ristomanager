@@ -16,6 +16,7 @@ import { BillDetail } from './pagamenti/BillSheet';
 import { PaymentDetail } from './pagamenti/PaymentDetail';
 import { PeriodPicker, type Period } from './pagamenti/PeriodPicker';
 import { formatEuro } from './pagamenti/paymentsView';
+import { useCashClosure } from './pagamenti/useCashClosure';
 import { useOpenBills } from './pagamenti/useOpenBills';
 
 /* ── Pagamenti ────────────────────────────────────────────────────────────
@@ -112,6 +113,14 @@ const PagamentiPage: React.FC<{
   // riga del report da sola non basta — non porta righe né token QR.
   const closedBills = useOpenBills(serviceFilter, 'closed');
   const [selectedClosureBillId, setSelectedClosureBillId] = useState<number | null>(null);
+
+  // Il report di chiusura vive qui, non nel tab: lo leggono il report stesso
+  // e la riga «Giornata» sotto i tab, che deve restare a vista anche su Link.
+  const { report: closureReport, error: closureError } = useCashClosure(serviceFilter?.service_date);
+  const dayCovers = useMemo(
+    () => (closureReport?.bills ?? []).reduce((n, b) => n + (b.covers || 0), 0),
+    [closureReport],
+  );
 
   // The closure tab only exists with pay-at-table on. null = flag not known
   // yet, so the tab bar doesn't flash a section that is about to disappear.
@@ -321,6 +330,23 @@ const PagamentiPage: React.FC<{
                   ]}
                 />
               )}
+              {/* La riga «Giornata»: totale incassato e coperti dell'intero
+                  giorno di servizio, sorda al toggle del turno e ferma sopra
+                  la lista — il colpo d'occhio che non deve dipendere da cosa
+                  si sta guardando sotto. */}
+              {billsAvailable && closureReport && (
+                <div className="flex items-center justify-between gap-3 rounded-[18px] bg-[var(--ds-surface)] px-4 py-3 shadow-[var(--ds-shadow-card)]">
+                  <span className="text-[13px] text-[var(--ds-text-muted)]">Giornata</span>
+                  <span className="text-[14px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                    {formatEuro(closureReport.total_cents)}
+                    {dayCovers > 0 && (
+                      <span className="ml-2 font-normal text-[var(--ds-text-secondary)]">
+                        · {dayCovers} {dayCovers === 1 ? 'coperto' : 'coperti'}
+                      </span>
+                    )}
+                  </span>
+                </div>
+              )}
               {!showingCassa && (
                 <SearchField
                   value={search}
@@ -334,7 +360,8 @@ const PagamentiPage: React.FC<{
           list={
             showingCassa ? (
               <ChiusuraCassa
-                date={serviceFilter?.service_date}
+                report={closureReport}
+                error={closureError}
                 shift={serviceFilter?.shift}
                 openCount={collectable.length}
                 openResidualCents={serviceResidual}
