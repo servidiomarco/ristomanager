@@ -674,6 +674,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   const [moveFor, setMoveFor] = useState<
     | { kind: 'line'; key: string; label: string; from: number }
     | { kind: 'item'; item: OrderItem; from: number }
+    // Dal chip sull'uscita nel menu: TUTTE le bozze locali di quel piatto
+    // nell'uscita di battuta — è il battuto appena fatto, non una riga scelta.
+    | { kind: 'dish'; dishId: number; label: string; from: number }
     | { kind: 'course'; from: number }
     | null
   >(null);
@@ -1565,6 +1568,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       tapOpensSheet={requiresSheetOnTap}
       onAdd={onDishTap}
       onRemove={removeFromCart}
+      courseOf={d => forcedCourse(d) ?? course}
+      onCourseTap={d => setMoveFor({ kind: 'dish', dishId: d.id, label: d.name, from: forcedCourse(d) ?? course })}
       onLongPress={setVariantFor}
       layout={isWide ? 'grid' : 'list'}
       // Sul palmare la ricerca sta nella testata del tavolo (lente), non qui.
@@ -1718,7 +1723,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           onClose={() => setMoveFor(null)}
           title={moveFor.kind === 'course'
             ? `Sposta la ${courseLabel(moveFor.from)}`
-            : `Sposta ${moveFor.kind === 'line' ? moveFor.label : moveFor.item.name_snapshot}`}
+            : `Sposta ${moveFor.kind === 'item' ? moveFor.item.name_snapshot : moveFor.label}`}
           subtitle={moveFor.kind === 'course'
             ? 'Tutte le righe non ancora inviate cambiano uscita'
             : 'In quale uscita va?'}
@@ -1746,6 +1751,11 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
                   onClick={() => {
                     if (moveFor.kind === 'line') moveCartLine(moveFor.key, n);
                     else if (moveFor.kind === 'item') moveServerItem(moveFor.item, n);
+                    else if (moveFor.kind === 'dish') {
+                      for (const l of cart.filter(l => l.dish.id === moveFor.dishId && l.course_no === moveFor.from)) {
+                        moveCartLine(l.key, n);
+                      }
+                    }
                     else moveCourseTo(moveFor.from, n);
                     setMoveFor(null);
                   }}
