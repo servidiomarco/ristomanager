@@ -472,6 +472,9 @@ export interface FiscalRegistryResponse {
   counts: { all: number; receipt: number; invoice: number; credit_note: number; proforma: number; voided: number; failed: number };
   documents: FiscalRegistryRow[];
   total_count: number;
+  /** Totale per giorno del filtro attivo, sull'intero periodo: la testata
+   *  del gruppo lo mostra giusto anche quando la lista pagina. */
+  day_totals: { day: string; count: number; total_cents: number }[];
 }
 
 export interface FiscalVatSummaryRow {

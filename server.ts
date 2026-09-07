@@ -6276,7 +6276,21 @@ app.get('/reports/fiscal-registry', authenticate, requirePermission('fiscal:view
         const countRs = await queryWithRetry(
             `SELECT COUNT(*)::int AS n FROM fiscal_documents fd WHERE ${FISCAL_PERIOD_WHERE}${filters}`, params
         );
-        res.json({ from: period.from, to: period.to, totals, counts, documents: page.rows, total_count: countRs.rows[0].n });
+        // Totale per giorno DEL FILTRO ATTIVO, sull'intero periodo: la
+        // testata di gruppo lo mostra giusto anche quando il giorno è
+        // tagliato dalla paginazione della lista. WYSIWYG: somma esattamente
+        // le righe che il filtro elenca, qualunque ne sia lo stato.
+        const dayTotalsRs = await queryWithRetry(
+            `SELECT (fd.created_at AT TIME ZONE 'Europe/Rome')::date AS day,
+                    COUNT(*)::int AS count, COALESCE(SUM(fd.total_cents), 0)::bigint AS total_cents
+             FROM fiscal_documents fd
+             WHERE ${FISCAL_PERIOD_WHERE}${filters}
+             GROUP BY 1`, params
+        );
+        res.json({
+            from: period.from, to: period.to, totals, counts, documents: page.rows, total_count: countRs.rows[0].n,
+            day_totals: dayTotalsRs.rows.map((r: any) => ({ day: String(r.day), count: r.count, total_cents: Number(r.total_cents) })),
+        });
     } catch (err: any) {
         console.error('GET /reports/fiscal-registry error:', err);
         res.status(500).json({ error: 'Internal server error', detail: err?.message });
