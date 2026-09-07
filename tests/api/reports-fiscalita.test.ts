@@ -182,8 +182,15 @@ describe('reportistica fiscale (vista Fiscalità)', () => {
         expect(res.body.counts.receipt).toBe(4);
         expect(res.body.counts.credit_note).toBe(1);
 
+        // Totali per giorno del filtro attivo (testata dei gruppi): somma
+        // WYSIWYG di ciò che il filtro elenca, stati compresi.
+        const days = Object.fromEntries(res.body.day_totals.map((d: any) => [d.day, d.total_cents]));
+        expect(days['2026-03-10']).toBe(17500); // 5000 + 4000 annullato + 7000 rt + 1500 proforma
+        expect(days['2026-03-11']).toBe(15300); // 2900 + 8000 + 2200 stornata + 2200 nc
+
         const soloFatture = await api().get(`/reports/fiscal-registry?from=${FROM}&to=${TO}&doc_type=INVOICE`).set(bearer(owner));
         expect(soloFatture.body.total_count).toBe(2);
+        expect(soloFatture.body.day_totals).toEqual([{ day: '2026-03-11', count: 2, total_cents: 10200 }]);
         const soloAnnullati = await api().get(`/reports/fiscal-registry?from=${FROM}&to=${TO}&status=VOIDED`).set(bearer(owner));
         expect(soloAnnullati.body.total_count).toBe(2);
     });

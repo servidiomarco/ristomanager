@@ -143,6 +143,13 @@ const RegistroEmessi: React.FC = () => {
     return [...byDay.entries()];
   }, [rows]);
 
+  // Totale del giorno per il filtro attivo, dal server: la somma delle sole
+  // righe caricate mentirebbe quando il giorno è tagliato dalla paginazione.
+  const dayTotals = useMemo(
+    () => new Map((data?.day_totals ?? []).map(d => [d.day, d.total_cents])),
+    [data],
+  );
+
   const totals = data?.totals;
   const counts = data?.counts;
 
@@ -251,7 +258,12 @@ const RegistroEmessi: React.FC = () => {
               )}
               {grouped.map(([day, dayRows]) => (
                 <section key={day}>
-                  <h3 className="pb-1.5 text-[13px] font-medium text-[var(--ds-text-muted)]">{dayLabel(day)}</h3>
+                  <h3 className="flex items-baseline justify-between gap-3 pb-1.5 text-[13px] font-medium text-[var(--ds-text-muted)]">
+                    <span>{dayLabel(day)}</span>
+                    <span className="tabular-nums">
+                      Tot. <span className="text-[var(--ds-text-primary)]">{formatEuro(dayTotals.get(day) ?? dayRows.reduce((n, r) => n + r.total_cents, 0))}</span>
+                    </span>
+                  </h3>
                   <ul className="overflow-hidden rounded-2xl bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
                     {dayRows.map(row => (
                       <li key={row.id} className="[&+li]:border-t [&+li]:border-[var(--ds-border)]">
