@@ -1772,6 +1772,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           initialQty={1}
           onCancel={() => setVariantFor(null)}
           onConfirm={(entries, removedIds, note, weightGrams, qty) => { addToCart(variantFor, entries, note, removedIds, weightGrams, qty ?? 1); setVariantFor(null); }}
+          onAdd={(entries, removedIds, note, weightGrams, qty) => addToCart(variantFor, entries, note, removedIds, weightGrams, qty ?? 1)}
         />
       )}
       {editLine && (

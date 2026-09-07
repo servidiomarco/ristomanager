@@ -952,6 +952,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
           components={variantFor.dish_type === 'COMPOSED' ? componentsForDish(variantFor.id) : []}
           onCancel={() => setVariantFor(null)}
           onConfirm={(entries, removedIds, note, weightGrams) => { addWithVariants(variantFor, entries, removedIds, note, weightGrams); setVariantFor(null); }}
+          onAdd={(entries, removedIds, note, weightGrams) => addWithVariants(variantFor, entries, removedIds, note, weightGrams)}
         />
       )}
 

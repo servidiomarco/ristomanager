@@ -43,7 +43,12 @@ export const VariantSheet: React.FC<{
   confirmLabel?: string;
   onCancel: () => void;
   onConfirm: (entries: { id: number; n: number }[], removedComponentIds: number[], note?: string, weightGrams?: number, qty?: number) => void;
-}> = ({ dish, groups, components = [], initial, initialQty, onDelete, confirmLabel, onCancel, onConfirm }) => {
+  /** «Aggiungi un altro»: batte la riga com'è e azzera il foglio senza
+   *  chiuderlo — due bistecche con cotture diverse sono due giri di scelte,
+   *  non due aperture del foglio. Assente (modifica riga, dove non ha
+   *  senso) = il bottone non compare. */
+  onAdd?: (entries: { id: number; n: number }[], removedComponentIds: number[], note?: string, weightGrams?: number, qty?: number) => void;
+}> = ({ dish, groups, components = [], initial, initialQty, onDelete, confirmLabel, onCancel, onConfirm, onAdd }) => {
   // Verso per variante, scala d'intensità a 4 gradini (utils/modifierScale):
   // +1 aggiunge a pagamento, +2 «Molta» allo stesso addebito, −1 «Senza» in
   // sconto, −2 «Poca» gratis, 0 = non applicata. Le scelte singole (cotture)
@@ -135,6 +140,22 @@ export const VariantSheet: React.FC<{
   const missing = groups.filter(g => g.min_select > 0
     && g.modifiers.filter(m => (selected.get(m.id) ?? 0) > 0).length < g.min_select);
 
+  // Le righe già battute da questo foglio: il contatore è la conferma che
+  // «Aggiungi un altro» ha scritto davvero — senza, l'azzeramento dei chip
+  // sembrerebbe un malfunzionamento.
+  const [added, setAdded] = useState(0);
+  const addAndReset = () => {
+    onAdd?.(entries, [...removed], custom.trim() || undefined,
+      dish.sold_by_weight ? grams : undefined,
+      initialQty != null ? qty : undefined);
+    setSelected(new Map());
+    setRemoved(new Set());
+    setCustom('');
+    setGrams(wDef);
+    setQty(1);
+    setAdded(v => v + 1);
+  };
+
   return (
     <Sheet
       open
@@ -156,6 +177,21 @@ export const VariantSheet: React.FC<{
               className="self-center text-[13px] font-medium text-[var(--ds-critical-text)] underline decoration-dotted transition-opacity hover:opacity-70"
             >
               elimina riga
+            </button>
+          )}
+          {added > 0 && (
+            <p className="text-center text-[13px] font-medium text-[var(--ds-text-muted)]">
+              {added === 1 ? '1 riga aggiunta' : `${added} righe aggiunte`}
+            </p>
+          )}
+          {onAdd && (
+            <button
+              type="button"
+              onClick={addAndReset}
+              disabled={missing.length > 0}
+              className={`w-full ${dsButton.quiet}`}
+            >
+              Aggiungi un altro
             </button>
           )}
           <button
