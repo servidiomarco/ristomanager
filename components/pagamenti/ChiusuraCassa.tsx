@@ -124,6 +124,18 @@ export const ChiusuraCassa: React.FC<{
     return c;
   }, [bills]);
   const visibleBills = docFilter === 'all' ? bills : bills.filter(b => docKind(b) === docFilter);
+  // I coperti del giorno dai conti chiusi, divisi per turno. Sempre l'intera
+  // giornata, come i totali per metodo: la card è la cassa che si conta a
+  // fine serata, non segue il toggle della topbar.
+  const covers = useMemo(() => {
+    const sum = (rows: CashClosureBillRow[]) => rows.reduce((n, b) => n + (b.covers || 0), 0);
+    const all = report?.bills ?? [];
+    return {
+      lunch: sum(all.filter(b => b.shift === 'LUNCH')),
+      dinner: sum(all.filter(b => b.shift === 'DINNER')),
+      total: sum(all),
+    };
+  }, [report]);
   // Con "Tutti" i turni in vista, le righe si raggruppano per turno: lo
   // stesso numero di tavolo esiste a pranzo E a cena, e senza sezioni la
   // lista del giorno sembrerebbe piena di doppioni.
@@ -181,6 +193,22 @@ export const ChiusuraCassa: React.FC<{
               <dt>Totale</dt>
               <dd className="tabular-nums">{formatEuro(report.total_cents)}</dd>
             </div>
+            {/* I coperti serviti accanto agli incassi: è il numero che dà il
+                senso al totale (lo scontrino medio si fa a mente). Divisi per
+                turno quando il giorno ne ha due. */}
+            {covers.total > 0 && (
+              <div className="flex justify-between border-t border-[var(--ds-border)] pt-1.5 text-[var(--ds-text-secondary)]">
+                <dt>
+                  Coperti
+                  {covers.lunch > 0 && covers.dinner > 0 && (
+                    <span className="ml-1.5 text-[12px] tabular-nums text-[var(--ds-text-muted)]">
+                      pranzo {covers.lunch} · cena {covers.dinner}
+                    </span>
+                  )}
+                </dt>
+                <dd className="tabular-nums font-semibold text-[var(--ds-text-primary)]">{covers.total}</dd>
+              </div>
+            )}
           </dl>
         ) : (
           <p className="text-[14px] text-[var(--ds-text-muted)]">Nessun incasso registrato.</p>
