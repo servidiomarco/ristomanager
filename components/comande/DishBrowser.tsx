@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { ChevronDown, Minus, Plus, Search, Trash2 } from 'lucide-react';
+import { ChevronDown, CornerDownRight, Minus, Plus, Search, Trash2 } from 'lucide-react';
 import type { Dish } from '../../types';
 import { SearchField } from '../ds';
 import { euro } from './orderView';
@@ -119,8 +119,9 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
             type="button"
             onClick={() => onCourseTap(d)}
             aria-label={`Sposta ${d.name} in un'altra uscita`}
-            className="inline-flex h-11 flex-shrink-0 items-center whitespace-nowrap rounded-full bg-[var(--ds-surface-row)] px-3 text-[13px] font-semibold text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-11 flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-[var(--ds-arriving-tint)] px-3 text-[13px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
+            <CornerDownRight size={14} aria-hidden />
             {courseTag(courseOf(d))}
           </button>
         )}
@@ -286,8 +287,9 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                       type="button"
                       onClick={() => onCourseTap!(d)}
                       aria-label={`Sposta ${d.name} in un'altra uscita`}
-                      className="absolute right-2.5 top-2.5 inline-flex h-9 items-center gap-1 whitespace-nowrap rounded-full bg-[var(--ds-action-bg)] px-2.5 text-[12px] font-semibold tabular-nums text-[var(--ds-action-fg)] transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      className="absolute right-2.5 top-2.5 inline-flex h-9 items-center gap-1 whitespace-nowrap rounded-full bg-[var(--ds-arriving-tint)] px-2.5 text-[12px] font-semibold tabular-nums text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
+                      <CornerDownRight size={13} aria-hidden />
                       {qty} · {courseTagShort(courseOf!(d))}
                     </button>
                   ) : (
