@@ -6032,12 +6032,29 @@ app.get('/reports/cash-closure', authenticate, requirePermission('payments:view'
         const raw = typeof req.query.date === 'string' ? req.query.date : '';
         const date = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : getRomeDatePart(new Date());
 
+        // Il giorno del report è il GIORNO DI SERVIZIO del conto, non il
+        // giorno solare dell'incasso: la cena chiusa all'una di notte sta
+        // nella serata a cui appartiene, non nel giorno dopo. service_date e
+        // shift sono stampati sul conto all'apertura; i COALESCE coprono le
+        // righe di prima di quella colonna (backfill una tantum a parte).
+        const SERVICE_DAY = `COALESCE(b.service_date, (COALESCE(b.closed_at, b.opened_at) AT TIME ZONE 'Europe/Rome')::date)`;
+        const SERVICE_SHIFT = `COALESCE(b.shift,
+                        (SELECT o.shift FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
+                        CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
+                             THEN 'LUNCH' ELSE 'DINNER' END)`;
+
+        // Ogni movimento eredita giorno e turno dal SUO conto: un sospeso
+        // saldato giorni dopo torna quindi sulla serata del conto — è la
+        // lettura per servizio che si vuole in chiusura, non il cassetto
+        // fisico del giorno solare (quello vive nelle sessioni di Cassa).
         const methodsRs = await queryWithRetry(
-            `SELECT method, SUM(amount_cents)::int AS amount_cents, COUNT(*)::int AS movements
-             FROM table_bill_payments
-             WHERE tenant_id = $1 AND voided_at IS NULL
-               AND (recorded_at AT TIME ZONE 'Europe/Rome')::date = $2::date
-             GROUP BY method
+            `SELECT p.method, ${SERVICE_SHIFT} AS shift,
+                    SUM(p.amount_cents)::int AS amount_cents, COUNT(*)::int AS movements
+             FROM table_bill_payments p
+             JOIN table_bills b ON b.id = p.table_bill_id
+             WHERE p.tenant_id = $1 AND p.voided_at IS NULL
+               AND ${SERVICE_DAY} = $2::date
+             GROUP BY 1, 2
              ORDER BY amount_cents DESC`,
             [req.tenantId!, date]
         );
@@ -6063,7 +6080,7 @@ app.get('/reports/cash-closure', authenticate, requirePermission('payments:view'
              ) staff ON TRUE
              WHERE b.tenant_id = $1 AND b.status IN ('CLOSED', 'SETTLED_PARTIAL')
                AND b.closed_at IS NOT NULL
-               AND (b.closed_at AT TIME ZONE 'Europe/Rome')::date = $2::date`,
+               AND ${SERVICE_DAY} = $2::date`,
             [req.tenantId!, date]
         );
 
@@ -6073,14 +6090,9 @@ app.get('/reports/cash-closure', authenticate, requirePermission('payments:view'
         const billListRs = await queryWithRetry(
             `SELECT b.id, b.total_cents, b.status, b.tip_cents, b.closed_at, b.covers,
                     t.name AS table_name, r.customer_name,
-                    -- Turno del conto (dalla comanda, o dedotto dall'apertura
-                    -- come in /bills/open): lo stesso tavolo serve pranzo e
-                    -- cena, senza turno le righe del giorno si confondono.
-                    COALESCE(
-                        (SELECT o.shift FROM orders o WHERE o.table_bill_id = b.id ORDER BY o.id LIMIT 1),
-                        CASE WHEN EXTRACT(hour FROM (b.opened_at AT TIME ZONE 'Europe/Rome')) BETWEEN 5 AND 16
-                             THEN 'LUNCH' ELSE 'DINNER' END
-                    ) AS shift,
+                    -- Turno del conto: lo stesso tavolo serve pranzo e cena,
+                    -- senza turno le righe del giorno si confondono.
+                    ${SERVICE_SHIFT} AS shift,
                     fd.doc_type AS fiscal_doc_type, fd.status AS fiscal_status, fd.doc_number AS fiscal_doc_number,
                     fd.public_token AS fiscal_public_token, fd.provider AS fiscal_provider,
                     COALESCE((SELECT jsonb_agg(jsonb_build_object('method', p.method, 'amount_cents', p.amount_cents) ORDER BY p.recorded_at)
@@ -6095,7 +6107,7 @@ app.get('/reports/cash-closure', authenticate, requirePermission('payments:view'
              ) fd ON TRUE
              WHERE b.tenant_id = $1 AND b.status IN ('CLOSED', 'SETTLED_PARTIAL')
                AND b.closed_at IS NOT NULL
-               AND (b.closed_at AT TIME ZONE 'Europe/Rome')::date = $2::date
+               AND ${SERVICE_DAY} = $2::date
              ORDER BY b.closed_at DESC`,
             [req.tenantId!, date]
         );

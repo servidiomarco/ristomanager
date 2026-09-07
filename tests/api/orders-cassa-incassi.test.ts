@@ -14,8 +14,13 @@ describe('libro cassa incassi', () => {
     let baseline: Record<string, number> = {};
     let baselineClosed = 0;
 
-    const methodMap = (body: any): Record<string, number> =>
-        Object.fromEntries(body.methods.map((m: any) => [m.method, m.amount_cents]));
+    // Le righe methods arrivano divise per turno: qui si somma per metodo,
+    // come fa la card con «Tutti» in vista.
+    const methodMap = (body: any): Record<string, number> => {
+        const map: Record<string, number> = {};
+        for (const m of body.methods) map[m.method] = (map[m.method] ?? 0) + m.amount_cents;
+        return map;
+    };
 
     const openBill = async (tableName: string, totalCents: number): Promise<number> => {
         const room = await api().post('/rooms').set(bearer(token)).send({
@@ -136,5 +141,36 @@ describe('libro cassa incassi', () => {
         expect(['LUNCH', 'DINNER']).toContain(row.shift);
         const rowMethods = row.payments.map((p: any) => p.method).sort();
         expect(rowMethods).toEqual(['BUONO_PASTO', 'CONTANTI']);
+        // Ogni riga per metodo porta il turno: è la divisione pranzo/cena
+        // che la card mostra.
+        expect(report.body.methods.every((m: any) => ['LUNCH', 'DINNER'].includes(m.shift))).toBe(true);
+    });
+
+    it('incassi e conto seguono il giorno di servizio, non il giorno solare', async () => {
+        // La cena chiusa dopo mezzanotte: il conto porta il service_date
+        // della serata, e il report deve metterlo lì — non nel giorno dopo
+        // solo perché l'incasso è stato battuto all'una di notte.
+        const { Client } = await import('pg');
+        const db = new Client({ connectionString: process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api' });
+        await db.connect();
+        const lateId = await openBill('CASSA3', 3000);
+        await db.query(`UPDATE table_bills SET service_date = CURRENT_DATE - 1, shift = 'DINNER' WHERE id = $1`, [lateId]);
+        const pay = await api().post(`/bills/${lateId}/payments`).set(bearer(token)).send({
+            method: 'SATISPAY', amount_cents: 3000,
+        });
+        expect(pay.status).toBe(201);
+        const close = await api().post(`/bills/${lateId}/close`).set(bearer(token)).send({});
+        expect(close.status).toBe(200);
+
+        const yesterday = (await db.query(`SELECT (CURRENT_DATE - 1)::text AS d`)).rows[0].d;
+        const repYest = await api().get(`/reports/cash-closure?date=${yesterday}`).set(bearer(token));
+        expect(repYest.status).toBe(200);
+        expect(repYest.body.bills.some((b: any) => b.id === lateId)).toBe(true);
+        expect(repYest.body.methods.some((m: any) =>
+            m.method === 'SATISPAY' && m.shift === 'DINNER' && m.amount_cents >= 3000)).toBe(true);
+
+        const repToday = await api().get('/reports/cash-closure').set(bearer(token));
+        expect(repToday.body.bills.some((b: any) => b.id === lateId)).toBe(false);
+        await db.end();
     });
 });
