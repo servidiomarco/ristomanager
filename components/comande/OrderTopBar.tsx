@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ArrowLeft, ArrowRightLeft, Ban, Check, MoreVertical, Minus, Percent, Plus, Receipt, Rows3, Search, Trash2, Users,
+  ArrowLeft, ArrowRightLeft, Ban, Check, MoreVertical, Minus, Percent, Plus, Receipt, Rows3, Search, Trash2, Users, Volume2,
 } from 'lucide-react';
 import { Sheet, StatusPill } from '../ds';
 import { euro, rowCountLabel } from './orderView';
@@ -32,6 +32,11 @@ interface OrderTopBarProps {
    *  Impostazioni. Solo palmare: la griglia larga non ha densità. */
   densityCompact?: boolean;
   onToggleDensity?: () => void;
+  /** Avviso sonoro su uscita pronta e chiamata del passe — preferenza
+   *  personale come la densità, salvata per dispositivo. Il toggle sta qui
+   *  anche perché il gesto sblocca l'AudioContext per i chime futuri. */
+  soundOn?: boolean;
+  onToggleSound?: () => void;
   onBack: () => void;
   onCovers: (delta: number) => void;
   onBill: () => void;
@@ -50,7 +55,7 @@ const stepper =
 export const OrderTopBar: React.FC<OrderTopBarProps> = ({
   tableName, guestName, totalCents, rows, covers, sentCourses, busy,
   billDisabled, clearDisabled, wide,
-  onSearch, densityCompact, onToggleDensity,
+  onSearch, densityCompact, onToggleDensity, soundOn, onToggleSound,
   onBack, onCovers, onBill, onDiscount, onTransfer, onClearDrafts, onDeleteOrder,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -90,6 +95,10 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
     ...(onToggleDensity ? [{
       icon: Rows3, label: 'Vista compatta', onClick: onToggleDensity,
       disabled: false, critical: false, active: densityCompact === true,
+    }] : []),
+    ...(onToggleSound ? [{
+      icon: Volume2, label: 'Avvisi sonori', onClick: onToggleSound,
+      disabled: false, critical: false, active: soundOn === true,
     }] : []),
     { icon: Trash2, label: 'Svuota le righe non inviate', onClick: onClearDrafts, disabled: clearDisabled, critical: true },
     // In fondo, dopo lo svuota-bozze: è il gesto più pesante del menu — via

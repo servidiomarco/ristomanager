@@ -28211,6 +28211,30 @@ app.post('/kds/items/:id/status', authenticate, requirePermission('orders:kds'),
             }
         } catch (_) {}
 
+        // Uscita completa = push ai camerieri, così il "pronto" arriva sul
+        // telefono (e sullo smartwatch abbinato) anche a comanda chiusa.
+        // Stesso tag della campanella del passe: se poi il passe chiama, la
+        // notifica si aggiorna invece di raddoppiare. Best-effort come al
+        // passe: senza push resta il socket e la lampada sui monitor.
+        if (courseReady) {
+            queryWithRetry(
+                `SELECT t.name AS table_name
+                 FROM orders o LEFT JOIN tables t ON t.id = o.table_id AND t.tenant_id = o.tenant_id
+                 WHERE o.id = $1 AND o.tenant_id = $2`,
+                [item.order_id, req.tenantId!]
+            ).then(info => pushSendToRoles(
+                req.tenantId!,
+                ['WAITER', 'MANAGER', 'GENERAL_MANAGER', 'OWNER'],
+                {
+                    category: 'service',
+                    title: `Tavolo ${info.rows[0]?.table_name ?? '—'} — cucina`,
+                    body: `${item.course_no}ª uscita pronta`,
+                    url: `/?view=COMANDE`,
+                    tag: `course-${item.order_id}-${item.course_no}`,
+                }
+            )).catch(err => console.warn('[kds] push uscita pronta non inviata:', err?.message ?? err));
+        }
+
         res.json({
             item,
             course_ready: courseReady,
