@@ -512,6 +512,42 @@ export interface CashClosureReport {
 }
 
 // ============================================
+// CHIUSURA FISCALE — la giornata (docs/chiusura-fiscale-plan.md)
+// ============================================
+// Per giornata di CALENDARIO Europe/Rome, non per servizio: è come ragionano
+// l'RT e l'Agenzia. La riga è la fotografia firmata; il registro vivo resta
+// CashClosureReport qui sopra.
+
+export interface FiscalClosureRow {
+  id: number;
+  closure_date: string; // YYYY-MM-DD
+  provider: string; // rt-local | openapi | mock | none
+  status: 'PENDING' | 'CONFIRMED' | 'FAILED';
+  zrep_number: string | null;
+  rt_total_cents: number | null;
+  crm_docs_count: number;
+  crm_total_cents: number;
+  note: string | null;
+  error: string | null;
+  requested_by_name: string;
+  requested_at: string;
+  confirmed_at: string | null;
+}
+
+export interface FiscalClosureView {
+  date: string;
+  provider: string;
+  closure: FiscalClosureRow | null;
+  docs: { doc_type: string; status: string; count: number; total_cents: number }[];
+  /** Scontrini CONFIRMED del giorno (scontrini di cassa compresi): il
+   *  corrispettivo che il CRM conosce, da riscontrare con la Z. */
+  receipts: { count: number; total_cents: number };
+  pending_count: number;
+  failed_count: number;
+  bills_without_doc: number;
+}
+
+// ============================================
 // CASSA — la sessione del cassetto (docs/cassa-plan.md §3.1)
 // ============================================
 // Il cassetto di UN SERVIZIO, non di una giornata: lo stesso cassetto passa di
