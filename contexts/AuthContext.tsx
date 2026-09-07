@@ -115,12 +115,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // La subscription push del browser deve appartenere a CHI è
             // loggato, non a chi la registrò: il re-claim è silenzioso.
             syncPushSubscription();
+          } else if (authApiService.getRefreshToken()) {
+            // /auth/me fallito ma il refresh token è ancora in storage: il
+            // server è irraggiungibile (WiFi, deploy), NON una revoca — le
+            // revoche vere cancellano lo storage dentro refreshToken(). Un
+            // reload durante un blip buttava fuori a metà servizio: si parte
+            // coi dati salvati e refresh/socket riallineano appena torna la rete.
+            setUser(storedUser);
+            setPermissions(storedPermissions);
+            socketClient.connect();
+            syncPushSubscription();
           } else {
             authApiService.clearAuth();
           }
         }
       } catch {
-        authApiService.clearAuth();
+        // Niente clearAuth: un errore imprevisto qui non è una revoca. Al
+        // prossimo giro (reload o keeper) la sessione si verifica di nuovo.
       } finally {
         setIsLoading(false);
       }
@@ -142,6 +153,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return unsubscribe;
   }, []);
+
+  // Session keeper: finché c'è un utente, l'access token si rinnova PRIMA
+  // di scadere (timer + risveglio del dispositivo). Senza, la scadenza
+  // cadeva nel mezzo del servizio: il 401+retry copriva le fetch ma il
+  // socket restava con il token vecchio.
+  useEffect(() => {
+    if (!user) return;
+    return authApiService.startSessionKeeper();
+  }, [user]);
 
   const login = useCallback(async (credentials: LoginCredentials) => {
     const response = await authApiService.login(credentials);

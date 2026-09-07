@@ -521,7 +521,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 - **~35 permessi granulari** (vista/modifica per ogni area; per le comande: prendere, stornare, monitor di partita, lancio uscite) applicati **sia sull'interfaccia sia sulle API**: senza permesso la voce di menu sparisce e l'endpoint rifiuta.
 - **Matrice permessi personalizzabile** per ristorante dalla UI (checkbox per ruolo), effettiva immediatamente.
 - Account: creazione/disattivazione utenti (solo Proprietario), cambio profilo, email e password self-service, **recupero password** via link monouso; il cambio password disconnette tutte le altre sessioni.
-- Sessioni con token a scadenza e rinnovo trasparente; avviso 5 minuti prima della scadenza.
+- **Sessioni per dispositivo**: più palmari o postazioni sullo stesso account convivono senza sbattersi fuori a vicenda; il rinnovo dei token è trasparente e anticipato (la sessione resta viva finché il dispositivo la usa almeno una volta a settimana, e un blip di rete o un riavvio del server non disconnettono mai); il logout spegne solo il dispositivo da cui è fatto.
 - **Log attività** completo: chi ha fatto cosa, quando, su quale risorsa, con esito — filtrabile per utente, azione, risorsa e periodo.
 
 ---
@@ -583,6 +583,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-07 | Utenti, ruoli e permessi | Sessioni per dispositivo: più device sullo stesso account convivono, il rinnovo dei token è anticipato e tollera blip di rete e riavvii del server (niente più logout a metà servizio), il logout scollega solo il dispositivo da cui è fatto. |
 | 2026-09-07 | Fiscalità | Nel registro documenti ogni giorno porta in testata il totale del filtro attivo («Tot.»): con la chip Proforma selezionata, accanto a «domenica 6 settembre» c'è il totale delle proforma di quel giorno. Calcolato sul periodo intero, giusto anche quando la lista pagina. |
 | 2026-09-07 | Pagamenti, conto al tavolo e cassa | Riga «Giornata» sotto i tab Chiusura/Link: totale incassato e coperti dell'intero giorno di servizio, sempre a vista qualunque turno o tab sia selezionato. |
 | 2026-09-07 | Pagamenti, conto al tavolo e cassa | La chiusura di cassa segue il toggle turno della topbar su tutta la pagina (incassi e coperti compresi: Pranzo, Cena o Tutti), e il giorno del report è il giorno di servizio — la cena incassata dopo mezzanotte resta nella sua serata invece di scivolare nel giorno dopo. |

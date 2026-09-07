@@ -53,9 +53,12 @@ class SocketClient {
       reconnectionDelayMax: 10000,
       randomizationFactor: 0.5,
       timeout: 20000,
-      auth: {
-        token
-      }
+      // Funzione, non oggetto: il token si rilegge dallo storage a OGNI
+      // tentativo di handshake. Con l'oggetto restava congelato quello del
+      // primo connect — dopo le 6h di vita dell'access token qualunque
+      // riconnessione (un blip del WiFi bastava) ripresentava il token
+      // scaduto e il realtime moriva fino al reload della pagina.
+      auth: (cb) => cb({ token: this.getToken() })
     });
 
     this.setupConnectionHandlers();

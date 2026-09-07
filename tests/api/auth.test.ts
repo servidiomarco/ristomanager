@@ -92,13 +92,20 @@ describe('auth', () => {
         expect(refresh.body.accessToken).toBeTruthy();
         expect(refresh.body.refreshToken).not.toBe(primo);
 
-        // La rotazione revoca il token precedente: il replay deve fallire.
-        // (Il confronto passa dal digest SHA-256 del token: senza, bcrypt
-        // tronca a 72 byte e qualunque refresh JWT dell'utente passerebbe.)
+        // Finestra di grazia della rotazione: il token appena ruotato passa
+        // ancora (risposta persa in rete → il client ritenta col vecchio).
+        // NON è il vecchio replay-sempre-valido di bcrypt troncato a 72
+        // byte: un token mai emesso da questa sessione sotto è un 401 secco.
         const replay = await api().post('/auth/refresh').send({ refreshToken: primo });
-        expect(replay.status).toBe(401);
+        expect(replay.status).toBe(200);
 
-        // E il logout azzera l'hash: nemmeno l'ultimo token emesso passa più.
+        const estraneo = await api().post('/auth/refresh').send({
+            refreshToken: primo.slice(0, -2) + 'xx',
+        });
+        expect(estraneo.status).toBe(401);
+
+        // E il logout senza body revoca tutto: nemmeno l'ultimo token
+        // emesso passa più.
         const logout = await api()
             .post('/auth/logout')
             .set(bearer(login.body.accessToken))
@@ -106,8 +113,43 @@ describe('auth', () => {
         expect(logout.status).toBe(200);
 
         const dopoLogout = await api().post('/auth/refresh').send({
-            refreshToken: refresh.body.refreshToken,
+            refreshToken: replay.body.refreshToken,
         });
         expect(dopoLogout.status).toBe(401);
+    });
+
+    it('due dispositivi sullo stesso account convivono e si sloggano uno alla volta', async () => {
+        // Il caso reale dei palmari: stesso utente loggato su più device.
+        // Con l'hash unico su users il secondo login revocava il primo, che
+        // moriva alla scadenza dell'access token — a metà servizio.
+        const deviceA = await api().post('/auth/login').send({
+            email: OWNER_EMAIL,
+            password: OWNER_PASSWORD,
+        });
+        const deviceB = await api().post('/auth/login').send({
+            email: OWNER_EMAIL,
+            password: OWNER_PASSWORD,
+        });
+        expect(deviceA.status).toBe(200);
+        expect(deviceB.status).toBe(200);
+
+        // Entrambe le sessioni si rinnovano, in qualunque ordine.
+        const refreshA = await api().post('/auth/refresh').send({ refreshToken: deviceA.body.refreshToken });
+        const refreshB = await api().post('/auth/refresh').send({ refreshToken: deviceB.body.refreshToken });
+        expect(refreshA.status).toBe(200);
+        expect(refreshB.status).toBe(200);
+
+        // Logout del solo device A (refresh token nel body): B resta dentro.
+        const logoutA = await api()
+            .post('/auth/logout')
+            .set(bearer(refreshA.body.accessToken))
+            .send({ refreshToken: refreshA.body.refreshToken });
+        expect(logoutA.status).toBe(200);
+
+        const refreshADopo = await api().post('/auth/refresh').send({ refreshToken: refreshA.body.refreshToken });
+        expect(refreshADopo.status).toBe(401);
+
+        const refreshBDopo = await api().post('/auth/refresh').send({ refreshToken: refreshB.body.refreshToken });
+        expect(refreshBDopo.status).toBe(200);
     });
 });

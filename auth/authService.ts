@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { queryWithRetry } from '../db.js';
@@ -17,6 +17,16 @@ const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret-change-in-production';
 const JWT_EXPIRES_IN = '6h';
 const JWT_REFRESH_EXPIRES_IN = '7d';
+// Vita della riga in user_sessions: DEVE rispecchiare JWT_REFRESH_EXPIRES_IN
+// (il JWT e la riga scadono insieme; la rotazione rinnova entrambi).
+const SESSION_LIFETIME_SQL = "interval '7 days'";
+// Finestra di grazia della rotazione: dopo un refresh il token PRECEDENTE
+// resta accettato per questo intervallo. Serve al WiFi del ristorante: se la
+// risposta di /auth/refresh si perde, il client resta col token vecchio e
+// senza grazia il suo prossimo tentativo sarebbe un 401 → logout a metà
+// servizio. Due minuti bastano a qualunque retry e tengono minima la
+// finestra di replay di un token rubato.
+const ROTATION_GRACE_SQL = "interval '2 minutes'";
 
 export interface TokenPayload {
   userId: number;
@@ -46,30 +56,45 @@ export class AuthService {
     return bcrypt.compare(password, hash);
   }
 
-  // I refresh token sono JWT da ~250 byte, ma bcrypt considera solo i primi
-  // 72: header e inizio payload sono identici per tutti i token dello stesso
-  // utente, quindi il confronto diretto passava per QUALUNQUE token emesso e
-  // la rotazione non revocava niente. Il digest SHA-256 (44 caratteri in
-  // base64) porta l'intero token dentro la finestra di bcrypt.
-  //
-  // Il cambio di formato invalida gli hash già salvati: al primo refresh
-  // dopo il deploy ogni sessione attiva riceve 401 e rifà il login una volta.
+  // Il digest SHA-256 base64 del refresh token è la chiave di lookup in
+  // user_sessions: il token è un JWT firmato ad alta entropia, il digest non
+  // è invertibile e da solo non conia niente (stessa ragione dei reset token).
   private static digestRefreshToken(token: string): string {
     return createHash('sha256').update(token).digest('base64');
   }
 
-  private static async hashRefreshToken(token: string): Promise<string> {
-    return this.hashPassword(this.digestRefreshToken(token));
-  }
-
+  // bcrypt(SHA-256) sopravvive SOLO per il fallback legacy su
+  // users.refresh_token_hash: i dispositivi loggati prima del deploy delle
+  // sessioni per-dispositivo hanno il refresh token in quel formato, e al
+  // primo refresh vengono migrati a una riga di user_sessions invece di
+  // essere sbattuti fuori. (Lo SHA-256 dentro bcrypt c'è perché bcrypt
+  // tronca a 72 byte e i JWT condividono i primi 72 — senza digest qualunque
+  // token dello stesso utente passava il confronto.)
   private static async verifyRefreshTokenHash(token: string, hash: string): Promise<boolean> {
     return this.verifyPassword(this.digestRefreshToken(token), hash);
+  }
+
+  // Registra una nuova sessione (login, cambio email, migrazione legacy) e
+  // approfitta del giro per potare le righe scadute dell'utente.
+  private static async createSession(userId: number, refreshToken: string): Promise<void> {
+    await queryWithRetry(
+      `INSERT INTO user_sessions (user_id, token_digest, expires_at)
+       VALUES ($1, $2, now() + ${SESSION_LIFETIME_SQL})`,
+      [userId, this.digestRefreshToken(refreshToken)]
+    );
+    await queryWithRetry('DELETE FROM user_sessions WHERE user_id = $1 AND expires_at < now()', [userId]);
   }
 
   // Generate access and refresh tokens
   static generateTokens(payload: TokenPayload): AuthTokens {
     const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-    const refreshToken = jwt.sign(payload, JWT_REFRESH_SECRET, { expiresIn: JWT_REFRESH_EXPIRES_IN });
+    // jti casuale: due login dello stesso utente nello stesso secondo
+    // producono altrimenti JWT byte-identici (stesso iat), stesso digest, e
+    // l'INSERT in user_sessions viola la UNIQUE su token_digest.
+    const refreshToken = jwt.sign(payload, JWT_REFRESH_SECRET, {
+      expiresIn: JWT_REFRESH_EXPIRES_IN,
+      jwtid: randomUUID()
+    });
     return { accessToken, refreshToken };
   }
 
@@ -154,9 +179,11 @@ export class AuthService {
 
     const tokens = this.generateTokens(payload);
 
-    // Store refresh token hash
-    const refreshTokenHash = await this.hashRefreshToken(tokens.refreshToken);
-    await queryWithRetry('UPDATE users SET refresh_token_hash = $1 WHERE id = $2', [refreshTokenHash, userRow.id]);
+    // Sessione per-dispositivo: il login NON tocca le sessioni esistenti.
+    // Prima viveva tutto in users.refresh_token_hash e ogni login revocava
+    // gli altri dispositivi dello stesso account, che morivano alla prima
+    // scadenza dell'access token — a metà servizio.
+    await this.createSession(userRow.id, tokens.refreshToken);
 
     const user: User = {
       id: userRow.id,
@@ -203,17 +230,44 @@ export class AuthService {
     }
 
     const userRow = result.rows[0];
+    const digest = this.digestRefreshToken(refreshToken);
 
-    // Dopo il logout l'hash è NULL: senza questo guard bcrypt.compare(token,
-    // null) lancia e una revoca legittima risponde 500 invece di 401.
-    if (!userRow.refresh_token_hash) {
-      return null;
-    }
+    // La sessione del dispositivo: match sul digest corrente, oppure sul
+    // digest precedente entro la finestra di grazia (risposta di refresh
+    // persa in rete: il client ritenta col token appena ruotato).
+    const sessionResult = await queryWithRetry(
+      `SELECT id FROM user_sessions
+        WHERE user_id = $1
+          AND expires_at > now()
+          AND (token_digest = $2
+               OR (prev_token_digest = $2 AND rotated_at > now() - ${ROTATION_GRACE_SQL}))
+        LIMIT 1`,
+      [userRow.id, digest]
+    );
 
-    // Verify refresh token hash matches
-    const isValidRefreshToken = await this.verifyRefreshTokenHash(refreshToken, userRow.refresh_token_hash);
-    if (!isValidRefreshToken) {
-      return null;
+    let sessionId: number | null = sessionResult.rows[0]?.id ?? null;
+
+    if (sessionId === null) {
+      // Fallback legacy: dispositivo loggato prima delle sessioni
+      // per-dispositivo, col suo hash in users.refresh_token_hash. Lo si
+      // migra a una riga di sessione e si consuma l'hash (single-use).
+      // Il guard sul NULL evita che bcrypt.compare(token, null) lanci e
+      // trasformi una revoca legittima in un 500.
+      if (!userRow.refresh_token_hash) {
+        return null;
+      }
+      const isLegacyToken = await this.verifyRefreshTokenHash(refreshToken, userRow.refresh_token_hash);
+      if (!isLegacyToken) {
+        return null;
+      }
+      const migrated = await queryWithRetry(
+        `INSERT INTO user_sessions (user_id, token_digest, expires_at)
+         VALUES ($1, $2, now() + ${SESSION_LIFETIME_SQL})
+         RETURNING id`,
+        [userRow.id, digest]
+      );
+      sessionId = migrated.rows[0].id;
+      await queryWithRetry('UPDATE users SET refresh_token_hash = NULL WHERE id = $1', [userRow.id]);
     }
 
     const newPayload: TokenPayload = {
@@ -225,16 +279,45 @@ export class AuthService {
 
     const tokens = this.generateTokens(newPayload);
 
-    // Update refresh token hash
-    const newRefreshTokenHash = await this.hashRefreshToken(tokens.refreshToken);
-    await queryWithRetry('UPDATE users SET refresh_token_hash = $1 WHERE id = $2', [newRefreshTokenHash, userRow.id]);
+    // Rotazione con finestra scorrevole: il digest corrente scivola in
+    // prev_token_digest (non quello appena presentato: se due tab dello
+    // stesso dispositivo si sorpassano in grazia, il token dell'altra tab
+    // resta così raggiungibile) e la scadenza riparte da 7 giorni — la
+    // sessione vive finché il dispositivo la usa almeno una volta a settimana.
+    const newDigest = this.digestRefreshToken(tokens.refreshToken);
+    await queryWithRetry(
+      `UPDATE user_sessions
+          SET prev_token_digest = token_digest,
+              rotated_at = now(),
+              token_digest = $1,
+              last_seen_at = now(),
+              expires_at = now() + ${SESSION_LIFETIME_SQL}
+        WHERE id = $2`,
+      [newDigest, sessionId]
+    );
 
     return tokens;
   }
 
-  // Logout user (invalidate refresh token)
-  static async logout(userId: number): Promise<void> {
+  // Logout: col refresh token si spegne SOLO la sessione di quel
+  // dispositivo (gli altri palmari sullo stesso account restano dentro);
+  // senza — o se il token non corrisponde a nessuna sessione, com'è per
+  // quelle legacy pre-deploy — si revoca tutto per non lasciare code.
+  static async logout(userId: number, refreshToken?: string): Promise<void> {
+    if (refreshToken) {
+      const digest = this.digestRefreshToken(refreshToken);
+      const deleted = await queryWithRetry(
+        `DELETE FROM user_sessions
+          WHERE user_id = $1 AND (token_digest = $2 OR prev_token_digest = $2)
+          RETURNING id`,
+        [userId, digest]
+      );
+      if (deleted.rows.length > 0) {
+        return;
+      }
+    }
     await queryWithRetry('UPDATE users SET refresh_token_hash = NULL WHERE id = $1', [userId]);
+    await queryWithRetry('DELETE FROM user_sessions WHERE user_id = $1', [userId]);
   }
 
   // Get user by ID (con il tenant di appartenenza: /auth/me lo espone
@@ -531,16 +614,17 @@ export class AuthService {
     }
 
     const newHash = await this.hashPassword(newPassword);
-    // refresh_token_hash a NULL insieme alla password: le altre sessioni
-    // muoiono al primo refresh (l'access token residuo scade da solo entro
-    // 6h). È il comportamento atteso dopo un cambio password — chi lo cambia
-    // di solito lo fa perché teme che qualcun altro abbia la vecchia.
+    // Tutte le sessioni revocate insieme alla password (l'access token
+    // residuo scade da solo entro 6h). È il comportamento atteso dopo un
+    // cambio password — chi lo cambia di solito lo fa perché teme che
+    // qualcun altro abbia la vecchia.
     await queryWithRetry(
       `UPDATE users
        SET password_hash = $1, refresh_token_hash = NULL, updated_at = CURRENT_TIMESTAMP
        WHERE id = $2`,
       [newHash, userId]
     );
+    await queryWithRetry('DELETE FROM user_sessions WHERE user_id = $1', [userId]);
     return 'ok';
   }
 
@@ -589,11 +673,12 @@ export class AuthService {
     };
     const tokens = this.generateTokens(payload);
 
-    // La rotazione dell'hash revoca il refresh token precedente: eventuali
-    // altre sessioni (che portano la vecchia email nel JWT) muoiono al primo
-    // refresh invece di continuare a mentire.
-    const refreshTokenHash = await this.hashRefreshToken(tokens.refreshToken);
-    await queryWithRetry('UPDATE users SET refresh_token_hash = $1 WHERE id = $2', [refreshTokenHash, userId]);
+    // Tutte le altre sessioni revocate: portano la vecchia email nel JWT e
+    // al primo refresh morirebbero comunque invece di continuare a mentire.
+    // Solo questa (coi token appena emessi) riparte pulita.
+    await queryWithRetry('UPDATE users SET refresh_token_hash = NULL WHERE id = $1', [userId]);
+    await queryWithRetry('DELETE FROM user_sessions WHERE user_id = $1', [userId]);
+    await this.createSession(userId, tokens.refreshToken);
 
     const user = await this.getUserById(userId);
     if (!user) {
@@ -646,6 +731,9 @@ export class AuthService {
       return null;
     }
     const row = result.rows[0];
+    // Logout ovunque anche per le sessioni per-dispositivo (il NULL su
+    // refresh_token_hash nell'UPDATE copre solo quelle legacy).
+    await queryWithRetry('DELETE FROM user_sessions WHERE user_id = $1', [row.id]);
     return {
       id: row.id,
       email: row.email,
