@@ -282,21 +282,27 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                       {hasVariants(d.id) && <ChevronDown size={15} aria-hidden />}
                     </span>
                   </button>
-                  {qty > 0 && (tappableBadge ? (
-                    <button
-                      type="button"
-                      onClick={() => onCourseTap!(d)}
-                      aria-label={`Sposta ${d.name} in un'altra uscita`}
-                      className="absolute right-2.5 top-2.5 inline-flex h-9 items-center gap-1 whitespace-nowrap rounded-full bg-[var(--ds-arriving-tint)] px-2.5 text-[12px] font-semibold tabular-nums text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                    >
-                      <CornerDownRight size={13} aria-hidden />
-                      {qty} · {courseTagShort(courseOf!(d))}
-                    </button>
-                  ) : (
-                    <span className="absolute right-3 top-3 inline-flex h-6 min-w-[24px] items-center justify-center rounded-full bg-[var(--ds-action-bg)] px-1.5 text-[12px] font-semibold tabular-nums text-[var(--ds-action-fg)]">
-                      {qty}
+                  {/* Due badge, due mestieri: il conteggio dice «quanti», il
+                      badge dell'uscita (icona di destinazione) dice «dove» e
+                      si tocca per spostare. */}
+                  {qty > 0 && (
+                    <span className="absolute right-2.5 top-2.5 flex items-center gap-1.5">
+                      {tappableBadge && (
+                        <button
+                          type="button"
+                          onClick={() => onCourseTap!(d)}
+                          aria-label={`Sposta ${d.name} in un'altra uscita`}
+                          className="inline-flex h-9 items-center gap-1 whitespace-nowrap rounded-full bg-[var(--ds-arriving-tint)] px-2.5 text-[12px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                        >
+                          <CornerDownRight size={13} aria-hidden />
+                          {courseTagShort(courseOf!(d))}
+                        </button>
+                      )}
+                      <span className="inline-flex h-6 min-w-[24px] items-center justify-center rounded-full bg-[var(--ds-action-bg)] px-1.5 text-[12px] font-semibold tabular-nums text-[var(--ds-action-fg)]">
+                        {qty}
+                      </span>
                     </span>
-                  ))}
+                  )}
                 </div>
               );
             })}

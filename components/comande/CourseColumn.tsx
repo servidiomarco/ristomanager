@@ -1,5 +1,6 @@
 import React from 'react';
 import { ArrowUpDown, Ban, ChevronUp, ChevronsUpDown, Loader2, Pencil, Plus, Send, SendHorizontal } from 'lucide-react';
+import { CourseChips } from './CourseChips';
 import type { OrderItem, OrderWithItems } from '../../types';
 import { StatusPill } from '../ds';
 import {
@@ -529,6 +530,20 @@ export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, o
           {rows === 0 ? 'vuota' : rowCountLabel(rows)}
         </span>
       </header>
+      {/* La pista delle uscite resta SEMPRE in vista: a comanda lunga le
+          uscite in fondo alla colonna scorrono via, e selezionarne una
+          voleva dire andarla a cercare. Stessa pista del palmare — pallino
+          «qui c'è roba», verde «già partita». */}
+      <div className="flex-shrink-0 border-b border-[var(--ds-border)] px-3 py-2">
+        <CourseChips
+          order={order}
+          cart={cart}
+          course={course}
+          onCourse={list.onCourse}
+          showBar={list.showBar}
+          showDessert={list.showDessert}
+        />
+      </div>
       <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--ds-canvas)] p-3">
         <CourseList {...list} />
       </div>
