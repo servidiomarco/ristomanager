@@ -210,6 +210,13 @@ WHERE NOT EXISTS (SELECT 1 FROM reservations WHERE customer_name = 'Famiglia Ros
 -- Modulo acceso, prima uscita che parte da sola
 UPDATE app_settings SET value = true       WHERE key = 'table_orders_enabled';
 UPDATE app_settings SET text_value = 'AUTO_FIRST' WHERE key = 'course_fire_mode';
+
+-- Pagamenti al tavolo accesi (entitlement + flag): senza, /bills/open
+-- risponde sempre vuoto e l'incasso dice «conto non trovato».
+INSERT INTO tenant_features (tenant_id, feature, enabled) VALUES (1, 'pay_at_table', true)
+ON CONFLICT (tenant_id, feature) DO UPDATE SET enabled = true;
+INSERT INTO app_settings (tenant_id, key, value) VALUES (1, 'pay_at_table_enabled', 'true')
+ON CONFLICT (tenant_id, key) DO UPDATE SET value = 'true';
 SQL
 
 # Gli allergeni arrivano dal CRM: li mettiamo sulla prenotazione di prova.
