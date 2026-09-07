@@ -583,6 +583,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-07 | Pagamenti, conto al tavolo e cassa | Esito onesto per l'incasso parziale: pagata una quota, la schermata di esito dice «Incassata una parte» con la cifra appena entrata in grande e il residuo sotto («Restano 16,00 € su 80,00 €») — prima diceva «Chiuso con proforma» col totale del tavolo. Bottone «Riapri e continua» per la quota successiva; la stampa proforma resta a portata. |
 | 2026-09-07 | Pagamenti, conto al tavolo e cassa | La quota «per piatti» ora ricorda cosa copre: al giro d'incasso successivo i piatti già pagati compaiono segnati «già pagata» (anche a metà riga: «1 già pagato») e non si rispuntano; dal QR al tavolo l'ospite li trova presi e non può ripagarli. Lo storno del movimento li libera. |
 | 2026-09-07 | Pagamenti, conto al tavolo e cassa | «Per piatti» nel dividi conto della cassa: si spuntano i piatti che la persona ha preso (anche una parte di una riga da più pezzi) e la quota si calcola da sola, come già dal QR al tavolo. Solo sui conti senza sconto, dove le righe quadrano col totale. |
 | 2026-09-07 | Utenti, ruoli e permessi | Sessioni per dispositivo: più device sullo stesso account convivono, il rinnovo dei token è anticipato e tollera blip di rete e riavvii del server (niente più logout a metà servizio), il logout scollega solo il dispositivo da cui è fatto. |

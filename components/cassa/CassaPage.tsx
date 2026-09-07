@@ -98,7 +98,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
   // L'importo scelto in «Dividi conto»: precompila il pannello di incasso.
   const [quotaCents, setQuotaCents] = useState<number | null>(null);
   const [quotaItemUnits, setQuotaItemUnits] = useState<{ order_item_id: number; units: number }[] | null>(null);
-  const [esito, setEsito] = useState<{ kind: Esito; bill: OpenBillRow } | null>(null);
+  const [esito, setEsito] = useState<{ kind: Esito; bill: OpenBillRow; paidNowCents?: number } | null>(null);
 
   // L'emissione dello scontrino è asincrona: l'esito si apre spesso col
   // documento ancora PENDING. Quando la conferma arriva via socket, i campi
@@ -374,7 +374,10 @@ export const CassaPage: React.FC<CassaPageProps> = ({
         row?.fiscal_status ?? null,
         row?.fiscal_doc_type ?? null,
       );
-      setEsito({ kind, bill: row ?? { ...bill, closed_at: closed.closed_at } });
+      // Quanto è entrato con QUESTO incasso: l'esito parziale mostra questo,
+      // non il totale del tavolo.
+      const paidNowCents = (opts?.payments ?? []).reduce((s, p) => s + p.amount_cents, 0);
+      setEsito({ kind, bill: row ?? { ...bill, closed_at: closed.closed_at }, paidNowCents });
       setScreen('esito');
     } catch (err: any) {
       setError(err?.data?.error ?? err?.message ?? 'Chiusura non riuscita');
@@ -764,6 +767,8 @@ export const CassaPage: React.FC<CassaPageProps> = ({
         <EsitoChiusura
           esito={esito.kind}
           totalCents={esito.bill.total_cents}
+          paidNowCents={esito.paidNowCents ?? null}
+          residualCents={esito.bill.residual_cents ?? null}
           tableName={esito.bill.table_name}
           closedAt={esito.bill.closed_at ?? null}
           docNumber={esito.bill.fiscal_doc_number ?? esito.bill.fiscal_ref ?? null}
