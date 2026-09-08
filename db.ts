@@ -329,6 +329,26 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
     try {
         await client.query('BEGIN');
 
+        // I seed storici dei permessi (tenant 1, sparsi in questa funzione)
+        // rispettano i permessi riservati alla piattaforma: una revoca dal
+        // pannello («comande spente al Frantoio», 8/09/2026) non deve
+        // risorgere al boot successivo. La tabella dei lock nasce con una
+        // migration, che gira DOPO createSchema: su un database vergine non
+        // esiste ancora — e non può contenere nulla — quindi lì si semina
+        // senza guardia.
+        const locksTableReady = (await client.query(
+            `SELECT to_regclass('public.platform_permission_locks') IS NOT NULL AS ok`
+        )).rows[0]?.ok === true;
+        const seedRolePermissionSql = locksTableReady
+            ? `INSERT INTO role_permissions (tenant_id, role, permission)
+               SELECT 1, $1, $2
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM platform_permission_locks
+                     WHERE tenant_id = 1 AND permission = $2
+                )
+               ON CONFLICT DO NOTHING`
+            : 'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING';
+
         // ============================================
         // TABELLE FONDANTI — devono esistere per prime
         // ============================================
@@ -1059,7 +1079,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
                 // DB nuovo; il DEFAULT transitorio cade con drop-default-tenant-id.
                 await client.query(`ALTER TABLE role_permissions ADD COLUMN IF NOT EXISTS tenant_id BIGINT NOT NULL DEFAULT 1;`);
                 await client.query(
-                    'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
+                    seedRolePermissionSql,
                     [role, permission]
                 );
             }
@@ -1074,7 +1094,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of logsPermissions) {
             await client.query(
-                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
+                seedRolePermissionSql,
                 [role, permission]
             );
         }
@@ -1088,7 +1108,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of staffPermissions) {
             await client.query(
-                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
+                seedRolePermissionSql,
                 [role, permission]
             );
         }
@@ -1125,7 +1145,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of generalManagerPermissions) {
             await client.query(
-                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
+                seedRolePermissionSql,
                 [role, permission]
             );
         }
@@ -1137,7 +1157,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of banquetPricePermissions) {
             await client.query(
-                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
+                seedRolePermissionSql,
                 [role, permission]
             );
         }
@@ -1150,7 +1170,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of banquetPaymentPermissions) {
             await client.query(
-                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
+                seedRolePermissionSql,
                 [role, permission]
             );
         }
@@ -1174,7 +1194,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of receptionRoleSeedPermissions) {
             await client.query(
-                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
+                seedRolePermissionSql,
                 [role, permission]
             );
         }
@@ -1538,7 +1558,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of customerPermissions) {
             await client.query(
-                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
+                seedRolePermissionSql,
                 [role, permission]
             );
         }
@@ -1691,7 +1711,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of inventoryPermissions) {
             await client.query(
-                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
+                seedRolePermissionSql,
                 [role, permission]
             );
         }
@@ -1704,7 +1724,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of voiceCallsPermissions) {
             await client.query(
-                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
+                seedRolePermissionSql,
                 [role, permission]
             );
         }
@@ -1718,7 +1738,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of receptionPermissions) {
             await client.query(
-                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
+                seedRolePermissionSql,
                 [role, permission]
             );
         }
@@ -1735,7 +1755,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of paymentsPermissions) {
             await client.query(
-                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
+                seedRolePermissionSql,
                 [role, permission]
             );
         }
@@ -3072,7 +3092,7 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
         ];
         for (const [role, permission] of orderPermissions) {
             await client.query(
-                'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
+                seedRolePermissionSql,
                 [role, permission]
             );
         }
