@@ -543,6 +543,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 - **Doppio livello di controllo**: il modulo va *venduto* (entitlement) e poi *acceso* dal ristoratore (interruttore operativo). Tutti i default sono prudenti (spento).
 - **Billing con Stripe**: abbonamento per tenant con add-on, checkout e portale clienti; lo stato dell'abbonamento accende/spegne i moduli da solo (webhook). Quadro MRR e stato clienti per l'amministrazione.
 - **Pannello Piattaforma** (solo admin): creazione nuovo ristorante in un click (con owner e password temporanea mostrata una sola volta), sospensione/riattivazione (la sospensione spegne anche login e pagine pubbliche), accensione moduli, **impersonificazione** dell'owner per assistenza (sessione breve, tracciata e con banner visibile).
+- **Sessione di piattaforma dentro un ristorante** («Entra» dal pannello): l'admin opera nel tenant con la propria identità e un livello sopra il Proprietario — tutti i permessi, matrice compresa — con banner visibile e ingresso tracciato nel log attività del ristorante. È la base per riservare funzionalità alla sola piattaforma; «Entra come» resta per vedere l'app con gli occhi del titolare.
 - **Onboarding self-service** del nuovo ristorante col wizard in 4 passi.
 
 ---
@@ -585,6 +586,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-08 | Piattaforma SaaS | «Entra» dal Pannello Piattaforma: sessione dell'admin dentro il ristorante con la propria identità, sopra la matrice permessi del tenant (banner visibile, ingresso nel log attività). «Entra come» resta per l'assistenza. |
 | 2026-09-07 | Comande, Cucina e Passe | Via la matita doppione dalle righe in bozza della comanda: il foglio di riga si apre già dal tocco sul nome. Nel foglio, «elimina riga» non è più un link tratteggiato ma il cestino tinto accanto al bottone principale — il peso visivo resta su quello che si vuole fare. |
 | 2026-09-07 | Comande, Cucina e Passe | La card dell'uscita nella colonna Comanda si elegge corrente toccandola ovunque — bordo, fondo, spazio fra le righe — non più solo dalla pill sul bordo; i controlli interni (storna, sposta, stepper) restano loro. |
 | 2026-09-07 | Comande, Cucina e Passe | La pista delle uscite (1ª–6ª, con Bar e Dolci quando ci sono) resta sempre in vista anche su desktop: fissa in testa alla colonna Comanda — con la comanda lunga i selettori scorrevano via e cambiare uscita voleva dire andarli a cercare. Sul piatto battuto i badge diventano due: il conteggio e, separato, il badge dell'uscita con l'icona di destinazione (si tocca per spostare). |

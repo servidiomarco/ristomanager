@@ -1,10 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { randomBytes } from 'node:crypto';
 import rateLimit from 'express-rate-limit';
-import { AuthService } from './authService.js';
+import { AuthService, isPlatformScopedSession } from './authService.js';
 import { authenticate, authorize } from './authMiddleware.js';
 import { UserRole, ViewState } from '../types.js';
-import { RolePermissionService, ALL_PERMISSIONS, Permission, isReportsAdmin } from './permissionService.js';
+import { RolePermissionService, ALL_PERMISSIONS, ALL_PERMISSION_KEYS, Permission, isReportsAdmin } from './permissionService.js';
 import { LogService, ActivityAction, ResourceType } from '../activityLogs/logService.js';
 import { getTenantFeatures } from '../services/entitlements.js';
 import { isSmtpConfigured, sendMail } from '../services/smtpService.js';
@@ -136,10 +136,43 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Not authenticated' });
     }
 
-    const user = await AuthService.getUserById(req.user.userId);
+    // Sessione di piattaforma scopata: la richiesta gira nel contesto del
+    // tenant bersaglio, ma la riga utente dell'admin vive nel suo tenant di
+    // casa — con la RLS rigida quella lettura (e quella su tenants) va
+    // dichiarata come lavoro di piattaforma, o torna vuota.
+    const scoped = isPlatformScopedSession(req.user);
+    const user = scoped
+      ? await runAsPlatform(() => AuthService.getUserById(req.user!.userId))
+      : await AuthService.getUserById(req.user.userId);
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Sessione di piattaforma scopata su un tenant: la riga utente punta al
+    // tenant di casa dell'admin, ma la sessione vive in QUEL tenant — la UI
+    // deve vedere branding e feature del tenant bersaglio, non di casa. I
+    // permessi sono la lista piena: la sessione bypassa la matrice.
+    if (scoped) {
+      const t = await runAsPlatform(() => queryWithRetry('SELECT id, slug, name FROM tenants WHERE id = $1', [req.user!.tenantId]));
+      if (t.rows.length === 0) {
+        return res.status(404).json({ error: 'Tenant not found' });
+      }
+      const features = await getTenantFeatures(req.user.tenantId);
+      return res.json({
+        ...user,
+        is_reports_admin: isReportsAdmin(user.email),
+        tenant: {
+          id: Number(t.rows[0].id),
+          slug: t.rows[0].slug,
+          name: t.rows[0].name,
+          // Mai il wizard di onboarding a una sessione di piattaforma: se il
+          // tenant è a metà setup lo si vede dal pannello, non da qui.
+          needs_onboarding: false,
+          features
+        },
+        permissions: ALL_PERMISSION_KEYS
+      });
     }
 
     // Get user's permissions from database

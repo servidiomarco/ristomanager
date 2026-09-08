@@ -332,6 +332,15 @@ class AuthApiService {
     localStorage.removeItem(REFRESH_TOKEN_KEY);
   }
 
+  /** Sessione di piattaforma scopata su un tenant: a differenza
+   *  dell'impersonation è una sessione piena — il refresh token c'è e il
+   *  server preserva lo scope a ogni rotazione. Utente e permessi li
+   *  riscrive il prossimo /auth/me. */
+  enterPlatformSession(accessToken: string, refreshToken: string): void {
+    localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+    localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+  }
+
   // Internal: fetch with auth header + automatic refresh on 401
   private async authFetch(url: string, init: RequestInit = {}, retried = false): Promise<Response> {
     const token = this.getAccessToken();

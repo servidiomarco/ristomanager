@@ -26,6 +26,11 @@ export const ALL_PERMISSIONS: { feature: string; permissions: Permission[] }[] =
   { feature: 'Chat staff', permissions: ['staffchat:use'] }
 ];
 
+// La lista piatta: è ciò che /auth/me risponde a una sessione di
+// piattaforma scopata su un tenant (che bypassa la matrice e quindi ha
+// tutto), così il frontend accende ogni superficie senza logica dedicata.
+export const ALL_PERMISSION_KEYS: Permission[] = ALL_PERMISSIONS.flatMap(f => f.permissions);
+
 // Lancio ristretto della Reportistica: gli account in allowlist la vedono
 // anche senza reports:view in matrice. La via ordinaria resta il permesso di
 // ruolo (assegnabile dalla UI); l'allowlist serve a dare la pagina al solo
