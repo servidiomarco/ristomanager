@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, Check, Loader2 } from 'lucide-react';
+import { AlertTriangle, Check, Loader2, Lock } from 'lucide-react';
 import { UserRole } from '../types';
 import { Loader } from './Loader';
 import { ModalShell, dsButton } from './ds';
@@ -55,6 +55,10 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
   const [features, setFeatures] = useState<FeaturePermissions[]>([]);
   const [roles] = useState<string[]>(['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER', 'KITCHEN']);
   const [rolePermissions, setRolePermissions] = useState<Record<string, string[]>>({});
+  // Permessi riservati alla piattaforma: qui si mostrano col lucchetto e
+  // non si toccano — li amministra il pannello. Il server li congela
+  // comunque, la UI evita solo di promettere un salvataggio che non avverrà.
+  const [locked, setLocked] = useState<string[]>([]);
   const [selectedRole, setSelectedRole] = useState<string>('MANAGER');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -92,6 +96,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
       const rolePermsData = await rolePermsRes.json();
 
       setFeatures(permissionsData.features);
+      setLocked(permissionsData.locked || []);
       setRolePermissions(rolePermsData);
     } catch (err) {
       setError('Errore nel caricamento dei permessi');
@@ -102,8 +107,8 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
   };
 
   const handlePermissionToggle = (permission: string) => {
-    if (selectedRole === 'OWNER') {
-      // Prevent modifying OWNER permissions
+    if (selectedRole === 'OWNER' || locked.includes(permission)) {
+      // OWNER non si modifica; un permesso riservato nemmeno.
       return;
     }
 
@@ -234,27 +239,32 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
                 </div>
                 <div className="p-4">
                   <div className="flex flex-wrap gap-2">
-                    {feature.permissions.map(permission => (
-                      <label
-                        key={permission}
-                        className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-full px-3.5 text-[14px] font-medium transition-colors ${
-                          hasPermission(permission)
-                            ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
-                            : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
-                        } ${selectedRole === 'OWNER' ? 'cursor-not-allowed opacity-60' : ''}`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={hasPermission(permission)}
-                          onChange={() => handlePermissionToggle(permission)}
-                          disabled={selectedRole === 'OWNER'}
-                          className="h-4 w-4 rounded accent-[var(--ds-action-bg)]"
-                        />
-                        <span>
-                          {PERMISSION_LABELS[permission] || permission}
-                        </span>
-                      </label>
-                    ))}
+                    {feature.permissions.map(permission => {
+                      const isLocked = locked.includes(permission);
+                      return (
+                        <label
+                          key={permission}
+                          title={isLocked ? 'Riservato alla piattaforma' : undefined}
+                          className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-full px-3.5 text-[14px] font-medium transition-colors ${
+                            hasPermission(permission)
+                              ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                              : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
+                          } ${selectedRole === 'OWNER' || isLocked ? 'cursor-not-allowed opacity-60' : ''}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={hasPermission(permission)}
+                            onChange={() => handlePermissionToggle(permission)}
+                            disabled={selectedRole === 'OWNER' || isLocked}
+                            className="h-4 w-4 rounded accent-[var(--ds-action-bg)]"
+                          />
+                          <span>
+                            {PERMISSION_LABELS[permission] || permission}
+                          </span>
+                          {isLocked && <Lock className="h-3.5 w-3.5 flex-shrink-0" aria-label="Riservato alla piattaforma" />}
+                        </label>
+                      );
+                    })}
                   </div>
                 </div>
               </div>

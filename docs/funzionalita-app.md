@@ -522,7 +522,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 - **6 ruoli operativi**: Proprietario, General Manager, Manager, Reception, Cameriere, Cucina (più l'Admin di piattaforma, esterno ai ristoranti).
 - **~35 permessi granulari** (vista/modifica per ogni area; per le comande: prendere, stornare, monitor di partita, lancio uscite) applicati **sia sull'interfaccia sia sulle API**: senza permesso la voce di menu sparisce e l'endpoint rifiuta.
 - **Matrice permessi personalizzabile** per ristorante dalla UI (checkbox per ruolo), effettiva immediatamente.
-- Account: creazione/disattivazione utenti (solo Proprietario), cambio profilo, email e password self-service, **recupero password** via link monouso; il cambio password disconnette tutte le altre sessioni.
+- Account: creazione/disattivazione utenti (solo Proprietario), cambio profilo, email e password self-service, **recupero password** via link monouso; il cambio password disconnette tutte le altre sessioni. L'email di recupero si presenta col nome del ristorante — per un account di piattaforma, col nome del prodotto.
 - **Sessioni per dispositivo**: più palmari o postazioni sullo stesso account convivono senza sbattersi fuori a vicenda; il rinnovo dei token è trasparente e anticipato (la sessione resta viva finché il dispositivo la usa almeno una volta a settimana, e un blip di rete o un riavvio del server non disconnettono mai); il logout spegne solo il dispositivo da cui è fatto.
 - **Log attività** completo: chi ha fatto cosa, quando, su quale risorsa, con esito — filtrabile per utente, azione, risorsa e periodo.
 
@@ -544,6 +544,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 - **Billing con Stripe**: abbonamento per tenant con add-on, checkout e portale clienti; lo stato dell'abbonamento accende/spegne i moduli da solo (webhook). Quadro MRR e stato clienti per l'amministrazione.
 - **Pannello Piattaforma** (solo admin): creazione nuovo ristorante in un click (con owner e password temporanea mostrata una sola volta), sospensione/riattivazione (la sospensione spegne anche login e pagine pubbliche), accensione moduli, **impersonificazione** dell'owner per assistenza (sessione breve, tracciata e con banner visibile).
 - **Sessione di piattaforma dentro un ristorante** («Entra» dal pannello): l'admin opera nel tenant con la propria identità e un livello sopra il Proprietario — tutti i permessi, matrice compresa — con banner visibile e ingresso tracciato nel log attività del ristorante. È la base per riservare funzionalità alla sola piattaforma; «Entra come» resta per vedere l'app con gli occhi del titolare.
+- **Permessi riservati alla piattaforma** («Permessi» sulla card del tenant): l'admin blocca singoli permessi della matrice — nel ristorante appaiono col lucchetto e il Proprietario non può più concederli né toglierli; con «revoca anche ai ruoli» il permesso resta alla sola piattaforma. Ogni cambio di perimetro finisce nel log attività del ristorante.
 - **Onboarding self-service** del nuovo ristorante col wizard in 4 passi.
 
 ---
@@ -586,6 +587,9 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-08 | Utenti, ruoli e permessi | Mittente di piattaforma vero: con le env `PLATFORM_EMAIL_*` configurate, le email di piattaforma (per ora il reset password di un account piattaforma) partono da casella e dominio del prodotto, non dal transport del ristorante. |
+| 2026-09-08 | Utenti, ruoli e permessi | L'email di recupero password di un account di piattaforma si presenta come Sympotia (mittente e firma), non più col nome del ristorante a cui la riga utente è appoggiata. |
+| 2026-09-08 | Piattaforma SaaS | Permessi riservati alla piattaforma: dal pannello si bloccano singoli permessi della matrice di un ristorante (lucchetto in Gestione Permessi, opzione di revoca a tutti i ruoli); solo la piattaforma li amministra, il cambio è tracciato nel log attività. |
 | 2026-09-08 | Piattaforma SaaS | «Entra» dal Pannello Piattaforma: sessione dell'admin dentro il ristorante con la propria identità, sopra la matrice permessi del tenant (banner visibile, ingresso nel log attività). «Entra come» resta per l'assistenza. |
 | 2026-09-07 | Comande, Cucina e Passe | Via la matita doppione dalle righe in bozza della comanda: il foglio di riga si apre già dal tocco sul nome. Nel foglio, «elimina riga» non è più un link tratteggiato ma il cestino tinto accanto al bottone principale — il peso visivo resta su quello che si vuole fare. |
 | 2026-09-07 | Comande, Cucina e Passe | La card dell'uscita nella colonna Comanda si elegge corrente toccandola ovunque — bordo, fondo, spazio fra le righe — non più solo dalla pill sul bordo; i controlli interni (storna, sposta, stepper) restano loro. |

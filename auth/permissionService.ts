@@ -200,6 +200,54 @@ export class RolePermissionService {
     return tenantCache(tenantId).permissions[role] || [];
   }
 
+  // ============================================
+  // PERMESSI RISERVATI ALLA PIATTAFORMA (Fase B del layer sopra l'OWNER)
+  // ============================================
+  // Un permesso bloccato non è più assegnabile né revocabile dalla matrice
+  // del tenant: lo amministra solo il pannello piattaforma. Chi lo aveva lo
+  // tiene finché la piattaforma non revoca (opzione esplicita del PUT).
+  // Nessuna cache: si legge solo nelle route della matrice e nel pannello,
+  // mai su un percorso caldo.
+
+  static async getLockedPermissions(tenantId: number): Promise<Permission[]> {
+    const result = await queryWithRetry(
+      'SELECT permission FROM platform_permission_locks WHERE tenant_id = $1 ORDER BY permission',
+      [tenantId]
+    );
+    return result.rows.map(row => row.permission as Permission);
+  }
+
+  // Sostituisce l'elenco dei lock; con `revoke` toglie in transazione i
+  // permessi bloccati a TUTTI i ruoli del tenant («isola alla piattaforma»
+  // in un gesto solo). La cache permessi si invalida perché la revoca la
+  // cambia davvero.
+  static async setLockedPermissions(tenantId: number, locks: Permission[], revoke: boolean): Promise<void> {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM platform_permission_locks WHERE tenant_id = $1', [tenantId]);
+      for (const permission of locks) {
+        await client.query(
+          'INSERT INTO platform_permission_locks (tenant_id, permission) VALUES ($1, $2)',
+          [tenantId, permission]
+        );
+      }
+      if (revoke && locks.length > 0) {
+        await client.query(
+          'DELETE FROM role_permissions WHERE tenant_id = $1 AND permission = ANY($2)',
+          [tenantId, locks]
+        );
+      }
+      await client.query('COMMIT');
+      invalidate(tenantId);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   // Eager warm-up — scalda la cache di tutti i tenant attivi dopo l'init
   // del DB, così la prima richiesta non paga la latenza del cache-miss.
   static async warmUp(): Promise<void> {

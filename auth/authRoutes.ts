@@ -7,7 +7,8 @@ import { UserRole, ViewState } from '../types.js';
 import { RolePermissionService, ALL_PERMISSIONS, ALL_PERMISSION_KEYS, Permission, isReportsAdmin } from './permissionService.js';
 import { LogService, ActivityAction, ResourceType } from '../activityLogs/logService.js';
 import { getTenantFeatures } from '../services/entitlements.js';
-import { isSmtpConfigured, sendMail } from '../services/smtpService.js';
+import { isSmtpConfigured, sendMail, isPlatformMailConfigured, sendPlatformMail } from '../services/smtpService.js';
+import { PLATFORM_NAME } from '../platform.js';
 import { queryWithRetry, runAsPlatform } from '../db.js';
 
 const router = Router();
@@ -416,7 +417,7 @@ router.post('/forgot-password', forgotPasswordLimiter, (req: Request, res: Respo
     // l'email arriva dalla stessa riga tenants che businessIdentity usa come
     // fallback.
     const result = await queryWithRetry(
-      `SELECT u.id, u.full_name, u.tenant_id, t.name AS tenant_name
+      `SELECT u.id, u.full_name, u.role, u.tenant_id, t.name AS tenant_name
          FROM users u
          JOIN tenants t ON t.id = u.tenant_id AND t.status = 'active'
         WHERE u.email = $1 AND u.is_active = TRUE`,
@@ -430,7 +431,16 @@ router.post('/forgot-password', forgotPasswordLimiter, (req: Request, res: Respo
     const userRow = result.rows[0];
     const tenantId = Number(userRow.tenant_id);
 
-    if (!(await isSmtpConfigured(tenantId))) {
+    // Un PLATFORM_ADMIN è un account di piattaforma: se il mittente di
+    // piattaforma (env PLATFORM_EMAIL_*) è configurato, il reset parte da
+    // lì — casella e dominio del prodotto, non del ristorante a cui la
+    // riga utente è appoggiata. Senza, si ripiega sul transport del tenant
+    // con la sola identità visibile di piattaforma: meglio un'email
+    // consegnata col mittente sbagliato che nessuna email.
+    const isPlatformAccount = userRow.role === UserRole.PLATFORM_ADMIN;
+    const viaPlatformSender = isPlatformAccount && isPlatformMailConfigured();
+
+    if (!viaPlatformSender && !(await isSmtpConfigured(tenantId))) {
       // Il warn è l'unico posto dove la differenza è visibile — nei log del
       // server, mai nella risposta.
       console.warn(`[forgot-password] SMTP non configurato per il tenant ${tenantId}: reset non inviabile per l'utente ${userRow.id}`);
@@ -445,18 +455,19 @@ router.post('/forgot-password', forgotPasswordLimiter, (req: Request, res: Respo
 
     const baseUrl = (process.env.CRM_APP_BASE_URL || 'https://crm.vecchiofrantoio.com').replace(/\/+$/, '');
     const resetLink = `${baseUrl}/?reset=${token}`;
-    const restaurantName = String(userRow.tenant_name || '');
+    const brandName = isPlatformAccount ? PLATFORM_NAME : String(userRow.tenant_name || '');
 
-    await sendMail(tenantId, {
+    const mailInput = {
       to: email.toLowerCase().trim(),
-      subject: `Reimposta la tua password — ${restaurantName}`,
+      fromNameOverride: isPlatformAccount ? PLATFORM_NAME : undefined,
+      subject: `Reimposta la tua password — ${brandName}`,
       text:
         `Ciao ${userRow.full_name},\n\n` +
         `per scegliere una nuova password apri questo link:\n\n` +
         `${resetLink}\n\n` +
         `Il link vale 1 ora e funziona una volta sola.\n` +
         `Se non hai chiesto tu il reset, ignora questa email: la password resta quella attuale.\n\n` +
-        `${restaurantName}`,
+        `${brandName}`,
       html:
         `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#1a1a1a">` +
         `<p style="font-size:16px;margin:0 0 16px">Ciao ${userRow.full_name},</p>` +
@@ -464,9 +475,15 @@ router.post('/forgot-password', forgotPasswordLimiter, (req: Request, res: Respo
         `<p style="margin:0 0 20px"><a href="${resetLink}" style="display:inline-block;background:#1a1a1a;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:9999px;font-size:15px">Reimposta la password</a></p>` +
         `<p style="font-size:13px;color:#666;margin:0 0 8px">Il link vale 1 ora e funziona una volta sola.</p>` +
         `<p style="font-size:13px;color:#666;margin:0 0 20px">Se non hai chiesto tu il reset, ignora questa email: la password resta quella attuale.</p>` +
-        `<p style="font-size:13px;color:#666;margin:0">${restaurantName}</p>` +
+        `<p style="font-size:13px;color:#666;margin:0">${brandName}</p>` +
         `</div>`,
-    });
+    };
+
+    if (viaPlatformSender) {
+      await sendPlatformMail(mailInput);
+    } else {
+      await sendMail(tenantId, mailInput);
+    }
 
     return uniformReply();
   } catch (error) {
@@ -701,7 +718,11 @@ router.get('/permissions', authenticate, authorize(UserRole.OWNER), async (req: 
       features: ALL_PERMISSIONS,
       // PLATFORM_ADMIN è un ruolo di piattaforma, non di tenant: nella
       // matrice permessi di un ristorante non ha senso e non deve comparire.
-      roles: Object.values(UserRole).filter(r => r !== UserRole.PLATFORM_ADMIN)
+      roles: Object.values(UserRole).filter(r => r !== UserRole.PLATFORM_ADMIN),
+      // Permessi riservati alla piattaforma: la UI li mostra col lucchetto,
+      // il PUT qui sotto li congela comunque anche per un client che ignora
+      // la lista.
+      locked: await RolePermissionService.getLockedPermissions(req.user!.tenantId)
     });
   } catch (error) {
     console.error('Get permissions error:', error);
@@ -751,11 +772,28 @@ router.put('/permissions/roles/:role', authenticate, authorize(UserRole.OWNER), 
       return res.status(400).json({ error: 'Permissions must be an array' });
     }
 
-    // Prevent removing critical permissions from OWNER role
+    // Permessi riservati alla piattaforma: per chiunque non sia una
+    // sessione di piattaforma scopata, le voci bloccate restano come sono —
+    // né concesse né revocate. Si preserva invece di rispondere 403 perché
+    // il PUT è un replace dell'intero set: un client che ignora i lock
+    // salverebbe comunque le altre voci, e deve poterlo fare.
+    let effective = permissions as Permission[];
+    const locked = new Set(await RolePermissionService.getLockedPermissions(req.user!.tenantId));
+    if (locked.size > 0 && !isPlatformScopedSession(req.user!)) {
+      const current = await RolePermissionService.getPermissionsForRole(req.user!.tenantId, role);
+      effective = [
+        ...effective.filter(p => !locked.has(p)),
+        ...current.filter(p => locked.has(p)),
+      ];
+    }
+
+    // Prevent removing critical permissions from OWNER role. Una voce
+    // bloccata è esente: se la piattaforma l'ha riservata (e magari
+    // revocata), il salvataggio del tenant non deve fallire per questo.
     if (role === UserRole.OWNER) {
       const requiredOwnerPermissions = ['users:full', 'settings:full'];
       for (const required of requiredOwnerPermissions) {
-        if (!permissions.includes(required)) {
+        if (!effective.includes(required as Permission) && !locked.has(required as Permission)) {
           return res.status(400).json({
             error: `Cannot remove ${required} permission from OWNER role`
           });
@@ -763,7 +801,7 @@ router.put('/permissions/roles/:role', authenticate, authorize(UserRole.OWNER), 
       }
     }
 
-    await RolePermissionService.setPermissionsForRole(req.user!.tenantId, role, permissions as Permission[]);
+    await RolePermissionService.setPermissionsForRole(req.user!.tenantId, role, effective);
 
     const updatedPermissions = await RolePermissionService.getPermissionsForRole(req.user!.tenantId, role);
     res.json({ role, permissions: updatedPermissions });

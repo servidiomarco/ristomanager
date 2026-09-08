@@ -1876,6 +1876,29 @@ export const adminImpersonateTenant = async (id: number): Promise<{
   });
 };
 
+// Permessi riservati alla piattaforma: il lock congela la voce nella
+// matrice del tenant; con revoke la toglie anche a tutti i ruoli.
+export const adminGetPermissionLocks = async (id: number): Promise<{
+  locks: string[];
+  features: { feature: string; permissions: string[] }[];
+}> => {
+  return apiRequest(`${API_URL}/admin/tenants/${id}/permission-locks`, {
+    headers: getHeaders(),
+  });
+};
+
+export const adminSetPermissionLocks = async (
+  id: number,
+  locks: string[],
+  revoke: boolean
+): Promise<{ locks: string[] }> => {
+  return apiRequest(`${API_URL}/admin/tenants/${id}/permission-locks`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify({ locks, revoke }),
+  });
+};
+
 // Sessione di piattaforma scopata: l'admin entra nel tenant con la propria
 // identità (sessione piena, refresh compreso) e dentro bypassa la matrice
 // permessi. L'impersonation resta la via di soccorso.

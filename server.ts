@@ -60,7 +60,7 @@ import authRoutes from './auth/authRoutes.js';
 import logRoutes from './activityLogs/logRoutes.js';
 import { authenticate, authorize, requirePermission, requireAnyPermission } from './auth/authMiddleware.js';
 import { AuthService } from './auth/authService.js';
-import { RolePermissionService, isReportsAdmin } from './auth/permissionService.js';
+import { RolePermissionService, isReportsAdmin, ALL_PERMISSIONS, ALL_PERMISSION_KEYS, type Permission } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
 import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles, sendToPlatformAdmins as pushSendToPlatformAdmins } from './services/pushService.js';
@@ -23752,6 +23752,71 @@ app.post('/admin/tenants/:id/enter', platformAdminAuth, async (req, res) => {
     } catch (err) {
         console.error('POST /admin/tenants/:id/enter error:', err);
         res.status(500).json({ error: 'Failed to enter tenant' });
+    }
+});
+
+// Permessi riservati alla piattaforma (Fase B del layer sopra l'OWNER): un
+// permesso bloccato qui sparisce dal controllo del tenant — la matrice lo
+// mostra col lucchetto e il PUT della matrice lo congela (vedi authRoutes).
+// La GET risponde anche il catalogo raggruppato, così il pannello disegna
+// l'editor senza una seconda chiamata.
+app.get('/admin/tenants/:id/permission-locks', platformAdminAuth, async (req, res) => {
+    const tenantId = Number(req.params.id);
+    if (!Number.isInteger(tenantId) || tenantId <= 0) {
+        return res.status(400).json({ error: 'invalid_tenant_id' });
+    }
+    try {
+        const exists = await queryWithRetry('SELECT id FROM tenants WHERE id = $1', [tenantId]);
+        if (exists.rows.length === 0) {
+            return res.status(404).json({ error: 'tenant_not_found' });
+        }
+        res.json({
+            locks: await RolePermissionService.getLockedPermissions(tenantId),
+            features: ALL_PERMISSIONS,
+        });
+    } catch (err) {
+        console.error('GET /admin/tenants/:id/permission-locks error:', err);
+        res.status(500).json({ error: 'Failed to fetch permission locks' });
+    }
+});
+
+app.put('/admin/tenants/:id/permission-locks', platformAdminAuth, async (req, res) => {
+    const tenantId = Number(req.params.id);
+    if (!Number.isInteger(tenantId) || tenantId <= 0) {
+        return res.status(400).json({ error: 'invalid_tenant_id' });
+    }
+    const { locks, revoke } = req.body ?? {};
+    if (!Array.isArray(locks) || locks.some(p => typeof p !== 'string')) {
+        return res.status(400).json({ error: 'invalid_locks', message: 'locks deve essere un array di permessi.' });
+    }
+    const unknown = locks.filter(p => !ALL_PERMISSION_KEYS.includes(p as Permission));
+    if (unknown.length > 0) {
+        return res.status(400).json({ error: 'unknown_permission', message: `Permessi sconosciuti: ${unknown.join(', ')}` });
+    }
+    try {
+        const exists = await queryWithRetry('SELECT id FROM tenants WHERE id = $1', [tenantId]);
+        if (exists.rows.length === 0) {
+            return res.status(404).json({ error: 'tenant_not_found' });
+        }
+        const deduped = [...new Set(locks as Permission[])];
+        await RolePermissionService.setLockedPermissions(tenantId, deduped, revoke === true);
+        // Nell'activity log del tenant, come l'ingresso: il titolare vede
+        // che la piattaforma ha cambiato il perimetro, e cosa.
+        await LogService.logActivity(
+            tenantId,
+            null,
+            req.user?.email ?? 'env-token',
+            'Platform admin',
+            ActivityAction.UPDATE,
+            ResourceType.SETTINGS,
+            undefined,
+            'permessi riservati',
+            { permission_locks: deduped, revoked: revoke === true }
+        );
+        res.json({ locks: await RolePermissionService.getLockedPermissions(tenantId) });
+    } catch (err) {
+        console.error('PUT /admin/tenants/:id/permission-locks error:', err);
+        res.status(500).json({ error: 'Failed to update permission locks' });
     }
 });
 

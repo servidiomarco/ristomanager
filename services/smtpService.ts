@@ -10,6 +10,7 @@
 
 import nodemailer, { type Transporter } from 'nodemailer';
 import { queryWithRetry } from '../db.js';
+import { PLATFORM_NAME } from '../platform.js';
 
 export type EmailProvider = 'smtp' | 'resend';
 
@@ -182,6 +183,11 @@ export interface SendMailInput {
     html?: string;
     /** Allegati già in memoria (dalla libreria media o da outbound_media). */
     attachments?: Array<{ filename: string; contentType: string; content: Buffer }>;
+    /** Nome mittente al posto di quello configurato dal tenant. Serve alle
+     *  email di piattaforma (es. reset password di un PLATFORM_ADMIN): il
+     *  transport resta quello del tenant — è lì che vivono SPF/DKIM — ma
+     *  l'email non deve presentarsi come il ristorante. */
+    fromNameOverride?: string;
 }
 
 export interface SendMailResult {
@@ -190,16 +196,17 @@ export interface SendMailResult {
     rejected: string[];
 }
 
-function buildFromHeader(config: EmailConfig): string {
-    return config.fromName
-        ? `"${config.fromName.replace(/"/g, '\\"')}" <${config.fromEmail}>`
+function buildFromHeader(config: EmailConfig, fromNameOverride?: string): string {
+    const fromName = fromNameOverride || config.fromName;
+    return fromName
+        ? `"${fromName.replace(/"/g, '\\"')}" <${config.fromEmail}>`
         : config.fromEmail;
 }
 
 async function sendViaSmtp(config: EmailConfig, input: SendMailInput): Promise<SendMailResult> {
     const transporter = buildTransporter(config);
     const info = await transporter.sendMail({
-        from: buildFromHeader(config),
+        from: buildFromHeader(config, input.fromNameOverride),
         replyTo: config.replyTo || undefined,
         to: input.to,
         subject: input.subject,
@@ -225,7 +232,7 @@ async function sendViaResend(config: EmailConfig, input: SendMailInput): Promise
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-            from: buildFromHeader(config),
+            from: buildFromHeader(config, input.fromNameOverride),
             reply_to: config.replyTo || undefined,
             to: [input.to],
             subject: input.subject,
@@ -260,6 +267,52 @@ export async function sendMail(tenantId: number, input: SendMailInput): Promise<
     const config = await getConfig(tenantId);
     if (!isProviderConfigured(config)) {
         throw new Error('Email non è configurato');
+    }
+    return config.provider === 'resend'
+        ? sendViaResend(config, input)
+        : sendViaSmtp(config, input);
+}
+
+// ============================================
+// MITTENTE DI PIATTAFORMA
+// ============================================
+// Le email che parlano a nome del prodotto (reset password di un
+// PLATFORM_ADMIN, comunicazioni di piattaforma) non escono dalla casella
+// di un ristorante: questa config vive SOLO in env (PLATFORM_*), mai in
+// integration_settings — per definizione non appartiene a nessun tenant.
+// Provider: Resend con PLATFORM_RESEND_API_KEY, oppure SMTP coi
+// PLATFORM_SMTP_*; PLATFORM_EMAIL_PROVIDER esplicita vince sull'euristica.
+
+function platformEnvConfig(): EmailConfig {
+    const resendApiKey = process.env.PLATFORM_RESEND_API_KEY || '';
+    const providerEnv = (process.env.PLATFORM_EMAIL_PROVIDER || '').toLowerCase();
+    const provider: EmailProvider =
+        providerEnv === 'smtp' || (providerEnv !== 'resend' && !resendApiKey && !!process.env.PLATFORM_SMTP_HOST)
+            ? 'smtp'
+            : 'resend';
+    return {
+        provider,
+        host: process.env.PLATFORM_SMTP_HOST || '',
+        port: Number(process.env.PLATFORM_SMTP_PORT) || 587,
+        secure: process.env.PLATFORM_SMTP_SECURE === 'true',
+        user: process.env.PLATFORM_SMTP_USER || '',
+        password: process.env.PLATFORM_SMTP_PASSWORD || '',
+        resendApiKey,
+        fromEmail: process.env.PLATFORM_EMAIL_FROM || '',
+        fromName: process.env.PLATFORM_EMAIL_FROM_NAME || PLATFORM_NAME,
+        replyTo: process.env.PLATFORM_EMAIL_REPLY_TO || '',
+        resendInboundSecret: '',
+    };
+}
+
+export function isPlatformMailConfigured(): boolean {
+    return isProviderConfigured(platformEnvConfig());
+}
+
+export async function sendPlatformMail(input: SendMailInput): Promise<SendMailResult> {
+    const config = platformEnvConfig();
+    if (!isProviderConfigured(config)) {
+        throw new Error('Mittente di piattaforma non configurato (env PLATFORM_EMAIL_*)');
     }
     return config.provider === 'resend'
         ? sendViaResend(config, input)
