@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Building2, Check, Copy, Plus, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Building2, Check, Copy, Lock, Plus, RefreshCw } from 'lucide-react';
 import {
   ModalShell, FormCard, Field, Callout, EmptyState, StatusPill, CountBadge, StatStrip,
   dsInput, dsButton,
@@ -8,6 +8,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { authApiService } from '../services/authApiService';
 import {
   adminListTenants, adminCreateTenant, adminUpdateTenant, adminImpersonateTenant, adminEnterTenant,
+  adminGetPermissionLocks, adminSetPermissionLocks,
   adminBillingCheckout, adminBillingPortal, adminBillingSummary, adminUpdateAddons,
   ADMIN_TENANT_FEATURES,
   type AdminTenant, type AdminTenantFeature, type AdminTenantProvisioned, type AdminBillingSummary,
@@ -192,6 +193,13 @@ const TenantCard: React.FC<{
   // Add-on in attesa di conferma: su un tenant abbonato la chip non scatta
   // da sola — cambia la fattura, e i soldi non si toccano per sbaglio.
   const [pendingAddon, setPendingAddon] = useState<AdminTenantFeature | null>(null);
+  // Permessi riservati alla piattaforma: editor inline, aperto a richiesta.
+  // Bozza separata dal dato caricato, così «Annulla» non lascia residui.
+  const [locksOpen, setLocksOpen] = useState(false);
+  const [locksCatalog, setLocksCatalog] = useState<{ feature: string; permissions: string[] }[]>([]);
+  const [locksDraft, setLocksDraft] = useState<string[]>([]);
+  const [locksRevoke, setLocksRevoke] = useState(false);
+  const [locksBusy, setLocksBusy] = useState<'load' | 'save' | null>(null);
   const suspended = tenant.status === 'suspended';
   const billing = billingPill(tenant.billing_status);
   const abbonato = tenant.billing_status !== null;
@@ -263,6 +271,40 @@ const TenantCard: React.FC<{
     } finally {
       setBusy(null);
       setConfirmingStatus(false);
+    }
+  };
+
+  const openLocks = async () => {
+    if (locksOpen) { setLocksOpen(false); return; }
+    setLocksBusy('load');
+    try {
+      const res = await adminGetPermissionLocks(tenant.id);
+      setLocksCatalog(res.features);
+      setLocksDraft(res.locks);
+      setLocksRevoke(false);
+      setLocksOpen(true);
+    } catch (err) {
+      showToast((err as ApiError).message || 'Permessi riservati non caricati', 'error');
+    } finally {
+      setLocksBusy(null);
+    }
+  };
+
+  const toggleLock = (permission: string) => {
+    setLocksDraft(prev => prev.includes(permission) ? prev.filter(p => p !== permission) : [...prev, permission]);
+  };
+
+  const saveLocks = async () => {
+    setLocksBusy('save');
+    try {
+      const res = await adminSetPermissionLocks(tenant.id, locksDraft, locksRevoke);
+      setLocksDraft(res.locks);
+      setLocksOpen(false);
+      showToast(locksRevoke ? 'Permessi riservati salvati e revocati ai ruoli' : 'Permessi riservati salvati', 'success');
+    } catch (err) {
+      showToast((err as ApiError).message || 'Salvataggio non riuscito', 'error');
+    } finally {
+      setLocksBusy(null);
     }
   };
 
@@ -381,6 +423,63 @@ const TenantCard: React.FC<{
         </div>
       )}
 
+      {/* Permessi riservati alla piattaforma: chip per permesso, raggruppate
+          per funzionalità. Una chip accesa = voce col lucchetto nella matrice
+          del tenant; «revoca anche ai ruoli» è l'isolamento in un gesto. */}
+      {locksOpen && (
+        <div className="mt-3 rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+          <p className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">Permessi riservati alla piattaforma</p>
+          <p className="mt-0.5 text-[13px] text-[var(--ds-text-muted)]">La matrice del tenant li mostra col lucchetto e non può toccarli.</p>
+          <div className="mt-3 space-y-2.5">
+            {locksCatalog.map(group => (
+              <div key={group.feature}>
+                <p className="mb-1 text-[12px] font-medium text-[var(--ds-text-muted)]">{group.feature}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {group.permissions.map(permission => {
+                    const on = locksDraft.includes(permission);
+                    return (
+                      <button
+                        key={permission}
+                        type="button"
+                        onClick={() => toggleLock(permission)}
+                        aria-pressed={on}
+                        className={`inline-flex h-9 items-center gap-1.5 rounded-full px-3 font-mono text-[12px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                          on
+                            ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                            : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
+                        }`}
+                      >
+                        {on && <Lock className="h-3 w-3" aria-hidden />}
+                        {permission}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <label className="flex min-h-11 flex-1 cursor-pointer items-center gap-2 text-[14px] text-[var(--ds-text-primary)]">
+              <input
+                type="checkbox"
+                checked={locksRevoke}
+                onChange={() => setLocksRevoke(v => !v)}
+                className="h-4 w-4 rounded accent-[var(--ds-action-bg)]"
+              />
+              Revoca anche a tutti i ruoli del tenant
+            </label>
+            <div className="flex flex-shrink-0 gap-2">
+              <button type="button" className={dsButton.secondary} onClick={() => setLocksOpen(false)} disabled={locksBusy === 'save'}>
+                Annulla
+              </button>
+              <button type="button" className={dsButton.primary} onClick={saveLocks} disabled={locksBusy === 'save'}>
+                {locksBusy === 'save' ? 'Salvo…' : 'Salva'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Azioni. La conferma di sospensione è inline: prende il posto della
           riga, niente window.confirm. */}
       {confirmingStatus ? (
@@ -411,6 +510,10 @@ const TenantCard: React.FC<{
           </button>
           <button type="button" className={dsButton.quiet} onClick={impersonate} disabled={busy === 'impersonate'} title="Sessione di 15 minuti come il titolare">
             Entra come
+          </button>
+          <button type="button" className={dsButton.quiet} onClick={openLocks} disabled={locksBusy === 'load'} aria-expanded={locksOpen}>
+            <Lock className="h-3.5 w-3.5" aria-hidden />
+            Permessi
           </button>
           <button type="button" className={dsButton.quiet} onClick={openBilling} disabled={busy === 'billing'}>
             {tenant.billing_status ? 'Fatturazione' : 'Attiva abbonamento'}

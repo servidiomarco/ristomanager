@@ -701,7 +701,11 @@ router.get('/permissions', authenticate, authorize(UserRole.OWNER), async (req: 
       features: ALL_PERMISSIONS,
       // PLATFORM_ADMIN è un ruolo di piattaforma, non di tenant: nella
       // matrice permessi di un ristorante non ha senso e non deve comparire.
-      roles: Object.values(UserRole).filter(r => r !== UserRole.PLATFORM_ADMIN)
+      roles: Object.values(UserRole).filter(r => r !== UserRole.PLATFORM_ADMIN),
+      // Permessi riservati alla piattaforma: la UI li mostra col lucchetto,
+      // il PUT qui sotto li congela comunque anche per un client che ignora
+      // la lista.
+      locked: await RolePermissionService.getLockedPermissions(req.user!.tenantId)
     });
   } catch (error) {
     console.error('Get permissions error:', error);
@@ -751,11 +755,28 @@ router.put('/permissions/roles/:role', authenticate, authorize(UserRole.OWNER), 
       return res.status(400).json({ error: 'Permissions must be an array' });
     }
 
-    // Prevent removing critical permissions from OWNER role
+    // Permessi riservati alla piattaforma: per chiunque non sia una
+    // sessione di piattaforma scopata, le voci bloccate restano come sono —
+    // né concesse né revocate. Si preserva invece di rispondere 403 perché
+    // il PUT è un replace dell'intero set: un client che ignora i lock
+    // salverebbe comunque le altre voci, e deve poterlo fare.
+    let effective = permissions as Permission[];
+    const locked = new Set(await RolePermissionService.getLockedPermissions(req.user!.tenantId));
+    if (locked.size > 0 && !isPlatformScopedSession(req.user!)) {
+      const current = await RolePermissionService.getPermissionsForRole(req.user!.tenantId, role);
+      effective = [
+        ...effective.filter(p => !locked.has(p)),
+        ...current.filter(p => locked.has(p)),
+      ];
+    }
+
+    // Prevent removing critical permissions from OWNER role. Una voce
+    // bloccata è esente: se la piattaforma l'ha riservata (e magari
+    // revocata), il salvataggio del tenant non deve fallire per questo.
     if (role === UserRole.OWNER) {
       const requiredOwnerPermissions = ['users:full', 'settings:full'];
       for (const required of requiredOwnerPermissions) {
-        if (!permissions.includes(required)) {
+        if (!effective.includes(required as Permission) && !locked.has(required as Permission)) {
           return res.status(400).json({
             error: `Cannot remove ${required} permission from OWNER role`
           });
@@ -763,7 +784,7 @@ router.put('/permissions/roles/:role', authenticate, authorize(UserRole.OWNER), 
       }
     }
 
-    await RolePermissionService.setPermissionsForRole(req.user!.tenantId, role, permissions as Permission[]);
+    await RolePermissionService.setPermissionsForRole(req.user!.tenantId, role, effective);
 
     const updatedPermissions = await RolePermissionService.getPermissionsForRole(req.user!.tenantId, role);
     res.json({ role, permissions: updatedPermissions });
