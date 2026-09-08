@@ -182,6 +182,11 @@ export interface SendMailInput {
     html?: string;
     /** Allegati già in memoria (dalla libreria media o da outbound_media). */
     attachments?: Array<{ filename: string; contentType: string; content: Buffer }>;
+    /** Nome mittente al posto di quello configurato dal tenant. Serve alle
+     *  email di piattaforma (es. reset password di un PLATFORM_ADMIN): il
+     *  transport resta quello del tenant — è lì che vivono SPF/DKIM — ma
+     *  l'email non deve presentarsi come il ristorante. */
+    fromNameOverride?: string;
 }
 
 export interface SendMailResult {
@@ -190,16 +195,17 @@ export interface SendMailResult {
     rejected: string[];
 }
 
-function buildFromHeader(config: EmailConfig): string {
-    return config.fromName
-        ? `"${config.fromName.replace(/"/g, '\\"')}" <${config.fromEmail}>`
+function buildFromHeader(config: EmailConfig, fromNameOverride?: string): string {
+    const fromName = fromNameOverride || config.fromName;
+    return fromName
+        ? `"${fromName.replace(/"/g, '\\"')}" <${config.fromEmail}>`
         : config.fromEmail;
 }
 
 async function sendViaSmtp(config: EmailConfig, input: SendMailInput): Promise<SendMailResult> {
     const transporter = buildTransporter(config);
     const info = await transporter.sendMail({
-        from: buildFromHeader(config),
+        from: buildFromHeader(config, input.fromNameOverride),
         replyTo: config.replyTo || undefined,
         to: input.to,
         subject: input.subject,
@@ -225,7 +231,7 @@ async function sendViaResend(config: EmailConfig, input: SendMailInput): Promise
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-            from: buildFromHeader(config),
+            from: buildFromHeader(config, input.fromNameOverride),
             reply_to: config.replyTo || undefined,
             to: [input.to],
             subject: input.subject,

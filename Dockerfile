@@ -14,7 +14,7 @@ RUN npm ci
 ARG CACHE_BUST=1
 
 # Copy ALL TypeScript source files
-COPY server.ts db.ts types.ts ./
+COPY server.ts db.ts types.ts platform.ts ./
 COPY auth ./auth
 COPY services ./services
 COPY activityLogs ./activityLogs

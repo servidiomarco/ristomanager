@@ -8,6 +8,7 @@ import { RolePermissionService, ALL_PERMISSIONS, ALL_PERMISSION_KEYS, Permission
 import { LogService, ActivityAction, ResourceType } from '../activityLogs/logService.js';
 import { getTenantFeatures } from '../services/entitlements.js';
 import { isSmtpConfigured, sendMail } from '../services/smtpService.js';
+import { PLATFORM_NAME } from '../platform.js';
 import { queryWithRetry, runAsPlatform } from '../db.js';
 
 const router = Router();
@@ -416,7 +417,7 @@ router.post('/forgot-password', forgotPasswordLimiter, (req: Request, res: Respo
     // l'email arriva dalla stessa riga tenants che businessIdentity usa come
     // fallback.
     const result = await queryWithRetry(
-      `SELECT u.id, u.full_name, u.tenant_id, t.name AS tenant_name
+      `SELECT u.id, u.full_name, u.role, u.tenant_id, t.name AS tenant_name
          FROM users u
          JOIN tenants t ON t.id = u.tenant_id AND t.status = 'active'
         WHERE u.email = $1 AND u.is_active = TRUE`,
@@ -445,18 +446,25 @@ router.post('/forgot-password', forgotPasswordLimiter, (req: Request, res: Respo
 
     const baseUrl = (process.env.CRM_APP_BASE_URL || 'https://crm.vecchiofrantoio.com').replace(/\/+$/, '');
     const resetLink = `${baseUrl}/?reset=${token}`;
-    const restaurantName = String(userRow.tenant_name || '');
+    // Un PLATFORM_ADMIN è un account di piattaforma: l'email si presenta
+    // come il prodotto, non come il ristorante a cui la riga utente è
+    // appoggiata (il titolare della piattaforma non deve ricevere un reset
+    // "dal Vecchio Frantoio"). Il transport resta quello del tenant — SPF e
+    // DKIM vivono lì — cambia solo l'identità visibile.
+    const isPlatformAccount = userRow.role === UserRole.PLATFORM_ADMIN;
+    const brandName = isPlatformAccount ? PLATFORM_NAME : String(userRow.tenant_name || '');
 
     await sendMail(tenantId, {
       to: email.toLowerCase().trim(),
-      subject: `Reimposta la tua password — ${restaurantName}`,
+      fromNameOverride: isPlatformAccount ? PLATFORM_NAME : undefined,
+      subject: `Reimposta la tua password — ${brandName}`,
       text:
         `Ciao ${userRow.full_name},\n\n` +
         `per scegliere una nuova password apri questo link:\n\n` +
         `${resetLink}\n\n` +
         `Il link vale 1 ora e funziona una volta sola.\n` +
         `Se non hai chiesto tu il reset, ignora questa email: la password resta quella attuale.\n\n` +
-        `${restaurantName}`,
+        `${brandName}`,
       html:
         `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:480px;margin:0 auto;padding:24px;color:#1a1a1a">` +
         `<p style="font-size:16px;margin:0 0 16px">Ciao ${userRow.full_name},</p>` +
@@ -464,7 +472,7 @@ router.post('/forgot-password', forgotPasswordLimiter, (req: Request, res: Respo
         `<p style="margin:0 0 20px"><a href="${resetLink}" style="display:inline-block;background:#1a1a1a;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:9999px;font-size:15px">Reimposta la password</a></p>` +
         `<p style="font-size:13px;color:#666;margin:0 0 8px">Il link vale 1 ora e funziona una volta sola.</p>` +
         `<p style="font-size:13px;color:#666;margin:0 0 20px">Se non hai chiesto tu il reset, ignora questa email: la password resta quella attuale.</p>` +
-        `<p style="font-size:13px;color:#666;margin:0">${restaurantName}</p>` +
+        `<p style="font-size:13px;color:#666;margin:0">${brandName}</p>` +
         `</div>`,
     });
 
