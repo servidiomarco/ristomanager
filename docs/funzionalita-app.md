@@ -587,6 +587,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-08 | Utenti, ruoli e permessi | Mittente di piattaforma vero: con le env `PLATFORM_EMAIL_*` configurate, le email di piattaforma (per ora il reset password di un account piattaforma) partono da casella e dominio del prodotto, non dal transport del ristorante. |
 | 2026-09-08 | Utenti, ruoli e permessi | L'email di recupero password di un account di piattaforma si presenta come Sympotia (mittente e firma), non più col nome del ristorante a cui la riga utente è appoggiata. |
 | 2026-09-08 | Piattaforma SaaS | Permessi riservati alla piattaforma: dal pannello si bloccano singoli permessi della matrice di un ristorante (lucchetto in Gestione Permessi, opzione di revoca a tutti i ruoli); solo la piattaforma li amministra, il cambio è tracciato nel log attività. |
 | 2026-09-08 | Piattaforma SaaS | «Entra» dal Pannello Piattaforma: sessione dell'admin dentro il ristorante con la propria identità, sopra la matrice permessi del tenant (banner visibile, ingresso nel log attività). «Entra come» resta per l'assistenza. |

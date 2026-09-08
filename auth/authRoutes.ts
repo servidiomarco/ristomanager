@@ -7,7 +7,7 @@ import { UserRole, ViewState } from '../types.js';
 import { RolePermissionService, ALL_PERMISSIONS, ALL_PERMISSION_KEYS, Permission, isReportsAdmin } from './permissionService.js';
 import { LogService, ActivityAction, ResourceType } from '../activityLogs/logService.js';
 import { getTenantFeatures } from '../services/entitlements.js';
-import { isSmtpConfigured, sendMail } from '../services/smtpService.js';
+import { isSmtpConfigured, sendMail, isPlatformMailConfigured, sendPlatformMail } from '../services/smtpService.js';
 import { PLATFORM_NAME } from '../platform.js';
 import { queryWithRetry, runAsPlatform } from '../db.js';
 
@@ -431,7 +431,16 @@ router.post('/forgot-password', forgotPasswordLimiter, (req: Request, res: Respo
     const userRow = result.rows[0];
     const tenantId = Number(userRow.tenant_id);
 
-    if (!(await isSmtpConfigured(tenantId))) {
+    // Un PLATFORM_ADMIN è un account di piattaforma: se il mittente di
+    // piattaforma (env PLATFORM_EMAIL_*) è configurato, il reset parte da
+    // lì — casella e dominio del prodotto, non del ristorante a cui la
+    // riga utente è appoggiata. Senza, si ripiega sul transport del tenant
+    // con la sola identità visibile di piattaforma: meglio un'email
+    // consegnata col mittente sbagliato che nessuna email.
+    const isPlatformAccount = userRow.role === UserRole.PLATFORM_ADMIN;
+    const viaPlatformSender = isPlatformAccount && isPlatformMailConfigured();
+
+    if (!viaPlatformSender && !(await isSmtpConfigured(tenantId))) {
       // Il warn è l'unico posto dove la differenza è visibile — nei log del
       // server, mai nella risposta.
       console.warn(`[forgot-password] SMTP non configurato per il tenant ${tenantId}: reset non inviabile per l'utente ${userRow.id}`);
@@ -446,15 +455,9 @@ router.post('/forgot-password', forgotPasswordLimiter, (req: Request, res: Respo
 
     const baseUrl = (process.env.CRM_APP_BASE_URL || 'https://crm.vecchiofrantoio.com').replace(/\/+$/, '');
     const resetLink = `${baseUrl}/?reset=${token}`;
-    // Un PLATFORM_ADMIN è un account di piattaforma: l'email si presenta
-    // come il prodotto, non come il ristorante a cui la riga utente è
-    // appoggiata (il titolare della piattaforma non deve ricevere un reset
-    // "dal Vecchio Frantoio"). Il transport resta quello del tenant — SPF e
-    // DKIM vivono lì — cambia solo l'identità visibile.
-    const isPlatformAccount = userRow.role === UserRole.PLATFORM_ADMIN;
     const brandName = isPlatformAccount ? PLATFORM_NAME : String(userRow.tenant_name || '');
 
-    await sendMail(tenantId, {
+    const mailInput = {
       to: email.toLowerCase().trim(),
       fromNameOverride: isPlatformAccount ? PLATFORM_NAME : undefined,
       subject: `Reimposta la tua password — ${brandName}`,
@@ -474,7 +477,13 @@ router.post('/forgot-password', forgotPasswordLimiter, (req: Request, res: Respo
         `<p style="font-size:13px;color:#666;margin:0 0 20px">Se non hai chiesto tu il reset, ignora questa email: la password resta quella attuale.</p>` +
         `<p style="font-size:13px;color:#666;margin:0">${brandName}</p>` +
         `</div>`,
-    });
+    };
+
+    if (viaPlatformSender) {
+      await sendPlatformMail(mailInput);
+    } else {
+      await sendMail(tenantId, mailInput);
+    }
 
     return uniformReply();
   } catch (error) {
