@@ -2159,8 +2159,12 @@ const buildConflictMessage = (conflicts: TableConflict[]): string => {
     return parts.join('; ');
 };
 
-// Reservations - require authentication
-app.get('/reservations', authenticate, async (req, res) => {
+// Reservations. La lista era l'unica della famiglia col solo authenticate
+// (scritture su reservations:full, letture puntuali su reservations:view):
+// ogni ruolo di default ha reservations:view, quindi il gate non toglie
+// niente a nessuno — ma senza, la matrice (e i permessi riservati della
+// piattaforma, Fase B) su questa route non mordevano.
+app.get('/reservations', authenticate, requirePermission('reservations:view'), async (req, res) => {
     try {
         // Finestra opzionale (?from=YYYY-MM-DD&to=YYYY-MM-DD, estremi inclusi,
         // giorni Europe/Rome). Il boot dell'app carica prima la finestra

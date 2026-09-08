@@ -103,6 +103,8 @@ describe('sessione di piattaforma scopata su un tenant', () => {
         // requirePermission: nessuna riga in role_permissions per il ruolo.
         const entitlements = await api().get('/settings/entitlements').set(bearer(platformAdminToken));
         expect(entitlements.status).toBe(403);
+        const reservations = await api().get('/reservations').set(bearer(platformAdminToken));
+        expect(reservations.status).toBe(403);
         // authorize(OWNER): il bypass esige lo scope, il ruolo da solo no.
         const matrix = await api().get('/auth/permissions').set(bearer(platformAdminToken));
         expect(matrix.status).toBe(403);
@@ -138,8 +140,8 @@ describe('sessione di piattaforma scopata su un tenant', () => {
     });
 
     it('la sessione scopata passa requirePermission e authorize(OWNER) nel tenant', async () => {
-        // Route col solo authenticate: la lista vuota prova che la sessione
-        // legge il tenant bersaglio (appena provisionato), non quello di casa.
+        // La lista vuota prova che la sessione legge il tenant bersaglio
+        // (appena provisionato), non quello di casa.
         const reservations = await api().get('/reservations').set(bearer(scopedAccessToken));
         expect(reservations.status).toBe(200);
         expect(Array.isArray(reservations.body)).toBe(true);

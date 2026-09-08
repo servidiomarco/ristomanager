@@ -9,7 +9,8 @@ import { LoginPage } from './components/LoginPage';
 import { ProfiloSheet } from './components/ProfiloSheet';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { BookingChannelsManager } from './components/BookingChannelsManager';
-import { PlatformPanel, ImpersonationBanner } from './components/PlatformPanel';
+import { PlatformPanel, ImpersonationBanner, decodeJwtPayload } from './components/PlatformPanel';
+import { authApiService } from './services/authApiService';
 import { Loader } from './components/Loader';
 import { UserManagement } from './components/UserManagement';
 import { RolePermissions } from './components/RolePermissions';
@@ -116,6 +117,13 @@ import {
   tenantLogoSrc,
 } from './services/apiService';
 import { swrConfig } from './services/configCache';
+
+// Sessione di piattaforma scopata su un tenant («Entra» dal pannello): il
+// claim scopedTenantId nel token la distingue da quella di pannello. Si
+// legge dal JWT e non dal profilo perché /auth/me non lo espone — e il
+// token è comunque l'unica verità sulla sessione corrente.
+const isPlatformScopedToken = (): boolean =>
+  !!decodeJwtPayload(authApiService.getAccessToken())?.scopedTenantId;
 
 // ---------------------------------------------------------------------------
 // Navigation taxonomy — single source of truth for the desktop sidebar AND the
@@ -869,7 +877,9 @@ const App: React.FC = () => {
     // Il platform admin parte dal pannello: la sua giornata sta sopra i
     // tenant, non nel servizio di uno di essi. Un preferred_landing_view
     // esplicito o un deep-link ?view= vincono comunque (gestiti sopra).
-    if (!appliedPreferredLandingRef.current && user.role === UserRole.PLATFORM_ADMIN && accessibleViews.includes(ViewState.PLATFORM)) {
+    // La sessione scopata («Entra» su un tenant) invece atterra come un
+    // utente del ristorante: sta lì per lavorarci.
+    if (!appliedPreferredLandingRef.current && user.role === UserRole.PLATFORM_ADMIN && !isPlatformScopedToken() && accessibleViews.includes(ViewState.PLATFORM)) {
       setView(ViewState.PLATFORM);
       appliedPreferredLandingRef.current = true;
       return;
@@ -1233,12 +1243,13 @@ const App: React.FC = () => {
   };
 
   const fetchData = async () => {
-    // L'admin piattaforma non opera il CRM del tenant: per scelta (D2) non ha
-    // righe nella matrice permessi, quindi questi cinque endpoint gli
-    // risponderebbero 403 — il toast "insufficient permissions" a ogni login.
-    // Atterra sulla vista Piattaforma; i dati di un ristorante li vede solo
-    // impersonando, con un token da OWNER di quel tenant.
-    if (user?.role === UserRole.PLATFORM_ADMIN) {
+    // L'admin piattaforma SENZA scope non opera il CRM del tenant: per
+    // scelta (D2) non ha righe nella matrice permessi, quindi questi cinque
+    // endpoint gli risponderebbero 403 — il toast "insufficient permissions"
+    // a ogni login. Atterra sulla vista Piattaforma. Con lo scope invece
+    // (claim scopedTenantId: è entrato in un tenant con «Entra») la sessione
+    // è operativa e i dati vanno caricati come per chiunque altro.
+    if (user?.role === UserRole.PLATFORM_ADMIN && !isPlatformScopedToken()) {
       setIsInitialDataLoading(false);
       return;
     }
