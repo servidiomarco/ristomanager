@@ -2159,8 +2159,12 @@ const buildConflictMessage = (conflicts: TableConflict[]): string => {
     return parts.join('; ');
 };
 
-// Reservations - require authentication
-app.get('/reservations', authenticate, async (req, res) => {
+// Reservations. La lista era l'unica della famiglia col solo authenticate
+// (scritture su reservations:full, letture puntuali su reservations:view):
+// ogni ruolo di default ha reservations:view, quindi il gate non toglie
+// niente a nessuno — ma senza, la matrice (e i permessi riservati della
+// piattaforma, Fase B) su questa route non mordevano.
+app.get('/reservations', authenticate, requirePermission('reservations:view'), async (req, res) => {
     try {
         // Finestra opzionale (?from=YYYY-MM-DD&to=YYYY-MM-DD, estremi inclusi,
         // giorni Europe/Rome). Il boot dell'app carica prima la finestra
@@ -23694,6 +23698,60 @@ app.post('/admin/tenants/:id/impersonate', platformAdminAuth, async (req, res) =
     } catch (err) {
         console.error('POST /admin/tenants/:id/impersonate error:', err);
         res.status(500).json({ error: 'Failed to impersonate tenant' });
+    }
+});
+
+// Sessione di piattaforma scopata (layer sopra l'OWNER): l'admin entra nel
+// tenant CON LA PROPRIA identità e ruolo — sessione piena (access + refresh),
+// claim scopedTenantId nel token. Dentro il tenant bypassa la matrice
+// permessi (vedi requirePermission), quindi mantiene anche ciò che la
+// piattaforma riserverà a sé; l'impersonation qui sopra resta per il
+// soccorso ("vedo quello che vede il titolare"). Richiede un account
+// PLATFORM_ADMIN vero: il token env di bootstrap non ha un'identità da
+// mettere in sessione né nell'audit.
+app.post('/admin/tenants/:id/enter', platformAdminAuth, async (req, res) => {
+    const tenantId = Number(req.params.id);
+    if (!Number.isInteger(tenantId) || tenantId <= 0) {
+        return res.status(400).json({ error: 'invalid_tenant_id' });
+    }
+    if (!req.user) {
+        return res.status(403).json({ error: 'jwt_required', message: 'Serve un account PLATFORM_ADMIN: il token env non ha identità.' });
+    }
+    try {
+        const tenantRes = await queryWithRetry('SELECT id, slug, name, status FROM tenants WHERE id = $1', [tenantId]);
+        if (tenantRes.rows.length === 0) {
+            return res.status(404).json({ error: 'tenant_not_found' });
+        }
+        // Solo tenant attivi: in uno sospeso non si opera (il refresh lo
+        // rifiuterebbe comunque — vedi refreshAccessToken).
+        if (tenantRes.rows[0].status !== 'active') {
+            return res.status(409).json({ error: 'tenant_not_active', message: 'Il tenant è sospeso: riattivalo prima di entrare.' });
+        }
+        const session = await AuthService.createPlatformTenantSession(req.user.userId, tenantId);
+        if (!session) {
+            return res.status(403).json({ error: 'not_platform_admin' });
+        }
+        // user_id NULL come per l'impersonation: l'admin non è un utente del
+        // tenant, ma l'ingresso resta nell'activity log del tenant bersaglio.
+        await LogService.logActivity(
+            tenantId,
+            null,
+            session.email,
+            'Platform admin',
+            ActivityAction.LOGIN,
+            ResourceType.AUTH,
+            req.user.userId,
+            session.email,
+            { platform_session: true, admin_email: session.email }
+        );
+        res.json({
+            accessToken: session.tokens.accessToken,
+            refreshToken: session.tokens.refreshToken,
+            tenant: { id: tenantId, slug: tenantRes.rows[0].slug, name: tenantRes.rows[0].name },
+        });
+    } catch (err) {
+        console.error('POST /admin/tenants/:id/enter error:', err);
+        res.status(500).json({ error: 'Failed to enter tenant' });
     }
 });
 

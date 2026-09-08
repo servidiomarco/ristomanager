@@ -7,7 +7,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { authApiService } from '../services/authApiService';
 import {
-  adminListTenants, adminCreateTenant, adminUpdateTenant, adminImpersonateTenant,
+  adminListTenants, adminCreateTenant, adminUpdateTenant, adminImpersonateTenant, adminEnterTenant,
   adminBillingCheckout, adminBillingPortal, adminBillingSummary, adminUpdateAddons,
   ADMIN_TENANT_FEATURES,
   type AdminTenant, type AdminTenantFeature, type AdminTenantProvisioned, type AdminBillingSummary,
@@ -27,7 +27,7 @@ export const PLATFORM_SESSION_KEY = 'ristocrm_platform_session';
 
 interface SavedPlatformSession {
   snapshot: Record<string, string | null>;
-  tenant: { id: number; slug: string };
+  tenant: { id: number; slug: string; name?: string };
 }
 
 const readSavedPlatformSession = (): SavedPlatformSession | null => {
@@ -54,14 +54,18 @@ export const decodeJwtPayload = (token: string | null): Record<string, unknown> 
   }
 };
 
-/* ── Banner di impersonation ──────────────────────────────────────────────
-   Fisso in alto su OGNI vista finché il token porta il claim impersonated_by.
+/* ── Banner di impersonation e sessione di piattaforma ────────────────────
+   Fisso in alto su OGNI vista finché il token porta il claim impersonated_by
+   (impersonation: sei l'OWNER per 15 minuti) oppure scopedTenantId (sessione
+   di piattaforma: sei tu, dentro il tenant, sopra la matrice permessi).
    Il fondo è il solid delle azioni: deve essere impossibile dimenticare di
    stare dentro il tenant di qualcun altro. */
 export const ImpersonationBanner: React.FC = () => {
   const { user } = useAuth();
   const claims = useMemo(() => decodeJwtPayload(authApiService.getAccessToken()), []);
-  if (!claims || !claims.impersonated_by) return null;
+  const isImpersonation = !!claims?.impersonated_by;
+  const isPlatformScope = !isImpersonation && !!claims?.scopedTenantId;
+  if (!claims || (!isImpersonation && !isPlatformScope)) return null;
 
   const saved = readSavedPlatformSession();
   const tenantLabel = user?.tenant?.name || saved?.tenant.slug || 'il tenant';
@@ -84,7 +88,11 @@ export const ImpersonationBanner: React.FC = () => {
       <div className="mx-auto flex max-w-6xl items-center gap-3 px-3 py-2 sm:px-4">
         <Building2 className="h-4 w-4 flex-shrink-0" aria-hidden />
         <p className="min-w-0 flex-1 truncate text-[13px]">
-          stai vedendo <span className="font-semibold">{tenantLabel}</span> come {email} · sessione di 15 minuti
+          {isImpersonation ? (
+            <>stai vedendo <span className="font-semibold">{tenantLabel}</span> come {email} · sessione di 15 minuti</>
+          ) : (
+            <>operi su <span className="font-semibold">{tenantLabel}</span> come {email} · sessione piattaforma</>
+          )}
         </p>
         <button
           type="button"
@@ -180,7 +188,7 @@ const TenantCard: React.FC<{
   showToast: ShowToast;
 }> = ({ tenant, onPatched, onRevert, showToast }) => {
   const [confirmingStatus, setConfirmingStatus] = useState(false);
-  const [busy, setBusy] = useState<'status' | 'impersonate' | 'billing' | 'addon' | null>(null);
+  const [busy, setBusy] = useState<'status' | 'enter' | 'impersonate' | 'billing' | 'addon' | null>(null);
   // Add-on in attesa di conferma: su un tenant abbonato la chip non scatta
   // da sola — cambia la fattura, e i soldi non si toccano per sbaglio.
   const [pendingAddon, setPendingAddon] = useState<AdminTenantFeature | null>(null);
@@ -255,6 +263,26 @@ const TenantCard: React.FC<{
     } finally {
       setBusy(null);
       setConfirmingStatus(false);
+    }
+  };
+
+  // Sessione di piattaforma: dentro il tenant con la propria identità,
+  // sopra la matrice permessi. Stessa foto della sessione dell'impersonation
+  // ("torna al pannello" la ripristina), ma qui il refresh token c'è.
+  const enterTenant = async () => {
+    setBusy('enter');
+    try {
+      const res = await adminEnterTenant(tenant.id);
+      const saved: SavedPlatformSession = {
+        snapshot: authApiService.getSessionSnapshot(),
+        tenant: res.tenant,
+      };
+      localStorage.setItem(PLATFORM_SESSION_KEY, JSON.stringify(saved));
+      authApiService.enterPlatformSession(res.accessToken, res.refreshToken);
+      window.location.reload();
+    } catch (err) {
+      setBusy(null);
+      showToast((err as ApiError).message || 'Ingresso non riuscito', 'error');
     }
   };
 
@@ -378,7 +406,10 @@ const TenantCard: React.FC<{
         </div>
       ) : (
         <div className="mt-3 flex flex-wrap gap-2">
-          <button type="button" className={dsButton.secondary} onClick={impersonate} disabled={busy === 'impersonate'}>
+          <button type="button" className={dsButton.secondary} onClick={enterTenant} disabled={busy === 'enter'}>
+            Entra
+          </button>
+          <button type="button" className={dsButton.quiet} onClick={impersonate} disabled={busy === 'impersonate'} title="Sessione di 15 minuti come il titolare">
             Entra come
           </button>
           <button type="button" className={dsButton.quiet} onClick={openBilling} disabled={busy === 'billing'}>

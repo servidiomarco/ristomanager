@@ -37,7 +37,22 @@ export interface TokenPayload {
   // normalizza col fallback 1 — corretto per tutti gli utenti esistenti.
   // Il fallback va rimosso prima di accendere il secondo tenant.
   tenantId: number;
+  // Sessione di piattaforma scopata su un tenant: un PLATFORM_ADMIN che
+  // "entra" in un ristorante mantiene la propria identità e ruolo, ma opera
+  // dentro quel tenant (tenantId = scopedTenantId). Il claim distingue la
+  // sessione operativa da quella di pannello: SOLO con lo scope il ruolo
+  // bypassa la matrice permessi del tenant — un token di piattaforma senza
+  // scope resta confinato al pannello, come prima.
+  scopedTenantId?: number;
 }
+
+// Vero solo per una sessione di piattaforma entrata in un tenant. Ogni
+// bypass (matrice permessi, authorize) passa da qui: il ruolo da solo non
+// basta, serve lo scope esplicito nel token.
+export const isPlatformScopedSession = (payload: TokenPayload): boolean =>
+  payload.role === UserRole.PLATFORM_ADMIN
+  && Number.isInteger(payload.scopedTenantId)
+  && (payload.scopedTenantId as number) > 0;
 
 export interface AuthTokens {
   accessToken: string;
@@ -112,6 +127,37 @@ export class AuthService {
       JWT_SECRET,
       { expiresIn: AuthService.IMPERSONATION_TTL_SECONDS }
     );
+  }
+
+  // Sessione di piattaforma scopata su un tenant: a differenza
+  // dell'impersonation è una sessione PIENA (access + refresh, riga in
+  // user_sessions) con l'identità dell'admin — è lo strumento di lavoro
+  // quotidiano del layer di piattaforma, non un intervento di soccorso.
+  // Il refresh preserva lo scope leggendolo dal claim (vedi
+  // refreshAccessToken): ricostruirlo dalla riga utente riporterebbe la
+  // sessione al tenant di casa dell'admin al primo rinnovo.
+  static async createPlatformTenantSession(
+    adminUserId: number,
+    targetTenantId: number
+  ): Promise<{ tokens: AuthTokens; email: string } | null> {
+    const result = await queryWithRetry(
+      'SELECT id, email, role, is_active FROM users WHERE id = $1',
+      [adminUserId]
+    );
+    const row = result.rows[0];
+    if (!row || !row.is_active || row.role !== UserRole.PLATFORM_ADMIN) {
+      return null;
+    }
+    const payload: TokenPayload = {
+      userId: row.id,
+      email: row.email,
+      role: UserRole.PLATFORM_ADMIN,
+      tenantId: targetTenantId,
+      scopedTenantId: targetTenantId
+    };
+    const tokens = this.generateTokens(payload);
+    await this.createSession(row.id, tokens.refreshToken);
+    return { tokens, email: row.email };
   }
 
   // Verify access token
@@ -276,6 +322,24 @@ export class AuthService {
       role: userRow.role as UserRole,
       tenantId: Number(userRow.tenant_id)
     };
+
+    // Sessione di piattaforma scopata: lo scope vive solo nel claim (la
+    // riga utente punta al tenant di casa dell'admin), quindi va riportato
+    // a mano nel payload nuovo. Il ruolo si ricontrolla dalla riga — un
+    // admin retrocesso perde lo scope al primo rinnovo — e il tenant
+    // bersaglio deve essere ancora attivo: sospenderlo taglia il refresh
+    // esattamente come il join qui sopra fa per il tenant di appartenenza.
+    if (isPlatformScopedSession({ ...payload, role: userRow.role as UserRole })) {
+      const target = await queryWithRetry(
+        `SELECT id FROM tenants WHERE id = $1 AND status = 'active'`,
+        [payload.scopedTenantId]
+      );
+      if (target.rows.length === 0) {
+        return null;
+      }
+      newPayload.tenantId = Number(payload.scopedTenantId);
+      newPayload.scopedTenantId = Number(payload.scopedTenantId);
+    }
 
     const tokens = this.generateTokens(newPayload);
 

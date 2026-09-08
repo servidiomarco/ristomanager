@@ -1876,6 +1876,20 @@ export const adminImpersonateTenant = async (id: number): Promise<{
   });
 };
 
+// Sessione di piattaforma scopata: l'admin entra nel tenant con la propria
+// identità (sessione piena, refresh compreso) e dentro bypassa la matrice
+// permessi. L'impersonation resta la via di soccorso.
+export const adminEnterTenant = async (id: number): Promise<{
+  accessToken: string;
+  refreshToken: string;
+  tenant: { id: number; slug: string; name: string };
+}> => {
+  return apiRequest(`${API_URL}/admin/tenants/${id}/enter`, {
+    method: 'POST',
+    headers: getHeaders(),
+  });
+};
+
 // Billing Stripe (Fase D3): il server risponde 503 billing_disabled finché
 // le env Stripe non ci sono — il chiamante lo intercetta via err.status.
 export const adminBillingCheckout = async (id: number): Promise<{ url: string; session_id?: string }> => {

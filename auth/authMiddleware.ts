@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { AuthService, TokenPayload } from './authService.js';
+import { AuthService, TokenPayload, isPlatformScopedSession } from './authService.js';
 import { Permission } from './permissions.js';
 import { RolePermissionService } from './permissionService.js';
 import { UserRole } from '../types.js';
@@ -44,8 +44,10 @@ export const authenticate = (req: Request, res: Response, next: NextFunction) =>
   // Il resto della richiesta gira nel contesto del tenant: da qui in giù
   // ogni query del pool si scopa da sola (RLS rigida compresa, quando
   // accesa). PLATFORM_ADMIN è piattaforma per definizione: le sue letture
-  // (pannello, impersonation) attraversano i tenant di mestiere.
-  if (req.user.role === UserRole.PLATFORM_ADMIN) {
+  // (pannello, impersonation) attraversano i tenant di mestiere — MA una
+  // sessione scopata su un tenant (claim scopedTenantId) è operativa e gira
+  // nel contesto di QUEL tenant, così non attraversa gli altri per sbaglio.
+  if (req.user.role === UserRole.PLATFORM_ADMIN && !isPlatformScopedSession(req.user)) {
     return runAsPlatform(() => next());
   }
   return runWithTenantContext(req.tenantId, () => next());
@@ -58,7 +60,11 @@ export const authorize = (...allowedRoles: UserRole[]) => {
       return res.status(401).json({ error: 'Not authenticated' });
     }
 
-    if (!allowedRoles.includes(req.user.role)) {
+    // Layer di piattaforma: una sessione scopata su un tenant passa ogni
+    // gate di ruolo — PLATFORM_ADMIN sta sopra OWNER per costruzione
+    // (ROLE_RANK) e elencarlo route per route sarebbe solo rumore. Senza
+    // scope invece vale la lista: il token di pannello non opera nel tenant.
+    if (!allowedRoles.includes(req.user.role) && !isPlatformScopedSession(req.user)) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
 
@@ -73,6 +79,14 @@ export const requirePermission = (permission: Permission) => {
   return async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    // Il bypass della matrice è il cuore del layer di piattaforma: la
+    // sessione scopata ha OGNI permesso nel tenant, e in particolare quelli
+    // che la Fase B (permessi riservati) toglierà ai ruoli del tenant.
+    // PLATFORM_ADMIN non ha righe in role_permissions e non deve averne.
+    if (isPlatformScopedSession(req.user)) {
+      return next();
     }
 
     try {
@@ -96,6 +110,12 @@ export const requireAnyPermission = (...permissions: Permission[]) => {
   return async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
+    }
+
+    // Stesso bypass di requirePermission: la sessione di piattaforma
+    // scopata passa senza consultare la matrice.
+    if (isPlatformScopedSession(req.user)) {
+      return next();
     }
 
     try {
