@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ArrowLeft, ArrowRightLeft, Ban, Check, MoreVertical, Minus, Percent, Plus, Receipt, Rows3, Search, Trash2, Users,
+  ArrowLeft, ArrowRightLeft, Ban, Check, Grid3x3, LayoutGrid, MoreVertical, Minus, Percent, Plus, Receipt, Rows3, Search, Trash2, Users,
 } from 'lucide-react';
 import { Sheet, StatusPill } from '../ds';
 import { euro, rowCountLabel } from './orderView';
@@ -42,6 +42,15 @@ interface OrderTopBarProps {
    *  conto. Assente = chi guarda non ha il permesso di storno: la voce non
    *  compare. */
   onDeleteOrder?: () => void;
+  /** Variante a pagine: la testata si spoglia — niente freccia (c'è Tavoli
+   *  nella barra), niente nome tavolo, righe e totale (stanno nella Comanda);
+   *  restano coperti, lente e ⋮, col Conto dentro il menu. */
+  paged?: boolean;
+  /** Come si presenta la pagina delle categorie (variante a pagine):
+   *  preferenza personale dell'operatore, per dispositivo come la densità.
+   *  Catalogo chiuso: lista, bottoni 3 per riga, bottoni 4 per riga. */
+  catView?: 'list' | 'grid3' | 'grid4';
+  onCatView?: (v: 'list' | 'grid3' | 'grid4') => void;
 }
 
 const stepper =
@@ -52,6 +61,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
   billDisabled, clearDisabled, wide,
   onSearch, densityCompact, onToggleDensity,
   onBack, onCovers, onBill, onDiscount, onTransfer, onClearDrafts, onDeleteOrder,
+  paged, catView = 'list', onCatView,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -85,12 +95,35 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
     active?: boolean;
   }
   const actions: MenuAction[] = [
+    // Nella variante a pagine il Conto sta qui: la testata spoglia tiene solo
+    // i gesti del giro comanda, e il conto è un gesto di fine tavolo.
+    ...(paged ? [{
+      icon: Receipt, label: 'Conto', onClick: onBill,
+      disabled: busy || billDisabled, critical: false,
+    }] : []),
     { icon: Percent, label: 'Sconto', onClick: onDiscount, disabled: false, critical: false },
     { icon: ArrowRightLeft, label: 'Sposta tavolo', onClick: onTransfer, disabled: false, critical: false },
     ...(onToggleDensity ? [{
       icon: Rows3, label: 'Vista compatta', onClick: onToggleDensity,
       disabled: false, critical: false, active: densityCompact === true,
     }] : []),
+    // Le tre viste della pagina categorie (variante a pagine): interruttori a
+    // spunta, uno solo attivo — stesso posto della Vista compatta, stessa
+    // natura di preferenza personale.
+    ...(onCatView ? [
+      {
+        icon: Rows3, label: 'Categorie in lista', onClick: () => onCatView('list'),
+        disabled: false, critical: false, active: catView === 'list',
+      },
+      {
+        icon: LayoutGrid, label: 'Categorie a bottoni · 3 per riga', onClick: () => onCatView('grid3'),
+        disabled: false, critical: false, active: catView === 'grid3',
+      },
+      {
+        icon: Grid3x3, label: 'Categorie a bottoni · 4 per riga', onClick: () => onCatView('grid4'),
+        disabled: false, critical: false, active: catView === 'grid4',
+      },
+    ] : []),
     { icon: Trash2, label: 'Svuota le righe non inviate', onClick: onClearDrafts, disabled: clearDisabled, critical: true },
     // In fondo, dopo lo svuota-bozze: è il gesto più pesante del menu — via
     // TUTTA la comanda, righe già in cucina comprese.
@@ -262,6 +295,34 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
               {menuTrigger}
               {menuPanel}
             </div>
+          </div>
+        </div>
+        {touchMenu}
+      </>
+    );
+  }
+
+  // Variante a pagine: una riga sola — coperti, lente, ⋮. Il tavolo lo sai
+  // (ci sei appena entrato da Tavoli), righe e totale stanno nella Comanda,
+  // il ritorno è nella barra in basso, il Conto nel menu. La scheda resta:
+  // i bottoni incassati hanno bisogno del livello 1 sotto (§8.8).
+  if (paged) {
+    return (
+      <>
+        <div className="rounded-[20px] bg-[var(--ds-surface)] p-2.5 shadow-[var(--ds-shadow-card)]">
+          <div className="flex items-center gap-1">
+            <div className="min-w-0 flex-1">{coversControl}</div>
+            {onSearch && (
+              <button
+                type="button"
+                onClick={onSearch}
+                aria-label="Cerca un piatto"
+                className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              >
+                <Search size={20} aria-hidden />
+              </button>
+            )}
+            {menuTrigger}
           </div>
         </div>
         {touchMenu}
