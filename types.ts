@@ -950,6 +950,10 @@ export interface User {
   updated_at?: string;
   last_login?: string;
   preferred_landing_view?: string | null;
+  // Layout della presa comanda sul palmare: 'pages' = variante a pagine
+  // (stile cassa, per chi arriva da Passepartout), null = classico.
+  // Per utente e non per dispositivo: la scelta segue l'operatore.
+  preferred_orderpad_layout?: string | null;
   // Account nell'allowlist REPORTS_ADMIN_EMAILS (env backend): vede la
   // Reportistica anche senza reports:view in matrice. Serve al lancio
   // ristretto — i permessi di ruolo restano la via ordinaria.
