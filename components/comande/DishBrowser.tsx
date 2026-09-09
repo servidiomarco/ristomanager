@@ -64,12 +64,16 @@ interface DishBrowserProps {
   nav?: 'chips' | 'pages';
   /** Ritorno alla pagina delle categorie (nav 'pages'): azzera la categoria. */
   onCategoryBack?: () => void;
+  /** Come si presenta la pagina delle categorie (nav 'pages'): lista a righe,
+   *  o bottoni in griglia da 3 o 4 per riga. Preferenza personale
+   *  dell'operatore (menu ⋮), catalogo chiuso. */
+  catView?: 'list' | 'grid3' | 'grid4';
 }
 
 export const DishBrowser: React.FC<DishBrowserProps> = ({
   dishes, categories, category, onCategory, query, onQuery,
   qtyInCourse, markedCategories, hasVariants, tapOpensSheet = hasVariants, onAdd, onRemove, courseOf, onCourseTap, onLongPress, layout,
-  showSearch = true, density = 'comfortable', nav = 'chips', onCategoryBack,
+  showSearch = true, density = 'comfortable', nav = 'chips', onCategoryBack, catView = 'list',
 }) => {
   const q = query.trim().toLowerCase();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -281,33 +285,54 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
   // ---------------- variante a pagine (stile cassa, solo palmare) ----------
   if (nav === 'pages' && layout === 'list') {
     if (category === null && !q) {
-      // La pagina delle categorie: righe grandi in una scheda sola, il
-      // pallino dice «qui c'è roba nell'uscita in composizione».
+      // La pagina delle categorie. Niente pillola di ricerca: la lente sta
+      // nella testata, accanto ai puntini. Tre vesti a scelta dell'operatore:
+      // righe in una scheda sola, o bottoni in griglia da 3 o 4 per riga —
+      // il pallino dice sempre «qui c'è roba nell'uscita in composizione».
       return (
         <div className="flex min-h-0 flex-1 flex-col gap-3">
-          {searchPill}
           <div className="-mx-2 min-h-0 flex-1 overflow-y-auto px-2 pb-2 pt-1">
-            <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
-              {categories.map((c, i) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => { onQuery(''); onCategory(c); }}
-                  className={`flex min-h-[56px] w-full items-center gap-2 py-1 pl-4 pr-3 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] ${
-                    i > 0 ? 'border-t border-[var(--ds-border)]' : ''
-                  }`}
-                >
-                  <span className="flex min-w-0 flex-1 items-center gap-2">
-                    <span className="truncate text-[16px] font-semibold text-[var(--ds-text-primary)]">{c}</span>
+            {catView !== 'list' && categories.length > 0 ? (
+              <div className={`grid gap-3 ${catView === 'grid4' ? 'grid-cols-4' : 'grid-cols-3'}`}>
+                {categories.map(c => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => { onQuery(''); onCategory(c); }}
+                    className="flex min-h-[76px] select-none flex-col items-center justify-center gap-1 rounded-[16px] bg-[var(--ds-surface)] p-2 text-center shadow-[var(--ds-shadow-card)] transition-transform hover:bg-[var(--ds-surface-row)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    <span className={`${catView === 'grid4' ? 'text-[13px]' : 'text-[15px]'} font-semibold leading-tight text-[var(--ds-text-primary)] [overflow-wrap:anywhere]`}>
+                      {c}
+                    </span>
                     {markedCategories.has(c) && (
                       <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--ds-text-muted)]" aria-hidden />
                     )}
-                  </span>
-                  <ChevronRight size={18} className="flex-shrink-0 text-[var(--ds-text-subtle)]" aria-hidden />
-                </button>
-              ))}
-              {categories.length === 0 && empty}
-            </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+                {categories.map((c, i) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => { onQuery(''); onCategory(c); }}
+                    className={`flex min-h-[56px] w-full items-center gap-2 py-1 pl-4 pr-3 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] ${
+                      i > 0 ? 'border-t border-[var(--ds-border)]' : ''
+                    }`}
+                  >
+                    <span className="flex min-w-0 flex-1 items-center gap-2">
+                      <span className="truncate text-[16px] font-semibold text-[var(--ds-text-primary)]">{c}</span>
+                      {markedCategories.has(c) && (
+                        <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--ds-text-muted)]" aria-hidden />
+                      )}
+                    </span>
+                    <ChevronRight size={18} className="flex-shrink-0 text-[var(--ds-text-subtle)]" aria-hidden />
+                  </button>
+                ))}
+                {categories.length === 0 && empty}
+              </div>
+            )}
           </div>
         </div>
       );

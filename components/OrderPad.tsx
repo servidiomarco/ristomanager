@@ -66,6 +66,10 @@ import {
 // Stessa famiglia di chiavi del tema (ristocrm_theme): preferenza personale,
 // per dispositivo.
 const DENSITY_KEY = 'ristocrm_orderpad_density';
+// La veste della pagina categorie nella variante a pagine (lista, bottoni 3
+// o 4 per riga): stessa natura della densità, per operatore e dispositivo.
+const CATVIEW_KEY = 'ristocrm_orderpad_catview';
+type CatView = 'list' | 'grid3' | 'grid4';
 
 // Banner di presenza: chi altro sta componendo su questo tavolo. Il tempo
 // solo col nome singolo — con due nomi la riga supera il dato che porta.
@@ -160,6 +164,16 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     try { localStorage.setItem(DENSITY_KEY, next); } catch { /* la scelta vale comunque per la sessione */ }
     return next;
   });
+  const [catView, setCatView] = useState<CatView>(() => {
+    try {
+      const v = localStorage.getItem(CATVIEW_KEY);
+      return v === 'grid3' || v === 'grid4' ? v : 'list';
+    } catch { return 'list'; }
+  });
+  const pickCatView = (next: CatView) => {
+    setCatView(next);
+    try { localStorage.setItem(CATVIEW_KEY, next); } catch { /* vale per la sessione */ }
+  };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
@@ -1592,13 +1606,12 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       onCourseTap={d => setMoveFor({ kind: 'dish', dishId: d.id, label: d.name, from: forcedCourse(d) ?? course })}
       onLongPress={setVariantFor}
       layout={isWide ? 'grid' : 'list'}
-      // Sul palmare la ricerca sta nella testata del tavolo (lente), non qui —
-      // tranne nella variante a pagine, dove la pagina delle categorie la
-      // mostra in testa come faceva la cassa.
-      showSearch={pagedPad}
+      // Sul palmare la ricerca sta nella testata del tavolo (lente), non qui.
+      showSearch={false}
       density={density}
       nav={pagedPad ? 'pages' : 'chips'}
       onCategoryBack={() => setCategory(null)}
+      catView={catView}
     />
   );
 
@@ -1617,8 +1630,12 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       onSearch={isWide ? undefined : () => setDishSearchOpen(true)}
       densityCompact={density === 'compact'}
       // Nella variante a pagine la lista piatti è già la scheda a righe:
-      // la densità non avrebbe effetto, quindi la voce non compare.
+      // la densità non avrebbe effetto, quindi la voce non compare — al suo
+      // posto ci sono le tre viste della pagina categorie.
       onToggleDensity={isWide || pagedPad ? undefined : toggleDensity}
+      paged={pagedPad}
+      catView={catView}
+      onCatView={pagedPad ? pickCatView : undefined}
       onBack={leaveTable}
       onCovers={changeCovers}
       onBill={() => setClosing(true)}
