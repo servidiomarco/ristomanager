@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronLeft, ChevronRight, CornerDownRight, Minus, Plus, Search, Trash2 } from 'lucide-react';
+import { Cake, ChefHat, ChevronDown, ChevronLeft, ChevronRight, CornerDownRight, Minus, Plus, Search, Trash2, Wine } from 'lucide-react';
 import type { Dish } from '../../types';
 import { SearchField } from '../ds';
 import { euro } from './orderView';
@@ -68,12 +68,19 @@ interface DishBrowserProps {
    *  o bottoni in griglia da 3 o 4 per riga. Preferenza personale
    *  dell'operatore (menu ⋮), catalogo chiuso. */
   catView?: 'list' | 'grid3' | 'grid4';
+  /** Le spunte «bar» e «dolci» del catalogo: nella vista a bottoni dividono
+   *  la pagina in sezioni vere — Cucina, Bar, Dolci — le stesse che decidono
+   *  l'uscita forzata. Niente sezioni inventate: se il catalogo non le ha,
+   *  la griglia resta una. */
+  barCategories?: Set<string>;
+  dessertCategories?: Set<string>;
 }
 
 export const DishBrowser: React.FC<DishBrowserProps> = ({
   dishes, categories, category, onCategory, query, onQuery,
   qtyInCourse, markedCategories, hasVariants, tapOpensSheet = hasVariants, onAdd, onRemove, courseOf, onCourseTap, onLongPress, layout,
   showSearch = true, density = 'comfortable', nav = 'chips', onCategoryBack, catView = 'list',
+  barCategories, dessertCategories,
 }) => {
   const q = query.trim().toLowerCase();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -292,25 +299,72 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
       return (
         <div className="flex min-h-0 flex-1 flex-col gap-3">
           <div className="-mx-2 min-h-0 flex-1 overflow-y-auto px-2 pb-2 pt-1">
-            {catView !== 'list' && categories.length > 0 ? (
-              <div className={`grid gap-3 ${catView === 'grid4' ? 'grid-cols-4' : 'grid-cols-3'}`}>
-                {categories.map(c => (
-                  <button
-                    key={c}
-                    type="button"
-                    onClick={() => { onQuery(''); onCategory(c); }}
-                    className="flex min-h-[76px] select-none flex-col items-center justify-center gap-1 rounded-[16px] bg-[var(--ds-surface)] p-2 text-center shadow-[var(--ds-shadow-card)] transition-transform hover:bg-[var(--ds-surface-row)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                  >
-                    <span className={`${catView === 'grid4' ? 'text-[13px]' : 'text-[15px]'} font-semibold leading-tight text-[var(--ds-text-primary)] [overflow-wrap:anywhere]`}>
-                      {c}
-                    </span>
-                    {markedCategories.has(c) && (
-                      <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--ds-text-muted)]" aria-hidden />
-                    )}
-                  </button>
-                ))}
-              </div>
-            ) : (
+            {catView !== 'list' && categories.length > 0 ? (() => {
+              // Le sezioni della pagina a bottoni: le spunte «bar» e «dolci»
+              // del catalogo — le stesse che forzano l'uscita — dividono la
+              // sala dalla cucina. Ordine di servizio: cucina, bar, dolci;
+              // dentro ogni sezione resta l'ordine scelto in pagina Menu.
+              const groups = [
+                { key: 'cucina', items: categories.filter(c => !barCategories?.has(c) && !dessertCategories?.has(c)) },
+                { key: 'bar', items: categories.filter(c => barCategories?.has(c) ?? false) },
+                { key: 'dolci', items: categories.filter(c => dessertCategories?.has(c) ?? false) },
+              ].filter(g => g.items.length > 0);
+              // I toni sono categorie, non stati (§3.5): tinte diverse perché
+              // le sezioni sono semplicemente diverse fra loro. Stringhe
+              // intere: Tailwind estrae i nomi staticamente.
+              const chrome: Record<string, { icon: typeof ChefHat; label: string; chip: string }> = {
+                cucina: { icon: ChefHat, label: 'Cucina', chip: 'bg-[var(--ds-cat-6-tint)] text-[var(--ds-cat-6-text)]' },
+                bar: { icon: Wine, label: 'Bar', chip: 'bg-[var(--ds-cat-2-tint)] text-[var(--ds-cat-2-text)]' },
+                dolci: { icon: Cake, label: 'Dolci', chip: 'bg-[var(--ds-cat-4-tint)] text-[var(--ds-cat-4-text)]' },
+              };
+              // L'ingresso a cascata attraversa le sezioni: un solo indice,
+              // stesso passo del monitor cucina (45 ms, tetto a 450).
+              let tileNo = 0;
+              const catTile = (c: string) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => { onQuery(''); onCategory(c); }}
+                  style={{ animation: 'tileIn 260ms ease-out both', animationDelay: `${Math.min(tileNo++ * 45, 450)}ms` }}
+                  className="flex min-h-[76px] select-none flex-col items-center justify-center gap-1 rounded-[16px] bg-[var(--ds-surface)] p-2 text-center shadow-[var(--ds-shadow-card)] transition-transform hover:bg-[var(--ds-surface-row)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                >
+                  <span className={`${catView === 'grid4' ? 'text-[13px]' : 'text-[15px]'} font-semibold leading-tight text-[var(--ds-text-primary)] [overflow-wrap:anywhere]`}>
+                    {c}
+                  </span>
+                  {markedCategories.has(c) && (
+                    <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--ds-text-muted)]" aria-hidden />
+                  )}
+                </button>
+              );
+              const gridClass = `grid gap-3 ${catView === 'grid4' ? 'grid-cols-4' : 'grid-cols-3'}`;
+              // Una sezione sola (catalogo senza spunte bar/dolci): niente
+              // intestazione — un titolo su tutto non divide niente.
+              if (groups.length <= 1) {
+                return <div className={gridClass}>{categories.map(catTile)}</div>;
+              }
+              return (
+                <div className="flex flex-col gap-6">
+                  {groups.map(g => {
+                    const { icon: Icon, label, chip } = chrome[g.key];
+                    return (
+                      <section key={g.key} className="flex flex-col gap-3">
+                        {/* Intestazione leggera: cerchietto tinto, parola,
+                            filetto che prende il resto della riga. */}
+                        <div className="flex items-center gap-2.5">
+                          <span className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${chip}`}>
+                            <Icon size={14} aria-hidden />
+                          </span>
+                          <span className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">{label}</span>
+                          <span className="h-px min-w-0 flex-1 bg-[var(--ds-border)]" aria-hidden />
+                          <span className="text-[12px] tabular-nums text-[var(--ds-text-muted)]">{g.items.length}</span>
+                        </div>
+                        <div className={gridClass}>{g.items.map(catTile)}</div>
+                      </section>
+                    );
+                  })}
+                </div>
+              );
+            })() : (
               <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
                 {categories.map((c, i) => (
                   <button
