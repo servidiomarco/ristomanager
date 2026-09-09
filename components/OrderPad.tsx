@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { chime } from '../utils/chime';
 import { signedModifierLabel, signedModifierDelta } from '../utils/modifierScale';
 import {
-  Check, Loader2, TriangleAlert, Users, X,
+  ArrowRight, Check, ChevronDown, Loader2, TriangleAlert, Users, X,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import type { Dish, RestaurantMenu, Reservation, Table, TableMerge, OrderWithItems, OrderItem } from '../types';
@@ -32,6 +32,7 @@ import { OrderTopBar } from './comande/OrderTopBar';
 import { DishBrowser } from './comande/DishBrowser';
 import { DishSearchSheet } from './comande/DishSearchSheet';
 import { CourseChips } from './comande/CourseChips';
+import { PadTabs } from './comande/PadTabs';
 import { CourseColumn, CourseList, SendFooter } from './comande/CourseColumn';
 import { ComandaSheet } from './comande/ComandaSheet';
 import { ReasonDialog } from './comande/ReasonDialog';
@@ -171,6 +172,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   const [discountOpen, setDiscountOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [comandaOpen, setComandaOpen] = useState(false);
+  // Il selettore dell'uscita in composizione della variante a pagine: la
+  // pastiglia in basso lo apre, al posto della pista di chip.
+  const [coursePickOpen, setCoursePickOpen] = useState(false);
   // La griglia: che stato guardo e quale tavolo cerco.
   const [gridFilter, setGridFilter] = useState<TableFilter>('ALL');
   const [gridQuery, setGridQuery] = useState('');
@@ -220,6 +224,10 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   const billTables = useMemo(() => new Set(serviceBills.keys()), [serviceBills]);
 
   const isWide = useMediaQuery('(min-width: 1024px)');
+  // La variante a pagine (stile cassa): preferenza per utente, salvata sul
+  // server come la pagina di partenza — segue l'operatore su ogni palmare.
+  // Solo sul palmare: su schermo largo menu e comanda stanno già affiancati.
+  const pagedPad = !isWide && user?.preferred_orderpad_layout === 'pages';
 
   useEffect(() => {
     getMenuCatalogue().then(setCatalogue).catch(() => setCatalogue(null));
@@ -267,9 +275,11 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     });
   }, [dishes, catalogue]);
 
+  // Nella variante a pagine la categoria nulla È la pagina delle categorie:
+  // l'auto-selezione della prima vale solo per la pista di chip.
   useEffect(() => {
-    if (category === null && categories.length > 0) setCategory(categories[0]);
-  }, [categories, category]);
+    if (!pagedPad && category === null && categories.length > 0) setCategory(categories[0]);
+  }, [categories, category, pagedPad]);
 
   // Varianti disponibili per un piatto, risolte dal catalogo.
   const groupsForDish = useCallback((dishId: number) => {
@@ -1572,9 +1582,13 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       onCourseTap={d => setMoveFor({ kind: 'dish', dishId: d.id, label: d.name, from: forcedCourse(d) ?? course })}
       onLongPress={setVariantFor}
       layout={isWide ? 'grid' : 'list'}
-      // Sul palmare la ricerca sta nella testata del tavolo (lente), non qui.
-      showSearch={false}
+      // Sul palmare la ricerca sta nella testata del tavolo (lente), non qui —
+      // tranne nella variante a pagine, dove la pagina delle categorie la
+      // mostra in testa come faceva la cassa.
+      showSearch={pagedPad}
       density={density}
+      nav={pagedPad ? 'pages' : 'chips'}
+      onCategoryBack={() => setCategory(null)}
     />
   );
 
@@ -1592,7 +1606,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       wide={isWide}
       onSearch={isWide ? undefined : () => setDishSearchOpen(true)}
       densityCompact={density === 'compact'}
-      onToggleDensity={isWide ? undefined : toggleDensity}
+      // Nella variante a pagine la lista piatti è già la scheda a righe:
+      // la densità non avrebbe effetto, quindi la voce non compare.
+      onToggleDensity={isWide || pagedPad ? undefined : toggleDensity}
       onBack={leaveTable}
       onCovers={changeCovers}
       onBill={() => setClosing(true)}
@@ -1808,6 +1824,55 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     </>
   );
 
+  // I due fogli del palmare, condivisi fra layout classico e variante a
+  // pagine: la ricerca dalla lente in testata, la comanda dal totale o
+  // dalla barra inferiore.
+  const searchSheet = (
+    <DishSearchSheet
+      open={dishSearchOpen}
+      dishes={dishes}
+      qtyInCourse={qtyInCourse}
+      hasVariants={hasVariantSheet}
+      tapOpensSheet={requiresSheetOnTap}
+      onAdd={onDishTap}
+      onClose={() => setDishSearchOpen(false)}
+    />
+  );
+
+  const comandaSheet = (
+    <ComandaSheet
+      showBar={showBar}
+      showDessert={showDessert}
+      open={comandaOpen}
+      onClose={() => setComandaOpen(false)}
+      order={order}
+      cart={cart}
+      dishes={dishes}
+      categories={categories}
+      course={course}
+      onCourse={setCourse}
+      busy={busy}
+      onBump={bumpCart}
+      onDrop={dropLine}
+      onVoid={i => setVoidTarget(i)}
+      onRecall={recall}
+      onFire={fire}
+      onEditLine={(l) => setEditLine(l)}
+      onUnfire={unfire}
+      onMoveLine={listProps.onMoveLine}
+      onMoveItem={listProps.onMoveItem}
+      onMoveCourse={listProps.onMoveCourse}
+      onDragLine={moveCartLine}
+      onDragItem={moveServerItem}
+      onDragCourse={moveCourseTo}
+      openedBy={openedByOther}
+      onSend={() => submit('course')}
+      onSendAll={() => submit('all')}
+      onRepeat={repeatLine}
+      onRepeatAll={repeatAll}
+    />
+  );
+
   // ---------------- schermo largo: menu e comanda affiancati ----------------
   if (isWide) {
     return (
@@ -1830,6 +1895,106 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
             onSendAll={() => submit('all')}
           />
         </div>
+        {dialogs}
+      </div>
+    );
+  }
+
+  // ------------- palmare, variante a pagine: la geografia della cassa -------
+  // Menu per pagine (categorie → piatti), barra inferiore Tavoli · Comanda ·
+  // Menu, uscita in composizione e «Segue» sotto il pollice. La logica è la
+  // stessa del layout classico — cambia solo dove stanno le cose, perché è
+  // lì che le cerca chi arriva dall'app di Passepartout.
+  if (pagedPad) {
+    const courseFilled =
+      courseLines.length > 0 ||
+      order.items.some(i => i.course_no === course && i.status !== 'VOIDED');
+    // «Segue»: l'uscita dopo, come sulla cassa. Da Bar e Dolci si torna
+    // alla 1ª — sono fuori sequenza, non hanno un «dopo».
+    const segueTarget =
+      course >= 1 && course < MAX_COURSES ? course + 1
+      : course === BAR_COURSE_NO || course === DESSERT_COURSE_NO ? 1
+      : null;
+    return (
+      <div className="flex h-full min-h-0 flex-col bg-[var(--ds-canvas)] px-4 pt-[max(0.75rem,env(safe-area-inset-top))]">
+        <div className="flex-shrink-0">{topBar}</div>
+
+        {(allergens || error || flash) && (
+          <div className="mt-3 flex flex-shrink-0 flex-col gap-2">
+            {allergens && <Callout tone="critical" icon={TriangleAlert}>{allergens}</Callout>}
+            {notices}
+          </div>
+        )}
+
+        <div className="mt-3 flex min-h-0 flex-1 flex-col">{browser}</div>
+
+        <div className="flex flex-shrink-0 items-center gap-2 pb-2 pt-2">
+          <button
+            type="button"
+            onClick={() => setCoursePickOpen(true)}
+            className="inline-flex h-11 flex-shrink-0 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-4 text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            {courseLabel(course)}
+            {courseFilled && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--ds-action-fg)]" aria-hidden />}
+            <ChevronDown size={16} aria-hidden />
+          </button>
+          <button
+            type="button"
+            onClick={() => { if (segueTarget != null) setCourse(segueTarget); }}
+            disabled={segueTarget == null}
+            className="inline-flex h-11 flex-shrink-0 items-center gap-2 rounded-full bg-[var(--ds-surface)] px-[18px] text-[16px] font-semibold text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            Segue
+            <ArrowRight size={16} aria-hidden />
+          </button>
+        </div>
+
+        <PadTabs
+          onTables={leaveTable}
+          onComanda={() => setComandaOpen(true)}
+          onMenu={() => setCategory(null)}
+          comandaMarked={cart.length > 0}
+        />
+
+        {searchSheet}
+        {comandaSheet}
+
+        {/* Il selettore dell'uscita in composizione: stessi bersagli del
+            «dove va la riga», ma qui si sceglie dove si batte adesso. */}
+        <ModalShell
+          open={coursePickOpen}
+          onClose={() => setCoursePickOpen(false)}
+          title="Uscita in composizione"
+          size="sm"
+          closeOnEscape
+          bodyClassName="p-5 sm:p-6"
+        >
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              ...(showBar ? [BAR_COURSE_NO] : []),
+              ...Array.from({ length: MAX_COURSES }, (_, i) => i + 1),
+              ...(showDessert ? [DESSERT_COURSE_NO] : []),
+            ].map(n => {
+              const active = n === course;
+              return (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => { setCourse(n); setCoursePickOpen(false); }}
+                  aria-pressed={active}
+                  className={`flex h-16 flex-col items-center justify-center gap-0.5 rounded-[16px] text-[15px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                    active
+                      ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                      : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
+                  }`}
+                >
+                  {courseLabel(n)}
+                </button>
+              );
+            })}
+          </div>
+        </ModalShell>
+
         {dialogs}
       </div>
     );
@@ -1887,48 +2052,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         </div>
       </div>
 
-      <DishSearchSheet
-        open={dishSearchOpen}
-        dishes={dishes}
-        qtyInCourse={qtyInCourse}
-        hasVariants={hasVariantSheet}
-        tapOpensSheet={requiresSheetOnTap}
-        onAdd={onDishTap}
-        onClose={() => setDishSearchOpen(false)}
-      />
-
-      <ComandaSheet
-        showBar={showBar}
-        showDessert={showDessert}
-        open={comandaOpen}
-        onClose={() => setComandaOpen(false)}
-        order={order}
-        cart={cart}
-        dishes={dishes}
-        categories={categories}
-        course={course}
-        onCourse={setCourse}
-        busy={busy}
-        onBump={bumpCart}
-        onDrop={dropLine}
-        onVoid={i => setVoidTarget(i)}
-        onRecall={recall}
-        onFire={fire}
-        onEditLine={(l) => setEditLine(l)}
-        onUnfire={unfire}
-        onMoveLine={listProps.onMoveLine}
-        onMoveItem={listProps.onMoveItem}
-        onMoveCourse={listProps.onMoveCourse}
-        onDragLine={moveCartLine}
-        onDragItem={moveServerItem}
-        onDragCourse={moveCourseTo}
-        openedBy={openedByOther}
-        onSend={() => submit('course')}
-        onSendAll={() => submit('all')}
-        onRepeat={repeatLine}
-        onRepeatAll={repeatAll}
-      />
-
+      {searchSheet}
+      {comandaSheet}
       {dialogs}
     </div>
   );

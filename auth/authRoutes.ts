@@ -191,14 +191,18 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
 
 // PUT /auth/me/preferences - Update current user's own preferences
 // Self-service: any authenticated user can update *their own* preferences only.
-// Currently exposes preferred_landing_view; pass null to clear it.
+// Exposes preferred_landing_view and preferred_orderpad_layout; a field left
+// out of the body stays as it is, null clears it.
 router.put('/me/preferences', authenticate, async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
     }
 
-    const { preferred_landing_view } = req.body as { preferred_landing_view?: string | null };
+    const { preferred_landing_view, preferred_orderpad_layout } = req.body as {
+      preferred_landing_view?: string | null;
+      preferred_orderpad_layout?: string | null;
+    };
 
     // Validate against the ViewState enum so this stays in sync with the
     // frontend automatically — the previous static list drifted (missing
@@ -208,10 +212,15 @@ router.put('/me/preferences', authenticate, async (req: Request, res: Response) 
       return res.status(400).json({ error: 'Invalid preferred_landing_view' });
     }
 
-    const updated = await AuthService.updatePreferredLanding(
-      req.user.userId,
-      preferred_landing_view ?? null
-    );
+    // Catalogo chiuso: 'pages' è l'unica variante; null/assente = classico.
+    if (preferred_orderpad_layout !== null && preferred_orderpad_layout !== undefined && preferred_orderpad_layout !== 'pages') {
+      return res.status(400).json({ error: 'Invalid preferred_orderpad_layout' });
+    }
+
+    const updated = await AuthService.updatePreferences(req.user.userId, {
+      ...(preferred_landing_view !== undefined ? { preferred_landing_view } : {}),
+      ...(preferred_orderpad_layout !== undefined ? { preferred_orderpad_layout } : {}),
+    });
 
     if (!updated) {
       return res.status(404).json({ error: 'User not found' });

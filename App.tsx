@@ -3095,6 +3095,35 @@ const App: React.FC = () => {
                   })}
                 </select>
               </div>
+              {/* Layout della presa comanda: 'pages' è la variante a pagine
+                  stile cassa, per chi arriva dall'app di Passepartout e
+                  naviga il menu a memoria muscolare. Per account, non per
+                  dispositivo: la scelta segue l'operatore su ogni palmare. */}
+              <div className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+                <label htmlFor="preferred-orderpad-layout" className="mb-1 block text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                  Comande sul palmare
+                </label>
+                <p className="mb-3 text-[13px] text-[var(--ds-text-muted)]">
+                  La forma del menu quando si batte una comanda. Vale su ogni palmare.
+                </p>
+                <select
+                  id="preferred-orderpad-layout"
+                  value={user?.preferred_orderpad_layout ?? ''}
+                  onChange={async (e) => {
+                    const v = e.target.value || null;
+                    try {
+                      await updatePreferences({ preferred_orderpad_layout: v });
+                      addToast('Layout comande aggiornato', 'success');
+                    } catch (err: any) {
+                      addToast(err?.message || 'Errore aggiornamento preferenze', 'error');
+                    }
+                  }}
+                  className={`${dsSelect} sm:max-w-sm`}
+                >
+                  <option value="">Classico</option>
+                  <option value="pages">A pagine, come la cassa</option>
+                </select>
+              </div>
                 <PushNotificationsCard />
               </div>
             </SettingsSection>

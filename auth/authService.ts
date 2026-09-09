@@ -182,7 +182,7 @@ export class AuthService {
   static async login(email: string, password: string): Promise<{ user: User; tokens: AuthTokens } | { tenantSuspended: true } | null> {
     const result = await queryWithRetry(
       `SELECT u.id, u.email, u.password_hash, u.full_name, u.phone, u.role, u.is_active,
-              u.created_at, u.updated_at, u.last_login, u.preferred_landing_view,
+              u.created_at, u.updated_at, u.last_login, u.preferred_landing_view, u.preferred_orderpad_layout,
               u.tenant_id, t.status AS tenant_status, t.slug AS tenant_slug, t.name AS tenant_name,
               t.onboarding_completed_at IS NULL AS tenant_needs_onboarding
          FROM users u
@@ -242,6 +242,7 @@ export class AuthService {
       updated_at: userRow.updated_at,
       last_login: userRow.last_login,
       preferred_landing_view: userRow.preferred_landing_view ?? null,
+      preferred_orderpad_layout: userRow.preferred_orderpad_layout ?? null,
       tenant: {
         id: Number(userRow.tenant_id),
         slug: userRow.tenant_slug,
@@ -389,7 +390,7 @@ export class AuthService {
   static async getUserById(userId: number): Promise<User | null> {
     const result = await queryWithRetry(
       `SELECT u.id, u.email, u.full_name, u.phone, u.role, u.is_active, u.created_at,
-              u.updated_at, u.last_login, u.preferred_landing_view,
+              u.updated_at, u.last_login, u.preferred_landing_view, u.preferred_orderpad_layout,
               u.tenant_id, t.slug AS tenant_slug, t.name AS tenant_name,
               t.onboarding_completed_at IS NULL AS tenant_needs_onboarding
          FROM users u
@@ -414,6 +415,7 @@ export class AuthService {
       updated_at: row.updated_at,
       last_login: row.last_login,
       preferred_landing_view: row.preferred_landing_view ?? null,
+      preferred_orderpad_layout: row.preferred_orderpad_layout ?? null,
       tenant: {
         id: Number(row.tenant_id),
         slug: row.tenant_slug,
@@ -450,19 +452,35 @@ export class AuthService {
     }));
   }
 
-  // Update only the preferred landing view for a given user. Used by the
-  // self-service /auth/me/preferences endpoint — narrower than updateUser
-  // so non-owners can't accidentally touch role/email/etc.
-  static async updatePreferredLanding(
+  // Update only the self-service preferences for a given user (landing view,
+  // layout comande). Used by /auth/me/preferences — narrower than updateUser
+  // so non-owners can't accidentally touch role/email/etc. `undefined` leaves
+  // a field as it is; `null` clears it.
+  static async updatePreferences(
     userId: number,
-    view: string | null
+    prefs: { preferred_landing_view?: string | null; preferred_orderpad_layout?: string | null }
   ): Promise<User | null> {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+    if (prefs.preferred_landing_view !== undefined) {
+      fields.push(`preferred_landing_view = $${values.length + 1}`);
+      values.push(prefs.preferred_landing_view);
+    }
+    if (prefs.preferred_orderpad_layout !== undefined) {
+      fields.push(`preferred_orderpad_layout = $${values.length + 1}`);
+      values.push(prefs.preferred_orderpad_layout);
+    }
+    if (fields.length === 0) {
+      return this.getUserById(userId);
+    }
+    values.push(userId);
+
     const result = await queryWithRetry(
       `UPDATE users
-       SET preferred_landing_view = $1, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2
-       RETURNING id, email, full_name, phone, role, is_active, created_at, updated_at, last_login, preferred_landing_view`,
-      [view, userId]
+       SET ${fields.join(', ')}, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $${values.length}
+       RETURNING id, email, full_name, phone, role, is_active, created_at, updated_at, last_login, preferred_landing_view, preferred_orderpad_layout`,
+      values
     );
 
     if (result.rows.length === 0) {
@@ -483,7 +501,8 @@ export class AuthService {
       created_at: row.created_at,
       updated_at: row.updated_at,
       last_login: row.last_login,
-      preferred_landing_view: row.preferred_landing_view ?? null
+      preferred_landing_view: row.preferred_landing_view ?? null,
+      preferred_orderpad_layout: row.preferred_orderpad_layout ?? null
     };
   }
 

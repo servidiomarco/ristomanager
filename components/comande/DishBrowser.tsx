@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { ChevronDown, CornerDownRight, Minus, Plus, Search, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, CornerDownRight, Minus, Plus, Search, Trash2 } from 'lucide-react';
 import type { Dish } from '../../types';
 import { SearchField } from '../ds';
 import { euro } from './orderView';
@@ -56,12 +56,20 @@ interface DishBrowserProps {
    *  unica a righe da 56px — 6–7 piatti in vista invece di 3, bersagli
    *  comunque a 44px. Catalogo chiuso: due varianti, non un tema libero. */
   density?: 'comfortable' | 'compact';
+  /** 'pages' è la variante a pagine (stile cassa, preferenza per utente):
+   *  con category null si vede la pagina delle categorie a righe grandi,
+   *  con una categoria scelta la sua lista piatti col ritorno in testa —
+   *  la geografia di chi arriva da Passepartout. Solo per il layout 'list';
+   *  'chips' resta la pista orizzontale di sempre. */
+  nav?: 'chips' | 'pages';
+  /** Ritorno alla pagina delle categorie (nav 'pages'): azzera la categoria. */
+  onCategoryBack?: () => void;
 }
 
 export const DishBrowser: React.FC<DishBrowserProps> = ({
   dishes, categories, category, onCategory, query, onQuery,
   qtyInCourse, markedCategories, hasVariants, tapOpensSheet = hasVariants, onAdd, onRemove, courseOf, onCourseTap, onLongPress, layout,
-  showSearch = true, density = 'comfortable',
+  showSearch = true, density = 'comfortable', nav = 'chips', onCategoryBack,
 }) => {
   const q = query.trim().toLowerCase();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -210,6 +218,123 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     </p>
   );
 
+  // La pillola di ricerca del palmare col suo foglio: serve identica alla
+  // pista di sempre e alla pagina delle categorie della variante a pagine.
+  const searchPill = showSearch && (
+    <>
+      {/* Stessa pelle di SearchField, ma è un bottone: il testo muto e
+          la lente dicono «ricerca», il velo fa il resto. */}
+      <button
+        type="button"
+        onClick={() => setSearchOpen(true)}
+        className="relative h-11 w-full flex-shrink-0 rounded-full bg-[var(--ds-surface)] pl-11 pr-4 text-left text-[15px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)] transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+      >
+        <Search
+          className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ds-text-muted)]"
+          aria-hidden
+        />
+        Cerca un piatto
+      </button>
+      <DishSearchSheet
+        open={searchOpen}
+        dishes={dishes}
+        qtyInCourse={qtyInCourse}
+        hasVariants={hasVariants}
+        tapOpensSheet={tapOpensSheet}
+        onAdd={onAdd}
+        onClose={() => setSearchOpen(false)}
+      />
+    </>
+  );
+
+  // La scheda unica a righe divise da hairline: è la vista compatta, ed è
+  // anche la pagina piatti della variante a pagine — stessa anatomia,
+  // stessi controlli, bersagli a 44px.
+  const compactCard = (
+    <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+      {visible.map((d, i) => (
+        <div
+          key={d.id}
+          className={`flex min-h-[56px] items-center gap-2 py-1 pl-4 pr-2 ${
+            i > 0 ? 'border-t border-[var(--ds-border)]' : ''
+          }`}
+        >
+          <button
+            type="button"
+            {...press(d)}
+            className="min-w-0 flex-1 select-none self-stretch py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            <div className="truncate text-[15px] font-semibold leading-snug text-[var(--ds-text-primary)]">
+              {d.name}
+            </div>
+            <div className="flex items-center gap-1 text-[13px] leading-snug tabular-nums text-[var(--ds-text-muted)]">
+              {euro(Math.round(Number(d.price) * 100))}
+              {hasVariants(d.id) && <ChevronDown size={14} aria-hidden />}
+            </div>
+          </button>
+          {rowControls(d)}
+        </div>
+      ))}
+    </div>
+  );
+
+  // ---------------- variante a pagine (stile cassa, solo palmare) ----------
+  if (nav === 'pages' && layout === 'list') {
+    if (category === null && !q) {
+      // La pagina delle categorie: righe grandi in una scheda sola, il
+      // pallino dice «qui c'è roba nell'uscita in composizione».
+      return (
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
+          {searchPill}
+          <div className="-mx-2 min-h-0 flex-1 overflow-y-auto px-2 pb-2 pt-1">
+            <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+              {categories.map((c, i) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => { onQuery(''); onCategory(c); }}
+                  className={`flex min-h-[56px] w-full items-center gap-2 py-1 pl-4 pr-3 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] ${
+                    i > 0 ? 'border-t border-[var(--ds-border)]' : ''
+                  }`}
+                >
+                  <span className="flex min-w-0 flex-1 items-center gap-2">
+                    <span className="truncate text-[16px] font-semibold text-[var(--ds-text-primary)]">{c}</span>
+                    {markedCategories.has(c) && (
+                      <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--ds-text-muted)]" aria-hidden />
+                    )}
+                  </span>
+                  <ChevronRight size={18} className="flex-shrink-0 text-[var(--ds-text-subtle)]" aria-hidden />
+                </button>
+              ))}
+              {categories.length === 0 && empty}
+            </div>
+          </div>
+        </div>
+      );
+    }
+    // La pagina di una categoria: ritorno in testa, poi la scheda a righe.
+    return (
+      <div className="flex min-h-0 flex-1 flex-col gap-3">
+        <div className="flex flex-shrink-0 items-center gap-2.5">
+          <button
+            type="button"
+            onClick={onCategoryBack}
+            className="inline-flex h-11 flex-shrink-0 items-center gap-1 rounded-full bg-[var(--ds-surface)] pl-2.5 pr-4 text-[14px] font-semibold text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            <ChevronLeft size={16} aria-hidden />
+            Categorie
+          </button>
+          <h2 className="min-w-0 flex-1 truncate text-[17px] font-bold text-[var(--ds-text-primary)]">
+            {q ? 'Ricerca' : category}
+          </h2>
+        </div>
+        <div className="-mx-2 min-h-0 flex-1 overflow-y-auto px-2 pb-2 pt-1">
+          {visible.length === 0 ? empty : compactCard}
+        </div>
+      </div>
+    );
+  }
+
   return (
     // Sul palmare i blocchi respirano di più: sono decisioni diverse in fila,
     // e a 12px si leggono come una fascia sola di controlli. In vista
@@ -217,32 +342,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     // unica a separare le zone.
     <div className={`flex min-h-0 flex-1 flex-col ${layout === 'list' && density !== 'compact' ? 'gap-4' : 'gap-3'}`}>
       {layout === 'list' ? (
-        showSearch && (
-          <>
-            {/* Stessa pelle di SearchField, ma è un bottone: il testo muto e
-                la lente dicono «ricerca», il velo fa il resto. */}
-            <button
-              type="button"
-              onClick={() => setSearchOpen(true)}
-              className="relative h-11 w-full flex-shrink-0 rounded-full bg-[var(--ds-surface)] pl-11 pr-4 text-left text-[15px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)] transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-            >
-              <Search
-                className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ds-text-muted)]"
-                aria-hidden
-              />
-              Cerca un piatto
-            </button>
-            <DishSearchSheet
-              open={searchOpen}
-              dishes={dishes}
-              qtyInCourse={qtyInCourse}
-              hasVariants={hasVariants}
-              tapOpensSheet={tapOpensSheet}
-              onAdd={onAdd}
-              onClose={() => setSearchOpen(false)}
-            />
-          </>
-        )
+        searchPill
       ) : (
         <SearchField
           value={query}
@@ -308,36 +408,10 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
             })}
           </div>
         ) : density === 'compact' && visible.length > 0 ? (
-          // Vista compatta, a scelta dell'operatore (menu ⋮): una scheda sola
-          // con righe divise da hairline invece di una scheda per piatto —
-          // 6–7 piatti in vista invece di 3, controlli identici, bersagli
-          // sempre a 44px. Niente ring sulla riga piena: in una lista divisa
-          // lo dicono già il più scuro e la quantità.
-          <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
-            {visible.map((d, i) => (
-              <div
-                key={d.id}
-                className={`flex min-h-[56px] items-center gap-2 py-1 pl-4 pr-2 ${
-                  i > 0 ? 'border-t border-[var(--ds-border)]' : ''
-                }`}
-              >
-                <button
-                  type="button"
-                  {...press(d)}
-                  className="min-w-0 flex-1 select-none self-stretch py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)]"
-                >
-                  <div className="truncate text-[15px] font-semibold leading-snug text-[var(--ds-text-primary)]">
-                    {d.name}
-                  </div>
-                  <div className="flex items-center gap-1 text-[13px] leading-snug tabular-nums text-[var(--ds-text-muted)]">
-                    {euro(Math.round(Number(d.price) * 100))}
-                    {hasVariants(d.id) && <ChevronDown size={14} aria-hidden />}
-                  </div>
-                </button>
-                {rowControls(d)}
-              </div>
-            ))}
-          </div>
+          // Vista compatta, a scelta dell'operatore (menu ⋮). Niente ring
+          // sulla riga piena: in una lista divisa lo dicono già il più
+          // scuro e la quantità.
+          compactCard
         ) : (
           <div className="flex flex-col gap-2">
             {visible.length === 0 ? empty : visible.map(d => {
