@@ -19,6 +19,14 @@
  * versionata del cambiamento, il re-assert al boot lo difende dal
  * ri-restringimento.
  *
+ * CASSA nella lista di role_permissions (aggiunta 9/09/2026): sui DB già
+ * applicati questa migration non rigira mai, ma sul REPLAY vergine (test,
+ * nuove installazioni) ora arriva DOPO che il seed di createSchema ha già
+ * inserito righe col ruolo CASSA — la lista storica senza CASSA faceva
+ * fallire la ADD CONSTRAINT sulla validazione delle righe esistenti. La
+ * migration modulo-cassa, più avanti nella sequenza, la allargherebbe
+ * comunque: qui si anticipa solo ciò che a fine sequenza è già vero.
+ *
  * @type {import('node-pg-migrate').ColumnDefinitions | undefined}
  */
 export const shorthands = undefined;
@@ -45,7 +53,7 @@ export const up = (pgm) => {
         ALTER TABLE users ADD CONSTRAINT users_role_check
             CHECK (role IN ('PLATFORM_ADMIN', 'OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER', 'KITCHEN'));
         ALTER TABLE role_permissions ADD CONSTRAINT role_permissions_role_check
-            CHECK (role IN ('PLATFORM_ADMIN', 'OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER', 'KITCHEN'));
+            CHECK (role IN ('PLATFORM_ADMIN', 'OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER', 'KITCHEN', 'CASSA'));
     `);
 };
 
