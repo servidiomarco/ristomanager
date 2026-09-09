@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Info, Minus, Plus, Trash2, Utensils } from 'lucide-react';
+import { ChevronDown, Info, Minus, Plus, Trash2, Utensils } from 'lucide-react';
 import type { Dish } from '../types';
 import type { MenuCatalogue } from '../services/ordersApiService';
 import { Sheet, dsButton, dsInput } from './ds';
@@ -86,6 +86,20 @@ export const VariantSheet: React.FC<{
   // Guida del gruppo (es. i gradi di cottura spiegati): chiusa di default,
   // il foglio serve a battere — la si apre quando serve ripassarla.
   const [openNotes, setOpenNotes] = useState<Set<number>>(new Set());
+  // I gruppi facoltativi partono ripiegati: il foglio si apre per la cottura
+  // obbligatoria, non per leggere ogni aggiunta possibile — il rumore sta
+  // dietro una riga col riassunto delle scelte. Aperti in partenza solo i
+  // gruppi che hanno già scelte attive (riapertura di una riga in bozza);
+  // gli obbligatori sono SEMPRE aperti e non si piegano.
+  const [openGroups, setOpenGroups] = useState<Set<number>>(() => {
+    const active = new Set((initial?.entries ?? []).filter(e => clampModifierN(e.n) !== 0).map(e => e.id));
+    return new Set(groups.filter(g => g.modifiers.some(m => active.has(m.id))).map(g => g.id));
+  });
+  const toggleGroup = (id: number) => setOpenGroups(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
   // Quantità della riga (solo in modifica dall'orderpad). Al peso resta 1:
   // due pezzi sono due pesate, quindi due righe.
   const [qty, setQty] = useState<number>(initialQty ?? 1);
@@ -327,21 +341,49 @@ export const VariantSheet: React.FC<{
       {groups.map(g => {
         const single = g.max_select <= 1;
         const chosen = chosenInGroup(g);
+        const required = g.min_select > 0;
+        const expanded = required || openGroups.has(g.id);
+        // Il riassunto della riga ripiegata: le scelte attive, con verso e
+        // intensità («+ Nduja, Senza cipolla») — piegare non è nascondere.
+        const picked = g.modifiers.filter(m => (selected.get(m.id) ?? 0) !== 0);
+        const summary = picked.map(m => signedModifierLabel(m.name, selected.get(m.id) ?? 0)).join(', ');
         return (
           <div key={g.id}>
-            <div className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-[var(--ds-text-muted)]">
-              <span>
-                {g.name}
-                {g.min_select > 0 && (
+            <div className={`flex items-center gap-1.5 ${expanded ? 'mb-2' : ''}`}>
+              {required ? (
+                <span className="min-h-[24px] min-w-0 flex-1 text-[13px] font-semibold text-[var(--ds-text-muted)]">
+                  {g.name}
                   <span className="text-[var(--ds-critical-text)]"> · obbligatorio</span>
-                )}
-                {/* Il tetto si dice solo quando può mordere: un gruppo con max
-                    pari alle opzioni non ha niente da contare. */}
-                {!single && g.max_select < g.modifiers.length && (
-                  <span className="tabular-nums"> · {chosen}/{g.max_select}</span>
-                )}
-              </span>
-              {g.note && (
+                  {/* Il tetto si dice solo quando può mordere: un gruppo con
+                      max pari alle opzioni non ha niente da contare. */}
+                  {!single && g.max_select < g.modifiers.length && (
+                    <span className="tabular-nums"> · {chosen}/{g.max_select}</span>
+                  )}
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(g.id)}
+                  aria-expanded={expanded}
+                  className="-mx-1.5 flex min-h-[44px] min-w-0 flex-1 items-center gap-1.5 rounded-[10px] px-1.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                >
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-[var(--ds-text-muted)]">
+                    {g.name}
+                    {expanded && !single && g.max_select < g.modifiers.length && (
+                      <span className="tabular-nums"> · {chosen}/{g.max_select}</span>
+                    )}
+                    {!expanded && picked.length > 0 && (
+                      <span className="font-medium text-[var(--ds-text-secondary)]"> · {summary}</span>
+                    )}
+                  </span>
+                  <ChevronDown
+                    size={16}
+                    className={`flex-shrink-0 text-[var(--ds-text-muted)] transition-transform ${expanded ? 'rotate-180' : ''}`}
+                    aria-hidden
+                  />
+                </button>
+              )}
+              {g.note && expanded && (
                 <button
                   type="button"
                   onClick={() => setOpenNotes(prev => {
@@ -357,12 +399,12 @@ export const VariantSheet: React.FC<{
                 </button>
               )}
             </div>
-            {g.note && openNotes.has(g.id) && (
+            {expanded && g.note && openNotes.has(g.id) && (
               <p className="mb-2 whitespace-pre-line rounded-[14px] bg-[var(--ds-surface-row)] px-3 py-2.5 text-[13px] leading-relaxed text-[var(--ds-text-secondary)]">
                 {g.note}
               </p>
             )}
-            {single ? (
+            {expanded && (single ? (
               <div className="flex flex-wrap gap-2">
                 {g.modifiers.map(m => {
                   const active = (selected.get(m.id) ?? 0) > 0;
@@ -457,7 +499,7 @@ export const VariantSheet: React.FC<{
                   );
                 })}
               </div>
-            )}
+            ))}
           </div>
         );
       })}
