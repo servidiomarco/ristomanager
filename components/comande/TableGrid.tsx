@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { Loader2, UtensilsCrossed } from 'lucide-react';
+import type { Room } from '../../types';
 import { EmptyState, SearchField, SegmentedControl } from '../ds';
 import {
   TABLE_GROUPS, countByState, matchesQuery,
@@ -17,17 +18,40 @@ interface TableGridProps {
   onPick: (tableId: number) => void;
   /** Errori, conferme e fogli conto: la griglia li mostra, non li possiede. */
   notice?: React.ReactNode;
+  /** Variante a pagine (stile cassa): una sala alla volta, scelta dalla
+   *  pista in basso — dove stavano le linguette sale di Passepartout. Le
+   *  tessere perdono le sezioni per stato (il gruppo è la sala; lo stato lo
+   *  dicono tinta e didascalia) e il filtro per stato non compare. */
+  paged?: boolean;
+  rooms?: Room[];
+  /** Sala selezionata (variante a pagine). null = la prima con tavoli. */
+  room?: number | null;
+  onRoom?: (id: number) => void;
 }
 
 export const TableGrid: React.FC<TableGridProps> = ({
   rows, filter, onFilter, query, onQuery, busy, onPick, notice,
+  paged = false, rooms = [], room = null, onRoom,
 }) => {
   const searchRef = useRef<HTMLInputElement | null>(null);
 
   const counts = useMemo(() => countByState(rows), [rows]);
+  // Le sale in pista: solo quelle con almeno un tavolo in griglia.
+  const roomTabs = useMemo(
+    () => (paged ? rooms.filter(rm => rows.some(r => r.table.room_id === rm.id)) : []),
+    [paged, rooms, rows]
+  );
+  const activeRoom = paged
+    ? (room != null && roomTabs.some(rm => rm.id === room) ? room : roomTabs[0]?.id ?? null)
+    : null;
+  // Cercando si cerca in tutta la sala — anzi, in tutte: il «33» va trovato
+  // anche se la pista è ferma su un'altra sala (stessa regola del menu).
   const visible = useMemo(
-    () => rows.filter(r => (filter === 'ALL' || r.state === filter) && matchesQuery(r, query)),
-    [rows, filter, query]
+    () => rows.filter(r =>
+      (filter === 'ALL' || r.state === filter)
+      && matchesQuery(r, query)
+      && (!paged || query.trim() !== '' || activeRoom == null || r.table.room_id === activeRoom)),
+    [rows, filter, query, paged, activeRoom]
   );
 
   // «/» porta il cursore nella ricerca, come ovunque nell'app. Ignorata mentre
@@ -100,17 +124,20 @@ export const TableGrid: React.FC<TableGridProps> = ({
 
         {/* Un filtro restringe un insieme che resta lo stesso insieme, quindi
             prende il trattamento del filtro: pista incassata, segmento attivo
-            bianco e sollevato. Il nero pieno è dell'azione (§7.4). */}
-        <div className="mt-3">
-          <SegmentedControl<TableFilter>
-            value={filter}
-            onChange={onFilter}
-            options={filterOptions}
-            ariaLabel="Filtra i tavoli"
-            equalWidth={false}
-            overflow="scroll"
-          />
-        </div>
+            bianco e sollevato. Il nero pieno è dell'azione (§7.4). Nella
+            variante a pagine non c'è: lì si sfoglia per sala, come in cassa. */}
+        {!paged && (
+          <div className="mt-3">
+            <SegmentedControl<TableFilter>
+              value={filter}
+              onChange={onFilter}
+              options={filterOptions}
+              ariaLabel="Filtra i tavoli"
+              equalWidth={false}
+              overflow="scroll"
+            />
+          </div>
+        )}
       </div>
 
       {/* La zona che scorre. Lo scorrimento verticale ritaglia anche in
@@ -126,7 +153,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
           </EmptyState>
         </div>
       ) : (
-        <TableTiles rows={visible} onPick={onPick} busy={busy} />
+        <TableTiles rows={visible} onPick={onPick} busy={busy} grouped={!paged} />
       )}
 
       {busy && (
@@ -135,6 +162,45 @@ export const TableGrid: React.FC<TableGridProps> = ({
         </div>
       )}
       </div>
+
+      {/* La pista delle sale, ancorata in basso come le linguette di
+          Passepartout: pastiglia attiva piena, pallino sulle sale con
+          qualcosa da fare (comanda aperta o conto da incassare) — c'è o non
+          c'è, il colore non porta l'informazione da solo (§4.3). */}
+      {paged && roomTabs.length > 1 && (
+        <div className="mx-auto w-full max-w-[1400px] flex-shrink-0 px-4 pb-3 pt-2 lg:px-8">
+          <div className="-my-1.5 flex gap-2 overflow-x-auto py-1.5 scrollbar-hide">
+            {roomTabs.map(rm => {
+              const active = rm.id === activeRoom;
+              const marked = rows.some(r =>
+                r.table.room_id === rm.id && (r.state === 'bill' || r.state === 'order'));
+              return (
+                <button
+                  key={rm.id}
+                  type="button"
+                  onClick={() => onRoom?.(rm.id)}
+                  aria-pressed={active}
+                  className={`inline-flex h-11 flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 text-[15px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                    active
+                      ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                      : 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
+                  }`}
+                >
+                  {rm.name}
+                  {marked && (
+                    <span
+                      className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${
+                        active ? 'bg-[var(--ds-action-fg)]' : 'bg-[var(--ds-text-muted)]'
+                      }`}
+                      aria-hidden
+                    />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

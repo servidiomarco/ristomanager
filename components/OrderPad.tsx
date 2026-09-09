@@ -5,7 +5,7 @@ import {
   ArrowRight, Check, ChevronDown, Loader2, TriangleAlert, Users, X,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import type { Dish, RestaurantMenu, Reservation, Table, TableMerge, OrderWithItems, OrderItem } from '../types';
+import type { Dish, RestaurantMenu, Reservation, Room, Table, TableMerge, OrderWithItems, OrderItem } from '../types';
 import { Shift } from '../types';
 import { getRomeDatePart } from '../utils/reservationTime';
 import { getTableMerges } from '../services/apiService';
@@ -86,6 +86,9 @@ interface OrderPadProps {
    *  comanda i suoi piatti e non le liste banchetti o stagionali. */
   menus: RestaurantMenu[];
   tables: Table[];
+  /** Le sale: nella variante a pagine la griglia tavoli si sfoglia per sala,
+   *  con la pista in basso come le linguette di Passepartout. */
+  rooms?: Room[];
   reservations: Reservation[];
   /** Giorno selezionato nella barra globale — la griglia mostra le
    *  prenotazioni di questo giorno, non fissa "oggi". */
@@ -97,7 +100,7 @@ interface OrderPadProps {
   onImmersive?: (on: boolean) => void;
 }
 
-export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, tables, reservations, globalDate, globalShiftFilter, onImmersive, initialTableId, onInitialTableConsumed }) => {
+export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, tables, rooms = [], reservations, globalDate, globalShiftFilter, onImmersive, initialTableId, onInitialTableConsumed }) => {
   const [catalogue, setCatalogue] = useState<MenuCatalogue | null>(null);
   // I piatti spenti restano in anagrafica per lo storico ma non si battono
   // più. Quattro interruttori: is_active della cassa (articolo disattivato
@@ -178,6 +181,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   // La griglia: che stato guardo e quale tavolo cerco.
   const [gridFilter, setGridFilter] = useState<TableFilter>('ALL');
   const [gridQuery, setGridQuery] = useState('');
+  // La sala sfogliata nella variante a pagine: resta quella anche tornando
+  // dal tavolo — il cameriere lavora una sala per volta.
+  const [gridRoom, setGridRoom] = useState<number | null>(null);
   // Il conto appena aperto: il QR va mostrato subito, non cercato altrove
   // mentre il tavolo aspetta.
   const [justClosed, setJustClosed] = useState<CloseOrderResult['bill'] | null>(null);
@@ -1507,6 +1513,10 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           onQuery={setGridQuery}
           busy={busy}
           onPick={loadTable}
+          paged={pagedPad}
+          rooms={rooms}
+          room={gridRoom}
+          onRoom={setGridRoom}
           notice={(error || flash || serviceBills.size > 0) ? (
             <div className="flex flex-col gap-2">
               {notices}
