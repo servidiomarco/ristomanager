@@ -23,6 +23,10 @@ interface TableTilesProps {
   busy?: boolean;
   /** Cosa va sotto il nome del tavolo. Il default è quello di Comande. */
   renderMeta?: (row: TableRow) => React.ReactNode;
+  /** false: niente sezioni per stato — una griglia sola nell'ordine dato.
+   *  È la sala della variante a pagine: lì il gruppo è la sala, e lo stato
+   *  lo dicono già la tinta e la didascalia della tessera. */
+  grouped?: boolean;
 }
 
 /** Il meta di Comande: quanti coperti, in che stato, e per chi è tenuto. */
@@ -49,35 +53,47 @@ export const defaultTableMeta = (row: TableRow): React.ReactNode => {
 };
 
 export const TableTiles: React.FC<TableTilesProps> = ({
-  rows, onPick, busy, renderMeta = defaultTableMeta,
-}) => (
-  <>
-    {TABLE_GROUPS.map(group => {
-      const group_rows = rows.filter(r => r.state === group.state);
-      if (group_rows.length === 0) return null;
-      return (
-        <section key={group.state} className="mt-4 first:mt-0">
-          <SectionHeader tone={group.tone} meta={String(group_rows.length)}>
-            {group.label}
-          </SectionHeader>
-          <div className="mt-2 grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-7 xl:grid-cols-9">
-            {group_rows.map(row => (
-              <button
-                key={row.table.id}
-                type="button"
-                onClick={() => onPick(row.pickId ?? row.table.id)}
-                disabled={busy}
-                className={`flex aspect-square flex-col items-center justify-center gap-0.5 rounded-[20px] p-1 shadow-[var(--ds-shadow-card)] transition-shadow disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${TABLE_TILE[row.state]}`}
-              >
-                <span className={`${row.groupLabel ? 'text-[18px]' : 'text-[24px]'} max-w-full truncate font-semibold tracking-[-0.02em] text-[var(--ds-text-primary)]`}>
-                  {row.groupLabel ?? row.table.name}
-                </span>
-                {renderMeta(row)}
-              </button>
-            ))}
-          </div>
-        </section>
-      );
-    })}
-  </>
-);
+  rows, onPick, busy, renderMeta = defaultTableMeta, grouped = true,
+}) => {
+  const tile = (row: TableRow) => (
+    <button
+      key={row.table.id}
+      type="button"
+      onClick={() => onPick(row.pickId ?? row.table.id)}
+      disabled={busy}
+      className={`flex aspect-square flex-col items-center justify-center gap-0.5 rounded-[20px] p-1 shadow-[var(--ds-shadow-card)] transition-shadow disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${TABLE_TILE[row.state]}`}
+    >
+      <span className={`${row.groupLabel ? 'text-[18px]' : 'text-[24px]'} max-w-full truncate font-semibold tracking-[-0.02em] text-[var(--ds-text-primary)]`}>
+        {row.groupLabel ?? row.table.name}
+      </span>
+      {renderMeta(row)}
+    </button>
+  );
+
+  if (!grouped) {
+    return (
+      <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-7 xl:grid-cols-9">
+        {rows.map(tile)}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {TABLE_GROUPS.map(group => {
+        const group_rows = rows.filter(r => r.state === group.state);
+        if (group_rows.length === 0) return null;
+        return (
+          <section key={group.state} className="mt-4 first:mt-0">
+            <SectionHeader tone={group.tone} meta={String(group_rows.length)}>
+              {group.label}
+            </SectionHeader>
+            <div className="mt-2 grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-7 xl:grid-cols-9">
+              {group_rows.map(tile)}
+            </div>
+          </section>
+        );
+      })}
+    </>
+  );
+};
