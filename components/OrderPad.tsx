@@ -1612,6 +1612,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       nav={pagedPad ? 'pages' : 'chips'}
       onCategoryBack={() => setCategory(null)}
       catView={catView}
+      barCategories={barCategories}
+      dessertCategories={dessertCategories}
     />
   );
 
