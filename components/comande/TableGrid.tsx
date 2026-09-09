@@ -140,10 +140,10 @@ export const TableGrid: React.FC<TableGridProps> = ({
         )}
       </div>
 
-      {/* La zona che scorre. Lo scorrimento verticale ritaglia anche in
-          orizzontale, quindi il padding laterale serve anche a dare aria alle
-          ombre delle tessere (regola 11). */}
-      <div className="mx-auto w-full min-h-0 max-w-[1400px] flex-1 overflow-y-auto px-4 pb-6 lg:px-8">
+      {/* La zona che scorre. Lo scorrimento ritaglia su ogni lato, quindi il
+          padding serve anche a dare aria alle ombre delle tessere (regola 11)
+          — il pt compreso: senza, la prima riga esce col bordo alto mozzato. */}
+      <div className="mx-auto w-full min-h-0 max-w-[1400px] flex-1 overflow-y-auto px-4 pb-6 pt-2 lg:px-8">
       {notice && <div className="mb-4">{notice}</div>}
 
       {visible.length === 0 ? (
