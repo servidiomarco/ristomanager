@@ -55,13 +55,16 @@ interface ComandaSheetProps {
   showBar?: boolean;
   /** Sezione «Dolci» in coda (categorie da dolci attive). */
   showDessert?: boolean;
+  /** A tutta pagina (variante a pagine): la Comanda è una sezione della
+   *  barra inferiore, non un cassetto dietro il totale — copre lo schermo. */
+  fullPage?: boolean;
 }
 
 export const ComandaSheet: React.FC<ComandaSheetProps> = ({
   open, onClose, order, cart, dishes, categories, course, onCourse, busy,
   onBump, onDrop, onVoid, onRecall, onFire, onEditLine, onUnfire, onMoveLine, onMoveItem, onMoveCourse,
   onDragLine, onDragItem, onDragCourse,
-  openedBy, onSend, onSendAll, onRepeat, onRepeatAll, showBar, showDessert,
+  openedBy, onSend, onSendAll, onRepeat, onRepeatAll, showBar, showDessert, fullPage,
 }) => {
   const [tab, setTab] = useState<SheetTab>('course');
 
@@ -122,6 +125,7 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
       subtitle={rows === 0 ? 'vuota' : rowCountLabel(rows)}
       ariaLabel="Comanda del tavolo"
       bodyClassName="px-4 py-4"
+      fullPage={fullPage}
       footer={footer}
       subheader={
         <SegmentedControl<SheetTab>

@@ -1843,6 +1843,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     <ComandaSheet
       showBar={showBar}
       showDessert={showDessert}
+      // Nella variante a pagine la Comanda è una sezione della barra, non un
+      // cassetto: copre lo schermo intero, come la pagina del menu.
+      fullPage={pagedPad}
       open={comandaOpen}
       onClose={() => setComandaOpen(false)}
       order={order}
