@@ -1616,6 +1616,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       catView={catView}
       barCategories={barCategories}
       dessertCategories={dessertCategories}
+      course={course}
     />
   );
 

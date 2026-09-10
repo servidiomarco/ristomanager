@@ -74,14 +74,26 @@ interface DishBrowserProps {
    *  la griglia resta una. */
   barCategories?: Set<string>;
   dessertCategories?: Set<string>;
+  /** L'uscita in composizione (nav 'pages'): con Bar selezionato le sezioni
+   *  Cucina e Dolci si attenuano, con Dolci si attenuano Cucina e Bar — un
+   *  invito dell'occhio, non un divieto: le categorie restano toccabili, e
+   *  le uscite forzate fanno comunque la cosa giusta. */
+  course?: number;
 }
 
 export const DishBrowser: React.FC<DishBrowserProps> = ({
   dishes, categories, category, onCategory, query, onQuery,
   qtyInCourse, markedCategories, hasVariants, tapOpensSheet = hasVariants, onAdd, onRemove, courseOf, onCourseTap, onLongPress, layout,
   showSearch = true, density = 'comfortable', nav = 'chips', onCategoryBack, catView = 'list',
-  barCategories, dessertCategories,
+  barCategories, dessertCategories, course,
 }) => {
+  // Categoria «fuori uscita»: non della sezione che l'uscita in composizione
+  // sta servendo. Solo per Bar e Dolci — le uscite numerate sono di cucina e
+  // insieme, quindi lì non si attenua niente.
+  const mutedCat = (c: string): boolean =>
+    course != null && isBarCourse(course) ? !(barCategories?.has(c) ?? false)
+    : course != null && isDessertCourse(course) ? !(dessertCategories?.has(c) ?? false)
+    : false;
   const q = query.trim().toLowerCase();
   const [searchOpen, setSearchOpen] = useState(false);
 
@@ -320,13 +332,17 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
               // L'ingresso a cascata attraversa le sezioni: un solo indice,
               // stesso passo del monitor cucina (45 ms, tetto a 450).
               let tileNo = 0;
-              const catTile = (c: string) => (
+              // `dimSelf` false dentro le sezioni: lì attenua la sezione
+              // intera, e un secondo velo sulla tessera farebbe il doppio.
+              const catTile = (c: string, dimSelf = true) => (
                 <button
                   key={c}
                   type="button"
                   onClick={() => { onQuery(''); onCategory(c); }}
                   style={{ animation: 'tileIn 260ms ease-out both', animationDelay: `${Math.min(tileNo++ * 45, 450)}ms` }}
-                  className="flex min-h-[76px] select-none flex-col items-center justify-center gap-1 rounded-[16px] bg-[var(--ds-surface)] p-2 text-center shadow-[var(--ds-shadow-card)] transition-transform hover:bg-[var(--ds-surface-row)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  className={`flex min-h-[76px] select-none flex-col items-center justify-center gap-1 rounded-[16px] bg-[var(--ds-surface)] p-2 text-center shadow-[var(--ds-shadow-card)] transition-[transform,opacity] hover:bg-[var(--ds-surface-row)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                    dimSelf && mutedCat(c) ? 'opacity-45' : ''
+                  }`}
                 >
                   <span className={`${catView === 'grid4' ? 'text-[13px]' : 'text-[15px]'} font-semibold leading-tight text-[var(--ds-text-primary)] [overflow-wrap:anywhere]`}>
                     {c}
@@ -340,14 +356,19 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
               // Una sezione sola (catalogo senza spunte bar/dolci): niente
               // intestazione — un titolo su tutto non divide niente.
               if (groups.length <= 1) {
-                return <div className={gridClass}>{categories.map(catTile)}</div>;
+                // map con lambda: l'indice di map non deve finire in dimSelf.
+                return <div className={gridClass}>{categories.map(c => catTile(c, true))}</div>;
               }
               return (
                 <div className="flex flex-col gap-6">
                   {groups.map(g => {
                     const { icon: Icon, label, chip } = chrome[g.key];
+                    // La sezione fuori uscita si attenua intera, testata
+                    // compresa: le sue categorie sono tutte dello stesso
+                    // mestiere, basta chiederlo alla prima.
+                    const secMuted = g.items.length > 0 && mutedCat(g.items[0]);
                     return (
-                      <section key={g.key} className="flex flex-col gap-3">
+                      <section key={g.key} className={`flex flex-col gap-3 transition-opacity ${secMuted ? 'opacity-45' : ''}`}>
                         {/* Intestazione leggera: cerchietto tinto, parola,
                             filetto che prende il resto della riga. */}
                         <div className="flex items-center gap-2.5">
@@ -358,7 +379,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                           <span className="h-px min-w-0 flex-1 bg-[var(--ds-border)]" aria-hidden />
                           <span className="text-[12px] tabular-nums text-[var(--ds-text-muted)]">{g.items.length}</span>
                         </div>
-                        <div className={gridClass}>{g.items.map(catTile)}</div>
+                        <div className={gridClass}>{g.items.map(c => catTile(c, false))}</div>
                       </section>
                     );
                   })}
@@ -371,9 +392,9 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                     key={c}
                     type="button"
                     onClick={() => { onQuery(''); onCategory(c); }}
-                    className={`flex min-h-[56px] w-full items-center gap-2 py-1 pl-4 pr-3 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] ${
+                    className={`flex min-h-[56px] w-full items-center gap-2 py-1 pl-4 pr-3 text-left transition-[background-color,opacity] hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] ${
                       i > 0 ? 'border-t border-[var(--ds-border)]' : ''
-                    }`}
+                    } ${mutedCat(c) ? 'opacity-45' : ''}`}
                   >
                     <span className="flex min-w-0 flex-1 items-center gap-2">
                       <span className="truncate text-[16px] font-semibold text-[var(--ds-text-primary)]">{c}</span>
