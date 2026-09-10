@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowUpDown, Ban, ChevronUp, ChevronsUpDown, Loader2, Plus, Send, SendHorizontal } from 'lucide-react';
+import { Ban, ChevronUp, ChevronsUpDown, Loader2, Plus, Send, SendHorizontal } from 'lucide-react';
 import { CourseChips } from './CourseChips';
 import type { OrderItem, OrderWithItems } from '../../types';
 import { StatusPill } from '../ds';
@@ -65,9 +65,6 @@ interface CourseListProps {
   showDessert?: boolean;
 }
 
-const stepper =
-  'inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
-
 export const CourseList: React.FC<CourseListProps> = ({
   order, cart, course, onCourse, busy, onBump, onDrop, onVoid, onRecall, onFire, onEditLine, onUnfire,
   onMoveLine, onMoveItem, onMoveCourse, onDragLine, onDragItem, onDragCourse, showBar, showDessert,
@@ -80,12 +77,24 @@ export const CourseList: React.FC<CourseListProps> = ({
       else if (p.kind === 'item') onDragItem?.(p.item, to);
       else onDragCourse?.(p.from, to);
     },
+    // Tenuto e rilasciato senza trascinare: il selettore modale — la via a
+    // tocco che prima stava sulle maniglie ⇅.
+    onHoldTap: (p: DragPayload) => {
+      if (p.kind === 'line') { const l = cart.find(x => x.key === p.key); if (l) onMoveLine?.(l); }
+      else if (p.kind === 'item') onMoveItem?.(p.item);
+    },
   });
   // Maniglia solo se il drop ha un gestore: senza, il bottone resta il
   // bottone di sempre.
   const grip = (p: DragPayload) => {
     const wired = p.kind === 'line' ? !!onDragLine : p.kind === 'item' ? !!onDragItem : !!onDragCourse;
     return wired ? dnd.handleProps(p) : {};
+  };
+  // La presa da riga (tocco lungo, useCourseDrag.rowProps): sostituisce le
+  // maniglie ⇅ per riga, che partivano da sole durante lo scroll.
+  const rowGrip = (p: DragPayload) => {
+    const wired = p.kind === 'line' ? !!(onDragLine || onMoveLine) : p.kind === 'item' ? !!(onDragItem || onMoveItem) : false;
+    return wired ? dnd.rowProps(p) : {};
   };
 
   // Il Bar sta in testa: le bibite escono prima degli antipasti. I Dolci in
@@ -278,9 +287,17 @@ export const CourseList: React.FC<CourseListProps> = ({
           {(serverRows.length > 0 || draftRows.length > 0) && (
             <div className={`${hasActions ? 'mt-2' : 'mt-1'} flex flex-col gap-1`}>
               {serverRows.map(i => (
-                <div key={i.id} className={`flex items-center gap-2 text-[15px] transition-opacity ${
-                  dnd.drag?.kind === 'item' && dnd.drag.item.id === i.id ? 'opacity-40' : ''
-                }`}>
+                <div
+                  key={i.id}
+                  // La riga in bozza si prende col tocco lungo (le altre no:
+                  // una riga già in cucina si storna, non si sposta).
+                  {...(i.status === 'DRAFT' && i.line_kind === 'DISH'
+                    ? rowGrip({ kind: 'item', item: i, from: i.course_no })
+                    : {})}
+                  className={`flex items-center gap-2 text-[15px] transition-opacity ${
+                    dnd.drag?.kind === 'item' && dnd.drag.item.id === i.id ? 'opacity-40' : ''
+                  }`}
+                >
                   <span className="flex-shrink-0 text-[14px] font-semibold tabular-nums text-[var(--ds-text-muted)]">
                     {i.qty}×
                   </span>
@@ -318,26 +335,17 @@ export const CourseList: React.FC<CourseListProps> = ({
                       <Ban size={15} />
                     </button>
                   )}
-                  {i.status === 'DRAFT' && i.line_kind === 'DISH' && onMoveItem && (
-                    <button
-                      type="button"
-                      onClick={() => onMoveItem(i)}
-                      disabled={busy}
-                      aria-label={`Sposta ${i.name_snapshot} su un'altra uscita`}
-                      title="Tocca per scegliere l'uscita, trascina per spostare"
-                      {...grip({ kind: 'item', item: i, from: i.course_no })}
-                      className={stepper}
-                    >
-                      <ArrowUpDown size={15} />
-                    </button>
-                  )}
                 </div>
               ))}
 
               {draftRows.map(l => (
-                <div key={l.key} className={`flex items-center gap-2 transition-opacity ${
-                  dnd.drag?.kind === 'line' && dnd.drag.key === l.key ? 'opacity-40' : ''
-                }`}>
+                <div
+                  key={l.key}
+                  {...rowGrip({ kind: 'line', key: l.key, label: l.dish.name, qty: l.qty, from: l.course_no })}
+                  className={`flex items-center gap-2 transition-opacity ${
+                    dnd.drag?.kind === 'line' && dnd.drag.key === l.key ? 'opacity-40' : ''
+                  }`}
+                >
                   {/* La quantità è un prefisso come nelle righe server: lo
                       stepper in riga non c'è più, si cambia dal foglio. */}
                   <span className="flex-shrink-0 text-[14px] font-semibold tabular-nums text-[var(--ds-text-muted)]">
@@ -370,23 +378,9 @@ export const CourseList: React.FC<CourseListProps> = ({
                   <span className="flex-shrink-0 text-[14px] tabular-nums text-[var(--ds-text-muted)]">
                     {euro(cartUnitCents(l) * l.qty)}
                   </span>
-                  <div className="flex flex-shrink-0 items-center gap-1">
-                    {/* Niente matita: il tocco sul nome apre già il foglio di
-                        riga (quantità, varianti, elimina). Resta solo la
-                        maniglia di spostamento. */}
-                    {onMoveLine && (
-                      <button
-                        type="button"
-                        onClick={() => onMoveLine(l)}
-                        aria-label={`Sposta ${l.dish.name} su un'altra uscita`}
-                        title="Tocca per scegliere l'uscita, trascina per spostare"
-                        {...grip({ kind: 'line', key: l.key, label: l.dish.name, qty: l.qty, from: l.course_no })}
-                        className={stepper}
-                      >
-                        <ArrowUpDown size={15} />
-                      </button>
-                    )}
-                  </div>
+                  {/* Niente matita e niente maniglia ⇅: il tocco sul nome
+                      apre il foglio di riga, il TOCCO LUNGO sulla riga la
+                      prende per spostarla (rowGrip). */}
                 </div>
               ))}
             </div>
