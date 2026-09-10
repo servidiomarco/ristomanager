@@ -539,7 +539,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       ? Math.round(Math.round(Number(dish.price) * 100) * Number(m.price_delta_pct) / 100)
       : m.price_delta_cents;
 
-  const addToCart = (dish: Dish, entries: { id: number; n: number }[] = [], note?: string, removedIds: number[] = [], weightGrams?: number, qty = 1) => {
+  // `courseNo` esplicito: per la duplicazione di una riga dalla comanda, che
+  // va nell'uscita DELLA riga, non in quella in composizione.
+  const addToCart = (dish: Dish, entries: { id: number; n: number }[] = [], note?: string, removedIds: number[] = [], weightGrams?: number, qty = 1, courseNo?: number) => {
     // `single` (gruppo a scelta singola) serve all'etichetta: le cotture
     // restano nome nudo, «+ Media» non significa niente.
     const byId = new Map(groupsForDish(dish.id).flatMap(g =>
@@ -553,7 +555,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       .map(id => comps.find(c => c.id === id))
       .filter((c): c is NonNullable<typeof c> => c != null);
     pushLine(
-      dish, forcedCourse(dish) ?? course, dish.sold_by_weight ? 1 : qty, chosen,
+      dish, courseNo ?? forcedCourse(dish) ?? course, dish.sold_by_weight ? 1 : qty, chosen,
       [...chosen.map(e => signedModifierLabel(byId.get(e.id)!.name, e.n, byId.get(e.id)!.single)), ...removed.map(c => `Senza ${c.name}`)],
       chosen.reduce((s, e) => s + signedModifierDelta(modifierDeltaCents(dish, byId.get(e.id)!), e.n), 0)
         + removed.reduce((s, c) => s + c.removal_delta_cents, 0),
@@ -1846,6 +1848,18 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           confirmLabel="Aggiorna"
           onCancel={() => setEditLine(null)}
           onConfirm={(entries, removedIds, note, weightGrams, qty) => { updateLine(editLine.key, entries, note, removedIds, weightGrams, qty); setEditLine(null); }}
+          // «Un altro come questo»: una riga nuova con la configurazione del
+          // foglio, nell'uscita DELLA riga. Qty 1: il gesto dice «un altro».
+          onAdd={(entries, removedIds, note, weightGrams) =>
+            addToCart(editLine.dish, entries, note, removedIds, weightGrams, 1, editLine.course_no)}
+          courseName={courseLabel(editLine.course_no)}
+          // Spostare cambia la chiave della riga: il foglio si chiude e la
+          // scelta passa al selettore «dove va la riga».
+          onCourseTap={() => {
+            const l = editLine;
+            setEditLine(null);
+            setMoveFor({ kind: 'line', key: l.key, label: l.dish.name, from: l.course_no });
+          }}
         />
       )}
 

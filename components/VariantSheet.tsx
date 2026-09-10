@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronDown, Info, Minus, Plus, Trash2, Utensils } from 'lucide-react';
+import { ChevronDown, CornerDownRight, Info, Minus, Plus, Trash2, Utensils } from 'lucide-react';
 import type { Dish } from '../types';
 import type { MenuCatalogue } from '../services/ordersApiService';
 import { Sheet, dsButton, dsInput } from './ds';
@@ -43,12 +43,18 @@ export const VariantSheet: React.FC<{
   confirmLabel?: string;
   onCancel: () => void;
   onConfirm: (entries: { id: number; n: number }[], removedComponentIds: number[], note?: string, weightGrams?: number, qty?: number) => void;
-  /** «Aggiungi un altro»: batte la riga com'è e azzera il foglio senza
-   *  chiuderlo — due bistecche con cotture diverse sono due giri di scelte,
-   *  non due aperture del foglio. Assente (modifica riga, dove non ha
-   *  senso) = il bottone non compare. */
+  /** «Aggiungi un altro»: batte la riga com'è configurata senza chiudere il
+   *  foglio. Su una battuta nuova azzera le scelte (due bistecche con cotture
+   *  diverse sono due giri); riaprendo una riga in bozza le TIENE — è una
+   *  duplicazione, «un altro come questo». */
   onAdd?: (entries: { id: number; n: number }[], removedComponentIds: number[], note?: string, weightGrams?: number, qty?: number) => void;
-}> = ({ dish, groups, components = [], initial, initialQty, onDelete, confirmLabel, onCancel, onConfirm, onAdd }) => {
+  /** L'uscita della riga («2ª uscita»), col chip per cambiarla: compare
+   *  riaprendo una riga dalla comanda. Il tocco delega al selettore di
+   *  OrderPad (onCourseTap), che chiude questo foglio — spostare cambia la
+   *  chiave della riga, e un foglio su una riga che non c'è più mente. */
+  courseName?: string;
+  onCourseTap?: () => void;
+}> = ({ dish, groups, components = [], initial, initialQty, onDelete, confirmLabel, onCancel, onConfirm, onAdd, courseName, onCourseTap }) => {
   // Verso per variante, scala d'intensità a 4 gradini (utils/modifierScale):
   // +1 aggiunge a pagamento, +2 «Molta» allo stesso addebito, −1 «Senza» in
   // sconto, −2 «Poca» gratis, 0 = non applicata. Le scelte singole (cotture)
@@ -86,20 +92,13 @@ export const VariantSheet: React.FC<{
   // Guida del gruppo (es. i gradi di cottura spiegati): chiusa di default,
   // il foglio serve a battere — la si apre quando serve ripassarla.
   const [openNotes, setOpenNotes] = useState<Set<number>>(new Set());
-  // I gruppi facoltativi partono ripiegati: il foglio si apre per la cottura
-  // obbligatoria, non per leggere ogni aggiunta possibile — il rumore sta
-  // dietro una riga col riassunto delle scelte. Aperti in partenza solo i
-  // gruppi che hanno già scelte attive (riapertura di una riga in bozza);
-  // gli obbligatori sono SEMPRE aperti e non si piegano.
-  const [openGroups, setOpenGroups] = useState<Set<number>>(() => {
-    const active = new Set((initial?.entries ?? []).filter(e => clampModifierN(e.n) !== 0).map(e => e.id));
-    return new Set(groups.filter(g => g.modifiers.some(m => active.has(m.id))).map(g => g.id));
-  });
-  const toggleGroup = (id: number) => setOpenGroups(prev => {
-    const next = new Set(prev);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    return next;
-  });
+  // I gruppi facoltativi sono pillole sotto «Varianti»: il nome è il
+  // bersaglio, il contenuto si apre sotto con l'ingresso di casa (tileIn).
+  // Fisarmonica a un'anta — aprire un gruppo chiude l'altro: il foglio serve
+  // a battere, non a tenere aperti tre cassetti. Il conteggio sulla pillola
+  // dice quante scelte vivono lì dentro anche da chiusa. Gli obbligatori
+  // restano sezioni sempre aperte, sopra.
+  const [openGroupId, setOpenGroupId] = useState<number | null>(null);
   // Quantità della riga (solo in modifica dall'orderpad). Al peso resta 1:
   // due pezzi sono due pesate, quindi due righe.
   const [qty, setQty] = useState<number>(initialQty ?? 1);
@@ -162,11 +161,15 @@ export const VariantSheet: React.FC<{
     onAdd?.(entries, [...removed], custom.trim() || undefined,
       dish.sold_by_weight ? grams : undefined,
       initialQty != null ? qty : undefined);
-    setSelected(new Map());
-    setRemoved(new Set());
-    setCustom('');
-    setGrams(wDef);
-    setQty(1);
+    // Battuta nuova: si azzera per il giro dopo. In modifica di una riga le
+    // scelte restano — «un altro» è un altro COSÌ, non un foglio vuoto.
+    if (initial == null) {
+      setSelected(new Map());
+      setRemoved(new Set());
+      setCustom('');
+      setGrams(wDef);
+      setQty(1);
+    }
     setAdded(v => v + 1);
   };
 
@@ -228,6 +231,23 @@ export const VariantSheet: React.FC<{
         </div>
       }
     >
+      {courseName && (
+        <div className="flex items-center gap-3">
+          <div className="text-[13px] font-semibold text-[var(--ds-text-muted)]">Uscita</div>
+          {/* Stesso chip dell'uscita che vive sulle righe del menu: dice dove
+              va la riga e si tocca per spostarla. */}
+          <button
+            type="button"
+            onClick={onCourseTap}
+            disabled={!onCourseTap}
+            aria-label={`Sposta in un'altra uscita (ora ${courseName})`}
+            className="ml-auto inline-flex h-11 items-center gap-1.5 rounded-full bg-[var(--ds-arriving-tint)] px-4 text-[15px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            <CornerDownRight size={15} aria-hidden />
+            {courseName}
+          </button>
+        </div>
+      )}
       {showQty && (
         <div className="flex items-center gap-3">
           <div className="text-[13px] font-semibold text-[var(--ds-text-muted)]">Quantità</div>
@@ -338,73 +358,31 @@ export const VariantSheet: React.FC<{
         </div>
       )}
 
-      {groups.map(g => {
-        const single = g.max_select <= 1;
-        const chosen = chosenInGroup(g);
-        const required = g.min_select > 0;
-        const expanded = required || openGroups.has(g.id);
-        // Il riassunto della riga ripiegata: le scelte attive, con verso e
-        // intensità («+ Nduja, Senza cipolla») — piegare non è nascondere.
-        const picked = g.modifiers.filter(m => (selected.get(m.id) ?? 0) !== 0);
-        const summary = picked.map(m => signedModifierLabel(m.name, selected.get(m.id) ?? 0)).join(', ');
-        return (
-          <div key={g.id}>
-            <div className={`flex items-center gap-1.5 ${expanded ? 'mb-2' : ''}`}>
-              {required ? (
-                <span className="min-h-[24px] min-w-0 flex-1 text-[13px] font-semibold text-[var(--ds-text-muted)]">
-                  {g.name}
-                  <span className="text-[var(--ds-critical-text)]"> · obbligatorio</span>
-                  {/* Il tetto si dice solo quando può mordere: un gruppo con
-                      max pari alle opzioni non ha niente da contare. */}
-                  {!single && g.max_select < g.modifiers.length && (
-                    <span className="tabular-nums"> · {chosen}/{g.max_select}</span>
-                  )}
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => toggleGroup(g.id)}
-                  aria-expanded={expanded}
-                  className="-mx-1.5 flex min-h-[44px] min-w-0 flex-1 items-center gap-1.5 rounded-[10px] px-1.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                >
-                  <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-[var(--ds-text-muted)]">
-                    {g.name}
-                    {expanded && !single && g.max_select < g.modifiers.length && (
-                      <span className="tabular-nums"> · {chosen}/{g.max_select}</span>
-                    )}
-                    {!expanded && picked.length > 0 && (
-                      <span className="font-medium text-[var(--ds-text-secondary)]"> · {summary}</span>
-                    )}
-                  </span>
-                  <ChevronDown
-                    size={16}
-                    className={`flex-shrink-0 text-[var(--ds-text-muted)] transition-transform ${expanded ? 'rotate-180' : ''}`}
-                    aria-hidden
-                  />
-                </button>
-              )}
-              {g.note && expanded && (
-                <button
-                  type="button"
-                  onClick={() => setOpenNotes(prev => {
-                    const next = new Set(prev);
-                    if (next.has(g.id)) next.delete(g.id); else next.add(g.id);
-                    return next;
-                  })}
-                  aria-expanded={openNotes.has(g.id)}
-                  aria-label={`Note su ${g.name}`}
-                  className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
-                >
-                  <Info size={14} aria-hidden />
-                </button>
-              )}
-            </div>
-            {expanded && g.note && openNotes.has(g.id) && (
-              <p className="mb-2 whitespace-pre-line rounded-[14px] bg-[var(--ds-surface-row)] px-3 py-2.5 text-[13px] leading-relaxed text-[var(--ds-text-secondary)]">
-                {g.note}
-              </p>
-            )}
-            {expanded && (single ? (
+      {(() => {
+        const noteButton = (g: CatalogueGroups[number]) => g.note ? (
+          <button
+            type="button"
+            onClick={() => setOpenNotes(prev => {
+              const next = new Set(prev);
+              if (next.has(g.id)) next.delete(g.id); else next.add(g.id);
+              return next;
+            })}
+            aria-expanded={openNotes.has(g.id)}
+            aria-label={`Note su ${g.name}`}
+            className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
+          >
+            <Info size={14} aria-hidden />
+          </button>
+        ) : null;
+        const notePanel = (g: CatalogueGroups[number]) => g.note && openNotes.has(g.id) ? (
+          <p className="mb-2 whitespace-pre-line rounded-[14px] bg-[var(--ds-surface-row)] px-3 py-2.5 text-[13px] leading-relaxed text-[var(--ds-text-secondary)]">
+            {g.note}
+          </p>
+        ) : null;
+        const groupBody = (g: CatalogueGroups[number]) => {
+          const single = g.max_select <= 1;
+          const chosen = chosenInGroup(g);
+          return single ? (
               <div className="flex flex-wrap gap-2">
                 {g.modifiers.map(m => {
                   const active = (selected.get(m.id) ?? 0) > 0;
@@ -499,10 +477,98 @@ export const VariantSheet: React.FC<{
                   );
                 })}
               </div>
-            ))}
-          </div>
+            );
+        };
+
+        const requiredGroups = groups.filter(g => g.min_select > 0);
+        const optional = groups.filter(g => g.min_select === 0);
+        const openGroup = optional.find(g => g.id === openGroupId) ?? null;
+
+        return (
+          <>
+            {/* Gli obbligatori sempre aperti: il foglio si apre per loro. */}
+            {requiredGroups.map(g => {
+              const single = g.max_select <= 1;
+              const chosen = chosenInGroup(g);
+              return (
+                <div key={g.id}>
+                  <div className="mb-2 flex items-center gap-1.5">
+                    <span className="min-w-0 flex-1 text-[13px] font-semibold text-[var(--ds-text-muted)]">
+                      {g.name}
+                      <span className="text-[var(--ds-critical-text)]"> · obbligatorio</span>
+                      {/* Il tetto si dice solo quando può mordere: un gruppo
+                          con max pari alle opzioni non ha niente da contare. */}
+                      {!single && g.max_select < g.modifiers.length && (
+                        <span className="tabular-nums"> · {chosen}/{g.max_select}</span>
+                      )}
+                    </span>
+                    {noteButton(g)}
+                  </div>
+                  {notePanel(g)}
+                  {groupBody(g)}
+                </div>
+              );
+            })}
+
+            {/* I facoltativi come pillole: il nome del gruppo è il bersaglio
+                e il contenuto si apre sotto con l'ingresso di casa (tileIn).
+                Fisarmonica a un'anta — aprire un gruppo chiude l'altro. Il
+                conteggio sulla pillola dice quante scelte vivono lì dentro
+                anche da chiusa. */}
+            {optional.length > 0 && (
+              <div>
+                <div className="mb-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">Varianti</div>
+                <div className="flex flex-wrap gap-2">
+                  {optional.map(g => {
+                    const picked = g.modifiers.filter(m => (selected.get(m.id) ?? 0) !== 0).length;
+                    const activePill = openGroupId === g.id;
+                    return (
+                      <button
+                        key={g.id}
+                        type="button"
+                        onClick={() => setOpenGroupId(prev => prev === g.id ? null : g.id)}
+                        aria-expanded={activePill}
+                        className={`inline-flex h-11 items-center gap-1.5 rounded-full px-4 text-[15px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                          activePill
+                            ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                            : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
+                        }`}
+                      >
+                        {g.name}
+                        {picked > 0 && (
+                          <span className={`text-[13px] font-semibold tabular-nums ${activePill ? 'opacity-90' : 'text-[var(--ds-text-secondary)]'}`}>
+                            · {picked}
+                          </span>
+                        )}
+                        <ChevronDown
+                          size={15}
+                          className={`flex-shrink-0 transition-transform ${activePill ? 'rotate-180' : ''}`}
+                          aria-hidden
+                        />
+                      </button>
+                    );
+                  })}
+                </div>
+                {openGroup && (
+                  // key = id: cambiare pillola rifa l'ingresso, non un morph.
+                  <div key={openGroup.id} className="mt-3" style={{ animation: 'tileIn 200ms ease-out both' }}>
+                    {(openGroup.max_select > 1 && openGroup.max_select < openGroup.modifiers.length) || openGroup.note ? (
+                      <div className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-[var(--ds-text-muted)]">
+                        {openGroup.max_select > 1 && openGroup.max_select < openGroup.modifiers.length && (
+                          <span className="tabular-nums">{chosenInGroup(openGroup)}/{openGroup.max_select}</span>
+                        )}
+                        {noteButton(openGroup)}
+                      </div>
+                    ) : null}
+                    {notePanel(openGroup)}
+                    {groupBody(openGroup)}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
         );
-      })}
+      })()}
 
       <label className="block">
         <span className="mb-2 block text-[13px] font-semibold text-[var(--ds-text-muted)]">Variante libera</span>
