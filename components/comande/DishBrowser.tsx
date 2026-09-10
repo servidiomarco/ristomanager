@@ -122,14 +122,10 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     if (lpTimer.current != null) { clearTimeout(lpTimer.current); lpTimer.current = null; }
     lpStart.current = null;
   };
-  // Doppio tap sul nome: svela le sotto-righe del piatto (variante,
-  // quantità, gestione). L'aggiunta vive sul «+» a destra, che non ha
-  // gesti. Soglia corta: 300 ms.
-  const lastTap = useRef<{ id: number; at: number } | null>(null);
   // Visibilità delle sotto-righe: default aperte quando c'è struttura (più
   // combinazioni, o varianti/nota/peso), chiuse per la sola liscia;
-  // l'override lo scrive il toggle a freccia — che è anche il modo per
-  // RICHIUDERE, oltre che l'affordance visibile del doppio tap.
+  // l'override lo scrive il TAP sul piatto — l'aggiunta sta sul «+», quindi
+  // il tocco sul nome è libero di essere il cassetto: apre e richiude.
   const [subRowsOverride, setSubRowsOverride] = useState<Map<number, boolean>>(new Map());
   const draftState = (dishId: number) => {
     if (!draftLinesFor || !onBumpLine || !onTapLine) return null;
@@ -165,17 +161,11 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     onClick: () => {
       if (lpFired.current) { lpFired.current = false; return; }
       // Sulla griglia larga il tap batte, com'è sempre stato: lì non ci
-      // sono sotto-righe né doppio tap.
+      // sono sotto-righe né cassetto.
       if (layout === 'grid') { onAdd(d); return; }
-      // Sul palmare il nome NON batte: si aggiunge solo dal «+», così il
-      // doppio tap non crea equivoci. Il doppio tap svela la sotto-riga.
-      const now = Date.now();
-      if (lastTap.current?.id === d.id && now - lastTap.current.at < 300) {
-        lastTap.current = null;
-        setSubRowsOverride(prev => new Map(prev).set(d.id, true));
-        return;
-      }
-      lastTap.current = { id: d.id, at: now };
+      // Sul palmare il nome NON batte (si aggiunge solo dal «+»): il tap è
+      // il cassetto — sul piatto con battute apre e richiude le sotto-righe.
+      if (draftState(d.id)) toggleSubRows(d.id);
     },
   });
 
@@ -218,19 +208,8 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
             {qty}
           </span>
         )}
-        {/* La freccia: affordance del doppio tap e toggle vero — un tocco
-            apre e RICHIUDE le sotto-righe. Ruota con l'apertura. */}
-        {ds && (
-          <button
-            type="button"
-            onClick={() => toggleSubRows(d.id)}
-            aria-expanded={rowsOpen}
-            aria-label={rowsOpen ? `Nascondi le battute di ${d.name}` : `Mostra le battute di ${d.name}`}
-            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-          >
-            <ChevronDown size={16} className={`transition-transform duration-200 ${rowsOpen ? 'rotate-180' : ''}`} aria-hidden />
-          </button>
-        )}
+        {/* Niente freccia: il cassetto si apre e richiude col tap sul
+            piatto — il nome è il bersaglio, non un bottone in più. */}
         <button
           type="button"
           onClick={() => onAdd(d)}
