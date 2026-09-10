@@ -302,6 +302,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
           title="Sconto sul conto"
           currentReason={bill.discount_reason ?? null}
           hasDiscount={bill.discount_type != null}
+          reasonRequired={false}
           busy={busy}
           onCancel={() => setDiscountOpen(false)}
           onClear={() => applyDiscount(null)}

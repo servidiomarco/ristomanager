@@ -5803,11 +5803,10 @@ app.post('/bills/:id/discount', authenticate, requirePermission('orders:void'), 
             if (type === 'PERCENT' && value > 100) {
                 return res.status(400).json({ error: 'Uno sconto percentuale non può superare il 100%' });
             }
+            // Motivazione facoltativa (scelta di Marco, 10/09): in cassa si
+            // sconta anche al volo. Se c'è, resta a registro come prima.
             const raw = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
-            if (raw.length < 3) {
-                return res.status(400).json({ error: 'Serve una motivazione (almeno 3 caratteri)' });
-            }
-            reason = raw.slice(0, 300);
+            reason = raw.length > 0 ? raw.slice(0, 300) : null;
         }
 
         await client.query('BEGIN');
@@ -29897,7 +29896,7 @@ app.post('/orders/items/:id/void', authenticate, requirePermission('orders:void'
     }
 });
 
-// Sconto sulla comanda, con motivazione obbligatoria e traccia di chi l'ha
+// Sconto sulla comanda, con motivazione facoltativa e traccia di chi l'ha
 // concesso. Passa da `orders:void`, non da `orders:take`: regalare soldi non
 // è la stessa cosa che prendere una comanda.
 app.post('/orders/:id/discount', authenticate, requirePermission('orders:void'), async (req, res) => {
@@ -29923,11 +29922,10 @@ app.post('/orders/:id/discount', authenticate, requirePermission('orders:void'),
             if (type === 'PERCENT' && value > 100) {
                 return res.status(400).json({ error: 'Uno sconto percentuale non può superare il 100%' });
             }
+            // Motivazione facoltativa (scelta di Marco, 10/09): in cassa si
+            // sconta anche al volo. Se c'è, resta a registro come prima.
             const raw = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
-            if (raw.length < 3) {
-                return res.status(400).json({ error: 'Serve una motivazione (almeno 3 caratteri)' });
-            }
-            reason = raw.slice(0, 300);
+            reason = raw.length > 0 ? raw.slice(0, 300) : null;
         }
 
         const upd = await queryWithRetry(
