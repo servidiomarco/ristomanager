@@ -50,8 +50,13 @@ interface SheetProps {
    *  maniglia: è una pagina, non un cassetto, e si chiude con la ×. Serve
    *  dove il foglio È la vista (la Comanda della variante a pagine), non un
    *  dettaglio col contesto dietro. Da sm in su non cambia nulla: il
-   *  pannello laterale resta il pannello laterale. */
+   *  pannello laterale resta il pannello laterale. La × qui è piena in
+   *  accent, come la freccia indietro del palmare: su una pagina è IL gesto
+   *  di ritorno, non un congedo discreto. */
   fullPage?: boolean;
+  /** Controlli accanto alla ×, allineati a lei: un interruttore di vista,
+   *  un'azione della testata. Pochi e compatti — la testata non è una barra. */
+  headerExtra?: React.ReactNode;
   ariaLabel?: string;
   children: React.ReactNode;
 }
@@ -66,6 +71,7 @@ export const Sheet: React.FC<SheetProps> = ({
   footer,
   bodyClassName = '',
   fullPage = false,
+  headerExtra,
   ariaLabel,
   children,
 }) => {
@@ -124,14 +130,19 @@ export const Sheet: React.FC<SheetProps> = ({
             )}
             {meta && <div className="mt-3 flex flex-wrap items-center gap-2">{meta}</div>}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Chiudi"
-            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex flex-shrink-0 items-center gap-2">
+            {headerExtra}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Chiudi"
+              className={fullPage
+                ? 'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]'
+                : 'inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]'}
+            >
+              <X className={fullPage ? 'h-[18px] w-[18px]' : 'h-4 w-4'} />
+            </button>
+          </div>
         </header>
 
         {subheader && (

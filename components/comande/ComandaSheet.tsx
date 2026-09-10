@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { RefreshCw, UtensilsCrossed } from 'lucide-react';
+import { ListOrdered, RefreshCw, Users, UtensilsCrossed } from 'lucide-react';
 import type { Dish, OrderItem, OrderWithItems } from '../../types';
 import { EmptyState, SectionHeader, Sheet, SegmentedControl } from '../ds';
 import { CourseList, SendFooter } from './CourseColumn';
@@ -56,17 +56,70 @@ interface ComandaSheetProps {
   /** Sezione «Dolci» in coda (categorie da dolci attive). */
   showDessert?: boolean;
   /** A tutta pagina (variante a pagine): la Comanda è una sezione della
-   *  barra inferiore, non un cassetto dietro il totale — copre lo schermo. */
+   *  barra inferiore, non un cassetto dietro il totale — copre lo schermo.
+   *  E la testata cambia mestiere: il titolo è il tavolo (la parola
+   *  «Comanda» la dice già la barra), sotto c'è chi l'ha aperta, e le due
+   *  letture stanno in un interruttore a icone accanto alla ×. */
   fullPage?: boolean;
+  /** Nome del tavolo, per la testata a tutta pagina. */
+  tableName?: string;
 }
 
 export const ComandaSheet: React.FC<ComandaSheetProps> = ({
   open, onClose, order, cart, dishes, categories, course, onCourse, busy,
   onBump, onDrop, onVoid, onRecall, onFire, onEditLine, onUnfire, onMoveLine, onMoveItem, onMoveCourse,
   onDragLine, onDragItem, onDragCourse,
-  openedBy, onSend, onSendAll, onRepeat, onRepeatAll, showBar, showDessert, fullPage,
+  openedBy, onSend, onSendAll, onRepeat, onRepeatAll, showBar, showDessert, fullPage, tableName,
 }) => {
   const [tab, setTab] = useState<SheetTab>('course');
+
+  // Chi ha preso la comanda, per la testata a tutta pagina: sempre — non
+  // solo quando è di qualcun altro. La cassa si nomina come banco.
+  const opener = String(order.order.opened_by_role ?? '') === 'CASSA'
+    ? 'dalla cassa'
+    : order.order.opened_by_name || null;
+
+  // Le due letture come interruttore a icone: l'elenco numerato è la comanda
+  // per uscite, le persone sono il tavolo intero. Cella attiva sollevata in
+  // bianco, come un segmented — è un filtro di lettura, non un'azione.
+  const viewSwitch = (
+    <div
+      className="inline-flex flex-shrink-0 items-center rounded-full bg-[var(--ds-surface-row)] p-1"
+      role="tablist"
+      aria-label="Come leggere la comanda"
+    >
+      <button
+        type="button"
+        role="tab"
+        aria-selected={tab === 'course'}
+        aria-label="Per uscita"
+        title="Per uscita"
+        onClick={() => setTab('course')}
+        className={`inline-flex h-9 w-11 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+          tab === 'course'
+            ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
+            : 'text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
+        }`}
+      >
+        <ListOrdered size={17} aria-hidden />
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={tab === 'table'}
+        aria-label="Tutto il tavolo"
+        title="Tutto il tavolo"
+        onClick={() => setTab('table')}
+        className={`inline-flex h-9 w-11 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+          tab === 'table'
+            ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
+            : 'text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
+        }`}
+      >
+        <Users size={17} aria-hidden />
+      </button>
+    </div>
+  );
 
   const lines = useMemo(() => repeatLines(order, cart, dishes), [order, cart, dishes]);
   const groups = useMemo(() => groupByCategory(lines, categories), [lines, categories]);
@@ -121,13 +174,16 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
     <Sheet
       open={open}
       onClose={onClose}
-      title={openedBy ? `Comanda ${openedBy}` : 'Comanda'}
-      subtitle={rows === 0 ? 'vuota' : rowCountLabel(rows)}
+      // A tutta pagina il titolo è il tavolo e sotto c'è chi ha preso la
+      // comanda; nel cassetto classico restano «Comanda» e il conteggio.
+      title={fullPage ? `Tav. ${tableName ?? ''}` : openedBy ? `Comanda ${openedBy}` : 'Comanda'}
+      subtitle={fullPage ? opener : rows === 0 ? 'vuota' : rowCountLabel(rows)}
       ariaLabel="Comanda del tavolo"
       bodyClassName="px-4 py-4"
       fullPage={fullPage}
+      headerExtra={fullPage ? viewSwitch : undefined}
       footer={footer}
-      subheader={
+      subheader={fullPage ? undefined : (
         <SegmentedControl<SheetTab>
           value={tab}
           onChange={setTab}
@@ -137,7 +193,7 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
             { value: 'table', label: 'Tutto il tavolo' },
           ]}
         />
-      }
+      )}
     >
       {tab === 'course' ? (
         <CourseList
