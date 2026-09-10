@@ -914,6 +914,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
         <DiscountDialog
           currentReason={order.order.discount_reason ?? null}
           hasDiscount={(order.discount_cents ?? 0) > 0}
+          reasonRequired={false}
           busy={busyBillId != null}
           onCancel={() => setDiscountOpen(false)}
           onClear={() => applyDiscount(null)}
@@ -926,6 +927,7 @@ export const CassaPage: React.FC<CassaPageProps> = ({
           title="Sconto sul conto"
           currentReason={payingBill.discount_reason ?? null}
           hasDiscount={payingBill.discount_type != null}
+          reasonRequired={false}
           busy={busyBillId != null}
           onCancel={() => setBillDiscountOpen(false)}
           onClear={() => applyBillDiscount(null)}

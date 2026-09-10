@@ -6,9 +6,10 @@ import { ModalShell, SegmentedControl, dsButton, dsInput } from '../ds';
 // (docs/cassa-plan.md §8). Lo sconto è di CONTO, non di riga — quello di riga
 // è fuori dall'MVP (§12) — quindi è lo stesso identico gesto nei due moduli.
 //
-// La motivazione è obbligatoria e non è burocrazia: a fine servizio la
-// differenza fra quello che il menu diceva e quello che è entrato la spiega
-// solo questa riga.
+// La motivazione spiega a fine servizio la differenza fra quello che il menu
+// diceva e quello che è entrato. Sul palmare resta obbligatoria; in cassa è
+// facoltativa (scelta di Marco, 10/09): chi sta al banco sconta anche al
+// volo, e il campo resta lì per chi vuole lasciare traccia.
 
 export const DiscountDialog: React.FC<{
   currentReason: string | null;
@@ -17,15 +18,18 @@ export const DiscountDialog: React.FC<{
   /** «Sconto sulla comanda» (default) o «Sconto sul conto» in cassa, dove la
    *  comanda è già chiusa e lo sconto vive sul conto. */
   title?: string;
+  /** false in cassa: si applica anche senza motivazione. */
+  reasonRequired?: boolean;
   onCancel: () => void;
   onClear: () => void;
   onConfirm: (p: { discount_type: 'PERCENT' | 'AMOUNT'; discount_value: number; reason: string }) => void;
-}> = ({ currentReason, hasDiscount, busy, title, onCancel, onClear, onConfirm }) => {
+}> = ({ currentReason, hasDiscount, busy, title, reasonRequired = true, onCancel, onClear, onConfirm }) => {
   const [type, setType] = useState<'PERCENT' | 'AMOUNT'>('PERCENT');
   const [value, setValue] = useState('');
   const [reason, setReason] = useState(currentReason ?? '');
   const num = Number(value.replace(',', '.'));
-  const valid = Number.isFinite(num) && num > 0 && (type !== 'PERCENT' || num <= 100) && reason.trim().length >= 3;
+  const valid = Number.isFinite(num) && num > 0 && (type !== 'PERCENT' || num <= 100)
+    && (!reasonRequired || reason.trim().length >= 3);
 
   return (
     <ModalShell
@@ -76,7 +80,7 @@ export const DiscountDialog: React.FC<{
       <input
         value={reason}
         onChange={e => setReason(e.target.value)}
-        placeholder="Motivazione (obbligatoria)"
+        placeholder={reasonRequired ? 'Motivazione (obbligatoria)' : 'Motivazione (facoltativa)'}
         aria-label="Motivazione dello sconto"
         className={dsInput}
       />
