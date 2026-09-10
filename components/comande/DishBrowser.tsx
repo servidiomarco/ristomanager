@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Cake, ChefHat, ChevronDown, ChevronLeft, ChevronRight, CornerDownRight, Minus, Plus, Search, Trash2, Wine } from 'lucide-react';
+import { ArrowLeft, Cake, ChefHat, ChevronDown, ChevronRight, CornerDownRight, Minus, Plus, Search, Trash2, Wine } from 'lucide-react';
 import type { Dish } from '../../types';
 import { SearchField } from '../ds';
 import { euro } from './orderView';
@@ -416,13 +416,16 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-3">
         <div className="flex flex-shrink-0 items-center gap-2.5">
+          {/* Cerchio pieno in accent, come la freccia indietro del tavolo:
+              il ritorno è un gesto, non una parola — il titolo accanto dice
+              già dove sei. */}
           <button
             type="button"
             onClick={onCategoryBack}
-            className="inline-flex h-11 flex-shrink-0 items-center gap-1 rounded-full bg-[var(--ds-surface)] pl-2.5 pr-4 text-[14px] font-semibold text-[var(--ds-text-secondary)] shadow-[var(--ds-shadow-card)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            aria-label="Torna alle categorie"
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
-            <ChevronLeft size={16} aria-hidden />
-            Categorie
+            <ArrowLeft size={20} aria-hidden />
           </button>
           <h2 className="min-w-0 flex-1 truncate text-[17px] font-bold text-[var(--ds-text-primary)]">
             {q ? 'Ricerca' : category}
