@@ -721,6 +721,16 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     else addToCart(dish);
   };
 
+  // Tocco lungo sul menu: su un piatto GIÀ battuto nell'uscita di battuta
+  // riapre la sua riga in bozza («Aggiorna» — aggiungere una variante lì
+  // corregge il battuto, non lo duplica); con più righe si riapre l'ultima
+  // toccata. Su un piatto non battuto resta il foglio di battuta nuova.
+  const onDishLongPress = (dish: Dish) => {
+    const target = forcedCourse(dish) ?? course;
+    const line = [...cart].reverse().find(l => l.dish.id === dish.id && l.course_no === target);
+    if (line) setEditLine(line); else setVariantFor(dish);
+  };
+
   const bumpCart = (key: string, delta: number) => {
     // Sulle righe al peso il «+» non alza la quantità (il server pretende
     // una riga per pezzo): aggiunge un ALTRO pezzo dello stesso peso, riga
@@ -1606,7 +1616,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       onRemove={removeFromCart}
       courseOf={d => forcedCourse(d) ?? course}
       onCourseTap={d => setMoveFor({ kind: 'dish', dishId: d.id, label: d.name, from: forcedCourse(d) ?? course })}
-      onLongPress={setVariantFor}
+      onLongPress={onDishLongPress}
       layout={isWide ? 'grid' : 'list'}
       // Sul palmare la ricerca sta nella testata del tavolo (lente), non qui.
       showSearch={false}
