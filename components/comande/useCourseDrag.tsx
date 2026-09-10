@@ -3,12 +3,20 @@ import { createPortal } from 'react-dom';
 import type { OrderItem } from '../../types';
 
 // ---------------------------------------------------------------------------
-// Il trascinamento della comanda: una riga in bozza (o un'uscita intera) si
-// prende dal SUO BOTTONE — il ⇅ della riga, lo «sposta» della testata — e si
-// lascia cadere sull'uscita di arrivo. Tocco secco = selettore modale come
-// sempre; tenuto e mosso = drag. La maniglia-che-è-anche-bottone azzera il
-// conflitto con lo scroll: il bottone non è una superficie di scorrimento,
-// quindi touch-action: none statico e niente tocco lungo.
+// Il trascinamento della comanda, in due prese.
+//
+// La MANIGLIA (l'uscita intera, ⇕ in testata): tocco secco = selettore
+// modale, tenuto e mosso = drag. Il bottone non è una superficie di
+// scorrimento, quindi touch-action: none statico e partenza immediata.
+//
+// La RIGA (il singolo piatto): la presa è il TOCCO LUNGO — le maniglie ⇅
+// per riga partivano da sole durante lo scroll (collaudo di Marco, 10/09)
+// e sono state tolte. Tenuto fermo ~400 ms la riga «si stacca» (vibrazione
+// e ghost che salta su), poi si trascina; mosso PRIMA della soglia è uno
+// scroll e la presa si annulla; tenuto e RILASCIATO senza spostarsi apre il
+// selettore modale di sempre (onHoldTap) — la via a tocco non si perde.
+// Sulla riga niente touch-action: lo scroll resta suo finché la presa non
+// è armata; da armata, un touchmove non-passivo su window ferma la pagina.
 //
 // Meccanica dai precedenti di casa: stato in ref e capture del pointer
 // (SwipeRow), transform diretto sul ghost senza re-render per frame
@@ -29,10 +37,15 @@ interface UseCourseDragOptions {
   /** Un'uscita già partita non è un bersaglio: il drop deve dirlo prima. */
   canDropOn: (courseNo: number) => boolean;
   onDrop: (payload: DragPayload, to: number) => void;
+  /** Tocco lungo RILASCIATO senza trascinare (presa da riga): apre il
+   *  selettore modale — lo stesso che apriva il tocco sulla maniglia. */
+  onHoldTap?: (payload: DragPayload) => void;
 }
 
 /** Quanto il puntatore può vagare prima che il tocco diventi un drag. */
 const SLOP_PX = 8;
+/** Tenuta ferma che arma la presa da riga. */
+const HOLD_MS = 400;
 /** Zona calda ai bordi dello scroller in cui parte l'autoscroll. */
 const EDGE_PX = 48;
 /** Velocità massima di autoscroll per frame. */
@@ -56,6 +69,12 @@ interface DragSession {
   startX: number; startY: number;
   x: number; y: number;
   armed: boolean;
+  /** Presa da riga: arma il tocco lungo, non il movimento. */
+  hold: boolean;
+  holdTimer: number | null;
+  /** Il dito si è mosso oltre la soglia DOPO l'armamento: il rilascio è la
+   *  fine di un drag, non un tocco lungo secco. */
+  dragMoved: boolean;
   pointerId: number;
   sourceEl: HTMLElement;
   scroller: HTMLElement | null;
@@ -63,18 +82,21 @@ interface DragSession {
   raf: number | null;
 }
 
-export function useCourseDrag({ disabled, canDropOn, onDrop }: UseCourseDragOptions): {
+export function useCourseDrag({ disabled, canDropOn, onDrop, onHoldTap }: UseCourseDragOptions): {
   drag: DragPayload | null;
   overCourse: number | null;
   handleProps: (payload: DragPayload) => React.HTMLAttributes<HTMLElement>;
+  /** Presa da riga (tocco lungo): per gli elementi che devono continuare a
+   *  scorrere sotto il dito — niente touch-action: none. */
+  rowProps: (payload: DragPayload) => React.HTMLAttributes<HTMLElement>;
   ghost: React.ReactNode;
 } {
   const [drag, setDrag] = useState<DragPayload | null>(null);
   const [overCourse, setOverCourse] = useState<number | null>(null);
 
   // Le opzioni cambiano a ogni render; il motore no. Le legge da qui.
-  const optsRef = useRef({ disabled, canDropOn, onDrop });
-  optsRef.current = { disabled, canDropOn, onDrop };
+  const optsRef = useRef({ disabled, canDropOn, onDrop, onHoldTap });
+  optsRef.current = { disabled, canDropOn, onDrop, onHoldTap };
 
   const ghostRef = useRef<HTMLDivElement | null>(null);
   const justDragged = useRef(false);
@@ -84,6 +106,13 @@ export function useCourseDrag({ disabled, canDropOn, onDrop }: UseCourseDragOpti
   // componente.
   const engine = useMemo(() => {
     let s: DragSession | null = null;
+
+    // A presa armata la pagina non deve scorrere sotto il drag: il
+    // touch-action della riga resta libero (serve allo scroll PRIMA della
+    // presa), quindi il freno è un touchmove non-passivo su window.
+    const onTouchMove = (e: TouchEvent) => {
+      if (s?.armed) e.preventDefault();
+    };
 
     const positionGhost = () => {
       const g = ghostRef.current;
@@ -122,6 +151,7 @@ export function useCourseDrag({ disabled, canDropOn, onDrop }: UseCourseDragOpti
     const arm = () => {
       if (!s || s.armed) return;
       s.armed = true;
+      if (s.holdTimer != null) { clearTimeout(s.holdTimer); s.holdTimer = null; }
       justDragged.current = true;
       if (typeof navigator !== 'undefined') navigator.vibrate?.(30);
       s.scroller = findScroller(s.sourceEl);
@@ -131,9 +161,11 @@ export function useCourseDrag({ disabled, canDropOn, onDrop }: UseCourseDragOpti
 
     const teardown = () => {
       if (s?.raf != null) cancelAnimationFrame(s.raf);
+      if (s?.holdTimer != null) clearTimeout(s.holdTimer);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('touchmove', onTouchMove);
       const bodyStyle = document.body.style as CSSStyleDeclaration & { webkitUserSelect?: string };
       bodyStyle.userSelect = '';
       bodyStyle.webkitUserSelect = '';
@@ -148,20 +180,27 @@ export function useCourseDrag({ disabled, canDropOn, onDrop }: UseCourseDragOpti
     function onMove(e: PointerEvent) {
       if (!s || e.pointerId !== s.pointerId) return;
       s.x = e.clientX; s.y = e.clientY;
+      const beyondSlop = Math.abs(s.x - s.startX) > SLOP_PX || Math.abs(s.y - s.startY) > SLOP_PX;
       if (!s.armed) {
-        if (Math.abs(s.x - s.startX) > SLOP_PX || Math.abs(s.y - s.startY) > SLOP_PX) arm();
+        // Presa da riga: il movimento prima della tenuta è uno SCROLL, la
+        // presa si annulla. Sulla maniglia il movimento è la presa stessa.
+        if (beyondSlop) { if (s.hold) teardown(); else arm(); }
         return;
       }
+      if (beyondSlop) s.dragMoved = true;
       positionGhost();
       hitTest();
     }
 
     function onUp(e: PointerEvent) {
       if (!s || e.pointerId !== s.pointerId) return;
-      const { armed, payload, over } = s;
+      const { armed, hold, dragMoved, payload, over } = s;
       teardown();
       if (armed) {
         if (over != null) optsRef.current.onDrop(payload, over);
+        // Tenuto e rilasciato senza trascinare: il selettore modale di
+        // sempre — la via a tocco delle maniglie che non ci sono più.
+        else if (hold && !dragMoved) optsRef.current.onHoldTap?.(payload);
         // Il click che il browser emette al rilascio non deve riaprire il
         // selettore: justDragged lo mangia in onClickCapture e si spegne
         // al prossimo tick.
@@ -175,7 +214,7 @@ export function useCourseDrag({ disabled, canDropOn, onDrop }: UseCourseDragOpti
       setTimeout(() => { justDragged.current = false; }, 0);
     }
 
-    const start = (payload: DragPayload, e: React.PointerEvent<HTMLElement>) => {
+    const start = (payload: DragPayload, e: React.PointerEvent<HTMLElement>, hold = false) => {
       if (optsRef.current.disabled || s) return;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       // iOS: il tocco tenuto avvia la SELEZIONE TESTO (lente + Copy) e la
@@ -190,18 +229,23 @@ export function useCourseDrag({ disabled, canDropOn, onDrop }: UseCourseDragOpti
         startX: e.clientX, startY: e.clientY,
         x: e.clientX, y: e.clientY,
         armed: false,
+        hold,
+        holdTimer: null,
+        dragMoved: false,
         pointerId: e.pointerId,
         sourceEl: e.currentTarget as HTMLElement,
         scroller: null,
         over: null,
         raf: null,
       };
+      if (hold) s.holdTimer = window.setTimeout(arm, HOLD_MS);
       // La capture tiene il gesto anche se il puntatore lascia il bottone;
       // i listener su window sopravvivono a un rimontaggio della riga.
       try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* niente */ }
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
       window.addEventListener('pointercancel', onCancel);
+      window.addEventListener('touchmove', onTouchMove, { passive: false });
     };
 
     return { start, teardown, positionGhost };
@@ -210,6 +254,24 @@ export function useCourseDrag({ disabled, canDropOn, onDrop }: UseCourseDragOpti
   }, []);
 
   useEffect(() => () => engine.teardown(), [engine]);
+
+  const rowProps = (payload: DragPayload): React.HTMLAttributes<HTMLElement> => ({
+    onPointerDown: e => engine.start(payload, e, true),
+    onClickCapture: e => {
+      // Dopo una presa (drag o tenuta secca) il click di rilascio è rumore:
+      // non deve aprire il foglio della riga sotto il dito.
+      if (justDragged.current) { e.preventDefault(); e.stopPropagation(); }
+    },
+    // Il tocco lungo è nostro, non del menu contestuale del browser.
+    onContextMenu: e => e.preventDefault(),
+    // NIENTE touch-action: la riga resta una superficie di scorrimento
+    // finché la presa non è armata (poi frena il touchmove su window).
+    style: {
+      userSelect: 'none',
+      WebkitUserSelect: 'none',
+      WebkitTouchCallout: 'none',
+    } as React.CSSProperties,
+  });
 
   const handleProps = (payload: DragPayload): React.HTMLAttributes<HTMLElement> => ({
     onPointerDown: e => engine.start(payload, e),
@@ -238,15 +300,20 @@ export function useCourseDrag({ disabled, canDropOn, onDrop }: UseCourseDragOpti
 
   const ghost = drag
     ? createPortal(
-        <div
-          ref={ghostRef}
-          className="pointer-events-none fixed left-0 top-0 z-50 select-none whitespace-nowrap rounded-[16px] bg-[var(--ds-surface)] px-4 py-2.5 text-[14px] font-semibold text-[var(--ds-text-primary)] opacity-95 shadow-[var(--ds-shadow-raised)]"
-        >
-          {dragGhostLabel(drag)}
+        // Due strati: il posizionamento (transform per frame) sta sul guscio,
+        // l'ingresso tileIn sull'interno — sono lo stesso canale CSS, sullo
+        // stesso elemento l'animazione coprirebbe la posizione per 160 ms.
+        <div ref={ghostRef} className="pointer-events-none fixed left-0 top-0 z-50">
+          <div
+            style={{ animation: 'tileIn 160ms ease-out both' }}
+            className="select-none whitespace-nowrap rounded-[16px] bg-[var(--ds-surface)] px-4 py-2.5 text-[14px] font-semibold text-[var(--ds-text-primary)] opacity-95 shadow-[var(--ds-shadow-raised)]"
+          >
+            {dragGhostLabel(drag)}
+          </div>
         </div>,
         document.body,
       )
     : null;
 
-  return { drag, overCourse, handleProps, ghost };
+  return { drag, overCourse, handleProps, rowProps, ghost };
 }
