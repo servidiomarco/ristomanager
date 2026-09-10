@@ -121,6 +121,13 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     if (lpTimer.current != null) { clearTimeout(lpTimer.current); lpTimer.current = null; }
     lpStart.current = null;
   };
+  // Doppio tap sul nome: primo tap aggiunge (subito, niente attese), il
+  // secondo entro la soglia NON aggiunge — svela le sotto-righe del piatto
+  // (variante, quantità, gestione). L'aggiunta rapida a raffica vive sul
+  // «+» a destra, che non ha gesti. Soglia corta: 300 ms.
+  const lastTap = useRef<{ id: number; at: number } | null>(null);
+  const [revealedDishes, setRevealedDishes] = useState<Set<number>>(new Set());
+
   const press = (d: Dish) => ({
     onPointerDown: (e: React.PointerEvent) => {
       lpFired.current = false;
@@ -138,7 +145,18 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     // Sul touch il tocco lungo evoca il menu contestuale del browser: qui è
     // un gesto nostro.
     onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
-    onClick: () => { if (lpFired.current) { lpFired.current = false; return; } onAdd(d); },
+    onClick: () => {
+      if (lpFired.current) { lpFired.current = false; return; }
+      const now = Date.now();
+      if (lastTap.current?.id === d.id && now - lastTap.current.at < 300) {
+        // Secondo tap: svela le sotto-righe, non aggiunge un altro pezzo.
+        lastTap.current = null;
+        setRevealedDishes(prev => new Set(prev).add(d.id));
+        return;
+      }
+      lastTap.current = { id: d.id, at: now };
+      onAdd(d);
+    },
   });
 
   // I controlli di riga sono gli stessi nelle due densità della lista: la
@@ -279,16 +297,19 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
   );
 
   // Le sotto-righe alla Passepartout: le combinazioni del battuto sotto il
-  // piatto, ognuna col suo stepper e il tap che apre il SUO foglio. SEMPRE,
-  // dal primo pezzo — anche la sola «liscia»: è lei l'ingresso per
-  // differenziare («tap → qty 1 + variante → Aggiorna» e la riga si divide),
-  // e in cassa il titolare la vede da vent'anni. bumpCart fa già tutto:
-  // qty a 0 toglie la riga, il «+» su un pezzo al peso ne aggiunge un altro
-  // dello stesso peso.
+  // piatto, ognuna col suo stepper e il tap che apre il SUO foglio.
+  // Compaiono da sole quando il contatore nasconde struttura (due
+  // combinazioni, o varianti/nota/peso); la sola riga liscia sta nascosta
+  // finché il DOPPIO TAP sul piatto non la svela — è l'ingresso per
+  // differenziare, senza il rumore di una riga doppione sotto ogni battuto.
+  // bumpCart fa già tutto: qty a 0 toglie la riga, il «+» su un pezzo al
+  // peso ne aggiunge un altro dello stesso peso.
   const subRows = (d: Dish) => {
     if (!draftLinesFor || !onBumpLine || !onTapLine) return null;
     const lines = draftLinesFor(d.id);
     if (lines.length === 0) return null;
+    const structured = lines.length >= 2 || lines[0].label !== 'liscia';
+    if (!structured && !revealedDishes.has(d.id)) return null;
     return lines.map(l => (
       <div key={l.key} className="flex min-h-[52px] items-center gap-2 border-t border-[var(--ds-border)] py-1 pl-5 pr-2">
         <CornerDownRight size={14} className="flex-shrink-0 text-[var(--ds-text-subtle)]" aria-hidden />
