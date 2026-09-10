@@ -83,9 +83,12 @@ interface DishBrowserProps {
    *  sotto-righe alla Passepartout: compaiono solo quando il contatore
    *  nasconde struttura (due righe, o una con varianti/nota/peso). Ogni
    *  sotto-riga ha il suo stepper e il tap apre il SUO foglio. */
-  draftLinesFor?: (dishId: number) => { key: string; qty: number; label: string }[];
+  draftLinesFor?: (dishId: number) => { key: string; qty: number; label: string; courseNo: number }[];
   onBumpLine?: (key: string, delta: number) => void;
   onTapLine?: (key: string) => void;
+  /** Chip dell'uscita sulla sotto-riga: sposta QUELLA combinazione — apre
+   *  il selettore «dove va la riga» di OrderPad. */
+  onLineCourseTap?: (key: string) => void;
 }
 
 export const DishBrowser: React.FC<DishBrowserProps> = ({
@@ -93,7 +96,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
   qtyInCourse, markedCategories, hasVariants, tapOpensSheet = hasVariants, onAdd, onRemove, courseOf, onCourseTap, onLongPress, layout,
   showSearch = true, density = 'comfortable', nav = 'chips', onCategoryBack, catView = 'list',
   barCategories, dessertCategories, course,
-  draftLinesFor, onBumpLine, onTapLine,
+  draftLinesFor, onBumpLine, onTapLine, onLineCourseTap,
 }) => {
   // Categoria «fuori uscita»: non della sezione che l'uscita in composizione
   // sta servendo. Solo per Bar e Dolci — le uscite numerate sono di cucina e
@@ -105,8 +108,6 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
   const q = query.trim().toLowerCase();
   const [searchOpen, setSearchOpen] = useState(false);
 
-  const courseTag = (n: number): string =>
-    isBarCourse(n) ? 'Bar' : isDessertCourse(n) ? 'Dolci' : `${ordinal(n)} uscita`;
   const courseTagShort = (n: number): string =>
     isBarCourse(n) ? 'Bar' : isDessertCourse(n) ? 'Dolci' : ordinal(n);
 
@@ -147,15 +148,18 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     onContextMenu: (e: React.MouseEvent) => e.preventDefault(),
     onClick: () => {
       if (lpFired.current) { lpFired.current = false; return; }
+      // Sulla griglia larga il tap batte, com'è sempre stato: lì non ci
+      // sono sotto-righe né doppio tap.
+      if (layout === 'grid') { onAdd(d); return; }
+      // Sul palmare il nome NON batte: si aggiunge solo dal «+», così il
+      // doppio tap non crea equivoci. Il doppio tap svela la sotto-riga.
       const now = Date.now();
       if (lastTap.current?.id === d.id && now - lastTap.current.at < 300) {
-        // Secondo tap: svela le sotto-righe, non aggiunge un altro pezzo.
         lastTap.current = null;
         setRevealedDishes(prev => new Set(prev).add(d.id));
         return;
       }
       lastTap.current = { id: d.id, at: now };
-      onAdd(d);
     },
   });
 
@@ -169,19 +173,8 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     const canRemove = qty > 0 && !tapOpensSheet(d.id);
     return (
       <div className="flex flex-shrink-0 items-center gap-2">
-        {/* Dove sta andando il battuto: compare al primo pezzo, e si tocca
-            per spostarlo — «gli antipasti in seconda» senza aprire niente. */}
-        {qty > 0 && courseOf && onCourseTap && (
-          <button
-            type="button"
-            onClick={() => onCourseTap(d)}
-            aria-label={`Sposta ${d.name} in un'altra uscita`}
-            className="inline-flex h-11 flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-[var(--ds-arriving-tint)] px-3 text-[13px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-          >
-            <CornerDownRight size={14} aria-hidden />
-            {courseTag(courseOf(d))}
-          </button>
-        )}
+        {/* Il chip dell'uscita non sta più qui: vive sulla sotto-riga, dove
+            sposta la combinazione specifica — la riga piatto resta pulita. */}
         {canRemove && (
           // L'ultimo pezzo si toglie con il cestino, non con il meno: «meno
           // uno» da uno è togliere il piatto, e dirlo con l'icona giusta
@@ -311,8 +304,23 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     const structured = lines.length >= 2 || lines[0].label !== 'liscia';
     if (!structured && !revealedDishes.has(d.id)) return null;
     return lines.map(l => (
-      <div key={l.key} className="flex min-h-[52px] items-center gap-2 border-t border-[var(--ds-border)] py-1 pl-5 pr-2">
-        <CornerDownRight size={14} className="flex-shrink-0 text-[var(--ds-text-subtle)]" aria-hidden />
+      <div key={l.key} className="flex min-h-[52px] items-center gap-2 border-t border-[var(--ds-border)] py-1 pl-4 pr-2">
+        {/* Il chip dell'uscita apre la fila: dice dove va QUESTA
+            combinazione e si tocca per spostarla — «la vegetariana con la
+            variante in seconda» senza toccare le altre. */}
+        {onLineCourseTap ? (
+          <button
+            type="button"
+            onClick={() => onLineCourseTap(l.key)}
+            aria-label={`Sposta ${l.label} in un'altra uscita`}
+            className="inline-flex h-9 flex-shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-[var(--ds-arriving-tint)] px-2.5 text-[12px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            <CornerDownRight size={13} aria-hidden />
+            {courseTagShort(l.courseNo)}
+          </button>
+        ) : (
+          <CornerDownRight size={14} className="flex-shrink-0 text-[var(--ds-text-subtle)]" aria-hidden />
+        )}
         <button
           type="button"
           onClick={() => onTapLine(l.key)}

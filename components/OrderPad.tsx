@@ -733,6 +733,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       .map(l => ({
         key: l.key,
         qty: l.qty,
+        courseNo: l.course_no,
         label: [
           ...(l.weight_grams != null ? [weightLabel(l.weight_grams)] : []),
           ...l.modifier_labels,
@@ -1650,6 +1651,10 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       draftLinesFor={draftLinesFor}
       onBumpLine={bumpCart}
       onTapLine={(key) => { const l = cart.find(x => x.key === key); if (l) setEditLine(l); }}
+      onLineCourseTap={(key) => {
+        const l = cart.find(x => x.key === key);
+        if (l) setMoveFor({ kind: 'line', key: l.key, label: l.dish.name, from: l.course_no });
+      }}
     />
   );
 
