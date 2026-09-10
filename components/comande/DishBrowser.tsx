@@ -122,12 +122,28 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     if (lpTimer.current != null) { clearTimeout(lpTimer.current); lpTimer.current = null; }
     lpStart.current = null;
   };
-  // Doppio tap sul nome: primo tap aggiunge (subito, niente attese), il
-  // secondo entro la soglia NON aggiunge — svela le sotto-righe del piatto
-  // (variante, quantità, gestione). L'aggiunta rapida a raffica vive sul
-  // «+» a destra, che non ha gesti. Soglia corta: 300 ms.
+  // Doppio tap sul nome: svela le sotto-righe del piatto (variante,
+  // quantità, gestione). L'aggiunta vive sul «+» a destra, che non ha
+  // gesti. Soglia corta: 300 ms.
   const lastTap = useRef<{ id: number; at: number } | null>(null);
-  const [revealedDishes, setRevealedDishes] = useState<Set<number>>(new Set());
+  // Visibilità delle sotto-righe: default aperte quando c'è struttura (più
+  // combinazioni, o varianti/nota/peso), chiuse per la sola liscia;
+  // l'override lo scrive il toggle a freccia — che è anche il modo per
+  // RICHIUDERE, oltre che l'affordance visibile del doppio tap.
+  const [subRowsOverride, setSubRowsOverride] = useState<Map<number, boolean>>(new Map());
+  const draftState = (dishId: number) => {
+    if (!draftLinesFor || !onBumpLine || !onTapLine) return null;
+    const lines = draftLinesFor(dishId);
+    if (lines.length === 0) return null;
+    const structured = lines.length >= 2 || lines[0].label !== 'liscia';
+    return { lines, open: subRowsOverride.get(dishId) ?? structured, structured };
+  };
+  const toggleSubRows = (dishId: number) => setSubRowsOverride(prev => {
+    const cur = draftState(dishId)?.open ?? false;
+    const next = new Map(prev);
+    next.set(dishId, !cur);
+    return next;
+  });
 
   const press = (d: Dish) => ({
     onPointerDown: (e: React.PointerEvent) => {
@@ -156,7 +172,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
       const now = Date.now();
       if (lastTap.current?.id === d.id && now - lastTap.current.at < 300) {
         lastTap.current = null;
-        setRevealedDishes(prev => new Set(prev).add(d.id));
+        setSubRowsOverride(prev => new Map(prev).set(d.id, true));
         return;
       }
       lastTap.current = { id: d.id, at: now };
@@ -167,6 +183,11 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
   // preferenza cambia quanto si vede, mai come si tocca.
   const rowControls = (d: Dish) => {
     const qty = qtyInCourse.get(d.id) ?? 0;
+    // A sotto-righe in vista la riga piatto si spoglia: contare, togliere e
+    // spostare si fa lì sotto, dove si vede QUALE combinazione si tocca —
+    // il cestino aggregato con due combinazioni era un controllo ambiguo.
+    const ds = draftState(d.id);
+    const rowsOpen = ds?.open === true;
     // Il «−» opera dove il tap aggiunge: sui piatti che aprono il foglio al
     // tap (peso, obbligatori) non si toglie da qui. Fra più righe con varianti
     // diverse decide removeFromCart in OrderPad, o si toglie dalla comanda.
@@ -175,7 +196,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
       <div className="flex flex-shrink-0 items-center gap-2">
         {/* Il chip dell'uscita non sta più qui: vive sulla sotto-riga, dove
             sposta la combinazione specifica — la riga piatto resta pulita. */}
-        {canRemove && (
+        {canRemove && !rowsOpen && (
           // L'ultimo pezzo si toglie con il cestino, non con il meno: «meno
           // uno» da uno è togliere il piatto, e dirlo con l'icona giusta
           // evita il tocco di troppo.
@@ -192,10 +213,23 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
             {qty === 1 ? <Trash2 size={16} /> : <Minus size={16} />}
           </button>
         )}
-        {qty > 0 && (
+        {qty > 0 && !rowsOpen && (
           <span className="min-w-[16px] text-center text-[17px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
             {qty}
           </span>
+        )}
+        {/* La freccia: affordance del doppio tap e toggle vero — un tocco
+            apre e RICHIUDE le sotto-righe. Ruota con l'apertura. */}
+        {ds && (
+          <button
+            type="button"
+            onClick={() => toggleSubRows(d.id)}
+            aria-expanded={rowsOpen}
+            aria-label={rowsOpen ? `Nascondi le battute di ${d.name}` : `Mostra le battute di ${d.name}`}
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            <ChevronDown size={16} className={`transition-transform duration-200 ${rowsOpen ? 'rotate-180' : ''}`} aria-hidden />
+          </button>
         )}
         <button
           type="button"
@@ -298,11 +332,10 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
   // bumpCart fa già tutto: qty a 0 toglie la riga, il «+» su un pezzo al
   // peso ne aggiunge un altro dello stesso peso.
   const subRows = (d: Dish) => {
-    if (!draftLinesFor || !onBumpLine || !onTapLine) return null;
-    const lines = draftLinesFor(d.id);
-    if (lines.length === 0) return null;
-    const structured = lines.length >= 2 || lines[0].label !== 'liscia';
-    if (!structured && !revealedDishes.has(d.id)) return null;
+    if (!onBumpLine || !onTapLine) return null;
+    const ds = draftState(d.id);
+    if (!ds || !ds.open) return null;
+    const lines = ds.lines;
     return lines.map(l => (
       <div key={l.key} className="flex min-h-[52px] items-center gap-2 border-t border-[var(--ds-border)] py-1 pl-4 pr-2">
         {/* Il chip dell'uscita apre la fila: dice dove va QUESTA
