@@ -279,14 +279,16 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
   );
 
   // Le sotto-righe alla Passepartout: le combinazioni del battuto sotto il
-  // piatto, ognuna col suo stepper e il tap che apre il SUO foglio. Solo
-  // quando il contatore nasconde struttura — la riga liscia singola non ha
-  // niente da mostrare. bumpCart fa già tutto: qty a 0 toglie la riga, il
-  // «+» su un pezzo al peso ne aggiunge un altro dello stesso peso.
+  // piatto, ognuna col suo stepper e il tap che apre il SUO foglio. SEMPRE,
+  // dal primo pezzo — anche la sola «liscia»: è lei l'ingresso per
+  // differenziare («tap → qty 1 + variante → Aggiorna» e la riga si divide),
+  // e in cassa il titolare la vede da vent'anni. bumpCart fa già tutto:
+  // qty a 0 toglie la riga, il «+» su un pezzo al peso ne aggiunge un altro
+  // dello stesso peso.
   const subRows = (d: Dish) => {
     if (!draftLinesFor || !onBumpLine || !onTapLine) return null;
     const lines = draftLinesFor(d.id);
-    if (lines.length < 2 && !(lines.length === 1 && lines[0].label !== 'liscia')) return null;
+    if (lines.length === 0) return null;
     return lines.map(l => (
       <div key={l.key} className="flex min-h-[52px] items-center gap-2 border-t border-[var(--ds-border)] py-1 pl-5 pr-2">
         <CornerDownRight size={14} className="flex-shrink-0 text-[var(--ds-text-subtle)]" aria-hidden />
