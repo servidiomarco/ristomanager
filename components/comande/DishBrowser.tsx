@@ -365,6 +365,22 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     ));
   };
 
+  // L'indicatore del cassetto, accanto al prezzo: compare quando il piatto
+  // ha battute (il tap ha qualcosa da aprire), punta giù da chiuso e si
+  // capovolge da aperto. Prende il posto del chevron «ha varianti» delle
+  // righe in lista — quel mestiere ormai lo fa il cassetto stesso.
+  const drawerChevron = (d: Dish) => {
+    const st = draftState(d.id);
+    if (!st) return null;
+    return (
+      <ChevronDown
+        size={18}
+        className={`flex-shrink-0 transition-transform duration-200 ${st.open ? 'rotate-180' : ''}`}
+        aria-hidden
+      />
+    );
+  };
+
   // La scheda unica a righe divise da hairline: è la vista compatta, ed è
   // anche la pagina piatti della variante a pagine — stessa anatomia,
   // stessi controlli, bersagli a 44px.
@@ -387,7 +403,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
               </div>
               <div className="flex items-center gap-1 text-[13px] leading-snug tabular-nums text-[var(--ds-text-muted)]">
                 {euro(Math.round(Number(d.price) * 100))}
-                {hasVariants(d.id) && <ChevronDown size={14} aria-hidden />}
+                {drawerChevron(d)}
               </div>
             </button>
             {rowControls(d)}
@@ -636,7 +652,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                       </div>
                       <div className="flex items-center gap-1 text-[15px] tabular-nums text-[var(--ds-text-muted)]">
                         {euro(Math.round(Number(d.price) * 100))}
-                        {hasVariants(d.id) && <ChevronDown size={15} aria-hidden />}
+                        {drawerChevron(d)}
                       </div>
                     </button>
                     {rowControls(d)}
