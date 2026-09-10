@@ -40,7 +40,7 @@ import { DiscountDialog } from './comande/DiscountDialog';
 import { buildRows, buildMergeGroups, makeReservationForTable, type TableFilter } from './comande/tablesView';
 import {
   BAR_COURSE_NO, DESSERT_COURSE_NO, MAX_COURSES, cartForCourse, cartKey, cartSum, courseBadge, courseLabel, euro,
-  isSent, isSystemLine, rowCount,
+  isSent, isSystemLine, rowCount, weightLabel,
   type CartLine, type RepeatLine,
   saveCartDraft, restoreCartDraft, dropCartDraft,
 } from './comande/orderView';
@@ -720,6 +720,26 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     if (requiresSheetOnTap(dish.id)) setVariantFor(dish);
     else addToCart(dish);
   };
+
+  // Le combinazioni battute di un piatto nell'uscita di battuta, per le
+  // sotto-righe del menu: la struttura che il contatore aggregato nasconde
+  // («3×» che in realtà è 2 lisce e una al sangue). L'etichetta cuoce peso,
+  // varianti e nota insieme; la riga senza niente si chiama «liscia».
+  const draftLinesFor = useCallback((dishId: number) => {
+    const d = dishes.find(x => x.id === dishId);
+    const to = d ? (forcedCourse(d) ?? course) : course;
+    return cart
+      .filter(l => l.dish.id === dishId && l.course_no === to)
+      .map(l => ({
+        key: l.key,
+        qty: l.qty,
+        label: [
+          ...(l.weight_grams != null ? [weightLabel(l.weight_grams)] : []),
+          ...l.modifier_labels,
+          ...(l.note ? [l.note] : []),
+        ].join(', ') || 'liscia',
+      }));
+  }, [cart, dishes, forcedCourse, course]);
 
   // Tocco lungo sul menu: su un piatto GIÀ battuto nell'uscita di battuta
   // riapre la sua riga in bozza («Aggiorna» — aggiungere una variante lì
@@ -1627,6 +1647,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       barCategories={barCategories}
       dessertCategories={dessertCategories}
       course={course}
+      draftLinesFor={draftLinesFor}
+      onBumpLine={bumpCart}
+      onTapLine={(key) => { const l = cart.find(x => x.key === key); if (l) setEditLine(l); }}
     />
   );
 

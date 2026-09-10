@@ -79,6 +79,13 @@ interface DishBrowserProps {
    *  invito dell'occhio, non un divieto: le categorie restano toccabili, e
    *  le uscite forzate fanno comunque la cosa giusta. */
   course?: number;
+  /** Le combinazioni battute del piatto nell'uscita di battuta, per le
+   *  sotto-righe alla Passepartout: compaiono solo quando il contatore
+   *  nasconde struttura (due righe, o una con varianti/nota/peso). Ogni
+   *  sotto-riga ha il suo stepper e il tap apre il SUO foglio. */
+  draftLinesFor?: (dishId: number) => { key: string; qty: number; label: string }[];
+  onBumpLine?: (key: string, delta: number) => void;
+  onTapLine?: (key: string) => void;
 }
 
 export const DishBrowser: React.FC<DishBrowserProps> = ({
@@ -86,6 +93,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
   qtyInCourse, markedCategories, hasVariants, tapOpensSheet = hasVariants, onAdd, onRemove, courseOf, onCourseTap, onLongPress, layout,
   showSearch = true, density = 'comfortable', nav = 'chips', onCategoryBack, catView = 'list',
   barCategories, dessertCategories, course,
+  draftLinesFor, onBumpLine, onTapLine,
 }) => {
   // Categoria «fuori uscita»: non della sezione che l'uscita in composizione
   // sta servendo. Solo per Bar e Dolci — le uscite numerate sono di cucina e
@@ -270,33 +278,79 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     </>
   );
 
+  // Le sotto-righe alla Passepartout: le combinazioni del battuto sotto il
+  // piatto, ognuna col suo stepper e il tap che apre il SUO foglio. Solo
+  // quando il contatore nasconde struttura — la riga liscia singola non ha
+  // niente da mostrare. bumpCart fa già tutto: qty a 0 toglie la riga, il
+  // «+» su un pezzo al peso ne aggiunge un altro dello stesso peso.
+  const subRows = (d: Dish) => {
+    if (!draftLinesFor || !onBumpLine || !onTapLine) return null;
+    const lines = draftLinesFor(d.id);
+    if (lines.length < 2 && !(lines.length === 1 && lines[0].label !== 'liscia')) return null;
+    return lines.map(l => (
+      <div key={l.key} className="flex min-h-[52px] items-center gap-2 border-t border-[var(--ds-border)] py-1 pl-5 pr-2">
+        <CornerDownRight size={14} className="flex-shrink-0 text-[var(--ds-text-subtle)]" aria-hidden />
+        <button
+          type="button"
+          onClick={() => onTapLine(l.key)}
+          className="min-w-0 flex-1 self-stretch py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)]"
+        >
+          <span className="block truncate text-[13px] font-medium text-[var(--ds-text-secondary)]">{l.label}</span>
+        </button>
+        <div className="flex flex-shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onBumpLine(l.key, -1)}
+            aria-label={l.qty === 1 ? `Togli ${l.label}` : `Uno in meno di ${l.label}`}
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            {l.qty === 1 ? <Trash2 size={15} /> : <Minus size={15} />}
+          </button>
+          <span className="min-w-[16px] text-center text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+            {l.qty}
+          </span>
+          <button
+            type="button"
+            onClick={() => onBumpLine(l.key, +1)}
+            aria-label={`Un altro ${l.label}`}
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            <Plus size={15} />
+          </button>
+        </div>
+      </div>
+    ));
+  };
+
   // La scheda unica a righe divise da hairline: è la vista compatta, ed è
   // anche la pagina piatti della variante a pagine — stessa anatomia,
   // stessi controlli, bersagli a 44px.
   const compactCard = (
     <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
       {visible.map((d, i) => (
-        <div
-          key={d.id}
-          className={`flex min-h-[56px] items-center gap-2 py-1 pl-4 pr-2 ${
-            i > 0 ? 'border-t border-[var(--ds-border)]' : ''
-          }`}
-        >
-          <button
-            type="button"
-            {...press(d)}
-            className="min-w-0 flex-1 select-none self-stretch py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)]"
+        <React.Fragment key={d.id}>
+          <div
+            className={`flex min-h-[56px] items-center gap-2 py-1 pl-4 pr-2 ${
+              i > 0 ? 'border-t border-[var(--ds-border)]' : ''
+            }`}
           >
-            <div className="truncate text-[15px] font-semibold leading-snug text-[var(--ds-text-primary)]">
-              {d.name}
-            </div>
-            <div className="flex items-center gap-1 text-[13px] leading-snug tabular-nums text-[var(--ds-text-muted)]">
-              {euro(Math.round(Number(d.price) * 100))}
-              {hasVariants(d.id) && <ChevronDown size={14} aria-hidden />}
-            </div>
-          </button>
-          {rowControls(d)}
-        </div>
+            <button
+              type="button"
+              {...press(d)}
+              className="min-w-0 flex-1 select-none self-stretch py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              <div className="truncate text-[15px] font-semibold leading-snug text-[var(--ds-text-primary)]">
+                {d.name}
+              </div>
+              <div className="flex items-center gap-1 text-[13px] leading-snug tabular-nums text-[var(--ds-text-muted)]">
+                {euro(Math.round(Number(d.price) * 100))}
+                {hasVariants(d.id) && <ChevronDown size={14} aria-hidden />}
+              </div>
+            </button>
+            {rowControls(d)}
+          </div>
+          {subRows(d)}
+        </React.Fragment>
       ))}
     </div>
   );
@@ -520,26 +574,31 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
             {visible.length === 0 ? empty : visible.map(d => {
               const qty = qtyInCourse.get(d.id) ?? 0;
               return (
+                // Colonna: la prima riga è il piatto di sempre, sotto le
+                // eventuali sotto-righe delle combinazioni battute.
                 <div
                   key={d.id}
-                  className={`flex min-h-[72px] items-center gap-3 rounded-[16px] bg-[var(--ds-surface)] px-4 py-3 shadow-[var(--ds-shadow-card)] ${
+                  className={`flex flex-col rounded-[16px] bg-[var(--ds-surface)] px-4 py-3 shadow-[var(--ds-shadow-card)] ${
                     qty > 0 ? 'ring-2 ring-[var(--ds-action-bg)]' : ''
                   }`}
                 >
-                  <button
-                    type="button"
-                    {...press(d)}
-                    className="min-w-0 flex-1 select-none text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                  >
-                    <div className="truncate text-[16px] font-semibold text-[var(--ds-text-primary)]">
-                      {d.name}
-                    </div>
-                    <div className="flex items-center gap-1 text-[15px] tabular-nums text-[var(--ds-text-muted)]">
-                      {euro(Math.round(Number(d.price) * 100))}
-                      {hasVariants(d.id) && <ChevronDown size={15} aria-hidden />}
-                    </div>
-                  </button>
-                  {rowControls(d)}
+                  <div className="flex min-h-[48px] items-center gap-3">
+                    <button
+                      type="button"
+                      {...press(d)}
+                      className="min-w-0 flex-1 select-none text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    >
+                      <div className="truncate text-[16px] font-semibold text-[var(--ds-text-primary)]">
+                        {d.name}
+                      </div>
+                      <div className="flex items-center gap-1 text-[15px] tabular-nums text-[var(--ds-text-muted)]">
+                        {euro(Math.round(Number(d.price) * 100))}
+                        {hasVariants(d.id) && <ChevronDown size={15} aria-hidden />}
+                      </div>
+                    </button>
+                    {rowControls(d)}
+                  </div>
+                  {subRows(d)}
                 </div>
               );
             })}
