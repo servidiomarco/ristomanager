@@ -721,15 +721,16 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     else addToCart(dish);
   };
 
-  // Le combinazioni battute di un piatto nell'uscita di battuta, per le
-  // sotto-righe del menu: la struttura che il contatore aggregato nasconde
-  // («3×» che in realtà è 2 lisce e una al sangue). L'etichetta cuoce peso,
-  // varianti e nota insieme; la riga senza niente si chiama «liscia».
+  // Le combinazioni battute di un piatto, per le sotto-righe del menu: la
+  // struttura che il contatore aggregato nasconde («3×» che in realtà è 2
+  // lisce e una al sangue). TUTTE le uscite, non solo quella in
+  // composizione: cambiando uscita (o spostando una riga) il battuto non
+  // deve sparire dal menu — il chip sulla sotto-riga dice dove sta ognuna
+  // (richiesta di Marco, 10/09). L'etichetta cuoce peso, varianti e nota
+  // insieme; la riga senza niente si chiama «liscia».
   const draftLinesFor = useCallback((dishId: number) => {
-    const d = dishes.find(x => x.id === dishId);
-    const to = d ? (forcedCourse(d) ?? course) : course;
     return cart
-      .filter(l => l.dish.id === dishId && l.course_no === to)
+      .filter(l => l.dish.id === dishId)
       .map(l => ({
         key: l.key,
         qty: l.qty,
@@ -740,7 +741,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           ...(l.note ? [l.note] : []),
         ].join(', ') || 'liscia',
       }));
-  }, [cart, dishes, forcedCourse, course]);
+  }, [cart]);
 
   // Tocco lungo sul menu: su un piatto GIÀ battuto nell'uscita di battuta
   // riapre la sua riga in bozza («Aggiorna» — aggiungere una variante lì
