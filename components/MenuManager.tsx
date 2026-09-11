@@ -736,6 +736,19 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     const set = new Set(cats);
     return dishes.filter(d => d.category && set.has(d.category) && d.is_active !== false && d.crm_enabled !== false);
   }, [dishes, menuCats]);
+  // La carta divisa per categoria (Bollicine, bianchi, rosé, rossi…),
+  // nell'ordine della pagina Menu: settanta chip in una nuvola unica non si
+  // scandagliano, quattro sezioni sì.
+  const wineGroups = useMemo(() => {
+    const order = (menuCats ?? []).map(c => c.name);
+    const byCat = new Map<string, typeof wineDishes>();
+    for (const w of wineDishes) {
+      const k = w.category ?? 'Altri';
+      if (!byCat.has(k)) byCat.set(k, []);
+      byCat.get(k)!.push(w);
+    }
+    return [...byCat.entries()].sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
+  }, [wineDishes, menuCats]);
   // I piatti delle categorie vino/bar/dolci non si abbinano: la card non
   // compare — un vino non suggerisce un vino.
   const dishCatIsWineish = useMemo(() => {
@@ -2749,25 +2762,48 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     : <span className="text-[13px] text-[var(--ds-text-muted)]">{dishWineIds.length === 1 ? '1 vino' : `${dishWineIds.length} vini`}</span>
                 }
               >
-                <div className="flex flex-wrap gap-2">
-                  {wineDishes.map(w => {
-                    const isSelected = dishWineIds.includes(w.id);
+                {/* Una sezione per categoria della carta, come la pagina
+                    categorie del palmare: etichetta, filetto, e il conteggio
+                    dei SELEZIONATI — dice dove sono le spunte senza cercarle.
+                    Con una categoria sola niente testata: un titolo su tutto
+                    non divide niente. */}
+                <div className="flex flex-col gap-4">
+                  {wineGroups.map(([cat, wines]) => {
+                    const chosen = wines.filter(w => dishWineIds.includes(w.id)).length;
                     return (
-                      <button
-                        key={w.id}
-                        type="button"
-                        onClick={() => setDishWineIds(prev =>
-                          prev.includes(w.id) ? prev.filter(x => x !== w.id) : [...prev, w.id])}
-                        aria-pressed={isSelected}
-                        className={`inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
-                          isSelected
-                            ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
-                            : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
-                        }`}
-                      >
-                        {isSelected ? <Check size={13} /> : <Wine size={13} aria-hidden />}
-                        {w.name}
-                      </button>
+                      <section key={cat} className="flex flex-col gap-2">
+                        {wineGroups.length > 1 && (
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">{cat}</span>
+                            <span className="h-px min-w-0 flex-1 bg-[var(--ds-border)]" aria-hidden />
+                            <span className="text-[12px] tabular-nums text-[var(--ds-text-muted)]">
+                              {chosen > 0 ? `${chosen} di ${wines.length}` : wines.length}
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex flex-wrap gap-2">
+                          {wines.map(w => {
+                            const isSelected = dishWineIds.includes(w.id);
+                            return (
+                              <button
+                                key={w.id}
+                                type="button"
+                                onClick={() => setDishWineIds(prev =>
+                                  prev.includes(w.id) ? prev.filter(x => x !== w.id) : [...prev, w.id])}
+                                aria-pressed={isSelected}
+                                className={`inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                                  isSelected
+                                    ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                                    : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
+                                }`}
+                              >
+                                {isSelected ? <Check size={13} /> : <Wine size={13} aria-hidden />}
+                                {w.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </section>
                     );
                   })}
                 </div>

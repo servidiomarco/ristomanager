@@ -594,6 +594,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-11 | Menu & Banchetti | La card «Vini abbinati» della scheda piatto raggruppa la carta per categoria (Bollicine, bianchi, rosé, rossi) nell'ordine della pagina Menu, con il conteggio dei selezionati per sezione — via la nuvola unica di chip. |
 | 2026-09-11 | Comande, Cucina e Passe | Il «Vino consigliato» nel foglio varianti diventa uno stepper: conteggio reale dei calici in comanda e «−» per toglierli, non più solo il «+». |
 | 2026-09-11 | Menu digitale pubblico | Il tocco sulla foto di un piatto (o vino) apre la foto a tutto schermo con nome e prezzo, come sul palmare; un tocco ovunque o Esc chiude. |
 | 2026-09-11 | Menu & Banchetti | Categoria bloccata sui piatti della cassa: il cambio manuale di categoria dalla scheda piatto sopravvive all'«Importa da cassa» (lucchetto per piatto; nome, prezzo, IVA e attivo restano della cassa). |
