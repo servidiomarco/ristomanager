@@ -460,6 +460,25 @@ export const importMenuPassepartout = async (): Promise<MenuImportResult> => {
   });
 };
 
+/** Esito dell'import foto piatti dalla cassa: si riempiono solo i piatti pp
+ *  senza foto — una foto caricata a mano non si tocca mai. */
+export interface MenuFotoImportResult {
+  /** Piatti della cassa senza foto nel CRM: i candidati del giro. */
+  candidati: number;
+  aggiornate: number;
+  senza_foto: number;
+  troppo_grandi: number;
+}
+
+/** Importa le foto degli articoli dalla cassa nei piatti pp senza foto.
+ *  Può richiedere minuti: dietro c'è il catalogo intero del gestionale. */
+export const importFotoPassepartout = async (): Promise<MenuFotoImportResult> => {
+  return apiRequest<MenuFotoImportResult>(`${API_URL}/menu/import/passepartout/foto`, {
+    method: 'POST',
+    headers: getHeaders(false),
+  });
+};
+
 /** URL pubblico del menu digitale (pagina servita dal backend, come /prenota). */
 export const digitalMenuUrl = (): string => `${API_URL}/menu`;
 

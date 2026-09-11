@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { ChevronDown, Search, X } from 'lucide-react';
 import type { Dish } from '../../types';
 import { euro } from './orderView';
+import { DishPhotoViewer } from './DishPhotoViewer';
 
 // ---------------------------------------------------------------------------
 // La ricerca piatti del palmare, nella stessa forma della ricerca globale
@@ -37,6 +38,9 @@ export const DishSearchSheet: React.FC<DishSearchSheetProps> = ({
 }) => {
   const [query, setQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  // La foto in grande dal tocco sulla miniatura: sopra il velo della
+  // ricerca (z-110 contro z-100), e chiuderla non chiude la ricerca.
+  const [photoDish, setPhotoDish] = useState<Dish | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -112,32 +116,51 @@ export const DishSearchSheet: React.FC<DishSearchSheetProps> = ({
               const qty = qtyInCourse.get(d.id) ?? 0;
               const variants = hasVariants(d.id);
               return (
-                <button
-                  key={d.id}
-                  type="button"
-                  onClick={() => { onAdd(d); if (tapOpensSheet(d.id)) onClose(); }}
-                  className="mx-3 flex min-h-[52px] w-[calc(100%-1.5rem)] items-center gap-3 rounded-[14px] px-3 py-2.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[15px] font-medium text-[var(--ds-text-primary)]">
-                      {d.name}
+                // La miniatura è un fratello in overlay, come sulla griglia
+                // dei piatti: dentro il bottone-riga non può stare, e il suo
+                // tocco apre il visore senza battere.
+                <div key={d.id} className="relative">
+                  <button
+                    type="button"
+                    onClick={() => { onAdd(d); if (tapOpensSheet(d.id)) onClose(); }}
+                    className={`mx-3 flex min-h-[52px] w-[calc(100%-1.5rem)] items-center gap-3 rounded-[14px] py-2.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                      d.photo_url ? 'pl-[60px] pr-3' : 'px-3'
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[15px] font-medium text-[var(--ds-text-primary)]">
+                        {d.name}
+                      </div>
+                      <div className="flex items-center gap-1 text-[13px] tabular-nums text-[var(--ds-text-muted)]">
+                        {euro(Math.round(Number(d.price) * 100))}
+                        {variants && <ChevronDown size={14} aria-hidden />}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1 text-[13px] tabular-nums text-[var(--ds-text-muted)]">
-                      {euro(Math.round(Number(d.price) * 100))}
-                      {variants && <ChevronDown size={14} aria-hidden />}
-                    </div>
-                  </div>
-                  {qty > 0 && (
-                    <span className="inline-flex h-6 min-w-[24px] flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] px-1.5 text-[12px] font-semibold tabular-nums text-[var(--ds-action-fg)]">
-                      {qty}
-                    </span>
+                    {qty > 0 && (
+                      <span className="inline-flex h-6 min-w-[24px] flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] px-1.5 text-[12px] font-semibold tabular-nums text-[var(--ds-action-fg)]">
+                        {qty}
+                      </span>
+                    )}
+                  </button>
+                  {d.photo_url && (
+                    <button
+                      type="button"
+                      onClick={() => setPhotoDish(d)}
+                      aria-label={`Foto di ${d.name}`}
+                      className="absolute left-4 top-1/2 h-11 w-11 -translate-y-1/2 overflow-hidden rounded-[12px] bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    >
+                      <img src={d.photo_url} alt="" loading="lazy" className="h-full w-full object-cover" />
+                    </button>
                   )}
-                </button>
+                </div>
               );
             })}
           </div>
         )}
       </div>
+      {photoDish && (
+        <DishPhotoViewer dish={photoDish} onClose={() => setPhotoDish(null)} zClass="z-[110]" />
+      )}
     </div>,
     document.body
   );

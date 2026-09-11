@@ -27,6 +27,7 @@ import {
     getSaleMenu,
     getConto,
     getArticoliMenu,
+    getFotoArticoli,
     inviaProduzioneComanda,
     chiudiComandaCompleta,
     isPassepartoutConfigured,
@@ -74,6 +75,14 @@ const handlers: Record<string, Handler> = {
     // Catalogo articoli per l'import menu del CRM (senza immagini: il payload
     // deve stare nel buffer del socket).
     articoli: (p) => getArticoliMenu(typeof p?.ultimaModifica === 'string' ? p.ultimaModifica : undefined),
+    // Foto degli articoli, a lotti sotto il buffer del socket: il catalogo
+    // intero (~14MB) si scarica UNA volta e resta in cache; `resto` sono gli
+    // id da richiedere al giro successivo.
+    fotoArticoli: (p) => {
+        const ids = Array.isArray(p?.ids) ? p.ids.map(Number).filter(Number.isFinite) : [];
+        if (ids.length === 0) throw new Error('Parametro "ids" mancante');
+        return getFotoArticoli(ids);
+    },
     // Introspezione del contratto WCF: scarica ?wsdl dall'AdapterWS e torna
     // il SOLO elenco operazioni (il contratto intero può superare il buffer
     // del socket — per quello c'è scripts/passepartout-scopri-ws.mjs in LAN).
