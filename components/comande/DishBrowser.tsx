@@ -5,6 +5,7 @@ import { SearchField } from '../ds';
 import { euro } from './orderView';
 import { isBarCourse, isDessertCourse, ordinal } from '../../utils/courses';
 import { DishSearchSheet } from './DishSearchSheet';
+import { DishPhotoViewer } from './DishPhotoViewer';
 
 // ---------------------------------------------------------------------------
 // Il menu, da toccare. Ricerca sempre a portata, categorie in una pista che
@@ -234,28 +235,10 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
       </button>
     ) : null;
 
-  // Il visore: fondo nero pieno come il fullscreen della scheda piatto in
-  // gestione menu — il telefono si gira verso l'ospite, quindi la foto ha
-  // il palco e sotto solo nome e prezzo. Un tocco ovunque chiude.
-  const photoModal = photoDish?.photo_url && (
-    <div
-      role="dialog"
-      aria-label={`Foto di ${photoDish.name}`}
-      onClick={() => setPhotoDish(null)}
-      className="fixed inset-0 z-50 flex cursor-zoom-out flex-col items-center justify-center gap-5 bg-black/95 p-5"
-    >
-      <img
-        src={photoDish.photo_url}
-        alt={photoDish.name}
-        className="max-h-[78vh] max-w-full rounded-[20px] object-contain"
-      />
-      <div className="text-center">
-        <div className="text-[22px] font-semibold text-white">{photoDish.name}</div>
-        <div className="mt-0.5 text-[17px] tabular-nums text-white/70">
-          {euro(Math.round(Number(photoDish.price) * 100))}
-        </div>
-      </div>
-    </div>
+  // Il visore condiviso con la ricerca piatti (DishPhotoViewer): stesso
+  // palco, un tocco ovunque chiude.
+  const photoModal = photoDish && (
+    <DishPhotoViewer dish={photoDish} onClose={() => setPhotoDish(null)} />
   );
 
   // Cercando si cerca in tutto il menu: se il piatto è fra i primi e la pista

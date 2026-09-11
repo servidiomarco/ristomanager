@@ -11,7 +11,7 @@ import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BanquetPaymentsModal } from './BanquetPaymentsModal';
 import { DishDetailModal } from './DishDetailModal';
 import { CustomerPickerModal } from './CustomerPickerModal';
-import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, setCategoryBar, setCategoryDessert, createMenuCategory, renameMenuCategory, deleteMenuCategory, getBanquetShareLink, sendBanquetQuoteEmail, sendBanquetQuoteWhatsApp, getModifierGroups, getDishComponents, type AdminModifierGroup, type MenuImportResult, type MenuTranslateResult, type MenuCategory } from '../services/apiService';
+import { getCustomers, getTableMerges, importMenuPassepartout, importFotoPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, setCategoryBar, setCategoryDessert, createMenuCategory, renameMenuCategory, deleteMenuCategory, getBanquetShareLink, sendBanquetQuoteEmail, sendBanquetQuoteWhatsApp, getModifierGroups, getDishComponents, type AdminModifierGroup, type MenuImportResult, type MenuFotoImportResult, type MenuTranslateResult, type MenuCategory } from '../services/apiService';
 import { socketClient } from '../services/socketClient';
 import { getSalaConfig, type SalaStation } from '../services/salaApiService';
 import { MenuVariantsModal } from './MenuVariantsModal';
@@ -363,6 +363,25 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       setImportError(err?.data?.message ?? err?.data?.error ?? err?.message ?? 'Import non riuscito');
     } finally {
       setImporting(false);
+    }
+  };
+
+  // Foto dalla cassa: azione a parte dal sync menu — dietro c'è il catalogo
+  // intero del gestionale (minuti, non secondi) e si fa una tantum, non a
+  // ogni allineamento prezzi. Riempie solo i piatti pp senza foto.
+  const [importingFoto, setImportingFoto] = useState(false);
+  const [fotoEsito, setFotoEsito] = useState<MenuFotoImportResult | null>(null);
+  const handleImportFoto = async () => {
+    if (importingFoto) return;
+    setImportingFoto(true);
+    setFotoEsito(null);
+    setImportError(null);
+    try {
+      setFotoEsito(await importFotoPassepartout());
+    } catch (err: any) {
+      setImportError(err?.data?.message ?? err?.data?.error ?? err?.message ?? 'Import foto non riuscito');
+    } finally {
+      setImportingFoto(false);
     }
   };
 
@@ -1509,6 +1528,18 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 Importa da cassa
               </button>
             )}
+            {canImportCassa && (
+              <button
+                type="button"
+                onClick={handleImportFoto}
+                disabled={importingFoto}
+                title="Porta le foto degli articoli della cassa sui piatti che non ne hanno (può richiedere qualche minuto)"
+                className="inline-flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3.5 text-[13px] font-medium text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              >
+                {importingFoto ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <ImageIcon className="h-4 w-4" aria-hidden />}
+                Foto da cassa
+              </button>
+            )}
             <SearchField
               value={searchTerm}
               onChange={setSearchTerm}
@@ -1546,11 +1577,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
       {activeTab === 'DISHES' && (
           <>
-            {(importEsito || importError) && (
+            {(importEsito || fotoEsito || importError) && (
               <div className="mb-4">
                 <Callout tone={importError ? 'critical' : 'positive'}>
                   {importError
-                    ?? `Menu allineato alla cassa: ${importEsito!.creati} nuovi, ${importEsito!.aggiornati} aggiornati, ${importEsito!.disattivati} disattivati${importEsito!.eliminati ? `, ${importEsito!.eliminati} rimossi` : ''}${importEsito!.gruppi_varianti ? `, ${importEsito!.gruppi_varianti} gruppi varianti` : ''}.`}
+                    ?? (fotoEsito
+                      ? (fotoEsito.candidati === 0
+                        ? 'Nessun piatto della cassa senza foto: niente da importare.'
+                        : `Foto importate dalla cassa: ${fotoEsito.aggiornate} su ${fotoEsito.candidati} piatti senza foto${fotoEsito.senza_foto ? `, ${fotoEsito.senza_foto} senza immagine in cassa` : ''}${fotoEsito.troppo_grandi ? `, ${fotoEsito.troppo_grandi} troppo pesanti` : ''}.`)
+                      : `Menu allineato alla cassa: ${importEsito!.creati} nuovi, ${importEsito!.aggiornati} aggiornati, ${importEsito!.disattivati} disattivati${importEsito!.eliminati ? `, ${importEsito!.eliminati} rimossi` : ''}${importEsito!.gruppi_varianti ? `, ${importEsito!.gruppi_varianti} gruppi varianti` : ''}.`)}
                 </Callout>
               </div>
             )}
