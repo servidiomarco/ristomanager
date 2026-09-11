@@ -2002,20 +2002,26 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   );
 
   // ---------------- schermo largo: menu e comanda affiancati ----------------
+  // La testata del tavolo vive DENTRO la colonna del menu, non a tutta
+  // larghezza: la Comanda sale fino alla barra globale e guadagna una riga
+  // di uscite — la testata parla del comporre (coperti, conto), che è
+  // mestiere della colonna sinistra.
   if (isWide) {
     return (
-      <div className="flex h-full min-h-0 flex-col gap-3 bg-[var(--ds-canvas)] p-4">
-        <div className="flex-shrink-0">{topBar}</div>
-        {(allergens || error || flash) && (
-          <div className="flex flex-shrink-0 flex-col gap-2">
-            {allergens && (
-              <Callout tone="critical" icon={TriangleAlert}>{allergens}</Callout>
-            )}
-            {notices}
-          </div>
-        )}
+      <div className="flex h-full min-h-0 flex-col bg-[var(--ds-canvas)] p-4">
         <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_380px] gap-3 xl:grid-cols-[minmax(0,1fr)_420px]">
-          {browser}
+          <div className="flex min-h-0 flex-col gap-3">
+            <div className="flex-shrink-0">{topBar}</div>
+            {(allergens || error || flash) && (
+              <div className="flex flex-shrink-0 flex-col gap-2">
+                {allergens && (
+                  <Callout tone="critical" icon={TriangleAlert}>{allergens}</Callout>
+                )}
+                {notices}
+              </div>
+            )}
+            {browser}
+          </div>
           <CourseColumn
             {...listProps}
             openedBy={openedByOther}
