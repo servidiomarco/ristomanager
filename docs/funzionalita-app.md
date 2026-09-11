@@ -368,6 +368,7 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 
 - **Import del menu** dal catalogo articoli della cassa, varianti comprese. Le voci disattivate in cassa (articoli e categorie "muti", tenuti lì solo per lo storico) non entrano nel menu del CRM; se erano già state importate, il sync le rimuove.
+- **Categoria bloccata**: la cassa possiede la categoria dei piatti importati e il sync la riallinea a ogni giro — ma cambiare categoria **a mano** dalla scheda di un piatto della cassa alza un lucchetto: da quel momento il sync lascia la categoria del CRM (nome, prezzo, IVA e attivo restano della cassa). È ciò che permette la carta dei vini divisa per colore (Vini bianchi / Vini rosé) mentre la cassa conosce solo «Vini bianchi-rosé».
 - Anteprima della comanda attiva su un tavolo della cassa e **importazione del conto** nel CRM.
 - **Chiusura del conto in cassa dal CRM**: scontrino e saldo partono verso il gestionale; ritentabile se la cassa era irraggiungibile.
 - Collegamento sicuro cloud↔ristorante tramite un piccolo agente installato sulla LAN (nessuna porta aperta verso l'esterno), con stato di connessione visibile.
@@ -593,6 +594,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-11 | Menu & Banchetti | Categoria bloccata sui piatti della cassa: il cambio manuale di categoria dalla scheda piatto sopravvive all'«Importa da cassa» (lucchetto per piatto; nome, prezzo, IVA e attivo restano della cassa). |
 | 2026-09-11 | Comande, Cucina e Passe | Il «Vino consigliato» lascia il cassetto del piatto e resta solo nel foglio varianti: il cassetto torna alle sole combinazioni battute. |
 | 2026-09-11 | Menu & Banchetti · Comande · Menu digitale · Funzioni AI | Vini abbinati ai piatti: card in scheda con «Suggerisci» AI e «Abbina i vini» sull'intera carta (flag dedicato), righe «Vino consigliato» nel cassetto del palmare e nel foglio varianti col «+» che batte nel Bar, riga «Si abbina con» sul menu QR. |
 | 2026-09-11 | Comande, Cucina e Passe | Le miniature dei piatti compaiono anche nella ricerca piatti del palmare; il tocco sulla miniatura apre la foto sopra il velo senza chiudere la ricerca né battere. |

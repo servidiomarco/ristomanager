@@ -3634,11 +3634,15 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
                 const iva = a.ivaPercento != null && Number.isInteger(a.ivaPercento)
                     && a.ivaPercento >= 0 && a.ivaPercento <= 100 ? a.ivaPercento : null;
                 const up = await client.query(
+                    // category_locked: la categoria è stata curata dal CRM
+                    // (es. la carta dei vini divisa per colore, che la cassa
+                    // non conosce) — il sync non la riscrive. Tutto il resto
+                    // resta della cassa.
                     `INSERT INTO dishes (tenant_id, name, price, category, allergens, vat_rate, external_ref, is_active)
                      VALUES ($1, $2, $3, $4, '{}', COALESCE($5, 10), $6, $7)
                      ON CONFLICT (tenant_id, external_ref) WHERE external_ref IS NOT NULL
                      DO UPDATE SET name = EXCLUDED.name, price = EXCLUDED.price,
-                                   category = EXCLUDED.category,
+                                   category = CASE WHEN dishes.category_locked THEN dishes.category ELSE EXCLUDED.category END,
                                    vat_rate = COALESCE($5, dishes.vat_rate),
                                    is_active = EXCLUDED.is_active
                      RETURNING id, (xmax = 0) AS inserted`,
@@ -12406,7 +12410,12 @@ app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req,
             // station_id, stessa semantica ma via resolveDishStation: il null
             // esplicito significa "torna a seguire la categoria", quindi
             // niente COALESCE — serve il flag touched.
-            `UPDATE dishes SET name = $1, description = $2, price = $3, category = $4, allergens = $5, photo_url = $6,
+            // Il lucchetto si alza da solo: cambiare a mano la categoria di un
+            // piatto della cassa è una curatela del CRM, e da quel momento il
+            // sync non la riscrive più (vedi l'upsert dell'import).
+            `UPDATE dishes SET name = $1, description = $2, price = $3,
+                    category_locked = CASE WHEN $4 IS DISTINCT FROM category AND external_ref LIKE 'pp:%' THEN true ELSE category_locked END,
+                    category = $4, allergens = $5, photo_url = $6,
                     vat_rate = COALESCE($9, vat_rate), dish_type = COALESCE($10, dish_type), sold_by_weight = COALESCE($11, sold_by_weight),
                     weight_min_grams = CASE WHEN $12 THEN $13 ELSE weight_min_grams END,
                     weight_max_grams = CASE WHEN $14 THEN $15 ELSE weight_max_grams END,
