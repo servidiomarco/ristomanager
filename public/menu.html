@@ -116,6 +116,19 @@ main { max-width: 760px; margin: 0 auto; padding: 8px 16px 64px; }
 .piatto__prezzo { font-weight: 600; font-size: 15px; white-space: nowrap; }
 
 .stato { text-align: center; color: var(--ds-text-muted); padding: 56px 20px; }
+
+/* --- Visore foto ---------------------------------------------------------
+   Fondo nero pieno come sul palmare: la foto ha il palco, sotto solo nome
+   e prezzo. Un tocco ovunque chiude. */
+.piatto__foto { cursor: zoom-in; }
+.fotovelo {
+    position: fixed; inset: 0; z-index: 50;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px;
+    background: rgba(0, 0, 0, 0.95); padding: 20px; cursor: zoom-out;
+}
+.fotovelo img { max-height: 78vh; max-width: 100%; border-radius: 20px; object-fit: contain; }
+.fotovelo__nome { font-size: 22px; font-weight: 600; color: #ffffff; text-align: center; }
+.fotovelo__prezzo { font-size: 17px; color: rgba(255, 255, 255, 0.7); margin-top: 2px; text-align: center; }
 footer { text-align: center; color: var(--ds-text-subtle); font-size: 12px; padding: 0 20px 40px; }
 </style>
 </head>
@@ -245,7 +258,7 @@ footer { text-align: center; color: var(--ds-text-subtle); font-size: 12px; padd
             perCat[cat].forEach(function (p) {
                 var tp = testoPiatto(p);
                 html += '<div class="piatto">'
-                    + (p.photo_url ? '<img class="piatto__foto" src="' + esc(p.photo_url) + '" alt="" loading="lazy" />' : '')
+                    + (p.photo_url ? '<img class="piatto__foto" src="' + esc(p.photo_url) + '" alt="" loading="lazy" data-nome="' + esc(tp.nome) + '" data-prezzo="' + (p.price > 0 ? esc(euro(p.price)) : '') + '" />' : '')
                     + '<div class="piatto__testo"><div class="piatto__nome">' + esc(tp.nome) + '</div>'
                     + (tp.desc ? '<div class="piatto__desc">' + esc(tp.desc) + '</div>' : '')
                     + (p.allergens && p.allergens.length ? '<div class="piatto__allergeni">' + esc(t('allergeni')) + ': ' + esc(p.allergens.join(', ')) + '</div>' : '')
@@ -258,6 +271,47 @@ footer { text-align: center; color: var(--ds-text-subtle); font-size: 12px; padd
         });
         main.innerHTML = html || '<p class="stato">' + esc(t('vuoto')) + '</p>';
     }
+
+    /* Il visore foto: si apre dal tocco sulla miniatura, si chiude con un
+       tocco ovunque o con Esc. Delegato su document perché le card si
+       rirenderizzano a ogni cambio lingua. */
+    function chiudiFoto() {
+        var v = document.getElementById('fotovelo');
+        if (v) v.remove();
+    }
+    document.addEventListener('click', function (ev) {
+        var img = ev.target.closest ? ev.target.closest('.piatto__foto') : null;
+        if (img) {
+            chiudiFoto();
+            var velo = document.createElement('div');
+            velo.className = 'fotovelo';
+            velo.id = 'fotovelo';
+            velo.setAttribute('role', 'dialog');
+            velo.setAttribute('aria-label', img.getAttribute('data-nome') || '');
+            var grande = document.createElement('img');
+            grande.src = img.src;
+            grande.alt = img.getAttribute('data-nome') || '';
+            velo.appendChild(grande);
+            var testo = document.createElement('div');
+            var nome = document.createElement('div');
+            nome.className = 'fotovelo__nome';
+            nome.textContent = img.getAttribute('data-nome') || '';
+            testo.appendChild(nome);
+            if (img.getAttribute('data-prezzo')) {
+                var prezzo = document.createElement('div');
+                prezzo.className = 'fotovelo__prezzo tnum';
+                prezzo.textContent = img.getAttribute('data-prezzo');
+                testo.appendChild(prezzo);
+            }
+            velo.appendChild(testo);
+            velo.addEventListener('click', chiudiFoto);
+            document.body.appendChild(velo);
+            return;
+        }
+    });
+    document.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Escape') chiudiFoto();
+    });
 
     document.documentElement.lang = lang;
     renderLangs();
