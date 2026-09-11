@@ -727,6 +727,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   // Vini abbinati del piatto nel form (id di piatti delle categorie «vino»).
   const [dishWineIds, setDishWineIds] = useState<number[]>([]);
   const [suggestingWines, setSuggestingWines] = useState(false);
+  // Le sezioni della carta partono chiuse: la testata col conteggio dice
+  // già dove sono le spunte, i settanta chip compaiono solo dove si tocca.
+  const [openWineCats, setOpenWineCats] = useState<Set<string>>(new Set());
   const [suggestWinesError, setSuggestWinesError] = useState<string | null>(null);
   // La carta dei vini: piatti attivi delle categorie marcate «vino» (o
   // «bar» in mancanza) — lo stesso universo del server.
@@ -762,7 +765,17 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     try {
       const r = await suggestDishWinePairings(editingDishId);
       if (r.wine_dish_ids.length === 0) setSuggestWinesError('Nessun abbinamento convincente fra i vini in carta.');
-      else setDishWineIds(r.wine_dish_ids);
+      else {
+        setDishWineIds(r.wine_dish_ids);
+        // La proposta apre le sue sezioni: una spunta dietro una testata
+        // chiusa non si vede, e il conteggio da solo non basta a curarla.
+        const ids = new Set(r.wine_dish_ids);
+        setOpenWineCats(prev => {
+          const next = new Set(prev);
+          for (const w of wineDishes) if (ids.has(w.id)) next.add(w.category ?? 'Altri');
+          return next;
+        });
+      }
     } catch (err: any) {
       const code = err?.data?.error;
       setSuggestWinesError(
@@ -962,6 +975,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     // (la spunta in modale Varianti), e restano libere.
     setDishGroupIds(menuCats?.find(c => c.name === firstCat)?.modifier_group_ids ?? []);
     setDishWineIds([]);
+    setOpenWineCats(new Set());
     setSuggestWinesError(null);
     setDishComponents([]);
     setPhotoUploadError(null);
@@ -989,6 +1003,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     // gli ingredienti si caricano pigri — servono solo aprendo un composto.
     setDishGroupIds(modifierGroups.filter(g => g.dish_ids.includes(dish.id)).map(g => g.id));
     setDishWineIds(dish.paired_wine_dish_ids ?? []);
+    setOpenWineCats(new Set());
     setSuggestWinesError(null);
     setDishComponents([]);
     if (dish.dish_type === 'COMPOSED') {
@@ -2762,25 +2777,37 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     : <span className="text-[13px] text-[var(--ds-text-muted)]">{dishWineIds.length === 1 ? '1 vino' : `${dishWineIds.length} vini`}</span>
                 }
               >
-                {/* Una sezione per categoria della carta, come la pagina
-                    categorie del palmare: etichetta, filetto, e il conteggio
-                    dei SELEZIONATI — dice dove sono le spunte senza cercarle.
-                    Con una categoria sola niente testata: un titolo su tutto
-                    non divide niente. */}
-                <div className="flex flex-col gap-4">
+                {/* Una sezione per categoria della carta, chiusa in
+                    partenza: la testata (nome, conteggio dei SELEZIONATI,
+                    chevron) si tocca e apre i chip — settanta chip in vista
+                    solo dove servono. Con una categoria sola niente testata:
+                    i chip restano sempre in vista, non c'è nulla da dividere. */}
+                <div className="flex flex-col gap-3">
                   {wineGroups.map(([cat, wines]) => {
                     const chosen = wines.filter(w => dishWineIds.includes(w.id)).length;
+                    const open = wineGroups.length === 1 || openWineCats.has(cat);
                     return (
                       <section key={cat} className="flex flex-col gap-2">
                         {wineGroups.length > 1 && (
-                          <div className="flex items-center gap-2.5">
+                          <button
+                            type="button"
+                            onClick={() => setOpenWineCats(prev => {
+                              const next = new Set(prev);
+                              if (next.has(cat)) next.delete(cat); else next.add(cat);
+                              return next;
+                            })}
+                            aria-expanded={open}
+                            className="flex min-h-[44px] w-full items-center gap-2.5 rounded-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                          >
                             <span className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">{cat}</span>
                             <span className="h-px min-w-0 flex-1 bg-[var(--ds-border)]" aria-hidden />
                             <span className="text-[12px] tabular-nums text-[var(--ds-text-muted)]">
                               {chosen > 0 ? `${chosen} di ${wines.length}` : wines.length}
                             </span>
-                          </div>
+                            <ChevronDown size={16} className={`flex-shrink-0 text-[var(--ds-text-muted)] transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden />
+                          </button>
                         )}
+                        {open && (
                         <div className="flex flex-wrap gap-2">
                           {wines.map(w => {
                             const isSelected = dishWineIds.includes(w.id);
@@ -2803,6 +2830,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             );
                           })}
                         </div>
+                        )}
                       </section>
                     );
                   })}
