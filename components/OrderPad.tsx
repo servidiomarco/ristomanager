@@ -743,6 +743,19 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       }));
   }, [cart]);
 
+  // I vini abbinati al piatto (curati in scheda piatto, via catalogo):
+  // id → piatto vivo in carta, nell'ordine del sommelier. Un vino spento o
+  // fuori carta sparisce da solo — dishes è già filtrato.
+  const pairedWinesFor = useCallback((dishId: number): Dish[] => {
+    const rows = (catalogue?.dish_wine_pairings ?? []).filter(p => p.dish_id === dishId);
+    if (rows.length === 0) return [];
+    return rows
+      .slice()
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map(p => dishes.find(d => d.id === p.wine_dish_id))
+      .filter((d): d is Dish => d != null);
+  }, [catalogue, dishes]);
+
   // Tocco lungo sul menu: su un piatto GIÀ battuto nell'uscita di battuta
   // riapre la sua riga in bozza («Aggiorna» — aggiungere una variante lì
   // corregge il battuto, non lo duplica); con più righe si riapre l'ultima
@@ -1651,6 +1664,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       course={course}
       draftLinesFor={draftLinesFor}
       onBumpLine={bumpCart}
+      pairedWinesFor={pairedWinesFor}
       onTapLine={(key) => { const l = cart.find(x => x.key === key); if (l) setEditLine(l); }}
       onLineCourseTap={(key) => {
         const l = cart.find(x => x.key === key);
@@ -1870,6 +1884,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           onCancel={() => setVariantFor(null)}
           onConfirm={(entries, removedIds, note, weightGrams, qty) => { addToCart(variantFor, entries, note, removedIds, weightGrams, qty ?? 1); setVariantFor(null); }}
           onAdd={(entries, removedIds, note, weightGrams, qty) => addToCart(variantFor, entries, note, removedIds, weightGrams, qty ?? 1)}
+          pairedWines={pairedWinesFor(variantFor.id)}
+          // Il calice batte da solo: forcedCourse lo instrada nel Bar.
+          onAddWine={(w) => addToCart(w)}
         />
       )}
       {editLine && (
@@ -1900,6 +1917,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
             setEditLine(null);
             setMoveFor({ kind: 'line', key: l.key, label: l.dish.name, from: l.course_no });
           }}
+          pairedWines={pairedWinesFor(editLine.dish.id)}
+          onAddWine={(w) => addToCart(w)}
         />
       )}
 

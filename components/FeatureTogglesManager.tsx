@@ -197,6 +197,8 @@ export const FeatureTogglesManager: React.FC<Props> = ({ showToast, only }) => {
         table_orders_enabled: { title: 'Comande', on: 'attive', off: 'disattivate' },
         // Idem: gestito da AiMessagesSettingsManager.
         ai_messages_enabled: { title: 'Messaggi con AI', on: 'attivi', off: 'disattivati' },
+        // Idem: gestito dal QR modal della pagina Menu (accanto a Traduci).
+        ai_wine_pairing_enabled: { title: 'Abbinamenti vino AI', on: 'attivi', off: 'disattivati' },
         // Idem: gestito dal QR modal della pagina Menu.
         digital_menu_enabled: { title: 'Menu digitale', on: 'attivo', off: 'disattivato' },
         // Idem: gestito dalla sezione Sala e cucina.

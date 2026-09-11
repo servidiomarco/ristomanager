@@ -218,10 +218,14 @@ export interface MenuCatalogue {
   /** Ingredienti dei piatti composti: pre-inclusi sul foglio varianti, si
    *  battono in negativo (removed_component_ids sulla riga). */
   dish_components: { id: number; dish_id: number; name: string; removal_delta_cents: number; sort_order: number }[];
+  /** Vini abbinati ai piatti (curati in scheda piatto): il cassetto e il
+   *  foglio del palmare li mostrano col «+» che batte nel Bar. */
+  dish_wine_pairings?: { dish_id: number; wine_dish_id: number; sort_order: number }[];
   /** Preferenze delle categorie decise in Menu: ordine (sort), accensione e
    *  le spunte «bar» e «dolci» (i piatti della categoria vanno dritti
-   *  nell'uscita Bar o Dolci). Categoria assente = accesa, in coda, normale. */
-  category_prefs?: Record<string, { enabled: boolean; sort: number; bar?: boolean; dessert?: boolean }>;
+   *  nell'uscita Bar o Dolci); «vino» marca la carta dei vini, l'universo
+   *  degli abbinamenti. Categoria assente = accesa, in coda, normale. */
+  category_prefs?: Record<string, { enabled: boolean; sort: number; bar?: boolean; dessert?: boolean; wine?: boolean }>;
 }
 
 export const getMenuCatalogue = async (): Promise<MenuCatalogue> =>
