@@ -756,6 +756,23 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       .filter((d): d is Dish => d != null);
   }, [catalogue, dishes]);
 
+  // Il calice in comanda: le righe LISCE di quel vino (niente varianti,
+  // nota o peso — quelle nascono solo dal foglio del vino stesso), su ogni
+  // uscita: contarle tutte è onesto anche se una riga è stata spostata.
+  const wineQtyInCart = useCallback((wineDishId: number): number =>
+    cart.reduce((sum, l) =>
+      l.dish.id === wineDishId && l.modifier_ids.length === 0
+        && (l.removed_component_ids ?? []).length === 0 && !l.note && l.weight_grams == null
+        ? sum + l.qty : sum, 0),
+    [cart]);
+  const removeWine = (w: Dish) => {
+    const plain = cart.filter(l =>
+      l.dish.id === w.id && l.modifier_ids.length === 0
+      && (l.removed_component_ids ?? []).length === 0 && !l.note && l.weight_grams == null);
+    const last = plain[plain.length - 1];
+    if (last) bumpCart(last.key, -1);
+  };
+
   // Tocco lungo sul menu: su un piatto GIÀ battuto nell'uscita di battuta
   // riapre la sua riga in bozza («Aggiorna» — aggiungere una variante lì
   // corregge il battuto, non lo duplica); con più righe si riapre l'ultima
@@ -1886,6 +1903,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           pairedWines={pairedWinesFor(variantFor.id)}
           // Il calice batte da solo: forcedCourse lo instrada nel Bar.
           onAddWine={(w) => addToCart(w)}
+          wineQty={wineQtyInCart}
+          onRemoveWine={removeWine}
         />
       )}
       {editLine && (
@@ -1918,6 +1937,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           }}
           pairedWines={pairedWinesFor(editLine.dish.id)}
           onAddWine={(w) => addToCart(w)}
+          wineQty={wineQtyInCart}
+          onRemoveWine={removeWine}
         />
       )}
 
