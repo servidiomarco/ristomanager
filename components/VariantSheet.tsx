@@ -375,7 +375,7 @@ export const VariantSheet: React.FC<{
           </button>
         ) : null;
         const notePanel = (g: CatalogueGroups[number]) => g.note && openNotes.has(g.id) ? (
-          <p className="mb-2 whitespace-pre-line rounded-[14px] bg-[var(--ds-surface-row)] px-3 py-2.5 text-[13px] leading-relaxed text-[var(--ds-text-secondary)]">
+          <p className="whitespace-pre-line border-b border-[var(--ds-border)] bg-[var(--ds-surface-row)] px-4 py-2.5 text-[13px] leading-relaxed text-[var(--ds-text-secondary)]">
             {g.note}
           </p>
         ) : null;
@@ -383,7 +383,7 @@ export const VariantSheet: React.FC<{
           const single = g.max_select <= 1;
           const chosen = chosenInGroup(g);
           return single ? (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 p-3">
                 {g.modifiers.map(m => {
                   const active = (selected.get(m.id) ?? 0) > 0;
                   const delta = deltaOf(m);
@@ -420,8 +420,8 @@ export const VariantSheet: React.FC<{
                  «Senza Nduja» (sconto), «Poca Nduja» (gratis). Scala ±2
                  concordata con Marco il 5/09 al posto delle ripetizioni
                  n×prezzo; la regola vive in utils/modifierScale. */
-              <div className="space-y-1.5">
-                {g.modifiers.map(m => {
+              <div>
+                {g.modifiers.map((m, mi) => {
                   const n = selected.get(m.id) ?? 0;
                   const delta = deltaOf(m);
                   const deltaTot = signedModifierDelta(delta, n);
@@ -429,9 +429,9 @@ export const VariantSheet: React.FC<{
                   return (
                     <div
                       key={m.id}
-                      className={`flex min-h-[48px] items-center gap-2 rounded-[14px] px-3 py-1.5 ${
-                        n !== 0 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]' : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
-                      }`}
+                      className={`flex min-h-[52px] items-center gap-2 py-1.5 pl-4 pr-3 ${
+                        mi > 0 ? 'border-t border-[var(--ds-border)]' : ''
+                      } ${n !== 0 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]' : 'text-[var(--ds-text-primary)]'}`}
                     >
                       <span className="min-w-0 flex-1 truncate text-[15px] font-medium">
                         {signedModifierLabel(m.name, n)}
@@ -457,7 +457,7 @@ export const VariantSheet: React.FC<{
                         aria-label={`Togli ${m.name}`}
                         disabled={n <= MODIFIER_N_MIN}
                         className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-35 ${
-                          n !== 0 ? 'bg-white/15 hover:bg-white/25' : 'bg-[var(--ds-surface)] hover:bg-[var(--ds-border)]'
+                          n !== 0 ? 'bg-white/15 hover:bg-white/25' : 'bg-[var(--ds-surface-row)] hover:bg-[var(--ds-border)]'
                         }`}
                       >
                         <Minus size={16} aria-hidden />
@@ -468,7 +468,7 @@ export const VariantSheet: React.FC<{
                         aria-label={`Aggiungi ${m.name}`}
                         disabled={capped || n >= MODIFIER_N_MAX}
                         className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-35 ${
-                          n !== 0 ? 'bg-white/15 hover:bg-white/25' : 'bg-[var(--ds-surface)] hover:bg-[var(--ds-border)]'
+                          n !== 0 ? 'bg-white/15 hover:bg-white/25' : 'bg-[var(--ds-surface-row)] hover:bg-[var(--ds-border)]'
                         }`}
                       >
                         <Plus size={16} aria-hidden />
@@ -480,93 +480,82 @@ export const VariantSheet: React.FC<{
             );
         };
 
-        const requiredGroups = groups.filter(g => g.min_select > 0);
-        const optional = groups.filter(g => g.min_select === 0);
-        const openGroup = optional.find(g => g.id === openGroupId) ?? null;
+        if (groups.length === 0) return null;
 
+        /* Una scheda per gruppo: la testata è il bersaglio e le opzioni
+           vivono DENTRO la stessa scheda, divise da hairline — il
+           contenimento che le pillole non davano (il contenuto aperto
+           galleggiava sotto due bottoni sconnessi, e non si capiva di chi
+           fosse). Stesso pattern del menu ⋮ e della vista compatta.
+           Obbligatori sempre aperti; facoltativi a fisarmonica a un'anta,
+           col conteggio delle scelte leggibile anche da chiusi. */
         return (
-          <>
-            {/* Gli obbligatori sempre aperti: il foglio si apre per loro. */}
-            {requiredGroups.map(g => {
-              const single = g.max_select <= 1;
-              const chosen = chosenInGroup(g);
-              return (
-                <div key={g.id}>
-                  <div className="mb-2 flex items-center gap-1.5">
-                    <span className="min-w-0 flex-1 text-[13px] font-semibold text-[var(--ds-text-muted)]">
-                      {g.name}
-                      <span className="text-[var(--ds-critical-text)]"> · obbligatorio</span>
-                      {/* Il tetto si dice solo quando può mordere: un gruppo
-                          con max pari alle opzioni non ha niente da contare. */}
-                      {!single && g.max_select < g.modifiers.length && (
-                        <span className="tabular-nums"> · {chosen}/{g.max_select}</span>
-                      )}
-                    </span>
-                    {noteButton(g)}
-                  </div>
-                  {notePanel(g)}
-                  {groupBody(g)}
-                </div>
-              );
-            })}
-
-            {/* I facoltativi come pillole: il nome del gruppo è il bersaglio
-                e il contenuto si apre sotto con l'ingresso di casa (tileIn).
-                Fisarmonica a un'anta — aprire un gruppo chiude l'altro. Il
-                conteggio sulla pillola dice quante scelte vivono lì dentro
-                anche da chiusa. */}
-            {optional.length > 0 && (
-              <div>
-                <div className="mb-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">Varianti</div>
-                <div className="flex flex-wrap gap-2">
-                  {optional.map(g => {
-                    const picked = g.modifiers.filter(m => (selected.get(m.id) ?? 0) !== 0).length;
-                    const activePill = openGroupId === g.id;
-                    return (
+          <div>
+            <div className="mb-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">Varianti</div>
+            <div className="flex flex-col gap-2">
+              {groups.map(g => {
+                const single = g.max_select <= 1;
+                const chosen = chosenInGroup(g);
+                const required = g.min_select > 0;
+                const open = required || openGroupId === g.id;
+                const picked = g.modifiers.filter(m => (selected.get(m.id) ?? 0) !== 0).length;
+                // Il tetto si dice solo quando può mordere: un gruppo con
+                // max pari alle opzioni non ha niente da contare.
+                const cap = !single && g.max_select < g.modifiers.length;
+                return (
+                  <div key={g.id} className="overflow-hidden rounded-[16px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+                    {required ? (
+                      <div className="flex min-h-[52px] items-center gap-1.5 px-4">
+                        <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                          {g.name}
+                          <span className="text-[13px] text-[var(--ds-critical-text)]"> · obbligatorio</span>
+                          {cap && (
+                            <span className="text-[13px] font-medium tabular-nums text-[var(--ds-text-muted)]"> · {chosen}/{g.max_select}</span>
+                          )}
+                        </span>
+                        {noteButton(g)}
+                      </div>
+                    ) : (
                       <button
-                        key={g.id}
                         type="button"
                         onClick={() => setOpenGroupId(prev => prev === g.id ? null : g.id)}
-                        aria-expanded={activePill}
-                        className={`inline-flex h-11 items-center gap-1.5 rounded-full px-4 text-[15px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
-                          activePill
-                            ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
-                            : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
-                        }`}
+                        aria-expanded={open}
+                        className="flex min-h-[52px] w-full items-center gap-2 px-4 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)]"
                       >
-                        {g.name}
-                        {picked > 0 && (
-                          <span className={`text-[13px] font-semibold tabular-nums ${activePill ? 'opacity-90' : 'text-[var(--ds-text-secondary)]'}`}>
-                            · {picked}
-                          </span>
-                        )}
+                        <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                          {g.name}
+                          {picked > 0 && (
+                            <span className="text-[13px] font-semibold tabular-nums text-[var(--ds-text-secondary)]"> · {picked}</span>
+                          )}
+                          {open && cap && (
+                            <span className="text-[13px] font-medium tabular-nums text-[var(--ds-text-muted)]"> · {chosen}/{g.max_select}</span>
+                          )}
+                        </span>
                         <ChevronDown
-                          size={15}
-                          className={`flex-shrink-0 transition-transform ${activePill ? 'rotate-180' : ''}`}
+                          size={18}
+                          className={`flex-shrink-0 text-[var(--ds-text-muted)] transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
                           aria-hidden
                         />
                       </button>
-                    );
-                  })}
-                </div>
-                {openGroup && (
-                  // key = id: cambiare pillola rifa l'ingresso, non un morph.
-                  <div key={openGroup.id} className="mt-3" style={{ animation: 'tileIn 200ms ease-out both' }}>
-                    {(openGroup.max_select > 1 && openGroup.max_select < openGroup.modifiers.length) || openGroup.note ? (
-                      <div className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-[var(--ds-text-muted)]">
-                        {openGroup.max_select > 1 && openGroup.max_select < openGroup.modifiers.length && (
-                          <span className="tabular-nums">{chosenInGroup(openGroup)}/{openGroup.max_select}</span>
-                        )}
-                        {noteButton(openGroup)}
+                    )}
+                    {open && (
+                      <div className="border-t border-[var(--ds-border)]" style={{ animation: 'tileIn 180ms ease-out both' }}>
+                        {/* Obbligatori: la guida resta dietro la ⓘ. Sui
+                            facoltativi si mostra quando il gruppo è aperto —
+                            aprire è già chiedere. */}
+                        {required ? notePanel(g) : g.note ? (
+                          <p className="whitespace-pre-line border-b border-[var(--ds-border)] bg-[var(--ds-surface-row)] px-4 py-2.5 text-[13px] leading-relaxed text-[var(--ds-text-secondary)]">
+                            {g.note}
+                          </p>
+                        ) : null}
+                        {groupBody(g)}
                       </div>
-                    ) : null}
-                    {notePanel(openGroup)}
-                    {groupBody(openGroup)}
+                    )}
                   </div>
-                )}
-              </div>
-            )}
-          </>
+                );
+              })}
+            </div>
+          </div>
         );
       })()}
 
