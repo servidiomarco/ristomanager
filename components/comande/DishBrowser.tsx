@@ -90,10 +90,6 @@ interface DishBrowserProps {
   /** Chip dell'uscita sulla sotto-riga: sposta QUELLA combinazione — apre
    *  il selettore «dove va la riga» di OrderPad. */
   onLineCourseTap?: (key: string) => void;
-  /** I vini abbinati al piatto (curati in scheda piatto): nel cassetto,
-   *  sotto le combinazioni, ognuno col «+» che lo batte — l'uscita forzata
-   *  Bar fa il resto. */
-  pairedWinesFor?: (dishId: number) => Dish[];
 }
 
 export const DishBrowser: React.FC<DishBrowserProps> = ({
@@ -101,7 +97,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
   qtyInCourse, markedCategories, hasVariants, tapOpensSheet = hasVariants, onAdd, onRemove, courseOf, onCourseTap, onLongPress, layout,
   showSearch = true, density = 'comfortable', nav = 'chips', onCategoryBack, catView = 'list',
   barCategories, dessertCategories, course,
-  draftLinesFor, onBumpLine, onTapLine, onLineCourseTap, pairedWinesFor,
+  draftLinesFor, onBumpLine, onTapLine, onLineCourseTap,
 }) => {
   // Categoria «fuori uscita»: non della sezione che l'uscita in composizione
   // sta servendo. Solo per Bar e Dolci — le uscite numerate sono di cucina e
@@ -329,34 +325,6 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
   // differenziare, senza il rumore di una riga doppione sotto ogni battuto.
   // bumpCart fa già tutto: qty a 0 toglie la riga, il «+» su un pezzo al
   // peso ne aggiunge un altro dello stesso peso.
-  // I vini abbinati, in coda al cassetto: righe quiete con l'icona Wine
-  // (NON Wand2: sono abbinamenti curati in scheda, non output AI) e il «+»
-  // che batte — l'uscita forzata Bar fa il resto.
-  const wineRows = (d: Dish) => {
-    if (!pairedWinesFor) return null;
-    const wines = pairedWinesFor(d.id);
-    if (wines.length === 0) return null;
-    return wines.map(w => (
-      <div key={`wine-${w.id}`} className="flex min-h-[52px] items-center gap-2.5 border-t border-[var(--ds-border)] py-1 pl-4 pr-2">
-        <Wine size={15} className="flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
-        <div className="min-w-0 flex-1">
-          <span className="block truncate text-[14px] font-medium leading-snug text-[var(--ds-text-primary)]">{w.name}</span>
-          <span className="block text-[12px] leading-snug tabular-nums text-[var(--ds-text-muted)]">
-            {euro(Math.round(Number(w.price) * 100))}
-          </span>
-        </div>
-        <button
-          type="button"
-          onClick={() => onAdd(w)}
-          aria-label={`Aggiungi ${w.name}`}
-          className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-        >
-          <Plus size={16} />
-        </button>
-      </div>
-    ));
-  };
-
   const subRows = (d: Dish) => {
     if (!onBumpLine || !onTapLine) return null;
     const ds = draftState(d.id);
@@ -457,8 +425,6 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
             {rowControls(d)}
           </div>
           {subRows(d)}
-                  {draftState(d.id)?.open ? wineRows(d) : null}
-          {draftState(d.id)?.open ? wineRows(d) : null}
         </React.Fragment>
       ))}
     </div>

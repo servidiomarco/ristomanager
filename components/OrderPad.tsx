@@ -1664,7 +1664,6 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       course={course}
       draftLinesFor={draftLinesFor}
       onBumpLine={bumpCart}
-      pairedWinesFor={pairedWinesFor}
       onTapLine={(key) => { const l = cart.find(x => x.key === key); if (l) setEditLine(l); }}
       onLineCourseTap={(key) => {
         const l = cart.find(x => x.key === key);
