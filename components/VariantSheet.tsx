@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronDown, CornerDownRight, Info, Minus, Plus, Trash2, Utensils } from 'lucide-react';
+import { ChevronDown, CornerDownRight, Info, Minus, Plus, Trash2 } from 'lucide-react';
 import type { Dish } from '../types';
 import type { MenuCatalogue } from '../services/ordersApiService';
 import { Sheet, dsButton, dsInput } from './ds';
@@ -153,6 +153,27 @@ export const VariantSheet: React.FC<{
   const missing = groups.filter(g => g.min_select > 0
     && g.modifiers.filter(m => (selected.get(m.id) ?? 0) > 0).length < g.min_select);
 
+  // Il prezzo vivo del pezzo configurato, per il bottone di conferma: base
+  // (al kg per il peso), più la scala delle varianti, più gli sconti degli
+  // ingredienti tolti, per la quantità. È la stessa anteprima dei delta qui
+  // sopra: il conto vero lo fa il server sul listino battuto.
+  const modById = React.useMemo(
+    () => new Map(groups.flatMap(g => g.modifiers.map(m => [m.id, m] as const))),
+    [groups],
+  );
+  const previewCents = (() => {
+    const base = dish.sold_by_weight ? Math.round(dishCents * grams / 1000) : dishCents;
+    const mods = entries.reduce((s, e) => {
+      const m = modById.get(e.id);
+      return m ? s + signedModifierDelta(deltaOf(m), e.n) : s;
+    }, 0);
+    const removals = [...removed].reduce((s, id) => {
+      const c = components.find(x => x.id === id);
+      return c ? s + c.removal_delta_cents : s;
+    }, 0);
+    return (base + mods + removals) * (dish.sold_by_weight ? 1 : qty);
+  })();
+
   // Le righe già battute da questo foglio: il contatore è la conferma che
   // «Aggiungi un altro» ha scritto davvero — senza, l'azzeramento dei chip
   // sembrerebbe un malfunzionamento.
@@ -177,12 +198,9 @@ export const VariantSheet: React.FC<{
     <Sheet
       open
       onClose={onCancel}
+      // Niente sottotitolo «Varianti»: lo dice già il contenuto tre righe
+      // sotto, e il titolo guadagna respiro (§10).
       title={dish.name}
-      subtitle={
-        <span className="inline-flex items-center gap-1.5">
-          <Utensils size={14} aria-hidden /> Varianti
-        </span>
-      }
       ariaLabel={`Varianti per ${dish.name}`}
       bodyClassName="space-y-5 px-5 py-5 sm:px-6"
       footer={
@@ -225,7 +243,11 @@ export const VariantSheet: React.FC<{
               disabled={missing.length > 0}
               className={`min-w-0 flex-1 ${dsButton.primary}`}
             >
-              {missing.length > 0 ? `Scegli: ${missing.map(g => g.name).join(', ')}` : (confirmLabel ?? 'Aggiungi')}
+              {/* Il prezzo sul bottone: la conferma è informata, non cieca —
+                  quantità, peso e varianti compresi, vivo mentre si tocca. */}
+              {missing.length > 0
+                ? `Scegli: ${missing.map(g => g.name).join(', ')}`
+                : `${confirmLabel ?? 'Aggiungi'} · ${euro(previewCents)}`}
             </button>
           </div>
         </div>
@@ -502,6 +524,11 @@ export const VariantSheet: React.FC<{
                 // Il tetto si dice solo quando può mordere: un gruppo con
                 // max pari alle opzioni non ha niente da contare.
                 const cap = !single && g.max_select < g.modifiers.length;
+                // A gruppo chiuso la testata dice COSA è scelto, non solo
+                // quanto: per le scelte singole il valore («Impiattamento ·
+                // Vassoio»), come le righe di Impostazioni — il riepilogo si
+                // legge senza riaprire niente. Per i multipli il conteggio.
+                const singlePick = single ? g.modifiers.find(m => (selected.get(m.id) ?? 0) > 0) : undefined;
                 return (
                   <div key={g.id} className="overflow-hidden rounded-[16px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
                     {required ? (
@@ -524,9 +551,11 @@ export const VariantSheet: React.FC<{
                       >
                         <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
                           {g.name}
-                          {picked > 0 && (
+                          {!open && singlePick ? (
+                            <span className="text-[14px] font-medium text-[var(--ds-text-secondary)]"> · {singlePick.name}</span>
+                          ) : picked > 0 ? (
                             <span className="text-[13px] font-semibold tabular-nums text-[var(--ds-text-secondary)]"> · {picked}</span>
-                          )}
+                          ) : null}
                           {open && cap && (
                             <span className="text-[13px] font-medium tabular-nums text-[var(--ds-text-muted)]"> · {chosen}/{g.max_select}</span>
                           )}
