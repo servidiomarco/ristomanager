@@ -594,6 +594,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-11 | Comande, Cucina e Passe | Sullo schermo largo la testata del tavolo (Tav., coperti, Conto) si accorcia alla colonna del menu e la Comanda sale a tutta altezza fino alla barra globale: una riga di uscite in più sempre in vista. |
 | 2026-09-11 | Menu & Banchetti | Card «Vini abbinati»: le sezioni per categoria partono chiuse e si aprono al tocco della testata (conteggio e chevron); «Suggerisci» apre da solo le sezioni dei vini proposti. |
 | 2026-09-11 | Menu & Banchetti | La card «Vini abbinati» della scheda piatto raggruppa la carta per categoria (Bollicine, bianchi, rosé, rossi) nell'ordine della pagina Menu, con il conteggio dei selezionati per sezione — via la nuvola unica di chip. |
 | 2026-09-11 | Comande, Cucina e Passe | Il «Vino consigliato» nel foglio varianti diventa uno stepper: conteggio reale dei calici in comanda e «−» per toglierli, non più solo il «+». |
