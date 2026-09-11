@@ -588,6 +588,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-11 | Comande, Cucina e Passe | Comanda più leggibile: nomi dei piatti a 17px, quantità a 16px in colore pieno, prezzi e varianti alzati di un punto, pastiglia dell'uscita sul bordo più grande (14px). |
 | 2026-09-10 | Comande, Cucina e Passe | Il cassetto delle battute mostra le bozze del piatto in tutte le uscite (chip per riga a dire dove sta ognuna): cambiando uscita il battuto non sparisce più dal menu. |
 | 2026-09-10 | Pagamenti, conto al tavolo e cassa | La motivazione dello sconto in cassa diventa facoltativa (comanda e conto): si sconta anche al volo, il campo resta per chi vuole lasciare traccia; sul palmare comande resta obbligatoria. |
 | 2026-09-10 | Comande, Cucina e Passe | Il cassetto delle battute si apre e richiude col tap sul piatto (via la freccia-bottone e il doppio tap): «+» batte, tap apre, tocco lungo corregge. La freccina accanto al prezzo lo indica e si capovolge da aperto (ingrandita a 18px, sostituisce il chevron «ha varianti» in lista). |
