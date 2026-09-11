@@ -27,9 +27,6 @@ export type PassepartoutOp =
     | 'conto'
     /** Catalogo articoli senza immagini — alimenta l'import menu del CRM. */
     | 'articoli'
-    /** Foto degli articoli a lotti sotto il buffer del socket — alimenta
-     *  l'import foto piatti. L'agente tiene il catalogo in cache. */
-    | 'fotoArticoli'
     /** InviaProduzioneComanda (tutte le uscite) — per comande create via WS. */
     | 'invia'
     /** Sequenza di chiusura completa (chiudiComandaCompleta): azione FISCALE. */
