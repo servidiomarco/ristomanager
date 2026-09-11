@@ -107,6 +107,10 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     : false;
   const q = query.trim().toLowerCase();
   const [searchOpen, setSearchOpen] = useState(false);
+  // La foto del piatto in grande, da porgere al cliente («com'è il
+  // frantoio?»): si apre dal tocco sulla miniatura, non dal tap sul piatto —
+  // quello batte o apre il cassetto, e un menu senza foto non cambia gesti.
+  const [photoDish, setPhotoDish] = useState<Dish | null>(null);
 
   const courseTagShort = (n: number): string =>
     isBarCourse(n) ? 'Bar' : isDessertCourse(n) ? 'Dolci' : ordinal(n);
@@ -214,6 +218,45 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
       </div>
     );
   };
+
+  // La miniatura, solo dove la scheda del piatto ha una foto: bersaglio a
+  // parte accanto al nome — il tocco NON batte, apre il visore. Fratello dei
+  // bottoni di riga, mai figlio: un bottone dentro un bottone non è HTML.
+  const photoThumb = (d: Dish, size: string) =>
+    d.photo_url ? (
+      <button
+        type="button"
+        onClick={e => { e.stopPropagation(); setPhotoDish(d); }}
+        aria-label={`Foto di ${d.name}`}
+        className={`${size} flex-shrink-0 overflow-hidden rounded-[12px] bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]`}
+      >
+        <img src={d.photo_url} alt="" loading="lazy" className="h-full w-full object-cover" />
+      </button>
+    ) : null;
+
+  // Il visore: fondo nero pieno come il fullscreen della scheda piatto in
+  // gestione menu — il telefono si gira verso l'ospite, quindi la foto ha
+  // il palco e sotto solo nome e prezzo. Un tocco ovunque chiude.
+  const photoModal = photoDish?.photo_url && (
+    <div
+      role="dialog"
+      aria-label={`Foto di ${photoDish.name}`}
+      onClick={() => setPhotoDish(null)}
+      className="fixed inset-0 z-50 flex cursor-zoom-out flex-col items-center justify-center gap-5 bg-black/95 p-5"
+    >
+      <img
+        src={photoDish.photo_url}
+        alt={photoDish.name}
+        className="max-h-[78vh] max-w-full rounded-[20px] object-contain"
+      />
+      <div className="text-center">
+        <div className="text-[22px] font-semibold text-white">{photoDish.name}</div>
+        <div className="mt-0.5 text-[17px] tabular-nums text-white/70">
+          {euro(Math.round(Number(photoDish.price) * 100))}
+        </div>
+      </div>
+    </div>
+  );
 
   // Cercando si cerca in tutto il menu: se il piatto è fra i primi e la pista
   // è ferma sugli antipasti, una ricerca che non lo trova è una ricerca rotta.
@@ -378,10 +421,11 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
       {visible.map((d, i) => (
         <React.Fragment key={d.id}>
           <div
-            className={`flex min-h-[56px] items-center gap-2 py-1 pl-4 pr-2 ${
-              i > 0 ? 'border-t border-[var(--ds-border)]' : ''
-            }`}
+            className={`flex min-h-[56px] items-center gap-2 py-1 pr-2 ${
+              d.photo_url ? 'pl-2' : 'pl-4'
+            } ${i > 0 ? 'border-t border-[var(--ds-border)]' : ''}`}
           >
+            {photoThumb(d, 'h-11 w-11')}
             <button
               type="button"
               {...press(d)}
@@ -536,6 +580,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
         <div className="-mx-2 min-h-0 flex-1 overflow-y-auto px-2 pb-2 pt-1">
           {visible.length === 0 ? empty : compactCard}
         </div>
+        {photoModal}
       </div>
     );
   }
@@ -575,9 +620,9 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                   <button
                     type="button"
                     {...press(d)}
-                    className={`flex min-h-[76px] w-full select-none flex-col justify-center gap-0.5 rounded-[16px] bg-[var(--ds-surface)] px-4 py-3 text-left shadow-[var(--ds-shadow-card)] transition-transform hover:bg-[var(--ds-surface-row)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
-                      qty > 0 ? 'ring-2 ring-[var(--ds-action-bg)]' : ''
-                    }`}
+                    className={`flex min-h-[76px] w-full select-none flex-col justify-center gap-0.5 rounded-[16px] bg-[var(--ds-surface)] py-3 text-left shadow-[var(--ds-shadow-card)] transition-transform hover:bg-[var(--ds-surface-row)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                      d.photo_url ? 'pl-[68px] pr-4' : 'px-4'
+                    } ${qty > 0 ? 'ring-2 ring-[var(--ds-action-bg)]' : ''}`}
                   >
                     <span className={`truncate text-[15px] font-semibold text-[var(--ds-text-primary)] ${tappableBadge ? 'pr-16' : 'pr-8'}`}>
                       {d.name}
@@ -587,6 +632,13 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                       {hasVariants(d.id) && <ChevronDown size={15} aria-hidden />}
                     </span>
                   </button>
+                  {/* La miniatura in overlay a sinistra, fratella della
+                      scheda come i badge: dentro il bottone non può stare. */}
+                  {d.photo_url && (
+                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2">
+                      {photoThumb(d, 'h-12 w-12')}
+                    </span>
+                  )}
                   {/* Due badge, due mestieri: il conteggio dice «quanti», il
                       badge dell'uscita (icona di destinazione) dice «dove» e
                       si tocca per spostare. */}
@@ -631,6 +683,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                   }`}
                 >
                   <div className="flex min-h-[48px] items-center gap-3">
+                    {photoThumb(d, 'h-12 w-12')}
                     <button
                       type="button"
                       {...press(d)}
@@ -653,6 +706,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
           </div>
         )}
       </div>
+      {photoModal}
     </div>
   );
 };
