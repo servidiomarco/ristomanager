@@ -479,6 +479,8 @@ export interface MenuCategory {
   bar?: boolean;
   /** Categoria da dolci: come il bar, ma nell'uscita Dolci in coda. */
   dessert?: boolean;
+  /** Carta dei vini: l'universo da cui pescano gli abbinamenti. */
+  wine?: boolean;
 }
 
 export const getMenuCategories = async (): Promise<MenuCategory[]> => {
@@ -542,6 +544,16 @@ export const setCategoryBar = async (category: string, bar: boolean): Promise<vo
     method: 'PUT',
     headers: getHeaders(),
     body: JSON.stringify({ category, bar }),
+  });
+};
+
+/** Spunta «vino» su una categoria: la marca come carta dei vini — l'universo
+ *  da cui pescano gli abbinamenti vino–piatto (scheda piatto e AI). */
+export const setCategoryWine = async (category: string, wine: boolean): Promise<void> => {
+  await apiRequest<{ ok: true }>(`${API_URL}/menu/category-wine`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify({ category, wine }),
   });
 };
 
@@ -687,6 +699,31 @@ export interface MenuTranslateResult {
  *  (piatti attivi + categorie, en/fr/de). Idempotente. */
 export const translateMenu = async (): Promise<MenuTranslateResult> => {
   return apiRequest<MenuTranslateResult>(`${API_URL}/menu/translate`, {
+    method: 'POST',
+    headers: getHeaders(false),
+  });
+};
+
+/** Proposta AI dei vini abbinati per UN piatto — non salva niente: la scheda
+ *  pre-seleziona e si salva col Salva del form. */
+export const suggestDishWinePairings = async (dishId: number): Promise<{ wine_dish_ids: number[] }> => {
+  return apiRequest<{ wine_dish_ids: number[] }>(`${API_URL}/dishes/${dishId}/suggest-pairings`, {
+    method: 'POST',
+    headers: getHeaders(false),
+  });
+};
+
+export interface PairWinesResult {
+  abbinati: number;
+  candidati: number;
+  tokens: number;
+}
+
+/** Abbina con l'AI la carta intera: solo i piatti ancora senza abbinamenti
+ *  (idempotente, come la traduzione). Ogni piatto resta correggibile dalla
+ *  scheda. */
+export const pairMenuWines = async (): Promise<PairWinesResult> => {
+  return apiRequest<PairWinesResult>(`${API_URL}/menu/pair-wines`, {
     method: 'POST',
     headers: getHeaders(false),
   });
@@ -1172,6 +1209,8 @@ export interface FeatureFlags {
   table_orders_enabled: boolean;
   /** Risposte suggerite ai messaggi dei clienti. */
   ai_messages_enabled: boolean;
+  /** Abbinamenti vino proposti dall'AI (Suggerisci in scheda + Abbina i vini). */
+  ai_wine_pairing_enabled: boolean;
   /** Menu digitale pubblico (QR al tavolo). Gestito dal QR modal della pagina Menu. */
   digital_menu_enabled: boolean;
   /** Postazione passe. Spenta: la pagina Passe sparisce e i verbi

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ChevronDown, CornerDownRight, Info, Minus, Plus, Trash2 } from 'lucide-react';
+import { Check, ChevronDown, CornerDownRight, Info, Minus, Plus, Trash2, Wine } from 'lucide-react';
 import type { Dish } from '../types';
 import type { MenuCatalogue } from '../services/ordersApiService';
 import { Sheet, dsButton, dsInput } from './ds';
@@ -54,7 +54,12 @@ export const VariantSheet: React.FC<{
    *  chiave della riga, e un foglio su una riga che non c'è più mente. */
   courseName?: string;
   onCourseTap?: () => void;
-}> = ({ dish, groups, components = [], initial, initialQty, onDelete, confirmLabel, onCancel, onConfirm, onAdd, courseName, onCourseTap }) => {
+  /** I vini abbinati al piatto (curati in scheda): sezione «Vino consigliato»
+   *  col «+» che batte — l'uscita forzata Bar fa il resto. Assenti (Cassa,
+   *  piatto senza abbinamenti) = la sezione non compare. */
+  pairedWines?: Dish[];
+  onAddWine?: (wine: Dish) => void;
+}> = ({ dish, groups, components = [], initial, initialQty, onDelete, confirmLabel, onCancel, onConfirm, onAdd, courseName, onCourseTap, pairedWines, onAddWine }) => {
   // Verso per variante, scala d'intensità a 4 gradini (utils/modifierScale):
   // +1 aggiunge a pagamento, +2 «Molta» allo stesso addebito, −1 «Senza» in
   // sconto, −2 «Poca» gratis, 0 = non applicata. Le scelte singole (cotture)
@@ -178,6 +183,9 @@ export const VariantSheet: React.FC<{
   // «Aggiungi un altro» ha scritto davvero — senza, l'azzeramento dei chip
   // sembrerebbe un malfunzionamento.
   const [added, setAdded] = useState(0);
+  // Calici battuti da questo foglio, per vino: la spunta col contatore è la
+  // conferma che il «+» ha scritto davvero.
+  const [wineAdded, setWineAdded] = useState<Map<number, number>>(new Map());
   const addAndReset = () => {
     onAdd?.(entries, [...removed], custom.trim() || undefined,
       dish.sold_by_weight ? grams : undefined,
@@ -587,6 +595,44 @@ export const VariantSheet: React.FC<{
           </div>
         );
       })()}
+
+      {pairedWines && pairedWines.length > 0 && onAddWine && (
+        <div>
+          {/* Abbinamenti curati in scheda piatto — icona Wine, non Wand2:
+              qui non parla l'AI, parla la carta. Il «+» batte subito
+              (uscita forzata Bar), il contatore conferma. */}
+          <div className="mb-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">Vino consigliato</div>
+          <div className="overflow-hidden rounded-[16px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+            {pairedWines.map((w, i) => {
+              const n = wineAdded.get(w.id) ?? 0;
+              return (
+                <div key={w.id} className={`flex min-h-[52px] items-center gap-2.5 py-1 pl-4 pr-3 ${i > 0 ? 'border-t border-[var(--ds-border)]' : ''}`}>
+                  <Wine size={15} className="flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
+                  <div className="min-w-0 flex-1">
+                    <span className="block truncate text-[15px] font-medium leading-snug text-[var(--ds-text-primary)]">{w.name}</span>
+                    <span className="block text-[13px] leading-snug tabular-nums text-[var(--ds-text-muted)]">
+                      {euro(Math.round(Number(w.price) * 100))}
+                    </span>
+                  </div>
+                  {n > 0 && (
+                    <span className="inline-flex items-center gap-1 text-[13px] font-semibold tabular-nums text-[var(--ds-seated-text)]">
+                      <Check size={14} aria-hidden />{n}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => { onAddWine(w); setWineAdded(prev => new Map(prev).set(w.id, (prev.get(w.id) ?? 0) + 1)); }}
+                    aria-label={`Aggiungi ${w.name}`}
+                    className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    <Plus size={16} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <label className="block">
         <span className="mb-2 block text-[13px] font-semibold text-[var(--ds-text-muted)]">Variante libera</span>

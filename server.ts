@@ -55,6 +55,7 @@ import {
 } from './services/passepartoutBridge.js';
 import type { PassepartoutComanda, EsitoChiusuraComanda, PassepartoutArticolo } from './services/passepartoutService.js';
 import { MENU_LANGS, isMenuTranslationConfigured, translateMenuEntries } from './services/menuTranslationService.js';
+import { isWinePairingConfigured, suggestWinePairings } from './services/aiWinePairingService.js';
 import { Shift, PaymentStatus, UserRole } from './types.js';
 import authRoutes from './auth/authRoutes.js';
 import logRoutes from './activityLogs/logRoutes.js';
@@ -3835,7 +3836,10 @@ const MENU_CAT_PREFS_KEY = 'menu_category_prefs';
 // la spunta in modale applica in blocco e ogni piatto resta libero dopo.
 // manual: categoria creata a mano dalla modale — esiste anche senza piatti,
 // e la pulizia dei fantasmi nel PUT non deve toccarla.
-type MenuCategoryPref = { enabled: boolean; sort: number; menu_ids?: number[]; modifier_group_ids?: number[]; manual?: boolean; bar?: boolean; dessert?: boolean };
+// wine: la categoria è carta dei vini — è l'universo da cui pescano gli
+// abbinamenti vino–piatto (scheda piatto e AI). Ortogonale a bar (che decide
+// l'uscita forzata): una categoria vino di solito è anche bar.
+type MenuCategoryPref = { enabled: boolean; sort: number; menu_ids?: number[]; modifier_group_ids?: number[]; manual?: boolean; bar?: boolean; dessert?: boolean; wine?: boolean };
 
 async function getMenuCategoryPrefs(tenantId: number): Promise<Record<string, MenuCategoryPref>> {
     const rs = await queryWithRetry(
@@ -3908,6 +3912,8 @@ app.get('/menu/categories', authenticate, async (req, res) => {
                 // Categoria da dolci: come il bar, ma nell'uscita Dolci in
                 // coda al servizio.
                 dessert: prefs[name]?.dessert === true,
+                // Carta dei vini: l'universo degli abbinamenti vino–piatto.
+                wine: prefs[name]?.wine === true,
             })),
         });
     } catch (err: any) {
@@ -4292,6 +4298,40 @@ app.put('/menu/category-bar', authenticate, requirePermission('menu:full'), asyn
         res.json({ ok: true });
     } catch (err: any) {
         console.error('PUT /menu/category-bar error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// La spunta «vino» su una categoria: come «bar», ma non tocca le uscite —
+// dice solo «questa è carta dei vini», l'universo da cui pescano gli
+// abbinamenti vino–piatto (scheda piatto, AI, cassetto del palmare).
+app.put('/menu/category-wine', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const category = typeof req.body?.category === 'string' ? req.body.category.trim() : '';
+        const wine = req.body?.wine;
+        if (!category || typeof wine !== 'boolean') {
+            return res.status(400).json({ error: 'servono category e wine (true/false)' });
+        }
+        if (!(await menuCategoryExists(req.tenantId!, category))) {
+            return res.status(404).json({ error: 'Categoria non trovata' });
+        }
+        const prefs = await getMenuCategoryPrefs(req.tenantId!);
+        const next: MenuCategoryPref = prefs[category] ?? { enabled: true, sort: Number.MAX_SAFE_INTEGER };
+        if (wine) next.wine = true; else delete next.wine;
+        prefs[category] = next;
+        await saveMenuCategoryPrefs(req.tenantId!, prefs);
+        try { socketService?.broadcastToAll(req.tenantId!, 'dish:synced', { categoria: category, wine }); } catch (_) {}
+        emitCatalogueUpdated(req.tenantId!, { categoria: category, wine });
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.DISH, 0, category,
+                { category_wine: wine }
+            ).catch(() => {});
+        }
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('PUT /menu/category-wine error:', err);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -4912,6 +4952,114 @@ app.post('/menu/translate', authenticate, requirePermission('menu:full'), async 
     }
 });
 
+// ── Abbinamenti vino: l'AI propone dai vini in carta, il ristoratore cura ──
+// L'universo dei vini: piatti attivi delle categorie marcate «vino»; senza
+// spunte vino si ripiega sulle categorie «bar» (bibite comprese — meglio un
+// universo largo che nessun universo, e comunque decide il ristoratore).
+const wineListForTenant = async (tenantId: number): Promise<{ id: number; name: string; category: string | null; description: string | null }[]> => {
+    const prefs = await getMenuCategoryPrefs(tenantId);
+    let cats = Object.entries(prefs).filter(([, p]) => p?.wine === true).map(([c]) => c);
+    if (cats.length === 0) cats = Object.entries(prefs).filter(([, p]) => p?.bar === true).map(([c]) => c);
+    if (cats.length === 0) return [];
+    const rs = await queryWithRetry(
+        `SELECT id, name, category, description FROM dishes
+         WHERE tenant_id = $1 AND is_active AND crm_enabled AND category = ANY($2::text[])
+         ORDER BY category, sort_order NULLS LAST, name`,
+        [tenantId, cats]
+    );
+    return rs.rows;
+};
+
+const trackWinePairingUsage = (tenantId: number, userEmail: string | null, prompt: number, output: number) => {
+    if (prompt + output === 0) return;
+    queryWithRetry(
+        `INSERT INTO ai_token_usage (provider, feature, model, prompt_tokens, output_tokens, total_tokens, user_email, tenant_id)
+         VALUES ('anthropic', 'wine_pairing', 'claude-opus-5', $1, $2, $3, $4, $5)`,
+        [prompt, output, prompt + output, userEmail, tenantId]
+    ).catch(err => console.error('ai_token_usage insert (wine_pairing) failed:', err));
+};
+
+// Proposta per UN piatto, senza salvare: la scheda la mostra pre-selezionata
+// e si salva solo col Salva del form — l'AI non scrive mai da sola qui.
+app.post('/dishes/:id/suggest-pairings', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        if (!(await getFeatureFlag(req.tenantId!, 'ai_wine_pairing_enabled', false))) {
+            return res.status(503).json({ error: 'ai_disabled' });
+        }
+        if (!isWinePairingConfigured()) {
+            return res.status(503).json({ error: 'not_configured', message: 'ANTHROPIC_API_KEY non configurata sul backend' });
+        }
+        const dishId = parseInt(req.params.id, 10);
+        if (!Number.isFinite(dishId)) return res.status(400).json({ error: 'id non valido' });
+        const dishRs = await queryWithRetry(
+            `SELECT id, name, category, description FROM dishes WHERE id = $1 AND tenant_id = $2`,
+            [dishId, req.tenantId!]
+        );
+        if (!dishRs.rows[0]) return res.status(404).json({ error: 'Piatto non trovato' });
+        const vini = await wineListForTenant(req.tenantId!);
+        if (vini.length === 0) {
+            return res.status(409).json({ error: 'no_wines', message: 'Nessuna categoria «vino» (né «bar») con piatti attivi' });
+        }
+        let prompt = 0, output = 0;
+        const mappa = await suggestWinePairings([dishRs.rows[0]], vini, (p, o) => { prompt += p; output += o; });
+        trackWinePairingUsage(req.tenantId!, req.user?.email || null, prompt, output);
+        res.json({ wine_dish_ids: mappa.get(dishId) ?? [] });
+    } catch (err: any) {
+        console.error('POST /dishes/:id/suggest-pairings error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Abbina la carta intera: come /menu/translate — idempotente, riempie SOLO i
+// piatti senza abbinamenti (rifarne uno = svuotarlo in scheda e rilanciare).
+// Qui l'AI scrive in tabella perché il bulk È la curatela di partenza: ogni
+// piatto resta poi correggibile dalla scheda.
+app.post('/menu/pair-wines', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        if (!(await getFeatureFlag(req.tenantId!, 'ai_wine_pairing_enabled', false))) {
+            return res.status(503).json({ error: 'ai_disabled' });
+        }
+        if (!isWinePairingConfigured()) {
+            return res.status(503).json({ error: 'not_configured', message: 'ANTHROPIC_API_KEY non configurata sul backend' });
+        }
+        const vini = await wineListForTenant(req.tenantId!);
+        if (vini.length === 0) {
+            return res.status(409).json({ error: 'no_wines', message: 'Nessuna categoria «vino» (né «bar») con piatti attivi' });
+        }
+        // Da abbinare: piatti attivi di cucina (fuori dalle categorie
+        // vino/bar/dolci — un vino non si abbina a un vino) ancora senza
+        // abbinamenti.
+        const prefs = await getMenuCategoryPrefs(req.tenantId!);
+        const escluse = Object.entries(prefs)
+            .filter(([, p]) => p?.wine === true || p?.bar === true || p?.dessert === true)
+            .map(([c]) => c);
+        const daAbbinare = await queryWithRetry(
+            `SELECT id, name, category, description FROM dishes d
+             WHERE tenant_id = $1 AND is_active AND crm_enabled
+               AND NOT (COALESCE(category, '') = ANY($2::text[]))
+               AND NOT EXISTS (SELECT 1 FROM dish_wine_pairings wp WHERE wp.tenant_id = $1 AND wp.dish_id = d.id)
+             ORDER BY category, sort_order NULLS LAST, name`,
+            [req.tenantId!, escluse]
+        );
+        let prompt = 0, output = 0;
+        const mappa = await suggestWinePairings(daAbbinare.rows, vini, (p, o) => { prompt += p; output += o; });
+        trackWinePairingUsage(req.tenantId!, req.user?.email || null, prompt, output);
+        let abbinati = 0;
+        for (const [dishId, wineIds] of mappa) {
+            await replaceDishWinePairings(req.tenantId!, dishId, wineIds);
+            abbinati++;
+        }
+        if (abbinati > 0) {
+            try { socketService?.broadcastToAll(req.tenantId!, 'dish:synced', { abbinati }); } catch (_) {}
+            emitCatalogueUpdated(req.tenantId!, { abbinati });
+        }
+        res.json({ abbinati, candidati: daAbbinare.rows.length, tokens: prompt + output });
+    } catch (err: any) {
+        console.error('POST /menu/pair-wines error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 // Dati del menu per la pagina pubblica: piatti attivi con traduzioni e
 // categorie tradotte. Niente id interni, niente campi gestionali.
 const handlePublicMenu = async (tenantId: number, _req: express.Request, res: express.Response) => {
@@ -4923,7 +5071,10 @@ const handlePublicMenu = async (tenantId: number, _req: express.Request, res: ex
     // E solo i piatti del menu Alla carta: il QR al tavolo mostra ciò che si
     // può ordinare, non le liste banchetti o i menu stagionali.
     const dishesRs = await queryWithRetry(
-        `SELECT d.name, d.description, d.price, d.category, d.allergens, d.photo_url, d.translations
+        `SELECT d.name, d.description, d.price, d.category, d.allergens, d.photo_url, d.translations,
+                COALESCE((SELECT array_agg(w.name ORDER BY wp.sort_order, w.name)
+                          FROM dish_wine_pairings wp JOIN dishes w ON w.id = wp.wine_dish_id
+                          WHERE wp.dish_id = d.id AND w.is_active AND w.crm_enabled), '{}') AS abbinati
          FROM dishes d WHERE d.tenant_id = $1 AND d.is_active AND d.crm_enabled
            AND EXISTS (SELECT 1 FROM dish_menus dm JOIN menus m ON m.id = dm.menu_id
                        WHERE dm.dish_id = d.id AND m.system_key = 'ALLA_CARTA')
@@ -4949,6 +5100,9 @@ const handlePublicMenu = async (tenantId: number, _req: express.Request, res: ex
             allergens: Array.isArray(d.allergens) ? d.allergens : [],
             photo_url: d.photo_url || null,
             translations: d.translations || null,
+            // I nomi dei vini abbinati: vetrina, nessuna azione. Nomi propri,
+            // quindi niente traduzione.
+            abbinati: Array.isArray(d.abbinati) ? d.abbinati : [],
         })),
     });
 };
@@ -11853,6 +12007,43 @@ const replaceDishModifierGroups = async (tenantId: number, dishId: number, group
     return rows.rows.map((r: any) => Number(r.group_id));
 };
 
+// Vini abbinati al piatto: sostituzione piena (a differenza dei gruppi
+// varianti qui non c'è un source da preservare) con sort_order = posizione
+// nell'array — l'ordine è la preferenza del sommelier. Il SELECT scarta id
+// fantasma o di altri tenant senza far saltare la FK.
+// Sempre in risposta come menu_ids: il broadcast dish:updated sostituisce il
+// piatto per intero nei client — un campo assente cancellerebbe gli
+// abbinamenti in memoria a ogni modifica non correlata.
+const dishWinePairingIds = async (dishId: number): Promise<number[]> => {
+    const rs = await queryWithRetry(
+        `SELECT wine_dish_id FROM dish_wine_pairings WHERE dish_id = $1 ORDER BY sort_order, wine_dish_id`,
+        [dishId]
+    );
+    return rs.rows.map((r: any) => Number(r.wine_dish_id));
+};
+
+const replaceDishWinePairings = async (tenantId: number, dishId: number, wineIds: number[]): Promise<number[]> => {
+    const wanted = [...new Set(wineIds.map(Number).filter(n => Number.isInteger(n) && n !== dishId))];
+    await queryWithRetry(
+        `DELETE FROM dish_wine_pairings
+         WHERE tenant_id = $1 AND dish_id = $2 AND NOT (wine_dish_id = ANY($3::int[]))`,
+        [tenantId, dishId, wanted]
+    );
+    for (let i = 0; i < wanted.length; i++) {
+        await queryWithRetry(
+            `INSERT INTO dish_wine_pairings (tenant_id, dish_id, wine_dish_id, sort_order)
+             SELECT $1, $2, d.id, $4 FROM dishes d WHERE d.tenant_id = $1 AND d.id = $3
+             ON CONFLICT (tenant_id, dish_id, wine_dish_id) DO UPDATE SET sort_order = EXCLUDED.sort_order`,
+            [tenantId, dishId, wanted[i], i]
+        );
+    }
+    const rows = await queryWithRetry(
+        'SELECT wine_dish_id FROM dish_wine_pairings WHERE tenant_id = $1 AND dish_id = $2 ORDER BY sort_order, wine_dish_id',
+        [tenantId, dishId]
+    );
+    return rows.rows.map((r: any) => Number(r.wine_dish_id));
+};
+
 // Ingredienti del piatto composto: upsert per id — update dei presenti,
 // insert dei nuovi, delete dei mancanti. Il keep-by-id tiene stabili gli id
 // che i palmari hanno nel catalogue: rigenerarli a ogni salvataggio
@@ -12013,7 +12204,9 @@ app.get('/dishes', authenticate, async (req, res) => {
         // /menu/categories: qui le righe restano solo raggruppate.
         const result = await queryWithRetry(
             `SELECT d.*, COALESCE((SELECT array_agg(dm.menu_id ORDER BY dm.menu_id)
-                                   FROM dish_menus dm WHERE dm.dish_id = d.id), '{}') AS menu_ids
+                                   FROM dish_menus dm WHERE dm.dish_id = d.id), '{}') AS menu_ids,
+                    COALESCE((SELECT array_agg(wp.wine_dish_id ORDER BY wp.sort_order, wp.wine_dish_id)
+                              FROM dish_wine_pairings wp WHERE wp.dish_id = d.id), '{}') AS paired_wine_dish_ids
              FROM dishes d WHERE d.tenant_id = $1 ORDER BY d.category, d.sort_order NULLS LAST, d.name`,
             [req.tenantId!]
         );
@@ -12127,7 +12320,12 @@ app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, re
             if ('error' in out) return res.status(400).json({ error: out.error });
             newDish.components = out.components;
         }
-        if (wantedGroups != null || Array.isArray(req.body?.components)) {
+        // Un piatto nuovo nasce senza abbinamenti: campo sempre presente,
+        // come menu_ids, così i client non lo vedono mai sparire.
+        newDish.paired_wine_dish_ids = Array.isArray(req.body?.paired_wine_dish_ids)
+            ? await replaceDishWinePairings(req.tenantId!, newDish.id, req.body.paired_wine_dish_ids)
+            : [];
+        if (wantedGroups != null || Array.isArray(req.body?.components) || Array.isArray(req.body?.paired_wine_dish_ids)) {
             // dish:created non trasporta legami né ingredienti: vivono nel
             // catalogue, e i palmari lo ricaricano su questo evento.
             emitCatalogueUpdated(req.tenantId!, { piatto: newDish.id });
@@ -12244,7 +12442,11 @@ app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req,
             if ('error' in out) return res.status(400).json({ error: out.error });
             updatedDish.components = out.components;
         }
-        if (Array.isArray(req.body?.modifier_group_ids) || Array.isArray(req.body?.components)) {
+        // Vini abbinati: stessa semantica di menu_ids (assente = non toccare).
+        updatedDish.paired_wine_dish_ids = Array.isArray(req.body?.paired_wine_dish_ids)
+            ? await replaceDishWinePairings(req.tenantId!, updatedDish.id, req.body.paired_wine_dish_ids)
+            : await dishWinePairingIds(updatedDish.id);
+        if (Array.isArray(req.body?.modifier_group_ids) || Array.isArray(req.body?.components) || Array.isArray(req.body?.paired_wine_dish_ids)) {
             emitCatalogueUpdated(req.tenantId!, { piatto: updatedDish.id });
         }
 
@@ -21661,8 +21863,8 @@ app.post('/voice-calls/sync', authenticate, requireFeature('voice'), voiceCallsA
 // directly — the endpoints they gate are low-volume (a handful per minute
 // at most), so caching isn't worth the complexity.
 
-type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'digital_menu_enabled' | 'passe_enabled';
-const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'voice_double_seating_enabled', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'digital_menu_enabled', 'passe_enabled'];
+type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'ai_wine_pairing_enabled' | 'digital_menu_enabled' | 'passe_enabled';
+const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'voice_double_seating_enabled', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'ai_wine_pairing_enabled', 'digital_menu_enabled', 'passe_enabled'];
 
 async function getFeatureFlag(tenantId: number, key: FeatureFlagKey, fallback: boolean): Promise<boolean> {
     try {
@@ -21698,6 +21900,9 @@ const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, boolean> = {
     // Spento finché il gestore non scrive le regole della casa: senza base di
     // conoscenza il modello non avrebbe da cosa rispondere.
     ai_messages_enabled: false,
+    // Spento finché il ristoratore non marca la carta dei vini: senza
+    // universo, il sommelier AI non ha da cosa pescare.
+    ai_wine_pairing_enabled: false,
     // Acceso di default: è il flusso storico (il passe lancia e serve). Nei
     // ristoranti senza passe si spegne da Impostazioni → Sala e cucina: la
     // pagina Passe sparisce dal menu e i verbi chiama/servito passano alla
@@ -26949,7 +27154,7 @@ app.post('/orders', authenticate, requirePermission('orders:take'), async (req, 
 // Sta sotto /menu e non sotto /orders per non collidere con /orders/:id.
 app.get('/menu/catalogue', authenticate, requirePermission('orders:view'), async (req, res) => {
     try {
-        const [lists, stations, groups, mods, links, components, catPrefs] = await Promise.all([
+        const [lists, stations, groups, mods, links, components, winePairs, catPrefs] = await Promise.all([
             queryWithRetry(`SELECT id, name, is_default, is_active, sort_order FROM menu_price_lists WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
             queryWithRetry(`SELECT id, name, color, sort_order, is_active FROM stations WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
             // Solo gruppi accesi: un gruppo spento in gestione non deve né
@@ -26960,6 +27165,7 @@ app.get('/menu/catalogue', authenticate, requirePermission('orders:view'), async
             queryWithRetry(`SELECT id, group_id, name, price_delta_cents, price_delta_pct, is_active, sort_order, note, name_en FROM modifiers WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
             queryWithRetry(`SELECT dish_id, group_id FROM dish_modifier_groups WHERE tenant_id = $1`, [req.tenantId!]),
             queryWithRetry(`SELECT id, dish_id, name, removal_delta_cents, sort_order FROM dish_components WHERE tenant_id = $1 ORDER BY sort_order, id`, [req.tenantId!]),
+            queryWithRetry(`SELECT dish_id, wine_dish_id, sort_order FROM dish_wine_pairings WHERE tenant_id = $1 ORDER BY dish_id, sort_order`, [req.tenantId!]),
             getMenuCategoryPrefs(req.tenantId!),
         ]);
         res.json({
@@ -26973,6 +27179,9 @@ app.get('/menu/catalogue', authenticate, requirePermission('orders:view'), async
             // Ingredienti dei piatti composti: pre-inclusi sul foglio, si
             // battono in negativo (removed_component_ids).
             dish_components: components.rows,
+            // Vini abbinati (curati in scheda piatto): il cassetto e il
+            // foglio del palmare li mostrano col «+» verso il Bar.
+            dish_wine_pairings: winePairs.rows,
             // Ordine e accensione delle categorie decisi in Menu: il palmare
             // li applica alle chip e nasconde le categorie spente.
             category_prefs: catPrefs,

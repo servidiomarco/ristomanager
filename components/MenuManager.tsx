@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Dish, RestaurantMenu, BanquetMenu, BanquetCourse, BanquetStatus, Shift, COMMON_ALLERGENS, VAT_RATES, Customer, Table, TableMerge, Reservation, ArrivalStatus, ReservationStatus, Room } from '../types';
-import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, Layers, SlidersHorizontal, Share2, MessageCircle, Martini, IceCreamCone } from 'lucide-react';
+import { Plus, Search, Tag, Trash2, Edit2, Utensils, BookOpen, Check, Calendar, List as ListIcon, LayoutGrid, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, ArrowUpDown, Printer, ImageIcon, X, Sun, Sunset, Users, StickyNote, BookUser, Phone, Mail, Upload, Loader2, Wallet, MoreHorizontal, ChefHat, Info, RefreshCw, QrCode, Copy, Languages, Layers, SlidersHorizontal, Share2, MessageCircle, Martini, IceCreamCone, Wine, Wand2 } from 'lucide-react';
 import { resizeImageToDataUrl } from '../utils/resizeImage';
 import { getRomeDatePart } from '../utils/reservationTime';
 import { printBanquet } from '../utils/printBanquet';
@@ -11,7 +11,7 @@ import { BanquetCompositionModal } from './BanquetCompositionModal';
 import { BanquetPaymentsModal } from './BanquetPaymentsModal';
 import { DishDetailModal } from './DishDetailModal';
 import { CustomerPickerModal } from './CustomerPickerModal';
-import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, setCategoryBar, setCategoryDessert, createMenuCategory, renameMenuCategory, deleteMenuCategory, getBanquetShareLink, sendBanquetQuoteEmail, sendBanquetQuoteWhatsApp, getModifierGroups, getDishComponents, type AdminModifierGroup, type MenuImportResult, type MenuTranslateResult, type MenuCategory } from '../services/apiService';
+import { getCustomers, getTableMerges, importMenuPassepartout, translateMenu, digitalMenuUrl, getFeatureFlags, updateFeatureFlags, getMenuCategories, saveMenuCategories, saveDishOrder, setDishEnabled, createMenu, renameMenu, deleteMenu, setBanquetStatus, setCategoryMenu, setCategoryBar, setCategoryDessert, setCategoryWine, suggestDishWinePairings, pairMenuWines, createMenuCategory, renameMenuCategory, deleteMenuCategory, getBanquetShareLink, sendBanquetQuoteEmail, sendBanquetQuoteWhatsApp, getModifierGroups, getDishComponents, type AdminModifierGroup, type MenuImportResult, type MenuTranslateResult, type PairWinesResult, type MenuCategory } from '../services/apiService';
 import { socketClient } from '../services/socketClient';
 import { getSalaConfig, type SalaStation } from '../services/salaApiService';
 import { MenuVariantsModal } from './MenuVariantsModal';
@@ -304,6 +304,15 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     } catch { /* la pill resta com'era: nessun falso ok */ }
     finally { setCatMenuBusy(null); }
   };
+  // La spunta «vino»: marca la carta dei vini — l'universo degli abbinamenti.
+  const handleToggleCategoryWine = async (catName: string, wine: boolean) => {
+    setCatMenuBusy(`${catName}|wine`);
+    try {
+      await setCategoryWine(catName, wine);
+      refreshMenuCats();
+    } catch { /* la pill resta com'era: nessun falso ok */ }
+    finally { setCatMenuBusy(null); }
+  };
   const [reorderBusy, setReorderBusy] = useState(false);
   useEffect(() => {
     let cancelled = false;
@@ -369,10 +378,18 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   // Menu digitale: QR pubblico, interruttore del flag e traduzioni AI.
   const [qrOpen, setQrOpen] = useState(false);
   const [menuAttivo, setMenuAttivo] = useState<boolean | null>(null);
+  // Interruttore del sommelier AI: vive qui accanto ad «Abbina i vini»
+  // perché è l'unico posto dove la funzione si usa — spento, i due
+  // endpoint rispondono ai_disabled e i bottoni lo spiegano.
+  const [wineAiAttivo, setWineAiAttivo] = useState<boolean | null>(null);
+  const [wineAiBusy, setWineAiBusy] = useState(false);
   const [menuFlagBusy, setMenuFlagBusy] = useState(false);
   const [translating, setTranslating] = useState(false);
   const [translateEsito, setTranslateEsito] = useState<MenuTranslateResult | null>(null);
   const [translateError, setTranslateError] = useState<string | null>(null);
+  const [pairingWines, setPairingWines] = useState(false);
+  const [pairEsito, setPairEsito] = useState<PairWinesResult | null>(null);
+  const [pairError, setPairError] = useState<string | null>(null);
   const [linkCopiato, setLinkCopiato] = useState(false);
   const menuUrl = digitalMenuUrl();
 
@@ -380,8 +397,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     if (!qrOpen) return;
     let cancelled = false;
     getFeatureFlags()
-      .then(f => { if (!cancelled) setMenuAttivo(f.digital_menu_enabled === true); })
-      .catch(() => { if (!cancelled) setMenuAttivo(null); });
+      .then(f => { if (!cancelled) { setMenuAttivo(f.digital_menu_enabled === true); setWineAiAttivo(f.ai_wine_pairing_enabled === true); } })
+      .catch(() => { if (!cancelled) { setMenuAttivo(null); setWineAiAttivo(null); } });
     return () => { cancelled = true; };
   }, [qrOpen]);
 
@@ -398,6 +415,19 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     }
   };
 
+  const toggleWineAi = async () => {
+    if (wineAiBusy || wineAiAttivo == null) return;
+    setWineAiBusy(true);
+    try {
+      const updated = await updateFeatureFlags({ ai_wine_pairing_enabled: !wineAiAttivo });
+      setWineAiAttivo(updated.ai_wine_pairing_enabled === true);
+    } catch (_) {
+      /* lo stato resta quello vero: al prossimo open si ricarica */
+    } finally {
+      setWineAiBusy(false);
+    }
+  };
+
   const handleTranslate = async () => {
     if (translating) return;
     setTranslating(true);
@@ -409,6 +439,24 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       setTranslateError(err?.data?.message ?? err?.data?.error ?? err?.message ?? 'Traduzione non riuscita');
     } finally {
       setTranslating(false);
+    }
+  };
+
+  const handlePairWines = async () => {
+    if (pairingWines) return;
+    setPairingWines(true);
+    setPairEsito(null);
+    setPairError(null);
+    try {
+      setPairEsito(await pairMenuWines());
+    } catch (err: any) {
+      const code = err?.data?.error;
+      setPairError(
+        code === 'ai_disabled' ? 'Funzione spenta: accendi «Abbinamenti vino AI» fra le funzioni.'
+        : code === 'no_wines' ? 'Marca prima una categoria come «Vino» nella modale Categorie.'
+        : err?.data?.message ?? err?.data?.error ?? err?.message ?? 'Abbinamento non riuscito');
+    } finally {
+      setPairingWines(false);
     }
   };
 
@@ -676,6 +724,42 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   // riformatta a ogni tasto rende impossibile battere «2,50») e diventa
   // centesimi solo al salvataggio.
   const [dishGroupIds, setDishGroupIds] = useState<number[]>([]);
+  // Vini abbinati del piatto nel form (id di piatti delle categorie «vino»).
+  const [dishWineIds, setDishWineIds] = useState<number[]>([]);
+  const [suggestingWines, setSuggestingWines] = useState(false);
+  const [suggestWinesError, setSuggestWinesError] = useState<string | null>(null);
+  // La carta dei vini: piatti attivi delle categorie marcate «vino» (o
+  // «bar» in mancanza) — lo stesso universo del server.
+  const wineDishes = useMemo(() => {
+    let cats = (menuCats ?? []).filter(c => c.wine).map(c => c.name);
+    if (cats.length === 0) cats = (menuCats ?? []).filter(c => c.bar).map(c => c.name);
+    const set = new Set(cats);
+    return dishes.filter(d => d.category && set.has(d.category) && d.is_active !== false && d.crm_enabled !== false);
+  }, [dishes, menuCats]);
+  // I piatti delle categorie vino/bar/dolci non si abbinano: la card non
+  // compare — un vino non suggerisce un vino.
+  const dishCatIsWineish = useMemo(() => {
+    const c = (menuCats ?? []).find(x => x.name === newDish.category);
+    return !!(c && (c.wine || c.bar || c.dessert));
+  }, [menuCats, newDish.category]);
+  const handleSuggestWines = async () => {
+    if (suggestingWines || editingDishId == null) return;
+    setSuggestingWines(true);
+    setSuggestWinesError(null);
+    try {
+      const r = await suggestDishWinePairings(editingDishId);
+      if (r.wine_dish_ids.length === 0) setSuggestWinesError('Nessun abbinamento convincente fra i vini in carta.');
+      else setDishWineIds(r.wine_dish_ids);
+    } catch (err: any) {
+      const code = err?.data?.error;
+      setSuggestWinesError(
+        code === 'ai_disabled' ? 'Funzione spenta: accendi «Abbinamenti vino AI» fra le funzioni.'
+        : code === 'no_wines' ? 'Marca prima una categoria come «Vino» nella modale Categorie.'
+        : err?.data?.message ?? err?.message ?? 'Suggerimento non riuscito');
+    } finally {
+      setSuggestingWines(false);
+    }
+  };
   const [dishComponents, setDishComponents] = useState<{ id?: number; name: string; sconto: string }[]>([]);
   // Partite di cucina per la select «Partita» del form piatto. Best-effort:
   // un ristorante senza modulo comande resta a lista vuota e il campo non
@@ -806,6 +890,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         weight_max_grams: newDish.weight_max_grams ?? null,
         weight_default_grams: newDish.weight_default_grams ?? null,
         modifier_group_ids: dishGroupIds,
+        paired_wine_dish_ids: dishWineIds,
         // Gli ingredienti si mandano solo per i composti: su un piatto
         // tornato Semplice restano com'erano, ignorati (non cancellati).
         ...(dishType === 'COMPOSED'
@@ -863,6 +948,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     // Come i menu: le spunte dei gruppi partono dal default della categoria
     // (la spunta in modale Varianti), e restano libere.
     setDishGroupIds(menuCats?.find(c => c.name === firstCat)?.modifier_group_ids ?? []);
+    setDishWineIds([]);
+    setSuggestWinesError(null);
     setDishComponents([]);
     setPhotoUploadError(null);
     setIsDishFormOpen(true);
@@ -888,6 +975,8 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     // Le spunte dei gruppi si leggono dai dish_ids della gestione varianti;
     // gli ingredienti si caricano pigri — servono solo aprendo un composto.
     setDishGroupIds(modifierGroups.filter(g => g.dish_ids.includes(dish.id)).map(g => g.id));
+    setDishWineIds(dish.paired_wine_dish_ids ?? []);
+    setSuggestWinesError(null);
     setDishComponents([]);
     if (dish.dish_type === 'COMPOSED') {
       getDishComponents(dish.id)
@@ -2648,6 +2737,60 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               )}
             </FormCard>
 
+            {/* I vini abbinati: l'AI propone dai vini in carta, qui si cura —
+                palmare e menu pubblico mostrano SOLO ciò che si salva. Solo
+                per i piatti di cucina: un vino non si abbina a un vino. */}
+            {!dishCatIsWineish && wineDishes.length > 0 && (
+              <FormCard
+                title="Vini abbinati"
+                aside={
+                  dishWineIds.length === 0
+                    ? <span className="text-[13px] text-[var(--ds-text-muted)]">nessuno</span>
+                    : <span className="text-[13px] text-[var(--ds-text-muted)]">{dishWineIds.length === 1 ? '1 vino' : `${dishWineIds.length} vini`}</span>
+                }
+              >
+                <div className="flex flex-wrap gap-2">
+                  {wineDishes.map(w => {
+                    const isSelected = dishWineIds.includes(w.id);
+                    return (
+                      <button
+                        key={w.id}
+                        type="button"
+                        onClick={() => setDishWineIds(prev =>
+                          prev.includes(w.id) ? prev.filter(x => x !== w.id) : [...prev, w.id])}
+                        aria-pressed={isSelected}
+                        className={`inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                          isSelected
+                            ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                            : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
+                        }`}
+                      >
+                        {isSelected ? <Check size={13} /> : <Wine size={13} aria-hidden />}
+                        {w.name}
+                      </button>
+                    );
+                  })}
+                </div>
+                {isEditingDish && (
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {/* Wand2 + famiglia arriving: è AI che propone (§ds). La
+                        proposta pre-seleziona i chip e si salva col Salva. */}
+                    <button
+                      type="button"
+                      onClick={handleSuggestWines}
+                      disabled={suggestingWines}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-arriving-tint)] px-3.5 text-[13px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    >
+                      {suggestingWines ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+                      {suggestingWines ? 'Ci penso…' : 'Suggerisci'}
+                    </button>
+                    <span className="text-[13px] text-[var(--ds-text-muted)]">La proposta si salva solo col Salva.</span>
+                  </div>
+                )}
+                {suggestWinesError && <p className="mt-2 text-[13px] text-[var(--ds-critical-text)]">{suggestWinesError}</p>}
+              </FormCard>
+            )}
+
             {/* Semplice = com'è sempre stato. Composto = fatto di ingredienti
                 pre-inclusi che il cameriere può togliere («Senza cipolla»),
                 gratis o a sconto. */}
@@ -3694,6 +3837,43 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 </p>
               )}
               {translateError && <p className="text-[13px] text-[var(--ds-critical-text)]">{translateError}</p>}
+              {/* Il sommelier AI sulla carta intera: riempie solo i piatti
+                  senza abbinamenti, ognuno resta correggibile in scheda. */}
+              <div className="flex items-center justify-between gap-3 rounded-2xl bg-[var(--ds-surface-row)] px-4 py-3">
+                <span className="text-[14px] font-medium text-[var(--ds-text-primary)]">
+                  {wineAiAttivo == null ? 'Stato…' : wineAiAttivo ? 'Sommelier AI attivo' : 'Sommelier AI spento'}
+                </span>
+                <button
+                  type="button"
+                  onClick={toggleWineAi}
+                  disabled={wineAiBusy || wineAiAttivo == null}
+                  className={`inline-flex h-9 items-center rounded-full px-4 text-[13px] font-semibold transition-colors disabled:opacity-40 ${
+                    wineAiAttivo
+                      ? 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]'
+                      : 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                  }`}
+                >
+                  {wineAiBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : wineAiAttivo ? 'Spegni' : 'Accendi'}
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={handlePairWines}
+                disabled={pairingWines || wineAiAttivo !== true}
+                className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-arriving-tint)] px-3.5 text-[13px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 disabled:opacity-40"
+              >
+                {pairingWines ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+                {pairingWines ? 'Ci penso…' : 'Abbina i vini'}
+              </button>
+              <p className="text-[13px] text-[var(--ds-text-muted)]">
+                Propone i vini della carta per i piatti ancora senza abbinamenti; si corregge piatto per piatto in scheda.
+              </p>
+              {pairEsito && (
+                <p className="text-[13px] text-[var(--ds-seated-text)]">
+                  {pairEsito.abbinati === 0 ? 'Tutto già abbinato.' : `${pairEsito.abbinati} ${pairEsito.abbinati === 1 ? 'piatto abbinato' : 'piatti abbinati'}.`}
+                </p>
+              )}
+              {pairError && <p className="text-[13px] text-[var(--ds-critical-text)]">{pairError}</p>}
             </div>
           )}
         </div>
@@ -4011,6 +4191,25 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     >
                       <IceCreamCone size={12} />
                       Dolci
+                    </button>
+                    {/* La spunta «vino»: carta dei vini — l'universo degli
+                        abbinamenti vino–piatto (scheda piatto e AI). */}
+                    <button
+                      type="button"
+                      disabled={catMenuBusy === `${cat.name}|wine`}
+                      onClick={() => handleToggleCategoryWine(cat.name, cat.wine !== true)}
+                      aria-pressed={cat.wine === true}
+                      title={cat.wine
+                        ? `${cat.name} è carta dei vini — togli la spunta`
+                        : `${cat.name} entra nella carta dei vini per gli abbinamenti`}
+                      className={`inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                        cat.wine
+                          ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                          : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
+                      } ${catMenuBusy === `${cat.name}|wine` ? 'opacity-50' : ''}`}
+                    >
+                      <Wine size={12} />
+                      Vino
                     </button>
                   </div>
                 </div>

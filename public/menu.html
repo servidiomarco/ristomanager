@@ -112,6 +112,7 @@ main { max-width: 760px; margin: 0 auto; padding: 8px 16px 64px; }
 .piatto__nome { font-weight: 600; font-size: 15px; }
 .piatto__desc { color: var(--ds-text-muted); font-size: 13px; margin-top: 2px; }
 .piatto__allergeni { color: var(--ds-text-subtle); font-size: 12px; margin-top: 4px; }
+.piatto__abbinati { color: var(--ds-text-subtle); font-size: 12px; margin-top: 4px; font-style: italic; }
 .piatto__prezzo { font-weight: 600; font-size: 15px; white-space: nowrap; }
 
 .stato { text-align: center; color: var(--ds-text-muted); padding: 56px 20px; }
@@ -142,10 +143,10 @@ footer { text-align: center; color: var(--ds-text-subtle); font-size: 12px; padd
     /* Testi della pagina nelle quattro lingue del menu. I piatti usano le
        traduzioni del CRM quando ci sono, altrimenti restano in italiano. */
     var UI = {
-        it: { menu: 'Menu', allergeni: 'Allergeni', vuoto: 'Il menu non è al momento disponibile.', errore: 'Non riusciamo a caricare il menu. Riprova tra poco.' },
-        en: { menu: 'Menu', allergeni: 'Allergens', vuoto: 'The menu is not available right now.', errore: 'We could not load the menu. Please try again shortly.' },
-        fr: { menu: 'Menu', allergeni: 'Allergènes', vuoto: 'Le menu n’est pas disponible pour le moment.', errore: 'Impossible de charger le menu. Réessayez dans un instant.' },
-        de: { menu: 'Speisekarte', allergeni: 'Allergene', vuoto: 'Die Speisekarte ist derzeit nicht verfügbar.', errore: 'Die Speisekarte konnte nicht geladen werden. Bitte versuche es gleich noch einmal.' }
+        it: { menu: 'Menu', allergeni: 'Allergeni', abbinati: 'Si abbina con', vuoto: 'Il menu non è al momento disponibile.', errore: 'Non riusciamo a caricare il menu. Riprova tra poco.' },
+        en: { menu: 'Menu', allergeni: 'Allergens', abbinati: 'Pairs with', vuoto: 'The menu is not available right now.', errore: 'We could not load the menu. Please try again shortly.' },
+        fr: { menu: 'Menu', allergeni: 'Allergènes', abbinati: 'S’accorde avec', vuoto: 'Le menu n’est pas disponible pour le moment.', errore: 'Impossible de charger le menu. Réessayez dans un instant.' },
+        de: { menu: 'Speisekarte', allergeni: 'Allergene', abbinati: 'Passt zu', vuoto: 'Die Speisekarte ist derzeit nicht verfügbar.', errore: 'Die Speisekarte konnte nicht geladen werden. Bitte versuche es gleich noch einmal.' }
     };
     var LANG_LABEL = { it: 'it', en: 'en', fr: 'fr', de: 'de' };
 
@@ -248,6 +249,7 @@ footer { text-align: center; color: var(--ds-text-subtle); font-size: 12px; padd
                     + '<div class="piatto__testo"><div class="piatto__nome">' + esc(tp.nome) + '</div>'
                     + (tp.desc ? '<div class="piatto__desc">' + esc(tp.desc) + '</div>' : '')
                     + (p.allergens && p.allergens.length ? '<div class="piatto__allergeni">' + esc(t('allergeni')) + ': ' + esc(p.allergens.join(', ')) + '</div>' : '')
+                    + (p.abbinati && p.abbinati.length ? '<div class="piatto__abbinati">' + esc(t('abbinati')) + ': ' + esc(p.abbinati.join(', ')) + '</div>' : '')
                     + '</div>'
                     + (p.price > 0 ? '<div class="piatto__prezzo tnum">' + esc(euro(p.price)) + '</div>' : '')
                     + '</div>';
