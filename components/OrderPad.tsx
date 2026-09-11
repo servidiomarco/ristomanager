@@ -2004,6 +2004,13 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       course >= 1 && course < MAX_COURSES ? course + 1
       : course === BAR_COURSE_NO || course === DESSERT_COURSE_NO ? 1
       : null;
+    // Il polso di quello che si sta battendo, senza cambiare scheda: bozze
+    // locali più quelle rimaste in bozza sul server — gli stessi numeri
+    // dell'«Invia tutto» della Comanda.
+    const draftCount = cart.reduce((s, l) => s + l.qty, 0)
+      + order.items.reduce((s, i) => s + (i.status === 'DRAFT' && !isSystemLine(i) ? i.qty : 0), 0);
+    const draftTotal = cartTotal
+      + order.items.reduce((s, i) => s + (i.status === 'DRAFT' && !isSystemLine(i) ? i.unit_price_cents * i.qty : 0), 0);
     return (
       <div className="flex h-full min-h-0 flex-col bg-[var(--ds-canvas)] px-4 pt-[max(0.75rem,env(safe-area-inset-top))]">
         <div className="flex-shrink-0">{topBar}</div>
@@ -2036,6 +2043,23 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
             Segue
             <ArrowRight size={16} aria-hidden />
           </button>
+          {/* Il numero che mancava alla pagina: quanto c'è da inviare.
+              Quieto, a destra, e il tocco porta dove si invia. */}
+          {draftCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setComandaOpen(true)}
+              aria-label={`Apri la comanda: ${draftCount === 1 ? '1 riga' : `${draftCount} righe`} da inviare, ${euro(draftTotal)}`}
+              className="ml-auto min-w-0 rounded-[10px] px-1.5 py-1 text-right transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              <span className="block truncate text-[12px] leading-tight text-[var(--ds-text-muted)]">
+                {draftCount === 1 ? '1 riga da inviare' : `${draftCount} righe da inviare`}
+              </span>
+              <span className="block text-[15px] font-semibold leading-tight tabular-nums text-[var(--ds-text-primary)]">
+                {euro(draftTotal)}
+              </span>
+            </button>
+          )}
         </div>
 
         <PadTabs

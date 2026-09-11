@@ -171,38 +171,27 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
 
   // I controlli di riga sono gli stessi nelle due densità della lista: la
   // preferenza cambia quanto si vede, mai come si tocca.
+  // Il battuto TOTALE del piatto, su tutte le uscite: è il numero che la
+  // riga mostra, coerente col cassetto (che è cross-uscita). Senza cassetto
+  // (Cassa in griglia) si torna al conteggio dell'uscita in composizione.
+  const battuteQty = (d: Dish): number =>
+    draftLinesFor
+      ? draftLinesFor(d.id).reduce((s, l) => s + l.qty, 0)
+      : (qtyInCourse.get(d.id) ?? 0);
+
   const rowControls = (d: Dish) => {
-    const qty = qtyInCourse.get(d.id) ?? 0;
+    const qty = battuteQty(d);
     // A sotto-righe in vista la riga piatto si spoglia: contare, togliere e
-    // spostare si fa lì sotto, dove si vede QUALE combinazione si tocca —
-    // il cestino aggregato con due combinazioni era un controllo ambiguo.
+    // spostare si fa lì sotto, dove si vede QUALE combinazione si tocca.
     const ds = draftState(d.id);
     const rowsOpen = ds?.open === true;
-    // Il «−» opera dove il tap aggiunge: sui piatti che aprono il foglio al
-    // tap (peso, obbligatori) non si toglie da qui. Fra più righe con varianti
-    // diverse decide removeFromCart in OrderPad, o si toglie dalla comanda.
-    const canRemove = qty > 0 && !tapOpensSheet(d.id);
     return (
       <div className="flex flex-shrink-0 items-center gap-2">
-        {/* Il chip dell'uscita non sta più qui: vive sulla sotto-riga, dove
-            sposta la combinazione specifica — la riga piatto resta pulita. */}
-        {canRemove && !rowsOpen && (
-          // L'ultimo pezzo si toglie con il cestino, non con il meno: «meno
-          // uno» da uno è togliere il piatto, e dirlo con l'icona giusta
-          // evita il tocco di troppo.
-          <button
-            type="button"
-            onClick={() => onRemove(d)}
-            aria-label={qty === 1 ? `Togli ${d.name}` : `Uno in meno di ${d.name}`}
-            className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
-              qty === 1
-                ? 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]'
-                : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
-            }`}
-          >
-            {qty === 1 ? <Trash2 size={16} /> : <Minus size={16} />}
-          </button>
-        )}
+        {/* Niente cestino sulla riga piatto: con più combinazioni decideva
+            da solo quale scalare, e riempiva la pagina di rosso. Togliere
+            vive nel cassetto (un tap sul nome), riga per riga. Il chip
+            dell'uscita idem: sulla sotto-riga, dove sposta la combinazione
+            specifica. */}
         {qty > 0 && !rowsOpen && (
           <span className="min-w-[16px] text-center text-[17px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
             {qty}
@@ -631,7 +620,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
         ) : (
           <div className="flex flex-col gap-2">
             {visible.length === 0 ? empty : visible.map(d => {
-              const qty = qtyInCourse.get(d.id) ?? 0;
+              const qty = battuteQty(d);
               return (
                 // Colonna: la prima riga è il piatto di sempre, sotto le
                 // eventuali sotto-righe delle combinazioni battute.
