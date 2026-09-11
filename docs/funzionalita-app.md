@@ -365,7 +365,6 @@ Modulo completo per presa comanda, produzione e coordinamento delle uscite. Si a
 Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 
 - **Import del menu** dal catalogo articoli della cassa, varianti comprese. Le voci disattivate in cassa (articoli e categorie "muti", tenuti lì solo per lo storico) non entrano nel menu del CRM; se erano già state importate, il sync le rimuove.
-- **Foto da cassa**: il bottone accanto a «Importa da cassa» porta le foto degli articoli del gestionale sui piatti che nel CRM **non ne hanno** — la foto è un campo del CRM, una foto caricata a mano non viene mai sovrascritta. Le immagini viaggiano dall'agente LAN a lotti (il catalogo con le foto pesa ~14MB e si scarica una volta sola, in cache); l'esito dice quante foto sono entrate e quanti articoli in cassa non ne hanno. Può richiedere qualche minuto.
 - Anteprima della comanda attiva su un tavolo della cassa e **importazione del conto** nel CRM.
 - **Chiusura del conto in cassa dal CRM**: scontrino e saldo partono verso il gestionale; ritentabile se la cassa era irraggiungibile.
 - Collegamento sicuro cloud↔ristorante tramite un piccolo agente installato sulla LAN (nessuna porta aperta verso l'esterno), con stato di connessione visibile.
@@ -590,7 +589,6 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
-| 2026-09-11 | Menu & Banchetti | «Foto da cassa» in gestione menu: importa le foto degli articoli Passepartout sui piatti pp senza foto (a lotti via agente LAN, cache del catalogo; le foto caricate a mano non si toccano), con esito nel callout. |
 | 2026-09-11 | Comande, Cucina e Passe | Le miniature dei piatti compaiono anche nella ricerca piatti del palmare; il tocco sulla miniatura apre la foto sopra il velo senza chiudere la ricerca né battere. |
 | 2026-09-11 | Comande, Cucina e Passe | Foto del piatto sul palmare e in Cassa, dove disponibile: miniatura accanto al nome (lista, compatta, pagine, griglia); il tocco sulla miniatura non batte ma apre la foto a tutto schermo con nome e prezzo, da mostrare al cliente al tavolo — un tocco ovunque chiude. |
 | 2026-09-11 | Comande, Cucina e Passe | Menu a pagine: totale «da inviare» (righe e importo) a destra della barra uscita/Segue, tocco che apre la Comanda; riga piatto battuta più leggera — conteggio totale del piatto e «+», il cestino vive solo nel cassetto. |

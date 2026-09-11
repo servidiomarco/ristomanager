@@ -3793,69 +3793,6 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
     }
 });
 
-// --- Import delle foto piatti dalla cassa ------------------------------------
-// La foto è un campo del CRM (l'import menu non la tocca): qui si riempiono
-// SOLO i piatti pp senza foto — mai sovrascritture, una foto caricata a mano
-// vince sempre sulla cassa. Le immagini viaggiano a lotti sotto il buffer del
-// socket (l'agente tiene il catalogo in cache e risponde con `resto` finché
-// c'è coda); salvate come data-URI in photo_url, come le foto caricate a mano.
-app.post('/menu/import/passepartout/foto', authenticate, requirePermission('menu:full'), requireFeature('passepartout'), async (req, res) => {
-    try {
-        const rows = await withTenant(req.tenantId!, (client) => client.query(
-            `SELECT id, external_ref FROM dishes
-             WHERE tenant_id = $1 AND external_ref LIKE 'pp:articolo:%'
-               AND (photo_url IS NULL OR photo_url = '')`,
-            [req.tenantId!]
-        ));
-        const byPp = new Map<number, number>();
-        for (const r of rows.rows) {
-            const m = /^pp:articolo:(\d+)$/.exec(String(r.external_ref));
-            if (m) byPp.set(Number(m[1]), r.id);
-        }
-        let pending = [...byPp.keys()];
-        let aggiornate = 0, senzaFoto = 0, troppoGrandi = 0;
-        // Il tetto ai giri è una cintura: con ~700KB a lotto servirebbero
-        // centinaia di foto per avvicinarlo, non un catalogo vero.
-        for (let round = 0; pending.length > 0 && round < 100; round++) {
-            // Timeout largo a ogni giro: a cache dell'agente fredda dietro la
-            // prima risposta c'è la GetArticoli intera (~14MB dal gestionale).
-            const lotto = await callPassepartout<{
-                foto: { id: number; dataUri: string }[];
-                senzaFoto: number[]; troppoGrandi: number[]; resto: number[];
-            }>('fotoArticoli', { ids: pending }, 150_000);
-            senzaFoto += lotto.senzaFoto.length;
-            troppoGrandi += lotto.troppoGrandi.length;
-            for (const f of lotto.foto) {
-                const dishId = byPp.get(f.id);
-                if (dishId == null || typeof f.dataUri !== 'string' || !f.dataUri.startsWith('data:image/')) continue;
-                const upd = await withTenant(req.tenantId!, (client) => client.query(
-                    // La guardia sul vuoto anche qui: nel frattempo qualcuno
-                    // può aver caricato una foto a mano, e quella resta.
-                    `UPDATE dishes SET photo_url = $1
-                     WHERE tenant_id = $2 AND id = $3 AND (photo_url IS NULL OR photo_url = '')`,
-                    [f.dataUri, req.tenantId!, dishId]
-                ));
-                aggiornate += upd.rowCount ?? 0;
-            }
-            pending = lotto.resto.map(Number).filter(Number.isFinite);
-        }
-        const esito = { candidati: byPp.size, aggiornate, senza_foto: senzaFoto, troppo_grandi: troppoGrandi };
-        try { socketService?.broadcastToAll(req.tenantId!, 'dish:synced', { foto_importate: aggiornate }); } catch (_) {}
-        if (req.user && aggiornate > 0) {
-            LogService.logActivity(
-                req.tenantId!, req.user.userId, req.user.email, req.user.email,
-                ActivityAction.UPDATE, ResourceType.DISH, undefined,
-                `Foto piatti importate dalla cassa: ${aggiornate} su ${byPp.size} piatti senza foto`
-            ).catch(() => {});
-        }
-        res.json(esito);
-    } catch (err: any) {
-        if (sendPassepartoutError(res, err)) return;
-        console.error('POST /menu/import/passepartout/foto error:', err);
-        res.status(500).json({ error: 'Internal server error', detail: err?.message });
-    }
-});
-
 // --- Menu digitale per gli ospiti --------------------------------------------
 // Pagina pubblica multilingua servita dal backend (come /prenota): QR al
 // tavolo → /menu → fetch di /public/menu. Il testo tradotto vive nel CRM:
