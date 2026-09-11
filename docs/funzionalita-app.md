@@ -257,7 +257,7 @@ Due voci in sidebar: **Menu** (i piatti, organizzati in menu) e **Banchetti** (g
 ## Menu digitale pubblico
 
 - Menu consultabile dal cliente **inquadrando un QR al tavolo**, senza app da installare.
-- Multilingua (usa le traduzioni del menu), con foto, descrizioni, prezzi e allergeni.
+- Multilingua (usa le traduzioni del menu), con foto, descrizioni, prezzi e allergeni. Il tocco sulla miniatura apre la **foto a tutto schermo** su fondo nero con nome e prezzo, come sul palmare; un tocco ovunque chiude.
 - Sotto i piatti con vini abbinati una riga discreta «Si abbina con: …» (etichetta nelle quattro lingue) coi vini scelti dal ristoratore, se attivi e in carta.
 - Si attiva/disattiva con un interruttore; il QR si genera dalla pagina Menu.
 
@@ -594,6 +594,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-11 | Menu digitale pubblico | Il tocco sulla foto di un piatto (o vino) apre la foto a tutto schermo con nome e prezzo, come sul palmare; un tocco ovunque o Esc chiude. |
 | 2026-09-11 | Menu & Banchetti | Categoria bloccata sui piatti della cassa: il cambio manuale di categoria dalla scheda piatto sopravvive all'«Importa da cassa» (lucchetto per piatto; nome, prezzo, IVA e attivo restano della cassa). |
 | 2026-09-11 | Comande, Cucina e Passe | Il «Vino consigliato» lascia il cassetto del piatto e resta solo nel foglio varianti: il cassetto torna alle sole combinazioni battute. |
 | 2026-09-11 | Menu & Banchetti · Comande · Menu digitale · Funzioni AI | Vini abbinati ai piatti: card in scheda con «Suggerisci» AI e «Abbina i vini» sull'intera carta (flag dedicato), righe «Vino consigliato» nel cassetto del palmare e nel foglio varianti col «+» che batte nel Bar, riga «Si abbina con» sul menu QR. |
