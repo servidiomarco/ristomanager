@@ -730,6 +730,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
   // Le sezioni della carta partono chiuse: la testata col conteggio dice
   // già dove sono le spunte, i settanta chip compaiono solo dove si tocca.
   const [openWineCats, setOpenWineCats] = useState<Set<string>>(new Set());
+  // La lente della carta: null = chiusa, stringa = campo aperto. Col filtro
+  // attivo le sezioni si aprono da sole sui soli vini che matchano.
+  const [wineSearch, setWineSearch] = useState<string | null>(null);
   const [suggestWinesError, setSuggestWinesError] = useState<string | null>(null);
   // La carta dei vini: piatti attivi delle categorie marcate «vino» (o
   // «bar» in mancanza) — lo stesso universo del server.
@@ -976,6 +979,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     setDishGroupIds(menuCats?.find(c => c.name === firstCat)?.modifier_group_ids ?? []);
     setDishWineIds([]);
     setOpenWineCats(new Set());
+    setWineSearch(null);
     setSuggestWinesError(null);
     setDishComponents([]);
     setPhotoUploadError(null);
@@ -1004,6 +1008,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
     setDishGroupIds(modifierGroups.filter(g => g.dish_ids.includes(dish.id)).map(g => g.id));
     setDishWineIds(dish.paired_wine_dish_ids ?? []);
     setOpenWineCats(new Set());
+    setWineSearch(null);
     setSuggestWinesError(null);
     setDishComponents([]);
     if (dish.dish_type === 'COMPOSED') {
@@ -2772,20 +2777,51 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               <FormCard
                 title="Vini abbinati"
                 aside={
-                  dishWineIds.length === 0
-                    ? <span className="text-[13px] text-[var(--ds-text-muted)]">nessuno</span>
-                    : <span className="text-[13px] text-[var(--ds-text-muted)]">{dishWineIds.length === 1 ? '1 vino' : `${dishWineIds.length} vini`}</span>
+                  <span className="flex items-center gap-2">
+                    <span className="text-[13px] text-[var(--ds-text-muted)]">
+                      {dishWineIds.length === 0 ? 'nessuno' : dishWineIds.length === 1 ? '1 vino' : `${dishWineIds.length} vini`}
+                    </span>
+                    {/* La lente: apre il campo che filtra la carta — con 60
+                        etichette la fisarmonica da sola non basta. Riaperta,
+                        chiude e azzera. */}
+                    <button
+                      type="button"
+                      onClick={() => setWineSearch(prev => prev == null ? '' : null)}
+                      aria-label={wineSearch == null ? 'Cerca un vino' : 'Chiudi la ricerca'}
+                      aria-expanded={wineSearch != null}
+                      className={`inline-flex h-9 w-9 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                        wineSearch != null
+                          ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                          : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
+                      }`}
+                    >
+                      {wineSearch != null ? <X size={16} /> : <Search size={16} />}
+                    </button>
+                  </span>
                 }
               >
+                {wineSearch != null && (
+                  <input
+                    type="text"
+                    value={wineSearch}
+                    onChange={e => setWineSearch(e.target.value)}
+                    placeholder="Cerca un vino…"
+                    autoFocus
+                    className={`${dsInput} mb-3`}
+                  />
+                )}
                 {/* Una sezione per categoria della carta, chiusa in
                     partenza: la testata (nome, conteggio dei SELEZIONATI,
                     chevron) si tocca e apre i chip — settanta chip in vista
                     solo dove servono. Con una categoria sola niente testata:
                     i chip restano sempre in vista, non c'è nulla da dividere. */}
                 <div className="flex flex-col gap-3">
-                  {wineGroups.map(([cat, wines]) => {
+                  {wineGroups.map(([cat, allWines]) => {
+                    const q = (wineSearch ?? '').trim().toLowerCase();
+                    const wines = q ? allWines.filter(w => w.name.toLowerCase().includes(q)) : allWines;
+                    if (q && wines.length === 0) return null;
                     const chosen = wines.filter(w => dishWineIds.includes(w.id)).length;
-                    const open = wineGroups.length === 1 || openWineCats.has(cat);
+                    const open = q !== '' || wineGroups.length === 1 || openWineCats.has(cat);
                     return (
                       <section key={cat} className="flex flex-col gap-2">
                         {wineGroups.length > 1 && (
