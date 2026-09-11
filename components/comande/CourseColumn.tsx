@@ -212,7 +212,7 @@ export const CourseList: React.FC<CourseListProps> = ({
             type="button"
             onClick={() => onCourse(n)}
             aria-pressed={current}
-            className={`absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full px-3 py-1 text-[12px] font-semibold ring-1 ring-inset transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+            className={`absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full px-3.5 py-1.5 text-[14px] font-semibold ring-1 ring-inset transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               current
                 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] ring-transparent'
                 : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] ring-[var(--ds-border-strong)]'
@@ -294,11 +294,11 @@ export const CourseList: React.FC<CourseListProps> = ({
                   {...(i.status === 'DRAFT' && i.line_kind === 'DISH'
                     ? rowGrip({ kind: 'item', item: i, from: i.course_no })
                     : {})}
-                  className={`flex items-center gap-2 text-[15px] transition-opacity ${
+                  className={`flex items-center gap-2 text-[17px] transition-opacity ${
                     dnd.drag?.kind === 'item' && dnd.drag.item.id === i.id ? 'opacity-40' : ''
                   }`}
                 >
-                  <span className="flex-shrink-0 text-[14px] font-semibold tabular-nums text-[var(--ds-text-muted)]">
+                  <span className="flex-shrink-0 text-[16px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
                     {i.qty}×
                   </span>
                   <span
@@ -310,18 +310,18 @@ export const CourseList: React.FC<CourseListProps> = ({
                   >
                     {i.name_snapshot}
                     {i.weight_grams != null && (
-                      <span className="text-[13px] tabular-nums text-[var(--ds-text-muted)]"> · {weightLabel(i.weight_grams)}</span>
+                      <span className="text-[14px] tabular-nums text-[var(--ds-text-muted)]"> · {weightLabel(i.weight_grams)}</span>
                     )}
                     {((i.modifiers && i.modifiers.length > 0) || i.note) && (
-                      <span className="text-[13px] text-[var(--ds-text-muted)]">
+                      <span className="text-[14px] text-[var(--ds-text-muted)]">
                         {' · '}{[...(i.modifiers ?? []).map(m => m.name), ...(i.note ? [i.note] : [])].join(', ')}
                       </span>
                     )}
                     {sent && i.status === 'QUEUED' && (
-                      <span className="text-[13px] text-[var(--ds-pending-text)]"> · in coda</span>
+                      <span className="text-[14px] text-[var(--ds-pending-text)]"> · in coda</span>
                     )}
                   </span>
-                  <span className="flex-shrink-0 text-[14px] tabular-nums text-[var(--ds-text-muted)]">
+                  <span className="flex-shrink-0 text-[15px] tabular-nums text-[var(--ds-text-muted)]">
                     {euro(i.line_total_cents ?? 0)}
                   </span>
                   {i.status !== 'VOIDED' && i.line_kind === 'DISH' && (
@@ -348,7 +348,7 @@ export const CourseList: React.FC<CourseListProps> = ({
                 >
                   {/* La quantità è un prefisso come nelle righe server: lo
                       stepper in riga non c'è più, si cambia dal foglio. */}
-                  <span className="flex-shrink-0 text-[14px] font-semibold tabular-nums text-[var(--ds-text-muted)]">
+                  <span className="flex-shrink-0 text-[16px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
                     {l.qty}×
                   </span>
                   {/* Le varianti lunghe si troncano: il tocco sul nome apre
@@ -363,19 +363,19 @@ export const CourseList: React.FC<CourseListProps> = ({
                     aria-label={`Varianti di ${l.dish.name}`}
                     className="min-w-0 flex-1 rounded-[10px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
-                    <div className="truncate text-[15px] text-[var(--ds-text-primary)]">
+                    <div className="truncate text-[17px] text-[var(--ds-text-primary)]">
                       {l.dish.name}
                       {l.weight_grams != null && (
-                        <span className="text-[13px] tabular-nums text-[var(--ds-text-muted)]"> · {weightLabel(l.weight_grams)}</span>
+                        <span className="text-[14px] tabular-nums text-[var(--ds-text-muted)]"> · {weightLabel(l.weight_grams)}</span>
                       )}
                     </div>
                     {(l.modifier_labels.length > 0 || l.note) && (
-                      <div className="truncate text-[13px] text-[var(--ds-text-muted)]">
+                      <div className="truncate text-[14px] text-[var(--ds-text-muted)]">
                         ↳ {[...l.modifier_labels, ...(l.note ? [l.note] : [])].join(', ')}
                       </div>
                     )}
                   </button>
-                  <span className="flex-shrink-0 text-[14px] tabular-nums text-[var(--ds-text-muted)]">
+                  <span className="flex-shrink-0 text-[15px] tabular-nums text-[var(--ds-text-muted)]">
                     {euro(cartUnitCents(l) * l.qty)}
                   </span>
                   {/* Niente matita e niente maniglia ⇅: il tocco sul nome
