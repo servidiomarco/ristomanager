@@ -2778,9 +2778,9 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 title="Vini abbinati"
                 aside={
                   <span className="flex items-center gap-2">
-                    <span className="text-[13px] text-[var(--ds-text-muted)]">
-                      {dishWineIds.length === 0 ? 'nessuno' : dishWineIds.length === 1 ? '1 vino' : `${dishWineIds.length} vini`}
-                    </span>
+                    {dishWineIds.length === 0 && (
+                      <span className="text-[13px] text-[var(--ds-text-muted)]">nessuno</span>
+                    )}
                     {/* La lente: apre il campo che filtra la carta — con 60
                         etichette la fisarmonica da sola non basta. Riaperta,
                         chiude e azzera. */}
@@ -2800,6 +2800,30 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   </span>
                 }
               >
+                {/* Gli abbinati del piatto, per nome e nell'ordine del
+                    sommelier: sono LORO il contenuto della card — il
+                    conteggio da solo obbligava ad aprire le sezioni per
+                    sapere quali. Il tocco toglie, come i chip di «Nei menu». */}
+                {dishWineIds.length > 0 && (
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    {dishWineIds
+                      .map(id => wineDishes.find(w => w.id === id))
+                      .filter((w): w is typeof wineDishes[number] => w != null)
+                      .map(w => (
+                        <button
+                          key={`sel-${w.id}`}
+                          type="button"
+                          onClick={() => setDishWineIds(prev => prev.filter(x => x !== w.id))}
+                          aria-label={`Togli ${w.name}`}
+                          className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-3.5 text-[13px] font-medium text-[var(--ds-action-fg)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                        >
+                          <Wine size={13} aria-hidden />
+                          {w.name}
+                          <X size={13} aria-hidden />
+                        </button>
+                      ))}
+                  </div>
+                )}
                 {wineSearch != null && (
                   <input
                     type="text"
