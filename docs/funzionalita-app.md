@@ -431,6 +431,7 @@ Per i ristoranti con cassa **Passepartout Menù** (modulo dedicato):
 ## Clienti (CRM / rubrica)
 
 - Rubrica con **indice alfabetico**, ricerca e scheda cliente completa: contatti, indirizzo, **dati di fatturazione** (denominazione, P.IVA, CF, codice SDI, PEC), preferenze di servizio (tavolo preferito, note), **allergie e note alimentari**, lingua dell'ospite.
+- **Ricerca per parole**: le parole digitate si trovano in qualsiasi ordine («Servidio Marco» trova «Marco Servidio», bastano i prefissi), il telefono matcha per sole cifre ignorando spazi e prefisso internazionale, e chi inizia con la parola digitata compare prima. Vale ovunque si cerca in rubrica: suggerimenti nel form prenotazione, pagina Clienti, ricerca globale.
 - Flag **VIP** (evidenzia la prenotazione in sala) e **Blacklist** con motivo (blocca web e agente vocale, avvisa in sala), consenso **marketing** con data.
 - **Storico prenotazioni e banchetti** del cliente.
 - **Alimentazione automatica**: ogni prenotazione con telefono — da qualunque canale — crea o aggiorna la scheda; la lingua rilevata dal canale si memorizza e le comunicazioni successive partono nella lingua giusta.
@@ -594,6 +595,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-12 | Clienti (CRM / rubrica) | Ricerca per parole in qualsiasi ordine («Servidio Marco» trova «Marco Servidio»), telefono per sole cifre, risultati che iniziano con la parola digitata in testa: i suggerimenti nel form prenotazione trovano la scheda esistente e non nascono doppioni. |
 | 2026-09-12 | Menu & Banchetti | Card «Vini abbinati»: i vini collegati si elencano per nome in testa alla card (chip col tocco che toglie), non più il solo conteggio. |
 | 2026-09-12 | Menu & Banchetti | Card «Vini abbinati»: lente accanto al conteggio che apre un campo di ricerca — filtra la carta per nome e apre da sola le sole sezioni con risultati. |
 | 2026-09-11 | Comande, Cucina e Passe | Sullo schermo largo la testata del tavolo (Tav., coperti, Conto) si accorcia alla colonna del menu e la Comanda sale a tutta altezza fino alla barra globale: una riga di uscite in più sempre in vista. |
