@@ -1794,7 +1794,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   const topBar = (
     <OrderTopBar
       showBack={!isWide}
-      bare={isWide}
+      inBar={isWide}
       tableName={table?.name ?? String(tableId)}
       guestName={reservation?.customer_name ?? null}
       totalCents={displayTotal}
@@ -2127,12 +2127,12 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
             >
               <ArrowLeft size={20} aria-hidden />
             </button>
-            <span className="min-w-0 flex-1" />
+            {topBar}
             <LivePill connected={isConnected} time={clock} />
           </div>
         </div>
         <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_380px] gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
-          <div className="flex min-h-0 flex-col gap-3">
+          <div className="flex min-h-0 flex-col gap-4">
             {(allergens || error) && (
               <div className="flex flex-shrink-0 flex-col gap-2">
                 {allergens && (
@@ -2145,7 +2145,6 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           </div>
           <CourseColumn
             {...listProps}
-            header={topBar}
             openedBy={openedByOther}
             onSend={() => submit('course')}
             onSendAll={() => submit('all')}

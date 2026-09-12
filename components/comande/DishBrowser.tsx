@@ -435,7 +435,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
             type="button"
             onClick={() => { onQuery(''); onCategory(c); }}
             aria-pressed={active}
-            className={`flex w-[150px] flex-shrink-0 flex-col items-start gap-1 rounded-[6px] px-3.5 py-3 text-left transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${CAT_CARD[n]} ${
+            className={`flex w-[156px] flex-shrink-0 flex-col items-start gap-1.5 rounded-[6px] px-4 py-3.5 text-left transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${CAT_CARD[n]} ${
               active
                 ? 'shadow-[var(--ds-shadow-raised)] ring-2 ring-[var(--ds-action-bg)]'
                 : 'shadow-[var(--ds-shadow-card)]'
@@ -750,7 +750,11 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     // e a 12px si leggono come una fascia sola di controlli. In vista
     // compatta il respiro lo cede ai piatti — lì è la sagoma della scheda
     // unica a separare le zone.
-    <div className={`flex min-h-0 flex-1 flex-col ${layout === 'list' && density !== 'compact' ? 'gap-4' : 'gap-3'}`}>
+    <div className={`flex min-h-0 flex-1 flex-col ${
+      layout === 'grid' && catStyle === 'cards' ? 'gap-5'
+      : layout === 'list' && density !== 'compact' ? 'gap-4'
+      : 'gap-3'
+    }`}>
       {/* Categorie, filetto, ricerca, piatti. La ricerca stava sopra tutto e
           apriva la pagina con un campo vuoto; qui la prima cosa è la scelta
           che si fa davvero a ogni tavolo — la categoria — e la ricerca sta

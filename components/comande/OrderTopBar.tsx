@@ -15,10 +15,10 @@ interface OrderTopBarProps {
   /** false quando il ritorno ai tavoli vive nella chrome della pagina (schermo
    *  largo): la scheda del tavolo resta, la freccia no. */
   showBack?: boolean;
-  /** true quando la testata è una FASCIA dentro il pannello della comanda e
-   *  non una scheda per conto suo: niente fondo, niente ombra, niente raggio
-   *  — il contenitore è di chi la ospita. */
-  bare?: boolean;
+  /** true quando la testata vive dentro la barra della pagina, in fila con la
+   *  freccia e il Live: una riga sola, senza scheda propria. La colonna di
+   *  destra resta tutta della comanda. */
+  inBar?: boolean;
   tableName: string;
   guestName: string | null;
   /** Ordine più bozze: è il numero che il cliente sentirebbe se chiedesse ora. */
@@ -67,7 +67,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
   billDisabled, clearDisabled, wide,
   onSearch, densityCompact, onToggleDensity,
   onBack, onCovers, onBill, onDiscount, onTransfer, onClearDrafts, onDeleteOrder,
-  paged, catView = 'list', onCatView, showBack = true, bare = false,
+  paged, catView = 'list', onCatView, showBack = true, inBar = false,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -276,10 +276,81 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
      passata nella barra della pagina, e la pastiglia «n uscite inviate» se
      n'è andata con lei: le tessere delle uscite qui sotto lo dicono già,
      uscita per uscita, che è l'informazione vera. */
+  /* Nella barra della pagina: il tavolo sta in fila con la freccia che ci ha
+     portati dentro, e la colonna di destra resta tutta della comanda. Chi è
+     seduto e quanto spende stanno sulla stessa riga, non sotto: in una barra
+     alta 64px una seconda riga non ci sta, e sono due dati brevi. */
+  if (wide && inBar) {
+    return (
+      <>
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <h2 className="flex-shrink-0 truncate text-[22px] font-semibold leading-none tracking-[-0.02em] text-[var(--ds-text-primary)]">
+            Tav. {tableName}
+          </h2>
+          <div
+            className="flex flex-shrink-0 items-center gap-1 rounded-full bg-[var(--ds-surface-row)] p-1"
+            title={`${covers} coperti`}
+          >
+            <button
+              type="button"
+              onClick={() => onCovers(-1)}
+              disabled={busy || covers <= 1}
+              aria-label="Un coperto in meno"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              <Minus size={15} aria-hidden />
+            </button>
+            <span className="w-6 text-center text-[16px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+              {covers}
+            </span>
+            <button
+              type="button"
+              onClick={() => onCovers(+1)}
+              disabled={busy}
+              aria-label="Un coperto in più"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              <Plus size={15} aria-hidden />
+            </button>
+          </div>
+          <div className="flex min-w-0 items-baseline gap-1.5 text-[15px]">
+            <span className="min-w-0 truncate text-[var(--ds-text-muted)]">
+              {guestName || 'Senza prenotazione'}
+            </span>
+            <span className="flex-shrink-0 text-[var(--ds-text-subtle)]" aria-hidden>·</span>
+            <span className="flex-shrink-0 font-semibold tabular-nums text-[var(--ds-text-primary)]">
+              {euro(totalCents)}
+            </span>
+          </div>
+          <div className="ml-auto flex flex-shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={onBill}
+              disabled={busy || billDisabled}
+              title="Chiudi la comanda e apri il conto"
+              className={`inline-flex h-11 items-center justify-center rounded-full px-5 text-[15px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                billDisabled
+                  ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-subtle)]'
+                  : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
+              }`}
+            >
+              Conto
+            </button>
+            <div className="relative">
+              {menuTrigger}
+              {menuPanel}
+            </div>
+          </div>
+        </div>
+        {touchMenu}
+      </>
+    );
+  }
+
   if (wide) {
     return (
       <>
-        <div className={`px-4 pb-3 pt-3.5 ${bare ? '' : 'rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]'}`}>
+        <div className="rounded-[20px] bg-[var(--ds-surface)] px-4 pb-3 pt-3.5 shadow-[var(--ds-shadow-card)]">
           <div className="flex items-center gap-3">
             {showBack && (
               <button

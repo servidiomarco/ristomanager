@@ -617,17 +617,12 @@ const qtyChipClass = (n: number | null | undefined): string =>
 interface CourseColumnProps extends CourseListProps {
   onSend: () => void;
   onSendAll: () => void;
-  /** La testata del tavolo, montata DENTRO questo pannello. La comanda e il
-   *  tavolo di cui parla sono una cosa sola: due schede impilate facevano
-   *  leggere due oggetti, e la seconda ricominciava da capo ogni volta che si
-   *  cambiava tavolo. Chi la passa resta padrone del suo contenuto. */
-  header?: React.ReactNode;
   /** «di Luca» / «dalla cassa» quando la comanda l'ha aperta qualcun altro:
    *  chi tocca un tavolo non suo lo legge in testa, prima di battere. */
   openedBy?: string | null;
 }
 
-export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, openedBy, header, ...list }) => {
+export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, openedBy, ...list }) => {
   const { order, cart, course } = list;
   const courseLines = cartForCourse(cart, course);
   const rows = rowCount(order, cart);
@@ -665,9 +660,6 @@ export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, o
   };
   return (
     <div className="flex min-h-0 flex-col overflow-hidden rounded-[6px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
-      {header && (
-        <div className="flex-shrink-0 border-b border-[var(--ds-border)]">{header}</div>
-      )}
       {/* La riga «Comanda · vuota» compare solo quando c'è qualcosa da dire
           che non sta già sopra: chi ha aperto il tavolo. Il conteggio e il
           totale li porta la scheda del tavolo, e una fascia che ripete il
