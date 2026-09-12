@@ -15,6 +15,10 @@ interface OrderTopBarProps {
   /** false quando il ritorno ai tavoli vive nella chrome della pagina (schermo
    *  largo): la scheda del tavolo resta, la freccia no. */
   showBack?: boolean;
+  /** true quando la testata è una FASCIA dentro il pannello della comanda e
+   *  non una scheda per conto suo: niente fondo, niente ombra, niente raggio
+   *  — il contenitore è di chi la ospita. */
+  bare?: boolean;
   tableName: string;
   guestName: string | null;
   /** Ordine più bozze: è il numero che il cliente sentirebbe se chiedesse ora. */
@@ -63,7 +67,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
   billDisabled, clearDisabled, wide,
   onSearch, densityCompact, onToggleDensity,
   onBack, onCovers, onBill, onDiscount, onTransfer, onClearDrafts, onDeleteOrder,
-  paged, catView = 'list', onCatView, showBack = true,
+  paged, catView = 'list', onCatView, showBack = true, bare = false,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -275,7 +279,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
   if (wide) {
     return (
       <>
-        <div className="rounded-[20px] bg-[var(--ds-surface)] px-4 pb-3 pt-3.5 shadow-[var(--ds-shadow-card)]">
+        <div className={`px-4 pb-3 pt-3.5 ${bare ? '' : 'rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]'}`}>
           <div className="flex items-center gap-3">
             {showBack && (
               <button
@@ -346,13 +350,14 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
           {/* Chi è al tavolo e quanto sta spendendo: il totale in scuro, che
               è il numero che si cerca; il nome accanto, che serve a sapere di
               chi è il tavolo, non a leggerlo per intero. */}
+          {/* Senza prenotazione la riga lo DICE invece di restare mezza vuota:
+              un cameriere che si aspetta un nome e non lo trova non sa se il
+              tavolo è un walk-in o se il dato non è arrivato. */}
           <div className="mt-1.5 flex items-baseline gap-1.5 text-[15px]">
-            {guestName && (
-              <>
-                <span className="min-w-0 truncate text-[var(--ds-text-muted)]">{guestName}</span>
-                <span className="flex-shrink-0 text-[var(--ds-text-subtle)]" aria-hidden>·</span>
-              </>
-            )}
+            <span className="min-w-0 truncate text-[var(--ds-text-muted)]">
+              {guestName || 'Senza prenotazione'}
+            </span>
+            <span className="flex-shrink-0 text-[var(--ds-text-subtle)]" aria-hidden>·</span>
             <span className="flex-shrink-0 font-semibold tabular-nums text-[var(--ds-text-primary)]">
               {euro(totalCents)}
             </span>

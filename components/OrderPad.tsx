@@ -837,12 +837,22 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   // quella. Con più righe (due cotture diverse) non decide nessuno: si toglie
   // dalla comanda, dove le righe sono distinte. Il peso resta fuori (una riga
   // per pezzo, si toglie dalla comanda).
-  const removeFromCart = (dish: Dish) => {
+  /** La riga che un «−» sul piatto scalerebbe, o null se non è chiaro quale.
+   *  Una sola fonte per il gesto e per il bottone: prima il «−» si mostrava
+   *  sui piatti «senza foglio», che è un'altra domanda — sulla Grigliata (che
+   *  ha la cottura obbligatoria) il bottone spariva anche con una riga sola,
+   *  e quella riga non si poteva più togliere dal menu. */
+  const removableKey = (dish: Dish): string | null => {
     const to = forcedCourse(dish) ?? course;
     const plainKey = cartKey(dish.id, to, []);
-    if (cart.some(l => l.key === plainKey)) { bumpCart(plainKey, -1); return; }
+    if (cart.some(l => l.key === plainKey)) return plainKey;
     const lines = cart.filter(l => l.dish.id === dish.id && l.course_no === to && l.weight_grams == null);
-    if (lines.length === 1) bumpCart(lines[0].key, -1);
+    return lines.length === 1 ? lines[0].key : null;
+  };
+
+  const removeFromCart = (dish: Dish) => {
+    const key = removableKey(dish);
+    if (key) bumpCart(key, -1);
   };
 
   /** Ripete una riga già ordinata nell'uscita in composizione. Non tocca il
@@ -1625,6 +1635,23 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     </>
   );
 
+  // L'indice di categoria di un piatto, nell'ORDINE delle schede categoria:
+  // la pastiglia della quantità in comanda deve avere la tinta della scheda da
+  // cui il piatto è stato battuto, o il colore non vuol dire niente.
+  const catIndexByDish = useMemo(() => {
+    const order = new Map(categories.map((c, i) => [c, i]));
+    const out = new Map<number, number>();
+    for (const d of dishes) {
+      const i = d.category ? order.get(d.category) : undefined;
+      if (i != null) out.set(d.id, i);
+    }
+    return out;
+  }, [dishes, categories]);
+  const catIndexOf = useCallback(
+    (dishId: number | null) => (dishId == null ? null : catIndexByDish.get(dishId) ?? null),
+    [catIndexByDish],
+  );
+
   // Quanti piatti ha ogni categoria, per il sottotitolo delle schede. Conta i
   // piatti BATTIBILI (già filtrati sopra): scrivere «15 piatti» e aprirne
   // undici è peggio che non scrivere niente.
@@ -1719,6 +1746,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     onDragLine: moveCartLine,
     onDragItem: moveServerItem,
     onDragCourse: moveCourseTo,
+    catIndexOf,
   };
 
   const browser = (
@@ -1735,6 +1763,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       tapOpensSheet={requiresSheetOnTap}
       onAdd={onDishTap}
       onRemove={removeFromCart}
+      canRemove={d => removableKey(d) != null}
       courseOf={d => forcedCourse(d) ?? course}
       onCourseTap={d => setMoveFor({ kind: 'dish', dishId: d.id, label: d.name, from: forcedCourse(d) ?? course })}
       onLongPress={onDishLongPress}
@@ -1765,6 +1794,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   const topBar = (
     <OrderTopBar
       showBack={!isWide}
+      bare={isWide}
       tableName={table?.name ?? String(tableId)}
       guestName={reservation?.customer_name ?? null}
       totalCents={displayTotal}
@@ -2086,7 +2116,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
             sinistra, il Live a destra. La scheda del tavolo non sta più qui —
             è passata in testa alla colonna della comanda, dove stanno i
             coperti e il conto di cui parla. */}
-        <div className="flex flex-shrink-0 items-start gap-3">
+        <div className="flex flex-shrink-0 items-center gap-3">
           {padBrand}
           <div className="flex min-w-0 flex-1 items-center gap-3 rounded-[28px] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)]">
             <button
@@ -2101,7 +2131,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
             <LivePill connected={isConnected} time={clock} />
           </div>
         </div>
-        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_380px] gap-3 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_380px] gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
           <div className="flex min-h-0 flex-col gap-3">
             {(allergens || error) && (
               <div className="flex flex-shrink-0 flex-col gap-2">
@@ -2113,15 +2143,13 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
             )}
             {browser}
           </div>
-          <div className="flex min-h-0 flex-col gap-3">
-            <div className="flex-shrink-0">{topBar}</div>
-            <CourseColumn
-              {...listProps}
-              openedBy={openedByOther}
-              onSend={() => submit('course')}
-              onSendAll={() => submit('all')}
-            />
-          </div>
+          <CourseColumn
+            {...listProps}
+            header={topBar}
+            openedBy={openedByOther}
+            onSend={() => submit('course')}
+            onSendAll={() => submit('all')}
+          />
         </div>
         {dialogs}
       </div>

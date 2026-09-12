@@ -23,6 +23,10 @@ import { useCourseDrag, type DragPayload } from './useCourseDrag';
 // ---------------------------------------------------------------------------
 
 interface CourseListProps {
+  /** L'indice di categoria del piatto (0-5, ciclico), per tingere la pastiglia
+   *  della quantità come la scheda categoria da cui è stato battuto. Chi la
+   *  passa conosce il catalogo; qui si sa solo che è un numero. */
+  catIndexOf?: (dishId: number | null) => number | null;
   order: OrderWithItems;
   cart: CartLine[];
   course: number;
@@ -68,6 +72,7 @@ interface CourseListProps {
 export const CourseList: React.FC<CourseListProps> = ({
   order, cart, course, onCourse, busy, onBump, onDrop, onVoid, onRecall, onFire, onEditLine, onUnfire,
   onMoveLine, onMoveItem, onMoveCourse, onDragLine, onDragItem, onDragCourse, showBar, showDessert,
+  catIndexOf,
 }) => {
   const dnd = useCourseDrag({
     disabled: busy,
@@ -309,7 +314,7 @@ export const CourseList: React.FC<CourseListProps> = ({
                       colonna di righe il numero nudo si perde nel nome del
                       piatto, e quanti pezzi sono è la prima cosa che la
                       cucina chiede al telefono. */}
-                  <span className="inline-flex h-7 min-w-[28px] flex-shrink-0 items-center justify-center rounded-[6px] bg-[var(--ds-surface-row)] px-1.5 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                  <span className={`inline-flex h-7 min-w-[28px] flex-shrink-0 items-center justify-center rounded-[6px] px-1.5 text-[15px] font-semibold tabular-nums ${qtyChipClass(catIndexOf?.(i.dish_id))}`}>
                     {i.qty}
                   </span>
                   <span
@@ -359,7 +364,7 @@ export const CourseList: React.FC<CourseListProps> = ({
                 >
                   {/* Stessa pastiglia delle righe server: lo stepper in riga
                       non c'è più, si cambia dal foglio. */}
-                  <span className="inline-flex h-7 min-w-[28px] flex-shrink-0 items-center justify-center rounded-[6px] bg-[var(--ds-surface-row)] px-1.5 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                  <span className={`inline-flex h-7 min-w-[28px] flex-shrink-0 items-center justify-center rounded-[6px] px-1.5 text-[15px] font-semibold tabular-nums ${qtyChipClass(catIndexOf?.(l.dish.id))}`}>
                     {l.qty}
                   </span>
                   {/* Le varianti lunghe si troncano: il tocco sul nome apre
@@ -455,7 +460,7 @@ export const SendFooter: React.FC<SendFooterProps> = ({
          Conto — lì si incassa, si divide e si stampa: qui si legge soltanto,
          perché «quanto stanno spendendo» è la domanda che si fa a metà
          servizio senza voler aprire niente. */
-      <div className="flex flex-col gap-1 border-t border-[var(--ds-border)] pt-3 text-[14px]">
+      <div className="flex flex-col gap-1 text-[14px]">
         <div className="flex items-center justify-between text-[var(--ds-text-muted)]">
           <span>Subtotale</span>
           <span className="tabular-nums">{euro(summary.subtotalCents)}</span>
@@ -585,15 +590,44 @@ export const SendFooter: React.FC<SendFooterProps> = ({
    La colonna di destra su desktop: intestazione, lista che scorre, azioni in
    fondo. Il padding in basso dell'intestazione è portante — sotto c'è una zona
    che scorre e dipinge dopo, e senza quel margine coprirebbe l'ombra. */
+/* La pastiglia della quantità, tinta della categoria del piatto. In una
+   comanda lunga «2» e «1» sono tutti uguali; col colore della categoria la
+   riga si aggancia alla scheda da cui è stata battuta, e un'uscita si legge
+   per composizione — tre verdi e un rosa — prima di leggerne i nomi.
+
+   Sono categorie, cioè cose diverse fra loro, non stati: i --ds-cat-* sono
+   esattamente questo (§3.5). Il numero sta sul TINT e mai sul solid — due dei
+   sei solid cadono sotto AA come testo piccolo. Righe di sistema (coperto,
+   servizio) e piatti senza categoria restano neutri.
+
+   Scritte per intero: Tailwind estrae le classi staticamente. */
+const CAT_QTY = [
+  'bg-[var(--ds-cat-1-tint)] text-[var(--ds-cat-1-text)]',
+  'bg-[var(--ds-cat-2-tint)] text-[var(--ds-cat-2-text)]',
+  'bg-[var(--ds-cat-3-tint)] text-[var(--ds-cat-3-text)]',
+  'bg-[var(--ds-cat-4-tint)] text-[var(--ds-cat-4-text)]',
+  'bg-[var(--ds-cat-5-tint)] text-[var(--ds-cat-5-text)]',
+  'bg-[var(--ds-cat-6-tint)] text-[var(--ds-cat-6-text)]',
+];
+const NEUTRAL_QTY = 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]';
+
+const qtyChipClass = (n: number | null | undefined): string =>
+  n == null ? NEUTRAL_QTY : CAT_QTY[n % 6];
+
 interface CourseColumnProps extends CourseListProps {
   onSend: () => void;
   onSendAll: () => void;
+  /** La testata del tavolo, montata DENTRO questo pannello. La comanda e il
+   *  tavolo di cui parla sono una cosa sola: due schede impilate facevano
+   *  leggere due oggetti, e la seconda ricominciava da capo ogni volta che si
+   *  cambiava tavolo. Chi la passa resta padrone del suo contenuto. */
+  header?: React.ReactNode;
   /** «di Luca» / «dalla cassa» quando la comanda l'ha aperta qualcun altro:
    *  chi tocca un tavolo non suo lo legge in testa, prima di battere. */
   openedBy?: string | null;
 }
 
-export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, openedBy, ...list }) => {
+export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, openedBy, header, ...list }) => {
   const { order, cart, course } = list;
   const courseLines = cartForCourse(cart, course);
   const rows = rowCount(order, cart);
@@ -630,7 +664,10 @@ export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, o
     totalCents: order.total_cents,
   };
   return (
-    <div className="flex min-h-0 flex-col overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+    <div className="flex min-h-0 flex-col overflow-hidden rounded-[6px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+      {header && (
+        <div className="flex-shrink-0 border-b border-[var(--ds-border)]">{header}</div>
+      )}
       {/* La riga «Comanda · vuota» compare solo quando c'è qualcosa da dire
           che non sta già sopra: chi ha aperto il tavolo. Il conteggio e il
           totale li porta la scheda del tavolo, e una fascia che ripete il

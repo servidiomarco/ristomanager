@@ -126,10 +126,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
                 largo Comande non ha più la testata dell'app sopra di sé, e
                 questa riga ne fa le veci — senza il pettine di controlli che
                 in servizio non si usano. */}
-            {/* items-start, non items-center: il bollo del marchio è più alto
-                della barra e centrato sporgeva sopra. I due bordi alti si
-                allineano, come nel disegno. */}
-            <div className="flex items-start gap-3">
+            <div className="flex items-center gap-3">
               {brand}
               <div className="flex min-w-0 flex-1 items-center gap-2 rounded-[28px] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)]">
                 <SearchField

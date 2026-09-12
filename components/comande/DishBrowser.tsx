@@ -83,6 +83,10 @@ interface DishBrowserProps {
   tapOpensSheet?: (dishId: number) => boolean;
   onAdd: (dish: Dish) => void;
   onRemove: (dish: Dish) => void;
+  /** true quando un «−» su questo piatto sa QUALE riga scalare. Senza, il
+   *  bottone non compare: un «−» che non fa niente è peggio di un «−» che non
+   *  c'è. Non passarla = comportamento storico (nessun «−» rapido). */
+  canRemove?: (dish: Dish) => boolean;
   /** L'uscita dove una battuta di questo piatto finisce (forzata o in
    *  composizione): col battuto in corso compare sul piatto come chip. */
   courseOf?: (dish: Dish) => number;
@@ -151,7 +155,7 @@ interface DishBrowserProps {
 
 export const DishBrowser: React.FC<DishBrowserProps> = ({
   dishes, categories, category, onCategory, query, onQuery,
-  qtyInCourse, markedCategories, hasVariants, tapOpensSheet = hasVariants, onAdd, onRemove, courseOf, onCourseTap, onLongPress, layout,
+  qtyInCourse, markedCategories, hasVariants, tapOpensSheet = hasVariants, onAdd, onRemove, canRemove, courseOf, onCourseTap, onLongPress, layout,
   showSearch = true, density = 'comfortable', nav = 'chips', onCategoryBack, catView = 'list',
   catStyle = 'chips', gridStyle = 'rows', countByCategory,
   barCategories, dessertCategories, course,
@@ -282,16 +286,17 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
      in fondo alla scheda. Si aggiunge al tocco sulla scheda, non lo
      sostituisce — chi sa già il piatto continua a batterlo con un tap solo.
 
-     Il «−» non compare sui piatti il cui tap apre un foglio (peso, varianti
-     obbligatorie): lì una battuta non è una riga sola e togliere «uno»
-     sarebbe ambiguo. Lo dice già il contratto della prop, e removeFromCart in
-     quel caso non farebbe nulla: un bottone morto è peggio di nessun bottone. */
+     Il «−» compare quando togliere è NON AMBIGUO — una riga sola di quel
+     piatto nell'uscita — e lo decide chi possiede il carrello (canRemove).
+     Prima la regola era «il tap apre un foglio?», che è un'altra domanda: la
+     Grigliata ha la cottura obbligatoria, quindi il «−» spariva anche con una
+     riga sola e quella riga non si poteva più togliere dal menu. */
   const photoStepper = (d: Dish) => {
     const qty = qtyInCourse.get(d.id) ?? 0;
-    const canRemove = qty > 0 && !tapOpensSheet(d.id);
+    const removable = qty > 0 && (canRemove?.(d) ?? false);
     return (
       <div className="flex items-center justify-between gap-2">
-        {canRemove ? (
+        {removable ? (
           <button
             type="button"
             onClick={() => onRemove(d)}
@@ -833,9 +838,11 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                     <span className="block truncate text-[14px] font-semibold text-[var(--ds-text-primary)]">
                       {d.name}
                     </span>
-                    <span className="flex items-center gap-1 text-[14px] tabular-nums text-[var(--ds-text-muted)]">
+                    {/* Niente freccina accanto al prezzo: nella griglia con
+                        foto il cassetto delle sotto-righe non c'è, e lo
+                        stepper qui sotto dice già cosa si può fare. */}
+                    <span className="text-[14px] tabular-nums text-[var(--ds-text-muted)]">
                       {euro(Math.round(Number(d.price) * 100))}
-                      {drawerChevron(d)}
                     </span>
                   </button>
                   <div className="mt-auto px-1.5 pb-1.5 pt-0.5">{photoStepper(d)}</div>

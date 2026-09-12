@@ -811,9 +811,13 @@ const App: React.FC = () => {
   // Il marchio col chevron che richiama il menu. Sta nella barra della pagina
   // di Comande, al posto esatto dove stava la sidebar: il bersaglio non si
   // sposta, si assottiglia.
+  // Marchio e chevron in FILA, non impilati: la stessa struttura della barra
+  // accanto (px-3 py-2.5 attorno a un corpo da 44px) le fa venire alte uguali
+  // da sole, senza numeri magici da tenere allineati a mano. Impilato il bollo
+  // era più alto della barra e le sporgeva sotto.
   const comandeBrand = (
-    <div className="animate-view-in flex flex-shrink-0 flex-col items-center gap-0.5 rounded-[28px] bg-[var(--ds-surface)] p-2.5 shadow-[var(--ds-shadow-card)]">
-      <div className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[14px] bg-[var(--ds-action-bg)]">
+    <div className="animate-view-in flex flex-shrink-0 items-center gap-1 rounded-[28px] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)]">
+      <div className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[14px] bg-[var(--ds-action-bg)]">
         <ChefHat className="h-5 w-5 text-[var(--ds-action-fg)]" />
       </div>
       <button
@@ -823,7 +827,7 @@ const App: React.FC = () => {
         aria-controls="sidebar-nav"
         title="Apri menu"
         aria-label="Apri menu"
-        className="pressable inline-flex h-6 w-10 flex-shrink-0 items-center justify-center rounded-[8px] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        className="pressable inline-flex h-11 w-8 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         <ChevronDown size={16} />
       </button>
