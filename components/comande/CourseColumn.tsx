@@ -432,67 +432,23 @@ interface SendFooterProps {
   /** Sul palmare l'etichetta è anche la maniglia della comanda: non c'è una
    *  seconda colonna, e questo è il posto dove la mano è già appoggiata. */
   onExpand?: () => void;
-  /** 'full' è il piede della colonna sullo schermo largo: il riepilogo del
-   *  conto e un bottone che dice cosa manda e quanto vale. 'compact' (il
+  /** 'full' è il piede della colonna sullo schermo largo: un bottone che dice
+   *  cosa manda e quanto vale, più «Invia tutto» quando serve. 'compact' (il
    *  default) è quello del palmare, dove lo spazio è del menu e il totale è
    *  già la maniglia del foglio comanda — invariato. */
   variant?: 'compact' | 'full';
-  /** Il riepilogo, solo per 'full'. Il coperto è una riga di sistema della
-   *  comanda: si mostra com'è battuto (8 × 2,00 €), non ricalcolato. */
-  summary?: {
-    subtotalCents: number;
-    coverCount: number;
-    coverUnitCents: number;
-    coverTotalCents: number;
-    serviceCents: number;
-    discountCents: number;
-    totalCents: number;
-  };
 }
 
 export const SendFooter: React.FC<SendFooterProps> = ({
   course, courseCount, courseTotal, allCount, allTotal, busy, onSend, onSendAll, onExpand,
-  variant = 'compact', summary,
+  variant = 'compact',
 }) => variant === 'full' ? (
+  /* Nessun riepilogo qui sotto. Il totale sta nella barra della pagina,
+     accanto al tavolo, e il dettaglio — coperti, servizio, sconto — nel foglio
+     Conto, che è dove si va per incassare. Ripeterlo costava centocinquanta
+     pixel di comanda e metteva a schermo DUE totali diversi: quello in barra
+     comprende le bozze non ancora inviate, questo no. */
   <div className="flex flex-col gap-3">
-    {summary && (
-      /* Il riepilogo del conto sotto la comanda. Non sostituisce il foglio
-         Conto — lì si incassa, si divide e si stampa: qui si legge soltanto,
-         perché «quanto stanno spendendo» è la domanda che si fa a metà
-         servizio senza voler aprire niente. */
-      <div className="flex flex-col gap-1 text-[14px]">
-        <div className="flex items-center justify-between text-[var(--ds-text-muted)]">
-          <span>Subtotale</span>
-          <span className="tabular-nums">{euro(summary.subtotalCents)}</span>
-        </div>
-        {summary.coverCount > 0 && (
-          <div className="flex items-center justify-between text-[var(--ds-text-muted)]">
-            <span className="tabular-nums">
-              Coperti · {summary.coverCount} × {euro(summary.coverUnitCents)}
-            </span>
-            <span className="tabular-nums">{euro(summary.coverTotalCents)}</span>
-          </div>
-        )}
-        {summary.serviceCents > 0 && (
-          <div className="flex items-center justify-between text-[var(--ds-text-muted)]">
-            <span>Servizio</span>
-            <span className="tabular-nums">{euro(summary.serviceCents)}</span>
-          </div>
-        )}
-        {summary.discountCents > 0 && (
-          <div className="flex items-center justify-between text-[var(--ds-pending-text)]">
-            <span>Sconto</span>
-            <span className="tabular-nums">−{euro(summary.discountCents)}</span>
-          </div>
-        )}
-        <div className="mt-1 flex items-baseline justify-between">
-          <span className="text-[15px] text-[var(--ds-text-secondary)]">Totale</span>
-          <span className="text-[26px] font-semibold tabular-nums tracking-[-0.015em] text-[var(--ds-text-primary)]">
-            {euro(summary.totalCents)}
-          </span>
-        </div>
-      </div>
-    )}
     {/* Il bottone dice cosa manda e quanto vale: «Invia» e basta costringeva
         a guardare da un'altra parte per sapere quale uscita stava partendo. */}
     <button
@@ -637,27 +593,6 @@ export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, o
   // Il coperto è una riga di sistema della comanda, non un calcolo: si mostra
   // com'è battuto. Righe multiple (comande vecchie, coperti ritoccati) si
   // sommano invece di far vincere la prima.
-  const liveOf = (kind: 'COVER' | 'SERVICE') =>
-    order.items.filter(i => i.line_kind === kind && i.status !== 'VOIDED');
-  const centsOf = (rows: OrderItem[]) =>
-    rows.reduce((s, i) => s + (i.line_total_cents ?? i.qty * i.unit_price_cents), 0);
-  const coverRows = liveOf('COVER');
-  const coverCount = coverRows.reduce((s, i) => s + i.qty, 0);
-  const coverTotalCents = centsOf(coverRows);
-  const serviceCents = centsOf(liveOf('SERVICE'));
-  // `subtotal_cents` del server comprende TUTTE le righe vive, coperto
-  // compreso. Qui il coperto ha la sua riga, quindi il subtotale sopra deve
-  // essere quello dei soli piatti: sommato com'è arrivava a contarlo due
-  // volte, e il riepilogo non tornava con il totale scritto sotto.
-  const summary = {
-    subtotalCents: order.subtotal_cents - coverTotalCents - serviceCents,
-    coverCount,
-    coverUnitCents: coverRows[0]?.unit_price_cents ?? 0,
-    coverTotalCents,
-    serviceCents,
-    discountCents: order.discount_cents ?? 0,
-    totalCents: order.total_cents,
-  };
   return (
     <div className="flex min-h-0 flex-col overflow-hidden rounded-[6px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
       {/* La riga «Comanda · vuota» compare solo quando c'è qualcosa da dire
@@ -704,7 +639,6 @@ export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, o
           onSend={onSend}
           onSendAll={onSendAll}
           variant="full"
-          summary={summary}
         />
       </div>
     </div>
