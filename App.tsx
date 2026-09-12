@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3 } from 'lucide-react';
 import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -381,6 +381,12 @@ const App: React.FC = () => {
   // NAV_ITEMS.sidebarCollapse. La linguetta è l'override manuale nel mezzo, e
   // quello che sceglie viene persistito: al riavvio si riparte da lì, finché
   // la prima navigazione non applica di nuovo il default della vista.
+  // Comande sullo schermo largo si prende la pagina: la sidebar si ritira in
+  // un bollo col marchio, e il chevron la rimette al suo posto accanto ai
+  // tavoli (che si stringono). È una preferenza di sessione, non per
+  // dispositivo: chi la apre per cambiare pagina se la ritrova aperta finché
+  // non la richiude.
+  const [comandeNavHidden, setComandeNavHidden] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
@@ -798,6 +804,31 @@ const App: React.FC = () => {
     return `${y}-${m}-${day}`;
   };
   const globalDateStr = formatLocalDateGlobal(globalDate);
+  // Il bollo vive solo dove la sidebar si ritira: Comande sullo schermo largo.
+  // Sotto lg la sidebar non c'è comunque (c'è la barra in basso), quindi la
+  // bandiera non deve spegnere niente lì.
+  const comandeNavStubbed = view === ViewState.COMANDE && comandeNavHidden;
+  // Il marchio col chevron che richiama il menu. Sta nella barra della pagina
+  // di Comande, al posto esatto dove stava la sidebar: il bersaglio non si
+  // sposta, si assottiglia.
+  const comandeBrand = (
+    <div className="flex flex-shrink-0 flex-col items-center gap-0.5 rounded-[28px] bg-[var(--ds-surface)] p-2.5 shadow-[var(--ds-shadow-card)]">
+      <div className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[14px] bg-[var(--ds-action-bg)]">
+        <ChefHat className="h-5 w-5 text-[var(--ds-action-fg)]" />
+      </div>
+      <button
+        type="button"
+        onClick={() => setComandeNavHidden(false)}
+        aria-expanded={false}
+        aria-controls="sidebar-nav"
+        title="Apri menu"
+        aria-label="Apri menu"
+        className="inline-flex h-6 w-10 flex-shrink-0 items-center justify-center rounded-[8px] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+      >
+        <ChevronDown size={16} />
+      </button>
+    </div>
+  );
 
   // Auto-switch from 'ALL' when navigating away from Dashboard
   useEffect(() => {
@@ -2053,7 +2084,7 @@ const App: React.FC = () => {
           contenuto risultava spinto a destra. Con mr-0 il corridoio torna a
           16px ed è uguale a tutti gli altri lati. */}
       <aside
-        className={`hidden lg:flex ${sidebarCollapsed ? 'w-[76px]' : 'w-[250px]'} m-4 mr-0 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] flex-col transition-[width] duration-200 z-20 relative`}
+        className={`${comandeNavStubbed ? 'hidden' : 'hidden lg:flex'} ${sidebarCollapsed ? 'w-[76px]' : 'w-[250px]'} m-4 mr-0 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] flex-col transition-[width] duration-200 z-20 relative`}
         aria-label="Navigazione principale"
       >
         {/* Intestazione — logo e comando apri/chiudi sulla stessa riga, come
@@ -2131,14 +2162,17 @@ const App: React.FC = () => {
           </div>
           <button
             type="button"
-            onClick={toggleSidebar}
-            aria-expanded={!sidebarCollapsed}
+            onClick={view === ViewState.COMANDE ? () => setComandeNavHidden(true) : toggleSidebar}
+            aria-expanded={view === ViewState.COMANDE ? true : !sidebarCollapsed}
             aria-controls="sidebar-nav"
-            title={sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
-            aria-label={sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
+            title={view === ViewState.COMANDE ? 'Nascondi menu' : sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
+            aria-label={view === ViewState.COMANDE ? 'Nascondi menu' : sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
             className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[12px] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${sidebarCollapsed ? '' : 'ml-auto'}`}
           >
-            <PanelLeft size={18} />
+            {/* In Comande il verso conta: il chevron su rimette via il menu da
+                dove il chevron giù l'ha tirato fuori. Altrove resta il
+                pannello, che non è una freccia ma un interruttore. */}
+            {view === ViewState.COMANDE ? <ChevronUp size={18} /> : <PanelLeft size={18} />}
           </button>
         </div>
 
@@ -2841,11 +2875,7 @@ const App: React.FC = () => {
               onImmersive={setImmersive}
               initialTableId={pendingComandeTableId}
               onInitialTableConsumed={() => setPendingComandeTableId(null)}
-              onGlobalDate={(dateOnly) => {
-                const [y, m, d] = dateOnly.split('-').map(Number);
-                if (y && m && d) setGlobalDate(new Date(y, m - 1, d));
-              }}
-              onGlobalShiftFilter={setGlobalShiftFilter}
+              brand={comandeNavStubbed ? comandeBrand : undefined}
             />
           </CardErrorBoundary>
         )}

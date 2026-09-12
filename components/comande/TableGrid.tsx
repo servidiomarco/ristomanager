@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, SlidersHorizontal, UtensilsCrossed } from 'lucide-react';
+import { Loader2, RotateCcw, SlidersHorizontal, UtensilsCrossed } from 'lucide-react';
 import type { Room } from '../../types';
-import { DateNavigator } from '../DateNavigator';
 import { EmptyState, SearchField, SegmentedControl } from '../ds';
 import {
   TABLE_GROUPS, countByState, matchesQuery,
@@ -38,19 +37,12 @@ interface TableGridProps {
    *  possiede la pagina: la griglia non conosce né il tenant né il socket. */
   brand?: React.ReactNode;
   live?: React.ReactNode;
-  /** Giorno e turno del servizio, che sullo schermo largo non hanno più la
-   *  barra globale: vivono nell'imbuto. Senza di loro non si riprende una
-   *  comanda appesa di un servizio passato. */
-  date?: string;
-  onDate?: (isoDay: string) => void;
-  shift?: 'ALL' | 'LUNCH' | 'DINNER';
-  onShift?: (next: 'ALL' | 'LUNCH' | 'DINNER') => void;
 }
 
 export const TableGrid: React.FC<TableGridProps> = ({
   rows, filter, onFilter, query, onQuery, busy, onPick, notice,
   paged = false, rooms = [], room = null, onRoom,
-  wide = false, brand, live, date, onDate, shift, onShift,
+  wide = false, brand, live,
 }) => {
   const searchRef = useRef<HTMLInputElement | null>(null);
   const [funnelOpen, setFunnelOpen] = useState(false);
@@ -134,7 +126,10 @@ export const TableGrid: React.FC<TableGridProps> = ({
                 largo Comande non ha più la testata dell'app sopra di sé, e
                 questa riga ne fa le veci — senza il pettine di controlli che
                 in servizio non si usano. */}
-            <div className="flex items-center gap-3">
+            {/* items-start, non items-center: il bollo del marchio è più alto
+                della barra e centrato sporgeva sopra. I due bordi alti si
+                allineano, come nel disegno. */}
+            <div className="flex items-start gap-3">
               {brand}
               <div className="flex min-w-0 flex-1 items-center gap-2 rounded-[28px] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)]">
                 <SearchField
@@ -147,19 +142,19 @@ export const TableGrid: React.FC<TableGridProps> = ({
                   className="min-w-0 flex-1"
                   recessed
                 />
-                {/* L'imbuto tiene ciò che non si tocca a ogni tavolo ma non può
-                    sparire: lo stato, il giorno e il turno. Il giorno in
-                    particolare è la strada per riprendere una comanda appesa
-                    di un servizio passato. Il pallino dice che un filtro è
-                    acceso — c'è o non c'è, il colore non porta il segnale da
-                    solo (§4.3). */}
+                {/* L'imbuto tiene il filtro per stato, che in servizio non si
+                    tocca a ogni tavolo. Giorno e turno NON stanno qui: Comande
+                    lavora il servizio in corso, e chi deve guardare un altro
+                    giorno lo cambia dalla barra globale di un'altra pagina. Il
+                    pallino dice che un filtro è acceso — c'è o non c'è, il
+                    colore non porta il segnale da solo (§4.3). */}
                 <div className="relative flex-shrink-0">
                   <button
                     type="button"
                     onClick={() => setFunnelOpen(o => !o)}
                     aria-haspopup="dialog"
                     aria-expanded={funnelOpen}
-                    aria-label="Filtri, giorno e turno"
+                    aria-label="Filtra per stato"
                     className="relative inline-flex h-11 w-11 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     <SlidersHorizontal size={18} aria-hidden />
@@ -178,48 +173,47 @@ export const TableGrid: React.FC<TableGridProps> = ({
                         className="fixed inset-0 z-40 cursor-default"
                         onClick={() => setFunnelOpen(false)}
                       />
+                      {/* Le pastiglie che VANNO A CAPO, non la pista che
+                          scorre: il segmento tagliava «Comanda aperta» a
+                          «Comanda a…» dentro un pannello da 320px. È la stessa
+                          forma dei filtri di Prenotazioni — un'etichetta
+                          piccola e sotto le pastiglie, piena scura quella
+                          scelta — così un filtro si usa uguale ovunque. */}
                       <div
                         role="dialog"
-                        aria-label="Filtri, giorno e turno"
+                        aria-label="Filtra i tavoli per stato"
                         className="absolute right-0 top-[52px] z-50 w-[320px] rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-raised)]"
                       >
-                        <div className="text-[13px] font-semibold text-[var(--ds-text-muted)]">Stato</div>
-                        <div className="mt-2">
-                          <SegmentedControl<TableFilter>
-                            value={filter}
-                            onChange={onFilter}
-                            options={filterOptions}
-                            ariaLabel="Filtra i tavoli"
-                            equalWidth={false}
-                            overflow="scroll"
-                            size="sm"
-                          />
+                        <div className="flex items-center justify-between">
+                          <span className="text-[12px] font-semibold text-[var(--ds-text-primary)]">Stato</span>
+                          {filter !== 'ALL' && (
+                            <button
+                              type="button"
+                              onClick={() => onFilter('ALL')}
+                              className="inline-flex items-center gap-1.5 text-[12px] font-medium text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                            >
+                              <RotateCcw size={13} aria-hidden /> Reimposta
+                            </button>
+                          )}
                         </div>
-                        {date && onDate && (
-                          <>
-                            <div className="mt-4 text-[13px] font-semibold text-[var(--ds-text-muted)]">Giorno</div>
-                            <div className="mt-2">
-                              <DateNavigator value={date} onChange={onDate} widthClass="w-full" backToToday="below" />
-                            </div>
-                          </>
-                        )}
-                        {shift && onShift && (
-                          <>
-                            <div className="mt-4 text-[13px] font-semibold text-[var(--ds-text-muted)]">Turno</div>
-                            <div className="mt-2">
-                              <SegmentedControl<'ALL' | 'LUNCH' | 'DINNER'>
-                                value={shift}
-                                onChange={onShift}
-                                options={[
-                                  { value: 'LUNCH', label: 'Pranzo' },
-                                  { value: 'DINNER', label: 'Cena' },
-                                  { value: 'ALL', label: 'Tutti' },
-                                ]}
-                                ariaLabel="Turno"
-                              />
-                            </div>
-                          </>
-                        )}
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {filterOptions.map(opt => (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              onClick={() => onFilter(opt.value)}
+                              aria-pressed={filter === opt.value}
+                              className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                                filter === opt.value
+                                  ? 'border-[var(--ds-action-bg)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                                  : 'border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]'
+                              }`}
+                            >
+                              {opt.label}
+                              <span className="tabular-nums opacity-70">{opt.badge}</span>
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     </>
                   )}
