@@ -49,9 +49,35 @@ describe('menu, sala & cucina', () => {
                 allergens: ['solfiti'],
             });
             expect(created.status).toBe(201);
-            expect(created.body.name).toBe('Barolo DOCG Del Piemonte');
+            expect(created.body.name).toBe('Barolo DOCG del Piemonte');
             expect(created.body.category).toBe('Vini Rossi IGT');
             await api().delete(`/dishes/${created.body.id}`).set(bearer(token));
+
+            // Sigle puntate: due o più coppie lettera-punto tornano
+            // maiuscole; l'abbreviazione a coppia singola («mel.») no.
+            // Preposizioni e congiunzioni minuscole quando non aprono il
+            // titolo, elisioni comprese.
+            const puntato = await api().post('/dishes').set(bearer(token)).send({
+                name: 'salumi d.o.p. con polpetta di mel.',
+                description: null,
+                price: 12,
+                category: 'Antipasti',
+                allergens: [],
+            });
+            expect(puntato.status).toBe(201);
+            expect(puntato.body.name).toBe('Salumi D.O.P. con Polpetta di Mel.');
+            await api().delete(`/dishes/${puntato.body.id}`).set(bearer(token));
+
+            const eliso = await api().post('/dishes').set(bearer(token)).send({
+                name: "spaghetti all'aglio e olio",
+                description: null,
+                price: 9,
+                category: 'Primi',
+                allergens: ['glutine'],
+            });
+            expect(eliso.status).toBe(201);
+            expect(eliso.body.name).toBe("Spaghetti all'Aglio e Olio");
+            await api().delete(`/dishes/${eliso.body.id}`).set(bearer(token));
         });
 
         it('il catalogo espone il listino di default del tenant', async () => {
