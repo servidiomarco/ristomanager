@@ -40,6 +40,20 @@ describe('menu, sala & cucina', () => {
             expect(found.category).toBe('Primi');
         });
 
+        it('i titoli si normalizzano in Title Case, con le denominazioni in sigla', async () => {
+            const created = await api().post('/dishes').set(bearer(token)).send({
+                name: 'BAROLO docg del piemonte',
+                description: null,
+                price: 45,
+                category: 'VINI ROSSI igt',
+                allergens: ['solfiti'],
+            });
+            expect(created.status).toBe(201);
+            expect(created.body.name).toBe('Barolo DOCG Del Piemonte');
+            expect(created.body.category).toBe('Vini Rossi IGT');
+            await api().delete(`/dishes/${created.body.id}`).set(bearer(token));
+        });
+
         it('il catalogo espone il listino di default del tenant', async () => {
             // Non esiste (ancora) un endpoint per prezzare il piatto su un
             // listino: il prezzo di riga ricade su dishes.price. Qui si

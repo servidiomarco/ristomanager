@@ -5,6 +5,19 @@ export const toTitleCase = (input: string | null | undefined): string => {
     .replace(/(^|[\s'’\-])(\p{L})/gu, (_, sep, ch) => sep + ch.toUpperCase());
 };
 
+// Denominazioni che sui titoli del menu restano sigle: «Barolo DOCG», non
+// «Barolo Docg» — vale per i vini e per le DOP/IGP alimentari. La lista è
+// chiusa apposta: parole corte vere (Do, Salame al Doc?) non devono
+// diventare sigle per sbaglio, quindi niente euristica «tutto maiuscolo se
+// corto». Replicata byte per byte nella migration titoli-menu-title-case:
+// toccarla qui significa toccarla anche là, o i confronti esatti divergono.
+const MENU_ACRONYMS = /\b(Doc|Docg|Igt|Igp|Dop|Stg|Aoc|Aop)\b/g;
+
+// Title Case per i titoli del menu (piatti, categorie, varianti,
+// ingredienti): come toTitleCase, ma le denominazioni tornano maiuscole.
+export const toMenuTitleCase = (input: string | null | undefined): string =>
+  toTitleCase(input).replace(MENU_ACRONYMS, (m) => m.toUpperCase());
+
 // Particelle che aprono un cognome composto: se il nome registrato inizia
 // così, la prima parola NON è un nome di battesimo. "De Franco Chiara"
 // troncato alla prima parola produceva saluti e conferme "Ciao De" /

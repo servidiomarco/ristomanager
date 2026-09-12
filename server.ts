@@ -176,7 +176,7 @@ import {
     type BlacklistPolicyMap,
     type BlacklistSource,
 } from './services/blacklistPolicy.js';
-import { toTitleCase } from './utils/text.js';
+import { toTitleCase, toMenuTitleCase } from './utils/text.js';
 import { clampModifierN, signedModifierLabel, signedModifierDelta } from './utils/modifierScale.js';
 import { BAR_COURSE_NO, DESSERT_COURSE_NO, isOffSequenceCourse } from './utils/courses.js';
 import { getRomeDatePart, getRomeTimePart } from './utils/reservationTime.js';
@@ -3605,7 +3605,7 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
                     // Title Case qui, così etichetta del gruppo e varianti
                     // inserite/aggiornate lo ereditano tutte insieme (il
                     // match con le righe esistenti è già su LOWER(name)).
-                    nome: toTitleCase(String(a.descrizione).trim()),
+                    nome: toMenuTitleCase(String(a.descrizione).trim()),
                     delta: Number.isFinite(Number(a.prezzo)) ? Math.round(Number(a.prezzo) * 100) : 0,
                 });
             }
@@ -3639,8 +3639,8 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
                 // Title Case sui titoli della cassa (spesso URLATI): stessa
                 // forma della migration titoli-menu-title-case e delle
                 // scritture CRM, o i confronti esatti per categoria mancano.
-                const nomePiatto = toTitleCase(String(a.descrizione).trim());
-                const categoriaPiatto = toTitleCase(String(a.categoria ?? '').trim()) || 'Senza Categoria';
+                const nomePiatto = toMenuTitleCase(String(a.descrizione).trim());
+                const categoriaPiatto = toMenuTitleCase(String(a.categoria ?? '').trim()) || 'Senza Categoria';
                 const up = await client.query(
                     // category_locked: la categoria è stata curata dal CRM
                     // (es. la carta dei vini divisa per colore, che la cassa
@@ -3952,7 +3952,7 @@ app.put('/menu/categories', authenticate, requirePermission('menu:full'), async 
             // Title Case anche sulla chiave del blob: deve combaciare byte
             // per byte con dishes.category, o menu di categoria e stazioni
             // smettono di agganciarsi.
-            const name = toTitleCase(c.name.trim());
+            const name = toMenuTitleCase(c.name.trim());
             prefs[name] = { enabled: c.enabled !== false, sort: i };
             if (Array.isArray(existing[name]?.menu_ids)) prefs[name].menu_ids = existing[name].menu_ids;
             if (Array.isArray(existing[name]?.modifier_group_ids)) prefs[name].modifier_group_ids = existing[name].modifier_group_ids;
@@ -3992,7 +3992,7 @@ const menuCategoryExists = async (tenantId: number, name: string): Promise<boole
 // Nuova categoria, anche vuota: vive nel blob finché non ha piatti.
 app.post('/menu/categories', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const name = toTitleCase(String(req.body?.name ?? '').trim());
+        const name = toMenuTitleCase(String(req.body?.name ?? '').trim());
         if (!name || name.length > 60) return res.status(400).json({ error: 'name deve essere 1..60 caratteri' });
         if (await menuCategoryExists(req.tenantId!, name)) {
             return res.status(409).json({ error: 'Categoria già esistente' });
@@ -4016,8 +4016,8 @@ app.post('/menu/categories', authenticate, requirePermission('menu:full'), async
 // prossimo import — il server rinomina comunque, l'avviso sta nella modale.
 app.put('/menu/categories/rename', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const from = toTitleCase(String(req.body?.from ?? '').trim());
-        const to = toTitleCase(String(req.body?.to ?? '').trim());
+        const from = toMenuTitleCase(String(req.body?.from ?? '').trim());
+        const to = toMenuTitleCase(String(req.body?.to ?? '').trim());
         if (!from || !to || to.length > 60) return res.status(400).json({ error: 'servono from e to (1..60 caratteri)' });
         if (from === to) return res.status(400).json({ error: 'Il nome è già questo' });
         if (!(await menuCategoryExists(req.tenantId!, from))) {
@@ -4062,7 +4062,7 @@ app.put('/menu/categories/rename', authenticate, requirePermission('menu:full'),
 // orfane o cancellerebbe anagrafica — prima si spostano i piatti.
 app.delete('/menu/categories', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const name = toTitleCase(String(req.query?.name ?? '').trim());
+        const name = toMenuTitleCase(String(req.query?.name ?? '').trim());
         if (!name) return res.status(400).json({ error: 'serve name' });
         const cnt = await queryWithRetry(
             'SELECT count(*)::int AS n FROM dishes WHERE tenant_id = $1 AND category = $2',
@@ -4097,7 +4097,7 @@ app.delete('/menu/categories', authenticate, requirePermission('menu:full'), asy
 // riapplica in blocco, com'è giusto per un'azione dichiarata "in blocco".
 app.put('/menu/category-menus', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const category = typeof req.body?.category === 'string' ? toTitleCase(req.body.category.trim()) : '';
+        const category = typeof req.body?.category === 'string' ? toMenuTitleCase(req.body.category.trim()) : '';
         const menuId = Number(req.body?.menu_id);
         const member = req.body?.member;
         if (!category.trim() || !Number.isInteger(menuId) || typeof member !== 'boolean') {
@@ -4193,7 +4193,7 @@ app.put('/menu/category-menus', authenticate, requirePermission('menu:full'), as
 // la prossima spunta di categoria riapplica in blocco.
 app.put('/menu/category-modifier-groups', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const category = typeof req.body?.category === 'string' ? toTitleCase(req.body.category.trim()) : '';
+        const category = typeof req.body?.category === 'string' ? toMenuTitleCase(req.body.category.trim()) : '';
         const groupId = Number(req.body?.group_id);
         const member = req.body?.member;
         if (!category.trim() || !Number.isInteger(groupId) || typeof member !== 'boolean') {
@@ -4286,7 +4286,7 @@ app.put('/menu/category-modifier-groups', authenticate, requirePermission('menu:
 // le altre proprietà di categoria; il palmare la riceve dal catalogue.
 app.put('/menu/category-bar', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const category = typeof req.body?.category === 'string' ? toTitleCase(req.body.category.trim()) : '';
+        const category = typeof req.body?.category === 'string' ? toMenuTitleCase(req.body.category.trim()) : '';
         const bar = req.body?.bar;
         if (!category || typeof bar !== 'boolean') {
             return res.status(400).json({ error: 'servono category e bar (true/false)' });
@@ -4322,7 +4322,7 @@ app.put('/menu/category-bar', authenticate, requirePermission('menu:full'), asyn
 // abbinamenti vino–piatto (scheda piatto, AI, cassetto del palmare).
 app.put('/menu/category-wine', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const category = typeof req.body?.category === 'string' ? toTitleCase(req.body.category.trim()) : '';
+        const category = typeof req.body?.category === 'string' ? toMenuTitleCase(req.body.category.trim()) : '';
         const wine = req.body?.wine;
         if (!category || typeof wine !== 'boolean') {
             return res.status(400).json({ error: 'servono category e wine (true/false)' });
@@ -4356,7 +4356,7 @@ app.put('/menu/category-wine', authenticate, requirePermission('menu:full'), asy
 // servizio, che parte senza chiamata.
 app.put('/menu/category-dessert', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const category = typeof req.body?.category === 'string' ? toTitleCase(req.body.category.trim()) : '';
+        const category = typeof req.body?.category === 'string' ? toMenuTitleCase(req.body.category.trim()) : '';
         const dessert = req.body?.dessert;
         if (!category || typeof dessert !== 'boolean') {
             return res.status(400).json({ error: 'servono category e dessert (true/false)' });
@@ -4492,7 +4492,7 @@ const parseVariantNote = (raw: any, max: number): { value: string | null } | { e
 
 app.post('/menu/modifier-groups', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const name = toTitleCase(String(req.body?.name ?? '').trim());
+        const name = toMenuTitleCase(String(req.body?.name ?? '').trim());
         if (!name || name.length > 100) return res.status(400).json({ error: 'name deve essere 1..100 caratteri' });
         const minSelect = req.body?.min_select === undefined ? 0 : Number(req.body.min_select);
         const maxSelect = req.body?.max_select === undefined ? 1 : Number(req.body.max_select);
@@ -4506,7 +4506,7 @@ app.post('/menu/modifier-groups', authenticate, requirePermission('menu:full'), 
         if (req.body?.modifiers !== undefined) {
             if (!Array.isArray(req.body.modifiers)) return res.status(400).json({ error: 'modifiers deve essere una lista' });
             for (const m of req.body.modifiers) {
-                const mName = toTitleCase(String(m?.name ?? '').trim());
+                const mName = toMenuTitleCase(String(m?.name ?? '').trim());
                 if (!mName || mName.length > 100) return res.status(400).json({ error: 'ogni variante deve avere un nome di 1..100 caratteri' });
                 const delta = parseModifierDelta(m);
                 if ('error' in delta) return res.status(400).json({ error: delta.error });
@@ -4596,7 +4596,7 @@ app.put('/menu/modifier-groups/:id', authenticate, requirePermission('menu:full'
             return res.status(409).json({ error: 'Il massimo di questo gruppo lo decide la cassa' });
         }
 
-        const name = req.body?.name === undefined ? null : toTitleCase(String(req.body.name).trim());
+        const name = req.body?.name === undefined ? null : toMenuTitleCase(String(req.body.name).trim());
         if (name !== null && (!name || name.length > 100)) return res.status(400).json({ error: 'name deve essere 1..100 caratteri' });
         const minSelect = req.body?.min_select === undefined ? null : Number(req.body.min_select);
         if (minSelect !== null && (!Number.isInteger(minSelect) || minSelect < 0)) return res.status(400).json({ error: 'min_select deve essere un intero >= 0' });
@@ -4700,7 +4700,7 @@ app.post('/menu/modifier-groups/:id/modifiers', authenticate, requirePermission(
         if (!Number.isInteger(groupId)) return res.status(400).json({ error: 'id non valido' });
         const guard = await loadManualGroup(req.tenantId!, groupId);
         if (guard.status !== 200) return res.status(guard.status).json({ error: guard.error });
-        const name = toTitleCase(String(req.body?.name ?? '').trim());
+        const name = toMenuTitleCase(String(req.body?.name ?? '').trim());
         if (!name || name.length > 100) return res.status(400).json({ error: 'name deve essere 1..100 caratteri' });
         const delta = parseModifierDelta(req.body);
         if ('error' in delta) return res.status(400).json({ error: delta.error });
@@ -4763,7 +4763,7 @@ app.put('/menu/modifiers/:id', authenticate, requirePermission('menu:full'), asy
         if (isPPGroupRef(cur.rows[0].external_ref)) {
             return res.status(409).json({ error: 'Le opzioni di questo gruppo arrivano dalla cassa' });
         }
-        const name = req.body?.name === undefined ? null : toTitleCase(String(req.body.name).trim());
+        const name = req.body?.name === undefined ? null : toMenuTitleCase(String(req.body.name).trim());
         if (name !== null && (!name || name.length > 100)) return res.status(400).json({ error: 'name deve essere 1..100 caratteri' });
         const isActive = req.body?.is_active === undefined ? null : Boolean(req.body.is_active);
 
@@ -12068,7 +12068,7 @@ const replaceDishComponents = async (tenantId: number, dishId: number, component
     const parsed: { id: number | null; name: string; delta: number }[] = [];
     for (const c of components) {
         // Title Case come ogni titolo del menu (migration titoli-menu).
-        const name = toTitleCase(String(c?.name ?? '').trim());
+        const name = toMenuTitleCase(String(c?.name ?? '').trim());
         if (!name || name.length > 100) return { error: 'ogni ingrediente deve avere un nome di 1..100 caratteri' };
         const delta = c?.removal_delta_cents === undefined || c?.removal_delta_cents === null
             ? 0 : Number(c.removal_delta_cents);
@@ -12289,8 +12289,8 @@ app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, re
     try {
         const { description, price, allergens, photo_url } = req.body;
         // Titoli sempre in Title Case, come la migration e il sync cassa.
-        const name = toTitleCase(String(req.body?.name ?? '').trim());
-        const category = req.body?.category ? toTitleCase(String(req.body.category).trim()) : req.body?.category;
+        const name = toMenuTitleCase(String(req.body?.name ?? '').trim());
+        const category = req.body?.category ? toMenuTitleCase(String(req.body.category).trim()) : req.body?.category;
         const station = await resolveDishStation(req.tenantId!, req.body?.station_id);
         if ('error' in station) return res.status(400).json({ error: station.error });
         const vatRate = req.body?.vat_rate == null
@@ -12407,8 +12407,8 @@ app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req,
         // Nota: il lucchetto categoria scatta su $4 IS DISTINCT FROM category,
         // e la forma normalizzata è la stessa dell'import — un semplice
         // re-invio del form non lo alza.
-        const name = toTitleCase(String(req.body?.name ?? '').trim());
-        const category = req.body?.category ? toTitleCase(String(req.body.category).trim()) : req.body?.category;
+        const name = toMenuTitleCase(String(req.body?.name ?? '').trim());
+        const category = req.body?.category ? toMenuTitleCase(String(req.body.category).trim()) : req.body?.category;
         const vatRate = parseVatRate(req.body?.vat_rate);
         if (req.body?.vat_rate != null && vatRate == null) return res.status(400).json({ error: 'vat_rate deve essere un intero fra 0 e 100' });
         const dishType = req.body?.dish_type == null ? null : String(req.body.dish_type);
@@ -31932,7 +31932,7 @@ app.get('/sala/config', authenticate, async (req, res) => {
 // esplicita sul singolo piatto).
 app.put('/sala/category-stations', authenticate, requirePermission('settings:full'), async (req, res) => {
     try {
-        const category = typeof req.body?.category === 'string' ? toTitleCase(req.body.category.trim()) : '';
+        const category = typeof req.body?.category === 'string' ? toMenuTitleCase(req.body.category.trim()) : '';
         if (!category || category.length > 100) return res.status(400).json({ error: 'Categoria non valida' });
         const stationId = req.body?.station_id != null ? Number(req.body.station_id) : null;
         if (stationId === null) {

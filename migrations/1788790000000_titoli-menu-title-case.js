@@ -7,10 +7,12 @@
 // di agganciarsi. Da qui in poi la stessa forma la impone il server a ogni
 // scrittura (toTitleCase sui punti di write), sync cassa compreso.
 //
-// pg_temp.rm_title_case replica utils/text.ts toTitleCase (tutto minuscolo,
-// poi maiuscola dopo inizio/spazio/apostrofo/trattino): dati migrati e
-// scritture future devono produrre byte identici, o i confronti esatti
-// (category = $1) tornano a mancare.
+// pg_temp.rm_title_case replica utils/text.ts toMenuTitleCase (tutto
+// minuscolo, poi maiuscola dopo inizio/spazio/apostrofo/trattino, e le
+// denominazioni tornano sigle: «Barolo DOCG», «Mozzarella di Bufala» DOP —
+// stessa lista chiusa di MENU_ACRONYMS): dati migrati e scritture future
+// devono produrre byte identici, o i confronti esatti (category = $1)
+// tornano a mancare.
 export const up = (pgm) => {
     pgm.sql(`
         CREATE FUNCTION pg_temp.rm_title_case(input text) RETURNS text AS $fn$
@@ -29,6 +31,17 @@ export const up = (pgm) => {
                 END IF;
                 boundary := ch = ' ' OR ch = '''' OR ch = '’' OR ch = '-' OR ch = E'\\t';
             END LOOP;
+            -- Denominazioni: da parola intera (\\m…\\M) tornano maiuscole.
+            -- «Docg» non viene toccato da \\mDoc\\M (la g è word char),
+            -- quindi l'ordine non conta.
+            out_s := regexp_replace(out_s, '\\mDoc\\M',  'DOC',  'g');
+            out_s := regexp_replace(out_s, '\\mDocg\\M', 'DOCG', 'g');
+            out_s := regexp_replace(out_s, '\\mIgt\\M',  'IGT',  'g');
+            out_s := regexp_replace(out_s, '\\mIgp\\M',  'IGP',  'g');
+            out_s := regexp_replace(out_s, '\\mDop\\M',  'DOP',  'g');
+            out_s := regexp_replace(out_s, '\\mStg\\M',  'STG',  'g');
+            out_s := regexp_replace(out_s, '\\mAoc\\M',  'AOC',  'g');
+            out_s := regexp_replace(out_s, '\\mAop\\M',  'AOP',  'g');
             RETURN out_s;
         END
         $fn$ LANGUAGE plpgsql;
