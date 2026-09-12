@@ -2012,7 +2012,8 @@ export const ReservationList: React.FC<ReservationListProps> = ({
   const handleConfirmDelete = () => {
       if (deleteConfirmModal.reservationId !== null) {
           onDeleteReservation(deleteConfirmModal.reservationId);
-          showToast('Prenotazione eliminata', 'success');
+          // Il toast arriva dall'eco socket reservation:deleted (anche al
+          // mittente): qui sarebbe la terza copia della stessa notizia.
       }
       setDeleteConfirmModal({show: false, reservationId: null, customerName: ''});
   }

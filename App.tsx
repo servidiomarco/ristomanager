@@ -87,7 +87,7 @@ import { notificationsApiService } from './services/notificationsApiService';
 import { useAuth } from './contexts/AuthContext';
 import { sortRooms } from './utils/roomOrder';
 import { toTitleCase } from './utils/text';
-import { getRomeDatePart, getRomeTimePart } from './utils/reservationTime';
+import { getRomeDatePart } from './utils/reservationTime';
 
 import {
   getReservations,
@@ -1365,7 +1365,10 @@ const App: React.FC = () => {
     socket.on('reservation:deleted', (id: number) => {
       const deleted = reservationsRef.current.find(r => r.id === id);
       setReservations(prev => prev.filter(r => r.id !== id));
-      addToast('Prenotazione eliminata', 'info');
+      // Unica voce per l'eliminazione: le prenotazioni broadcastano anche al
+      // mittente (riga autoritativa lato server), quindi questo toast arriva
+      // pure a chi ha eliminato — niente doppione nel handler locale.
+      addToast(deleted ? `Prenotazione eliminata: ${toTitleCase(deleted.customer_name)}` : 'Prenotazione eliminata', 'info');
       if (deleted) addReservationNotification(deleted, 'deleted');
     });
 
@@ -1786,40 +1789,13 @@ const App: React.FC = () => {
   };
 
   // --- Reservation Logic ---
-  const buildReservationDetails = (res: Reservation): string[] => {
-    // Post write-path fix + migration the DB returns reservation_time as a
-    // proper UTC ISO ("2026-07-21T18:00:00.000Z" = 20:00 in Europe/Rome).
-    // Splitting on 'T' would grab the UTC hour and show 18:00 for a 20:00
-    // booking — the classic 2h CEST shift. Convert via the helpers instead.
-    const romeDate = getRomeDatePart(res.reservation_time);
-    const timeLabel = getRomeTimePart(res.reservation_time) || '00:00';
-    const [yStr, mStr, dStr] = (romeDate || '').split('-');
-    const dateLabelSource = new Date(
-      Number(yStr),
-      Number(mStr) - 1,
-      Number(dStr),
-    );
-    const dateLabel = dateLabelSource.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
-    const shiftLabel = res.shift === Shift.LUNCH ? 'Pranzo' : 'Cena';
-    const tableName = res.table_id ? tables.find(t => t.id === res.table_id)?.name : null;
-
-    const details = [
-      `${toTitleCase(res.customer_name)} · ${res.guests} ${res.guests === 1 ? 'ospite' : 'ospiti'}`,
-      `${dateLabel} · ${timeLabel} (${shiftLabel})`,
-      tableName ? `Tavolo ${tableName}` : 'Tavolo non assegnato',
-    ];
-    if (res.phone) details.push(res.phone);
-    return details;
-  };
 
   const handleUpdateReservation = async (updatedRes: Reservation) => {
     try {
       const returnedRes = await updateReservation(updatedRes.id as number, updatedRes);
       setReservations(prev => prev.map(r => r.id === returnedRes.id ? returnedRes : r));
-      addToast('Prenotazione aggiornata', 'success', {
-        title: 'Modifica Prenotazione',
-        details: buildReservationDetails(returnedRes),
-      });
+      // Il toast arriva dall'eco socket reservation:updated (anche al
+      // mittente): niente doppione qui.
     } catch (error: any) {
       console.error("Error updating reservation:", error);
       addToast(error?.message || 'Errore aggiornamento prenotazione', 'error');
@@ -1882,10 +1858,8 @@ const App: React.FC = () => {
       // handler (see Socket.IO effect) — that path covers all channels
       // uniformly and dedupes against the local optimistic path.
 
-      addToast('Prenotazione inserita con successo', 'success', {
-        title: 'Nuova Prenotazione',
-        details: buildReservationDetails(returnedRes),
-      });
+      // Nessun toast qui: l'eco socket reservation:created arriva anche al
+      // mittente («Nuova prenotazione: NOME») ed è l'unica voce.
       return returnedRes;
     } catch (error: any) {
       console.error("Error adding reservation:", error);
@@ -1899,11 +1873,8 @@ const App: React.FC = () => {
     try {
       await deleteReservation(id);
       setReservations(prev => prev.filter(r => r.id !== id));
-      // The bell notification is added by the reservation:deleted socket
-      // handler (see Socket.IO effect).
-      addToast('Prenotazione cancellata', 'info', targetRes
-        ? { title: 'Prenotazione Cancellata', details: buildReservationDetails(targetRes) }
-        : undefined);
+      // Toast e campanella arrivano dal handler socket reservation:deleted
+      // (l'eco raggiunge anche il mittente): niente doppione qui.
     } catch (error) {
       console.error("Error deleting reservation:", error);
       addToast('Error deleting reservation', 'error');

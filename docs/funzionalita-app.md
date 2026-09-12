@@ -567,7 +567,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 - **Barra globale data + turno** condivisa da tutte le viste di servizio.
 - **Interruttori rapidi di canale**: prenotazioni web e agente vocale si spengono/accendono al volo dalla barra.
 - **Multilingua verso il cliente**: la lingua dell'ospite viene rilevata e ricordata; conferme, template WhatsApp, email e pagine pubbliche seguono la sua lingua (IT/EN; menu anche FR/DE).
-- **Notifiche uniformi con Annulla**: tutte le conferme d'azione dell'app parlano la stessa lingua — pillola scura con bottone d'azione (Annulla, Ricarica, Estendi) o card con icona — ancorate in basso al centro su telefono e in basso a destra su desktop; gli errori restano finché non vengono chiusi. Le azioni reversibili (spunta/eliminazione nella spesa, svuota righe non inviate in Comande) offrono Annulla per cinque secondi invece di chiedere conferma prima.
+- **Notifiche uniformi con Annulla**: tutte le notifiche dell'app sono la stessa pillola scura della Lista della spesa — icona che dice cosa è successo, eventuale bottone d'azione (Annulla, Ricarica, Estendi), forma estesa con dettagli sullo stesso fondo — ancorate in basso al centro su telefono e in basso a destra su desktop; gli errori restano finché non vengono chiusi con la X. Un'azione produce un toast solo (niente doppioni locale+socket). Le azioni reversibili (spunta/eliminazione nella spesa, svuota righe non inviate in Comande) offrono Annulla per cinque secondi invece di chiedere conferma prima.
 - **Robustezza**: aggiornamento app segnalato con banner; errori isolati per scheda (un crash non butta giù l'app); protezione anti doppio-invio su tutte le operazioni delicate.
 - **Fuso orario**: tutte le date e ore sono Europe/Rome, indipendentemente dal dispositivo.
 
@@ -596,6 +596,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-12 | Funzionalità trasversali | Tutte le notifiche vestono la pillola scura della spesa (ritirata la card bianca, anche per gli esiti con dettagli); un'eliminazione/creazione/modifica di prenotazione produce un solo toast, col nome del cliente, invece di due o tre copie. |
 | 2026-09-12 | Funzionalità trasversali | Notifiche unificate nel linguaggio della snackbar della spesa (pillola con azione / card con icona, stessa posizione ovunque, errori che restano finché non chiusi); Annulla anche su «svuota righe non inviate» in Comande; l'esito di sync/azioni in Conversazioni, permessi ruoli, push e pagamenti passa dagli stessi toast. |
 | 2026-09-12 | Clienti (CRM / rubrica) | Ricerca per parole in qualsiasi ordine («Servidio Marco» trova «Marco Servidio»), telefono per sole cifre, risultati che iniziano con la parola digitata in testa: i suggerimenti nel form prenotazione trovano la scheda esistente e non nascono doppioni. |
 | 2026-09-12 | Menu & Banchetti | Card «Vini abbinati»: i vini collegati si elencano per nome in testa alla card (chip col tocco che toglie), non più il solo conteggio. |
