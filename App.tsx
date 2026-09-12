@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3 } from 'lucide-react';
 import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
@@ -28,7 +28,7 @@ import { HaccpPage } from './components/HaccpPage';
 import ConversazioniPage from './components/ConversazioniPage';
 import InboxPage from './components/InboxPage';
 import StaffChatPage from './components/StaffChatPage';
-import { SegmentedControl, StatusPill, useMediaQuery, dsSelect } from './components/ds';
+import { LivePill, SegmentedControl, StatusPill, useMediaQuery, dsSelect } from './components/ds';
 import { NotificationsPanel } from './components/NotificationsPanel';
 import EmailPage from './components/EmailPage';
 import NotifichePage from './components/NotifichePage';
@@ -381,6 +381,12 @@ const App: React.FC = () => {
   // NAV_ITEMS.sidebarCollapse. La linguetta è l'override manuale nel mezzo, e
   // quello che sceglie viene persistito: al riavvio si riparte da lì, finché
   // la prima navigazione non applica di nuovo il default della vista.
+  // Comande sullo schermo largo si prende la pagina: la sidebar si ritira in
+  // un bollo col marchio, e il chevron la rimette al suo posto accanto ai
+  // tavoli (che si stringono). È una preferenza di sessione, non per
+  // dispositivo: chi la apre per cambiare pagina se la ritrova aperta finché
+  // non la richiude.
+  const [comandeNavHidden, setComandeNavHidden] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
@@ -798,6 +804,35 @@ const App: React.FC = () => {
     return `${y}-${m}-${day}`;
   };
   const globalDateStr = formatLocalDateGlobal(globalDate);
+  // Il bollo vive solo dove la sidebar si ritira: Comande sullo schermo largo.
+  // Sotto lg la sidebar non c'è comunque (c'è la barra in basso), quindi la
+  // bandiera non deve spegnere niente lì.
+  const comandeNavStubbed = view === ViewState.COMANDE && comandeNavHidden;
+  // Il marchio col chevron che richiama il menu. Sta nella barra della pagina
+  // di Comande, al posto esatto dove stava la sidebar: il bersaglio non si
+  // sposta, si assottiglia.
+  // Marchio e chevron in FILA, non impilati: la stessa struttura della barra
+  // accanto (px-3 py-2.5 attorno a un corpo da 44px) le fa venire alte uguali
+  // da sole, senza numeri magici da tenere allineati a mano. Impilato il bollo
+  // era più alto della barra e le sporgeva sotto.
+  const comandeBrand = (
+    <div className="animate-view-in flex flex-shrink-0 items-center gap-1 rounded-[28px] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)]">
+      <div className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[14px] bg-[var(--ds-action-bg)]">
+        <ChefHat className="h-5 w-5 text-[var(--ds-action-fg)]" />
+      </div>
+      <button
+        type="button"
+        onClick={() => setComandeNavHidden(false)}
+        aria-expanded={false}
+        aria-controls="sidebar-nav"
+        title="Apri menu"
+        aria-label="Apri menu"
+        className="pressable inline-flex h-11 w-8 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+      >
+        <ChevronDown size={16} />
+      </button>
+    </div>
+  );
 
   // Auto-switch from 'ALL' when navigating away from Dashboard
   useEffect(() => {
@@ -2052,8 +2087,20 @@ const App: React.FC = () => {
           stacco fra le due card contro i 16px dei margini esterni: il
           contenuto risultava spinto a destra. Con mr-0 il corridoio torna a
           16px ed è uguale a tutti gli altri lati. */}
+      {/* La larghezza si anima, non si spegne: `display:none` non ha stati
+          intermedi, e in Comande la sidebar spariva e ricompariva di scatto.
+          Ritirata resta nell'albero a larghezza zero — margine e contenuto
+          compresi, o i 16px del margine terrebbero il posto di una colonna
+          che non c'è — e torna scorrendo insieme ai tavoli che si stringono.
+          `invisible` toglie il focus ai link mentre è via: una tabulazione
+          non deve finire dentro un menu che nessuno vede. */}
       <aside
-        className={`hidden lg:flex ${sidebarCollapsed ? 'w-[76px]' : 'w-[250px]'} m-4 mr-0 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] flex-col transition-[width] duration-200 z-20 relative`}
+        className={`hidden lg:flex ${
+          comandeNavStubbed
+            ? 'w-0 m-0 opacity-0 invisible pointer-events-none'
+            : `${sidebarCollapsed ? 'w-[76px]' : 'w-[250px]'} m-4 mr-0 opacity-100`
+        } overflow-hidden rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] flex-col transition-[width,margin,opacity] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none z-20 relative`}
+        aria-hidden={comandeNavStubbed}
         aria-label="Navigazione principale"
       >
         {/* Intestazione — logo e comando apri/chiudi sulla stessa riga, come
@@ -2131,14 +2178,17 @@ const App: React.FC = () => {
           </div>
           <button
             type="button"
-            onClick={toggleSidebar}
-            aria-expanded={!sidebarCollapsed}
+            onClick={view === ViewState.COMANDE ? () => setComandeNavHidden(true) : toggleSidebar}
+            aria-expanded={view === ViewState.COMANDE ? true : !sidebarCollapsed}
             aria-controls="sidebar-nav"
-            title={sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
-            aria-label={sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
+            title={view === ViewState.COMANDE ? 'Nascondi menu' : sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
+            aria-label={view === ViewState.COMANDE ? 'Nascondi menu' : sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
             className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[12px] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${sidebarCollapsed ? '' : 'ml-auto'}`}
           >
-            <PanelLeft size={18} />
+            {/* In Comande il verso conta: il chevron su rimette via il menu da
+                dove il chevron giù l'ha tirato fuori. Altrove resta il
+                pannello, che non è una freccia ma un interruttore. */}
+            {view === ViewState.COMANDE ? <ChevronUp size={18} /> : <PanelLeft size={18} />}
           </button>
         </div>
 
@@ -2333,7 +2383,18 @@ const App: React.FC = () => {
             In Cucina sparisce del tutto: data-picker, turno, ricerca globale
             e «+» lì non servono, e lo spazio è delle comande — la topbar del
             monitor porta da sola data, orologio e i suoi controlli. */}
-        <header className={`flex-shrink-0 h-16 md:h-[72px] m-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] z-10 md:z-30 items-center justify-between px-3 md:px-4 ${view === ViewState.CUCINA ? 'hidden' : immersive ? 'hidden lg:flex' : 'flex'}`}>
+        <header className={`flex-shrink-0 h-16 md:h-[72px] m-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] z-10 md:z-30 items-center justify-between px-3 md:px-4 ${
+          view === ViewState.CUCINA ? 'hidden'
+          // Comande sullo schermo largo si prende la pagina: la sua testata è
+          // dentro la pagina (ricerca, imbuto, Live) e questa sopra sarebbe
+          // una seconda barra che dice le stesse cose. Giorno e turno vivono
+          // nell'imbuto della griglia. La sidebar resta — ridotta a rail come
+          // già fa Comande — o non si andrebbe più da nessuna parte.
+          // Sul telefono non cambia niente: lì la testata c'è finché non si
+          // entra in un tavolo, come sempre.
+          : view === ViewState.COMANDE ? (immersive ? 'hidden' : 'flex lg:hidden')
+          : immersive ? 'hidden lg:flex' : 'flex'
+        }`}>
            {/* `pl-2` sopra al `px-3` della testata: il marchio ha aria propria
                dentro l'immagine solo sopra e sotto, ai lati arriva al bordo, e
                attaccato alla curva della card sembrava scivolato fuori. */}
@@ -2422,47 +2483,12 @@ const App: React.FC = () => {
 
               {/* Connection state + current time, merged into one pill.
                   Connected uses the `seated` family; offline uses `critical`.
-                  The dot pulses, but under prefers-reduced-motion it becomes a
-                  steady colour — the signal is never removed, only the motion. */}
-              <div
-                className={`hidden md:inline-flex items-center gap-2 pl-2.5 pr-3 h-10 rounded-full text-[15px] font-medium ${
-                  isConnected
-                    ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
-                    : 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]'
-                }`}
-                role="status"
-                aria-live={isConnected ? 'polite' : 'assertive'}
-                aria-label={isConnected ? 'Connesso' : 'Non connesso'}
-              >
-                <span className="relative flex h-2 w-2" aria-hidden>
-                  {isConnected && (
-                    <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--ds-seated-solid)] opacity-60 animate-ping motion-reduce:hidden"></span>
-                  )}
-                  <span className={`relative inline-flex h-2 w-2 rounded-full ${isConnected ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-critical-solid)]'}`}></span>
-                </span>
-                <span className="whitespace-nowrap tabular-nums">
-                  {isConnected
-                    ? `Live ${currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`
-                    : 'Offline'}
-                </span>
-              </div>
+                  Comande a schermo pieno mostra la stessa pastiglia nella sua
+                  chrome, quindi vive in ds/ e non più inline qui. */}
+              <LivePill connected={isConnected} time={currentTime} className="hidden md:inline-flex" />
 
               {/* Mobile-only status dot */}
-              <span
-                className="md:hidden relative flex h-2.5 w-2.5 mx-1"
-                role="status"
-                aria-live={isConnected ? 'polite' : 'assertive'}
-                aria-label={isConnected ? 'Connesso' : 'Non connesso'}
-                title={isConnected ? 'Connesso' : 'Non connesso'}
-              >
-                {isConnected && (
-                  <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--ds-seated-solid)] opacity-60 animate-ping motion-reduce:hidden" aria-hidden></span>
-                )}
-                <span
-                  className={`relative inline-flex h-2.5 w-2.5 rounded-full ${isConnected ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-critical-solid)]'}`}
-                  aria-hidden
-                ></span>
-              </span>
+              <LivePill connected={isConnected} time={currentTime} variant="dot" className="md:hidden mx-1" />
 
               {/* Global search — opens the command palette. Same button surface
                   as the bell so it stays reachable on mobile, where ⌘K does not apply. */}
@@ -2854,7 +2880,19 @@ const App: React.FC = () => {
 
         {view === ViewState.COMANDE && (
           <CardErrorBoundary label="Comande">
-            <OrderPad dishes={dishes} menus={menus} tables={tables} rooms={rooms} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} onImmersive={setImmersive} initialTableId={pendingComandeTableId} onInitialTableConsumed={() => setPendingComandeTableId(null)} />
+            <OrderPad
+              dishes={dishes}
+              menus={menus}
+              tables={tables}
+              rooms={rooms}
+              reservations={reservations}
+              globalDate={globalDate}
+              globalShiftFilter={globalShiftFilter}
+              onImmersive={setImmersive}
+              initialTableId={pendingComandeTableId}
+              onInitialTableConsumed={() => setPendingComandeTableId(null)}
+              brand={comandeNavStubbed ? comandeBrand : undefined}
+            />
           </CardErrorBoundary>
         )}
 

@@ -1,11 +1,57 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Cake, ChefHat, ChevronDown, ChevronRight, CornerDownRight, Minus, Plus, Search, Trash2, Wine } from 'lucide-react';
+import {
+  Apple, ArrowLeft, Beef, Beer, Cake, CakeSlice, ChefHat, ChevronDown, ChevronRight, Coffee,
+  CornerDownRight, Croissant, CupSoda, Drumstick, Fish, GlassWater, Ham, Image as ImageIcon,
+  IceCreamCone, Martini, Minus, Pizza, Plus, Salad, Sandwich, Search, Soup, Trash2, Utensils,
+  Wheat, Wine,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import type { Dish } from '../../types';
 import { SearchField } from '../ds';
 import { euro } from './orderView';
 import { isBarCourse, isDessertCourse, ordinal } from '../../utils/courses';
 import { DishSearchSheet } from './DishSearchSheet';
 import { DishPhotoViewer } from './DishPhotoViewer';
+
+/* ── L'icona della categoria ──────────────────────────────────────────────
+   Le categorie le scrive il ristoratore, quindi non c'è una tabella da cui
+   pescare: si riconosce la parola. Il confronto è sulla forma senza accenti e
+   in minuscolo — «Caffè» e «caffe» sono la stessa categoria — e la prima
+   parola che combacia vince, così «Gelati e Dessert» prende il gelato e non
+   il dolce generico.
+
+   Senza corrispondenza resta la forchetta: un'icona sbagliata è peggio di
+   un'icona neutra, perché la si legge e si sbaglia categoria. */
+const CATEGORY_ICONS: [RegExp, LucideIcon][] = [
+  [/gelat|sorbett/, IceCreamCone],
+  [/dolc|dessert|tort|pasticc/, CakeSlice],
+  [/caff|the|tisan/, Coffee],
+  [/vin|calic|bollicin|spuman|champ/, Wine],
+  [/amar|digestiv|liquor|cocktail|aperitiv|grapp/, Martini],
+  [/birr/, Beer],
+  [/bibit|bevand|soft|analcol|succ/, CupSoda],
+  [/acqu/, GlassWater],
+  [/antipast|sfiz|stuzzich|tapas|tagli/, Ham],
+  [/salum|formagg/, Ham],
+  [/zupp|vellut|minestr|brod/, Soup],
+  [/prim|past|risott|gnocch/, Wheat],
+  [/pizz|focacc|farinac/, Pizza],
+  [/pesc|crudo|frutti di mare|molluschi/, Fish],
+  [/grigli|brace|carn|secondi|bistecc|manz/, Beef],
+  [/pol|arrost/, Drumstick],
+  [/contorn|verdur|insalat|ortagg/, Salad],
+  [/panin|hamburg|sandwich|toast/, Sandwich],
+  [/frutt/, Apple],
+  [/colazion|brioche|cornett/, Croissant],
+];
+
+const stripAccents = (v: string): string =>
+  v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+const categoryIcon = (name: string): LucideIcon => {
+  const key = stripAccents(name);
+  return CATEGORY_ICONS.find(([re]) => re.test(key))?.[1] ?? Utensils;
+};
 
 // ---------------------------------------------------------------------------
 // Il menu, da toccare. Ricerca sempre a portata, categorie in una pista che
@@ -37,6 +83,10 @@ interface DishBrowserProps {
   tapOpensSheet?: (dishId: number) => boolean;
   onAdd: (dish: Dish) => void;
   onRemove: (dish: Dish) => void;
+  /** true quando un «−» su questo piatto sa QUALE riga scalare. Senza, il
+   *  bottone non compare: un «−» che non fa niente è peggio di un «−» che non
+   *  c'è. Non passarla = comportamento storico (nessun «−» rapido). */
+  canRemove?: (dish: Dish) => boolean;
   /** L'uscita dove una battuta di questo piatto finisce (forzata o in
    *  composizione): col battuto in corso compare sul piatto come chip. */
   courseOf?: (dish: Dish) => number;
@@ -65,6 +115,17 @@ interface DishBrowserProps {
   nav?: 'chips' | 'pages';
   /** Ritorno alla pagina delle categorie (nav 'pages'): azzera la categoria. */
   onCategoryBack?: () => void;
+  /** Come si presentano le categorie sullo schermo largo. 'chips' è la pista
+   *  di sempre e resta il default: Cassa monta questo stesso componente.
+   *  'cards' è la fila di schede tinte di Comande — ogni categoria con la sua
+   *  tinta e quanti piatti ha. */
+  catStyle?: 'chips' | 'cards';
+  /** La griglia piatti sullo schermo largo. 'rows' è la scheda bassa di
+   *  sempre (default, e quella di Cassa); 'photos' è la griglia con la foto
+   *  in alto e lo stepper in fondo. */
+  gridStyle?: 'rows' | 'photos';
+  /** Quanti piatti ha ogni categoria, per il sottotitolo delle schede. */
+  countByCategory?: Map<string, number>;
   /** Come si presenta la pagina delle categorie (nav 'pages'): lista a righe,
    *  o bottoni in griglia da 3 o 4 per riga. Preferenza personale
    *  dell'operatore (menu ⋮), catalogo chiuso. */
@@ -94,8 +155,9 @@ interface DishBrowserProps {
 
 export const DishBrowser: React.FC<DishBrowserProps> = ({
   dishes, categories, category, onCategory, query, onQuery,
-  qtyInCourse, markedCategories, hasVariants, tapOpensSheet = hasVariants, onAdd, onRemove, courseOf, onCourseTap, onLongPress, layout,
+  qtyInCourse, markedCategories, hasVariants, tapOpensSheet = hasVariants, onAdd, onRemove, canRemove, courseOf, onCourseTap, onLongPress, layout,
   showSearch = true, density = 'comfortable', nav = 'chips', onCategoryBack, catView = 'list',
+  catStyle = 'chips', gridStyle = 'rows', countByCategory,
   barCategories, dessertCategories, course,
   draftLinesFor, onBumpLine, onTapLine, onLineCourseTap,
 }) => {
@@ -220,6 +282,53 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     );
   };
 
+  /* Lo stepper della scheda con foto: «−», quanti, «+», tre bersagli da 44px
+     in fondo alla scheda. Si aggiunge al tocco sulla scheda, non lo
+     sostituisce — chi sa già il piatto continua a batterlo con un tap solo.
+
+     Il «−» compare quando togliere è NON AMBIGUO — una riga sola di quel
+     piatto nell'uscita — e lo decide chi possiede il carrello (canRemove).
+     Prima la regola era «il tap apre un foglio?», che è un'altra domanda: la
+     Grigliata ha la cottura obbligatoria, quindi il «−» spariva anche con una
+     riga sola e quella riga non si poteva più togliere dal menu. */
+  const photoStepper = (d: Dish) => {
+    const qty = qtyInCourse.get(d.id) ?? 0;
+    const removable = qty > 0 && (canRemove?.(d) ?? false);
+    return (
+      <div className="flex items-center justify-between gap-2">
+        {removable ? (
+          <button
+            type="button"
+            onClick={() => onRemove(d)}
+            aria-label={`Togli ${d.name}`}
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            <Minus size={16} aria-hidden />
+          </button>
+        ) : (
+          <span className="h-11 w-11 flex-shrink-0" aria-hidden />
+        )}
+        <span className={`min-w-[20px] text-center text-[17px] font-semibold tabular-nums ${
+          qty > 0 ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)]'
+        }`}>
+          {qty}
+        </span>
+        <button
+          type="button"
+          onClick={() => onAdd(d)}
+          aria-label={`Aggiungi ${d.name}`}
+          className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+            qty > 0
+              ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]'
+              : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
+          }`}
+        >
+          <Plus size={16} aria-hidden />
+        </button>
+      </div>
+    );
+  };
+
   // La miniatura, solo dove la scheda del piatto ha una foto: bersaglio a
   // parte accanto al nome — il tocco NON batte, apre il visore. Fratello dei
   // bottoni di riga, mai figlio: un bottone dentro un bottone non è HTML.
@@ -276,6 +385,80 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                 aria-hidden
               />
             )}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  /* Le schede categoria dello schermo largo. La tinta viene dai --ds-cat-*,
+     assegnata per POSIZIONE nel catalogo e ciclica dopo la sesta: sono
+     categorie, cioè cose diverse fra loro, non stati — una categoria in
+     ambra «pending» direbbe alla sala che c'è qualcosa da fare (§3.5).
+
+     Scritte per intero, mai composte: Tailwind estrae i nomi delle classi
+     staticamente, e un `bg-[var(--ds-cat-${i}-tint)]` non arriva mai nel
+     foglio di stile. */
+  // Solo la tinta: il filetto -line attorno a ogni scheda sommava sei bordi
+  // colorati a sei fondi colorati, e la fila diventava una scacchiera.
+  const CAT_CARD = [
+    'bg-[var(--ds-cat-1-tint)]',
+    'bg-[var(--ds-cat-2-tint)]',
+    'bg-[var(--ds-cat-3-tint)]',
+    'bg-[var(--ds-cat-4-tint)]',
+    'bg-[var(--ds-cat-5-tint)]',
+    'bg-[var(--ds-cat-6-tint)]',
+  ];
+  const CAT_TEXT = [
+    'text-[var(--ds-cat-1-text)]',
+    'text-[var(--ds-cat-2-text)]',
+    'text-[var(--ds-cat-3-text)]',
+    'text-[var(--ds-cat-4-text)]',
+    'text-[var(--ds-cat-5-text)]',
+    'text-[var(--ds-cat-6-text)]',
+  ];
+
+  const catCards = (
+    /* La fila scorre invece di andare a capo: un menu con dodici categorie
+       spingerebbe i piatti sotto la piega, e i piatti sono il motivo per cui
+       si è qui.
+
+       Il margine negativo con padding UGUALE dà aria ai bordi senza spostare
+       niente: `overflow-x-auto` ritaglia anche in verticale (quando un asse
+       non è `visible`, l'altro smette di esserlo), e i 6px di prima tagliavano
+       l'ombra di netto a metà — `--ds-shadow-card` scende 8px e sfuma per 24,
+       quindi ne servono una ventina. Finché le schede avevano il filetto
+       colorato il taglio si leggeva come un bordo; tolto quello, si vede. */
+    <div className="-mx-2 -my-6 flex flex-shrink-0 gap-3 overflow-x-auto px-2 py-6 scrollbar-hide">
+      {categories.map((c, i) => {
+        const active = !q && c === category;
+        const n = i % 6;
+        const count = countByCategory?.get(c);
+        const Icon = categoryIcon(c);
+        return (
+          <button
+            key={c}
+            type="button"
+            onClick={() => { onQuery(''); onCategory(c); }}
+            aria-pressed={active}
+            className={`flex w-[156px] flex-shrink-0 flex-col items-start gap-1.5 rounded-[6px] px-4 py-3.5 text-left transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${CAT_CARD[n]} ${
+              active
+                ? 'shadow-[var(--ds-shadow-card)] ring-2 ring-[var(--ds-action-bg)]'
+                : 'shadow-[var(--ds-shadow-card)]'
+            } ${mutedCat(c) ? 'opacity-45' : ''}`}
+          >
+            {/* L'icona al posto del quadratino: dice di che categoria si tratta
+                prima che si legga il nome, che è il punto di una pista da
+                scorrere con la coda dell'occhio. Nel colore -text della
+                famiglia, non nel solid: è un glifo sottile su tinta chiara. */}
+            <Icon size={20} className={CAT_TEXT[n]} aria-hidden />
+            {/* Il nome in testo normale, non nel colore della categoria: sei
+                nomi ognuno di un colore diverso erano sei richiami invece di
+                sei etichette. Il colore resta nella tinta e nell'icona. */}
+            <span className="w-full truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">{c}</span>
+            <span className="text-[12px] tabular-nums text-[var(--ds-text-muted)]">
+              {count != null ? `${count} ${count === 1 ? 'piatto' : 'piatti'}` : '\u00a0'}
+            </span>
           </button>
         );
       })}
@@ -573,25 +756,122 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     // e a 12px si leggono come una fascia sola di controlli. In vista
     // compatta il respiro lo cede ai piatti — lì è la sagoma della scheda
     // unica a separare le zone.
-    <div className={`flex min-h-0 flex-1 flex-col ${layout === 'list' && density !== 'compact' ? 'gap-4' : 'gap-3'}`}>
-      {layout === 'list' ? (
-        searchPill
+    <div className={`flex min-h-0 flex-1 flex-col ${
+      layout === 'grid' && catStyle === 'cards' ? 'gap-5'
+      : layout === 'list' && density !== 'compact' ? 'gap-4'
+      : 'gap-3'
+    }`}>
+      {/* Categorie, filetto, ricerca, piatti. La ricerca stava sopra tutto e
+          apriva la pagina con un campo vuoto; qui la prima cosa è la scelta
+          che si fa davvero a ogni tavolo — la categoria — e la ricerca sta
+          appoggiata ai piatti che filtra. Il filetto divide le due zone: la
+          fila delle categorie sopra, quello che ne esce sotto. */}
+      {layout === 'grid' && catStyle === 'cards' ? (
+        <>
+          {catCards}
+          {/* --ds-border-strong, non --ds-border: il filetto sta sulla TELA,
+              e #e9e9ec su #ededf1 misura circa 1,03:1 — sparisce. È lo stesso
+              motivo per cui DateNavigator ha un trattamento «on canvas». */}
+          <div className="h-px flex-shrink-0 bg-[var(--ds-border-strong)]" aria-hidden />
+          <SearchField
+            value={query}
+            onChange={onQuery}
+            placeholder="Cerca un piatto in tutto il menù…"
+            ariaLabel="Cerca un piatto"
+            className="flex-shrink-0"
+          />
+        </>
       ) : (
-        <SearchField
-          value={query}
-          onChange={onQuery}
-          placeholder="Cerca un piatto"
-          ariaLabel="Cerca un piatto"
-          className="flex-shrink-0"
-        />
+        <>
+          {layout === 'list' ? (
+            searchPill
+          ) : (
+            <SearchField
+              value={query}
+              onChange={onQuery}
+              placeholder="Cerca un piatto"
+              ariaLabel="Cerca un piatto"
+              className="flex-shrink-0"
+            />
+          )}
+          {chips}
+        </>
       )}
-      {chips}
 
       {/* Lo scorrimento verticale ritaglia anche in orizzontale, quindi le
           ombre delle schede uscirebbero tagliate di netto ai due bordi: il
           margine negativo con padding uguale ridà spazio all'elevazione. */}
       <div className="-mx-2 min-h-0 flex-1 overflow-y-auto px-2 pb-2 pt-1">
-        {layout === 'grid' ? (
+        {layout === 'grid' && gridStyle === 'photos' ? (
+          /* La griglia con la foto. La scheda è alta il doppio della riga di
+             prima, quindi se ne vedono meno: in cambio il piatto si riconosce
+             dall'immagine e si porge al cliente senza cercarlo a nome.
+             Lo stepper in fondo è un'AGGIUNTA, non un rimpiazzo — il tocco
+             sulla scheda batte come sempre, e sui piatti con varianti apre il
+             loro foglio. */
+          <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 lg:grid-cols-4">
+            {visible.length === 0 ? empty : visible.map(d => {
+              const qty = qtyInCourse.get(d.id) ?? 0;
+              const tappableBadge = qty > 0 && courseOf && onCourseTap;
+              return (
+                <div
+                  key={d.id}
+                  className={`relative flex flex-col overflow-hidden rounded-[6px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] ${
+                    qty > 0 ? 'ring-2 ring-[var(--ds-action-bg)]' : ''
+                  }`}
+                >
+                  {/* La foto è un bersaglio suo: si porge il telefono al
+                      cliente senza battere il piatto per sbaglio. Senza foto
+                      resta il riquadro col glifo — la scheda non cambia
+                      altezza, o la griglia balla riga per riga. */}
+                  <button
+                    type="button"
+                    onClick={() => { if (d.photo_url) setPhotoDish(d); }}
+                    tabIndex={d.photo_url ? 0 : -1}
+                    aria-label={d.photo_url ? `Guarda la foto di ${d.name}` : undefined}
+                    aria-hidden={d.photo_url ? undefined : true}
+                    className={`flex aspect-[16/10] w-full items-center justify-center bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] ${
+                      d.photo_url ? 'cursor-zoom-in' : 'cursor-default'
+                    }`}
+                  >
+                    {d.photo_url ? (
+                      <img src={d.photo_url} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <ImageIcon size={28} className="text-[var(--ds-text-muted)] opacity-50" aria-hidden />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    {...press(d)}
+                    className="select-none px-2.5 pb-0.5 pt-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    <span className="block truncate text-[14px] font-semibold text-[var(--ds-text-primary)]">
+                      {d.name}
+                    </span>
+                    {/* Niente freccina accanto al prezzo: nella griglia con
+                        foto il cassetto delle sotto-righe non c'è, e lo
+                        stepper qui sotto dice già cosa si può fare. */}
+                    <span className="text-[14px] tabular-nums text-[var(--ds-text-muted)]">
+                      {euro(Math.round(Number(d.price) * 100))}
+                    </span>
+                  </button>
+                  <div className="mt-auto px-1.5 pb-1.5 pt-0.5">{photoStepper(d)}</div>
+                  {qty > 0 && tappableBadge && (
+                    <button
+                      type="button"
+                      onClick={() => onCourseTap!(d)}
+                      aria-label={`Sposta ${d.name} in un'altra uscita`}
+                      className="absolute right-2 top-2 inline-flex h-9 items-center gap-1 whitespace-nowrap rounded-full bg-[var(--ds-arriving-tint)] px-2.5 text-[12px] font-semibold text-[var(--ds-arriving-text)] shadow-[var(--ds-shadow-card)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    >
+                      <CornerDownRight size={13} aria-hidden />
+                      {courseTagShort(courseOf!(d))}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : layout === 'grid' ? (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {visible.length === 0 ? empty : visible.map(d => {
               const qty = qtyInCourse.get(d.id) ?? 0;

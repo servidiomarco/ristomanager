@@ -27293,7 +27293,7 @@ app.get('/orders/open', authenticate, requirePermission('orders:view'), async (r
         const service = { service_date: filterDate ?? now.service_date, shift: filterShift ?? now.shift };
 
         const rows = await queryWithRetry(
-            `SELECT o.id, o.table_id
+            `SELECT o.id, o.table_id, o.discount_type, o.discount_value
                FROM orders o
               WHERE o.tenant_id = $1 AND o.status = 'OPEN'
                 AND o.service_date = $2::date
@@ -27302,10 +27302,57 @@ app.get('/orders/open', authenticate, requirePermission('orders:view'), async (r
               ORDER BY o.id`,
             [req.tenantId!, filterDate ?? now.service_date, filterShift]
         );
+
+        // Quanto sta spendendo il tavolo e a che punto è, per la tessera della
+        // griglia: prima si scopriva aprendo il tavolo uno per uno. Una query
+        // sola per tutta la sala — sessanta tessere non possono essere sessanta
+        // chiamate. Le righe passano dagli stessi helper del resto del modulo
+        // (lineTotalCents, applyDiscount, deriveCourseStatus): una seconda
+        // aritmetica del totale diverge dal conto al primo sconto.
+        const orderIds = rows.rows.map((r: any) => Number(r.id));
+        const itemsByOrder = new Map<number, any[]>();
+        if (orderIds.length > 0) {
+            const items = await queryWithRetry(
+                `SELECT order_id, course_no, status, qty, unit_price_cents, modifiers, line_kind, queued_at, fired_at
+                   FROM order_items
+                  WHERE order_id = ANY($1::int[]) AND tenant_id = $2`,
+                [orderIds, req.tenantId!]
+            );
+            for (const it of items.rows) {
+                const list = itemsByOrder.get(Number(it.order_id));
+                if (list) list.push(it); else itemsByOrder.set(Number(it.order_id), [it]);
+            }
+        }
+
+        // L'uscita che la tessera racconta: la PIÙ AVANTI fra quelle di cucina,
+        // non l'ultima toccata. Bar e Dolci vincono solo se non c'è nient'altro
+        // — un amaro servito non deve coprire la 2ª che è ancora in cucina.
+        const topCourse = (list: any[]): { course_no: number; status: string } | null => {
+            // Coperto e servizio non sono un'uscita: una comanda appena aperta
+            // ha già le sue righe di sistema, e contarle faceva leggere «1ª in
+            // bozza» a un tavolo che non ha ancora ordinato niente.
+            const live = list.filter(i => i.status !== 'VOIDED' && (i.line_kind ?? 'DISH') === 'DISH');
+            if (live.length === 0) return null;
+            const numbers = [...new Set(live.map(i => Number(i.course_no)))];
+            const kitchen = numbers.filter(n => !isOffSequenceCourse(n));
+            const pick = kitchen.length > 0 ? Math.max(...kitchen) : Math.min(...numbers);
+            return { course_no: pick, status: deriveCourseStatus(live.filter(i => Number(i.course_no) === pick)) };
+        };
+
         res.json({
             service,
             table_ids: [...new Set(rows.rows.map((r: any) => Number(r.table_id)))],
-            orders: rows.rows.map((r: any) => ({ id: Number(r.id), table_id: Number(r.table_id) })),
+            orders: rows.rows.map((r: any) => {
+                const list = itemsByOrder.get(Number(r.id)) ?? [];
+                const subtotal = list.filter(i => i.status !== 'VOIDED')
+                                     .reduce((sum, i) => sum + lineTotalCents(i), 0);
+                return {
+                    id: Number(r.id),
+                    table_id: Number(r.table_id),
+                    total_cents: applyDiscount(subtotal, r.discount_type, r.discount_value),
+                    course: topCourse(list),
+                };
+            }),
         });
     } catch (err: any) {
         console.error('GET /orders/open error:', err);

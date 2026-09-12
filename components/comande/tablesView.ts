@@ -1,6 +1,9 @@
-import type { Reservation, Table, TableMerge } from '../../types';
+import type { CourseStatus, Reservation, Table, TableMerge } from '../../types';
 import { ArrivalStatus, ReservationStatus } from '../../types';
-import { getRomeDatePart } from '../../utils/reservationTime';
+import { getRomeDatePart, getRomeTimePart } from '../../utils/reservationTime';
+import { ordinal } from '../../utils/courses';
+import { COURSE_BADGE, euro } from './orderView';
+import type { OpenOrderSummary } from '../../services/ordersApiService';
 import type { SectionTone } from '../ds';
 
 // ---------------------------------------------------------------------------
@@ -28,6 +31,12 @@ export interface TableRow {
   groupLabel?: string;
   groupSeats?: number;
   pickId?: number;
+  /** Quanto sta spendendo il tavolo e a che punto è il servizio. Presente
+   *  solo se il chiamante passa i riassunti: Cassa non lo fa, e la sua
+   *  griglia resta quella di sempre. */
+  order?: OpenOrderSummary;
+  /** Il residuo del conto da incassare, per la stessa riga di stato. */
+  billCents?: number;
 }
 
 export type TableFilter = 'ALL' | TableState;
@@ -64,11 +73,67 @@ export const TABLE_TILE: Record<TableState, string> = {
   free:   'bg-[var(--ds-surface)]',
 };
 
+/* La tessera larga di Comande. Niente anello spesso come sulla quadrata: qui
+   lo stato lo portano la tinta, il pallino e la riga scritta — tre segnali di
+   cui due non sono colore (§4.3), e un bordo da 2px attorno a una tessera che
+   contiene quattro righe di testo la trasforma in un riquadro d'allarme. */
+export const TABLE_TILE_WIDE: Record<TableState, string> = {
+  bill:   'bg-[var(--ds-pending-tint)] ring-1 ring-[var(--ds-pending-tint-border)]',
+  order:  'bg-[var(--ds-seated-tint)] ring-1 ring-[var(--ds-seated-tint-border)]',
+  booked: 'bg-[var(--ds-arriving-tint)] ring-1 ring-[var(--ds-arriving-tint-border)]',
+  free:   'bg-[var(--ds-surface)] ring-1 ring-[var(--ds-border)]',
+};
+
+/** Il pallino in testa alla tessera: ripete lo stato senza affidarlo al solo
+ *  fondo, che a tinta chiara su schermo sporco di servizio si perde. */
+export const TABLE_DOT: Record<TableState, string> = {
+  bill:   'bg-[var(--ds-pending-solid)]',
+  order:  'bg-[var(--ds-seated-solid)]',
+  booked: 'bg-[var(--ds-arriving-solid)]',
+  free:   'bg-[var(--ds-border-strong)]',
+};
+
 export const TABLE_CAPTION: Record<TableState, string> = {
   bill:   'text-[var(--ds-pending-text)]',
   order:  'text-[var(--ds-seated-text)]',
   booked: 'text-[var(--ds-arriving-text)]',
   free:   'text-[var(--ds-text-muted)]',
+};
+
+/* ── La riga di stato della tessera ───────────────────────────────────────
+   Prima la tessera diceva soltanto «comanda aperta»: per sapere quanto stava
+   spendendo il tavolo, o se la sua uscita era ancora in cucina, bisognava
+   aprirlo. Qui lo dice la griglia.
+
+   Una lingua sola: le parole degli stati sono quelle delle pastiglie della
+   comanda (COURSE_BADGE) — «in cucina» sulla tessera e «in cucina» sulla
+   colonna sono la stessa cosa. Un secondo vocabolario costringerebbe la sala
+   a impararne due per la stessa informazione. */
+
+/** Chi è al tavolo. Il trattino NON è un vuoto da riempire: tiene la riga al
+ *  suo posto, così le tessere restano alte uguali e la griglia non balla. */
+export const tableNameLine = (row: TableRow): string =>
+  row.reservation?.customer_name?.trim() || '—';
+
+/** «134,00 € · 2ª in cucina», «62,00 € · da incassare», «21:30», «libero». */
+export const tableStatusLine = (row: TableRow): string => {
+  if (row.state === 'bill') {
+    return typeof row.billCents === 'number' ? `${euro(row.billCents)} · da incassare` : 'da incassare';
+  }
+  if (row.state === 'order') {
+    // Il campo può non esserci: frontend e backend si deployano separati, e
+    // fra i due c'è sempre una finestra in cui il nuovo parla col vecchio.
+    // Senza questa guardia la tessera scriveva «NaN €».
+    const money = typeof row.order?.total_cents === 'number' ? euro(row.order.total_cents) : null;
+    // Comanda aperta e ancora intonsa: nessuna uscita di cui dire lo stato.
+    const course = row.order?.course;
+    const what = course ? `${ordinal(course.course_no)} ${COURSE_BADGE[course.status].text}` : 'comanda aperta';
+    return money ? `${money} · ${what}` : what;
+  }
+  if (row.state === 'booked' && row.reservation) {
+    return getRomeTimePart(row.reservation.reservation_time);
+  }
+  return 'libero';
 };
 
 /** «10» prima di «9» è il difetto che rende la griglia inutilizzabile: si
@@ -138,6 +203,10 @@ export const buildRows = (
   // (regola del progetto: ogni superficie applica le unioni).
   mergeGroups?: Map<string, number[]>,
   shiftFilter?: 'ALL' | 'LUNCH' | 'DINNER',
+  // Il totale e l'uscita per la riga di stato della tessera. Facoltativi: la
+  // griglia di Cassa non li passa e resta quella di sempre.
+  orderByTable?: Map<number, OpenOrderSummary>,
+  billCentsByTable?: Map<number, number>,
 ): TableRow[] => {
   const byId = new Map(tables.map(t => [t.id, t]));
   const groupFor = (id: number): number[] | null => {
@@ -167,6 +236,17 @@ export const buildRows = (
         : reservation ? 'booked'
         : 'free';
       const row: TableRow = { table, state, reservation };
+      // Il riassunto segue il tavolo che ha davvero la comanda (o il conto):
+      // su un'unione è il capofila a portare la tessera, ma i soldi possono
+      // stare sul gregario.
+      if (state === 'order' && orderByTable) {
+        const on = orderByTable.get((orderOn ?? table).id);
+        if (on) row.order = on;
+      }
+      if (state === 'bill' && billCentsByTable) {
+        const cents = billCentsByTable.get((billOn ?? table).id);
+        if (cents != null) row.billCents = cents;
+      }
       if (members.length > 1) {
         row.groupLabel = members.map(m => m.name).sort(compareTableNames).join('+');
         row.groupSeats = members.reduce((sum, m) => sum + m.seats, 0);

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { chime } from '../utils/chime';
 import { signedModifierLabel, signedModifierDelta } from '../utils/modifierScale';
 import {
-  ArrowRight, ChevronDown, Loader2, Trash2, TriangleAlert, Users, X,
+  ArrowLeft, ArrowRight, ChevronDown, Loader2, Trash2, TriangleAlert, Users, X,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import type { Dish, RestaurantMenu, Reservation, Room, Table, TableMerge, OrderWithItems, OrderItem } from '../types';
@@ -13,6 +13,7 @@ import {
   ordersApiService, getMenuCatalogue, newIdempotencyKey, closeOrder, updateOrder, fireCourse, deleteEmptyOrder, deleteWholeOrder,
   voidItem, setOrderDiscount, transferOrder, getOpenOrderTables,
   type MenuCatalogue, type NewOrderItem, type CloseOrderResult, type SendOrderResult,
+  type OpenOrderSummary,
 } from '../services/ordersApiService';
 import { BillSheet, InvoiceDialog } from './pagamenti/BillSheet';
 import { StampaCopiaButton } from './pagamenti/StampaCopiaButton';
@@ -22,9 +23,10 @@ import { useToast } from '../contexts/ToastContext';
 import { billsApiService, printBill } from '../services/billsApiService';
 
 import { socketClient } from '../services/socketClient';
+import { useSocket } from '../hooks/useSocket';
 import type { ServiceBill } from '../services/ordersApiService';
 import {
-  ModalShell, Callout, SectionHeader, useMediaQuery,
+  ModalShell, Callout, LivePill, SectionHeader, useMediaQuery,
   dsButton,
 } from './ds';
 import { VariantSheet } from './VariantSheet';
@@ -103,9 +105,21 @@ interface OrderPadProps {
   /** Chiede alla chrome dell'app di togliersi di mezzo: dentro un tavolo il
    *  telefono serve tutto alla comanda. */
   onImmersive?: (on: boolean) => void;
+  /** Il marchio del locale, montato dalla chrome dell'app: Comande a schermo
+   *  pieno se lo porta nella propria testata. */
+  brand?: React.ReactNode;
 }
 
-export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, tables, rooms = [], reservations, globalDate, globalShiftFilter, onImmersive, initialTableId, onInitialTableConsumed }) => {
+export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, tables, rooms = [], reservations, globalDate, globalShiftFilter, onImmersive, initialTableId, onInitialTableConsumed, brand: padBrand }) => {
+  const { isConnected } = useSocket();
+  // L'orologio della pastiglia Live. Un tick al minuto: l'ora al minuto non
+  // ha bisogno di più, e un secondo di intervallo ridisegnerebbe la griglia
+  // sessanta volte al minuto durante il servizio.
+  const [clock, setClock] = useState<Date>(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setClock(new Date()), 60_000);
+    return () => clearInterval(t);
+  }, []);
   const [catalogue, setCatalogue] = useState<MenuCatalogue | null>(null);
   // I piatti spenti restano in anagrafica per lo storico ma non si battono
   // più. Quattro interruttori: is_active della cassa (articolo disattivato
@@ -207,6 +221,10 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   // mentre il tavolo aspetta.
   const [justClosed, setJustClosed] = useState<CloseOrderResult['bill'] | null>(null);
   const [openTables, setOpenTables] = useState<Set<number>>(new Set());
+  // Il totale e l'uscita di ogni comanda aperta, per la riga di stato della
+  // tessera. Arrivano dalla stessa chiamata di `openTables`: la griglia non
+  // paga una richiesta in più per dire quanto sta spendendo il tavolo.
+  const [openOrders, setOpenOrders] = useState<Map<number, OpenOrderSummary>>(new Map());
   // Comande CREATE da questo dispositivo: solo queste si disfano uscendo dal
   // tavolo. Un altro palmare stava componendo (il suo carrello è locale, la
   // comanda sul server sembra intonsa): entrare a guardare e tornare indietro
@@ -247,6 +265,13 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     return o.opened_by_name ? `di ${o.opened_by_name}` : null;
   }, [order, user]);
   const billTables = useMemo(() => new Set(serviceBills.keys()), [serviceBills]);
+  // Quanto resta da incassare per tavolo: è il numero che la tessera scrive,
+  // e il residuo (non il totale) è quello che il cassiere deve ancora vedere
+  // arrivare — su un conto già pagato a metà il totale mentirebbe.
+  const billResiduals = useMemo(
+    () => new Map([...serviceBills].map(([id, b]) => [id, b.residual_cents])),
+    [serviceBills]
+  );
 
   const isWide = useMediaQuery('(min-width: 1024px)');
   // La variante a pagine (stile cassa): preferenza per utente, salvata sul
@@ -475,7 +500,10 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       // dell'app (Tav. 3, collaudo del 5/9).
       try {
         const res = await getOpenOrderTables(serviceQuery);
-        if (!cancelled) setOpenTables(new Set(res.table_ids));
+        if (!cancelled) {
+          setOpenTables(new Set(res.table_ids));
+          setOpenOrders(new Map(res.orders.map(o => [o.table_id, o])));
+        }
       } catch { /* ignora: la griglia resta senza l'evidenza comande */ }
     })();
     (async () => {
@@ -809,12 +837,22 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   // quella. Con più righe (due cotture diverse) non decide nessuno: si toglie
   // dalla comanda, dove le righe sono distinte. Il peso resta fuori (una riga
   // per pezzo, si toglie dalla comanda).
-  const removeFromCart = (dish: Dish) => {
+  /** La riga che un «−» sul piatto scalerebbe, o null se non è chiaro quale.
+   *  Una sola fonte per il gesto e per il bottone: prima il «−» si mostrava
+   *  sui piatti «senza foglio», che è un'altra domanda — sulla Grigliata (che
+   *  ha la cottura obbligatoria) il bottone spariva anche con una riga sola,
+   *  e quella riga non si poteva più togliere dal menu. */
+  const removableKey = (dish: Dish): string | null => {
     const to = forcedCourse(dish) ?? course;
     const plainKey = cartKey(dish.id, to, []);
-    if (cart.some(l => l.key === plainKey)) { bumpCart(plainKey, -1); return; }
+    if (cart.some(l => l.key === plainKey)) return plainKey;
     const lines = cart.filter(l => l.dish.id === dish.id && l.course_no === to && l.weight_grams == null);
-    if (lines.length === 1) bumpCart(lines[0].key, -1);
+    return lines.length === 1 ? lines[0].key : null;
+  };
+
+  const removeFromCart = (dish: Dish) => {
+    const key = removableKey(dish);
+    if (key) bumpCart(key, -1);
   };
 
   /** Ripete una riga già ordinata nell'uscita in composizione. Non tocca il
@@ -1597,12 +1635,48 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     </>
   );
 
+  // L'indice di categoria di un piatto, nell'ORDINE delle schede categoria:
+  // la pastiglia della quantità in comanda deve avere la tinta della scheda da
+  // cui il piatto è stato battuto, o il colore non vuol dire niente.
+  const catIndexByDish = useMemo(() => {
+    const order = new Map(categories.map((c, i) => [c, i]));
+    const out = new Map<number, number>();
+    for (const d of dishes) {
+      const i = d.category ? order.get(d.category) : undefined;
+      if (i != null) out.set(d.id, i);
+    }
+    return out;
+  }, [dishes, categories]);
+  const catIndexOf = useCallback(
+    (dishId: number | null) => (dishId == null ? null : catIndexByDish.get(dishId) ?? null),
+    [catIndexByDish],
+  );
+
+  // Quanti piatti ha ogni categoria, per il sottotitolo delle schede. Conta i
+  // piatti BATTIBILI (già filtrati sopra): scrivere «15 piatti» e aprirne
+  // undici è peggio che non scrivere niente.
+  //
+  // SOPRA il return della griglia, non sotto: da lì in giù siamo dopo un'uscita
+  // anticipata, e un hook che gira solo col tavolo aperto fa contare a React
+  // più hook del render precedente — schermata bianca al primo tavolo aperto.
+  const dishCountByCategory = useMemo(() => {
+    const out = new Map<string, number>();
+    for (const d of dishes) {
+      if (!d.category) continue;
+      out.set(d.category, (out.get(d.category) ?? 0) + 1);
+    }
+    return out;
+  }, [dishes]);
+
   // ---------------- selezione tavolo ----------------
   if (!tableId || !order) {
     return (
       <>
         <TableGrid
-          rows={buildRows(tables, openTables, billTables, reservationForTable, mergeGroupByTable, globalShiftFilter)}
+          rows={buildRows(
+            tables, openTables, billTables, reservationForTable, mergeGroupByTable, globalShiftFilter,
+            openOrders, billResiduals,
+          )}
           filter={gridFilter}
           onFilter={setGridFilter}
           query={gridQuery}
@@ -1612,7 +1686,12 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           paged={pagedPad}
           rooms={rooms}
           room={gridRoom}
-          onRoom={setGridRoom}
+          // −1 è «Tutte» della pista sullo schermo largo: la pista a pagine non
+          // lo emette mai (lì si sta sempre dentro una sala).
+          onRoom={(id) => setGridRoom(id === -1 ? null : id)}
+          wide={isWide}
+          brand={isWide ? padBrand : undefined}
+          live={isWide ? <LivePill connected={isConnected} time={clock} /> : undefined}
           notice={(error || serviceBills.size > 0) ? (
             <div className="flex flex-col gap-2">
               {notices}
@@ -1634,7 +1713,6 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   const allergens = reservation?.customer_dietary_notes?.trim();
   const rows = rowCount(order, cart);
   const displayTotal = order.total_cents + cartTotal;
-  const sentCourses = order.courses.filter(c => isSent(c.status)).length;
 
   // Quante righe sparirebbero chiudendo ora: le bozze locali più quelle
   // rimaste in bozza sul server dopo un invio interrotto.
@@ -1668,6 +1746,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     onDragLine: moveCartLine,
     onDragItem: moveServerItem,
     onDragCourse: moveCourseTo,
+    catIndexOf,
   };
 
   const browser = (
@@ -1684,12 +1763,17 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       tapOpensSheet={requiresSheetOnTap}
       onAdd={onDishTap}
       onRemove={removeFromCart}
+      canRemove={d => removableKey(d) != null}
       courseOf={d => forcedCourse(d) ?? course}
       onCourseTap={d => setMoveFor({ kind: 'dish', dishId: d.id, label: d.name, from: forcedCourse(d) ?? course })}
       onLongPress={onDishLongPress}
       layout={isWide ? 'grid' : 'list'}
-      // Sul palmare la ricerca sta nella testata del tavolo (lente), non qui.
+      // Sul palmare la ricerca sta nella testata del tavolo (lente), non qui;
+      // sullo schermo largo il campo è già inline sopra la griglia piatti.
       showSearch={false}
+      catStyle={isWide ? 'cards' : 'chips'}
+      gridStyle={isWide ? 'photos' : 'rows'}
+      countByCategory={dishCountByCategory}
       density={density}
       nav={pagedPad ? 'pages' : 'chips'}
       onCategoryBack={() => setCategory(null)}
@@ -1709,12 +1793,13 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
 
   const topBar = (
     <OrderTopBar
+      showBack={!isWide}
+      inBar={isWide}
       tableName={table?.name ?? String(tableId)}
       guestName={reservation?.customer_name ?? null}
       totalCents={displayTotal}
       rows={rows}
       covers={order.order.covers}
-      sentCourses={sentCourses}
       busy={busy}
       billDisabled={displayTotal === 0 && rows === 0}
       clearDisabled={cart.length === 0}
@@ -2024,12 +2109,34 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   // larghezza: la Comanda sale fino alla barra globale e guadagna una riga
   // di uscite — la testata parla del comporre (coperti, conto), che è
   // mestiere della colonna sinistra.
+  // Le distanze della schermata sono tutte da 20px: fra la barra della pagina e
+  // quello che c'è sotto, fra il menu e la comanda, e dentro la colonna fra
+  // categorie, filetto, ricerca e piatti. A 12px erano zone diverse incollate
+  // che si leggevano come una fascia sola.
   if (isWide) {
     return (
-      <div className="flex h-full min-h-0 flex-col bg-[var(--ds-canvas)] p-4">
-        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_380px] gap-3 xl:grid-cols-[minmax(0,1fr)_420px]">
-          <div className="flex min-h-0 flex-col gap-3">
-            <div className="flex-shrink-0">{topBar}</div>
+      <div className="flex h-full min-h-0 flex-col gap-5 bg-[var(--ds-canvas)] p-4">
+        {/* La chrome della pagina, come sulla griglia: il ritorno ai tavoli a
+            sinistra, il Live a destra. La scheda del tavolo non sta più qui —
+            è passata in testa alla colonna della comanda, dove stanno i
+            coperti e il conto di cui parla. */}
+        <div className="flex flex-shrink-0 items-center gap-3">
+          {padBrand}
+          <div className="flex min-w-0 flex-1 items-center gap-3 rounded-[28px] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)]">
+            <button
+              type="button"
+              onClick={leaveTable}
+              aria-label="Torna alla scelta del tavolo"
+              className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              <ArrowLeft size={20} aria-hidden />
+            </button>
+            {topBar}
+            <LivePill connected={isConnected} time={clock} />
+          </div>
+        </div>
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_380px] gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
+          <div className="flex min-h-0 flex-col gap-4">
             {(allergens || error) && (
               <div className="flex flex-shrink-0 flex-col gap-2">
                 {allergens && (
