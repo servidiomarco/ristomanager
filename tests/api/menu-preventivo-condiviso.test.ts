@@ -61,7 +61,7 @@ describe('preventivo condivisibile', () => {
         expect(q.event_date).toBe('2027-07-01');
         expect(q.guests).toBe(40);
         expect(q.courses).toHaveLength(1);
-        expect(q.courses[0].dishes[0].name).toBe('Piatto preventivo');
+        expect(q.courses[0].dishes[0].name).toBe('Piatto Preventivo');
         expect(q.courses[0].dishes[0].allergens).toContain('Glutine');
         expect(q.courses[0].notes).toBe('a scelta');
         // 30 adulti × 60 + 10 bambini × 30 = 2100, sconto 100 → 2000

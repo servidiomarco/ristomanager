@@ -84,8 +84,8 @@ describe('menu: visibilità e ordinamento CRM', () => {
         let pub = await api().get('/public/menu');
         expect(pub.status).toBe(200);
         let nomi = pub.body.piatti.map((p: any) => p.name);
-        expect(nomi).not.toContain('Alfa test');
-        expect(nomi).toContain('Beta test');
+        expect(nomi).not.toContain('Alfa Test');
+        expect(nomi).toContain('Beta Test');
 
         // Categoria spenta: spariscono tutti.
         const cats = (await api().get('/menu/categories').set(bearer(token))).body.categories;
@@ -95,7 +95,7 @@ describe('menu: visibilità e ordinamento CRM', () => {
         expect(put.status).toBe(200);
         pub = await api().get('/public/menu');
         nomi = pub.body.piatti.map((p: any) => p.name);
-        expect(nomi).not.toContain('Beta test');
+        expect(nomi).not.toContain('Beta Test');
         expect(nomi).not.toContain('Gamma test');
 
         // Riaccesa: tornano (Alfa resta spento dal toggle piatto).
@@ -104,8 +104,8 @@ describe('menu: visibilità e ordinamento CRM', () => {
         });
         pub = await api().get('/public/menu');
         nomi = pub.body.piatti.map((p: any) => p.name);
-        expect(nomi).toContain('Beta test');
-        expect(nomi).not.toContain('Alfa test');
+        expect(nomi).toContain('Beta Test');
+        expect(nomi).not.toContain('Alfa Test');
     });
 
     it("l'ordine delle categorie arriva al menu pubblico in categorie_ordine", async () => {

@@ -88,7 +88,7 @@ describe('varianti: crud, gruppi cassa, composti, percentuali', () => {
         expect(created.status).toBe(201);
         expect(created.body.external_ref).toBeNull();
         expect(created.body.is_active).toBe(true);
-        expect(created.body.modifiers.map((m: any) => m.name)).toEqual(['Al sangue', 'Ben cotta']);
+        expect(created.body.modifiers.map((m: any) => m.name)).toEqual(['Al Sangue', 'Ben Cotta']);
         groupIds.push(created.body.id);
 
         const dup = await api().post('/menu/modifier-groups').set(bearer(token)).send({ name: 'cottura vrt' });
@@ -157,7 +157,7 @@ describe('varianti: crud, gruppi cassa, composti, percentuali', () => {
             name: 'Aggiunte pizza', min_select: 1,
         });
         expect(ok.status).toBe(200);
-        expect(ok.body.name).toBe('Aggiunte pizza');
+        expect(ok.body.name).toBe('Aggiunte Pizza');
         expect(ok.body.min_select).toBe(1);
         // Si riporta a 0 per non far scattare il min nei test successivi.
         const back = await api().put(`/menu/modifier-groups/${ppGroupId}`).set(bearer(token)).send({ min_select: 0 });
@@ -258,13 +258,15 @@ describe('varianti: crud, gruppi cassa, composti, percentuali', () => {
             ],
         });
         expect(again.status).toBe(200);
-        const rossa = again.body.components.find((c: any) => c.name === 'Cipolla rossa');
+        // Il nome inviato minuscolo torna in Title Case: è la normalizzazione
+        // dei titoli del menu, non un errore di echo.
+        const rossa = again.body.components.find((c: any) => c.name === 'Cipolla Rossa');
         expect(rossa.id).toBe(cipollaId);
         expect(again.body.components.some((c: any) => c.name === 'Olive')).toBe(false);
 
         const fetched = await api().get(`/dishes/${dish.id}/components`).set(bearer(token));
         expect(fetched.status).toBe(200);
-        expect(fetched.body.components.map((c: any) => c.name)).toEqual(['Cipolla rossa', 'Capperi']);
+        expect(fetched.body.components.map((c: any) => c.name)).toEqual(['Cipolla Rossa', 'Capperi']);
 
         const sovrapprezzo = await api().put(`/dishes/${dish.id}`).set(bearer(token)).send({
             name: dish.name, description: null, price: 15, category: dish.category, allergens: null,

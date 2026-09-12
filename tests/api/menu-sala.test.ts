@@ -37,7 +37,7 @@ describe('menu, sala & cucina', () => {
             const found = list.body.find((d: any) => d.id === dishId);
             expect(found).toBeDefined();
             expect(Number(found.price)).toBe(14.5);
-            expect(found.category).toBe('PRIMI');
+            expect(found.category).toBe('Primi');
         });
 
         it('il catalogo espone il listino di default del tenant', async () => {
@@ -234,7 +234,7 @@ describe('menu, sala & cucina', () => {
             expect(seconda.status).toBe(200);
 
             const config = await api().get('/sala/config').set(bearer(token));
-            expect(config.body.category_stations['PRIMI']).toBe(stationBisId);
+            expect(config.body.category_stations['Primi']).toBe(stationBisId);
         });
 
         it('rifiuta con 404 una partita inesistente (o di un altro tenant) nella mappa', async () => {
