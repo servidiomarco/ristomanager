@@ -594,6 +594,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-12 | Menu & Banchetti | Card «Vini abbinati»: i vini collegati si elencano per nome in testa alla card (chip col tocco che toglie), non più il solo conteggio. |
 | 2026-09-12 | Menu & Banchetti | Card «Vini abbinati»: lente accanto al conteggio che apre un campo di ricerca — filtra la carta per nome e apre da sola le sole sezioni con risultati. |
 | 2026-09-11 | Comande, Cucina e Passe | Sullo schermo largo la testata del tavolo (Tav., coperti, Conto) si accorcia alla colonna del menu e la Comanda sale a tutta altezza fino alla barra globale: una riga di uscite in più sempre in vista. |
 | 2026-09-11 | Menu & Banchetti | Card «Vini abbinati»: le sezioni per categoria partono chiuse e si aprono al tocco della testata (conteggio e chevron); «Suggerisci» apre da solo le sezioni dei vini proposti. |
