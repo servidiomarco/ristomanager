@@ -812,7 +812,7 @@ const App: React.FC = () => {
   // di Comande, al posto esatto dove stava la sidebar: il bersaglio non si
   // sposta, si assottiglia.
   const comandeBrand = (
-    <div className="flex flex-shrink-0 flex-col items-center gap-0.5 rounded-[28px] bg-[var(--ds-surface)] p-2.5 shadow-[var(--ds-shadow-card)]">
+    <div className="animate-view-in flex flex-shrink-0 flex-col items-center gap-0.5 rounded-[28px] bg-[var(--ds-surface)] p-2.5 shadow-[var(--ds-shadow-card)]">
       <div className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[14px] bg-[var(--ds-action-bg)]">
         <ChefHat className="h-5 w-5 text-[var(--ds-action-fg)]" />
       </div>
@@ -823,7 +823,7 @@ const App: React.FC = () => {
         aria-controls="sidebar-nav"
         title="Apri menu"
         aria-label="Apri menu"
-        className="inline-flex h-6 w-10 flex-shrink-0 items-center justify-center rounded-[8px] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+        className="pressable inline-flex h-6 w-10 flex-shrink-0 items-center justify-center rounded-[8px] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
       >
         <ChevronDown size={16} />
       </button>
@@ -2083,8 +2083,20 @@ const App: React.FC = () => {
           stacco fra le due card contro i 16px dei margini esterni: il
           contenuto risultava spinto a destra. Con mr-0 il corridoio torna a
           16px ed è uguale a tutti gli altri lati. */}
+      {/* La larghezza si anima, non si spegne: `display:none` non ha stati
+          intermedi, e in Comande la sidebar spariva e ricompariva di scatto.
+          Ritirata resta nell'albero a larghezza zero — margine e contenuto
+          compresi, o i 16px del margine terrebbero il posto di una colonna
+          che non c'è — e torna scorrendo insieme ai tavoli che si stringono.
+          `invisible` toglie il focus ai link mentre è via: una tabulazione
+          non deve finire dentro un menu che nessuno vede. */}
       <aside
-        className={`${comandeNavStubbed ? 'hidden' : 'hidden lg:flex'} ${sidebarCollapsed ? 'w-[76px]' : 'w-[250px]'} m-4 mr-0 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] flex-col transition-[width] duration-200 z-20 relative`}
+        className={`hidden lg:flex ${
+          comandeNavStubbed
+            ? 'w-0 m-0 opacity-0 invisible pointer-events-none'
+            : `${sidebarCollapsed ? 'w-[76px]' : 'w-[250px]'} m-4 mr-0 opacity-100`
+        } overflow-hidden rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] flex-col transition-[width,margin,opacity] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none z-20 relative`}
+        aria-hidden={comandeNavStubbed}
         aria-label="Navigazione principale"
       >
         {/* Intestazione — logo e comando apri/chiudi sulla stessa riga, come

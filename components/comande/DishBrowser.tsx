@@ -1,11 +1,57 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Cake, ChefHat, ChevronDown, ChevronRight, CornerDownRight, Image as ImageIcon, Minus, Plus, Search, Trash2, Wine } from 'lucide-react';
+import {
+  Apple, ArrowLeft, Beef, Beer, Cake, CakeSlice, ChefHat, ChevronDown, ChevronRight, Coffee,
+  CornerDownRight, Croissant, CupSoda, Drumstick, Fish, GlassWater, Ham, Image as ImageIcon,
+  IceCreamCone, Martini, Minus, Pizza, Plus, Salad, Sandwich, Search, Soup, Trash2, Utensils,
+  Wheat, Wine,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import type { Dish } from '../../types';
 import { SearchField } from '../ds';
 import { euro } from './orderView';
 import { isBarCourse, isDessertCourse, ordinal } from '../../utils/courses';
 import { DishSearchSheet } from './DishSearchSheet';
 import { DishPhotoViewer } from './DishPhotoViewer';
+
+/* ── L'icona della categoria ──────────────────────────────────────────────
+   Le categorie le scrive il ristoratore, quindi non c'è una tabella da cui
+   pescare: si riconosce la parola. Il confronto è sulla forma senza accenti e
+   in minuscolo — «Caffè» e «caffe» sono la stessa categoria — e la prima
+   parola che combacia vince, così «Gelati e Dessert» prende il gelato e non
+   il dolce generico.
+
+   Senza corrispondenza resta la forchetta: un'icona sbagliata è peggio di
+   un'icona neutra, perché la si legge e si sbaglia categoria. */
+const CATEGORY_ICONS: [RegExp, LucideIcon][] = [
+  [/gelat|sorbett/, IceCreamCone],
+  [/dolc|dessert|tort|pasticc/, CakeSlice],
+  [/caff|the|tisan/, Coffee],
+  [/vin|calic|bollicin|spuman|champ/, Wine],
+  [/amar|digestiv|liquor|cocktail|aperitiv|grapp/, Martini],
+  [/birr/, Beer],
+  [/bibit|bevand|soft|analcol|succ/, CupSoda],
+  [/acqu/, GlassWater],
+  [/antipast|sfiz|stuzzich|tapas|tagli/, Ham],
+  [/salum|formagg/, Ham],
+  [/zupp|vellut|minestr|brod/, Soup],
+  [/prim|past|risott|gnocch/, Wheat],
+  [/pizz|focacc|farinac/, Pizza],
+  [/pesc|crudo|frutti di mare|molluschi/, Fish],
+  [/grigli|brace|carn|secondi|bistecc|manz/, Beef],
+  [/pol|arrost/, Drumstick],
+  [/contorn|verdur|insalat|ortagg/, Salad],
+  [/panin|hamburg|sandwich|toast/, Sandwich],
+  [/frutt/, Apple],
+  [/colazion|brioche|cornett/, Croissant],
+];
+
+const stripAccents = (v: string): string =>
+  v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+const categoryIcon = (name: string): LucideIcon => {
+  const key = stripAccents(name);
+  return CATEGORY_ICONS.find(([re]) => re.test(key))?.[1] ?? Utensils;
+};
 
 // ---------------------------------------------------------------------------
 // Il menu, da toccare. Ricerca sempre a portata, categorie in una pista che
@@ -348,21 +394,15 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
      Scritte per intero, mai composte: Tailwind estrae i nomi delle classi
      staticamente, e un `bg-[var(--ds-cat-${i}-tint)]` non arriva mai nel
      foglio di stile. */
+  // Solo la tinta: il filetto -line attorno a ogni scheda sommava sei bordi
+  // colorati a sei fondi colorati, e la fila diventava una scacchiera.
   const CAT_CARD = [
-    'bg-[var(--ds-cat-1-tint)] ring-[var(--ds-cat-1-line)]',
-    'bg-[var(--ds-cat-2-tint)] ring-[var(--ds-cat-2-line)]',
-    'bg-[var(--ds-cat-3-tint)] ring-[var(--ds-cat-3-line)]',
-    'bg-[var(--ds-cat-4-tint)] ring-[var(--ds-cat-4-line)]',
-    'bg-[var(--ds-cat-5-tint)] ring-[var(--ds-cat-5-line)]',
-    'bg-[var(--ds-cat-6-tint)] ring-[var(--ds-cat-6-line)]',
-  ];
-  const CAT_SWATCH = [
-    'bg-[var(--ds-cat-1-solid)]',
-    'bg-[var(--ds-cat-2-solid)]',
-    'bg-[var(--ds-cat-3-solid)]',
-    'bg-[var(--ds-cat-4-solid)]',
-    'bg-[var(--ds-cat-5-solid)]',
-    'bg-[var(--ds-cat-6-solid)]',
+    'bg-[var(--ds-cat-1-tint)]',
+    'bg-[var(--ds-cat-2-tint)]',
+    'bg-[var(--ds-cat-3-tint)]',
+    'bg-[var(--ds-cat-4-tint)]',
+    'bg-[var(--ds-cat-5-tint)]',
+    'bg-[var(--ds-cat-6-tint)]',
   ];
   const CAT_TEXT = [
     'text-[var(--ds-cat-1-text)]',
@@ -376,27 +416,35 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
   const catCards = (
     // La fila scorre invece di andare a capo: un menu con dodici categorie
     // spingerebbe i piatti sotto la piega, e i piatti sono il motivo per cui
-    // si è qui.
-    <div className="-my-1.5 flex flex-shrink-0 gap-3 overflow-x-auto py-1.5 scrollbar-hide">
+    // si è qui. Il margine negativo con padding uguale dà aria ai bordi: senza,
+    // lo scorrimento tagliava di netto la prima scheda e la sua ombra.
+    <div className="-mx-2 -my-1.5 flex flex-shrink-0 gap-3 overflow-x-auto px-2 py-1.5 scrollbar-hide">
       {categories.map((c, i) => {
         const active = !q && c === category;
         const n = i % 6;
         const count = countByCategory?.get(c);
+        const Icon = categoryIcon(c);
         return (
           <button
             key={c}
             type="button"
             onClick={() => { onQuery(''); onCategory(c); }}
             aria-pressed={active}
-            className={`flex w-[168px] flex-shrink-0 flex-col items-start gap-1.5 rounded-[6px] px-4 py-3 text-left ring-1 transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${CAT_CARD[n]} ${
-              active ? 'shadow-[var(--ds-shadow-raised)]' : 'shadow-[var(--ds-shadow-card)]'
+            className={`flex w-[150px] flex-shrink-0 flex-col items-start gap-1 rounded-[6px] px-3.5 py-3 text-left transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${CAT_CARD[n]} ${
+              active
+                ? 'shadow-[var(--ds-shadow-raised)] ring-2 ring-[var(--ds-action-bg)]'
+                : 'shadow-[var(--ds-shadow-card)]'
             } ${mutedCat(c) ? 'opacity-45' : ''}`}
           >
-            {/* Il quadrato pieno è il segno che resta quando la tinta di fondo
-                non basta: la scheda attiva lo dice con l'elevazione, non solo
-                col colore. */}
-            <span className={`h-5 w-5 flex-shrink-0 rounded-[4px] ${CAT_SWATCH[n]}`} aria-hidden />
-            <span className={`w-full truncate text-[16px] font-semibold ${CAT_TEXT[n]}`}>{c}</span>
+            {/* L'icona al posto del quadratino: dice di che categoria si tratta
+                prima che si legga il nome, che è il punto di una pista da
+                scorrere con la coda dell'occhio. Nel colore -text della
+                famiglia, non nel solid: è un glifo sottile su tinta chiara. */}
+            <Icon size={20} className={CAT_TEXT[n]} aria-hidden />
+            {/* Il nome in testo normale, non nel colore della categoria: sei
+                nomi ognuno di un colore diverso erano sei richiami invece di
+                sei etichette. Il colore resta nella tinta e nell'icona. */}
+            <span className="w-full truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">{c}</span>
             <span className="text-[12px] tabular-nums text-[var(--ds-text-muted)]">
               {count != null ? `${count} ${count === 1 ? 'piatto' : 'piatti'}` : '\u00a0'}
             </span>
@@ -698,18 +746,42 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     // compatta il respiro lo cede ai piatti — lì è la sagoma della scheda
     // unica a separare le zone.
     <div className={`flex min-h-0 flex-1 flex-col ${layout === 'list' && density !== 'compact' ? 'gap-4' : 'gap-3'}`}>
-      {layout === 'list' ? (
-        searchPill
+      {/* Categorie, filetto, ricerca, piatti. La ricerca stava sopra tutto e
+          apriva la pagina con un campo vuoto; qui la prima cosa è la scelta
+          che si fa davvero a ogni tavolo — la categoria — e la ricerca sta
+          appoggiata ai piatti che filtra. Il filetto divide le due zone: la
+          fila delle categorie sopra, quello che ne esce sotto. */}
+      {layout === 'grid' && catStyle === 'cards' ? (
+        <>
+          {catCards}
+          {/* --ds-border-strong, non --ds-border: il filetto sta sulla TELA,
+              e #e9e9ec su #ededf1 misura circa 1,03:1 — sparisce. È lo stesso
+              motivo per cui DateNavigator ha un trattamento «on canvas». */}
+          <div className="h-px flex-shrink-0 bg-[var(--ds-border-strong)]" aria-hidden />
+          <SearchField
+            value={query}
+            onChange={onQuery}
+            placeholder="Cerca un piatto in tutto il menù…"
+            ariaLabel="Cerca un piatto"
+            className="flex-shrink-0"
+          />
+        </>
       ) : (
-        <SearchField
-          value={query}
-          onChange={onQuery}
-          placeholder="Cerca un piatto"
-          ariaLabel="Cerca un piatto"
-          className="flex-shrink-0"
-        />
+        <>
+          {layout === 'list' ? (
+            searchPill
+          ) : (
+            <SearchField
+              value={query}
+              onChange={onQuery}
+              placeholder="Cerca un piatto"
+              ariaLabel="Cerca un piatto"
+              className="flex-shrink-0"
+            />
+          )}
+          {chips}
+        </>
       )}
-      {layout === 'grid' && catStyle === 'cards' ? catCards : chips}
 
       {/* Lo scorrimento verticale ritaglia anche in orizzontale, quindi le
           ombre delle schede uscirebbero tagliate di netto ai due bordi: il
@@ -722,7 +794,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
              Lo stepper in fondo è un'AGGIUNTA, non un rimpiazzo — il tocco
              sulla scheda batte come sempre, e sui piatti con varianti apre il
              loro foglio. */
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 2xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 lg:grid-cols-4">
             {visible.length === 0 ? empty : visible.map(d => {
               const qty = qtyInCourse.get(d.id) ?? 0;
               const tappableBadge = qty > 0 && courseOf && onCourseTap;
@@ -743,7 +815,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                     tabIndex={d.photo_url ? 0 : -1}
                     aria-label={d.photo_url ? `Guarda la foto di ${d.name}` : undefined}
                     aria-hidden={d.photo_url ? undefined : true}
-                    className={`flex aspect-[4/3] w-full items-center justify-center bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] ${
+                    className={`flex aspect-[16/10] w-full items-center justify-center bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] ${
                       d.photo_url ? 'cursor-zoom-in' : 'cursor-default'
                     }`}
                   >
@@ -756,17 +828,17 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                   <button
                     type="button"
                     {...press(d)}
-                    className="select-none px-3 pb-1 pt-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)]"
+                    className="select-none px-2.5 pb-0.5 pt-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)]"
                   >
-                    <span className="block truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                    <span className="block truncate text-[14px] font-semibold text-[var(--ds-text-primary)]">
                       {d.name}
                     </span>
-                    <span className="flex items-center gap-1 text-[15px] tabular-nums text-[var(--ds-text-muted)]">
+                    <span className="flex items-center gap-1 text-[14px] tabular-nums text-[var(--ds-text-muted)]">
                       {euro(Math.round(Number(d.price) * 100))}
                       {drawerChevron(d)}
                     </span>
                   </button>
-                  <div className="mt-auto px-2 pb-2 pt-1">{photoStepper(d)}</div>
+                  <div className="mt-auto px-1.5 pb-1.5 pt-0.5">{photoStepper(d)}</div>
                   {qty > 0 && tappableBadge && (
                     <button
                       type="button"

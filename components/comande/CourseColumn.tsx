@@ -631,14 +631,21 @@ export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, o
   };
   return (
     <div className="flex min-h-0 flex-col overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
-      <header className="flex flex-shrink-0 items-center gap-2 border-b border-[var(--ds-border)] px-4 py-3">
-        <h2 className="min-w-0 flex-1 truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
-          Comanda{openedBy ? <span className="font-normal text-[var(--ds-text-muted)]"> {openedBy}</span> : null}
-        </h2>
-        <span className="flex-shrink-0 text-[13px] tabular-nums text-[var(--ds-text-muted)]">
-          {rows === 0 ? 'vuota' : rowCountLabel(rows)}
-        </span>
-      </header>
+      {/* La riga «Comanda · vuota» compare solo quando c'è qualcosa da dire
+          che non sta già sopra: chi ha aperto il tavolo. Il conteggio e il
+          totale li porta la scheda del tavolo, e una fascia che ripete il
+          nome della colonna sotto il titolo della colonna era una riga da
+          saltare per arrivare alle uscite (§10). */}
+      {openedBy && (
+        <header className="flex flex-shrink-0 items-center gap-2 border-b border-[var(--ds-border)] px-4 py-3">
+          <h2 className="min-w-0 flex-1 truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
+            Comanda<span className="font-normal text-[var(--ds-text-muted)]"> {openedBy}</span>
+          </h2>
+          <span className="flex-shrink-0 text-[13px] tabular-nums text-[var(--ds-text-muted)]">
+            {rows === 0 ? 'vuota' : rowCountLabel(rows)}
+          </span>
+        </header>
+      )}
       {/* La pista delle uscite resta SEMPRE in vista: a comanda lunga le
           uscite in fondo alla colonna scorrono via, e selezionarne una
           voleva dire andarla a cercare. Stessa pista del palmare — pallino
@@ -651,6 +658,7 @@ export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, o
           onCourse={list.onCourse}
           showBar={list.showBar}
           showDessert={list.showDessert}
+          variant="card"
         />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--ds-canvas)] p-3">

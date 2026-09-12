@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft, ArrowRightLeft, Ban, Check, Grid3x3, LayoutGrid, MoreVertical, Minus, Percent, Plus, Receipt, Rows3, Search, Trash2, Users,
 } from 'lucide-react';
-import { Sheet, StatusPill } from '../ds';
+import { Sheet } from '../ds';
 import { euro, rowCountLabel } from './orderView';
 
 // ---------------------------------------------------------------------------
@@ -22,7 +22,6 @@ interface OrderTopBarProps {
   rows: number;
   covers: number;
   /** Uscite già partite. Zero non si annuncia. */
-  sentCourses: number;
   busy: boolean;
   billDisabled: boolean;
   clearDisabled: boolean;
@@ -60,7 +59,7 @@ const stepper =
   'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 export const OrderTopBar: React.FC<OrderTopBarProps> = ({
-  tableName, guestName, totalCents, rows, covers, sentCourses, busy,
+  tableName, guestName, totalCents, rows, covers, busy,
   billDisabled, clearDisabled, wide,
   onSearch, densityCompact, onToggleDensity,
   onBack, onCovers, onBill, onDiscount, onTransfer, onClearDrafts, onDeleteOrder,
@@ -262,42 +261,101 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
     </Sheet>
   );
 
+  /* Lo schermo largo: il tavolo è il TITOLO della colonna, non una riga di
+     controlli. Il numero grande, i coperti accanto (si correggono guardando
+     il tavolo, non da un menu), a destra Conto e ⋮; sotto, in piccolo, chi è
+     seduto e quanto sta spendendo.
+
+     Prima stava tutto su una riga sola, col nome e il totale schiacciati in
+     13px fra la freccia e i coperti: il numero del tavolo — l'unica cosa che
+     dice DOVE sei — pesava quanto un sottotitolo. La freccia indietro è
+     passata nella barra della pagina, e la pastiglia «n uscite inviate» se
+     n'è andata con lei: le tessere delle uscite qui sotto lo dicono già,
+     uscita per uscita, che è l'informazione vera. */
   if (wide) {
     return (
       <>
-        <div className="flex items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
-          {/* Cerchio pieno in accent: la freccia nuda con sfondo solo in hover
-              era invisibile su touch, l'unico controllo della riga senza
-              forma. */}
-          <button
-            type="button"
-            onClick={onBack}
-            aria-label="Torna alla scelta del tavolo"
-            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-          >
-            <ArrowLeft size={20} />
-          </button>
-          <div className="min-w-0">
-            <div className="truncate text-[19px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
+        <div className="rounded-[20px] bg-[var(--ds-surface)] px-4 pb-3 pt-3.5 shadow-[var(--ds-shadow-card)]">
+          <div className="flex items-center gap-3">
+            {showBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                aria-label="Torna alla scelta del tavolo"
+                className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              >
+                <ArrowLeft size={20} />
+              </button>
+            )}
+            <h2 className="min-w-0 flex-shrink truncate text-[28px] font-semibold leading-none tracking-[-0.03em] text-[var(--ds-text-primary)]">
               Tav. {tableName}
+            </h2>
+            {/* I coperti in una pastiglia incassata, senza l'etichetta:
+                due frecce attorno a un numero accanto al tavolo non si
+                confondono con altro, e la parola «Coperti» rubava la
+                larghezza al nome dell'ospite qui sotto. Resta nel title e
+                nelle aria-label, per chi legge con lo screen reader. */}
+            <div
+              className="flex flex-shrink-0 items-center gap-1 rounded-full bg-[var(--ds-surface-row)] p-1"
+              title={`${covers} coperti`}
+            >
+              <button
+                type="button"
+                onClick={() => onCovers(-1)}
+                disabled={busy || covers <= 1}
+                aria-label="Un coperto in meno"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              >
+                <Minus size={16} aria-hidden />
+              </button>
+              <span className="w-7 text-center text-[17px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                {covers}
+              </span>
+              <button
+                type="button"
+                onClick={() => onCovers(+1)}
+                disabled={busy}
+                aria-label="Un coperto in più"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              >
+                <Plus size={16} aria-hidden />
+              </button>
             </div>
-            <div className="truncate text-[13px] tabular-nums text-[var(--ds-text-muted)]">
-              {guestName ? `${guestName} · ` : ''}Totale {euro(totalCents)}
+            <div className="ml-auto flex flex-shrink-0 items-center gap-2">
+              {/* Il Conto incassato, non nero pieno: il nero è di Invia, che è
+                  l'azione di questa schermata (§7.4). */}
+              <button
+                type="button"
+                onClick={onBill}
+                disabled={busy || billDisabled}
+                title="Chiudi la comanda e apri il conto"
+                className={`inline-flex h-11 items-center justify-center rounded-full px-5 text-[15px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                  billDisabled
+                    ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-subtle)]'
+                    : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
+                }`}
+              >
+                Conto
+              </button>
+              <div className="relative">
+                {menuTrigger}
+                {menuPanel}
+              </div>
             </div>
           </div>
-          <span className="h-9 w-px flex-shrink-0 bg-[var(--ds-border)]" aria-hidden />
-          {coversControl}
-          <div className="ml-auto flex flex-shrink-0 items-center gap-2">
-            {sentCourses > 0 && (
-              <StatusPill tone="positive" className="h-8 px-3">
-                {sentCourses === 1 ? '1 uscita inviata' : `${sentCourses} uscite inviate`}
-              </StatusPill>
+          {/* Chi è al tavolo e quanto sta spendendo: il totale in scuro, che
+              è il numero che si cerca; il nome accanto, che serve a sapere di
+              chi è il tavolo, non a leggerlo per intero. */}
+          <div className="mt-1.5 flex items-baseline gap-1.5 text-[15px]">
+            {guestName && (
+              <>
+                <span className="min-w-0 truncate text-[var(--ds-text-muted)]">{guestName}</span>
+                <span className="flex-shrink-0 text-[var(--ds-text-subtle)]" aria-hidden>·</span>
+              </>
             )}
-            {billButton}
-            <div className="relative">
-              {menuTrigger}
-              {menuPanel}
-            </div>
+            <span className="flex-shrink-0 font-semibold tabular-nums text-[var(--ds-text-primary)]">
+              {euro(totalCents)}
+            </span>
           </div>
         </div>
         {touchMenu}

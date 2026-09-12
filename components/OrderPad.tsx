@@ -1686,7 +1686,6 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   const allergens = reservation?.customer_dietary_notes?.trim();
   const rows = rowCount(order, cart);
   const displayTotal = order.total_cents + cartTotal;
-  const sentCourses = order.courses.filter(c => isSent(c.status)).length;
 
   // Quante righe sparirebbero chiudendo ora: le bozze locali più quelle
   // rimaste in bozza sul server dopo un invio interrotto.
@@ -1771,7 +1770,6 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       totalCents={displayTotal}
       rows={rows}
       covers={order.order.covers}
-      sentCourses={sentCourses}
       busy={busy}
       billDisabled={displayTotal === 0 && rows === 0}
       clearDisabled={cart.length === 0}
