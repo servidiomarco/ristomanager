@@ -107,8 +107,10 @@ export const VariantSheet: React.FC<{
   // Fisarmonica a un'anta — aprire un gruppo chiude l'altro: il foglio serve
   // a battere, non a tenere aperti tre cassetti. Il conteggio sulla pillola
   // dice quante scelte vivono lì dentro anche da chiusa. Gli obbligatori
-  // restano sezioni sempre aperte, sopra.
-  const [openGroupId, setOpenGroupId] = useState<number | null>(null);
+  // restano sezioni sempre aperte, sopra. «Vino consigliato» partecipa alla
+  // stessa anta con la chiave 'vino': è un'offerta, non un passaggio della
+  // battuta, quindi nasce chiusa come gli altri facoltativi.
+  const [openGroupId, setOpenGroupId] = useState<number | 'vino' | null>(null);
   // Quantità della riga (solo in modifica dall'orderpad). Al peso resta 1:
   // due pezzi sono due pesate, quindi due righe.
   const [qty, setQty] = useState<number>(initialQty ?? 1);
@@ -598,52 +600,79 @@ export const VariantSheet: React.FC<{
         );
       })()}
 
-      {pairedWines && pairedWines.length > 0 && onAddWine && (
-        <div>
-          {/* Abbinamenti curati in scheda piatto — icona Wine, non Wand2:
-              qui non parla l'AI, parla la carta. Stepper come le sotto-righe
-              del menu: il «+» batte (uscita forzata Bar), il conteggio è la
-              comanda vera e il «−» corregge senza cercare la riga. */}
-          <div className="mb-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">Vino consigliato</div>
+      {pairedWines && pairedWines.length > 0 && onAddWine && (() => {
+        /* Abbinamenti curati in scheda piatto — icona Wine, non Wand2:
+           qui non parla l'AI, parla la carta. Stessa scheda-fisarmonica dei
+           gruppi facoltativi, chiusa di default: il vino è un'offerta, non
+           un passaggio della battuta. Il conteggio in testata è la somma dei
+           calici in comanda — si legge anche da chiusa. Dentro, stepper come
+           le sotto-righe del menu: il «+» batte (uscita forzata Bar), il
+           conteggio è la comanda vera e il «−» corregge senza cercare la
+           riga. */
+        const open = openGroupId === 'vino';
+        const calici = pairedWines.reduce((s, w) => s + (wineQty?.(w.id) ?? 0), 0);
+        return (
           <div className="overflow-hidden rounded-[16px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
-            {pairedWines.map((w, i) => {
-              const n = wineQty?.(w.id) ?? 0;
-              return (
-                <div key={w.id} className={`flex min-h-[52px] items-center gap-2 py-1 pl-4 pr-3 ${i > 0 ? 'border-t border-[var(--ds-border)]' : ''}`}>
-                  <Wine size={15} className="flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
-                  <div className="min-w-0 flex-1">
-                    <span className="block truncate text-[15px] font-medium leading-snug text-[var(--ds-text-primary)]">{w.name}</span>
-                    <span className="block text-[13px] leading-snug tabular-nums text-[var(--ds-text-muted)]">
-                      {euro(Math.round(Number(w.price) * 100))}
-                    </span>
-                  </div>
-                  {n > 0 && onRemoveWine && (
-                    <button
-                      type="button"
-                      onClick={() => onRemoveWine(w)}
-                      aria-label={`Togli ${w.name}`}
-                      className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                    >
-                      <Minus size={16} />
-                    </button>
-                  )}
-                  {n > 0 && (
-                    <span className="w-5 text-center text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">{n}</span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => onAddWine(w)}
-                    aria-label={`Aggiungi ${w.name}`}
-                    className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-                  >
-                    <Plus size={16} />
-                  </button>
-                </div>
-              );
-            })}
+            <button
+              type="button"
+              onClick={() => setOpenGroupId(prev => prev === 'vino' ? null : 'vino')}
+              aria-expanded={open}
+              className="flex min-h-[52px] w-full items-center gap-2 px-4 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              <Wine size={15} className="flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
+              <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                Vino consigliato
+                {calici > 0 && (
+                  <span className="text-[13px] font-semibold tabular-nums text-[var(--ds-text-secondary)]"> · {calici}</span>
+                )}
+              </span>
+              <ChevronDown
+                size={18}
+                className={`flex-shrink-0 text-[var(--ds-text-muted)] transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+                aria-hidden
+              />
+            </button>
+            {open && (
+              <div className="border-t border-[var(--ds-border)]" style={{ animation: 'tileIn 180ms ease-out both' }}>
+                {pairedWines.map((w, i) => {
+                  const n = wineQty?.(w.id) ?? 0;
+                  return (
+                    <div key={w.id} className={`flex min-h-[52px] items-center gap-2 py-1 pl-4 pr-3 ${i > 0 ? 'border-t border-[var(--ds-border)]' : ''}`}>
+                      <div className="min-w-0 flex-1">
+                        <span className="block truncate text-[15px] font-medium leading-snug text-[var(--ds-text-primary)]">{w.name}</span>
+                        <span className="block text-[13px] leading-snug tabular-nums text-[var(--ds-text-muted)]">
+                          {euro(Math.round(Number(w.price) * 100))}
+                        </span>
+                      </div>
+                      {n > 0 && onRemoveWine && (
+                        <button
+                          type="button"
+                          onClick={() => onRemoveWine(w)}
+                          aria-label={`Togli ${w.name}`}
+                          className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                        >
+                          <Minus size={16} />
+                        </button>
+                      )}
+                      {n > 0 && (
+                        <span className="w-5 text-center text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">{n}</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => onAddWine(w)}
+                        aria-label={`Aggiungi ${w.name}`}
+                        className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      >
+                        <Plus size={16} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       <label className="block">
         <span className="mb-2 block text-[13px] font-semibold text-[var(--ds-text-muted)]">Variante libera</span>
