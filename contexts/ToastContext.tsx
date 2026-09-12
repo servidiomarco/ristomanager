@@ -34,6 +34,8 @@ interface ToastEntry extends ToastOptions {
   id: string;
   message: string;
   type: ToastTone;
+  /** Nessun timer: resta finché non viene chiuso (gli errori). */
+  persistent?: boolean;
 }
 
 interface ToastContextType {
@@ -66,7 +68,10 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // StrictMode). Un toast con azione nasce da un gesto diretto: sopprimerlo
     // butterebbe via anche l'undo nuovo, quindi passa sempre.
     if (!options?.action) {
-      const dedupKey = `${type}|${options?.title ?? ''}|${message}`;
+      // La chiave ignora il tono di proposito: «Prenotazione eliminata» dal
+      // handler locale (success) e dall'eco socket (info) è la stessa notizia
+      // e deve collassare in un toast solo.
+      const dedupKey = `${options?.title ?? ''}|${message}`;
       const now = Date.now();
       const lastAt = lastToastAtRef.current.get(dedupKey);
       if (lastAt !== undefined && now - lastAt < TOAST_DEDUP_WINDOW_MS) {
@@ -94,7 +99,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           if (timer) { clearTimeout(timer); timersRef.current.delete(dropped.id); }
         }
       }
-      return [...kept, { id, message, type, ...options }];
+      return [...kept, { id, message, type, ...options, persistent: duration === null }];
     });
 
     if (duration !== null) {
@@ -110,14 +115,14 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       {createPortal(
         <ToastViewport>
           {toasts.map(t =>
-            t.action && !t.title && !t.details?.length ? (
+            !t.title && !t.details?.length ? (
               <ToastPill
                 key={t.id}
                 icon={t.icon}
                 tone={t.type}
                 message={t.message}
-                actionLabel={t.action.label}
-                onAction={t.action.onClick}
+                action={t.action}
+                dismissible={t.persistent}
                 onDismiss={() => removeToast(t.id)}
               />
             ) : (
@@ -129,6 +134,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 details={t.details}
                 icon={t.icon}
                 action={t.action}
+                dismissible={t.persistent}
                 onDismiss={() => removeToast(t.id)}
               />
             ),
