@@ -118,10 +118,13 @@ export const tableNameLine = (row: TableRow): string =>
 /** «134,00 € · 2ª in cucina», «62,00 € · da incassare», «21:30», «libero». */
 export const tableStatusLine = (row: TableRow): string => {
   if (row.state === 'bill') {
-    return row.billCents != null ? `${euro(row.billCents)} · da incassare` : 'da incassare';
+    return typeof row.billCents === 'number' ? `${euro(row.billCents)} · da incassare` : 'da incassare';
   }
   if (row.state === 'order') {
-    const money = row.order ? euro(row.order.total_cents) : null;
+    // Il campo può non esserci: frontend e backend si deployano separati, e
+    // fra i due c'è sempre una finestra in cui il nuovo parla col vecchio.
+    // Senza questa guardia la tessera scriveva «NaN €».
+    const money = typeof row.order?.total_cents === 'number' ? euro(row.order.total_cents) : null;
     // Comanda aperta e ancora intonsa: nessuna uscita di cui dire lo stato.
     const course = row.order?.course;
     const what = course ? `${ordinal(course.course_no)} ${COURSE_BADGE[course.status].text}` : 'comanda aperta';
