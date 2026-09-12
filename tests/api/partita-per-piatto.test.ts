@@ -71,7 +71,7 @@ describe('partita per singolo piatto', () => {
         });
         expect(dish.status).toBe(201);
         expect(dish.body.station_id).toBe(antipastiId);
-        expect(dish.body.category).toBe('CONTORNI-PP');
+        expect(dish.body.category).toBe('Contorni-Pp');
         patatineId = dish.body.id;
     });
 

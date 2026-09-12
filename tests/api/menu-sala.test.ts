@@ -37,7 +37,21 @@ describe('menu, sala & cucina', () => {
             const found = list.body.find((d: any) => d.id === dishId);
             expect(found).toBeDefined();
             expect(Number(found.price)).toBe(14.5);
-            expect(found.category).toBe('PRIMI');
+            expect(found.category).toBe('Primi');
+        });
+
+        it('i titoli si normalizzano in Title Case, con le denominazioni in sigla', async () => {
+            const created = await api().post('/dishes').set(bearer(token)).send({
+                name: 'BAROLO docg del piemonte',
+                description: null,
+                price: 45,
+                category: 'VINI ROSSI igt',
+                allergens: ['solfiti'],
+            });
+            expect(created.status).toBe(201);
+            expect(created.body.name).toBe('Barolo DOCG Del Piemonte');
+            expect(created.body.category).toBe('Vini Rossi IGT');
+            await api().delete(`/dishes/${created.body.id}`).set(bearer(token));
         });
 
         it('il catalogo espone il listino di default del tenant', async () => {
@@ -234,7 +248,7 @@ describe('menu, sala & cucina', () => {
             expect(seconda.status).toBe(200);
 
             const config = await api().get('/sala/config').set(bearer(token));
-            expect(config.body.category_stations['PRIMI']).toBe(stationBisId);
+            expect(config.body.category_stations['Primi']).toBe(stationBisId);
         });
 
         it('rifiuta con 404 una partita inesistente (o di un altro tenant) nella mappa', async () => {

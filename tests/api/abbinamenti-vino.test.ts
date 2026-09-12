@@ -52,7 +52,7 @@ describe('abbinamenti vino', () => {
         expect(on.status).toBe(200);
         const cats = await api().get('/menu/categories').set(bearer(token));
         expect(cats.status).toBe(200);
-        const cat = cats.body.categories.find((c: any) => c.name === 'Vini test');
+        const cat = cats.body.categories.find((c: any) => c.name === 'Vini Test');
         expect(cat?.wine).toBe(true);
     });
 
@@ -106,12 +106,12 @@ describe('abbinamenti vino', () => {
         await api().put('/settings/features').set(bearer(token)).send({ digital_menu_enabled: true });
         const res = await api().get('/public/menu');
         expect(res.status).toBe(200);
-        const brasato = res.body.piatti.find((p: any) => p.name === 'Brasato test');
-        expect(brasato?.abbinati).toEqual(['Primitivo test']);
+        const brasato = res.body.piatti.find((p: any) => p.name === 'Brasato Test');
+        expect(brasato?.abbinati).toEqual(['Primitivo Test']);
         // Un vino spento sparisce dalla vetrina senza toccare gli abbinamenti.
         await api().put(`/dishes/${vinoId}/enabled`).set(bearer(token)).send({ enabled: false });
         const dopo = await api().get('/public/menu');
-        const brasatoDopo = dopo.body.piatti.find((p: any) => p.name === 'Brasato test');
+        const brasatoDopo = dopo.body.piatti.find((p: any) => p.name === 'Brasato Test');
         expect(brasatoDopo?.abbinati).toEqual([]);
         await api().put(`/dishes/${vinoId}/enabled`).set(bearer(token)).send({ enabled: true });
     });
