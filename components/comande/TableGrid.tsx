@@ -222,7 +222,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
             {/* Le sale in pista, con quanti tavoli hanno. «Tutte» in testa
                 perché su un monitor la sala intera è la vista di partenza. */}
             {roomTabs.length > 1 && (
-              <div className="mt-3">
+              <div className="mt-5">
                 <SegmentedControl<string>
                   value={activeRoom == null ? 'ALL' : String(activeRoom)}
                   onChange={(next) => onRoom?.(next === 'ALL' ? -1 : Number(next))}

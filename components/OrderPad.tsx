@@ -2109,9 +2109,13 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   // larghezza: la Comanda sale fino alla barra globale e guadagna una riga
   // di uscite — la testata parla del comporre (coperti, conto), che è
   // mestiere della colonna sinistra.
+  // Le distanze della schermata sono tutte da 20px: fra la barra della pagina e
+  // quello che c'è sotto, fra il menu e la comanda, e dentro la colonna fra
+  // categorie, filetto, ricerca e piatti. A 12px erano zone diverse incollate
+  // che si leggevano come una fascia sola.
   if (isWide) {
     return (
-      <div className="flex h-full min-h-0 flex-col gap-3 bg-[var(--ds-canvas)] p-4">
+      <div className="flex h-full min-h-0 flex-col gap-5 bg-[var(--ds-canvas)] p-4">
         {/* La chrome della pagina, come sulla griglia: il ritorno ai tavoli a
             sinistra, il Live a destra. La scheda del tavolo non sta più qui —
             è passata in testa alla colonna della comanda, dove stanno i
