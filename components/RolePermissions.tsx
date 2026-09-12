@@ -3,6 +3,7 @@ import { AlertTriangle, Check, Loader2, Lock } from 'lucide-react';
 import { UserRole } from '../types';
 import { Loader } from './Loader';
 import { ModalShell, dsButton } from './ds';
+import { useToast } from '../contexts/ToastContext';
 
 interface FeaturePermissions {
   feature: string;
@@ -63,7 +64,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const { addToast } = useToast();
 
   const getAuthHeaders = () => {
     const token = localStorage.getItem('ristomanager_access_token');
@@ -128,7 +129,6 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
   const handleSave = async () => {
     setSaving(true);
     setError(null);
-    setSuccessMessage(null);
 
     try {
       const response = await fetch(`${API_BASE_URL}/auth/permissions/roles/${selectedRole}`, {
@@ -142,8 +142,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
         throw new Error(data.error || 'Failed to save permissions');
       }
 
-      setSuccessMessage(`Permessi per ${ROLE_LABELS[selectedRole]} salvati con successo`);
-      setTimeout(() => setSuccessMessage(null), 3000);
+      addToast(`Permessi per ${ROLE_LABELS[selectedRole]} salvati`, 'success');
     } catch (err: any) {
       setError(err.message || 'Errore nel salvataggio dei permessi');
     } finally {
@@ -271,13 +270,6 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
             ))}
           </div>
 
-          {/* Success message */}
-          {successMessage && (
-            <div role="status" className="mt-6 flex items-center gap-2.5 rounded-[16px] bg-[var(--ds-seated-tint)] p-4 text-[14px] text-[var(--ds-seated-text)]">
-              <Check className="h-4 w-4 flex-shrink-0" aria-hidden />
-              {successMessage}
-            </div>
-          )}
         </>
       )}
     </ModalShell>

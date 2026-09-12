@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { chime } from '../utils/chime';
 import { signedModifierLabel, signedModifierDelta } from '../utils/modifierScale';
 import {
-  ArrowRight, Check, ChevronDown, Loader2, TriangleAlert, Users, X,
+  ArrowRight, ChevronDown, Loader2, Trash2, TriangleAlert, Users, X,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import type { Dish, RestaurantMenu, Reservation, Room, Table, TableMerge, OrderWithItems, OrderItem } from '../types';
@@ -18,6 +18,7 @@ import { BillSheet, InvoiceDialog } from './pagamenti/BillSheet';
 import { StampaCopiaButton } from './pagamenti/StampaCopiaButton';
 import { PagamentoSheet } from './cassa/PagamentoSheet';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import { billsApiService, printBill } from '../services/billsApiService';
 
 import { socketClient } from '../services/socketClient';
@@ -176,7 +177,11 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [flash, setFlash] = useState<string | null>(null);
+  // Conferme d'azione: la stessa voce del resto dell'app (toast §Toast, via
+  // ToastProvider), non più un Callout inline duplicato in quattro layout.
+  // Slot esclusivo: la conferma nuova sostituisce la precedente.
+  const { addToast } = useToast();
+  const setFlash = (msg: string) => addToast(msg, 'success', { replaceKey: 'orderpad-flash' });
   const [variantFor, setVariantFor] = useState<Dish | null>(null);
   // Riga in bozza riaperta per leggere/correggere le varianti (le lunghe si
   // troncano in lista): stesso foglio della battitura, precompilato.
@@ -262,12 +267,6 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     socket.on('catalogue:updated', onCatalogue);
     return () => { socket.off('catalogue:updated', onCatalogue); };
   }, []);
-
-  useEffect(() => {
-    if (!flash) return;
-    const t = setTimeout(() => setFlash(null), 6000);
-    return () => clearTimeout(t);
-  }, [flash]);
 
   // La barra di navigazione torna quando si torna in griglia e quando si esce
   // dalla pagina: il ritorno nel cleanup non è pignoleria, senza quello uscire
@@ -849,8 +848,16 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   };
 
   const clearDrafts = () => {
+    // Svuotare è distruttivo e solo locale: l'inversa è rimettere in bozza
+    // le stesse righe, quindi la conferma offre Annulla invece di chiedere
+    // conferma prima.
+    const cleared = cart;
     setCart([]);
-    setFlash('Righe non inviate svuotate');
+    addToast('Righe non inviate svuotate', 'success', {
+      icon: Trash2,
+      action: { label: 'Annulla', onClick: () => setCart(prev => [...cleared, ...prev]) },
+      replaceKey: 'orderpad-flash',
+    });
   };
 
   const courseLines = cartForCourse(cart, course);
@@ -1371,7 +1378,6 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   const notices = (
     <>
       {error && <ErrorBar message={error} onDismiss={() => setError(null)} />}
-      {flash && <Callout tone="positive" icon={Check}>{flash}</Callout>}
       {tableMates.length > 0 && (
         <Callout tone="info" icon={Users}>
           {presenceLabel(tableMates)}
@@ -1595,7 +1601,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           rooms={rooms}
           room={gridRoom}
           onRoom={setGridRoom}
-          notice={(error || flash || serviceBills.size > 0) ? (
+          notice={(error || serviceBills.size > 0) ? (
             <div className="flex flex-col gap-2">
               {notices}
               {serviceBills.size > 0 && (
@@ -2012,7 +2018,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_380px] gap-3 xl:grid-cols-[minmax(0,1fr)_420px]">
           <div className="flex min-h-0 flex-col gap-3">
             <div className="flex-shrink-0">{topBar}</div>
-            {(allergens || error || flash) && (
+            {(allergens || error) && (
               <div className="flex flex-shrink-0 flex-col gap-2">
                 {allergens && (
                   <Callout tone="critical" icon={TriangleAlert}>{allergens}</Callout>
@@ -2060,7 +2066,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       <div className="flex h-full min-h-0 flex-col bg-[var(--ds-canvas)] px-4 pt-[max(0.75rem,env(safe-area-inset-top))]">
         <div className="flex-shrink-0">{topBar}</div>
 
-        {(allergens || error || flash) && (
+        {(allergens || error) && (
           <div className="mt-3 flex flex-shrink-0 flex-col gap-2">
             {allergens && <Callout tone="critical" icon={TriangleAlert}>{allergens}</Callout>}
             {notices}
@@ -2175,7 +2181,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         </div>
       </div>
 
-      {(allergens || error || flash) && (
+      {(allergens || error) && (
         <div className="mt-3 flex flex-shrink-0 flex-col gap-2">
           {allergens && <Callout tone="critical" icon={TriangleAlert}>{allergens}</Callout>}
           {notices}

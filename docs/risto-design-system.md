@@ -1048,11 +1048,11 @@ call. Holding the write until the countdown expires means closing the page mid-t
 *action*; this way it loses only the chance to undo it, which is the one of the two the user
 can live without.
 
-**The action label has to clear 4.5:1 against the pill in both themes**, and this is where the
-shipped one falls down: amber on the near-black pill is 5.45:1 in light, but the pill inverts to
-near-white in dark and the same amber measures **2.96:1**. Recorded so it is not copied as
-precedent. The fix is a label colour that inverts with the fill, not a darker amber — §3.3 has
-already been down that road.
+**The action label has to clear 4.5:1 against the pill in both themes**, and the first shipped
+pill did not: it hardcoded `pending-solid`, 5.45:1 on the near-black light pill but **2.96:1**
+once the pill inverts to near-white in dark. The label now rides `--ds-action-accent`, a colour
+that inverts with the fill — the reference gold on the dark pill, the light theme's dark gold on
+the light one — not a darker amber, which is the road §3.3 already closed.
 
 **Tooltip** [der] — `surface-inverted` fill, `surface-inverted-fg` text, `rounded.md`,
 `caption` type, max-width 240px. Never the sole carrier of information; touch devices get no

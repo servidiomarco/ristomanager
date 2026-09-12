@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { AuthProvider } from './contexts/AuthContext';
+import { ToastProvider } from './contexts/ToastContext';
 import { ShoppingProvider } from './contexts/ShoppingContext';
 import { TodosProvider } from './contexts/TodosContext';
 import { PublicPayPageEntry } from './components/PublicPayPage';
@@ -40,11 +41,13 @@ root.render(
       <PublicQuotePage />
     ) : (
       <AuthProvider>
-        <ShoppingProvider>
-          <TodosProvider>
-            <App />
-          </TodosProvider>
-        </ShoppingProvider>
+        <ToastProvider>
+          <ShoppingProvider>
+            <TodosProvider>
+              <App />
+            </TodosProvider>
+          </ShoppingProvider>
+        </ToastProvider>
       </AuthProvider>
     )}
   </React.StrictMode>
