@@ -13615,7 +13615,40 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
                 = right(regexp_replace(COALESCE(c.phone, ''), '\\D', '', 'g'), 10)
         ) AS no_show_count`;
         if (q && q.trim()) {
-            const term = `%${q.trim().toLowerCase()}%`;
+            const trimmed = q.trim().toLowerCase();
+            // Ricerca per PAROLE, non per frase intera: ogni parola digitata
+            // deve comparire nel nome (o nell'email), in qualsiasi ordine.
+            // Il vecchio LIKE sull'intera frase non trovava «Servidio Marco»
+            // quando la scheda era «Marco Servidio»: la rubrica sembrava
+            // vuota e il cliente veniva salvato una seconda volta con un
+            // altro numero — doppione che il vincolo sul telefono non può
+            // intercettare.
+            const tokens = trimmed.split(/\s+/).filter(Boolean);
+            const params: (string | number)[] = [];
+            const add = (v: string | number) => { params.push(v); return `$${params.length}`; };
+            const nameEmailCond = tokens.map((t) => {
+                const p = add(`%${t}%`);
+                return `(LOWER(name) LIKE ${p} OR LOWER(COALESCE(email, '')) LIKE ${p})`;
+            }).join(' AND ');
+            const conds = [`(${nameEmailCond})`];
+            // Telefono confrontato per sole cifre: «333 1234567» trova anche
+            // «+39 333 1234567». Il vecchio LIKE sulla stringa grezza falliva
+            // su spazi e prefisso. Sotto le 3 cifre il filtro direbbe sì a
+            // mezza rubrica, quindi non scatta.
+            const qDigits = trimmed.replace(/\D/g, '');
+            if (qDigits.length >= 3) {
+                conds.push(`regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') LIKE ${add(`%${qDigits}%`)}`);
+            }
+            // Prefissi prima delle sottostringhe: con 6 posti nel dropdown
+            // del form prenotazione, «mar» deve proporre «Marco …» prima di
+            // «Gennaro Marfella». Fascia 0: il nome inizia con la frase
+            // digitata; fascia 1: una parola del nome inizia con la prima
+            // parola digitata; fascia 2: il resto. A parità, alfabetico.
+            const rankPhrase = add(`${trimmed}%`);
+            const rankTokStart = add(`${tokens[0]}%`);
+            const rankTokWord = add(`% ${tokens[0]}%`);
+            const capParam = add(cap);
+            const tenantParam = add(req.tenantId!);
             const result = await queryWithRetry(
                 `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
                         preferred_table_id, preferences_notes, dietary_notes, is_vip,
@@ -13623,12 +13656,17 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
                         consent_marketing, consent_marketing_updated_at, language, billing,
                         ${noShowSubquery}
                  FROM customers c
-                 WHERE c.tenant_id = $3
+                 WHERE c.tenant_id = ${tenantParam}
                    AND phone IS NOT NULL AND TRIM(phone) <> ''
-                   AND (LOWER(name) LIKE $1 OR LOWER(phone) LIKE $1 OR LOWER(COALESCE(email, '')) LIKE $1)
-                 ORDER BY name
-                 LIMIT $2`,
-                [term, cap, req.tenantId!]
+                   AND (${conds.join(' OR ')})
+                 ORDER BY CASE
+                     WHEN LOWER(name) LIKE ${rankPhrase} THEN 0
+                     WHEN LOWER(name) LIKE ${rankTokStart} OR LOWER(name) LIKE ${rankTokWord} THEN 1
+                     ELSE 2
+                   END,
+                   name
+                 LIMIT ${capParam}`,
+                params
             );
             return res.json(result.rows);
         }
