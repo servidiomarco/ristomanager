@@ -194,42 +194,44 @@ export const CourseList: React.FC<CourseListProps> = ({
             dimmedTarget || isDragSource ? 'opacity-60' : ''
           }`}
         >
-          {/* La maniglia dell'uscita intera, nell'angolo in alto a sinistra:
-              icona ⇕ APPOSTA diversa dal ⇅ di riga (due icone uguali si
-              confondevano al telefono). Tocco = selettore, trascinata = drag. */}
-          {courseMovable && (
+          {/* Maniglia ⇕ e pill dell'uscita, a cavallo del bordo in alto,
+              in un'unica fila ancorata a sinistra. La #546 aveva spostato la
+              pill da centrata a left-3 — la STESSA posizione della maniglia,
+              che le finiva sotto: spostare l'uscita intera era sparito. La
+              fila tiene le due cose affiancate qualunque cosa cambi dopo.
+              Icona ⇕ APPOSTA diversa dal ⇅ di riga (due icone uguali si
+              confondevano al telefono). Tocco = selettore, trascinata = drag;
+              la pill elegge l'uscita corrente, come l'etichetta di prima. */}
+          <span className="absolute left-3 top-0 z-10 inline-flex -translate-y-1/2 items-center gap-1.5">
+            {courseMovable && (
+              <button
+                type="button"
+                onClick={() => onMoveCourse!(n)}
+                disabled={busy}
+                aria-label={`Sposta la ${courseLabel(n)} su un'altra uscita`}
+                title="Tocca per scegliere l'uscita, trascina per spostare l'uscita intera"
+                {...grip({ kind: 'course', from: n, count: draftRows.length + serverRows.filter(i => i.status === 'DRAFT').length })}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] ring-1 ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              >
+                <ChevronsUpDown size={15} />
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => onMoveCourse!(n)}
-              disabled={busy}
-              aria-label={`Sposta la ${courseLabel(n)} su un'altra uscita`}
-              title="Tocca per scegliere l'uscita, trascina per spostare l'uscita intera"
-              {...grip({ kind: 'course', from: n, count: draftRows.length + serverRows.filter(i => i.status === 'DRAFT').length })}
-              className="absolute left-3 top-0 z-10 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] ring-1 ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              onClick={() => onCourse(n)}
+              aria-pressed={current}
+              className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-1.5 text-[14px] font-semibold ring-1 ring-inset transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                current
+                  ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] ring-transparent'
+                  : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] ring-[var(--ds-border-strong)]'
+              }`}
             >
-              <ChevronsUpDown size={15} />
+              {/* La spunta sull'uscita servita: quella card è finita, e si
+                  riconosce senza leggere lo stato dall'altra parte. */}
+              {status === 'SERVED' && <Check size={14} aria-hidden />}
+              {courseLabel(n)}
             </button>
-          )}
-          {/* La pill col nome dell'uscita, a cavallo del bordo in alto. Da
-              CENTRATA è passata a SINISTRA: le uscite sono una colonna, e
-              un'etichetta al centro di ogni card costringe l'occhio a
-              zigzagare per leggere quale uscita sta guardando. Il tocco la
-              elegge uscita corrente, come l'etichetta di prima. */}
-          <button
-            type="button"
-            onClick={() => onCourse(n)}
-            aria-pressed={current}
-            className={`absolute left-3 top-0 z-10 -translate-y-1/2 inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-1.5 text-[14px] font-semibold ring-1 ring-inset transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
-              current
-                ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] ring-transparent'
-                : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] ring-[var(--ds-border-strong)]'
-            }`}
-          >
-            {/* La spunta sull'uscita servita: quella card è finita, e si
-                riconosce senza leggere lo stato dall'altra parte. */}
-            {status === 'SERVED' && <Check size={14} aria-hidden />}
-            {courseLabel(n)}
-          </button>
+          </span>
           {(sent || serverRows.length > 0 || draftRows.length > 0) && (
             <span className="absolute right-3 top-0 z-10 -translate-y-1/2">
               {sent
