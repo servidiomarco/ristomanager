@@ -419,11 +419,17 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
   ];
 
   const catCards = (
-    // La fila scorre invece di andare a capo: un menu con dodici categorie
-    // spingerebbe i piatti sotto la piega, e i piatti sono il motivo per cui
-    // si è qui. Il margine negativo con padding uguale dà aria ai bordi: senza,
-    // lo scorrimento tagliava di netto la prima scheda e la sua ombra.
-    <div className="-mx-2 -my-1.5 flex flex-shrink-0 gap-3 overflow-x-auto px-2 py-1.5 scrollbar-hide">
+    /* La fila scorre invece di andare a capo: un menu con dodici categorie
+       spingerebbe i piatti sotto la piega, e i piatti sono il motivo per cui
+       si è qui.
+
+       Il margine negativo con padding UGUALE dà aria ai bordi senza spostare
+       niente: `overflow-x-auto` ritaglia anche in verticale (quando un asse
+       non è `visible`, l'altro smette di esserlo), e i 6px di prima tagliavano
+       l'ombra di netto a metà — `--ds-shadow-card` scende 8px e sfuma per 24,
+       quindi ne servono una ventina. Finché le schede avevano il filetto
+       colorato il taglio si leggeva come un bordo; tolto quello, si vede. */
+    <div className="-mx-2 -my-6 flex flex-shrink-0 gap-3 overflow-x-auto px-2 py-6 scrollbar-hide">
       {categories.map((c, i) => {
         const active = !q && c === category;
         const n = i % 6;
@@ -437,7 +443,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
             aria-pressed={active}
             className={`flex w-[156px] flex-shrink-0 flex-col items-start gap-1.5 rounded-[6px] px-4 py-3.5 text-left transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${CAT_CARD[n]} ${
               active
-                ? 'shadow-[var(--ds-shadow-raised)] ring-2 ring-[var(--ds-action-bg)]'
+                ? 'shadow-[var(--ds-shadow-card)] ring-2 ring-[var(--ds-action-bg)]'
                 : 'shadow-[var(--ds-shadow-card)]'
             } ${mutedCat(c) ? 'opacity-45' : ''}`}
           >
