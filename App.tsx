@@ -28,7 +28,7 @@ import { HaccpPage } from './components/HaccpPage';
 import ConversazioniPage from './components/ConversazioniPage';
 import InboxPage from './components/InboxPage';
 import StaffChatPage from './components/StaffChatPage';
-import { SegmentedControl, StatusPill, useMediaQuery, dsSelect } from './components/ds';
+import { LivePill, SegmentedControl, StatusPill, useMediaQuery, dsSelect } from './components/ds';
 import { NotificationsPanel } from './components/NotificationsPanel';
 import EmailPage from './components/EmailPage';
 import NotifichePage from './components/NotifichePage';
@@ -2333,7 +2333,18 @@ const App: React.FC = () => {
             In Cucina sparisce del tutto: data-picker, turno, ricerca globale
             e «+» lì non servono, e lo spazio è delle comande — la topbar del
             monitor porta da sola data, orologio e i suoi controlli. */}
-        <header className={`flex-shrink-0 h-16 md:h-[72px] m-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] z-10 md:z-30 items-center justify-between px-3 md:px-4 ${view === ViewState.CUCINA ? 'hidden' : immersive ? 'hidden lg:flex' : 'flex'}`}>
+        <header className={`flex-shrink-0 h-16 md:h-[72px] m-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] z-10 md:z-30 items-center justify-between px-3 md:px-4 ${
+          view === ViewState.CUCINA ? 'hidden'
+          // Comande sullo schermo largo si prende la pagina: la sua testata è
+          // dentro la pagina (ricerca, imbuto, Live) e questa sopra sarebbe
+          // una seconda barra che dice le stesse cose. Giorno e turno vivono
+          // nell'imbuto della griglia. La sidebar resta — ridotta a rail come
+          // già fa Comande — o non si andrebbe più da nessuna parte.
+          // Sul telefono non cambia niente: lì la testata c'è finché non si
+          // entra in un tavolo, come sempre.
+          : view === ViewState.COMANDE ? (immersive ? 'hidden' : 'flex lg:hidden')
+          : immersive ? 'hidden lg:flex' : 'flex'
+        }`}>
            {/* `pl-2` sopra al `px-3` della testata: il marchio ha aria propria
                dentro l'immagine solo sopra e sotto, ai lati arriva al bordo, e
                attaccato alla curva della card sembrava scivolato fuori. */}
@@ -2422,47 +2433,12 @@ const App: React.FC = () => {
 
               {/* Connection state + current time, merged into one pill.
                   Connected uses the `seated` family; offline uses `critical`.
-                  The dot pulses, but under prefers-reduced-motion it becomes a
-                  steady colour — the signal is never removed, only the motion. */}
-              <div
-                className={`hidden md:inline-flex items-center gap-2 pl-2.5 pr-3 h-10 rounded-full text-[15px] font-medium ${
-                  isConnected
-                    ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
-                    : 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]'
-                }`}
-                role="status"
-                aria-live={isConnected ? 'polite' : 'assertive'}
-                aria-label={isConnected ? 'Connesso' : 'Non connesso'}
-              >
-                <span className="relative flex h-2 w-2" aria-hidden>
-                  {isConnected && (
-                    <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--ds-seated-solid)] opacity-60 animate-ping motion-reduce:hidden"></span>
-                  )}
-                  <span className={`relative inline-flex h-2 w-2 rounded-full ${isConnected ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-critical-solid)]'}`}></span>
-                </span>
-                <span className="whitespace-nowrap tabular-nums">
-                  {isConnected
-                    ? `Live ${currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`
-                    : 'Offline'}
-                </span>
-              </div>
+                  Comande a schermo pieno mostra la stessa pastiglia nella sua
+                  chrome, quindi vive in ds/ e non più inline qui. */}
+              <LivePill connected={isConnected} time={currentTime} className="hidden md:inline-flex" />
 
               {/* Mobile-only status dot */}
-              <span
-                className="md:hidden relative flex h-2.5 w-2.5 mx-1"
-                role="status"
-                aria-live={isConnected ? 'polite' : 'assertive'}
-                aria-label={isConnected ? 'Connesso' : 'Non connesso'}
-                title={isConnected ? 'Connesso' : 'Non connesso'}
-              >
-                {isConnected && (
-                  <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--ds-seated-solid)] opacity-60 animate-ping motion-reduce:hidden" aria-hidden></span>
-                )}
-                <span
-                  className={`relative inline-flex h-2.5 w-2.5 rounded-full ${isConnected ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-critical-solid)]'}`}
-                  aria-hidden
-                ></span>
-              </span>
+              <LivePill connected={isConnected} time={currentTime} variant="dot" className="md:hidden mx-1" />
 
               {/* Global search — opens the command palette. Same button surface
                   as the bell so it stays reachable on mobile, where ⌘K does not apply. */}
@@ -2854,7 +2830,23 @@ const App: React.FC = () => {
 
         {view === ViewState.COMANDE && (
           <CardErrorBoundary label="Comande">
-            <OrderPad dishes={dishes} menus={menus} tables={tables} rooms={rooms} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} onImmersive={setImmersive} initialTableId={pendingComandeTableId} onInitialTableConsumed={() => setPendingComandeTableId(null)} />
+            <OrderPad
+              dishes={dishes}
+              menus={menus}
+              tables={tables}
+              rooms={rooms}
+              reservations={reservations}
+              globalDate={globalDate}
+              globalShiftFilter={globalShiftFilter}
+              onImmersive={setImmersive}
+              initialTableId={pendingComandeTableId}
+              onInitialTableConsumed={() => setPendingComandeTableId(null)}
+              onGlobalDate={(dateOnly) => {
+                const [y, m, d] = dateOnly.split('-').map(Number);
+                if (y && m && d) setGlobalDate(new Date(y, m - 1, d));
+              }}
+              onGlobalShiftFilter={setGlobalShiftFilter}
+            />
           </CardErrorBoundary>
         )}
 

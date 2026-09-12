@@ -248,7 +248,13 @@ export const SearchField: React.FC<{
   /** A passive hint parked inside the field — e.g. what Enter will do to the
    *  single remaining match. Never covers the clear button. */
   hint?: React.ReactNode;
-}> = ({ value, onChange, placeholder, ariaLabel = 'Cerca', className = '', inputRef, onKeyDown, hint }) => (
+  /** Set when the field sits INSIDE a white bar or card rather than on the
+   *  canvas. The default white-plus-shadow treatment is for the canvas, where
+   *  it has to lift off the grey; inside a card it draws a white box on a
+   *  white box, shadow and all. Same two-treatment rule as DateNavigator's
+   *  `onCanvas`, from the other side. */
+  recessed?: boolean;
+}> = ({ value, onChange, placeholder, ariaLabel = 'Cerca', className = '', inputRef, onKeyDown, hint, recessed = false }) => (
   <div className={`relative ${className}`}>
     <Search
       className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ds-text-muted)]"
@@ -262,7 +268,11 @@ export const SearchField: React.FC<{
       onKeyDown={onKeyDown}
       placeholder={placeholder}
       aria-label={ariaLabel}
-      className="h-11 w-full rounded-full bg-[var(--ds-surface)] pl-11 pr-11 text-[15px] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] placeholder:text-[var(--ds-text-muted)] transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+      className={`h-11 w-full rounded-full pl-11 pr-11 text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+        recessed
+          ? 'bg-[var(--ds-surface-row)]'
+          : 'bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]'
+      }`}
     />
     {hint && (
       <span className="pointer-events-none absolute right-11 top-1/2 hidden -translate-y-1/2 lg:inline-flex">

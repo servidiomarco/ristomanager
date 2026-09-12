@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Cake, ChefHat, ChevronDown, ChevronRight, CornerDownRight, Minus, Plus, Search, Trash2, Wine } from 'lucide-react';
+import { ArrowLeft, Cake, ChefHat, ChevronDown, ChevronRight, CornerDownRight, Image as ImageIcon, Minus, Plus, Search, Trash2, Wine } from 'lucide-react';
 import type { Dish } from '../../types';
 import { SearchField } from '../ds';
 import { euro } from './orderView';
@@ -65,6 +65,17 @@ interface DishBrowserProps {
   nav?: 'chips' | 'pages';
   /** Ritorno alla pagina delle categorie (nav 'pages'): azzera la categoria. */
   onCategoryBack?: () => void;
+  /** Come si presentano le categorie sullo schermo largo. 'chips' è la pista
+   *  di sempre e resta il default: Cassa monta questo stesso componente.
+   *  'cards' è la fila di schede tinte di Comande — ogni categoria con la sua
+   *  tinta e quanti piatti ha. */
+  catStyle?: 'chips' | 'cards';
+  /** La griglia piatti sullo schermo largo. 'rows' è la scheda bassa di
+   *  sempre (default, e quella di Cassa); 'photos' è la griglia con la foto
+   *  in alto e lo stepper in fondo. */
+  gridStyle?: 'rows' | 'photos';
+  /** Quanti piatti ha ogni categoria, per il sottotitolo delle schede. */
+  countByCategory?: Map<string, number>;
   /** Come si presenta la pagina delle categorie (nav 'pages'): lista a righe,
    *  o bottoni in griglia da 3 o 4 per riga. Preferenza personale
    *  dell'operatore (menu ⋮), catalogo chiuso. */
@@ -96,6 +107,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
   dishes, categories, category, onCategory, query, onQuery,
   qtyInCourse, markedCategories, hasVariants, tapOpensSheet = hasVariants, onAdd, onRemove, courseOf, onCourseTap, onLongPress, layout,
   showSearch = true, density = 'comfortable', nav = 'chips', onCategoryBack, catView = 'list',
+  catStyle = 'chips', gridStyle = 'rows', countByCategory,
   barCategories, dessertCategories, course,
   draftLinesFor, onBumpLine, onTapLine, onLineCourseTap,
 }) => {
@@ -220,6 +232,52 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     );
   };
 
+  /* Lo stepper della scheda con foto: «−», quanti, «+», tre bersagli da 44px
+     in fondo alla scheda. Si aggiunge al tocco sulla scheda, non lo
+     sostituisce — chi sa già il piatto continua a batterlo con un tap solo.
+
+     Il «−» non compare sui piatti il cui tap apre un foglio (peso, varianti
+     obbligatorie): lì una battuta non è una riga sola e togliere «uno»
+     sarebbe ambiguo. Lo dice già il contratto della prop, e removeFromCart in
+     quel caso non farebbe nulla: un bottone morto è peggio di nessun bottone. */
+  const photoStepper = (d: Dish) => {
+    const qty = qtyInCourse.get(d.id) ?? 0;
+    const canRemove = qty > 0 && !tapOpensSheet(d.id);
+    return (
+      <div className="flex items-center justify-between gap-2">
+        {canRemove ? (
+          <button
+            type="button"
+            onClick={() => onRemove(d)}
+            aria-label={`Togli ${d.name}`}
+            className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            <Minus size={16} aria-hidden />
+          </button>
+        ) : (
+          <span className="h-11 w-11 flex-shrink-0" aria-hidden />
+        )}
+        <span className={`min-w-[20px] text-center text-[17px] font-semibold tabular-nums ${
+          qty > 0 ? 'text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)]'
+        }`}>
+          {qty}
+        </span>
+        <button
+          type="button"
+          onClick={() => onAdd(d)}
+          aria-label={`Aggiungi ${d.name}`}
+          className={`inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+            qty > 0
+              ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)]'
+              : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
+          }`}
+        >
+          <Plus size={16} aria-hidden />
+        </button>
+      </div>
+    );
+  };
+
   // La miniatura, solo dove la scheda del piatto ha una foto: bersaglio a
   // parte accanto al nome — il tocco NON batte, apre il visore. Fratello dei
   // bottoni di riga, mai figlio: un bottone dentro un bottone non è HTML.
@@ -276,6 +334,72 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                 aria-hidden
               />
             )}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  /* Le schede categoria dello schermo largo. La tinta viene dai --ds-cat-*,
+     assegnata per POSIZIONE nel catalogo e ciclica dopo la sesta: sono
+     categorie, cioè cose diverse fra loro, non stati — una categoria in
+     ambra «pending» direbbe alla sala che c'è qualcosa da fare (§3.5).
+
+     Scritte per intero, mai composte: Tailwind estrae i nomi delle classi
+     staticamente, e un `bg-[var(--ds-cat-${i}-tint)]` non arriva mai nel
+     foglio di stile. */
+  const CAT_CARD = [
+    'bg-[var(--ds-cat-1-tint)] ring-[var(--ds-cat-1-line)]',
+    'bg-[var(--ds-cat-2-tint)] ring-[var(--ds-cat-2-line)]',
+    'bg-[var(--ds-cat-3-tint)] ring-[var(--ds-cat-3-line)]',
+    'bg-[var(--ds-cat-4-tint)] ring-[var(--ds-cat-4-line)]',
+    'bg-[var(--ds-cat-5-tint)] ring-[var(--ds-cat-5-line)]',
+    'bg-[var(--ds-cat-6-tint)] ring-[var(--ds-cat-6-line)]',
+  ];
+  const CAT_SWATCH = [
+    'bg-[var(--ds-cat-1-solid)]',
+    'bg-[var(--ds-cat-2-solid)]',
+    'bg-[var(--ds-cat-3-solid)]',
+    'bg-[var(--ds-cat-4-solid)]',
+    'bg-[var(--ds-cat-5-solid)]',
+    'bg-[var(--ds-cat-6-solid)]',
+  ];
+  const CAT_TEXT = [
+    'text-[var(--ds-cat-1-text)]',
+    'text-[var(--ds-cat-2-text)]',
+    'text-[var(--ds-cat-3-text)]',
+    'text-[var(--ds-cat-4-text)]',
+    'text-[var(--ds-cat-5-text)]',
+    'text-[var(--ds-cat-6-text)]',
+  ];
+
+  const catCards = (
+    // La fila scorre invece di andare a capo: un menu con dodici categorie
+    // spingerebbe i piatti sotto la piega, e i piatti sono il motivo per cui
+    // si è qui.
+    <div className="-my-1.5 flex flex-shrink-0 gap-3 overflow-x-auto py-1.5 scrollbar-hide">
+      {categories.map((c, i) => {
+        const active = !q && c === category;
+        const n = i % 6;
+        const count = countByCategory?.get(c);
+        return (
+          <button
+            key={c}
+            type="button"
+            onClick={() => { onQuery(''); onCategory(c); }}
+            aria-pressed={active}
+            className={`flex w-[168px] flex-shrink-0 flex-col items-start gap-1.5 rounded-[6px] px-4 py-3 text-left ring-1 transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${CAT_CARD[n]} ${
+              active ? 'shadow-[var(--ds-shadow-raised)]' : 'shadow-[var(--ds-shadow-card)]'
+            } ${mutedCat(c) ? 'opacity-45' : ''}`}
+          >
+            {/* Il quadrato pieno è il segno che resta quando la tinta di fondo
+                non basta: la scheda attiva lo dice con l'elevazione, non solo
+                col colore. */}
+            <span className={`h-5 w-5 flex-shrink-0 rounded-[4px] ${CAT_SWATCH[n]}`} aria-hidden />
+            <span className={`w-full truncate text-[16px] font-semibold ${CAT_TEXT[n]}`}>{c}</span>
+            <span className="text-[12px] tabular-nums text-[var(--ds-text-muted)]">
+              {count != null ? `${count} ${count === 1 ? 'piatto' : 'piatti'}` : '\u00a0'}
+            </span>
           </button>
         );
       })}
@@ -585,13 +709,80 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
           className="flex-shrink-0"
         />
       )}
-      {chips}
+      {layout === 'grid' && catStyle === 'cards' ? catCards : chips}
 
       {/* Lo scorrimento verticale ritaglia anche in orizzontale, quindi le
           ombre delle schede uscirebbero tagliate di netto ai due bordi: il
           margine negativo con padding uguale ridà spazio all'elevazione. */}
       <div className="-mx-2 min-h-0 flex-1 overflow-y-auto px-2 pb-2 pt-1">
-        {layout === 'grid' ? (
+        {layout === 'grid' && gridStyle === 'photos' ? (
+          /* La griglia con la foto. La scheda è alta il doppio della riga di
+             prima, quindi se ne vedono meno: in cambio il piatto si riconosce
+             dall'immagine e si porge al cliente senza cercarlo a nome.
+             Lo stepper in fondo è un'AGGIUNTA, non un rimpiazzo — il tocco
+             sulla scheda batte come sempre, e sui piatti con varianti apre il
+             loro foglio. */
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 2xl:grid-cols-4">
+            {visible.length === 0 ? empty : visible.map(d => {
+              const qty = qtyInCourse.get(d.id) ?? 0;
+              const tappableBadge = qty > 0 && courseOf && onCourseTap;
+              return (
+                <div
+                  key={d.id}
+                  className={`relative flex flex-col overflow-hidden rounded-[6px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] ${
+                    qty > 0 ? 'ring-2 ring-[var(--ds-action-bg)]' : ''
+                  }`}
+                >
+                  {/* La foto è un bersaglio suo: si porge il telefono al
+                      cliente senza battere il piatto per sbaglio. Senza foto
+                      resta il riquadro col glifo — la scheda non cambia
+                      altezza, o la griglia balla riga per riga. */}
+                  <button
+                    type="button"
+                    onClick={() => { if (d.photo_url) setPhotoDish(d); }}
+                    tabIndex={d.photo_url ? 0 : -1}
+                    aria-label={d.photo_url ? `Guarda la foto di ${d.name}` : undefined}
+                    aria-hidden={d.photo_url ? undefined : true}
+                    className={`flex aspect-[4/3] w-full items-center justify-center bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] ${
+                      d.photo_url ? 'cursor-zoom-in' : 'cursor-default'
+                    }`}
+                  >
+                    {d.photo_url ? (
+                      <img src={d.photo_url} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <ImageIcon size={28} className="text-[var(--ds-text-muted)] opacity-50" aria-hidden />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    {...press(d)}
+                    className="select-none px-3 pb-1 pt-2.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)]"
+                  >
+                    <span className="block truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                      {d.name}
+                    </span>
+                    <span className="flex items-center gap-1 text-[15px] tabular-nums text-[var(--ds-text-muted)]">
+                      {euro(Math.round(Number(d.price) * 100))}
+                      {drawerChevron(d)}
+                    </span>
+                  </button>
+                  <div className="mt-auto px-2 pb-2 pt-1">{photoStepper(d)}</div>
+                  {qty > 0 && tappableBadge && (
+                    <button
+                      type="button"
+                      onClick={() => onCourseTap!(d)}
+                      aria-label={`Sposta ${d.name} in un'altra uscita`}
+                      className="absolute right-2 top-2 inline-flex h-9 items-center gap-1 whitespace-nowrap rounded-full bg-[var(--ds-arriving-tint)] px-2.5 text-[12px] font-semibold text-[var(--ds-arriving-text)] shadow-[var(--ds-shadow-card)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    >
+                      <CornerDownRight size={13} aria-hidden />
+                      {courseTagShort(courseOf!(d))}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : layout === 'grid' ? (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {visible.length === 0 ? empty : visible.map(d => {
               const qty = qtyInCourse.get(d.id) ?? 0;

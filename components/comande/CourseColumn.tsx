@@ -1,5 +1,5 @@
 import React from 'react';
-import { Ban, ChevronUp, ChevronsUpDown, Loader2, Plus, Send, SendHorizontal } from 'lucide-react';
+import { Ban, Check, ChevronUp, ChevronsUpDown, Loader2, Plus, Send, SendHorizontal } from 'lucide-react';
 import { CourseChips } from './CourseChips';
 import type { OrderItem, OrderWithItems } from '../../types';
 import { StatusPill } from '../ds';
@@ -205,26 +205,33 @@ export const CourseList: React.FC<CourseListProps> = ({
               <ChevronsUpDown size={15} />
             </button>
           )}
-          {/* La pill col nome dell'uscita, a cavallo del bordo in alto al
-              centro. Il tocco la elegge uscita corrente, come l'etichetta
-              di prima. */}
+          {/* La pill col nome dell'uscita, a cavallo del bordo in alto. Da
+              CENTRATA è passata a SINISTRA: le uscite sono una colonna, e
+              un'etichetta al centro di ogni card costringe l'occhio a
+              zigzagare per leggere quale uscita sta guardando. Il tocco la
+              elegge uscita corrente, come l'etichetta di prima. */}
           <button
             type="button"
             onClick={() => onCourse(n)}
             aria-pressed={current}
-            className={`absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full px-3.5 py-1.5 text-[14px] font-semibold ring-1 ring-inset transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+            className={`absolute left-3 top-0 z-10 -translate-y-1/2 inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-1.5 text-[14px] font-semibold ring-1 ring-inset transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               current
                 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] ring-transparent'
                 : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] ring-[var(--ds-border-strong)]'
             }`}
           >
+            {/* La spunta sull'uscita servita: quella card è finita, e si
+                riconosce senza leggere lo stato dall'altra parte. */}
+            {status === 'SERVED' && <Check size={14} aria-hidden />}
             {courseLabel(n)}
           </button>
-          {(sent || serverRows.length > 0) && (
+          {(sent || serverRows.length > 0 || draftRows.length > 0) && (
             <span className="absolute right-3 top-0 z-10 -translate-y-1/2">
               {sent
                 ? <StatusPill tone={badge.tone}>{badge.text}</StatusPill>
-                : <StatusPill tone="pending">da inviare</StatusPill>}
+                : current
+                  ? <StatusPill tone="neutral">in composizione</StatusPill>
+                  : <StatusPill tone="pending">da inviare</StatusPill>}
             </span>
           )}
 
@@ -298,8 +305,12 @@ export const CourseList: React.FC<CourseListProps> = ({
                     dnd.drag?.kind === 'item' && dnd.drag.item.id === i.id ? 'opacity-40' : ''
                   }`}
                 >
-                  <span className="flex-shrink-0 text-[16px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
-                    {i.qty}×
+                  {/* La quantità in una pastiglia invece che col «×»: in una
+                      colonna di righe il numero nudo si perde nel nome del
+                      piatto, e quanti pezzi sono è la prima cosa che la
+                      cucina chiede al telefono. */}
+                  <span className="inline-flex h-7 min-w-[28px] flex-shrink-0 items-center justify-center rounded-[6px] bg-[var(--ds-surface-row)] px-1.5 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                    {i.qty}
                   </span>
                   <span
                     className={`min-w-0 flex-1 truncate ${
@@ -346,10 +357,10 @@ export const CourseList: React.FC<CourseListProps> = ({
                     dnd.drag?.kind === 'line' && dnd.drag.key === l.key ? 'opacity-40' : ''
                   }`}
                 >
-                  {/* La quantità è un prefisso come nelle righe server: lo
-                      stepper in riga non c'è più, si cambia dal foglio. */}
-                  <span className="flex-shrink-0 text-[16px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
-                    {l.qty}×
+                  {/* Stessa pastiglia delle righe server: lo stepper in riga
+                      non c'è più, si cambia dal foglio. */}
+                  <span className="inline-flex h-7 min-w-[28px] flex-shrink-0 items-center justify-center rounded-[6px] bg-[var(--ds-surface-row)] px-1.5 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
+                    {l.qty}
                   </span>
                   {/* Le varianti lunghe si troncano: il tocco sul nome apre
                       il foglio varianti della riga, dove si leggono TUTTE e
@@ -416,11 +427,94 @@ interface SendFooterProps {
   /** Sul palmare l'etichetta è anche la maniglia della comanda: non c'è una
    *  seconda colonna, e questo è il posto dove la mano è già appoggiata. */
   onExpand?: () => void;
+  /** 'full' è il piede della colonna sullo schermo largo: il riepilogo del
+   *  conto e un bottone che dice cosa manda e quanto vale. 'compact' (il
+   *  default) è quello del palmare, dove lo spazio è del menu e il totale è
+   *  già la maniglia del foglio comanda — invariato. */
+  variant?: 'compact' | 'full';
+  /** Il riepilogo, solo per 'full'. Il coperto è una riga di sistema della
+   *  comanda: si mostra com'è battuto (8 × 2,00 €), non ricalcolato. */
+  summary?: {
+    subtotalCents: number;
+    coverCount: number;
+    coverUnitCents: number;
+    coverTotalCents: number;
+    serviceCents: number;
+    discountCents: number;
+    totalCents: number;
+  };
 }
 
 export const SendFooter: React.FC<SendFooterProps> = ({
   course, courseCount, courseTotal, allCount, allTotal, busy, onSend, onSendAll, onExpand,
-}) => (
+  variant = 'compact', summary,
+}) => variant === 'full' ? (
+  <div className="flex flex-col gap-3">
+    {summary && (
+      /* Il riepilogo del conto sotto la comanda. Non sostituisce il foglio
+         Conto — lì si incassa, si divide e si stampa: qui si legge soltanto,
+         perché «quanto stanno spendendo» è la domanda che si fa a metà
+         servizio senza voler aprire niente. */
+      <div className="flex flex-col gap-1 border-t border-[var(--ds-border)] pt-3 text-[14px]">
+        <div className="flex items-center justify-between text-[var(--ds-text-muted)]">
+          <span>Subtotale</span>
+          <span className="tabular-nums">{euro(summary.subtotalCents)}</span>
+        </div>
+        {summary.coverCount > 0 && (
+          <div className="flex items-center justify-between text-[var(--ds-text-muted)]">
+            <span className="tabular-nums">
+              Coperti · {summary.coverCount} × {euro(summary.coverUnitCents)}
+            </span>
+            <span className="tabular-nums">{euro(summary.coverTotalCents)}</span>
+          </div>
+        )}
+        {summary.serviceCents > 0 && (
+          <div className="flex items-center justify-between text-[var(--ds-text-muted)]">
+            <span>Servizio</span>
+            <span className="tabular-nums">{euro(summary.serviceCents)}</span>
+          </div>
+        )}
+        {summary.discountCents > 0 && (
+          <div className="flex items-center justify-between text-[var(--ds-pending-text)]">
+            <span>Sconto</span>
+            <span className="tabular-nums">−{euro(summary.discountCents)}</span>
+          </div>
+        )}
+        <div className="mt-1 flex items-baseline justify-between">
+          <span className="text-[15px] text-[var(--ds-text-secondary)]">Totale</span>
+          <span className="text-[26px] font-semibold tabular-nums tracking-[-0.015em] text-[var(--ds-text-primary)]">
+            {euro(summary.totalCents)}
+          </span>
+        </div>
+      </div>
+    )}
+    {/* Il bottone dice cosa manda e quanto vale: «Invia» e basta costringeva
+        a guardare da un'altra parte per sapere quale uscita stava partendo. */}
+    <button
+      type="button"
+      onClick={onSend}
+      disabled={busy || courseCount === 0}
+      className="inline-flex h-14 w-full items-center justify-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-6 text-[17px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+    >
+      {busy ? <Loader2 size={18} className="animate-spin" aria-hidden /> : <Send size={18} aria-hidden />}
+      {courseCount === 0 ? `Invia ${courseLabel(course)}` : `Invia ${courseLabel(course)} · ${euro(courseTotal)}`}
+    </button>
+    {/* «Invia tutto» resta, e resta alla sua condizione di sempre: compare
+        solo se ci sono bozze FUORI dall'uscita corrente, altrimenti sarebbe
+        lo stesso bottone due volte. */}
+    {allCount > courseCount && (
+      <button
+        type="button"
+        onClick={onSendAll}
+        disabled={busy}
+        className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-[var(--ds-surface)] text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+      >
+        <SendHorizontal size={16} aria-hidden />
+        Invia tutto · {euro(allTotal)}
+      </button>
+    )}
+  </div>
+) : (
   <div className="flex flex-col gap-1.5">
     {/* Sul palmare la comanda è un foglio ripiegato qui sotto, e lo dice la
         maniglia — la stessa dei fogli aperti. Ad aprirla è lei più tutta la
@@ -511,6 +605,30 @@ export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, o
   const serverCourseTotal = order.items.reduce((s, i) => s + (isServerDraft(i) && i.course_no === course ? i.qty * i.unit_price_cents : 0), 0);
   const serverAllQty = order.items.reduce((s, i) => s + (isServerDraft(i) ? i.qty : 0), 0);
   const serverAllTotal = order.items.reduce((s, i) => s + (isServerDraft(i) ? i.qty * i.unit_price_cents : 0), 0);
+  // Il coperto è una riga di sistema della comanda, non un calcolo: si mostra
+  // com'è battuto. Righe multiple (comande vecchie, coperti ritoccati) si
+  // sommano invece di far vincere la prima.
+  const liveOf = (kind: 'COVER' | 'SERVICE') =>
+    order.items.filter(i => i.line_kind === kind && i.status !== 'VOIDED');
+  const centsOf = (rows: OrderItem[]) =>
+    rows.reduce((s, i) => s + (i.line_total_cents ?? i.qty * i.unit_price_cents), 0);
+  const coverRows = liveOf('COVER');
+  const coverCount = coverRows.reduce((s, i) => s + i.qty, 0);
+  const coverTotalCents = centsOf(coverRows);
+  const serviceCents = centsOf(liveOf('SERVICE'));
+  // `subtotal_cents` del server comprende TUTTE le righe vive, coperto
+  // compreso. Qui il coperto ha la sua riga, quindi il subtotale sopra deve
+  // essere quello dei soli piatti: sommato com'è arrivava a contarlo due
+  // volte, e il riepilogo non tornava con il totale scritto sotto.
+  const summary = {
+    subtotalCents: order.subtotal_cents - coverTotalCents - serviceCents,
+    coverCount,
+    coverUnitCents: coverRows[0]?.unit_price_cents ?? 0,
+    coverTotalCents,
+    serviceCents,
+    discountCents: order.discount_cents ?? 0,
+    totalCents: order.total_cents,
+  };
   return (
     <div className="flex min-h-0 flex-col overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
       <header className="flex flex-shrink-0 items-center gap-2 border-b border-[var(--ds-border)] px-4 py-3">
@@ -548,6 +666,8 @@ export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, o
           busy={list.busy}
           onSend={onSend}
           onSendAll={onSendAll}
+          variant="full"
+          summary={summary}
         />
       </div>
     </div>

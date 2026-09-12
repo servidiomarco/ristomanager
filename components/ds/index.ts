@@ -38,3 +38,4 @@ export type { SwipeAction } from './SwipeRow';
 export { LinkifiedText } from './LinkifiedText';
 export { ToastViewport, ToastPill, ToastCard } from './Toast';
 export type { ToastTone } from './Toast';
+export { LivePill } from './LivePill';

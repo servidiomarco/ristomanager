@@ -1,6 +1,6 @@
 import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
-import type { OrderWithItems } from '../types';
+import type { CourseStatus, OrderWithItems } from '../types';
 import { buildApiError } from './apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
@@ -235,12 +235,22 @@ export const getMenuCatalogue = async (): Promise<MenuCatalogue> =>
 
 /** Tavoli con una comanda aperta nel servizio, in una chiamata sola.
  *  `shift` assente = entrambi i turni del giorno, come /bills/open. */
+/** Quello che la tessera della griglia racconta di una comanda aperta: il
+ *  totale corrente e l'uscita più avanti, già derivata dal server. `course`
+ *  è null su una comanda ancora intonsa (aperta, niente battuto). */
+export interface OpenOrderSummary {
+  id: number;
+  table_id: number;
+  total_cents: number;
+  course: { course_no: number; status: CourseStatus } | null;
+}
+
 export const getOpenOrderTables = async (
   service?: { date?: string; shift?: 'LUNCH' | 'DINNER' },
 ): Promise<{
   service: { service_date: string; shift: 'LUNCH' | 'DINNER' };
   table_ids: number[];
-  orders: { id: number; table_id: number }[];
+  orders: OpenOrderSummary[];
 }> => {
   const params = new URLSearchParams();
   if (service?.date) params.set('date', service.date);

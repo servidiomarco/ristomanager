@@ -12,6 +12,9 @@ import { euro, rowCountLabel } from './orderView';
 // ---------------------------------------------------------------------------
 
 interface OrderTopBarProps {
+  /** false quando il ritorno ai tavoli vive nella chrome della pagina (schermo
+   *  largo): la scheda del tavolo resta, la freccia no. */
+  showBack?: boolean;
   tableName: string;
   guestName: string | null;
   /** Ordine più bozze: è il numero che il cliente sentirebbe se chiedesse ora. */
@@ -61,7 +64,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
   billDisabled, clearDisabled, wide,
   onSearch, densityCompact, onToggleDensity,
   onBack, onCovers, onBill, onDiscount, onTransfer, onClearDrafts, onDeleteOrder,
-  paged, catView = 'list', onCatView,
+  paged, catView = 'list', onCatView, showBack = true,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -339,7 +342,11 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
       <div className="rounded-[20px] bg-[var(--ds-surface)] p-2.5 shadow-[var(--ds-shadow-card)]">
         <div className="flex items-center gap-1">
           {/* Cerchio pieno in accent: su touch l'hover non esiste, quindi la
-              freccia senza sfondo non leggeva come bersaglio. */}
+              freccia senza sfondo non leggeva come bersaglio. Sullo schermo
+              largo non c'è: il ritorno ai tavoli sta nella chrome della
+              pagina, e due frecce indietro sulla stessa schermata sono una
+              domanda («quale delle due?») invece di una risposta. */}
+          {showBack && (
           <button
             type="button"
             onClick={onBack}
@@ -348,6 +355,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
           >
             <ArrowLeft size={20} />
           </button>
+          )}
           <div className="min-w-0 flex-1">
             <div className="truncate text-[20px] font-semibold tracking-[-0.02em] text-[var(--ds-text-primary)]">
               Tav. {tableName}

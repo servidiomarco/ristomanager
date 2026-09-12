@@ -221,6 +221,7 @@ spacing:
 # RADIUS
 # ---------------------------------------------------------------------------
 rounded:
+  xs:    "6px"    # comande: table tile, category card, dish card
   sm:    "8px"    # checkbox
   md:    "12px"   # icon chip, heatmap cell, table badge, input
   lg:    "16px"   # rows, tiles, toast
