@@ -850,12 +850,24 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   const clearDrafts = () => {
     // Svuotare è distruttivo e solo locale: l'inversa è rimettere in bozza
     // le stesse righe, quindi la conferma offre Annulla invece di chiedere
-    // conferma prima.
+    // conferma prima. Chiavata sulla comanda aperta al momento dello svuoto:
+    // se nel frattempo si è cambiato tavolo, le righe non vanno ripristinate
+    // nella comanda sbagliata.
     const cleared = cart;
+    const orderIdAtClear = openOrderIdRef.current;
     setCart([]);
     addToast('Righe non inviate svuotate', 'success', {
       icon: Trash2,
-      action: { label: 'Annulla', onClick: () => setCart(prev => [...cleared, ...prev]) },
+      action: {
+        label: 'Annulla',
+        onClick: () => {
+          if (openOrderIdRef.current !== orderIdAtClear) {
+            addToast('Comanda cambiata, righe non ripristinate', 'info');
+            return;
+          }
+          setCart(prev => [...cleared, ...prev]);
+        },
+      },
       replaceKey: 'orderpad-flash',
     });
   };

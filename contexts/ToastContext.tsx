@@ -62,19 +62,24 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   const addToast = useCallback<AddToast>((message, type = 'info', options) => {
-    const dedupKey = `${type}|${options?.title ?? ''}|${message}`;
-    const now = Date.now();
-    const lastAt = lastToastAtRef.current.get(dedupKey);
-    if (lastAt !== undefined && now - lastAt < TOAST_DEDUP_WINDOW_MS) {
-      // Duplicato soppresso. Il timestamp si rinfresca, così trigger a
-      // raffica tengono viva la soppressione invece di sfuggirle appena
-      // scade la finestra.
+    // Il dedup esiste per il feedback passivo doppio (handler + socket:event,
+    // StrictMode). Un toast con azione nasce da un gesto diretto: sopprimerlo
+    // butterebbe via anche l'undo nuovo, quindi passa sempre.
+    if (!options?.action) {
+      const dedupKey = `${type}|${options?.title ?? ''}|${message}`;
+      const now = Date.now();
+      const lastAt = lastToastAtRef.current.get(dedupKey);
+      if (lastAt !== undefined && now - lastAt < TOAST_DEDUP_WINDOW_MS) {
+        // Duplicato soppresso. Il timestamp si rinfresca, così trigger a
+        // raffica tengono viva la soppressione invece di sfuggirle appena
+        // scade la finestra.
+        lastToastAtRef.current.set(dedupKey, now);
+        return;
+      }
       lastToastAtRef.current.set(dedupKey, now);
-      return;
-    }
-    lastToastAtRef.current.set(dedupKey, now);
-    for (const [k, ts] of lastToastAtRef.current) {
-      if (now - ts > TOAST_DEDUP_WINDOW_MS * 4) lastToastAtRef.current.delete(k);
+      for (const [k, ts] of lastToastAtRef.current) {
+        if (now - ts > TOAST_DEDUP_WINDOW_MS * 4) lastToastAtRef.current.delete(k);
+      }
     }
 
     const id = Math.random().toString(36).substr(2, 9);
@@ -123,6 +128,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 title={t.title}
                 details={t.details}
                 icon={t.icon}
+                action={t.action}
                 onDismiss={() => removeToast(t.id)}
               />
             ),

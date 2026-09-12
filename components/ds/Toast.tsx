@@ -86,8 +86,11 @@ export const ToastCard: React.FC<{
   title?: string;
   details?: string[];
   icon?: LucideIcon;
+  /** Un'azione su un toast ricco (titolo/dettagli). Quella singola su un
+   *  messaggio secco spetta alla pillola, non a questa card. */
+  action?: { label: string; onClick: () => void | Promise<void> };
   onDismiss: () => void;
-}> = ({ tone, message, title, details, icon, onDismiss }) => {
+}> = ({ tone, message, title, details, icon, action, onDismiss }) => {
   const Icon = icon ?? TONE_ICON[tone];
   const hasDetails = !!(title || (details && details.length > 0));
   return (
@@ -110,12 +113,23 @@ export const ToastCard: React.FC<{
               ))}
             </ul>
           )}
+          {action && (
+            <button
+              type="button"
+              onClick={async () => {
+                try { await action.onClick(); } finally { onDismiss(); }
+              }}
+              className="mt-2 inline-flex h-9 items-center rounded-full bg-[var(--ds-action-bg)] px-3 text-[13px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              {action.label}
+            </button>
+          )}
         </div>
         <button
           type="button"
           onClick={onDismiss}
           aria-label="Chiudi notifica"
-          className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] transition-colors hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         >
           <X className="h-4 w-4" aria-hidden />
         </button>
