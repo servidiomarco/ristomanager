@@ -3956,7 +3956,13 @@ app.put('/menu/categories', authenticate, requirePermission('menu:full'), async 
             prefs[name] = { enabled: c.enabled !== false, sort: i };
             if (Array.isArray(existing[name]?.menu_ids)) prefs[name].menu_ids = existing[name].menu_ids;
             if (Array.isArray(existing[name]?.modifier_group_ids)) prefs[name].modifier_group_ids = existing[name].modifier_group_ids;
+            // OGNI flag della categoria va riportato, non solo bar: dessert e
+            // wine mancavano da questa lista e un riordino dalla modale li
+            // cancellava in silenzio — l'uscita Dolci sparita dal palmare e
+            // le categorie vino smarcate in produzione (12/09) vengono da qui.
             if (existing[name]?.bar) prefs[name].bar = true;
+            if (existing[name]?.dessert) prefs[name].dessert = true;
+            if (existing[name]?.wine) prefs[name].wine = true;
             if (existing[name]?.manual) prefs[name].manual = true;
         });
         // Le categorie manuali sopravvivono anche a un client che non le
