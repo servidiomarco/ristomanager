@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3 } from 'lucide-react';
-import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3 } from 'lucide-react';
+import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
 import { MenuManager } from './components/MenuManager';
@@ -11,6 +11,7 @@ import { OnboardingWizard } from './components/OnboardingWizard';
 import { BookingChannelsManager } from './components/BookingChannelsManager';
 import { PlatformPanel, ImpersonationBanner, decodeJwtPayload } from './components/PlatformPanel';
 import { authApiService } from './services/authApiService';
+import { useToast } from './contexts/ToastContext';
 import { Loader } from './components/Loader';
 import { UserManagement } from './components/UserManagement';
 import { RolePermissions } from './components/RolePermissions';
@@ -1119,8 +1120,9 @@ const App: React.FC = () => {
     return null;
   };
 
-  // Toast/Snackbar State
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  // Dedup, timer e rendering vivono nel ToastProvider (contexts/ToastContext):
+  // qui resta solo il nome, che continua a scendere per props ai figli.
+  const { addToast } = useToast();
 
   // User management modal state
   const [showRolePermissions, setShowRolePermissions] = useState(false);
@@ -1304,54 +1306,6 @@ const App: React.FC = () => {
     // interattiva. `to` = windowFrom incluso: un giorno di sovrapposizione
     // col primo tempo, il dedup per id lo assorbe.
     if (!archiveLoadedRef.current) void loadReservationsArchive(windowFrom);
-  };
-
-  // Dedup guard: same message+type+title emitted within this window are
-  // collapsed to a single toast. Fires all the time we do "handler +
-  // socket:event" (both trigger the same feedback) or when React StrictMode
-  // double-invokes an effect in dev. 2500ms covers the typical socket
-  // roundtrip while staying short enough to not swallow legitimate repeat
-  // actions ("Salva" clicked twice on purpose).
-  const TOAST_DEDUP_WINDOW_MS = 2500;
-  const lastToastAtRef = useRef<Map<string, number>>(new Map());
-
-  const addToast = (
-    message: string,
-    type: 'success' | 'error' | 'info' = 'info',
-    options?: { title?: string; details?: string[]; duration?: number; action?: { label: string; onClick: () => void } }
-  ) => {
-      const dedupKey = `${type}|${options?.title ?? ''}|${message}`;
-      const now = Date.now();
-      const lastAt = lastToastAtRef.current.get(dedupKey);
-      if (lastAt !== undefined && now - lastAt < TOAST_DEDUP_WINDOW_MS) {
-          // Suppressed duplicate. Refresh the timestamp so back-to-back
-          // triggers keep the suppression alive instead of leaking through
-          // right after the window expires.
-          lastToastAtRef.current.set(dedupKey, now);
-          return;
-      }
-      lastToastAtRef.current.set(dedupKey, now);
-      // Periodic cleanup so the map doesn't grow unbounded during long
-      // sessions. Anything older than the window is safe to drop.
-      for (const [k, ts] of lastToastAtRef.current) {
-          if (now - ts > TOAST_DEDUP_WINDOW_MS * 4) lastToastAtRef.current.delete(k);
-      }
-
-      const id = Math.random().toString(36).substr(2, 9);
-      const duration = options?.duration ?? (options?.details?.length ? 6000 : 3000);
-      setToasts(prev => [...prev, {
-          id,
-          message,
-          type,
-          title: options?.title,
-          details: options?.details,
-          duration,
-          action: options?.action,
-      }]);
-
-      setTimeout(() => {
-          setToasts(prev => prev.filter(t => t.id !== id));
-      }, duration);
   };
 
   useTokenExpiryWarning({ isAuthenticated, showToast: addToast });
@@ -1552,7 +1506,9 @@ const App: React.FC = () => {
       // the connection was down. Otherwise stay quiet (first connect,
       // brief reconnect that never reached the toast timer).
       if (disconnectToastShownRef.current) {
-        addToast('Connessione ristabilita', 'success');
+        // Stessa replaceKey dell'avviso di caduta: il ripristino lo
+        // sostituisce invece di lasciarlo appeso (gli errori persistono).
+        addToast('Connessione ristabilita', 'success', { replaceKey: 'connessione' });
         disconnectToastShownRef.current = false;
       }
 
@@ -1593,7 +1549,7 @@ const App: React.FC = () => {
         clearTimeout(disconnectToastTimerRef.current);
       }
       disconnectToastTimerRef.current = window.setTimeout(() => {
-        addToast('Connessione persa - le modifiche verranno sincronizzate al ripristino', 'error');
+        addToast('Connessione persa - le modifiche verranno sincronizzate al ripristino', 'error', { replaceKey: 'connessione' });
         disconnectToastShownRef.current = true;
         disconnectToastTimerRef.current = null;
       }, 2500);
@@ -3635,83 +3591,7 @@ const App: React.FC = () => {
           }}
         />
 
-        {/* Global Toasts */}
-        <div
-          className="fixed bottom-20 lg:bottom-4 left-4 right-auto lg:left-auto lg:right-4 z-50 flex flex-col gap-2 max-w-[calc(100vw-6rem)] sm:max-w-md"
-          role="region"
-          aria-label="Notifiche"
-          aria-live="polite"
-        >
-            {toasts.map(toast => {
-                const hasDetails = toast.details && toast.details.length > 0;
-                const accent = toast.type === 'success'
-                    ? { iconText: 'text-[var(--ds-seated-text)]' }
-                    : toast.type === 'error'
-                    ? { iconText: 'text-[var(--ds-critical-text)]' }
-                    : { iconText: 'text-[var(--ds-text-primary)]' };
-                return (
-                    <div
-                        key={toast.id}
-                        role={toast.type === 'error' ? 'alert' : undefined}
- className={`bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] border border-[var(--ds-border)] rounded-lg duration-300 ${
-                            hasDetails ? 'p-3.5 min-w-[300px] sm:min-w-[360px]' : 'flex items-center gap-2.5 px-3.5 py-2.5'
-                        }`}
-                    >
-                        {hasDetails ? (
-                            <div className="flex items-start gap-3">
-                                <div className={`p-1.5 rounded-md bg-[var(--ds-surface-row)] ${accent.iconText} flex-shrink-0`}>
-                                    {toast.type === 'success' && <CheckCircle className="h-4 w-4" />}
-                                    {toast.type === 'error' && <AlertTriangle className="h-4 w-4" />}
-                                    {toast.type === 'info' && <Info className="h-4 w-4" />}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                    {toast.title && (
-                                        <p className="text-[13px] font-semibold text-[var(--ds-text-primary)] mb-0.5">{toast.title}</p>
-                                    )}
-                                    <p className="text-sm font-medium text-[var(--ds-text-primary)] mb-1">{toast.message}</p>
-                                    <ul className="space-y-0.5">
-                                        {toast.details!.map((d, i) => (
-                                            <li key={i} className="text-[13px] text-[var(--ds-text-muted)] leading-snug">{d}</li>
-                                        ))}
-                                    </ul>
-                                    {toast.action && (
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                toast.action!.onClick();
-                                                setToasts(prev => prev.filter(t => t.id !== toast.id));
-                                            }}
-                                            className={`mt-2 px-3 py-1.5 text-xs font-semibold rounded-md bg-[var(--ds-surface-row)] ${accent.iconText} hover:opacity-80`}
-                                        >
-                                            {toast.action.label}
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
-                        ) : (
-                            <>
-                                {toast.type === 'success' && <CheckCircle className={`h-4 w-4 ${accent.iconText} shrink-0`} />}
-                                {toast.type === 'error' && <AlertTriangle className={`h-4 w-4 ${accent.iconText} shrink-0`} />}
-                                {toast.type === 'info' && <Info className={`h-4 w-4 ${accent.iconText} shrink-0`} />}
-                                <span className="text-[13px] font-medium text-[var(--ds-text-primary)] flex-1">{toast.message}</span>
-                                {toast.action && (
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            toast.action!.onClick();
-                                            setToasts(prev => prev.filter(t => t.id !== toast.id));
-                                        }}
-                                        className={`px-3 py-1 text-xs font-semibold rounded-md bg-[var(--ds-surface-row)] ${accent.iconText} hover:opacity-80 flex-shrink-0`}
-                                    >
-                                        {toast.action.label}
-                                    </button>
-                                )}
-                            </>
-                        )}
-                    </div>
-                );
-            })}
-        </div>
+        {/* I toast globali sono renderizzati dal ToastProvider (portal). */}
       </main>
     </div>
   );

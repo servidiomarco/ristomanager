@@ -793,6 +793,19 @@ body {
   --ds-critical-solid: #c0392b;
   --ds-critical-fg: #ffffff;
 
+  /* Bordi sulle tinte di famiglia (spec §3.3) — un filo piu' scuri della
+     tinta, per le card che dichiarano una famiglia senza riempirsi. */
+  --ds-seated-tint-border: #d5e9dd;
+  --ds-arriving-tint-border: #e4e3f8;
+  --ds-pending-tint-border: #f6e8cc;
+  --ds-critical-tint-border: #f8d9d3;
+
+  /* Label d'azione sulla pillola action-bg (§Toast). L'oro di riferimento
+     regge sul quasi-nero (5.45:1) ma crollava sulla pillola invertita del
+     tema scuro (2.96:1): il label inverte con il fill, non si scurisce
+     l'ambra — vedi §3.3. */
+  --ds-action-accent: #b8860b;
+
   /* Elevation — light mode lifts with soft, wide shadows */
 
   /* ---------------------------------------------------------------------
@@ -873,6 +886,15 @@ body {
   --ds-critical-solid: #c0392b;
   --ds-critical-fg: #ffffff;
 
+  --ds-seated-tint-border: #243a2c;
+  --ds-arriving-tint-border: #2a2a48;
+  --ds-pending-tint-border: #3f3212;
+  --ds-critical-tint-border: #43201a;
+
+  /* Sulla pillola chiara del tema scuro l'oro di riferimento non regge:
+     il label inverte con il fill (e' il pending-text del tema chiaro). */
+  --ds-action-accent: #7a5807;
+
   /* Categoriale — scuro. Vedi il commento nel blocco chiaro. */
   --ds-cat-1-tint: #102626;   --ds-cat-1-line: #1D5758;   --ds-cat-1-text: #7FC8C9;   --ds-cat-1-solid: #2E9A9C;   /* teal */
   --ds-cat-2-tint: #131F2B;   --ds-cat-2-line: #2B4E71;   --ds-cat-2-text: #8FBBE4;   --ds-cat-2-solid: #4B8FD1;   /* azure */
@@ -923,6 +945,32 @@ body {
 :root { --ds-bottom-nav-clear: calc(env(safe-area-inset-bottom, 0px) + 108px); }
 .pb-mobile-nav { padding-bottom: var(--ds-bottom-nav-clear); }
 @media (min-width: 1024px) { .pb-mobile-nav { padding-bottom: 0; } }
+
+/* ── Toast (§Toast) ────────────────────────────────────────────────────────
+   Un solo ancoraggio per tutte le notifiche: centrato sopra la bottom nav su
+   telefono — il pollice e' ancora dove ha agito — in basso a destra da md.
+   Le schermate che nascondono la barra passano il proprio offset via
+   --ds-toast-bottom. z 70: sopra i modali (50), come da scala §2.4. */
+.ds-toast-viewport {
+  position: fixed;
+  left: 1rem;
+  right: 1rem;
+  bottom: var(--ds-toast-bottom, var(--ds-bottom-nav-clear));
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  pointer-events: none;
+}
+@media (min-width: 768px) {
+  .ds-toast-viewport {
+    left: auto;
+    right: 1rem;
+    bottom: var(--ds-toast-bottom, 1rem);
+    align-items: flex-end;
+  }
+}
 
 /* ── Animated hairline frame — "Adesso in sala" ────────────────────────────
    The live deck is the only tile describing RIGHT NOW, so it needs to outrank

@@ -17,6 +17,7 @@ import {
   OutboundMessage,
 } from '../services/voiceCallsApiService';
 import { Reservation } from '../types';
+import { useToast } from '../contexts/ToastContext';
 import { toTitleCase } from '../utils/text';
 import {
   SplitPane, PaneHeader, PanePlaceholder, StatusPill, CountBadge, SearchField, EmptyState, SectionHeader,
@@ -727,7 +728,9 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
   const [syncing, setSyncing] = useState(false);
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  // Esiti di sync e azioni bulk: toast globali (§Toast), non più un Callout
+  // in testa alla lista che scompariva sotto lo scroll.
+  const { addToast } = useToast();
 
   useEffect(() => {
     const t = setTimeout(() => setSearchDebounced(search), 350);
@@ -804,18 +807,16 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
 
   const handleSync = useCallback(async () => {
     setSyncing(true);
-    setSyncMessage(null);
     try {
       const result = await voiceCallsApiService.sync();
-      setSyncMessage(`Importate ${result.imported} · numeri recuperati ${result.backfilled} · saltate ${result.skipped}${result.failed ? ` · errori ${result.failed}` : ''}`);
+      addToast(`Importate ${result.imported} · numeri recuperati ${result.backfilled} · saltate ${result.skipped}${result.failed ? ` · errori ${result.failed}` : ''}`, 'success');
       await fetchItems();
     } catch (err) {
-      setSyncMessage(`Errore: ${(err as Error).message}`);
+      addToast(`Errore: ${(err as Error).message}`, 'error');
     } finally {
       setSyncing(false);
-      setTimeout(() => setSyncMessage(null), 5000);
     }
-  }, [fetchItems]);
+  }, [fetchItems, addToast]);
 
   // Bulk "segna tutte come ricontattate": two-step confirm (first click arms
   // the button, second within 4s executes) so a stray tap can't flip the
@@ -834,21 +835,19 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
     if (markAllTimerRef.current) clearTimeout(markAllTimerRef.current);
     setMarkAllArmed(false);
     setMarkingAll(true);
-    setSyncMessage(null);
     try {
       const { updated } = await voiceCallsApiService.markAllContacted();
-      setSyncMessage(updated > 0
+      addToast(updated > 0
         ? `${updated} conversazion${updated === 1 ? 'e segnata' : 'i segnate'} come ricontattat${updated === 1 ? 'a' : 'e'}`
-        : 'Nessuna conversazione da ricontattare');
+        : 'Nessuna conversazione da ricontattare', updated > 0 ? 'success' : 'info');
       await fetchItems();
       onFollowUpChanged?.();
     } catch (err) {
-      setSyncMessage(`Errore: ${(err as Error).message}`);
+      addToast(`Errore: ${(err as Error).message}`, 'error');
     } finally {
       setMarkingAll(false);
-      setTimeout(() => setSyncMessage(null), 5000);
     }
-  }, [markAllArmed, fetchItems, onFollowUpChanged]);
+  }, [markAllArmed, fetchItems, onFollowUpChanged, addToast]);
 
   // Swipe-right on a pending call. Same endpoint the detail modal's
   // "Ricontattato" button uses — the gesture is a shortcut to it,
@@ -1108,17 +1107,6 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
         }
         list={
           <div className="space-y-3">
-            {/* One slot for both outcomes of a sync or a bulk mark — the
-                string already carries which one it was. */}
-            {syncMessage && (
-              <Callout
-                tone={syncMessage.startsWith('Errore') ? 'critical' : 'info'}
-                icon={syncMessage.startsWith('Errore') ? AlertCircle : CheckCircle2}
-              >
-                {syncMessage}
-              </Callout>
-            )}
-
             {error && <Callout tone="critical" icon={AlertCircle}>{error}</Callout>}
 
             {loading ? (

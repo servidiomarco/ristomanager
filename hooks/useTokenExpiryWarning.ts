@@ -63,11 +63,12 @@ export const useTokenExpiryWarning = ({ isAuthenticated, showToast }: Options): 
       warnedForTokenRef.current = token;
 
       const minutes = Math.max(1, Math.ceil(msUntilExpiry / 60000));
+      // Niente title: il messaggio dice già tutto, e senza titolo il toast
+      // esce come pillola con l'azione in vista (§Toast).
       showToast(
         `La sessione scade tra ${minutes} ${minutes === 1 ? 'minuto' : 'minuti'}`,
         'info',
         {
-          title: 'Sessione in scadenza',
           duration: msUntilExpiry,
           action: {
             label: 'Estendi',
