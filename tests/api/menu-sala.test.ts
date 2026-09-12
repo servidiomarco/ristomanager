@@ -52,6 +52,19 @@ describe('menu, sala & cucina', () => {
             expect(created.body.name).toBe('Barolo DOCG Del Piemonte');
             expect(created.body.category).toBe('Vini Rossi IGT');
             await api().delete(`/dishes/${created.body.id}`).set(bearer(token));
+
+            // Sigle puntate: due o più coppie lettera-punto tornano
+            // maiuscole; l'abbreviazione a coppia singola («mel.») no.
+            const puntato = await api().post('/dishes').set(bearer(token)).send({
+                name: 'salumi d.o.p. con polpetta di mel.',
+                description: null,
+                price: 12,
+                category: 'Antipasti',
+                allergens: [],
+            });
+            expect(puntato.status).toBe(201);
+            expect(puntato.body.name).toBe('Salumi D.O.P. Con Polpetta Di Mel.');
+            await api().delete(`/dishes/${puntato.body.id}`).set(bearer(token));
         });
 
         it('il catalogo espone il listino di default del tenant', async () => {

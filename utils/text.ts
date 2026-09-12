@@ -13,10 +13,21 @@ export const toTitleCase = (input: string | null | undefined): string => {
 // toccarla qui significa toccarla anche là, o i confronti esatti divergono.
 const MENU_ACRONYMS = /\b(Doc|Docg|Igt|Igp|Dop|Stg|Aoc|Aop)\b/g;
 
+// Sigle puntate: una sequenza di almeno due coppie lettera-punto è una
+// sigla («d.o.p.» → «D.O.P.», «s.p.a.» → «S.P.A.»). Il minimo di due
+// coppie protegge le abbreviazioni vere («Mel.», «Pat.»), che di coppia
+// ne hanno una sola.
+const DOTTED_ACRONYMS = /\b(?:\p{L}\.){2,}/gu;
+
 // Title Case per i titoli del menu (piatti, categorie, varianti,
-// ingredienti): come toTitleCase, ma le denominazioni tornano maiuscole.
+// ingredienti): come toTitleCase, ma le denominazioni tornano maiuscole,
+// puntate o no. Replicato nelle migration titoli-menu-title-case e
+// sigle-puntate-menu: toccare qui significa una migration nuova di
+// riallineamento, o i confronti esatti divergono.
 export const toMenuTitleCase = (input: string | null | undefined): string =>
-  toTitleCase(input).replace(MENU_ACRONYMS, (m) => m.toUpperCase());
+  toTitleCase(input)
+    .replace(MENU_ACRONYMS, (m) => m.toUpperCase())
+    .replace(DOTTED_ACRONYMS, (m) => m.toUpperCase());
 
 // Particelle che aprono un cognome composto: se il nome registrato inizia
 // così, la prima parola NON è un nome di battesimo. "De Franco Chiara"
