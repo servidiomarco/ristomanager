@@ -156,7 +156,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
           </>
         }
       >
-        <div className="space-y-4 rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5">
+        <div className="space-y-4 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label="Data" htmlFor="print-date">
               <input
@@ -223,7 +223,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
               type="checkbox"
               checked={includeBanquets}
               onChange={(e) => setIncludeBanquets(e.target.checked)}
-              className="h-5 w-5 rounded-[6px] accent-[var(--ds-action-bg)]"
+              className="h-5 w-5 rounded-[var(--ds-radius)] accent-[var(--ds-action-bg)]"
             />
             <span className="text-[15px] text-[var(--ds-text-primary)]">Includi banchetti del giorno</span>
           </label>
@@ -231,7 +231,7 @@ export const PrintReservationsModal: React.FC<Props> = ({
 
         <div className="mt-4">
           <p className="mb-2 text-[13px] font-semibold text-[var(--ds-text-secondary)]">Anteprima</p>
-          <div className="space-y-1 rounded-[16px] bg-[var(--ds-surface-row)] p-4 text-[14px]">
+          <div className="space-y-1 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-4 text-[14px]">
             <p className="font-semibold capitalize text-[var(--ds-text-primary)]">{formatPrintDate(printDate)}</p>
             <p className="text-[var(--ds-text-secondary)]">{shiftLabel} · {roomLabel}</p>
             <p className="text-[var(--ds-text-muted)]">

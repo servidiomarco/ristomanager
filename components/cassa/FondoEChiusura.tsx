@@ -40,7 +40,7 @@ const toCents = (s: string): number => {
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : 0;
 };
 
-const field = 'h-12 w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-right text-[17px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
+const field = 'h-12 w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-right text-[17px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]';
 
 export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
   view, loading, error, busy, canClose, onBack, onOpen, onUpdateFloat, onClose, onPrint, onOpenGiornale,
@@ -123,7 +123,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                       type="button"
                       onClick={() => { onUpdateFloat(toCents(floatText)); setEditingFloat(false); }}
                       disabled={busy}
-                      className="h-12 rounded-xl bg-[var(--ds-action-bg)] px-4 text-[14px] font-semibold text-[var(--ds-action-fg)] disabled:opacity-40"
+                      className="h-12 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] px-4 text-[14px] font-semibold text-[var(--ds-action-fg)] disabled:opacity-40"
                     >
                       Salva
                     </button>
@@ -163,7 +163,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                     type="button"
                     onClick={() => onOpen(toCents(floatText))}
                     disabled={busy}
-                    className="h-12 rounded-xl bg-[var(--ds-action-bg)] px-5 text-[15px] font-semibold text-[var(--ds-action-fg)] disabled:opacity-40"
+                    className="h-12 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] px-5 text-[15px] font-semibold text-[var(--ds-action-fg)] disabled:opacity-40"
                   >
                     Apri la cassa
                   </button>
@@ -198,7 +198,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
             )}
 
             {out && (out.deposits_cents > 0 || out.omaggio_cents > 0 || out.sospeso_cents > 0 || out.voided_cents > 0) && (
-              <div className="mt-4 space-y-1.5 rounded-[14px] bg-[var(--ds-surface-row)] p-3 text-[13px]">
+              <div className="mt-4 space-y-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 text-[13px]">
                 <div className="font-semibold text-[var(--ds-text-secondary)]">Fuori dai totali</div>
                 <div className="flex justify-between gap-2">
                   <span className="text-[var(--ds-text-secondary)]">Caparre a credito · {out.deposits_count}</span>
@@ -247,7 +247,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                     <dd className="tabular-nums text-[var(--ds-text-primary)]">{euro(session!.counted_cents ?? 0)}</dd>
                   </div>
                 </dl>
-                <div className={`rounded-[14px] p-3 ${
+                <div className={`rounded-[var(--ds-radius)] p-3 ${
                   (session!.difference_cents ?? 0) === 0
                     ? 'bg-[var(--ds-seated-tint)]' : 'bg-[var(--ds-critical-tint)]'
                 }`}>
@@ -291,7 +291,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                 </label>
 
                 {difference != null && (
-                  <div className={`rounded-[14px] p-3 ${difference === 0 ? 'bg-[var(--ds-seated-tint)]' : 'bg-[var(--ds-critical-tint)]'}`}>
+                  <div className={`rounded-[var(--ds-radius)] p-3 ${difference === 0 ? 'bg-[var(--ds-seated-tint)]' : 'bg-[var(--ds-critical-tint)]'}`}>
                     <div className="flex justify-between gap-2 text-[15px] font-semibold">
                       <span className={difference === 0 ? 'text-[var(--ds-seated-text)]' : 'text-[var(--ds-critical-text)]'}>
                         Differenza
@@ -310,7 +310,7 @@ export const FondoEChiusura: React.FC<FondoEChiusuraProps> = ({
                     </span>
                     <textarea
                       value={note} onChange={e => setNote(e.target.value)} rows={3}
-                      className="w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] p-3 text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]"
+                      className="w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-2)] p-3 text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]"
                     />
                     <span className="mt-1 block text-[12px] text-[var(--ds-text-muted)]">
                       Resta a registro con il tuo nome.

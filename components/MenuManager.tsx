@@ -1754,7 +1754,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             key={dish.id}
                             type="button"
                             onClick={() => setViewDish(isSelected ? null : dish)}
-                            className={`flex flex-col overflow-hidden rounded-[20px] bg-[var(--ds-surface)] text-left shadow-[var(--ds-shadow-card)] transition-shadow hover:shadow-[var(--ds-shadow-raised)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                            className={`flex flex-col overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] text-left shadow-[var(--ds-shadow-card)] transition-shadow hover:shadow-[var(--ds-shadow-raised)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                               isSelected ? 'ring-2 ring-[var(--ds-text-primary)]' : ''
                             } ${dish.is_active === false || dish.crm_enabled === false ? 'opacity-60' : ''}`}
                           >
@@ -1852,7 +1852,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       })}
                     </div>
                   ) : (
-                    <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+                    <div className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
                       {filteredDishes.map((dish, i) => {
                         const isSelected = viewDish?.id === dish.id;
                         return (
@@ -1868,11 +1868,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               <img
                                 src={dish.photo_url}
                                 alt=""
-                                className="h-11 w-11 flex-shrink-0 rounded-[12px] object-cover"
+                                className="h-11 w-11 flex-shrink-0 rounded-[var(--ds-radius)] object-cover"
                                 onError={e => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
                               />
                             ) : (
-                              <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[12px] bg-[var(--ds-surface-row)]">
+                              <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)]">
                                 <ImageIcon className="h-4 w-4 text-[var(--ds-text-subtle)]" aria-hidden />
                               </div>
                             )}
@@ -1976,7 +1976,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     DishDetailModal as a sheet, because a 320px column beside a
                     grid leaves neither readable. */}
                 {detailPanelOpen && viewDish && (
-                  <aside className="hidden w-80 flex-shrink-0 flex-col self-start overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] lg:flex">
+                  <aside className="hidden w-80 flex-shrink-0 flex-col self-start overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] lg:flex">
                     <div className="relative">
                       {viewDish.photo_url ? (
                         <img src={viewDish.photo_url} alt="" className="h-40 w-full object-cover" />
@@ -2032,7 +2032,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           });
                           if (used.length === 0) {
                             return (
-                              <p className="rounded-[12px] bg-[var(--ds-surface-row)] px-3 py-2.5 text-[13px] text-[var(--ds-text-muted)]">
+                              <p className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-2.5 text-[13px] text-[var(--ds-text-muted)]">
                                 Non ancora inserito in un menu banchetto.
                               </p>
                             );
@@ -2040,7 +2040,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           return (
                             <ul className="space-y-1">
                               {used.slice(0, 6).map(m => (
-                                <li key={m.id} className="truncate rounded-[12px] bg-[var(--ds-surface-row)] px-3 py-2 text-[13px] text-[var(--ds-text-primary)]">
+                                <li key={m.id} className="truncate rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-2 text-[13px] text-[var(--ds-text-primary)]">
                                   {m.name}
                                   {m.event_date && (
                                     <span className="text-[var(--ds-text-muted)]">
@@ -2184,7 +2184,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     // Raised only while its own menu is open. Grid siblings paint
                     // in DOM order, so without this the dropdown slides under the
                     // next card instead of over it.
-                    className={`flex cursor-pointer flex-col rounded-[20px] bg-[var(--ds-surface)] p-5 shadow-[var(--ds-shadow-card)] transition-shadow hover:shadow-[var(--ds-shadow-raised)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${isPast ? 'opacity-75' : ''} ${cardMenuOpenId === menu.id ? 'relative z-40' : ''}`}
+                    className={`flex cursor-pointer flex-col rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-5 shadow-[var(--ds-shadow-card)] transition-shadow hover:shadow-[var(--ds-shadow-raised)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${isPast ? 'opacity-75' : ''} ${cardMenuOpenId === menu.id ? 'relative z-40' : ''}`}
                   >
                       <div className="flex items-start gap-4">
                           {/* Date tile — the thing you scan a banquet list for.
@@ -2194,7 +2194,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               `min-h` invece di `h`: l'altezza la decide il
                               contenuto più il padding, così le tessere restano
                               allineate fra loro ma non strozzate. */}
-                          <div className={`flex min-h-[92px] w-[62px] flex-shrink-0 flex-col items-center justify-center rounded-[16px] px-2 py-3 ${tileTone}`}>
+                          <div className={`flex min-h-[92px] w-[62px] flex-shrink-0 flex-col items-center justify-center rounded-[var(--ds-radius)] px-2 py-3 ${tileTone}`}>
                               {menu.shift && (
                                 isLunch ? <Sun className="mb-1 h-3.5 w-3.5" aria-label="Pranzo" />
                                         : <Sunset className="mb-1 h-3.5 w-3.5" aria-label="Cena" />
@@ -2304,7 +2304,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                           </button>
                                           {cardMenuOpenId === menu.id && (
                                               <div
- className="absolute right-0 top-full z-30 mt-1 w-48 overflow-hidden rounded-[16px] bg-[var(--ds-surface)] py-1 shadow-[var(--ds-shadow-raised)] duration-100"
+ className="absolute right-0 top-full z-30 mt-1 w-48 overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] py-1 shadow-[var(--ds-shadow-raised)] duration-100"
                                               >
                                                   <button
                                                       type="button"
@@ -2374,7 +2374,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
                               {/* Three figures, one strip — the shape repeats on every
                                   card so the eye lands on the same spot each time. */}
-                              <div className="mt-4 hidden items-stretch rounded-[16px] bg-[var(--ds-surface-row)] sm:flex">
+                              <div className="mt-4 hidden items-stretch rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] sm:flex">
                                   <div className="flex-1 px-3 py-3 text-center">
                                       <div className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
                                         {guestsValue}
@@ -2413,7 +2413,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           descrizione manca il bordo non resta appeso sopra
                           "Coperti". Il padding sta sul contenitore, cosi' i
                           filetti restano rientrati. */}
-                      <div className="mt-3 rounded-[16px] bg-[var(--ds-surface-row)] px-4 sm:hidden">
+                      <div className="mt-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 sm:hidden">
                           {menu.description && (
                             <p className="line-clamp-2 border-t border-[var(--ds-border)] py-3 text-[13px] text-[var(--ds-text-muted)] first:border-t-0">
                               {menu.description}
@@ -2857,7 +2857,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               return next;
                             })}
                             aria-expanded={open}
-                            className="flex min-h-[44px] w-full items-center gap-2.5 rounded-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                            className="flex min-h-[44px] w-full items-center gap-2.5 rounded-[var(--ds-radius)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                           >
                             <span className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">{cat}</span>
                             <span className="h-px min-w-0 flex-1 bg-[var(--ds-border)]" aria-hidden />
@@ -2949,7 +2949,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   type="button"
                   onClick={() => setNewDish({ ...newDish, sold_by_weight: !newDish.sold_by_weight })}
                   aria-pressed={newDish.sold_by_weight === true}
-                  className="flex min-h-[44px] w-full items-center gap-3 rounded-[12px] bg-[var(--ds-surface-row)] px-3 py-2 text-left transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  className="flex min-h-[44px] w-full items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-2 text-left transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
                   <span
                     aria-hidden
@@ -3056,11 +3056,11 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   <img
                     src={newDish.photo_url}
                     alt="Anteprima"
-                    className="h-20 w-20 flex-shrink-0 rounded-[16px] object-cover"
+                    className="h-20 w-20 flex-shrink-0 rounded-[var(--ds-radius)] object-cover"
                     onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
                   />
                 ) : (
-                  <div className="flex h-20 w-20 flex-shrink-0 items-center justify-center rounded-[16px] bg-[var(--ds-surface-row)]">
+                  <div className="flex h-20 w-20 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)]">
                     <ImageIcon className="h-6 w-6 text-[var(--ds-text-subtle)]" aria-hidden />
                   </div>
                 )}
@@ -3257,7 +3257,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                 <FormCard title="Cliente">
                   <p className="mb-4 text-[13px] text-[var(--ds-text-muted)]">Chi ha richiesto il banchetto. Selezionalo dalla rubrica per collegare la prenotazione.</p>
                 {selectedBanquetCustomer ? (
-                  <div className="flex items-center justify-between gap-3 rounded-md border border-[var(--ds-border)] bg-[var(--ds-canvas)] p-3">
+                  <div className="flex items-center justify-between gap-3 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-canvas)] p-3">
                     <div className="min-w-0">
                       <div className="font-semibold text-[var(--ds-text-primary)] text-sm truncate">{selectedBanquetCustomer.name}</div>
                       <div className="mt-0.5 flex flex-wrap gap-3 text-xs text-[var(--ds-text-muted)]">
@@ -3273,7 +3273,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       <button
                         type="button"
                         onClick={() => setIsBanquetCustomerPickerOpen(true)}
-                        className="px-2.5 py-1.5 text-xs font-medium text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] rounded-md"
+                        className="px-2.5 py-1.5 text-xs font-medium text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] rounded-[var(--ds-radius)]"
                       >
                         Cambia
                       </button>
@@ -3283,7 +3283,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           setSelectedBanquetCustomer(null);
                           setNewBanquet(prev => ({ ...prev, customer_id: null }));
                         }}
-                        className="p-1.5 text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] rounded-md"
+                        className="p-1.5 text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] rounded-[var(--ds-radius)]"
                         title="Rimuovi cliente"
                       >
                         <X className="h-4 w-4" />
@@ -3294,7 +3294,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   <button
                     type="button"
                     onClick={() => setIsBanquetCustomerPickerOpen(true)}
-                    className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-canvas)] text-[var(--ds-text-primary)] text-sm font-medium hover:bg-[var(--ds-surface-row)]"
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-canvas)] text-[var(--ds-text-primary)] text-sm font-medium hover:bg-[var(--ds-surface-row)]"
                   >
                     <BookUser className="h-4 w-4" />
                     Seleziona dalla rubrica
@@ -3314,7 +3314,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       <input
                           required
                           placeholder="es. Menu Matrimonio Gold"
-                          className={`w-full bg-[var(--ds-surface)] border rounded-md px-3 py-2 text-sm focus:outline-none ${
+                          className={`w-full bg-[var(--ds-surface)] border rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none ${
                             banquetFieldHasError('Nome Menu')
                               ? 'border-[var(--ds-critical-solid)] focus:border-[var(--ds-critical-solid)]'
                               : 'border-[var(--ds-border)] focus:border-[var(--ds-text-primary)]'
@@ -3331,7 +3331,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                       <input
                           type="date"
                           required
-                          className={`w-full bg-[var(--ds-surface)] border rounded-md px-3 py-2 text-sm focus:outline-none ${
+                          className={`w-full bg-[var(--ds-surface)] border rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none ${
                             banquetFieldHasError('Data Evento')
                               ? 'border-[var(--ds-critical-solid)] focus:border-[var(--ds-critical-solid)]'
                               : 'border-[var(--ds-border)] focus:border-[var(--ds-text-primary)]'
@@ -3363,7 +3363,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Descrizione Commerciale <span className="font-normal text-[var(--ds-text-muted)]">— opzionale</span></label>
                     <textarea
                       placeholder="Breve descrizione visibile in stampa (es. Cresima, Matrimonio civile…)"
-                      className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-20"
+                      className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-20"
                       value={newBanquet.description}
                       onChange={e => setNewBanquet({...newBanquet, description: e.target.value})}
                     />
@@ -3412,7 +3412,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           required
                           min="0"
                           step="0.01"
-                          className={`w-full bg-[var(--ds-surface)] border rounded-md px-3 py-2 text-sm focus:outline-none ${
+                          className={`w-full bg-[var(--ds-surface)] border rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none ${
                             banquetFieldHasError('Prezzo Adulti')
                               ? 'border-[var(--ds-critical-solid)] focus:border-[var(--ds-critical-solid)]'
                               : 'border-[var(--ds-border)] focus:border-[var(--ds-text-primary)]'
@@ -3433,7 +3433,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           min="0"
                           step="0.01"
                           placeholder="Se vuoto: stesso adulti"
-                          className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)]"
+                          className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)]"
                           value={newBanquet.children_price ?? ''}
                           onChange={e => setNewBanquet({...newBanquet, children_price: e.target.value === '' ? null : parseFloat(e.target.value)})}
                       />
@@ -3447,7 +3447,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           min="0"
                           step="0.01"
                           placeholder="0.00"
-                          className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)]"
+                          className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)]"
                           value={newBanquet.deposit_amount ?? ''}
                           onChange={e => setNewBanquet({...newBanquet, deposit_amount: e.target.value === '' ? undefined : parseFloat(e.target.value)})}
                       />
@@ -3457,7 +3457,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   <div>
                       <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Sconto <span className="font-normal text-[var(--ds-text-muted)]">— opzionale</span></label>
                       <div className="flex gap-2">
-                          <div className="inline-flex rounded-md border border-[var(--ds-border)] overflow-hidden flex-shrink-0">
+                          <div className="inline-flex rounded-[var(--ds-radius)] border border-[var(--ds-border)] overflow-hidden flex-shrink-0">
                               <button
                                   type="button"
                                   onClick={() => setNewBanquet({...newBanquet, discount_type: newBanquet.discount_type === 'PERCENT' ? null : 'PERCENT', discount_value: newBanquet.discount_type === 'PERCENT' ? null : (newBanquet.discount_value ?? null)})}
@@ -3477,7 +3477,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                               step="0.01"
                               placeholder={newBanquet.discount_type === 'PERCENT' ? 'es. 10' : '0.00'}
                               disabled={!newBanquet.discount_type}
-                              className="flex-1 min-w-0 bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="flex-1 min-w-0 bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
                               value={newBanquet.discount_value ?? ''}
                               onChange={e => setNewBanquet({...newBanquet, discount_value: e.target.value === '' ? null : parseFloat(e.target.value)})}
                           />
@@ -3495,7 +3495,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   const guests = Number(newBanquet.guests) || 0;
                   const adultPrice = Number(newBanquet.price_per_person) || 0;
                   return (
-                    <div className="mt-5 flex flex-wrap items-center justify-between gap-2 rounded-[16px] bg-[var(--ds-seated-tint)] px-4 py-3">
+                    <div className="mt-5 flex flex-wrap items-center justify-between gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-seated-tint)] px-4 py-3">
                       <div>
                         <div className="text-[13px] font-semibold text-[var(--ds-seated-text)]">Totale banchetto</div>
                         <div className="text-[13px] text-[var(--ds-seated-text)] opacity-80 tabular-nums">
@@ -3521,7 +3521,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Note Portate <span className="font-normal normal-case tracking-normal">— cucina</span></label>
                     <textarea
                       placeholder="es. Senza glutine al tavolo 3, allergia ai crostacei per il tavolo sposi…"
-                      className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-28"
+                      className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-28"
                       value={newBanquet.notes_courses || ''}
                       onChange={e => setNewBanquet({...newBanquet, notes_courses: e.target.value})}
                     />
@@ -3530,7 +3530,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Note Servizio <span className="font-normal normal-case tracking-normal">— sala</span></label>
                     <textarea
                       placeholder="es. Tempi: aperitivo 19:30, taglio torta 22:30. Vino bianco freddo per gli antipasti…"
-                      className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-28"
+                      className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-28"
                       value={newBanquet.notes_service || ''}
                       onChange={e => setNewBanquet({...newBanquet, notes_service: e.target.value})}
                     />
@@ -3539,7 +3539,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     <label className="mb-1 block text-[13px] font-medium text-[var(--ds-text-secondary)]">Note Mise en Place</label>
                     <textarea
                       placeholder="es. Tovagliato avorio, segnaposti personalizzati, fiori bianchi al centro…"
-                      className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-28"
+                      className="w-full bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] px-3 py-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] h-28"
                       value={newBanquet.notes_mise_en_place || ''}
                       onChange={e => setNewBanquet({...newBanquet, notes_mise_en_place: e.target.value})}
                     />
@@ -3587,7 +3587,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   {(newBanquet.courses || []).map((course, courseIndex) => {
                     const totalCourses = (newBanquet.courses || []).length;
                     return (
-                      <div key={courseIndex} className="bg-[var(--ds-canvas)] rounded-lg border border-[var(--ds-border)] overflow-hidden">
+                      <div key={courseIndex} className="bg-[var(--ds-canvas)] rounded-[var(--ds-radius)] border border-[var(--ds-border)] overflow-hidden">
                         <div className="flex items-center gap-2 px-3 py-2 bg-[var(--ds-surface)] border-b border-[var(--ds-border)]">
                           <div className="flex flex-col">
                             <button
@@ -3622,7 +3622,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                           <button
                             type="button"
                             onClick={() => removeCourse(courseIndex)}
-                            className="p-1.5 rounded-md text-[var(--ds-text-muted)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]"
+                            className="p-1.5 rounded-[var(--ds-radius)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)]"
                             title="Elimina uscita"
                           >
                             <X className="h-4 w-4" />
@@ -3645,7 +3645,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                       <div
                                         key={dish.id}
                                         onClick={() => toggleDishInCourse(courseIndex, dish.id)}
-                                        className={`p-2 rounded-md border cursor-pointer transition flex items-start gap-2 ${
+                                        className={`p-2 rounded-[var(--ds-radius)] border cursor-pointer transition flex items-start gap-2 ${
                                           checked
                                             ? 'bg-[var(--ds-surface-row)] border-[var(--ds-text-primary)]'
                                             : 'bg-[var(--ds-surface)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'
@@ -3680,7 +3680,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                       <div
                                         key={dish.id}
                                         onClick={() => toggleDishInCourse(courseIndex, dish.id)}
-                                        className={`p-2 rounded-md border cursor-pointer transition flex items-start gap-2 ${
+                                        className={`p-2 rounded-[var(--ds-radius)] border cursor-pointer transition flex items-start gap-2 ${
                                           checked ? 'bg-[var(--ds-surface-row)] border-[var(--ds-text-primary)]' : 'bg-[var(--ds-surface)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'
                                         }`}
                                       >
@@ -3716,14 +3716,14 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                             onChange={e => setCourseNotes(courseIndex, e.target.value)}
                             placeholder="Es. servire con pane caldo, abbinare a vino bianco fresco…"
                             rows={2}
-                            className="w-full bg-[var(--ds-canvas)] border border-[var(--ds-border)] rounded-md p-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] resize-y"
+                            className="w-full bg-[var(--ds-canvas)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] p-2 text-sm focus:outline-none focus:border-[var(--ds-text-primary)] resize-y"
                           />
                         </div>
                       </div>
                     );
                   })}
                   {(newBanquet.courses || []).length === 0 && (
-                    <div className="text-center py-6 bg-[var(--ds-canvas)] rounded-lg border border-dashed border-[var(--ds-border)]">
+                    <div className="text-center py-6 bg-[var(--ds-canvas)] rounded-[var(--ds-radius)] border border-dashed border-[var(--ds-border)]">
                       <p className="text-sm text-[var(--ds-text-muted)] mb-2">Nessuna uscita</p>
                       <button
                         type="button"
@@ -3779,7 +3779,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                     })()}
 
                     {/* Tables grouped by room — same UX as Reservations table picker */}
-                    <div className="bg-[var(--ds-canvas)] rounded-lg border border-[var(--ds-border)] p-2 sm:p-4 max-h-[400px] overflow-y-auto">
+                    <div className="bg-[var(--ds-canvas)] rounded-[var(--ds-radius)] border border-[var(--ds-border)] p-2 sm:p-4 max-h-[400px] overflow-y-auto">
                       {(() => {
                         const openRooms = rooms.filter(r => !r.is_closed);
                         const displayedRooms = tablePickerRoomFilter === 'ALL'
@@ -3815,7 +3815,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                                           return { ...prev, table_ids: next };
                                         });
                                       }}
-                                      className={`relative p-2 sm:p-3 rounded-md border text-center transition-colors ${
+                                      className={`relative p-2 sm:p-3 rounded-[var(--ds-radius)] border text-center transition-colors ${
                                         isSelected
                                           ? 'border-[var(--ds-text-primary)] bg-[var(--ds-surface-row)] ring-1 ring-[var(--ds-text-primary)] z-10'
                                           : isOccupied
@@ -3899,7 +3899,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
         subtitle="L'ospite inquadra il QR e sfoglia il menu in quattro lingue."
       >
         <div className="space-y-4">
-          <div className="flex items-center justify-between gap-3 rounded-2xl bg-[var(--ds-surface-row)] px-4 py-3">
+          <div className="flex items-center justify-between gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-3">
             <span className="text-[14px] font-medium text-[var(--ds-text-primary)]">
               {menuAttivo == null ? 'Stato…' : menuAttivo ? 'Menu visibile agli ospiti' : 'Menu non visibile'}
             </span>
@@ -3919,7 +3919,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
 
           <div className="flex flex-col items-center gap-3">
             {/* Piatto bianco fisso: un QR su fondo scuro non si inquadra. */}
-            <div className="rounded-[16px] bg-[#ffffff] p-3 shadow-[var(--ds-shadow-card)]">
+            <div className="rounded-[var(--ds-radius)] bg-[#ffffff] p-3 shadow-[var(--ds-shadow-card)]">
               <QRCodeSVG value={menuUrl} size={168} level="M" />
             </div>
             <div className="flex flex-wrap items-center justify-center gap-2">
@@ -3963,7 +3963,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
               {translateError && <p className="text-[13px] text-[var(--ds-critical-text)]">{translateError}</p>}
               {/* Il sommelier AI sulla carta intera: riempie solo i piatti
                   senza abbinamenti, ognuno resta correggibile in scheda. */}
-              <div className="flex items-center justify-between gap-3 rounded-2xl bg-[var(--ds-surface-row)] px-4 py-3">
+              <div className="flex items-center justify-between gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-3">
                 <span className="text-[14px] font-medium text-[var(--ds-text-primary)]">
                   {wineAiAttivo == null ? 'Stato…' : wineAiAttivo ? 'Sommelier AI attivo' : 'Sommelier AI spento'}
                 </span>
@@ -4148,7 +4148,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   )}
                 </>
               ) : (
-                <p className="rounded-[12px] bg-[var(--ds-surface-row)] px-3 py-2.5 text-[13px] text-[var(--ds-text-muted)]">
+                <p className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-2.5 text-[13px] text-[var(--ds-text-muted)]">
                   L'invio dal numero WhatsApp del ristorante è in attivazione (serve l'approvazione del modello da parte di Meta). Intanto copia il link o usa l'email.
                 </p>
               )}
@@ -4473,7 +4473,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
       {showBanquetSortModal && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center" onClick={() => setShowBanquetSortModal(false)}>
           <div className="absolute inset-0 bg-black/30" />
- <div className="relative w-full sm:max-w-sm bg-[var(--ds-surface)] rounded-t-2xl sm:rounded-2xl shadow-[var(--ds-shadow-raised)] pb-6 duration-200"onClick={e => e.stopPropagation()}>
+ <div className="relative w-full sm:max-w-sm bg-[var(--ds-surface)] rounded-t-[var(--ds-radius)] sm:rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)] pb-6 duration-200"onClick={e => e.stopPropagation()}>
             <div className="flex justify-center pt-3 pb-2 sm:hidden">
               <div className="w-8 h-1 rounded-full bg-[var(--ds-text-subtle)]" />
             </div>
@@ -4486,7 +4486,7 @@ export const MenuManager: React.FC<MenuManagerProps> = ({
                   key={opt.value}
                   type="button"
                   onClick={() => { setBanquetSortBy(opt.value); setShowBanquetSortModal(false); }}
-                  className={`w-full flex items-center justify-between px-4 py-2.5 text-sm rounded-lg transition-colors ${
+                  className={`w-full flex items-center justify-between px-4 py-2.5 text-sm rounded-[var(--ds-radius)] transition-colors ${
                     banquetSortBy === opt.value ? 'bg-[var(--ds-surface-row)] font-medium text-[var(--ds-text-primary)]' : 'text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
                   }`}
                 >
@@ -4565,7 +4565,7 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
 
   return (
     <div className="flex flex-col lg:flex-row gap-4">
-      <div className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5 lg:w-3/4">
+      <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5 lg:w-3/4">
       <div className="mb-4 flex items-center gap-3">
         <button
           onClick={() => setCursor(new Date(year, monthIndex - 1, 1))}
@@ -4608,7 +4608,7 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
             <button
               key={i}
               onClick={() => setSelectedDate(events.length ? key : null)}
-              className={`flex aspect-square flex-col overflow-hidden rounded-[12px] p-1.5 text-left transition-colors sm:aspect-auto sm:min-h-[96px] ${
+              className={`flex aspect-square flex-col overflow-hidden rounded-[var(--ds-radius)] p-1.5 text-left transition-colors sm:aspect-auto sm:min-h-[96px] ${
                 isSelected
                   ? 'bg-[var(--ds-surface-row)] ring-2 ring-inset ring-[var(--ds-text-primary)]'
                   : isToday
@@ -4631,7 +4631,7 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
                   {events.slice(0, 2).map(ev => (
                     <span
                       key={ev.id}
-                      className={`block truncate rounded-[6px] px-1.5 py-0.5 text-[11px] font-medium ${
+                      className={`block truncate rounded-[var(--ds-radius)] px-1.5 py-0.5 text-[11px] font-medium ${
                         ev.shift === Shift.DINNER
                           ? 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]'
                           : 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
@@ -4654,7 +4654,7 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
       </div>
       </div>
 
-      <div className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] lg:w-1/4">
+      <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] lg:w-1/4">
         {selectedDate ? (
           <>
           <h4 className="text-[19px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
@@ -4684,7 +4684,7 @@ const BanquetCalendar: React.FC<BanquetCalendarProps> = ({ banquetMenus, onSelec
                     if (e.target !== e.currentTarget) return;
                     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onViewBanquet(menu); }
                   }}
-                  className="cursor-pointer rounded-[16px] bg-[var(--ds-surface-row)] p-3 transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                  className="cursor-pointer rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 >
                   <div className="flex items-start gap-2.5">
                     <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ${

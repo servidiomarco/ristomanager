@@ -210,7 +210,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           niente ombra — e restano due elementi che galleggiano sul velo: la
           pillola e, sotto, il pannello dei risultati. */}
       <div
-        className="ds-palette-panel relative flex h-[90dvh] w-full flex-col overflow-hidden rounded-t-[24px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] sm:h-auto sm:max-w-2xl sm:overflow-visible sm:rounded-none sm:bg-transparent sm:shadow-none"
+        className="ds-palette-panel relative flex h-[90dvh] w-full flex-col overflow-hidden rounded-t-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] sm:h-auto sm:max-w-2xl sm:overflow-visible sm:rounded-none sm:bg-transparent sm:shadow-none"
         onClick={e => e.stopPropagation()}
       >
         {/* Maniglia — solo telefono. È l'affordance che dice da quale bordo è
@@ -274,7 +274,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         {showResultsPanel && (
           <div
             ref={listRef}
-            className="min-h-0 flex-1 overflow-y-auto bg-[var(--ds-surface)] pb-2 sm:mt-2 sm:max-h-[min(60vh,30rem)] sm:flex-none sm:rounded-[20px] sm:shadow-[var(--ds-shadow-raised)]"
+            className="min-h-0 flex-1 overflow-y-auto bg-[var(--ds-surface)] pb-2 sm:mt-2 sm:max-h-[min(60vh,30rem)] sm:flex-none sm:rounded-[var(--ds-radius)] sm:shadow-[var(--ds-shadow-raised)]"
           >
             {showEmpty && (
               <div className="px-6 py-12 sm:py-10 text-center text-[14px] sm:text-[13px] text-[var(--ds-text-muted)]">
@@ -297,7 +297,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       type="button"
                       onMouseEnter={() => setActiveIndex(i)}
                       onClick={() => commit({ kind: 'reservation', data: r })}
-                      className={`mx-3 flex w-[calc(100%-1.5rem)] items-center gap-3 rounded-[14px] px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                      className={`mx-3 flex w-[calc(100%-1.5rem)] items-center gap-3 rounded-[var(--ds-radius)] px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                         isActive ? 'bg-[var(--ds-surface-row)]' : 'hover:bg-[var(--ds-surface-row)]'
                       }`}
                     >
@@ -342,7 +342,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       type="button"
                       onMouseEnter={() => setActiveIndex(flatIndex)}
                       onClick={() => commit({ kind: 'customer', data: c })}
-                      className={`mx-3 flex w-[calc(100%-1.5rem)] items-center gap-3 rounded-[14px] px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                      className={`mx-3 flex w-[calc(100%-1.5rem)] items-center gap-3 rounded-[var(--ds-radius)] px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                         isActive ? 'bg-[var(--ds-surface-row)]' : 'hover:bg-[var(--ds-surface-row)]'
                       }`}
                     >

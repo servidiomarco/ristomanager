@@ -93,7 +93,7 @@ ${PRINT_TOKENS_CSS}
   .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .total td { font-weight: 700; font-size: 15px; border-bottom: none; padding-top: 8px; }
   .muted { color: var(--ds-print-ink-muted); font-weight: 400; }
-  .box { border: 1px solid var(--ds-print-rule); border-radius: 8px; padding: 10px 12px;
+  .box { border: 1px solid var(--ds-print-rule); border-radius: var(--ds-print-radius); padding: 10px 12px;
          font-size: 13px; margin-bottom: 12px; }
   .diff { font-size: 17px; font-weight: 700; }
   .sign { margin-top: 28px; font-size: 12px; color: var(--ds-print-ink-muted); }

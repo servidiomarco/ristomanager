@@ -246,7 +246,7 @@ const NotifichePage: React.FC = () => {
         </div>
 
         {filtersOpen && (
-          <div className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+          <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
             <SegmentedControl
               value={categoryActive ? filter : 'all'}
               onChange={next => setFilter(next)}

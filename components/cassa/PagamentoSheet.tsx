@@ -223,7 +223,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
             Storna la portata contestata: resta in comanda come riga annullata con la
             motivazione, e il totale del conto si riallinea da solo.
           </p>
-          <ul className="divide-y divide-[var(--ds-border)] rounded-[16px] bg-[var(--ds-surface-row)] px-3">
+          <ul className="divide-y divide-[var(--ds-border)] rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3">
             {editOrder.items.filter(i => !isSystemLine(i)).map(i => (
               <li key={i.id} className="flex items-center gap-3 py-2.5">
                 <span className={`min-w-0 flex-1 text-[15px] ${i.status === 'VOIDED' ? 'text-[var(--ds-text-muted)] line-through' : 'text-[var(--ds-text-primary)]'}`}>
@@ -248,7 +248,7 @@ export const PagamentoSheet: React.FC<PagamentoSheetProps> = ({ billId, service,
               </li>
             ))}
           </ul>
-          <div className="flex items-center justify-between rounded-[14px] bg-[var(--ds-surface-row)] px-3.5 py-2.5">
+          <div className="flex items-center justify-between rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3.5 py-2.5">
             <span className="text-[14px] font-semibold text-[var(--ds-text-primary)]">Residuo aggiornato</span>
             <span className="text-[17px] font-semibold tabular-nums text-[var(--ds-text-primary)]">{euro(bill.residual_cents)}</span>
           </div>

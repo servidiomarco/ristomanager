@@ -263,7 +263,7 @@ const SettingsIcon: React.FC<{
   tone?: 'neutral' | 'pending' | 'positive';
 }> = ({ icon: Icon, tone = 'neutral' }) => (
   <span
-    className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[12px] ${
+    className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] ${
       tone === 'pending' ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
       : tone === 'positive' ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
       : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
@@ -282,7 +282,7 @@ const SettingsDisclosure: React.FC<{
   description: string;
   children: React.ReactNode;
 }> = ({ icon, iconTone, title, description, children }) => (
-  <details className="group overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+  <details className="group overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
     {/* min-h 44px e nessun marcatore nativo: la riga intera è il bersaglio. */}
     <summary className="flex min-h-[64px] cursor-pointer select-none list-none items-center justify-between gap-3 p-3 transition-colors hover:bg-[var(--ds-surface-row)] [&::-webkit-details-marker]:hidden">
       <span className="flex min-w-0 items-center gap-3">
@@ -313,7 +313,7 @@ const SettingsNavCard: React.FC<{
   <button
     type="button"
     onClick={onClick}
-    className="flex min-h-[64px] items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+    className="flex min-h-[64px] items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
   >
     <SettingsIcon icon={icon} />
     <span className="min-w-0 flex-1">
@@ -816,8 +816,8 @@ const App: React.FC = () => {
   // da sole, senza numeri magici da tenere allineati a mano. Impilato il bollo
   // era più alto della barra e le sporgeva sotto.
   const comandeBrand = (
-    <div className="animate-view-in flex flex-shrink-0 items-center gap-1 rounded-[28px] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)]">
-      <div className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[14px] bg-[var(--ds-action-bg)]">
+    <div className="animate-view-in flex flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)]">
+      <div className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)]">
         <ChefHat className="h-5 w-5 text-[var(--ds-action-fg)]" />
       </div>
       <button
@@ -2099,7 +2099,7 @@ const App: React.FC = () => {
           comandeNavStubbed
             ? 'w-0 m-0 opacity-0 invisible pointer-events-none'
             : `${sidebarCollapsed ? 'w-[76px]' : 'w-[250px]'} m-4 mr-0 opacity-100`
-        } overflow-hidden rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] flex-col transition-[width,margin,opacity] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none z-20 relative`}
+        } overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] flex-col transition-[width,margin,opacity] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none z-20 relative`}
         aria-hidden={comandeNavStubbed}
         aria-label="Navigazione principale"
       >
@@ -2116,7 +2116,7 @@ const App: React.FC = () => {
             {/* Wordmark Sympotia a sidebar aperta; chiusa non ci sta, resta il
                 quadrato. Due img nero/bianco: il tema le scambia via CSS. */}
             {sidebarCollapsed ? (
-              <div className="bg-[var(--ds-action-bg)] h-10 w-10 rounded-[14px] inline-flex items-center justify-center flex-shrink-0">
+              <div className="bg-[var(--ds-action-bg)] h-10 w-10 rounded-[var(--ds-radius)] inline-flex items-center justify-center flex-shrink-0">
                 <ChefHat className="text-[var(--ds-action-fg)] h-5 w-5" />
               </div>
             ) : (
@@ -2144,7 +2144,7 @@ const App: React.FC = () => {
                     className={
                       darkLogoUsable
                         ? `h-16 w-auto dark:hidden ${tenantLogoReady && !tenantLogoFailed ? '' : 'hidden'}`
-                        : `h-16 w-auto dark:rounded-[12px] dark:bg-white dark:p-1.5 ${tenantLogoReady && !tenantLogoFailed ? '' : 'hidden'}`
+                        : `h-16 w-auto dark:rounded-[var(--ds-radius)] dark:bg-white dark:p-1.5 ${tenantLogoReady && !tenantLogoFailed ? '' : 'hidden'}`
                     }
                   />
                   {darkLogoUsable && (
@@ -2183,7 +2183,7 @@ const App: React.FC = () => {
             aria-controls="sidebar-nav"
             title={view === ViewState.COMANDE ? 'Nascondi menu' : sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
             aria-label={view === ViewState.COMANDE ? 'Nascondi menu' : sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
-            className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[12px] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${sidebarCollapsed ? '' : 'ml-auto'}`}
+            className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${sidebarCollapsed ? '' : 'ml-auto'}`}
           >
             {/* In Comande il verso conta: il chevron su rimette via il menu da
                 dove il chevron giù l'ha tirato fuori. Altrove resta il
@@ -2235,7 +2235,7 @@ const App: React.FC = () => {
                         onClick={toggleTheme}
                         title={theme === 'dark' ? 'Tema chiaro' : 'Tema scuro'}
                         aria-label={theme === 'dark' ? 'Passa a tema chiaro' : 'Passa a tema scuro'}
-                        className="group w-full flex items-center justify-center px-3 h-10 rounded-[12px] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] transition-colors"
+                        className="group w-full flex items-center justify-center px-3 h-10 rounded-[var(--ds-radius)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] transition-colors"
                       >
                         {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
                       </button>
@@ -2246,7 +2246,7 @@ const App: React.FC = () => {
                         onClick={toggleTheme}
                         aria-label={theme === 'dark' ? 'Passa a tema chiaro' : 'Passa a tema scuro'}
                         aria-pressed={theme === 'dark'}
-                        className="group w-full flex items-center justify-between gap-3 px-3 h-10 rounded-[12px] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] transition-colors"
+                        className="group w-full flex items-center justify-between gap-3 px-3 h-10 rounded-[var(--ds-radius)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] transition-colors"
                       >
                         <span className="flex items-center gap-3">
                           <span className="text-[var(--ds-text-secondary)]">
@@ -2296,7 +2296,7 @@ const App: React.FC = () => {
         <div className="p-3">
           {/* User Info — level-2 row inside the level-1 sidebar card */}
           {sidebarCollapsed ? (
-            <div className="flex flex-col items-center gap-2 py-2 rounded-[16px] bg-[var(--ds-surface-row)]">
+            <div className="flex flex-col items-center gap-2 py-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)]">
               {/* L'avatar apre il profilo self-service — è l'unico appiglio
                   quando la sidebar è chiusa. */}
               <button
@@ -2309,7 +2309,7 @@ const App: React.FC = () => {
               </button>
               <button
                 onClick={logout}
-                className="p-2 text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-solid)] rounded-[12px] transition-colors"
+                className="p-2 text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-solid)] rounded-[var(--ds-radius)] transition-colors"
                 title="Esci"
                 aria-label="Esci"
               >
@@ -2317,12 +2317,12 @@ const App: React.FC = () => {
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-3 p-3 rounded-[16px] bg-[var(--ds-surface-row)]">
+            <div className="flex items-center gap-3 p-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)]">
               {/* Avatar + nome sono un bottone: aprono il profilo. Esci resta
                   un controllo separato — logout e profilo non si somigliano. */}
               <button
                 onClick={() => setShowProfilo(true)}
-                className="flex flex-1 min-w-0 items-center gap-3 text-left rounded-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="flex flex-1 min-w-0 items-center gap-3 text-left rounded-[var(--ds-radius)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 title="Il tuo account"
                 aria-label="Il tuo account"
               >
@@ -2336,7 +2336,7 @@ const App: React.FC = () => {
               </button>
               <button
                 onClick={logout}
-                className="p-1.5 text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-solid)] rounded-[10px] transition-colors"
+                className="p-1.5 text-[var(--ds-text-muted)] hover:text-[var(--ds-critical-solid)] rounded-[var(--ds-radius)] transition-colors"
                 title="Esci"
                 aria-label="Esci"
               >
@@ -2383,7 +2383,7 @@ const App: React.FC = () => {
             In Cucina sparisce del tutto: data-picker, turno, ricerca globale
             e «+» lì non servono, e lo spazio è delle comande — la topbar del
             monitor porta da sola data, orologio e i suoi controlli. */}
-        <header className={`flex-shrink-0 h-16 md:h-[72px] m-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] z-10 md:z-30 items-center justify-between px-3 md:px-4 ${
+        <header className={`flex-shrink-0 h-16 md:h-[72px] m-4 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] z-10 md:z-30 items-center justify-between px-3 md:px-4 ${
           view === ViewState.CUCINA ? 'hidden'
           // Comande sullo schermo largo si prende la pagina: la sua testata è
           // dentro la pagina (ricerca, imbuto, Live) e questa sopra sarebbe
@@ -2409,7 +2409,7 @@ const App: React.FC = () => {
                   <img
                     src={tenantLogo}
                     alt={tenantName || PLATFORM_NAME}
-                    className="h-11 w-auto dark:rounded-[10px] dark:bg-white dark:p-1"
+                    className="h-11 w-auto dark:rounded-[var(--ds-radius)] dark:bg-white dark:p-1"
                   />
                 )
               ) : (
@@ -2562,7 +2562,7 @@ const App: React.FC = () => {
                     <div
                       role="menu"
                       aria-label="Crea nuovo"
- className="absolute right-0 top-full mt-2 w-60 p-1.5 rounded-[18px] border border-[var(--ds-border)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] z-30"
+ className="absolute right-0 top-full mt-2 w-60 p-1.5 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] z-30"
                     >
                       {visibleCreateClusters.map((cluster, ci) => (
                         <React.Fragment key={ci}>
@@ -2573,7 +2573,7 @@ const App: React.FC = () => {
                               type="button"
                               role="menuitem"
                               onClick={() => runCreateAction(item.run)}
-                              className="w-full flex items-center gap-3 px-3 h-11 rounded-xl text-sm font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] transition-colors text-left"
+                              className="w-full flex items-center gap-3 px-3 h-11 rounded-[var(--ds-radius)] text-sm font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] transition-colors text-left"
                             >
                               <item.Icon className="h-[18px] w-[18px] text-[var(--ds-text-muted)]" />
                               <span>{item.label}</span>
@@ -2999,7 +2999,7 @@ const App: React.FC = () => {
                 dispositivo, nel caso delle push), non per il ristorante. */}
             <SettingsSection id="imp-profilo" label="Profilo">
               <div className="space-y-3">
-              <div className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+              <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
                 <label htmlFor="preferred-landing" className="mb-1 block text-[15px] font-semibold text-[var(--ds-text-primary)]">
                   Pagina di partenza
                 </label>
@@ -3064,7 +3064,7 @@ const App: React.FC = () => {
                   stile cassa, per chi arriva dall'app di Passepartout e
                   naviga il menu a memoria muscolare. Per account, non per
                   dispositivo: la scelta segue l'operatore su ogni palmare. */}
-              <div className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+              <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
                 <label htmlFor="preferred-orderpad-layout" className="mb-1 block text-[15px] font-semibold text-[var(--ds-text-primary)]">
                   Comande sul palmare
                 </label>
@@ -3182,7 +3182,7 @@ const App: React.FC = () => {
             {/* Gateway e regole dei pagamenti. */}
             <SettingsSection id="imp-pagamenti" label="Pagamenti">
               <div className="space-y-3">
-                <div className="rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
+                <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
                   <div className="flex min-h-[40px] items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-3">
                       <SettingsIcon icon={CreditCard} />
@@ -3342,7 +3342,7 @@ const App: React.FC = () => {
             navigazione sotto sarebbe solo un bersaglio per uscire per sbaglio
             dal tavolo aperto. Si torna indietro con la freccia in testata. */}
         <nav
-          className={`fixed left-4 right-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] lg:hidden z-30 ${
+          className={`fixed left-4 right-4 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] lg:hidden z-30 ${
             immersive ? 'hidden' : ''
           }`}
           style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
@@ -3421,7 +3421,7 @@ const App: React.FC = () => {
                 it — anchored to the same --ds-bottom-nav-clear the scroll
                 region uses, so it always clears the bar and the raised "+". */}
             <div
-              className="fixed left-4 right-4 z-[29] lg:hidden bg-[var(--ds-surface)] rounded-[28px] shadow-[var(--ds-shadow-raised)]"
+              className="fixed left-4 right-4 z-[29] lg:hidden bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)]"
               style={{ bottom: 'var(--ds-bottom-nav-clear)', animation: 'slideUpBehindNav 280ms ease-out both' }}
             >
               <div className="p-5 grid grid-cols-2 gap-4 justify-items-center">
@@ -3438,7 +3438,7 @@ const App: React.FC = () => {
                     className="flex flex-col items-center gap-2 focus:outline-none active:scale-95 transition-transform"
                     style={{ animation: `tileIn 150ms ease-out ${i * 40}ms both` }}
                   >
-                    <div className="w-20 h-20 rounded-[20px] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)]">
+                    <div className="w-20 h-20 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)]">
                       {tile.icon}
                     </div>
                     <span className="text-[13px] font-semibold text-[var(--ds-text-primary)]">{tile.label}</span>
@@ -3456,8 +3456,8 @@ const App: React.FC = () => {
               className="absolute inset-0 bg-[var(--ds-backdrop)]"
               onClick={() => setShowMoreMenu(false)}
             />
- <div className="absolute bottom-0 left-0 right-0 max-h-[calc(100dvh-env(safe-area-inset-top)-1rem)] flex flex-col bg-[var(--ds-surface)] rounded-t-[28px] shadow-[var(--ds-shadow-raised)] duration-200">
-              <div className="flex-shrink-0 bg-[var(--ds-surface)] rounded-t-[28px]">
+ <div className="absolute bottom-0 left-0 right-0 max-h-[calc(100dvh-env(safe-area-inset-top)-1rem)] flex flex-col bg-[var(--ds-surface)] rounded-t-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)] duration-200">
+              <div className="flex-shrink-0 bg-[var(--ds-surface)] rounded-t-[var(--ds-radius)]">
                 <div className="flex justify-center pt-3 pb-1">
                   <div className="w-10 h-1 rounded-full bg-[var(--ds-border-strong)]" />
                 </div>
@@ -3472,7 +3472,7 @@ const App: React.FC = () => {
               {/* User identity card — tocco: apre il profilo self-service */}
               <button
                 onClick={() => { setShowMoreMenu(false); setShowProfilo(true); }}
-                className="mx-4 mb-2 p-3 rounded-[16px] bg-[var(--ds-surface-row)] flex items-center gap-3 w-[calc(100%-2rem)] text-left"
+                className="mx-4 mb-2 p-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center gap-3 w-[calc(100%-2rem)] text-left"
               >
                 <div className="w-10 h-10 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] flex items-center justify-center text-[13px] font-medium shrink-0">
                   {user?.full_name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'U'}
@@ -3505,7 +3505,7 @@ const App: React.FC = () => {
                         <button
                           key={item.label}
                           onClick={() => { setShowMoreMenu(false); if (item.view !== undefined) setView(item.view); }}
-                          className={`w-full flex items-center gap-3 px-3 h-12 rounded-[14px] transition-colors ${item.view !== undefined && view === item.view ? 'bg-[var(--ds-surface-row)]' : ''}`}
+                          className={`w-full flex items-center gap-3 px-3 h-12 rounded-[var(--ds-radius)] transition-colors ${item.view !== undefined && view === item.view ? 'bg-[var(--ds-surface-row)]' : ''}`}
                         >
                           <item.Icon className="h-5 w-5 text-[var(--ds-text-secondary)]" />
                           <span className="text-[15px] font-medium tracking-[-0.01em] text-[var(--ds-text-primary)]">{item.label}</span>
@@ -3527,7 +3527,7 @@ const App: React.FC = () => {
                   <button
                     key={item.label}
                     onClick={() => { setShowMoreMenu(false); if (item.view !== undefined) setView(item.view); }}
-                    className={`w-full flex items-center gap-3 px-3 h-12 rounded-[14px] transition-colors ${item.view !== undefined && view === item.view ? 'bg-[var(--ds-surface-row)]' : ''}`}
+                    className={`w-full flex items-center gap-3 px-3 h-12 rounded-[var(--ds-radius)] transition-colors ${item.view !== undefined && view === item.view ? 'bg-[var(--ds-surface-row)]' : ''}`}
                   >
                     <item.Icon className="h-5 w-5 text-[var(--ds-text-secondary)]" />
                     <span className="text-[15px] font-medium tracking-[-0.01em] text-[var(--ds-text-primary)]">{item.label}</span>
@@ -3538,7 +3538,7 @@ const App: React.FC = () => {
                   type="button"
                   onClick={toggleTheme}
                   aria-pressed={theme === 'dark'}
-                  className="w-full flex items-center gap-3 px-3 h-12 rounded-[14px] transition-colors"
+                  className="w-full flex items-center gap-3 px-3 h-12 rounded-[var(--ds-radius)] transition-colors"
                 >
                   {theme === 'dark' ? <Sun className="h-5 w-5 text-[var(--ds-text-secondary)]" /> : <Moon className="h-5 w-5 text-[var(--ds-text-secondary)]" />}
                   <span className="text-[15px] font-medium tracking-[-0.01em] text-[var(--ds-text-primary)]">Modalità scura</span>
@@ -3553,7 +3553,7 @@ const App: React.FC = () => {
                 </button>
                 <button
                   onClick={() => { setShowMoreMenu(false); logout(); }}
-                  className="w-full flex items-center gap-3 px-3 h-12 rounded-[14px] text-[var(--ds-critical-text)] transition-colors"
+                  className="w-full flex items-center gap-3 px-3 h-12 rounded-[var(--ds-radius)] text-[var(--ds-critical-text)] transition-colors"
                 >
                   <LogOut className="h-5 w-5" />
                   <span className="text-[15px] font-medium tracking-[-0.01em]">Esci</span>
@@ -3612,7 +3612,7 @@ const SidebarItem = ({ icon, label, active, onClick, collapsed = false, badge }:
     onClick={onClick}
     title={collapsed ? label : undefined}
     aria-current={active ? 'page' : undefined}
-    className={`w-full flex items-center ${collapsed ? 'justify-center' : 'gap-3'} px-3 h-10 rounded-[12px] transition-colors duration-150 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] ${
+    className={`w-full flex items-center ${collapsed ? 'justify-center' : 'gap-3'} px-3 h-10 rounded-[var(--ds-radius)] transition-colors duration-150 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ds-surface)] ${
       active
         ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
         : 'text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]'
@@ -3645,7 +3645,7 @@ const BottomNavItem = ({ icon, label, active, onClick, badge }: { icon: React.Re
     onClick={onClick}
     aria-current={active ? 'page' : undefined}
     aria-label={label}
-    className={`pressable flex flex-1 flex-col items-center justify-center gap-1 px-1 py-1.5 max-[420px]:py-[13px] rounded-[14px] transition-colors ${
+    className={`pressable flex flex-1 flex-col items-center justify-center gap-1 px-1 py-1.5 max-[420px]:py-[13px] rounded-[var(--ds-radius)] transition-colors ${
       active
         ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
         : 'text-[var(--ds-text-muted)]'

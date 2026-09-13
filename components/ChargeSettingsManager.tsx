@@ -112,7 +112,7 @@ export const ChargeSettingsManager: React.FC<Props> = ({ showToast }) => {
                             value={coverInput}
                             onChange={(e) => setCoverInput(e.target.value)}
                             disabled={!canEdit || saving}
-                            className="w-24 px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                            className="w-24 px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                         />
                         <span className="text-[12px] text-[var(--ds-text-muted)]">€</span>
                     </div>
@@ -135,7 +135,7 @@ export const ChargeSettingsManager: React.FC<Props> = ({ showToast }) => {
                             value={serviceInput}
                             onChange={(e) => setServiceInput(e.target.value)}
                             disabled={!canEdit || saving}
-                            className="w-24 px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                            className="w-24 px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                         />
                         <span className="text-[12px] text-[var(--ds-text-muted)]">% sui piatti</span>
                     </div>

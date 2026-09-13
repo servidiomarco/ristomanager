@@ -15,7 +15,7 @@ export interface BanquetLabelProps {
 export const BanquetLabel: React.FC<BanquetLabelProps> = ({ width, name, guests, colorClass }) => (
   <div
     style={{ minWidth: width }}
-    className={`${colorClass} inline-flex items-center gap-2.5 rounded-xl border border-[var(--ds-banquet-border)] bg-[var(--ds-banquet-bg)] px-4 py-3 shadow-[var(--ds-shadow-card)]`}
+    className={`${colorClass} inline-flex items-center gap-2.5 rounded-[var(--ds-radius)] border border-[var(--ds-banquet-border)] bg-[var(--ds-banquet-bg)] px-4 py-3 shadow-[var(--ds-shadow-card)]`}
   >
     <BookOpen size={22} className="flex-shrink-0 text-[var(--ds-banquet-accent)]" />
     <span className="whitespace-nowrap text-[20px] font-semibold text-[var(--ds-banquet-fg-strong)]">{name}</span>

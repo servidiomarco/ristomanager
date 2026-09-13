@@ -220,15 +220,18 @@ spacing:
 # ---------------------------------------------------------------------------
 # RADIUS
 # ---------------------------------------------------------------------------
+# Due gradini per TUTTE le scatole, piu' il tondo pieno che non e' un raggio
+# ma una forma. La scala a otto gradini e' stata ritirata: otto valori per la
+# stessa domanda ("quanto e' tondo questo angolo?") si sceglievano a occhio, e
+# a fine giro l'app aveva schede a 16, 20 e 24px una accanto all'altra.
 rounded:
-  xs:    "6px"    # comande: table tile, category card, dish card
-  sm:    "8px"    # checkbox
-  md:    "12px"   # icon chip, heatmap cell, table badge, input
-  lg:    "16px"   # rows, tiles, toast
-  xl:    "20px"   # inner tinted panels, popover
-  "2xl": "24px"   # cards
-  "3xl": "28px"   # sidebar, top bar, modal
-  full:  "999px"  # pills, badges, avatars, progress bars
+  box:   "6px"    # var(--ds-radius) — schede, pannelli, tessere, campi, fogli, righe
+  inner: "4px"    # var(--ds-radius-sm) — cio' che sta DENTRO una scatola:
+                  # pastiglia della quantita', quadratini di legenda, checkbox.
+                  # Un angolo interno allo stesso raggio del suo contenitore
+                  # legge piatto; un filo piu' stretto e i due si distinguono.
+  full:  "999px"  # pills, badges, avatars, progress bars, bottoni circolari —
+                  # NON passa dal token: e' una forma, non un raggio.
 
 # ---------------------------------------------------------------------------
 # ELEVATION

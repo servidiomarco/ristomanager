@@ -117,7 +117,7 @@ const LiveTile: React.FC<{
 }> = ({ label, value, sub, tone = 'neutral', dot }) => {
   const arriving = tone === 'arriving';
   return (
-    <div className={`min-w-0 rounded-[16px] px-4 py-3.5 ${arriving ? 'bg-[var(--ds-arriving-tint)]' : 'bg-[var(--ds-surface-row)]'}`}>
+    <div className={`min-w-0 rounded-[var(--ds-radius)] px-4 py-3.5 ${arriving ? 'bg-[var(--ds-arriving-tint)]' : 'bg-[var(--ds-surface-row)]'}`}>
       <div className={`flex items-center gap-1.5 text-[13px] font-medium ${arriving ? 'text-[var(--ds-arriving-text)]' : 'text-[var(--ds-text-secondary)]'}`}>
         {dot}
         <span className="truncate">{label}</span>
@@ -183,7 +183,7 @@ const KpiCard: React.FC<{
   const inner = (
     <>
       <div className="flex items-center gap-2.5">
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]">
+        <span className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]">
           {icon}
         </span>
         <h3 className="text-[15px] sm:text-[16px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
@@ -194,7 +194,7 @@ const KpiCard: React.FC<{
     </>
   );
   const shell =
-    'bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-4';
+    'bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-4';
   return onClick ? (
     <button
       type="button"
@@ -1114,7 +1114,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             </div>
 
             {/* Date navigator + time chip + shift filter — mobile only (desktop uses header) */}
-            <div className="flex flex-wrap items-start gap-2 self-stretch w-full md:hidden bg-[var(--ds-surface)] rounded-[24px] shadow-[var(--ds-shadow-card)] p-3">
+            <div className="flex flex-wrap items-start gap-2 self-stretch w-full md:hidden bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] p-3">
               <DateNavigator
                 value={selectedDateStr}
                 onChange={(dateOnly) => {
@@ -1348,7 +1348,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 </>
               ) : (
                 <>
-                  <div className="flex-1 min-h-[92px] rounded-[16px] bg-[var(--ds-surface-row)] flex items-end p-4">
+                  <div className="flex-1 min-h-[92px] rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-end p-4">
                     <span className="block h-1 w-6 rounded-full bg-[var(--ds-border-strong)]" />
                   </div>
                   <span className="text-[14px] text-[var(--ds-text-muted)]">
@@ -1382,7 +1382,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           today), ordered by reservation time ascending. Confirm/decline act in
           place; a booking with an unpaid deposit still routes into the modal so
           the guard holds. Full editing lives in Prenotazioni. */}
-      <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 xl:flex-1 xl:min-h-0">
+      <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 xl:flex-1 xl:min-h-0">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Da confermare</h2>
           {pendingReservations.length > 0 && (
@@ -1397,7 +1397,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             <SkeletonReservationCard variant="narrow" />
           </div>
         ) : pendingReservations.length === 0 ? (
-          <div className="rounded-[16px] bg-[var(--ds-surface-row)] px-4 py-8 text-center">
+          <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-8 text-center">
             <CheckCircle2 className="h-7 w-7 text-[var(--ds-seated-solid)] mx-auto mb-2" aria-hidden />
             <p className="text-[14px] text-[var(--ds-text-muted)]">Nessuna prenotazione da confermare</p>
           </div>
@@ -1423,11 +1423,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 : new Date(`${resDateStr}T12:00:00`).toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' });
               const busy = inlinePendingBusy === res.id;
               return (
-                <div key={res.id} className="rounded-[16px] bg-[var(--ds-surface-row)] p-3 flex items-center gap-3 min-w-0">
+                <div key={res.id} className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 flex items-center gap-3 min-w-0">
                   <button
                     type="button"
                     onClick={() => setPendingModalRes(res)}
-                    className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-lg"
+                    className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-[var(--ds-radius)]"
                   >
                     <p className="text-[15px] font-semibold text-[var(--ds-text-primary)] truncate">
                       {toTitleCase(res.customer_name) || '—'}
@@ -1464,7 +1464,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         )}
       </div>
       {/* Note & Allergeni */}
-      <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 xl:flex-1 xl:min-h-0">
+      <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 xl:flex-1 xl:min-h-0">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
             Note &amp; allergeni
@@ -1474,7 +1474,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           )}
         </div>
         {reservationNotes.length === 0 ? (
-          <div className="rounded-[16px] bg-[var(--ds-surface-row)] px-4 py-8 text-center">
+          <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-8 text-center">
             <StickyNote className="h-7 w-7 text-[var(--ds-text-subtle)] mx-auto mb-2" aria-hidden />
             <p className="text-[14px] text-[var(--ds-text-muted)]">
               Nessuna nota {globalShiftFilter === 'LUNCH' ? 'per il pranzo' : globalShiftFilter === 'DINNER' ? 'per la cena' : 'per oggi'}
@@ -1495,7 +1495,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 : 'senza tavolo';
               const meta = [tableLabel, time || '—', room?.name].filter(Boolean).join(' · ');
               return (
-                <div key={reservation.id} className="rounded-[16px] bg-[var(--ds-surface-row)] p-3 min-w-0">
+                <div key={reservation.id} className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 min-w-0">
                   <div className="flex items-baseline gap-2 flex-wrap min-w-0">
                     <span className={`text-[13px] ${table ? 'text-[var(--ds-text-muted)]' : 'text-[var(--ds-pending-text)] font-medium'}`}>
                       {meta}
@@ -1593,9 +1593,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         );
 
         return (
-          <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-4 min-w-0">
+          <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-4 min-w-0">
             <div className="flex items-center gap-2.5 min-w-0">
-              <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[10px] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]">
+              <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]">
                 <LayoutGrid className="h-4 w-4" aria-hidden />
               </span>
               <div className="min-w-0">
@@ -1646,7 +1646,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               {roomStats.map(room => {
                 const Icon = getRoomIcon(room.name);
                 return (
-                  <div key={room.id} className="rounded-[16px] bg-[var(--ds-surface-row)] p-3 flex items-center gap-3 min-w-0">
+                  <div key={room.id} className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 flex items-center gap-3 min-w-0">
                     <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]">
                       <Icon className="h-4 w-4" />
                     </span>
@@ -1679,10 +1679,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       {/* Affluenza — coperti per fascia oraria, grouped by service. One aligned
           time axis per service instead of one per room, so the same 21:00 sits
           in the same column for every sala. */}
-      <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-6 flex flex-col gap-5 min-w-0">
+      <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] p-4 sm:p-6 flex flex-col gap-5 min-w-0">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2.5 min-w-0">
-            <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[10px] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]">
+            <span className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]">
               <BarChart3 className="h-4 w-4" aria-hidden />
             </span>
             <div className="min-w-0">
@@ -1752,7 +1752,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
               : tone.text;
 
             return (
-              <div key={shift} className={`rounded-[16px] p-4 sm:p-5 flex flex-col gap-4 min-w-0 ${tone.wash}`}>
+              <div key={shift} className={`rounded-[var(--ds-radius)] p-4 sm:p-5 flex flex-col gap-4 min-w-0 ${tone.wash}`}>
                 <div className="flex items-center gap-2 flex-wrap min-w-0">
                   <span className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] ${tone.text}`}>
                     {tone.icon}
@@ -1794,7 +1794,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                           {slotsOf(room).map(slot => (
                             <div
                               key={slot.time}
-                              className="relative flex-1 min-w-[56px] h-11 rounded-[12px] bg-[var(--ds-surface)] overflow-hidden flex items-center justify-center"
+                              className="relative flex-1 min-w-[56px] h-11 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] overflow-hidden flex items-center justify-center"
                               title={`${room.roomName} · ${slot.time} · ${slot.guests} coperti (${slot.percentage}%)`}
                             >
                               {slot.percentage > 0 && (
@@ -1817,7 +1817,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                         <div className="w-[168px] flex-shrink-0 text-[14px] font-medium text-[var(--ds-text-muted)] truncate">
                           {active.length === 0 ? 'Tutte le sale' : 'Altre sale'}
                         </div>
-                        <div className="flex-1 h-11 rounded-[12px] bg-[var(--ds-surface)]/60 flex items-center justify-center text-[13px] text-[var(--ds-text-muted)] px-3 text-center">
+                        <div className="flex-1 h-11 rounded-[var(--ds-radius)] bg-[var(--ds-surface)]/60 flex items-center justify-center text-[13px] text-[var(--ds-text-muted)] px-3 text-center">
                           Nessuna prenotazione a {isLunch ? 'pranzo' : 'cena'}
                         </div>
                         <span className="w-[92px] flex-shrink-0 text-right text-[13px] text-[var(--ds-text-muted)]">—</span>
@@ -1843,7 +1843,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
                 {showLunch && (
-                  <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-3 flex items-center justify-between gap-2 min-w-0">
+                  <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 flex items-center justify-between gap-2 min-w-0">
                     <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--ds-text-primary)] min-w-0">
                       <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]">
                         <Sun className="h-3.5 w-3.5" />
@@ -1856,7 +1856,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   </div>
                 )}
                 {showDinner && (
-                  <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-3 flex items-center justify-between gap-2 min-w-0">
+                  <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 flex items-center justify-between gap-2 min-w-0">
                     <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--ds-text-primary)] min-w-0">
                       <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
                         <Sunset className="h-3.5 w-3.5" />
@@ -1868,7 +1868,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     </span>
                   </div>
                 )}
-                <div className="rounded-[16px] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] p-3 flex items-center justify-between gap-2 min-w-0">
+                <div className="rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] p-3 flex items-center justify-between gap-2 min-w-0">
                   <span className="text-[14px] font-medium truncate">Totale giornata</span>
                   <span className="tabular text-[17px] font-bold flex-shrink-0">
                     {shownGuests}<span className="text-[14px] font-normal opacity-60">/{shownCapacity}</span>
@@ -1913,7 +1913,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 the shape of the card's footer. */}
             <div className={`grid gap-2 ${globalShiftFilter === 'ALL' ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
               {(globalShiftFilter === 'ALL' || globalShiftFilter === 'LUNCH') && (
-                <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-3 flex items-center justify-between gap-2 min-w-0">
+                <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 flex items-center justify-between gap-2 min-w-0">
                   <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--ds-text-primary)] min-w-0">
                     <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]">
                       <Sun className="h-3.5 w-3.5" />
@@ -1926,7 +1926,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 </div>
               )}
               {(globalShiftFilter === 'ALL' || globalShiftFilter === 'DINNER') && (
-                <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-3 flex items-center justify-between gap-2 min-w-0">
+                <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 flex items-center justify-between gap-2 min-w-0">
                   <span className="inline-flex items-center gap-2 text-[14px] font-medium text-[var(--ds-text-primary)] min-w-0">
                     <span className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
                       <Sunset className="h-3.5 w-3.5" />
@@ -1948,7 +1948,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
       {/* Row 3: Attività + Spesa + Sotto scorta */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Attività */}
-        <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 h-[440px]">
+        <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 h-[440px]">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Attività</h2>
@@ -1972,7 +1972,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           </div>
 
           {overdueTodos.length > 0 && (
-            <div className="rounded-[16px] bg-[var(--ds-critical-tint)] px-3 py-2.5 flex items-center gap-2.5 min-w-0">
+            <div className="rounded-[var(--ds-radius)] bg-[var(--ds-critical-tint)] px-3 py-2.5 flex items-center gap-2.5 min-w-0">
               <AlertTriangle className="h-4 w-4 text-[var(--ds-critical-text)] flex-shrink-0" aria-hidden />
               <p className="text-[13px] text-[var(--ds-critical-text)] truncate flex-1 min-w-0">
                 {overdueTodos[0].title}
@@ -1987,7 +1987,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
           <div className="flex-1 min-h-0 flex flex-col gap-1.5 overflow-y-auto scrollbar-hide -mx-1 px-1">
             {urgentTasks.length === 0 ? (
-              <div className="rounded-[16px] bg-[var(--ds-surface-row)] px-4 py-8 text-center">
+              <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-8 text-center">
                 <CheckCircle2 className="h-7 w-7 text-[var(--ds-seated-solid)] mx-auto mb-2" aria-hidden />
                 <p className="text-[14px] text-[var(--ds-text-muted)]">Tutto sotto controllo</p>
               </div>
@@ -1996,7 +1996,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 const isOverdue = !!todo.dueDate && todo.dueDate < todayStr;
                 const isToday = todo.dueDate === todayStr;
                 return (
-                  <div key={todo.id} className="flex items-center gap-2.5 rounded-[14px] bg-[var(--ds-surface-row)] px-3 py-2.5 min-w-0">
+                  <div key={todo.id} className="flex items-center gap-2.5 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-2.5 min-w-0">
                     <button
                       onClick={() => handleToggleTodo(todo.id)}
                       className="flex-shrink-0 w-5 h-5 rounded-full border-2 border-[var(--ds-border-strong)] hover:border-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
@@ -2044,7 +2044,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
 
         {/* Spesa */}
-        <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 h-[440px]">
+        <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 h-[440px]">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Spesa</h2>
@@ -2061,8 +2061,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           </div>
 
           {/* Pane del giorno — the estimate, and a one-tap way to act on it */}
-          <div className="rounded-[16px] bg-[var(--ds-pending-tint)] p-3 flex items-center gap-3 min-w-0">
-            <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[12px] bg-[var(--ds-surface)] text-[var(--ds-pending-text)]">
+          <div className="rounded-[var(--ds-radius)] bg-[var(--ds-pending-tint)] p-3 flex items-center gap-3 min-w-0">
+            <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-surface)] text-[var(--ds-pending-text)]">
               <Wheat className="h-5 w-5" aria-hidden />
             </span>
             <div className="min-w-0 flex-1">
@@ -2079,7 +2079,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
 
           <div className="flex-1 min-h-0 flex flex-col gap-1.5 overflow-y-auto scrollbar-hide -mx-1 px-1">
             {totalItems === 0 ? (
-              <div className="rounded-[16px] bg-[var(--ds-surface-row)] px-4 py-8 text-center">
+              <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-8 text-center">
                 <ShoppingCart className="h-7 w-7 text-[var(--ds-text-subtle)] mx-auto mb-2" aria-hidden />
                 <p className="text-[14px] text-[var(--ds-text-muted)]">Lista vuota</p>
               </div>
@@ -2090,7 +2090,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   if (items.length === 0) return null;
                   const remaining = items.filter(i => !i.checked).length;
                   return (
-                    <div key={cat} className="flex items-center gap-2 rounded-[14px] bg-[var(--ds-surface-row)] px-3 py-2.5 min-w-0">
+                    <div key={cat} className="flex items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-2.5 min-w-0">
                       <span className="inline-flex items-center gap-1.5 px-2.5 h-7 rounded-full text-[13px] font-medium bg-[var(--ds-surface)] text-[var(--ds-text-primary)] flex-shrink-0">
                         {SHOPPING_CATEGORY_LABELS[cat]}
                       </span>
@@ -2104,7 +2104,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                   <div key={item.id} className="flex items-center gap-2.5 px-3 py-1.5 min-w-0">
                     <button
                       onClick={() => handleToggleShoppingItem(item.id)}
-                      className="flex-shrink-0 w-5 h-5 rounded-[6px] border-2 border-[var(--ds-border-strong)] hover:border-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      className="flex-shrink-0 w-5 h-5 rounded-[var(--ds-radius)] border-2 border-[var(--ds-border-strong)] hover:border-[var(--ds-text-primary)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                       aria-label={`Completa: ${item.name}`}
                     />
                     <span className="flex-1 min-w-0 text-[15px] text-[var(--ds-text-primary)] truncate">{item.name}</span>
@@ -2150,7 +2150,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         {/* Sotto scorta — sorted by criticality: empty first, then closest to
             the threshold. Rows go red at zero, amber while merely low, which is
             what signals the ordering now that the caption is gone. */}
-        <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 h-[440px]">
+        <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-3 min-w-0 h-[440px]">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">Sotto scorta</h2>
@@ -2180,7 +2180,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                 <Loader label="Caricamento..." size={40} />
               </div>
             ) : lowStockItems.length === 0 ? (
-              <div className="rounded-[16px] bg-[var(--ds-surface-row)] px-4 py-8 text-center">
+              <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-8 text-center">
                 <Package className="h-7 w-7 text-[var(--ds-text-subtle)] mx-auto mb-2" aria-hidden />
                 <p className="text-[14px] text-[var(--ds-text-muted)]">Tutte le scorte sono in regola</p>
               </div>
@@ -2193,7 +2193,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                     ? { wash: 'bg-[var(--ds-critical-tint)]', text: 'text-[var(--ds-critical-text)]' }
                     : { wash: 'bg-[var(--ds-pending-tint)]', text: 'text-[var(--ds-pending-text)]' };
                   return (
-                    <div key={item.id} className={`flex items-center gap-3 rounded-[14px] px-3 py-2.5 min-w-0 ${tone.wash}`}>
+                    <div key={item.id} className={`flex items-center gap-3 rounded-[var(--ds-radius)] px-3 py-2.5 min-w-0 ${tone.wash}`}>
                       <div className="flex-1 min-w-0">
                         <div className="text-[15px] font-semibold text-[var(--ds-text-primary)] truncate">{item.name}</div>
                         {(item.category_name || item.area) && (
@@ -2244,7 +2244,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           ].filter(g => g.people.length > 0);
 
           return (
-            <div key={shiftKey} className={`rounded-[16px] p-4 flex flex-col gap-3 min-w-0 ${tone.wash}`}>
+            <div key={shiftKey} className={`rounded-[var(--ds-radius)] p-4 flex flex-col gap-3 min-w-0 ${tone.wash}`}>
               <div className="flex items-center gap-2 flex-wrap min-w-0">
                 <span className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] ${tone.text}`}>
                   {tone.icon}
@@ -2302,7 +2302,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         };
 
         return (
-          <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-4 min-w-0">
+          <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] p-4 sm:p-5 flex flex-col gap-4 min-w-0">
             <div className="flex items-baseline gap-2.5 flex-wrap">
               <h2 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
                 Personale in servizio
@@ -2331,7 +2331,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
           matrice o allowlist): stessa regola dell'endpoint, o il bottone
           esisterebbe solo per rispondere 403. */}
       {(hasPermission('reports:view') || user?.is_reports_admin) && (
-      <div className="bg-[var(--ds-surface)] p-4 sm:p-5 rounded-[20px] shadow-[var(--ds-shadow-card)]">
+      <div className="bg-[var(--ds-surface)] p-4 sm:p-5 rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)]">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-2 min-w-0">
             <Wand2 className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
@@ -2346,7 +2346,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             type="button"
             onClick={handleGenerateReport}
             disabled={reportLoading}
-            className="inline-flex h-10 flex-shrink-0 items-center gap-2 rounded-[10px] bg-[var(--ds-text-primary)] px-4 text-[14px] font-semibold text-[var(--ds-surface)] transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            className="inline-flex h-10 flex-shrink-0 items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-text-primary)] px-4 text-[14px] font-semibold text-[var(--ds-surface)] transition-opacity hover:opacity-90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
           >
             {reportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
             {reportLoading ? 'Ci penso…' : report ? 'Rigenera' : 'Genera'}
@@ -2354,7 +2354,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
         </div>
 
         {reportError && (
-          <p className="mt-3 rounded-[10px] bg-[var(--ds-surface-row)] px-3 py-2 text-[13px] text-[var(--ds-text-muted)]">
+          <p className="mt-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-2 text-[13px] text-[var(--ds-text-muted)]">
             {reportError}
           </p>
         )}
@@ -2402,7 +2402,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
             >
               <div className="absolute inset-0 bg-[var(--ds-backdrop)]" />
               <div
-                className="relative w-full max-w-md bg-[var(--ds-surface)] rounded-2xl shadow-[var(--ds-shadow-raised)] border border-[var(--ds-border)] overflow-hidden"
+                className="relative w-full max-w-md bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)] border border-[var(--ds-border)] overflow-hidden"
                 onClick={e => e.stopPropagation()}
               >
                 <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--ds-border)]">
@@ -2470,7 +2470,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                         type="button"
                         onClick={() => setUnpaidDepositWarn(false)}
                         disabled={closeDisabled}
-                        className="inline-flex items-center h-9 px-3 rounded-lg text-[13px] font-medium border border-[var(--ds-border)] text-[var(--ds-text-primary)] bg-[var(--ds-surface)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50 transition-colors"
+                        className="inline-flex items-center h-9 px-3 rounded-[var(--ds-radius)] text-[13px] font-medium border border-[var(--ds-border)] text-[var(--ds-text-primary)] bg-[var(--ds-surface)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50 transition-colors"
                       >
                         Annulla
                       </button>
@@ -2478,7 +2478,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                         type="button"
                         onClick={() => handlePendingDecision('confirm', { forceConfirm: true })}
                         disabled={closeDisabled || !onUpdateReservation}
-                        className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium bg-[var(--ds-pending-solid)] text-[var(--ds-pending-fg)] hover:opacity-90 disabled:opacity-50 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                        className="inline-flex items-center gap-1.5 h-9 px-3 rounded-[var(--ds-radius)] text-[13px] font-medium bg-[var(--ds-pending-solid)] text-[var(--ds-pending-fg)] hover:opacity-90 disabled:opacity-50 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                       >
                         {pendingActionBusy === 'confirm' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
                         Conferma comunque
@@ -2491,7 +2491,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                       type="button"
                       onClick={() => handlePendingDecision('decline')}
                       disabled={closeDisabled || !onUpdateReservation}
-                      className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] hover:opacity-90 disabled:opacity-50 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      className="inline-flex items-center gap-1.5 h-9 px-3 rounded-[var(--ds-radius)] text-[13px] font-medium bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] hover:opacity-90 disabled:opacity-50 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       {pendingActionBusy === 'decline' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Ban className="h-3.5 w-3.5" />}
                       Rifiuta
@@ -2500,7 +2500,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ reservations, tables, dish
                       type="button"
                       onClick={() => handlePendingDecision('confirm')}
                       disabled={closeDisabled || !onUpdateReservation}
-                      className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-[13px] font-medium bg-[var(--ds-seated-solid)] text-[var(--ds-seated-fg)] hover:opacity-90 disabled:opacity-50 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      className="inline-flex items-center gap-1.5 h-9 px-3 rounded-[var(--ds-radius)] text-[13px] font-medium bg-[var(--ds-seated-solid)] text-[var(--ds-seated-fg)] hover:opacity-90 disabled:opacity-50 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       {pendingActionBusy === 'confirm' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
                       Conferma

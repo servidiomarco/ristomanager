@@ -64,7 +64,7 @@ const Row: React.FC<{
   action?: React.ReactNode;
 }> = ({ label, sub, amount, tone = 'normal', action }) => (
   <div
-    className={`flex items-center gap-2 rounded-[14px] px-3 py-2 ${
+    className={`flex items-center gap-2 rounded-[var(--ds-radius)] px-3 py-2 ${
       tone === 'voided' ? 'bg-[var(--ds-critical-tint)]'
       : tone === 'draft' ? 'bg-[var(--ds-arriving-tint)]'
       : 'bg-[var(--ds-surface-row)]'
@@ -135,7 +135,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
         {isEmpty && (
-          <div className="rounded-[14px] bg-[var(--ds-surface-row)] px-3 py-6 text-center text-[13px] text-[var(--ds-text-muted)]">
+          <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-6 text-center text-[13px] text-[var(--ds-text-muted)]">
             Ancora niente su questo tavolo. Scegli dal menu: le righe restano in
             bozza finché non le invii.
           </div>
@@ -297,7 +297,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
       {/* Sotto lg la testata dell'app è nascosta (immersive): questa scheda è
           la prima in cima e il padding rispetta il notch dove c'è. */}
       <div className="mx-auto w-full max-w-[1600px] flex-shrink-0 px-4 pb-3 pt-[max(1rem,env(safe-area-inset-top))] lg:px-8">
-        <div className="flex items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
+        <div className="flex items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
           <button
             type="button"
             onClick={onBack}
@@ -376,7 +376,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
         </div>
 
         {isWide && (
-          <aside className="flex w-[380px] flex-shrink-0 flex-col rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] xl:w-[420px]">
+          <aside className="flex w-[380px] flex-shrink-0 flex-col rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] xl:w-[420px]">
             {comanda}
           </aside>
         )}
@@ -409,7 +409,7 @@ export const TavoloAttivo: React.FC<TavoloAttivoProps> = ({
               >
                 Chiudi
               </button>
-              <div className="min-h-0 flex-1 rounded-[20px] bg-[var(--ds-surface)] p-4">{comanda}</div>
+              <div className="min-h-0 flex-1 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4">{comanda}</div>
             </div>
           )}
         </>

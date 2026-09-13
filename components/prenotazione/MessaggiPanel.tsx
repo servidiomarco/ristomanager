@@ -156,7 +156,7 @@ export const MessaggiPanel: React.FC<{
             return (
               <article
                 key={msg.id}
-                className={`rounded-[16px] p-4 ${
+                className={`rounded-[var(--ds-radius)] p-4 ${
                   failed ? 'bg-[var(--ds-critical-tint)]' : 'bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]'
                 }`}
               >

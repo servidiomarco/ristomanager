@@ -376,7 +376,7 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
                   const badge = reservationStatusBadge(res.reservation_status ?? null);
                   const isLinked = detail.reservation_id === res.id;
                   return (
-                    <div key={res.id} className="rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+                    <div key={res.id} className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex min-w-0 items-center gap-2 text-[15px] text-[var(--ds-text-primary)]">
                           <CheckCircle2 className="h-4 w-4 flex-shrink-0 text-[var(--ds-seated-solid)]" aria-hidden />
@@ -595,7 +595,7 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
             defaultOpen
           >
             {detail.summary && (
-              <div className="mb-4 rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+              <div className="mb-4 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
                 <div className="mb-1 text-[13px] font-medium text-[var(--ds-text-secondary)]">Riassunto</div>
                 <p className="text-[15px] leading-relaxed text-[var(--ds-text-primary)]">{detail.summary}</p>
               </div>
@@ -607,11 +607,11 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
                 {turns.map((turn, idx) => (
                   <div key={idx} className={`flex ${turn.who === 'user' ? 'justify-end' : 'justify-start'}`}>
                     <div
-                      className={`max-w-[85%] rounded-[18px] px-3.5 py-2 text-[14px] leading-relaxed ${
+                      className={`max-w-[85%] rounded-[var(--ds-radius)] px-3.5 py-2 text-[14px] leading-relaxed ${
                         turn.who === 'user'
-                          ? 'rounded-br-[6px] bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)]'
+                          ? 'rounded-br-[var(--ds-radius)] bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)]'
                           : turn.who === 'agent'
-                          ? 'rounded-bl-[6px] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
+                          ? 'rounded-bl-[var(--ds-radius)] bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
                           : 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
                       }`}
                     >
@@ -643,7 +643,7 @@ const CallDetail: React.FC<CallDetailProps> = ({ callId, reservations, onClose, 
                 {messages.map(msg => {
                   const badge = messageStatusBadge(msg.status);
                   return (
-                    <div key={msg.id} className="rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+                    <div key={msg.id} className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
                       <div className="mb-1.5 flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
                           <span className="font-medium text-[var(--ds-text-primary)]">{channelLabel(msg.channel)}</span>
@@ -1057,7 +1057,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
             </div>
 
             {filtersOpen && (
-              <div className="space-y-3 rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+              <div className="space-y-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
                 <SegmentedControl
                   value={statusFilter}
                   onChange={next => setStatusFilter(next)}
@@ -1110,7 +1110,7 @@ const ConversazioniPage: React.FC<ConversazioniPageProps> = ({ reservations, onF
             {error && <Callout tone="critical" icon={AlertCircle}>{error}</Callout>}
 
             {loading ? (
-              <SkeletonInboxList count={6} className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)]" />
+              <SkeletonInboxList count={6} className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)]" />
             ) : visibleItems.length === 0 ? (
               <EmptyState icon={Phone}>
                 {statusFilter === 'to-contact'

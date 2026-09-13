@@ -60,16 +60,16 @@ export const AttachmentRow: React.FC<{
     // una sezione — e cosi' due o tre stanno affiancati invece che impilati.
     // `max-w-full` la tiene dentro su schermo stretto, dove il nome accorciato
     // puo' ancora essere piu' largo del composer.
-    <div className="inline-flex max-w-full items-center gap-3 rounded-[16px] bg-[var(--ds-surface-row)] p-2">
+    <div className="inline-flex max-w-full items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-2">
       {previewUrl ? (
         <img
           src={previewUrl}
           alt=""
-          className="h-10 w-10 flex-shrink-0 rounded-[12px] object-cover"
+          className="h-10 w-10 flex-shrink-0 rounded-[var(--ds-radius)] object-cover"
           loading="lazy"
         />
       ) : (
-        <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[12px] bg-[var(--ds-surface)] text-[10px] font-semibold text-[var(--ds-text-muted)]">
+        <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-surface)] text-[10px] font-semibold text-[var(--ds-text-muted)]">
           {typeLabel(contentType)}
         </span>
       )}

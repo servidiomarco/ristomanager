@@ -24,9 +24,9 @@ export class CardErrorBoundary extends React.Component<Props, State> {
     render() {
         if (this.state.error) {
             return (
-                <div className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+                <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
                     <div className="flex items-start gap-3">
-                        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[12px] bg-[var(--ds-critical-tint)]">
+                        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-critical-tint)]">
                             <AlertTriangle className="h-5 w-5 text-[var(--ds-critical-text)]" />
                         </div>
                         <div className="min-w-0">

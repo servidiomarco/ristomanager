@@ -130,7 +130,7 @@ export const ExpediterDisplay: React.FC = () => {
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--ds-canvas)]">
       <div className="flex-shrink-0 px-4 pb-3 pt-4">
-        <div className="flex items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 pl-4 shadow-[var(--ds-shadow-card)]">
+        <div className="flex items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 pl-4 shadow-[var(--ds-shadow-card)]">
           {/* Tondo, non maiuscolo (§5.2): il corpo e il peso bastano. */}
           <h1 className="text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">Passe</h1>
           <span className="text-[15px] text-[var(--ds-text-muted)] tabular-nums">
@@ -234,7 +234,7 @@ export const ExpediterDisplay: React.FC = () => {
                 const key = `${s.order_id}:${s.course_no}`;
                 const agoS = Math.floor((now - new Date(s.served_at).getTime()) / 1000);
                 return (
-                  <div key={key} className="flex items-center gap-3 rounded-[14px] bg-[var(--ds-surface)] px-4 py-1.5 shadow-[var(--ds-shadow-card)]">
+                  <div key={key} className="flex items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-4 py-1.5 shadow-[var(--ds-shadow-card)]">
                     <span className="text-[15px] font-semibold text-[var(--ds-text-muted)]">
                       T{s.table_name ?? '—'}
                     </span>
@@ -288,7 +288,7 @@ const CourseRow: React.FC<{
       : 'bg-[var(--ds-surface)]';
 
   return (
-    <div className={`flex items-center gap-4 rounded-[18px] px-4 py-3 shadow-[var(--ds-shadow-card)] ${tone}`}>
+    <div className={`flex items-center gap-4 rounded-[var(--ds-radius)] px-4 py-3 shadow-[var(--ds-shadow-card)] ${tone}`}>
       <div className="w-24 flex-shrink-0">
         <div className="text-[20px] font-semibold tracking-[-0.015em] text-[var(--ds-text-primary)]">
           T{c.table_name ?? '—'}
@@ -420,14 +420,14 @@ const CourseRow: React.FC<{
 const KitchenStats: React.FC<{ report: KitchenReport | null }> = ({ report }) => {
   if (!report) {
     return (
-      <div className="mb-5 rounded-[20px] bg-[var(--ds-surface)] px-5 py-4 text-[14px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)]">
+      <div className="mb-5 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-5 py-4 text-[14px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)]">
         Caricamento statistiche…
       </div>
     );
   }
   const s = report.sincronia;
   return (
-    <div className="mb-5 rounded-[20px] bg-[var(--ds-surface)] p-5 shadow-[var(--ds-shadow-card)]">
+    <div className="mb-5 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-5 shadow-[var(--ds-shadow-card)]">
       <div className="mb-5 grid grid-cols-2 gap-4 md:grid-cols-4">
         <Stat label="Uscite completate" value={String(s?.uscite ?? 0)} />
         <Stat label="Delta di sincronia (mediano)" value={s?.delta_mediano_min != null ? `${s.delta_mediano_min}′` : '—'}

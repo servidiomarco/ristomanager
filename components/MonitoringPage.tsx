@@ -98,7 +98,7 @@ const SectionCard: React.FC<{
   subtitle: string;
   children: React.ReactNode;
 }> = ({ icon, title, subtitle, children }) => (
-  <section className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5">
+  <section className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5">
     <header className="mb-4 flex items-start gap-3">
       <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
         {icon}
@@ -118,7 +118,7 @@ const StatTile: React.FC<{
   value: string;
   hint?: string;
 }> = ({ icon, label, value, hint }) => (
-  <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+  <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
     <div className="mb-1 flex items-center gap-2 text-[13px] font-medium text-[var(--ds-text-secondary)]">
       <span className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-muted)]">
         {icon}
@@ -131,7 +131,7 @@ const StatTile: React.FC<{
 );
 
 const EmptyChart: React.FC<{ message: string }> = ({ message }) => (
-  <div className="flex h-[180px] items-center justify-center rounded-[16px] bg-[var(--ds-surface-row)] text-[13px] text-[var(--ds-text-muted)]">
+  <div className="flex h-[180px] items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] text-[13px] text-[var(--ds-text-muted)]">
     {message}
   </div>
 );
@@ -217,7 +217,7 @@ export const MonitoringPage: React.FC = () => {
           </div>
 
           {error && (
-            <div className="mb-5 flex items-center gap-2 rounded-[16px] bg-[var(--ds-critical-tint)] px-4 py-3 text-[13px] text-[var(--ds-critical-text)]">
+            <div className="mb-5 flex items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-critical-tint)] px-4 py-3 text-[13px] text-[var(--ds-critical-text)]">
               <AlertTriangle className="h-4 w-4 flex-shrink-0" />
               <span>{error}</span>
             </div>
@@ -265,7 +265,7 @@ export const MonitoringPage: React.FC = () => {
 
                 {/* Barra quota crediti del piano ElevenLabs */}
                 {quotaPct != null && (
-                  <div className="mb-4 rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+                  <div className="mb-4 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
                     <div className="mb-1.5 flex items-center justify-between text-[13px]">
                       <span className="font-medium text-[var(--ds-text-secondary)]">Quota crediti del ciclo corrente</span>
                       <span className="tabular font-semibold text-[var(--ds-text-primary)]">{quotaPct}%</span>
@@ -280,7 +280,7 @@ export const MonitoringPage: React.FC = () => {
                 )}
 
                 {eleven?.subscriptionError && (
-                  <div className="mb-4 flex items-center gap-2 rounded-[16px] bg-[var(--ds-pending-tint)] px-4 py-2.5 text-[12px] text-[var(--ds-pending-text)]">
+                  <div className="mb-4 flex items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-pending-tint)] px-4 py-2.5 text-[12px] text-[var(--ds-pending-text)]">
                     <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
                     <span>Quota ElevenLabs non disponibile: {eleven.subscriptionError}. Le statistiche chiamate restano valide.</span>
                   </div>
@@ -358,7 +358,7 @@ export const MonitoringPage: React.FC = () => {
 
                 {/* Ripartizione per feature */}
                 {gemini && gemini.byFeature.length > 0 && (
-                  <div className="overflow-hidden rounded-[16px] bg-[var(--ds-surface-row)]">
+                  <div className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)]">
                     <table className="w-full text-[13px]">
                       <thead>
                         <tr className="text-left text-[var(--ds-text-muted)]">

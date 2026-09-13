@@ -70,7 +70,7 @@ export const TableTiles: React.FC<TableTilesProps> = ({
       type="button"
       onClick={() => onPick(row.pickId ?? row.table.id)}
       disabled={busy}
-      className={`flex aspect-square flex-col items-center justify-center gap-0.5 rounded-[20px] p-1 shadow-[var(--ds-shadow-card)] transition-shadow disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${TABLE_TILE[row.state]}`}
+      className={`flex aspect-square flex-col items-center justify-center gap-0.5 rounded-[var(--ds-radius)] p-1 shadow-[var(--ds-shadow-card)] transition-shadow disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${TABLE_TILE[row.state]}`}
     >
       <span className={`${row.groupLabel ? 'text-[18px]' : 'text-[24px]'} max-w-full truncate font-semibold tracking-[-0.02em] text-[var(--ds-text-primary)]`}>
         {row.groupLabel ?? row.table.name}
@@ -92,7 +92,7 @@ export const TableTiles: React.FC<TableTilesProps> = ({
       type="button"
       onClick={() => onPick(row.pickId ?? row.table.id)}
       disabled={busy}
-      className={`flex min-h-[132px] flex-col items-start gap-0.5 rounded-[6px] px-3 py-2.5 text-left shadow-[var(--ds-shadow-card)] transition-shadow disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${TABLE_TILE_WIDE[row.state]}`}
+      className={`flex min-h-[132px] flex-col items-start gap-0.5 rounded-[var(--ds-radius)] px-3 py-2.5 text-left shadow-[var(--ds-shadow-card)] transition-shadow disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${TABLE_TILE_WIDE[row.state]}`}
     >
       <span className="flex w-full items-start justify-between gap-2">
         <span className={`${row.groupLabel ? 'text-[19px]' : 'text-[26px]'} min-w-0 truncate font-semibold leading-tight tracking-[-0.02em] ${TABLE_CAPTION[row.state]}`}>

@@ -130,7 +130,7 @@ export const DayPicker: React.FC<{
     'inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
   return (
-    <div className={`rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-raised)] ${className}`}>
+    <div className={`rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-raised)] ${className}`}>
       <div className="mb-2 flex items-center justify-between gap-2">
         <button
           type="button"

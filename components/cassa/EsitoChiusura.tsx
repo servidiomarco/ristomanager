@@ -101,7 +101,7 @@ export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
 
   return (
     <div className="flex h-full min-h-0 items-center justify-center px-4 py-8">
-      <div className="w-full max-w-[480px] rounded-[24px] bg-[var(--ds-surface)] p-6 shadow-[var(--ds-shadow-card)]">
+      <div className="w-full max-w-[480px] rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-6 shadow-[var(--ds-shadow-card)]">
         <StatusPill tone={head.tone}>{head.label}</StatusPill>
 
         <div className="mt-3 text-[40px] font-semibold leading-none tabular-nums tracking-[-0.02em] text-[var(--ds-text-primary)]">
@@ -113,8 +113,8 @@ export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
         {/* Lo scontrino si consegna adesso, col cliente ancora davanti: QR
             da inquadrare col telefono, o copia di cortesia dalla termica. */}
         {esito === 'saldato' && receiptToken && (
-          <div className="mt-4 flex items-center gap-4 rounded-[16px] bg-[var(--ds-surface-row)] p-3.5">
-            <div className="rounded-[10px] bg-white p-2" aria-hidden>
+          <div className="mt-4 flex items-center gap-4 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3.5">
+            <div className="rounded-[var(--ds-radius)] bg-white p-2" aria-hidden>
               <QRCodeSVG value={`${window.location.origin}/scontrino/${receiptToken}`} size={104} level="M" />
             </div>
             <div className="min-w-0 space-y-2">

@@ -28,7 +28,7 @@ export const FormCard: React.FC<{
   // e inferiore.
   if (collapsible) {
     return (
-      <details open={defaultOpen} className={`group rounded-[20px] bg-[var(--ds-surface)] ${className}`}>
+      <details open={defaultOpen} className={`group rounded-[var(--ds-radius)] bg-[var(--ds-surface)] ${className}`}>
         <summary className="flex cursor-pointer list-none select-none items-center justify-between gap-3 p-5 sm:p-6 [&::-webkit-details-marker]:hidden">
           <div className="flex min-w-0 items-center gap-2">
             <ChevronDown className="h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)] transition-transform group-open:rotate-180" aria-hidden />
@@ -45,7 +45,7 @@ export const FormCard: React.FC<{
     );
   }
   return (
-    <section className={`rounded-[20px] bg-[var(--ds-surface)] p-5 sm:p-6 ${className}`}>
+    <section className={`rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-5 sm:p-6 ${className}`}>
       {(title || aside) && (
         <div className="mb-5 flex items-center justify-between gap-3">
           {title && (
@@ -128,7 +128,7 @@ export const dsSelect =
   'w-full h-11 px-4 rounded-full bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] cursor-pointer transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ds-select';
 
 export const dsTextarea =
-  'w-full px-4 py-3 rounded-[16px] bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
+  'w-full px-4 py-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] text-[15px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] transition-shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
 
 /** Modificatore di stato per un controllo in errore: si appende a `dsInput`,
  *  `dsSelect` o `dsTextarea` (`${dsInput} ${err ? dsInputError : ''}`).

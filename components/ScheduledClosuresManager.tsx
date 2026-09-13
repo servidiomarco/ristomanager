@@ -164,7 +164,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                 {canEdit && (
                     <button
                         onClick={() => setShowForm(v => !v)}
-                        className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-sm font-medium hover:opacity-90"
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-sm font-medium hover:opacity-90"
                     >
                         <Plus className="h-4 w-4" />
                         Nuova chiusura
@@ -173,11 +173,11 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
             </div>
 
             {showForm && canEdit && (
-                <div className="mb-4 p-4 rounded-lg border border-[var(--ds-border)] bg-[var(--ds-surface-row)] space-y-3">
+                <div className="mb-4 p-4 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-row)] space-y-3">
                     <div className="flex gap-2">
                         <button
                             onClick={() => setFormKind('room')}
-                            className={`flex-1 px-3 py-2 rounded-md text-sm font-medium border ${formKind === 'room'
+                            className={`flex-1 px-3 py-2 rounded-[var(--ds-radius)] text-sm font-medium border ${formKind === 'room'
                                 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]'
                                 : 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
                         >
@@ -185,7 +185,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                         </button>
                         <button
                             onClick={() => setFormKind('table')}
-                            className={`flex-1 px-3 py-2 rounded-md text-sm font-medium border ${formKind === 'table'
+                            className={`flex-1 px-3 py-2 rounded-[var(--ds-radius)] text-sm font-medium border ${formKind === 'table'
                                 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] border-[var(--ds-text-primary)]'
                                 : 'bg-[var(--ds-surface)] text-[var(--ds-text-primary)] border-[var(--ds-border)] hover:bg-[var(--ds-surface-row)]'}`}
                         >
@@ -200,7 +200,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                                 value={formDate}
                                 min={todayISO()}
                                 onChange={e => setFormDate(e.target.value)}
-                                className="w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 text-sm"
+                                className="w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 text-sm"
                             />
                         </div>
                         <div>
@@ -208,7 +208,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                             <select
                                 value={formShift}
                                 onChange={e => setFormShift(e.target.value as Shift)}
-                                className="w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 text-sm"
+                                className="w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 text-sm"
                             >
                                 <option value={Shift.LUNCH}>Pranzo</option>
                                 <option value={Shift.DINNER}>Cena</option>
@@ -222,7 +222,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                                 <select
                                     value={formRoomId}
                                     onChange={e => setFormRoomId(e.target.value ? Number(e.target.value) : '')}
-                                    className="w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 text-sm"
+                                    className="w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 text-sm"
                                 >
                                     <option value="">Seleziona...</option>
                                     {rooms.map(r => (
@@ -233,7 +233,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                                 <select
                                     value={formTableId}
                                     onChange={e => setFormTableId(e.target.value ? Number(e.target.value) : '')}
-                                    className="w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 text-sm"
+                                    className="w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 text-sm"
                                 >
                                     <option value="">Seleziona...</option>
                                     {tables.map(t => {
@@ -251,7 +251,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                     <div className="flex justify-end gap-2">
                         <button
                             onClick={() => { setShowForm(false); resetForm(); }}
-                            className="px-3 py-1.5 rounded-md text-sm text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]"
+                            className="px-3 py-1.5 rounded-[var(--ds-radius)] text-sm text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]"
                             disabled={saving}
                         >
                             Annulla
@@ -259,7 +259,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                         <button
                             onClick={handleAdd}
                             disabled={saving}
-                            className="px-3 py-1.5 rounded-md bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-sm font-medium hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
+                            className="px-3 py-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-sm font-medium hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
                         >
                             {saving && <Loader2 className="h-4 w-4 animate-spin" />}
                             Conferma
@@ -278,7 +278,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                     Nessuna chiusura {showPast ? '' : 'futura'} programmata.
                 </div>
             ) : (
-                <ul className="divide-y divide-[var(--ds-border)] border border-[var(--ds-border)] rounded-lg overflow-hidden">
+                <ul className="divide-y divide-[var(--ds-border)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] overflow-hidden">
                     {rows.map(row => {
                         const label = row.kind === 'room'
                             ? `Sala: ${roomsById.get(row.room_id)?.name ?? `#${row.room_id}`}`
@@ -291,7 +291,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                         return (
                             <li key={`${row.kind}-${row.id}`} className="flex items-center justify-between gap-3 px-4 py-3 bg-[var(--ds-surface)]">
                                 <div className="flex items-center gap-3 min-w-0">
-                                    <div className="w-8 h-8 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0">
+                                    <div className="w-8 h-8 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0">
                                         <Icon className="h-4 w-4 text-[var(--ds-text-primary)]" />
                                     </div>
                                     <div className="min-w-0">
@@ -304,7 +304,7 @@ export const ScheduledClosuresManager: React.FC<Props> = ({ showToast }) => {
                                 {canEdit && (
                                     <button
                                         onClick={() => handleDelete(row)}
-                                        className="p-1.5 rounded-md text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] dark:hover:bg-[var(--ds-critical-tint)] transition"
+                                        className="p-1.5 rounded-[var(--ds-radius)] text-[var(--ds-critical-text)] hover:bg-[var(--ds-critical-tint)] dark:hover:bg-[var(--ds-critical-tint)] transition"
                                         title="Rimuovi chiusura"
                                     >
                                         <Trash2 className="h-4 w-4" />

@@ -47,7 +47,7 @@ export const ClienteVisita: React.FC<ClienteVisitaProps> = ({
 
       {hasCustomer ? (
         <>
-          <div className="rounded-[16px] bg-[var(--ds-arriving-tint)] p-4">
+          <div className="rounded-[var(--ds-radius)] bg-[var(--ds-arriving-tint)] p-4">
             <div className="flex items-center gap-3">
               <Avatar name={reservation!.customer_name} />
               <div className="min-w-0 flex-1">

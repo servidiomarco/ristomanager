@@ -348,7 +348,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
         type="button"
         onClick={e => { e.stopPropagation(); setPhotoDish(d); }}
         aria-label={`Foto di ${d.name}`}
-        className={`${size} flex-shrink-0 overflow-hidden rounded-[12px] bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]`}
+        className={`${size} flex-shrink-0 overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]`}
       >
         <img src={d.photo_url} alt="" loading="lazy" className="h-full w-full object-cover" />
       </button>
@@ -451,7 +451,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
             type="button"
             onClick={() => { onQuery(''); onCategory(c); }}
             aria-pressed={active}
-            className={`flex w-[156px] flex-shrink-0 flex-col items-start gap-1.5 rounded-[6px] px-4 py-3.5 text-left transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${CAT_CARD[n]} ${
+            className={`flex w-[156px] flex-shrink-0 flex-col items-start gap-1.5 rounded-[var(--ds-radius)] px-4 py-3.5 text-left transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${CAT_CARD[n]} ${
               active
                 ? 'shadow-[var(--ds-shadow-card)] ring-2 ring-[var(--ds-action-bg)]'
                 : 'shadow-[var(--ds-shadow-card)]'
@@ -593,7 +593,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
   // anche la pagina piatti della variante a pagine — stessa anatomia,
   // stessi controlli, bersagli a 44px.
   const compactCard = (
-    <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+    <div className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
       {visible.map((d, i) => (
         <React.Fragment key={d.id}>
           <div
@@ -662,7 +662,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                   type="button"
                   onClick={() => { onQuery(''); onCategory(c); }}
                   style={{ animation: 'tileIn 260ms ease-out both', animationDelay: `${Math.min(tileNo++ * 45, 450)}ms` }}
-                  className={`flex min-h-[76px] select-none flex-col items-center justify-center gap-1 rounded-[16px] bg-[var(--ds-surface)] p-2 text-center shadow-[var(--ds-shadow-card)] transition-[transform,opacity] hover:bg-[var(--ds-surface-row)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                  className={`flex min-h-[76px] select-none flex-col items-center justify-center gap-1 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-2 text-center shadow-[var(--ds-shadow-card)] transition-[transform,opacity] hover:bg-[var(--ds-surface-row)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                     dimSelf && mutedCat(c) ? 'opacity-45' : ''
                   }`}
                 >
@@ -708,7 +708,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                 </div>
               );
             })() : (
-              <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+              <div className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
                 {categories.map((c, i) => (
                   <button
                     key={c}
@@ -826,7 +826,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
               return (
                 <div
                   key={d.id}
-                  className={`relative flex flex-col overflow-hidden rounded-[6px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] ${
+                  className={`relative flex flex-col overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] ${
                     qty > 0 ? 'ring-2 ring-[var(--ds-action-bg)]' : ''
                   }`}
                 >
@@ -905,7 +905,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                   <button
                     type="button"
                     {...press(d)}
-                    className={`flex min-h-[76px] w-full select-none flex-col justify-center gap-0.5 rounded-[16px] bg-[var(--ds-surface)] py-3 text-left shadow-[var(--ds-shadow-card)] transition-transform hover:bg-[var(--ds-surface-row)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                    className={`flex min-h-[76px] w-full select-none flex-col justify-center gap-0.5 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] py-3 text-left shadow-[var(--ds-shadow-card)] transition-transform hover:bg-[var(--ds-surface-row)] active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                       d.photo_url ? 'pl-[68px] pr-4' : 'px-4'
                     } ${qty > 0 ? 'ring-2 ring-[var(--ds-action-bg)]' : ''}`}
                   >
@@ -963,7 +963,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                 // eventuali sotto-righe delle combinazioni battute.
                 <div
                   key={d.id}
-                  className={`flex flex-col rounded-[16px] bg-[var(--ds-surface)] px-4 py-3 shadow-[var(--ds-shadow-card)] ${
+                  className={`flex flex-col rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-4 py-3 shadow-[var(--ds-shadow-card)] ${
                     qty > 0 ? 'ring-2 ring-[var(--ds-action-bg)]' : ''
                   }`}
                 >

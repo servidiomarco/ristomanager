@@ -22,7 +22,7 @@ interface PadTabsProps {
 }
 
 const tabClass =
-  'flex flex-1 flex-col items-center gap-0.5 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-[14px]';
+  'flex flex-1 flex-col items-center gap-0.5 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] rounded-[var(--ds-radius)]';
 
 export const PadTabs: React.FC<PadTabsProps> = ({ onTables, onComanda, onMenu, comandaMarked }) => (
   // La barra è a tutta larghezza dentro un contenitore col padding: i margini

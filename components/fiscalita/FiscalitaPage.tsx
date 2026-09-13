@@ -228,7 +228,7 @@ const RegistroEmessi: React.FC = () => {
             Stampa
           </button>
         </div>
-        <div className="flex w-full flex-shrink-0 items-center divide-x divide-[var(--ds-border)] rounded-[18px] bg-[var(--ds-surface)] px-1 py-1 shadow-[var(--ds-shadow-card)] lg:w-auto lg:px-4">
+        <div className="flex w-full flex-shrink-0 items-center divide-x divide-[var(--ds-border)] rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-1 py-1 shadow-[var(--ds-shadow-card)] lg:w-auto lg:px-4">
           <Kpi label="documentato" value={formatEuro(totals?.documented_total_cents ?? 0)} tone="positive" />
           <Kpi label={`scontrini · ${totals?.receipts.count ?? 0}`} value={formatEuro(totals?.receipts.total_cents ?? 0)} />
           <Kpi label={`fatture · ${totals?.invoices.count ?? 0}`} value={formatEuro(totals?.invoices.total_cents ?? 0)} />
@@ -264,7 +264,7 @@ const RegistroEmessi: React.FC = () => {
                       Tot. <span className="text-[var(--ds-text-primary)]">{formatEuro(dayTotals.get(day) ?? dayRows.reduce((n, r) => n + r.total_cents, 0))}</span>
                     </span>
                   </h3>
-                  <ul className="overflow-hidden rounded-2xl bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+                  <ul className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
                     {dayRows.map(row => (
                       <li key={row.id} className="[&+li]:border-t [&+li]:border-[var(--ds-border)]">
                         <button

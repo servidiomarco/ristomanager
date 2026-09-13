@@ -431,7 +431,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
     <div
       key={key}
       aria-hidden="true"
-      className="flex w-full items-center gap-3 rounded-[16px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)] motion-safe:animate-pulse"
+      className="flex w-full items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)] motion-safe:animate-pulse"
     >
       <div className="w-[58px] flex-shrink-0 space-y-1">
         <div className="h-4 w-11 rounded bg-[var(--ds-surface-row)]" />
@@ -441,7 +441,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
         <div className={`h-4 rounded bg-[var(--ds-surface-row)] ${variant === 'wide' ? 'w-3/5' : 'w-2/5'}`} />
         <div className="h-3 w-24 rounded bg-[var(--ds-surface-row)]" />
       </div>
-      <div className="h-11 w-14 flex-shrink-0 rounded-[12px] bg-[var(--ds-surface-row)]" />
+      <div className="h-11 w-14 flex-shrink-0 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)]" />
       <div className="h-11 w-11 flex-shrink-0 rounded-full bg-[var(--ds-surface-row)] sm:w-28" />
     </div>
   );
@@ -497,7 +497,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
       <div
         key={r.id}
         onClick={() => setSelectedReservationId(r.id)}
-        className={`flex w-full cursor-pointer items-center gap-3 rounded-[16px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)] transition-shadow ${
+        className={`flex w-full cursor-pointer items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)] transition-shadow ${
           isSelected ? 'ring-2 ring-[var(--ds-text-primary)]' : ''
         }`}
       >
@@ -555,7 +555,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
         {/* Where */}
         {table ? (
           <div
-            className={`flex h-11 min-w-[56px] flex-shrink-0 flex-col items-center justify-center rounded-[12px] px-2.5 ${
+            className={`flex h-11 min-w-[56px] flex-shrink-0 flex-col items-center justify-center rounded-[var(--ds-radius)] px-2.5 ${
               tooSmall
                 ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
                 : 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]'
@@ -571,7 +571,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); setSelectedReservationId(r.id); setShowTablePicker(true); }}
-            className="inline-flex h-11 flex-shrink-0 items-center gap-1 rounded-[12px] border border-dashed border-[var(--ds-pending-solid)] px-3 text-[13px] font-medium text-[var(--ds-pending-text)] transition-colors hover:bg-[var(--ds-pending-tint)]"
+            className="inline-flex h-11 flex-shrink-0 items-center gap-1 rounded-[var(--ds-radius)] border border-dashed border-[var(--ds-pending-solid)] px-3 text-[13px] font-medium text-[var(--ds-pending-text)] transition-colors hover:bg-[var(--ds-pending-tint)]"
             title="Assegna un tavolo"
           >
             <Plus className="h-3.5 w-3.5" aria-hidden /> tavolo
@@ -658,7 +658,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
      button, and a horizontal scroller spent a third of the screen showing
      three of them. */
   const allaPorta = (
-    <section className="flex min-h-0 flex-1 flex-col rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+    <section className="flex min-h-0 flex-1 flex-col rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
       <div className="mb-3 flex flex-shrink-0 items-center gap-2">
         <PulseDot dotClass="bg-[var(--ds-critical-solid)]" pulse={arrivingNow.length > 0} sizeClass="h-2 w-2" />
         <h2 className="text-[15px] font-semibold text-[var(--ds-text-primary)]">Alla porta</h2>
@@ -686,7 +686,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
                   {/* The row selects; the circle seats. Two targets, because
                       mixing them is how a host checks in the wrong party. */}
                   <div
-                    className={`flex items-center gap-3 rounded-[14px] p-3 transition-colors ${
+                    className={`flex items-center gap-3 rounded-[var(--ds-radius)] p-3 transition-colors ${
                       late ? 'bg-[var(--ds-critical-tint)]' : 'hover:bg-[var(--ds-surface-row)]'
                     }`}
                   >
@@ -883,7 +883,7 @@ const ReceptionPage: React.FC<ReceptionPageProps> = ({ globalDate, globalShiftFi
               scrolling region below is opaque and would otherwise slice the
               shadow off with a hard line. */}
           <div className="flex flex-shrink-0 items-center gap-3 px-4 pb-4 pt-4">
-            <div className="flex flex-1 items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
+            <div className="flex flex-1 items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
               <button
                 onClick={() => setSelectedReservationId(null)}
                 className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:text-[var(--ds-text-primary)]"
@@ -1089,7 +1089,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
   const notes = stripDietaryNote(reservation.notes);
 
   return (
-    <section className="flex-shrink-0 rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+    <section className="flex-shrink-0 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
@@ -1124,7 +1124,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
           while they walk the party across the room. */}
       {table ? (
         <div
-          className={`mt-4 flex items-center gap-3 rounded-[16px] px-4 py-3 ${
+          className={`mt-4 flex items-center gap-3 rounded-[var(--ds-radius)] px-4 py-3 ${
             tooSmall
               ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
               : 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]'
@@ -1245,7 +1245,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
       {reservation.phone && (
         <a
           href={`tel:${reservation.phone}`}
-          className="mt-3 flex items-center gap-3 rounded-[16px] bg-[var(--ds-surface-row)] p-3 lg:hidden"
+          className="mt-3 flex items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3 lg:hidden"
         >
           <span className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)]">
             <Phone className="h-4 w-4" />
@@ -1263,7 +1263,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
 };
 
 const NotesLine: React.FC<{ label: string; text: string; tone?: 'pending' }> = ({ label, text, tone }) => (
-  <div className={`rounded-[12px] px-3 py-2 text-[13px] ${
+  <div className={`rounded-[var(--ds-radius)] px-3 py-2 text-[13px] ${
     tone === 'pending'
       ? 'bg-[var(--ds-pending-tint)] text-[var(--ds-pending-text)]'
       : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]'
@@ -1285,7 +1285,7 @@ const SecondaryAction: React.FC<{
     onClick={onClick}
     disabled={disabled}
     title={label}
-    className={`inline-flex min-h-[56px] flex-col items-center justify-center gap-1 rounded-[14px] px-2 py-2 text-[12px] font-medium transition-opacity hover:opacity-80 disabled:opacity-50 ${
+    className={`inline-flex min-h-[56px] flex-col items-center justify-center gap-1 rounded-[var(--ds-radius)] px-2 py-2 text-[12px] font-medium transition-opacity hover:opacity-80 disabled:opacity-50 ${
       tone === 'critical'
         ? 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]'
         : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)]'
@@ -1463,7 +1463,7 @@ const TablePicker: React.FC<TablePickerProps> = ({
           sits where the host's eye lands, because that's what they're matching
           against every glyph below. */}
       <div className="flex flex-shrink-0 items-center justify-between gap-4 px-4 pb-3 pt-4 sm:px-6">
-        <div className="flex min-w-0 flex-1 items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
+        <div className="flex min-w-0 flex-1 items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
           <div className="min-w-0 flex-1">
             <p className="text-[13px] text-[var(--ds-text-muted)]">Tavolo per</p>
             <h2 className="truncate text-[18px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
@@ -1520,7 +1520,7 @@ const TablePicker: React.FC<TablePickerProps> = ({
           top, with the occupant's name on occupied rows so a swap is an
           informed choice, not a guess. */}
       {isPhone ? (
-        <div className="mx-4 mb-4 min-h-0 flex-1 overflow-y-auto rounded-[24px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)]">
+        <div className="mx-4 mb-4 min-h-0 flex-1 overflow-y-auto rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)]">
           <div className="flex flex-col gap-1">
             {listTables.map(t => {
               const { state, occupantRes, disabled, onTap } = decorate(t);
@@ -1533,7 +1533,7 @@ const TablePicker: React.FC<TablePickerProps> = ({
                   type="button"
                   onClick={onTap}
                   disabled={busy || disabled}
-                  className={`flex w-full items-center gap-3 rounded-[16px] p-3 text-left transition-colors ${
+                  className={`flex w-full items-center gap-3 rounded-[var(--ds-radius)] p-3 text-left transition-colors ${
                     disabled
                       ? 'cursor-not-allowed opacity-45'
                       : 'hover:bg-[var(--ds-surface-row)] active:bg-[var(--ds-surface-row)]'
@@ -1560,7 +1560,7 @@ const TablePicker: React.FC<TablePickerProps> = ({
       /* Canvas. Floor-dot background so the room reads as space, not a card. */
       <div
         ref={containerRef}
-        className="mx-4 mb-4 flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-[24px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] sm:mx-6"
+        className="mx-4 mb-4 flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] sm:mx-6"
         style={{
           backgroundImage: 'radial-gradient(var(--floor-dot) 1px, transparent 1px)',
           backgroundSize: '18px 18px',
@@ -1685,7 +1685,7 @@ const TablePicker: React.FC<TablePickerProps> = ({
                 type="button"
                 disabled={busy}
                 onClick={() => { setSwapChoices(null); setSwapCandidate(choice); }}
-                className="flex w-full items-center justify-between gap-3 rounded-[16px] bg-[var(--ds-surface)] p-3 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-50"
+                className="flex w-full items-center justify-between gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 text-left shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-50"
               >
                 <span className="min-w-0 truncate font-medium text-[var(--ds-text-primary)]">
                   {toTitleCase(choice.customer_name) || 'Senza nome'}
@@ -1757,7 +1757,7 @@ const SwapConfirmDialog: React.FC<SwapConfirmDialogProps> = ({
         </>
       }
     >
-      <div className="space-y-2 rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+      <div className="space-y-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
         <SwapRow
           name={toTitleCase(source.customer_name) || 'Senza nome'}
           from={tableName(source.table_id)}
@@ -1885,7 +1885,7 @@ const RoomMap: React.FC<RoomMapProps> = ({
       {/* Header — the same shell as the TablePicker, so the two full-screen
           floor views read as one pair rather than two separate features. */}
       <div className="flex flex-shrink-0 items-center justify-between gap-4 px-4 pb-3 pt-4 sm:px-6">
-        <div className="flex min-w-0 flex-1 items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
+        <div className="flex min-w-0 flex-1 items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
           <div className="min-w-0 flex-1">
             <p className="text-[13px] text-[var(--ds-text-muted)]">Stato sala</p>
             <h2 className="truncate text-[18px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
@@ -1932,7 +1932,7 @@ const RoomMap: React.FC<RoomMapProps> = ({
 
       <div
         ref={containerRef}
-        className="mx-4 mb-4 flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-[24px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] sm:mx-6"
+        className="mx-4 mb-4 flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] sm:mx-6"
         style={{
           backgroundImage: 'radial-gradient(var(--floor-dot) 1px, transparent 1px)',
           backgroundSize: '18px 18px',

@@ -147,7 +147,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
 
     if (loading) {
         return (
-            <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
+            <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] p-4 flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
                 <Loader label="Caricamento…" size={40} />
             </div>
         );
@@ -155,7 +155,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
     if (!status) return null;
 
     const inputClass =
-        'w-full px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60';
+        'w-full px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60';
 
     // The environment the user is about to save decides which credential pair
     // has to be complete before SumUp can be switched on.
@@ -164,7 +164,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
         : status.sandbox_configured;
 
     return (
-        <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden">
+        <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden">
             <button
                 type="button"
                 onClick={() => setExpanded((v) => !v)}
@@ -172,7 +172,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                 className="w-full flex items-center justify-between gap-3 p-4 text-left hover:bg-[var(--ds-surface-row)] transition-colors"
             >
                 <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0">
+                    <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0">
                         <CreditCard className="w-5 h-5 text-[var(--ds-text-primary)]" />
                     </div>
                     <div className="min-w-0">
@@ -200,7 +200,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                     : 'Test sul merchant sandbox. Nessun addebito reale.'}
                             </p>
                         </div>
-                        <div className="inline-flex rounded-md border border-[var(--ds-border)] overflow-hidden text-[12px] font-medium">
+                        <div className="inline-flex rounded-[var(--ds-radius)] border border-[var(--ds-border)] overflow-hidden text-[12px] font-medium">
                             <button
                                 type="button"
                                 onClick={() => canEdit && setDraftEnv('sandbox')}
@@ -228,7 +228,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                         </div>
                     </div>
 
-                    <div className="flex items-start gap-2 text-[12px] text-[var(--ds-text-subtle)] bg-[var(--ds-surface-row)] rounded-md p-2.5">
+                    <div className="flex items-start gap-2 text-[12px] text-[var(--ds-text-subtle)] bg-[var(--ds-surface-row)] rounded-[var(--ds-radius)] p-2.5">
                         <Info className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
                         <span>
                             SumUp usa lo stesso endpoint (<code className="text-[var(--ds-text-muted)]">{status.api_base}</code>) per
@@ -386,7 +386,7 @@ export const SumUpIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             type="button"
                             onClick={handleSave}
                             disabled={!canEdit || saving || !hasChanges}
-                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                             Salva

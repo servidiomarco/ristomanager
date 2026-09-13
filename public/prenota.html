@@ -58,10 +58,20 @@
     --ds-shadow-card: 0 1px 2px rgba(16, 17, 25, 0.04), 0 8px 24px rgba(16, 17, 25, 0.05);
     --ds-shadow-raised: 0 4px 8px rgba(16, 17, 25, 0.06), 0 20px 48px rgba(16, 17, 25, 0.10);
 
-    --radius-md: 0.5rem;
-    --radius-lg: 0.75rem;
-    --radius-xl: 1rem;
-    --radius-2xl: 1.25rem;
+    /* Il raggio delle scatole, ricopiato a mano come tutti i token di questo
+       file: la pagina è servita dal backend e non passa da Vite, quindi
+       index.css non la raggiunge — cambiare il token nell'app e non qui
+       lascia indietro la pagina che vede l'ospite.
+       Il tondo pieno (999px) e i cerchi (50%) restano quello che sono. */
+    --ds-radius: 6px;
+    --ds-radius-sm: 4px;
+
+    /* I quattro gradini storici puntano tutti al raggio unico: così i punti
+       che li citano non vanno riscritti uno per uno. */
+    --radius-md: var(--ds-radius);
+    --radius-lg: var(--ds-radius);
+    --radius-xl: var(--ds-radius);
+    --radius-2xl: var(--ds-radius);
 
     /* --- Estensione pubblica --- */
     /* Più calda di --ds-canvas: questa è una sala da pranzo, non una console. */
@@ -103,7 +113,7 @@ button:disabled { cursor: not-allowed; }
 :focus-visible {
     outline: 2px solid var(--ds-border-focus);
     outline-offset: 2px;
-    border-radius: 4px;
+    border-radius: var(--ds-radius-sm);
 }
 
 .tnum { font-variant-numeric: tabular-nums; }

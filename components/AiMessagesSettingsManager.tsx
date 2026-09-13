@@ -96,17 +96,17 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
 
     if (loading) {
         return (
-            <div className="bg-[var(--ds-surface)] rounded-lg border border-[var(--ds-border)] px-4 py-3 flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
+            <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] border border-[var(--ds-border)] px-4 py-3 flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
                 <Loader2 className="h-4 w-4 animate-spin" /> Caricamento…
             </div>
         );
     }
 
     return (
-        <details className="group bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden">
+        <details className="group bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden">
             <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
                 <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-arriving-text)] flex-shrink-0">
+                    <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-arriving-text)] flex-shrink-0">
                         <Wand2 className="w-5 h-5" />
                     </div>
                     <div className="min-w-0">
@@ -137,7 +137,7 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
             </summary>
 
             <div className="border-t border-[var(--ds-border)] px-4 py-4 space-y-5">
-                <div className="rounded-md bg-[var(--ds-surface-row)] border border-[var(--ds-border)] px-3 py-2.5 text-[13px] leading-relaxed text-[var(--ds-text-muted)]">
+                <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] px-3 py-2.5 text-[13px] leading-relaxed text-[var(--ds-text-muted)]">
                     Nella pagina Messaggi comparirà <strong className="text-[var(--ds-text-primary)]">Suggerisci risposta</strong>:
                     l'AI legge la conversazione e la prenotazione collegata e propone una frase.
                     <strong className="text-[var(--ds-text-primary)]"> Nessun messaggio parte da solo</strong> — leggi, correggi se serve, invii tu.
@@ -155,12 +155,12 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
                     </div>
 
                     {enabled && activeCount === 0 && (
-                        <p className="mb-2 rounded-md bg-[var(--ds-pending-tint)] px-3 py-2 text-[13px] text-[var(--ds-pending-text)]">
+                        <p className="mb-2 rounded-[var(--ds-radius)] bg-[var(--ds-pending-tint)] px-3 py-2 text-[13px] text-[var(--ds-pending-text)]">
                             La funzione è attiva ma non c'è nessuna regola: senza, l'AI non ha da cosa rispondere e non proporrà nulla.
                         </p>
                     )}
 
-                    <div className="rounded-md border border-[var(--ds-border)] divide-y divide-[var(--ds-border)]">
+                    <div className="rounded-[var(--ds-radius)] border border-[var(--ds-border)] divide-y divide-[var(--ds-border)]">
                         {entries.map(e => (
                             <div key={e.id} className={`px-3 py-2.5 ${e.is_active ? '' : 'opacity-50'}`}>
                                 {editingId === e.id ? (
@@ -168,22 +168,22 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
                                         <input
                                             value={editTitle}
                                             onChange={ev => setEditTitle(ev.target.value)}
-                                            className="w-full text-[13px] font-medium rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5"
+                                            className="w-full text-[13px] font-medium rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5"
                                         />
                                         <textarea
                                             value={editContent}
                                             onChange={ev => setEditContent(ev.target.value)}
                                             rows={3}
-                                            className="w-full text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 resize-y"
+                                            className="w-full text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 resize-y"
                                         />
                                         <div className="flex items-center gap-2">
                                             <button type="button" disabled={!editTitle.trim() || !editContent.trim() || saving}
                                                 onClick={() => saveEdit(e.id)}
-                                                className="inline-flex items-center gap-1 text-[13px] px-2.5 py-1.5 rounded-md border border-[var(--ds-border)] disabled:opacity-50">
+                                                className="inline-flex items-center gap-1 text-[13px] px-2.5 py-1.5 rounded-[var(--ds-radius)] border border-[var(--ds-border)] disabled:opacity-50">
                                                 <Check size={13} /> Salva
                                             </button>
                                             <button type="button" onClick={() => setEditingId(null)}
-                                                className="inline-flex items-center gap-1 text-[13px] px-2.5 py-1.5 rounded-md text-[var(--ds-text-muted)]">
+                                                className="inline-flex items-center gap-1 text-[13px] px-2.5 py-1.5 rounded-[var(--ds-radius)] text-[var(--ds-text-muted)]">
                                                 <X size={13} /> Annulla
                                             </button>
                                         </div>
@@ -198,7 +198,7 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
                                             <div className="flex items-center gap-1 flex-shrink-0">
                                                 <button type="button" aria-label={`Modifica ${e.title}`} disabled={saving}
                                                     onClick={() => { setEditingId(e.id); setEditTitle(e.title); setEditContent(e.content); }}
-                                                    className="p-1.5 rounded-md text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] disabled:opacity-50">
+                                                    className="p-1.5 rounded-[var(--ds-radius)] text-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] disabled:opacity-50">
                                                     <Pencil size={13} />
                                                 </button>
                                                 <button type="button" disabled={saving}
@@ -214,7 +214,7 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
                                                         await deleteKnowledge(e.id);
                                                         setEntries(prev => prev.filter(x => x.id !== e.id));
                                                     }, 'Regola eliminata')}
-                                                    className="p-1.5 rounded-md text-[var(--ds-critical-solid)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50">
+                                                    className="p-1.5 rounded-[var(--ds-radius)] text-[var(--ds-critical-solid)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-50">
                                                     <Trash2 size={13} />
                                                 </button>
                                             </div>
@@ -249,18 +249,18 @@ export const AiMessagesSettingsManager: React.FC<Props> = ({ showToast }) => {
                                     value={newTitle}
                                     onChange={e => setNewTitle(e.target.value)}
                                     placeholder="Argomento (es. Torte da fuori)"
-                                    className="w-full text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5"
+                                    className="w-full text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5"
                                 />
                                 <textarea
                                     value={newContent}
                                     onChange={e => setNewContent(e.target.value)}
                                     placeholder="La regola, come la diresti a un cliente: “Sì, si può portare la torta purché porti anche lo scontrino del pasticcere.”"
                                     rows={2}
-                                    className="w-full text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 resize-y"
+                                    className="w-full text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-1.5 resize-y"
                                 />
                                 <button type="button" disabled={!newTitle.trim() || !newContent.trim() || saving}
                                     onClick={() => add(newTitle.trim(), newContent.trim())}
-                                    className="text-[13px] px-2.5 py-1.5 rounded-md border border-[var(--ds-border)] flex items-center gap-1 disabled:opacity-50">
+                                    className="text-[13px] px-2.5 py-1.5 rounded-[var(--ds-radius)] border border-[var(--ds-border)] flex items-center gap-1 disabled:opacity-50">
                                     <Plus size={13} /> Aggiungi regola
                                 </button>
                             </div>

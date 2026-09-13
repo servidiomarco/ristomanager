@@ -20,7 +20,7 @@ const PROVIDER_LABELS: Record<FiscalProviderSetting, string> = {
     'rt-local': 'Registratore in sala (Epson RT)',
 };
 
-const inputCls = 'h-10 w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)] disabled:opacity-50';
+const inputCls = 'h-10 w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-2)] px-3 text-[14px] text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)] disabled:opacity-50';
 
 export const FiscalSettingsManager: React.FC<Props> = ({ showToast }) => {
     const { hasPermission } = useAuth();
@@ -83,7 +83,7 @@ export const FiscalSettingsManager: React.FC<Props> = ({ showToast }) => {
 
     if (loading || !settings) {
         return (
-            <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] px-4 py-3 flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
+            <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] px-4 py-3 flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
                 <Loader2 className="h-4 w-4 animate-spin" /> Caricamento…
             </div>
         );
@@ -103,10 +103,10 @@ export const FiscalSettingsManager: React.FC<Props> = ({ showToast }) => {
     return (
         <div className="space-y-3">
             {/* ── Esercente: P.IVA, denominazione e sede ─────────────────── */}
-            <details className="group bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden">
+            <details className="group bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden">
                 <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
                     <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-arriving-text)] flex-shrink-0">
+                        <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-arriving-text)] flex-shrink-0">
                             <Building2 className="w-5 h-5" />
                         </div>
                         <div className="min-w-0">
@@ -138,7 +138,7 @@ export const FiscalSettingsManager: React.FC<Props> = ({ showToast }) => {
                                     type="button"
                                     onClick={() => save({ vat_number: vat })}
                                     disabled={!canEdit || saving || !vatValid}
-                                    className="h-10 flex-shrink-0 rounded-xl bg-[var(--ds-action-bg)] px-4 text-[13px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+                                    className="h-10 flex-shrink-0 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] px-4 text-[13px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
                                 >
                                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Salva'}
                                 </button>
@@ -159,7 +159,7 @@ export const FiscalSettingsManager: React.FC<Props> = ({ showToast }) => {
                                     type="button"
                                     onClick={() => save({ seller: { business_name: seller.business_name, address: { street: seller.street, zip: seller.zip, city: seller.city, province: seller.province } } })}
                                     disabled={!canEdit || saving}
-                                    className="h-8 flex-shrink-0 rounded-xl bg-[var(--ds-action-bg)] px-3 text-[12px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
+                                    className="h-8 flex-shrink-0 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] px-3 text-[12px] font-semibold text-[var(--ds-action-fg)] hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40"
                                 >
                                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Salva'}
                                 </button>
@@ -231,10 +231,10 @@ export const FiscalSettingsManager: React.FC<Props> = ({ showToast }) => {
             </details>
 
             {/* ── Scontrino elettronico: scelta del driver fiscale ────────── */}
-            <details className="group bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden">
+            <details className="group bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden">
                 <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
                     <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-arriving-text)] flex-shrink-0">
+                        <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-arriving-text)] flex-shrink-0">
                             <FileText className="w-5 h-5" />
                         </div>
                         <div className="min-w-0">
@@ -269,13 +269,13 @@ export const FiscalSettingsManager: React.FC<Props> = ({ showToast }) => {
                     </label>
 
                     {settings.provider === 'openapi' && !settings.openapi_token_configured && (
-                        <p className="flex items-start gap-2 rounded-md bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3 text-[13px] text-[var(--ds-pending-text)]">
+                        <p className="flex items-start gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3 text-[13px] text-[var(--ds-pending-text)]">
                             <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0" />
                             Manca il token Openapi sul server (variabile OPENAPI_INVOICE_TOKEN): gli scontrini falliranno finché non viene configurato.
                         </p>
                     )}
                     {settings.provider === 'openapi' && !settings.vat_number && (
-                        <p className="flex items-start gap-2 rounded-md bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3 text-[13px] text-[var(--ds-pending-text)]">
+                        <p className="flex items-start gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] border border-[var(--ds-border)] p-3 text-[13px] text-[var(--ds-pending-text)]">
                             <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0" />
                             Manca la P.IVA nei dati dell'esercente: senza, lo scontrino non parte.
                         </p>
@@ -289,10 +289,10 @@ export const FiscalSettingsManager: React.FC<Props> = ({ showToast }) => {
             </details>
 
             {/* ── Mappatura IVA: default piatti e voci di sistema ─────────── */}
-            <details className="group bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden">
+            <details className="group bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden">
                 <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
                     <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-arriving-text)] flex-shrink-0">
+                        <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-arriving-text)] flex-shrink-0">
                             <Percent className="w-5 h-5" />
                         </div>
                         <div className="min-w-0">

@@ -128,7 +128,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
                 in servizio non si usano. */}
             <div className="flex items-center gap-3">
               {brand}
-              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-[28px] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)]">
+              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)]">
                 <SearchField
                   value={query}
                   onChange={onQuery}
@@ -179,7 +179,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
                       <div
                         role="dialog"
                         aria-label="Filtra i tavoli per stato"
-                        className="absolute right-0 top-[52px] z-50 w-[320px] rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-raised)]"
+                        className="absolute right-0 top-[52px] z-50 w-[320px] rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-raised)]"
                       >
                         <div className="flex items-center justify-between">
                           <span className="text-[12px] font-semibold text-[var(--ds-text-primary)]">Stato</span>

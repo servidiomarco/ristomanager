@@ -338,7 +338,7 @@ export const DevelopmentPage: React.FC = () => {
             // 1.03:1 e sparirebbe, lasciando cinque liste senza contorno.
             <div
               key={col.key}
-              className={`flex min-h-0 w-[82vw] max-w-72 flex-none snap-center flex-col rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] transition-shadow sm:w-72 sm:max-w-none lg:w-80 ${
+              className={`flex min-h-0 w-[82vw] max-w-72 flex-none snap-center flex-col rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] transition-shadow sm:w-72 sm:max-w-none lg:w-80 ${
                 isDropTarget ? 'ring-2 ring-[var(--ds-border-focus)]' : ''
               }`}
               onDragOver={(e) => { e.preventDefault(); setDropHint(prev => (prev?.column === col.key ? prev : { column: col.key, index: null })); }}
@@ -385,7 +385,7 @@ export const DevelopmentPage: React.FC = () => {
                       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDropHint({ column: col.key, index: hoverIndex(e, i) }); }}
                       onDrop={(e) => { e.preventDefault(); e.stopPropagation(); handleDrop(col.key, hoverIndex(e, i)); }}
                       onClick={() => setEditDraft({ id: card.id, title: card.title, description: card.description || '', column_key: card.column_key, labels: card.labels ?? [] })}
-                      className={`group cursor-pointer rounded-[14px] bg-[var(--ds-surface-row)] px-3 py-2.5 transition-colors hover:bg-[var(--ds-border)] ${
+                      className={`group cursor-pointer rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-2.5 transition-colors hover:bg-[var(--ds-border)] ${
                         draggingId === card.id ? 'opacity-40' : ''
                       }`}
                     >
@@ -504,7 +504,7 @@ export const DevelopmentPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => { setComposerColumn(col.key); setComposerTitle(''); }}
-                    className="w-full rounded-[14px] border border-dashed border-[var(--ds-border-strong)] px-3 py-4 text-[13px] text-[var(--ds-text-muted)] transition-colors hover:border-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]"
+                    className="w-full rounded-[var(--ds-radius)] border border-dashed border-[var(--ds-border-strong)] px-3 py-4 text-[13px] text-[var(--ds-text-muted)] transition-colors hover:border-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]"
                   >
                     {col.hint} — aggiungi la prima card
                   </button>
@@ -512,7 +512,7 @@ export const DevelopmentPage: React.FC = () => {
 
                 {/* Inline composer */}
                 {composerColumn === col.key && (
-                  <div className="space-y-2 rounded-[14px] bg-[var(--ds-surface-row)] p-2">
+                  <div className="space-y-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-2">
                     <textarea
                       ref={composerInputRef}
                       value={composerTitle}
@@ -523,7 +523,7 @@ export const DevelopmentPage: React.FC = () => {
                       }}
                       rows={2}
                       placeholder="Titolo della card…"
-                      className="w-full resize-none rounded-[12px] bg-[var(--ds-surface)] px-3 py-2 text-[14px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      className="w-full resize-none rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-3 py-2 text-[14px] text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     />
                     <div className="flex items-center gap-2">
                       <button

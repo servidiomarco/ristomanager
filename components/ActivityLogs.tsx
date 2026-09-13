@@ -309,7 +309,7 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
       footerLayout="row"
     >
       {error ? (
-        <div role="alert" className="rounded-[16px] bg-[var(--ds-critical-tint)] p-8 text-center text-[var(--ds-critical-text)]">
+        <div role="alert" className="rounded-[var(--ds-radius)] bg-[var(--ds-critical-tint)] p-8 text-center text-[var(--ds-critical-text)]">
           {error}
         </div>
       ) : loading && logs.length === 0 ? (
@@ -317,11 +317,11 @@ export const ActivityLogs: React.FC<ActivityLogsProps> = ({ isOpen, onClose }) =
           <Loader label="Caricamento…" size={40} />
         </div>
       ) : logs.length === 0 ? (
-        <div className="rounded-[20px] bg-[var(--ds-surface)] px-6 py-12 text-center text-[14px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)]">
+        <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-6 py-12 text-center text-[14px] text-[var(--ds-text-muted)] shadow-[var(--ds-shadow-card)]">
           Nessun log trovato
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+        <div className="overflow-x-auto rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
           <table className="w-full">
             <thead className="sticky top-0 bg-[var(--ds-surface-row)]">
               <tr>

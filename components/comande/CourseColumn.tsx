@@ -157,7 +157,7 @@ export const CourseList: React.FC<CourseListProps> = ({
             type="button"
             data-course-drop={n}
             onClick={() => onCourse(n)}
-            className={`flex min-h-[52px] w-full items-center gap-2 rounded-[16px] border border-dashed border-[var(--ds-border-strong)] px-4 text-left text-[15px] text-[var(--ds-text-muted)] transition-colors hover:border-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+            className={`flex min-h-[52px] w-full items-center gap-2 rounded-[var(--ds-radius)] border border-dashed border-[var(--ds-border-strong)] px-4 text-left text-[15px] text-[var(--ds-text-muted)] transition-colors hover:border-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
               isDropTarget ? 'ring-2 ring-[var(--ds-action-bg)] border-transparent' : ''
             }`}
           >
@@ -184,7 +184,7 @@ export const CourseList: React.FC<CourseListProps> = ({
             if ((e.target as HTMLElement).closest('button, a, input, textarea')) return;
             onCourse(n);
           }}
-          className={`relative cursor-pointer rounded-[16px] p-3 pt-4 transition-opacity ${
+          className={`relative cursor-pointer rounded-[var(--ds-radius)] p-3 pt-4 transition-opacity ${
             fired
               ? 'border-2 border-[var(--ds-arriving-solid)] bg-[var(--ds-arriving-tint)]'
               : sent
@@ -316,7 +316,7 @@ export const CourseList: React.FC<CourseListProps> = ({
                       colonna di righe il numero nudo si perde nel nome del
                       piatto, e quanti pezzi sono è la prima cosa che la
                       cucina chiede al telefono. */}
-                  <span className={`inline-flex h-7 min-w-[28px] flex-shrink-0 items-center justify-center rounded-[6px] px-1.5 text-[15px] font-semibold tabular-nums ${qtyChipClass(catIndexOf?.(i.dish_id))}`}>
+                  <span className={`inline-flex h-7 min-w-[28px] flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-sm)] px-1.5 text-[15px] font-semibold tabular-nums ${qtyChipClass(catIndexOf?.(i.dish_id))}`}>
                     {i.qty}
                   </span>
                   <span
@@ -366,7 +366,7 @@ export const CourseList: React.FC<CourseListProps> = ({
                 >
                   {/* Stessa pastiglia delle righe server: lo stepper in riga
                       non c'è più, si cambia dal foglio. */}
-                  <span className={`inline-flex h-7 min-w-[28px] flex-shrink-0 items-center justify-center rounded-[6px] px-1.5 text-[15px] font-semibold tabular-nums ${qtyChipClass(catIndexOf?.(l.dish.id))}`}>
+                  <span className={`inline-flex h-7 min-w-[28px] flex-shrink-0 items-center justify-center rounded-[var(--ds-radius-sm)] px-1.5 text-[15px] font-semibold tabular-nums ${qtyChipClass(catIndexOf?.(l.dish.id))}`}>
                     {l.qty}
                   </span>
                   {/* Le varianti lunghe si troncano: il tocco sul nome apre
@@ -379,7 +379,7 @@ export const CourseList: React.FC<CourseListProps> = ({
                     onClick={onEditLine ? () => onEditLine(l) : undefined}
                     disabled={!onEditLine}
                     aria-label={`Varianti di ${l.dish.name}`}
-                    className="min-w-0 flex-1 rounded-[10px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                    className="min-w-0 flex-1 rounded-[var(--ds-radius)] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
                     <div className="truncate text-[17px] text-[var(--ds-text-primary)]">
                       {l.dish.name}
@@ -405,7 +405,7 @@ export const CourseList: React.FC<CourseListProps> = ({
           )}
 
           {current && serverRows.length === 0 && draftRows.length === 0 && (
-            <p className="mt-2 rounded-[12px] bg-[var(--ds-surface-row)] px-4 py-6 text-center text-[14px] text-[var(--ds-text-muted)]">
+            <p className="mt-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-6 text-center text-[14px] text-[var(--ds-text-muted)]">
               Tocca un piatto per iniziare.
             </p>
           )}
@@ -498,7 +498,7 @@ export const SendFooter: React.FC<SendFooterProps> = ({
         <button
           type="button"
           onClick={onExpand}
-          className="-my-1.5 -ml-1.5 min-w-0 flex-1 rounded-[14px] p-1.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] active:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          className="-my-1.5 -ml-1.5 min-w-0 flex-1 rounded-[var(--ds-radius)] p-1.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] active:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         >
           <span className="flex items-center gap-1.5 text-[13px] text-[var(--ds-text-muted)]">
             <span className="truncate">{courseLabel(course)} · da inviare</span>
@@ -596,7 +596,7 @@ export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, o
   // com'è battuto. Righe multiple (comande vecchie, coperti ritoccati) si
   // sommano invece di far vincere la prima.
   return (
-    <div className="flex min-h-0 flex-col overflow-hidden rounded-[6px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+    <div className="flex min-h-0 flex-col overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
       {/* La riga «Comanda · vuota» compare solo quando c'è qualcosa da dire
           che non sta già sopra: chi ha aperto il tavolo. Il conteggio e il
           totale li porta la scheda del tavolo, e una fascia che ripete il

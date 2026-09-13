@@ -164,7 +164,7 @@ export const BookingChannelsManager: React.FC<Props> = ({ showToast }) => {
                     const draft = drafts[source];
                     const activeCount = draft.order.filter(c => draft.enabled[c]).length;
                     return (
-                        <section key={source} className="rounded-[16px] bg-[var(--ds-surface-row)] p-4">
+                        <section key={source} className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-4">
                             <div className="mb-3 flex items-baseline justify-between gap-2">
                                 <h4 className="text-[14px] font-semibold text-[var(--ds-text-primary)]">{label}</h4>
                                 <span className="text-[12px] text-[var(--ds-text-muted)]">{hint}</span>
@@ -176,7 +176,7 @@ export const BookingChannelsManager: React.FC<Props> = ({ showToast }) => {
                                     // priorità reale, non la posizione in lista.
                                     const rank = on ? draft.order.slice(0, i + 1).filter(c => draft.enabled[c]).length : null;
                                     return (
-                                        <li key={channel} className={`flex items-center gap-2 rounded-[12px] bg-[var(--ds-surface)] px-3 py-2 ${on ? '' : 'opacity-55'}`}>
+                                        <li key={channel} className={`flex items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-3 py-2 ${on ? '' : 'opacity-55'}`}>
                                             <span className="w-5 text-center text-[12px] font-semibold tabular-nums text-[var(--ds-text-muted)]" aria-hidden>
                                                 {rank ?? '—'}
                                             </span>

@@ -360,7 +360,7 @@ export const SupplierManagementModal: React.FC<SupplierManagementModalProps> = (
               </div>
 
               {isPendingDelete && (
-                <div className="mt-3 rounded-[16px] bg-[var(--ds-critical-tint)] p-3">
+                <div className="mt-3 rounded-[var(--ds-radius)] bg-[var(--ds-critical-tint)] p-3">
                   <p className="text-[14px] text-[var(--ds-critical-text)]">
                     Eliminare? I prodotti collegati resteranno senza fornitore.
                   </p>

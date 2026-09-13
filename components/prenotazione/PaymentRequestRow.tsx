@@ -48,7 +48,7 @@ export const PaymentRequestRow: React.FC<{
   })();
 
   return (
-    <li className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-[14px] bg-[var(--ds-surface-row)] px-3.5 py-2.5">
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3.5 py-2.5">
       <StatusPill tone={state.tone}>{state.label}</StatusPill>
       <span className="text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
         {euro(request.amount_cents)}

@@ -251,7 +251,7 @@ const TodoRow: React.FC<{
   return (
     <div
       onClick={selectMode ? onToggleSelect : undefined}
-      className={`group relative rounded-[18px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow ${
+      className={`group relative rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow ${
         selectMode ? 'cursor-pointer' : ''
       } ${isSelected ? 'ring-2 ring-[var(--ds-border-focus)]' : ''}`}
     >
@@ -885,7 +885,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
             <div
               onClick={e => e.stopPropagation()}
               style={{ animation: 'slideUpSheet 260ms cubic-bezier(0.32, 0.72, 0, 1) both' }}
-              className="relative max-h-full w-full overflow-y-auto rounded-t-[24px] bg-[var(--ds-surface)] pb-6 shadow-[var(--ds-shadow-raised)]"
+              className="relative max-h-full w-full overflow-y-auto rounded-t-[var(--ds-radius)] bg-[var(--ds-surface)] pb-6 shadow-[var(--ds-shadow-raised)]"
             >
               <div className="flex justify-center pb-2 pt-3" aria-hidden>
                 <span className="h-1 w-9 rounded-full bg-[var(--ds-border-strong)]" />
@@ -1176,7 +1176,7 @@ export const AttivitaPage: React.FC<AttivitaPageProps> = ({ banquetMenus, dishes
                           type="button"
                           onClick={() => toggleBanquetLink(b.id)}
                           aria-pressed={linked}
-                          className={`flex w-full items-center gap-3 rounded-[16px] p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                          className={`flex w-full items-center gap-3 rounded-[var(--ds-radius)] p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                             linked
                               ? 'bg-[var(--ds-arriving-tint)]'
                               : 'bg-[var(--ds-surface-row)] hover:bg-[var(--ds-border)]'

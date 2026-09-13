@@ -42,7 +42,7 @@ export const SupplierPanel: React.FC<{
     <div className="flex flex-col gap-4">
       <BreadBanner bread={bread} />
 
-      <div className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+      <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
         <div className="mb-3 flex items-center justify-between gap-2">
           <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">
             Per fornitore
@@ -63,7 +63,7 @@ export const SupplierPanel: React.FC<{
         ) : (
           <div className="space-y-3">
             {withSupplier.map(({ supplier, count }) => (
-              <div key={supplier.id} className="rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+              <div key={supplier.id} className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
                 <div className="mb-2 flex items-start gap-2">
                   <Truck className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
                   <div className="min-w-0 flex-1">
@@ -99,7 +99,7 @@ export const SupplierPanel: React.FC<{
             ))}
 
             {orphanCount > 0 && (
-              <div className="rounded-[16px] bg-[var(--ds-critical-tint)] p-3">
+              <div className="rounded-[var(--ds-radius)] bg-[var(--ds-critical-tint)] p-3">
                 <div className="mb-2 flex items-start gap-2">
                   <Truck className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--ds-critical-text)]" aria-hidden />
                   <div className="min-w-0 flex-1">

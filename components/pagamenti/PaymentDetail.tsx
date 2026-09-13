@@ -344,7 +344,7 @@ export const PaymentDetail: React.FC<{
                 const ChIcon = ch.Icon;
                 const st = messageStatusView(msg.status);
                 return (
-                  <article key={msg.id} className="rounded-[16px] bg-[var(--ds-surface-row)] p-3.5">
+                  <article key={msg.id} className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3.5">
                     <div className="mb-1.5 flex flex-wrap items-center gap-2">
                       <StatusPill tone={ch.tone}>
                         <ChIcon className="h-3 w-3" /> {ch.label}

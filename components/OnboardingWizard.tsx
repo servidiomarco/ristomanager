@@ -260,7 +260,7 @@ export const OnboardingWizard: React.FC = () => {
                             {rooms.length > 0 && (
                                 <ul className="mb-4 space-y-2">
                                     {rooms.map(r => (
-                                        <li key={r.id} className="flex items-center justify-between rounded-[14px] bg-[var(--ds-surface-row)] px-4 py-2.5 text-[15px] text-[var(--ds-text-primary)]">
+                                        <li key={r.id} className="flex items-center justify-between rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-2.5 text-[15px] text-[var(--ds-text-primary)]">
                                             <span>{r.name}</span>
                                             <span className="text-[13px] text-[var(--ds-text-muted)]">{tablesInRoom.get(r.id) || 0} tavoli</span>
                                         </li>
@@ -338,7 +338,7 @@ export const OnboardingWizard: React.FC = () => {
                         {dishes.length > 0 && (
                             <ul className="mb-4 space-y-2">
                                 {dishes.map(d => (
-                                    <li key={d.id} className="flex items-center justify-between rounded-[14px] bg-[var(--ds-surface-row)] px-4 py-2.5 text-[15px] text-[var(--ds-text-primary)]">
+                                    <li key={d.id} className="flex items-center justify-between rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 py-2.5 text-[15px] text-[var(--ds-text-primary)]">
                                         <span>{d.name}</span>
                                         <span className="text-[13px] text-[var(--ds-text-muted)]">{d.category} · {Number(d.price).toFixed(2)} €</span>
                                     </li>

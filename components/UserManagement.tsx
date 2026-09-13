@@ -229,7 +229,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onClose, autoOpe
             return (
               <div
                 key={user.id}
-                className="flex flex-col gap-3 rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]"
+                className="flex flex-col gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-3">

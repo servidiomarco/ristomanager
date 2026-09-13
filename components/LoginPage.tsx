@@ -479,7 +479,7 @@ export const LoginPage: React.FC = () => {
                     className="peer sr-only"
                   />
                   <span
-                    className="h-5 w-5 rounded-[6px] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] peer-checked:bg-[var(--ds-action-bg)] peer-checked:border-[var(--ds-action-bg)] peer-disabled:opacity-40 peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--ds-border-focus)] peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[var(--ds-surface)] transition-colors duration-150"
+                    className="h-5 w-5 rounded-[var(--ds-radius)] border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] peer-checked:bg-[var(--ds-action-bg)] peer-checked:border-[var(--ds-action-bg)] peer-disabled:opacity-40 peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--ds-border-focus)] peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[var(--ds-surface)] transition-colors duration-150"
                   />
                   <Check
                     className="absolute h-3.5 w-3.5 text-[var(--ds-action-fg)] opacity-0 peer-checked:opacity-100 transition-opacity duration-150 pointer-events-none"

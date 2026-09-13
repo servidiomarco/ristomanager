@@ -216,7 +216,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
     <div
       ref={menuRef}
       role="menu"
-      className="absolute right-0 top-full z-30 mt-2 w-[280px] overflow-hidden rounded-[20px] bg-[var(--ds-surface)] py-1.5 shadow-[var(--ds-shadow-raised)]"
+      className="absolute right-0 top-full z-30 mt-2 w-[280px] overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] py-1.5 shadow-[var(--ds-shadow-raised)]"
     >
       {actions.map(a => (
         <button
@@ -250,7 +250,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
       ariaLabel="Altre azioni sulla comanda"
       bodyClassName="px-4 py-4"
     >
-      <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+      <div className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
         {actions.map((a, i) => (
           <button
             key={a.label}
@@ -359,7 +359,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
   if (wide) {
     return (
       <>
-        <div className="rounded-[20px] bg-[var(--ds-surface)] px-4 pb-3 pt-3.5 shadow-[var(--ds-shadow-card)]">
+        <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-4 pb-3 pt-3.5 shadow-[var(--ds-shadow-card)]">
           <div className="flex items-center gap-3">
             {showBack && (
               <button
@@ -455,7 +455,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
   if (paged) {
     return (
       <>
-        <div className="rounded-[20px] bg-[var(--ds-surface)] p-2.5 shadow-[var(--ds-shadow-card)]">
+        <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-2.5 shadow-[var(--ds-shadow-card)]">
           <div className="flex items-center gap-1">
             <div className="min-w-0 flex-1">{coversControl}</div>
             {onSearch && (
@@ -482,7 +482,7 @@ export const OrderTopBar: React.FC<OrderTopBarProps> = ({
   // sulla tela nuda sarebbero invisibili.
   return (
     <>
-      <div className="rounded-[20px] bg-[var(--ds-surface)] p-2.5 shadow-[var(--ds-shadow-card)]">
+      <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-2.5 shadow-[var(--ds-shadow-card)]">
         <div className="flex items-center gap-1">
           {/* Cerchio pieno in accent: su touch l'hover non esiste, quindi la
               freccia senza sfondo non leggeva come bersaglio. Sullo schermo

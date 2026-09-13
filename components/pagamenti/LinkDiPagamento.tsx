@@ -85,8 +85,8 @@ const PaymentRow: React.FC<{
         inGroup
           ? active ? 'bg-[var(--ds-surface-row)]' : 'hover:bg-[var(--ds-surface-row)]'
           : active
-            ? 'rounded-[16px] bg-[var(--ds-surface-row)] shadow-[var(--ds-shadow-card)]'
-            : 'rounded-[16px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] hover:bg-[var(--ds-surface-row)]'
+            ? 'rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] shadow-[var(--ds-shadow-card)]'
+            : 'rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] hover:bg-[var(--ds-surface-row)]'
       }`}
     >
       {/* The state, before the number. Scanning this list is looking for the
@@ -94,7 +94,7 @@ const PaymentRow: React.FC<{
           at the left edge answers that in one pass down the column, where a
           pill on the right edge makes the eye cross every row to find it. The
           pill stays: colour alone is not a label. */}
-      <span className={`inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[12px] ${STATUS_TILE[status.tone]}`}>
+      <span className={`inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] ${STATUS_TILE[status.tone]}`}>
         <StatusIcon className="h-4 w-4" />
       </span>
       <span className="min-w-0 flex-1">
@@ -242,7 +242,7 @@ export const LinkDiPagamento: React.FC<{
                 return (
                   <div
                     key={`bill-${day.key}-${group.billId}`}
-                    className="overflow-hidden rounded-[16px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]"
+                    className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]"
                   >
                     {/* Two lines, not one: the table, the customer, the running
                         total and the bar do not fit across a pane this wide. */}

@@ -48,7 +48,7 @@ const QueueRow: React.FC<{
     // dentro un bottone è markup non valido e in Safari quello interno smette
     // di funzionare.
     <div
-      className={`flex items-stretch gap-3 overflow-hidden rounded-[20px] ${
+      className={`flex items-stretch gap-3 overflow-hidden rounded-[var(--ds-radius)] ${
         past ? 'bg-[var(--ds-surface-row)]' : 'bg-[var(--ds-pending-tint)]'
       }`}
     >
@@ -59,7 +59,7 @@ const QueueRow: React.FC<{
       >
         {/* Il numero del tavolo è l'identificatore: si cerca quello, non il
             nome dell'ospite. */}
-        <span className="flex h-12 w-12 flex-shrink-0 flex-col items-center justify-center rounded-[14px] bg-[var(--ds-surface)] sm:h-14 sm:w-14">
+        <span className="flex h-12 w-12 flex-shrink-0 flex-col items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-surface)] sm:h-14 sm:w-14">
           <span className="text-[17px] font-semibold leading-none tracking-[-0.01em] text-[var(--ds-text-primary)] sm:text-[19px]">
             {bill.table_name ?? '—'}
           </span>
@@ -112,7 +112,7 @@ const JumpCard: React.FC<{ label: string; onClick: () => void }> = ({ label, onC
   <button
     type="button"
     onClick={onClick}
-    className="flex min-h-[56px] flex-1 items-center justify-between gap-3 rounded-[20px] bg-[var(--ds-surface)] px-4 text-left text-[15px] font-medium text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+    className="flex min-h-[56px] flex-1 items-center justify-between gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-4 text-left text-[15px] font-medium text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
   >
     {label}
     <ArrowRight size={18} className="flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />

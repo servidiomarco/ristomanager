@@ -56,11 +56,11 @@ export const TableAssignmentAiPromptCard: React.FC<Props> = ({ showToast }) => {
   };
 
   return (
-    <details className="group bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden"
+    <details className="group bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden"
       open={expanded} onToggle={e => setExpanded((e.target as HTMLDetailsElement).open)}>
       <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)] flex-shrink-0">
+          <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)] flex-shrink-0">
             <Wand2 className="w-5 h-5" />
           </div>
           <div className="min-w-0">
@@ -77,7 +77,7 @@ export const TableAssignmentAiPromptCard: React.FC<Props> = ({ showToast }) => {
         ) : (
           <>
             {!canEdit && (
-              <div className="mb-4 text-[13px] text-[var(--ds-text-muted)] bg-[var(--ds-surface-row)] rounded-lg p-3">
+              <div className="mb-4 text-[13px] text-[var(--ds-text-muted)] bg-[var(--ds-surface-row)] rounded-[var(--ds-radius)] p-3">
                 Solo in lettura: la modifica richiede il permesso di gestione impostazioni.
               </div>
             )}
@@ -88,14 +88,14 @@ export const TableAssignmentAiPromptCard: React.FC<Props> = ({ showToast }) => {
               disabled={!canEdit}
               rows={8}
               placeholder={'Es: privilegia i tavoli vicino alla vetrata per i gruppi oltre 6 persone; non assegnare il tavolo 12 dopo le 21:00; per gli habitué usa sempre il tavolo preferito se libero…'}
-              className="w-full text-[13px] rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 py-2 resize-y focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+              className="w-full text-[13px] rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 py-2 resize-y focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
             />
             <p className="text-[12px] text-[var(--ds-text-muted)] mt-1">{prompt.length}/{PROMPT_MAX}</p>
 
             {canEdit && (
               <div className="flex items-center gap-2 mt-3">
                 <button onClick={handleSave} disabled={saving}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[14px] font-medium hover:opacity-90 disabled:opacity-50">
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[14px] font-medium hover:opacity-90 disabled:opacity-50">
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                   {saving ? 'Salvataggio…' : 'Salva'}
                 </button>

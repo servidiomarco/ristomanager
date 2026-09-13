@@ -1209,7 +1209,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       onTouchEnd={handleTouchEnd}
     >
       {/* Mobile: Date + Shift Picker (controls per-shift merge scope) */}
-      <div className="md:hidden flex flex-wrap items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)] sm:px-4 z-20">
+      <div className="md:hidden flex flex-wrap items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)] sm:px-4 z-20">
         <DateNavigator
           value={selectedDate}
           onChange={setSelectedDate}
@@ -1266,7 +1266,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       </div>
 
       {/* Toolbar */}
-      <div className="rounded-[20px] bg-[var(--ds-surface)] p-3 sm:p-4 shadow-[var(--ds-shadow-card)] flex flex-wrap items-center justify-between gap-2 sm:gap-4 z-20">
+      <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 sm:p-4 shadow-[var(--ds-shadow-card)] flex flex-wrap items-center justify-between gap-2 sm:gap-4 z-20">
         <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide w-full sm:flex-1 sm:min-w-0 pb-1">
           {rooms.map(room => (
             <button
@@ -1366,10 +1366,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           <div className="h-6 w-px bg-[var(--ds-border)] mx-1"></div>
 
           <button onClick={() => handleAddTable(TableShape.RECTANGLE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title="Rettangolo">
-            <div className="w-6 h-4 border-2 border-current rounded-sm" />
+            <div className="w-6 h-4 border-2 border-current rounded-[var(--ds-radius-sm)]" />
           </button>
           <button onClick={() => handleAddTable(TableShape.SQUARE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title="Quadrato">
-            <div className="w-4 h-4 border-2 border-current rounded-sm" />
+            <div className="w-4 h-4 border-2 border-current rounded-[var(--ds-radius-sm)]" />
           </button>
           <button onClick={() => handleAddTable(TableShape.CIRCLE)} className={`${dsIconButton} bg-[var(--ds-surface-row)] shadow-none`} title="Tondo">
              <div className="w-4 h-4 border-2 border-current rounded-full" />
@@ -1416,7 +1416,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                       onClick={() => setRoomClosureMenuOpen(false)}
                     />
                     <div
-                      className="fixed z-[61] w-72 overflow-hidden rounded-[16px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]"
+                      className="fixed z-[61] w-72 overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]"
                       style={{
                         top: roomClosureAnchor.bottom + 4,
                         left: Math.max(8, Math.min(roomClosureAnchor.right - 288, window.innerWidth - 296)),
@@ -1665,7 +1665,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       {/* Canvas */}
       <div
         ref={canvasRef}
-        className={`flex-1 bg-[var(--ds-canvas)] rounded-[20px] border border-dashed border-[var(--ds-border-strong)] relative overflow-hidden ${isSelectionMode ? 'cursor-crosshair' : 'cursor-default'}`}
+        className={`flex-1 bg-[var(--ds-canvas)] rounded-[var(--ds-radius)] border border-dashed border-[var(--ds-border-strong)] relative overflow-hidden ${isSelectionMode ? 'cursor-crosshair' : 'cursor-default'}`}
         onClick={() => !isSelectionMode && setSelectedTables([])}
         style={{
             backgroundImage: 'radial-gradient(var(--floor-dot) 1px, transparent 1px)',
@@ -1685,7 +1685,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 in the same room are visually distinct. */}
             {floorLabels.hulls.map((h, i) => (
               <div key={`hull-${h.banquetId}-${i}`}
-                className={`${floorLabels.banquetColorByBanquetId.get(h.banquetId) || 'banquet-color-0'} absolute rounded-2xl border border-[var(--ds-banquet-border)] bg-[var(--ds-banquet-bg)] pointer-events-none`}
+                className={`${floorLabels.banquetColorByBanquetId.get(h.banquetId) || 'banquet-color-0'} absolute rounded-[var(--ds-radius)] border border-[var(--ds-banquet-border)] bg-[var(--ds-banquet-bg)] pointer-events-none`}
                 style={{ left: h.box.x, top: h.box.y, width: h.box.w, height: h.box.h, zIndex: 0 }} />
             ))}
             {currentTables.map(renderTableShape)}
@@ -1704,7 +1704,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
           {isLoadingMerges && (
               <div className="absolute inset-0 z-30 bg-[var(--ds-canvas)]/70 backdrop-blur-[1px] flex items-center justify-center">
-                  <div className="flex items-center gap-2 px-4 py-2 bg-[var(--ds-surface)] rounded-[16px] shadow-[var(--ds-shadow-card)]">
+                  <div className="flex items-center gap-2 px-4 py-2 bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)]">
                       <Loader label="Caricamento tavoli…" size={40} />
                   </div>
               </div>
@@ -1749,14 +1749,14 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             </button>
             {isLegendOpen && (
                 <div
- className="absolute bottom-full right-0 mb-2 w-56 bg-[var(--ds-surface)] p-4 rounded-[16px] shadow-[var(--ds-shadow-raised)] text-[13px] space-y-2 duration-150"
+ className="absolute bottom-full right-0 mb-2 w-56 bg-[var(--ds-surface)] p-4 rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)] text-[13px] space-y-2 duration-150"
                     onClick={(e) => e.stopPropagation()}
                 >
                     <div className="text-[13px] font-semibold text-[var(--ds-text-muted)] mb-1">Legenda stato</div>
                     {(['libera', 'attesa', 'inarrivo', 'arrivato', 'uscita', 'noshow'] as TableDisplayStatus[]).map(s => (
                         <div key={s} className="flex items-center gap-2 text-[var(--ds-text-secondary)]">
                             <div
-                                className={`w-3 h-3 rounded-sm border ${s === 'inarrivo' ? 'motion-safe:animate-pulse' : ''}`}
+                                className={`w-3 h-3 rounded-[var(--ds-radius-sm)] border ${s === 'inarrivo' ? 'motion-safe:animate-pulse' : ''}`}
                                 style={{ background: `var(--tg-${s}-bg)`, borderColor: `var(--tg-${s}-stroke)` }}
                             ></div>
                             {TABLE_STATUS_LABEL[s]}

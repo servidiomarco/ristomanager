@@ -109,7 +109,7 @@ export const ToastCard: React.FC<{
   return (
     <div
       role={tone === 'error' ? 'alert' : 'status'}
-      className="pointer-events-auto w-full max-w-md rounded-[24px] bg-[var(--ds-action-bg)] py-3 pl-4 pr-3 shadow-[var(--ds-shadow-raised)]"
+      className="pointer-events-auto w-full max-w-md rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] py-3 pl-4 pr-3 shadow-[var(--ds-shadow-raised)]"
       style={{ animation: 'tileIn 200ms ease-out both' }}
     >
       <div className="flex items-start gap-3">

@@ -219,7 +219,7 @@ export const RoadmapPage: React.FC = () => {
           return (
             <section
               key={phase.key}
-              className="mx-auto w-full max-w-3xl rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]"
+              className="mx-auto w-full max-w-3xl rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]"
             >
               {/* Header fase: il numero d'ordine è informazione vera (le fasi
                   vanno in sequenza), non decorazione. */}
@@ -267,7 +267,7 @@ export const RoadmapPage: React.FC = () => {
                   return (
                     <div
                       key={task.id}
-                      className="group rounded-[14px] bg-[var(--ds-surface-row)] px-3 py-2.5 transition-colors hover:bg-[var(--ds-border)]"
+                      className="group rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-2.5 transition-colors hover:bg-[var(--ds-border)]"
                     >
                       <div className="flex items-start gap-2.5">
                         {/* Toggle fatto: per i task manuali è l'azione primaria;
@@ -360,7 +360,7 @@ export const RoadmapPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setEditDraft({ id: null, title: '', description: '', phase_key: phase.key, claude_prompt: '', result_note: '' })}
-                    className="w-full rounded-[14px] border border-dashed border-[var(--ds-border-strong)] px-3 py-4 text-[13px] text-[var(--ds-text-muted)] transition-colors hover:border-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]"
+                    className="w-full rounded-[var(--ds-radius)] border border-dashed border-[var(--ds-border-strong)] px-3 py-4 text-[13px] text-[var(--ds-text-muted)] transition-colors hover:border-[var(--ds-text-muted)] hover:text-[var(--ds-text-primary)]"
                   >
                     Nessun task — aggiungi il primo
                   </button>

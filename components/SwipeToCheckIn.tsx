@@ -111,7 +111,7 @@ export const SwipeToCheckIn: React.FC<SwipeToCheckInProps> = ({ enabled, onConfi
       {/* Underlay — revealed as the card slides right */}
       {dx > 0 && (
         <div
-          className={`absolute inset-0 rounded-2xl flex items-center pl-5 gap-2.5 transition-colors ${
+          className={`absolute inset-0 rounded-[var(--ds-radius)] flex items-center pl-5 gap-2.5 transition-colors ${
             armed ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-seated-solid)]/70'
           }`}
           aria-hidden="true"

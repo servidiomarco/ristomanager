@@ -197,7 +197,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
           <Loader label="Caricamento…" size={40} />
         </div>
       ) : error ? (
-        <div role="alert" className="rounded-[16px] bg-[var(--ds-critical-tint)] px-4 py-3 text-[14px] text-[var(--ds-critical-text)]">
+        <div role="alert" className="rounded-[var(--ds-radius)] bg-[var(--ds-critical-tint)] px-4 py-3 text-[14px] text-[var(--ds-critical-text)]">
           {error}
         </div>
       ) : (
@@ -223,7 +223,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
           </div>
 
           {selectedRole === 'OWNER' && (
-            <div className="mb-6 flex items-start gap-2.5 rounded-[16px] bg-[var(--ds-pending-tint)] p-4 text-[14px] leading-relaxed text-[var(--ds-pending-text)]">
+            <div className="mb-6 flex items-start gap-2.5 rounded-[var(--ds-radius)] bg-[var(--ds-pending-tint)] p-4 text-[14px] leading-relaxed text-[var(--ds-pending-text)]">
               <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden />
               <span>Il ruolo Proprietario ha sempre tutti i permessi e non può essere modificato.</span>
             </div>
@@ -232,7 +232,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
           {/* Permissions grid */}
           <div className="space-y-3">
             {features.map(feature => (
-              <div key={feature.feature} className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+              <div key={feature.feature} className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
                 <div className="border-b border-[var(--ds-border)] px-4 py-2.5">
                   <h3 className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">{feature.feature}</h3>
                 </div>

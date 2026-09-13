@@ -64,11 +64,11 @@ export const StaffChatPresetsCard: React.FC<Props> = ({ showToast }) => {
   };
 
   return (
-    <details className="group bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden"
+    <details className="group bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden"
       open={expanded} onToggle={e => setExpanded((e.target as HTMLDetailsElement).open)}>
       <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden hover:bg-[var(--ds-surface-row)] transition-colors">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)] flex-shrink-0">
+          <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center text-[var(--ds-text-primary)] flex-shrink-0">
             <MessagesSquare className="w-5 h-5" />
           </div>
           <div className="min-w-0">
@@ -85,7 +85,7 @@ export const StaffChatPresetsCard: React.FC<Props> = ({ showToast }) => {
         ) : (
           <div className="space-y-3 pt-2">
             {!canEdit && (
-              <p className="text-[13px] text-[var(--ds-text-muted)] bg-[var(--ds-surface-row)] rounded-lg p-3">
+              <p className="text-[13px] text-[var(--ds-text-muted)] bg-[var(--ds-surface-row)] rounded-[var(--ds-radius)] p-3">
                 Serve il permesso impostazioni per modificarli.
               </p>
             )}

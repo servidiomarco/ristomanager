@@ -366,7 +366,7 @@ const TenantCard: React.FC<{
   };
 
   return (
-    <div className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5">
+    <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-[16px] font-semibold tracking-[-0.01em] text-[var(--ds-text-primary)]">{tenant.name}</h3>
         <StatusPill tone={suspended ? 'critical' : 'positive'}>{suspended ? 'sospeso' : 'attivo'}</StatusPill>
@@ -406,7 +406,7 @@ const TenantCard: React.FC<{
           niente scatto diretto della chip — stessa forma della conferma di
           sospensione. */}
       {pendingAddon && (
-        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
           <p className="min-w-0 flex-1 text-[14px] text-[var(--ds-text-primary)]">
             {tenant.features.includes(pendingAddon)
               ? `Rimuovere «${FEATURE_LABEL[pendingAddon]}» dall'abbonamento? Il credito residuo viene prorato.`
@@ -427,7 +427,7 @@ const TenantCard: React.FC<{
           per funzionalità. Una chip accesa = voce col lucchetto nella matrice
           del tenant; «revoca anche ai ruoli» è l'isolamento in un gesto. */}
       {locksOpen && (
-        <div className="mt-3 rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+        <div className="mt-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
           <p className="text-[13px] font-semibold text-[var(--ds-text-secondary)]">Permessi riservati alla piattaforma</p>
           <p className="mt-0.5 text-[13px] text-[var(--ds-text-muted)]">La matrice del tenant li mostra col lucchetto e non può toccarli.</p>
           <div className="mt-3 space-y-2.5">
@@ -483,7 +483,7 @@ const TenantCard: React.FC<{
       {/* Azioni. La conferma di sospensione è inline: prende il posto della
           riga, niente window.confirm. */}
       {confirmingStatus ? (
-        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
           <p className="min-w-0 flex-1 text-[14px] text-[var(--ds-text-primary)]">
             {suspended
               ? `Riattivare ${tenant.name}?`
@@ -787,7 +787,7 @@ export const PlatformPanel: React.FC<{ showToast: ShowToast }> = ({ showToast })
           {loading && (
             <div className="space-y-3">
               {[0, 1, 2].map(i => (
-                <div key={i} className="h-36 animate-pulse rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]" />
+                <div key={i} className="h-36 animate-pulse rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]" />
               ))}
             </div>
           )}

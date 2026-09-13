@@ -104,7 +104,7 @@ export const BlacklistPolicyManager: React.FC<Props> = ({ showToast }) => {
                             onChange={e => setDraft(prev => ({ ...prev, [s.key]: e.target.value as BlacklistBehavior }))}
                             disabled={!canEdit || saving}
                             aria-label={`Comportamento blacklist per ${s.label}`}
-                            className="w-56 flex-shrink-0 px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                            className="w-56 flex-shrink-0 px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                         >
                             <option value="block">Blocca la prenotazione</option>
                             <option value="warn">Consenti con avviso</option>

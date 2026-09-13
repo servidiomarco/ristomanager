@@ -155,7 +155,7 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
                         value={perPersonInput}
                         onChange={(e) => setPerPersonInput(e.target.value)}
                         disabled={!canEdit || saving || !effectiveEnabled}
-                        className="w-24 px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                        className="w-24 px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                     />
                     <span className="text-[12px] text-[var(--ds-text-muted)]">a persona</span>
                 </div>
@@ -178,7 +178,7 @@ export const AutoDepositManager: React.FC<Props> = ({ showToast }) => {
                         value={minGuestsInput}
                         onChange={(e) => setMinGuestsInput(e.target.value)}
                         disabled={!canEdit || saving || !effectiveEnabled}
-                        className="w-24 px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                        className="w-24 px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                     />
                     <span className="text-[12px] text-[var(--ds-text-muted)]">coperti o più</span>
                 </div>

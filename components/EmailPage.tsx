@@ -121,7 +121,7 @@ const EmailHtmlBody: React.FC<{ html: string }> = ({ html }) => {
       sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
       onLoad={handleLoad}
       style={{ height: `${height}px` }}
-      className="w-full rounded-[12px] border-0 bg-white"
+      className="w-full rounded-[var(--ds-radius)] border-0 bg-white"
       title="Contenuto email"
     />
   );
@@ -518,7 +518,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
   ));
 
   const renderLibreria = () => (
-    <div className="rounded-[14px] border border-[var(--ds-border)] bg-[var(--ds-surface-row)] px-3 py-2.5">
+    <div className="rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-row)] px-3 py-2.5">
       {libreria === null ? (
         <p className="flex items-center gap-2 py-1 text-[13px] text-[var(--ds-text-muted)]">
           <Loader2 className="h-3.5 w-3.5 animate-spin" /> Carico la libreria…
@@ -535,7 +535,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                 type="button"
                 onClick={() => handleAllegaDallaLibreria(f)}
                 disabled={uploading}
-                className="flex w-full items-center gap-2.5 rounded-[10px] px-2 py-2 text-left transition-colors hover:bg-[var(--ds-surface)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                className="flex w-full items-center gap-2.5 rounded-[var(--ds-radius)] px-2 py-2 text-left transition-colors hover:bg-[var(--ds-surface)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
               >
                 <Paperclip className="h-3.5 w-3.5 flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
                 <span className="min-w-0 flex-1 truncate text-[14px] text-[var(--ds-text-primary)]">{f.title}</span>
@@ -684,7 +684,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
         }
         list={
           threadsLoading ? (
-            <SkeletonInboxList count={7} className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)]" />
+            <SkeletonInboxList count={7} className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)]" />
           ) : threadsError ? (
             <Callout tone="critical" icon={AlertTriangle}>{threadsError}</Callout>
           ) : visibleThreads.length === 0 ? (
@@ -828,10 +828,10 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                         return (
                           <div key={m.id} className={`flex ${isOut ? 'justify-end' : 'justify-start'}`}>
                             <div
-                              className={`${hasHtml ? 'w-full max-w-[680px]' : 'max-w-[85%] md:max-w-[70%]'} rounded-[18px] px-4 py-3 ${
+                              className={`${hasHtml ? 'w-full max-w-[680px]' : 'max-w-[85%] md:max-w-[70%]'} rounded-[var(--ds-radius)] px-4 py-3 ${
                                 isOut
-                                  ? 'rounded-br-[6px] bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)]'
-                                  : 'rounded-bl-[6px] bg-[var(--ds-surface)] text-[var(--ds-text-primary)]'
+                                  ? 'rounded-br-[var(--ds-radius)] bg-[var(--ds-arriving-solid)] text-[var(--ds-arriving-fg)]'
+                                  : 'rounded-bl-[var(--ds-radius)] bg-[var(--ds-surface)] text-[var(--ds-text-primary)]'
                               }`}
                             >
                               <div className={`mb-1 flex items-center gap-1 text-[12px] font-medium ${isOut ? 'text-white/75' : 'text-[var(--ds-text-muted)]'}`}>
@@ -891,7 +891,7 @@ const EmailPage: React.FC<EmailPageProps> = ({ onCreateReservationFromEmail }) =
                   aria-label="Oggetto"
                   className="h-11 w-full rounded-full bg-[var(--ds-surface)] px-4 text-[15px] text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] placeholder:text-[var(--ds-text-muted)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                 />
-                <div className="rounded-[24px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
+                <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-shadow focus-within:ring-2 focus-within:ring-[var(--ds-border-focus)]">
                   {attachments.length > 0 && (
                     <div className="mb-2 flex flex-wrap gap-1.5">{renderAttachmentRows()}</div>
                   )}

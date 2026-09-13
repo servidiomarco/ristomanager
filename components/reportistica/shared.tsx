@@ -109,7 +109,7 @@ export const SectionCard: React.FC<{
   actions?: React.ReactNode;
   children: React.ReactNode;
 }> = ({ icon, title, subtitle, actions, children }) => (
-  <section className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5">
+  <section className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5">
     <header className="mb-4 flex items-start gap-3">
       <span className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]">
         {icon}
@@ -131,7 +131,7 @@ export const StatTile: React.FC<{
   hint?: string;
   delta?: React.ReactNode;
 }> = ({ icon, label, value, hint, delta }) => (
-  <div className="rounded-[16px] bg-[var(--ds-surface-row)] p-3">
+  <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
     <div className="mb-1 flex items-center gap-2 text-[13px] font-medium text-[var(--ds-text-secondary)]">
       <span className="inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-muted)]">
         {icon}
@@ -147,7 +147,7 @@ export const StatTile: React.FC<{
 );
 
 export const EmptyChart: React.FC<{ message: string }> = ({ message }) => (
-  <div className="flex h-[180px] items-center justify-center rounded-[16px] bg-[var(--ds-surface-row)] px-4 text-center text-[13px] text-[var(--ds-text-muted)]">
+  <div className="flex h-[180px] items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-4 text-center text-[13px] text-[var(--ds-text-muted)]">
     {message}
   </div>
 );

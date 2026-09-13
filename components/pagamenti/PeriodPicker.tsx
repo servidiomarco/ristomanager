@@ -183,7 +183,7 @@ export const PeriodPicker: React.FC<{
         </button>
       </div>
 
-      <div className="mt-3 rounded-[20px] bg-[var(--ds-surface)] p-4 sm:p-5">
+      <div className="mt-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 sm:p-5">
         <div className="mb-3 flex items-center justify-between gap-2">
           <button
             type="button"

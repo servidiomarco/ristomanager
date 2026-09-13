@@ -106,9 +106,9 @@ export const Sheet: React.FC<SheetProps> = ({
           in from the right on a phone both read as the wrong gesture. */}
       <div
         onClick={e => e.stopPropagation()}
-        className={`ds-sheet absolute inset-x-0 bottom-0 flex flex-col overflow-hidden bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] sm:inset-y-0 sm:left-auto sm:right-0 sm:max-h-none sm:w-[min(30rem,100vw)] sm:rounded-none sm:rounded-l-[24px] ${
+        className={`ds-sheet absolute inset-x-0 bottom-0 flex flex-col overflow-hidden bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] sm:inset-y-0 sm:left-auto sm:right-0 sm:max-h-none sm:w-[min(30rem,100vw)] sm:rounded-none sm:rounded-l-[var(--ds-radius)] ${
           // Toccando il bordo alto, la pagina deve rispettare il notch da sé.
-          fullPage ? 'top-0 rounded-none pt-[env(safe-area-inset-top)] sm:pt-0' : 'max-h-[92dvh] rounded-t-[24px]'
+          fullPage ? 'top-0 rounded-none pt-[env(safe-area-inset-top)] sm:pt-0' : 'max-h-[92dvh] rounded-t-[var(--ds-radius)]'
         }`}
       >
         {/* Grab handle — phone only. It is the affordance that says this panel

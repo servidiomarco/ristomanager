@@ -283,7 +283,7 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                     type="button"
                     disabled={disabled}
                     onClick={() => setIconPickerFor(isOpen ? null : pickerKey)}
-                    className={`w-9 h-9 rounded-md border flex items-center justify-center transition-colors ${
+                    className={`w-9 h-9 rounded-[var(--ds-radius)] border flex items-center justify-center transition-colors ${
                         currentIcon
                             ? 'border-[var(--ds-arriving-solid)] bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]'
                             : 'border-[var(--ds-border)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)]'
@@ -296,7 +296,7 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                 {isOpen && (
                     <>
                         <div className="fixed inset-0 z-[70]" onClick={() => setIconPickerFor(null)} />
-                        <div className="absolute right-0 top-full mt-1 z-[71] w-64 bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-lg shadow-[var(--ds-shadow-raised)] p-2">
+                        <div className="absolute right-0 top-full mt-1 z-[71] w-64 bg-[var(--ds-surface)] border border-[var(--ds-border)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-raised)] p-2">
                             <div className="flex items-center justify-between px-1 pb-1.5 mb-1 border-b border-[var(--ds-border)]">
                                 <span className="text-[11px] font-semibold text-[var(--ds-text-muted)]">Icona</span>
                                 <button
@@ -316,7 +316,7 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                                             key={key}
                                             type="button"
                                             onClick={() => { onPick(key); setIconPickerFor(null); }}
-                                            className={`w-9 h-9 rounded-md flex items-center justify-center transition-colors ${
+                                            className={`w-9 h-9 rounded-[var(--ds-radius)] flex items-center justify-center transition-colors ${
                                                 selected
                                                     ? 'bg-[var(--ds-arriving-tint)] text-[var(--ds-arriving-text)]'
                                                     : 'text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)]'
@@ -355,7 +355,7 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                         return (
                             <li
                                 key={d.key}
-                                className={`rounded-md border bg-[var(--ds-surface)] transition-colors ${
+                                className={`rounded-[var(--ds-radius)] border bg-[var(--ds-surface)] transition-colors ${
                                     dragOverIndex === i ? 'border-[var(--ds-arriving-solid)] bg-[var(--ds-arriving-tint)]' : 'border-[var(--ds-border)]'
                                 }`}
                             >
@@ -393,7 +393,7 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                                     <button
                                         type="button"
                                         onClick={() => toggleExpanded(d.key)}
-                                        className="p-1.5 rounded-md text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)] transition-colors"
+                                        className="p-1.5 rounded-[var(--ds-radius)] text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)] transition-colors"
                                         title={isExpanded ? 'Nascondi varianti' : 'Mostra varianti'}
                                         aria-label={isExpanded ? 'Nascondi varianti' : 'Mostra varianti'}
                                         aria-expanded={isExpanded}
@@ -407,7 +407,7 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                                         <button
                                             type="button"
                                             onClick={() => removeAt(i)}
-                                            className="p-1.5 rounded-md text-[var(--ds-critical-solid)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                                            className="p-1.5 rounded-[var(--ds-radius)] text-[var(--ds-critical-solid)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                                             title="Rimuovi"
                                             aria-label={`Rimuovi ${d.label}`}
                                         >
@@ -444,13 +444,13 @@ export const ReservationNotesManager: React.FC<Props> = ({ showToast }) => {
                         maxLength={MAX_LABEL_LENGTH}
                         onChange={(e) => setNewLabel(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addLabel(); } }}
-                        className="flex-1 rounded-md border border-[var(--ds-border)] px-3 py-1.5 text-[14px] bg-[var(--ds-surface)] focus:outline-none focus:border-[var(--ds-action-bg)]"
+                        className="flex-1 rounded-[var(--ds-radius)] border border-[var(--ds-border)] px-3 py-1.5 text-[14px] bg-[var(--ds-surface)] focus:outline-none focus:border-[var(--ds-action-bg)]"
                     />
                     <button
                         type="button"
                         onClick={addLabel}
                         disabled={!newLabel.trim() || drafts.length >= MAX_LABELS}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         <Plus className="w-4 h-4" /> Aggiungi
                     </button>
@@ -520,7 +520,7 @@ const VariantEditor: React.FC<VariantEditorProps> = ({ variants, canEdit, hint, 
                                 <button
                                     type="button"
                                     onClick={() => onRemove(i)}
-                                    className="p-1 rounded-md text-[var(--ds-critical-solid)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                                    className="p-1 rounded-[var(--ds-radius)] text-[var(--ds-critical-solid)] hover:bg-[var(--ds-critical-tint)] hover:text-[var(--ds-critical-text)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                                     title="Rimuovi variante"
                                     aria-label={`Rimuovi variante ${v.label}`}
                                 >
@@ -540,13 +540,13 @@ const VariantEditor: React.FC<VariantEditorProps> = ({ variants, canEdit, hint, 
                         maxLength={MAX_LABEL_LENGTH}
                         onChange={(e) => setPending(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commit(); } }}
-                        className="flex-1 rounded-md border border-[var(--ds-border)] px-2.5 py-1 text-[13px] bg-[var(--ds-surface)] focus:outline-none focus:border-[var(--ds-action-bg)]"
+                        className="flex-1 rounded-[var(--ds-radius)] border border-[var(--ds-border)] px-2.5 py-1 text-[13px] bg-[var(--ds-surface)] focus:outline-none focus:border-[var(--ds-action-bg)]"
                     />
                     <button
                         type="button"
                         onClick={commit}
                         disabled={!pending.trim() || variants.length >= MAX_VARIANTS}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[12px] font-medium hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[12px] font-medium hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         <Plus className="w-3.5 h-3.5" /> Aggiungi
                     </button>

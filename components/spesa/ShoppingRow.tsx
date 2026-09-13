@@ -46,7 +46,7 @@ export const ShoppingRow: React.FC<{
         aria-label={selectionMode
           ? `Seleziona ${item.name}`
           : item.checked ? `Segna ${item.name} da acquistare` : `Segna ${item.name} come preso`}
-        className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[9px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+        className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
           (selectionMode ? selected : item.checked)
             ? 'bg-[var(--ds-seated-solid)] text-[#ffffff]'
             : 'bg-[var(--ds-surface)] ring-1 ring-inset ring-[var(--ds-border-strong)]'
@@ -58,7 +58,7 @@ export const ShoppingRow: React.FC<{
       <button
         type="button"
         onClick={selectionMode ? onSelect : onEdit}
-        className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:rounded-[8px]"
+        className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] focus-visible:rounded-[var(--ds-radius)]"
       >
         <span className="flex flex-wrap items-baseline gap-x-2">
           {qty && (
@@ -120,7 +120,7 @@ export const ShoppingRow: React.FC<{
   // has to come from here or the rows lose their edges mid-selection.
   if (selectionMode) {
     return (
-      <div className="overflow-hidden rounded-[16px] shadow-[var(--ds-shadow-card)]">{body}</div>
+      <div className="overflow-hidden rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)]">{body}</div>
     );
   }
 

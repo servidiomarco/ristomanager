@@ -229,7 +229,7 @@ export const ComandaSheet: React.FC<ComandaSheetProps> = ({
                 {g.lines.map(l => (
                   <div
                     key={l.key}
-                    className="flex items-center gap-3 rounded-[16px] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)]"
+                    className="flex items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)]"
                   >
                     <span className="w-8 flex-shrink-0 text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">
                       {l.qty}×

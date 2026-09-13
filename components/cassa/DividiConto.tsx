@@ -101,7 +101,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="mx-auto w-full max-w-[900px] flex-shrink-0 px-4 pb-3 pt-4 lg:px-8">
-        <div className="flex items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
+        <div className="flex items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
           <button
             type="button"
             onClick={onBack}
@@ -124,7 +124,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
           <button
             type="button"
             onClick={() => setMode('equal')}
-            className={`rounded-[20px] p-4 text-left transition-colors ${
+            className={`rounded-[var(--ds-radius)] p-4 text-left transition-colors ${
               mode === 'equal'
                 ? 'bg-[var(--ds-arriving-tint)] ring-2 ring-[var(--ds-arriving-solid)]'
                 : 'bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] hover:bg-[var(--ds-surface-row)]'
@@ -140,7 +140,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
           <button
             type="button"
             onClick={() => setMode('amount')}
-            className={`rounded-[20px] p-4 text-left transition-colors ${
+            className={`rounded-[var(--ds-radius)] p-4 text-left transition-colors ${
               mode === 'amount'
                 ? 'bg-[var(--ds-arriving-tint)] ring-2 ring-[var(--ds-arriving-solid)]'
                 : 'bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] hover:bg-[var(--ds-surface-row)]'
@@ -157,7 +157,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
             <button
               type="button"
               onClick={() => setMode('items')}
-              className={`rounded-[20px] p-4 text-left transition-colors ${
+              className={`rounded-[var(--ds-radius)] p-4 text-left transition-colors ${
                 mode === 'items'
                   ? 'bg-[var(--ds-arriving-tint)] ring-2 ring-[var(--ds-arriving-solid)]'
                   : 'bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] hover:bg-[var(--ds-surface-row)]'
@@ -174,7 +174,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
           )}
         </div>
 
-        <section className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+        <section className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
           {mode === 'equal' ? (
             <div className="flex items-center gap-3">
               <span className="text-[14px] text-[var(--ds-text-secondary)]">Persone</span>
@@ -209,7 +209,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
                 const remaining = it.qty - taken;
                 if (remaining <= 0) {
                   return (
-                    <div key={ix} className="flex min-h-[44px] items-center gap-3 rounded-[14px] bg-[var(--ds-surface-row)] px-3 py-1.5 opacity-60">
+                    <div key={ix} className="flex min-h-[44px] items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-1.5 opacity-60">
                       <span className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-border-strong)] text-white">
                         <Check size={12} />
                       </span>
@@ -228,7 +228,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
                 return (
                   <div
                     key={ix}
-                    className={`flex items-center gap-2 rounded-[14px] px-3 py-1.5 transition-colors ${
+                    className={`flex items-center gap-2 rounded-[var(--ds-radius)] px-3 py-1.5 transition-colors ${
                       units > 0 ? 'bg-[var(--ds-arriving-tint)]' : 'bg-[var(--ds-surface-row)]'
                     }`}
                   >
@@ -295,13 +295,13 @@ export const DividiConto: React.FC<DividiContoProps> = ({
                   type="text" inputMode="decimal" value={amount} autoFocus
                   onChange={e => setAmount(e.target.value)}
                   placeholder={(residualCents / 100).toFixed(2)}
-                  className="h-12 w-full rounded-xl border border-[var(--ds-border)] bg-[var(--ds-surface-2)] pl-8 pr-3 text-right text-[17px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]"
+                  className="h-12 w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-2)] pl-8 pr-3 text-right text-[17px] tabular-nums text-[var(--ds-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--ds-border-focus)]"
                 />
               </div>
             </label>
           )}
 
-          <div className="mt-4 flex items-center justify-between gap-3 rounded-[14px] bg-[var(--ds-surface-row)] p-3">
+          <div className="mt-4 flex items-center justify-between gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-3">
             <div className="min-w-0">
               <div className="text-[15px] font-semibold text-[var(--ds-text-primary)]">
                 Quota corrente · {euro(chosen)}
@@ -327,7 +327,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
           <section className="space-y-2">
             <div className="text-[13px] font-semibold text-[var(--ds-text-muted)]">Quote di questo conto</div>
             {bill.paid_splits > 0 && (
-              <div className="flex items-center justify-between gap-2 rounded-[14px] bg-[var(--ds-seated-tint)] px-3 py-2.5">
+              <div className="flex items-center justify-between gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-seated-tint)] px-3 py-2.5">
                 <span className="min-w-0 truncate text-[14px] text-[var(--ds-seated-text)]">
                   {bill.paid_splits === 1 ? '1 quota pagata al tavolo col QR' : `${bill.paid_splits} quote pagate al tavolo col QR`}
                 </span>
@@ -335,7 +335,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
               </div>
             )}
             {claimed > 0 && (
-              <div className="flex items-center justify-between gap-2 rounded-[14px] bg-[var(--ds-pending-tint)] px-3 py-2.5">
+              <div className="flex items-center justify-between gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-pending-tint)] px-3 py-2.5">
                 <span className="min-w-0 truncate text-[14px] text-[var(--ds-pending-text)]">
                   {euro(claimed)} prenotati dal telefono di un ospite
                 </span>
@@ -345,7 +345,7 @@ export const DividiConto: React.FC<DividiContoProps> = ({
             {deposit > 0 && (
               // La caparra è una quota nel modello ma non è il claim di un
               // cliente: sta in fondo, come nota, non in mezzo alle altre.
-              <div className="flex items-center justify-between gap-2 rounded-[14px] bg-[var(--ds-surface-row)] px-3 py-2.5">
+              <div className="flex items-center justify-between gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] px-3 py-2.5">
                 <span className="min-w-0 truncate text-[14px] text-[var(--ds-text-secondary)]">
                   Caparra della prenotazione
                 </span>

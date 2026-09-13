@@ -151,7 +151,7 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
 
     if (loading) {
         return (
-            <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] p-4 flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
+            <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] p-4 flex items-center gap-2 text-[13px] text-[var(--ds-text-muted)]">
                 <Loader label="Caricamento…" size={40} />
             </div>
         );
@@ -160,9 +160,9 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
         // Endpoint mancante / errore di rete: mostriamo comunque la card così
         // l'operatore capisce perché non funziona (backend da riavviare, ecc.).
         return (
-            <div className="bg-[var(--ds-surface)] rounded-lg border border-[var(--ds-border)] p-4">
+            <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] border border-[var(--ds-border)] p-4">
                 <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0">
+                    <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0">
                         <Inbox className="w-5 h-5 text-[var(--ds-text-primary)]" />
                     </div>
                     <div className="min-w-0">
@@ -177,7 +177,7 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
     }
 
     return (
-        <div className="bg-[var(--ds-surface)] rounded-[20px] shadow-[var(--ds-shadow-card)] overflow-hidden">
+        <div className="bg-[var(--ds-surface)] rounded-[var(--ds-radius)] shadow-[var(--ds-shadow-card)] overflow-hidden">
             <button
                 type="button"
                 onClick={() => setExpanded((v) => !v)}
@@ -185,7 +185,7 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
                 className="w-full flex items-center justify-between gap-3 p-4 text-left hover:bg-[var(--ds-surface-row)] transition-colors"
             >
                 <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-md bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0">
+                    <div className="w-10 h-10 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] flex items-center justify-center flex-shrink-0">
                         <Inbox className="w-5 h-5 text-[var(--ds-text-primary)]" />
                     </div>
                     <div className="min-w-0">
@@ -249,7 +249,7 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                 disabled={!canEdit || saving}
                                 autoComplete="off"
                                 spellCheck={false}
-                                className="w-full px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                                className="w-full px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                             />
                         </div>
                         <div>
@@ -262,7 +262,7 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                 onChange={(e) => setPortInput(e.target.value)}
                                 placeholder="993"
                                 disabled={!canEdit || saving}
-                                className="w-full px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                                className="w-full px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                             />
                         </div>
                     </div>
@@ -276,7 +276,7 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                     : 'STARTTLS (di solito porta 143).'}
                             </p>
                         </div>
-                        <div className="inline-flex rounded-md border border-[var(--ds-border)] overflow-hidden text-[12px] font-medium">
+                        <div className="inline-flex rounded-[var(--ds-radius)] border border-[var(--ds-border)] overflow-hidden text-[12px] font-medium">
                             <button
                                 type="button"
                                 onClick={() => canEdit && setSecureInput(false)}
@@ -314,7 +314,7 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             disabled={!canEdit || saving}
                             autoComplete="off"
                             spellCheck={false}
-                            className="w-full px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                            className="w-full px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                         />
                     </div>
 
@@ -329,7 +329,7 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
                                 disabled={!canEdit || saving}
                                 autoComplete="new-password"
                                 spellCheck={false}
-                                className="w-full pr-10 px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                                className="w-full pr-10 px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] placeholder:text-[var(--ds-text-subtle)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                             />
                             <button
                                 type="button"
@@ -364,7 +364,7 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             type="button"
                             onClick={handleTest}
                             disabled={!canEdit || testing || !status.configured}
-                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-medium text-[var(--ds-text-primary)] hover:bg-[var(--ds-surface-row)] disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {testing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plug className="w-4 h-4" />}
                             Test connessione
@@ -373,7 +373,7 @@ export const ImapIntegrationCard: React.FC<Props> = ({ showToast }) => {
                             type="button"
                             onClick={handleSave}
                             disabled={!canEdit || saving || !hasChanges}
-                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-[var(--ds-radius)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] text-[13px] font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                             Salva

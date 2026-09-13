@@ -126,7 +126,7 @@ export const NotificationsPanel: React.FC<{
       role="dialog"
       aria-label="Notifiche"
       style={{ top: at.top, left: at.left, width: PANEL_WIDTH, maxHeight: 'min(70vh, 620px)' }}
-      className="fixed z-[60] flex flex-col overflow-hidden rounded-[24px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]"
+      className="fixed z-[60] flex flex-col overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]"
     >
       <div className="flex-shrink-0 space-y-3 p-4">
         <div className="flex items-center justify-between gap-3">

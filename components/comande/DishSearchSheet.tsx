@@ -105,7 +105,7 @@ export const DishSearchSheet: React.FC<DishSearchSheetProps> = ({
         </div>
 
         {showResultsPanel && (
-          <div className="mt-2 min-h-0 flex-shrink overflow-y-auto rounded-[20px] bg-[var(--ds-surface)] py-1 shadow-[var(--ds-shadow-raised)] sm:max-h-[min(60vh,30rem)]">
+          <div className="mt-2 min-h-0 flex-shrink overflow-y-auto rounded-[var(--ds-radius)] bg-[var(--ds-surface)] py-1 shadow-[var(--ds-shadow-raised)] sm:max-h-[min(60vh,30rem)]">
             {showEmpty && (
               <div className="px-6 py-12 text-center text-[14px] text-[var(--ds-text-muted)] sm:py-10 sm:text-[13px]">
                 Nessun piatto per <span className="font-medium text-[var(--ds-text-primary)]">"{query.trim()}"</span>.
@@ -123,7 +123,7 @@ export const DishSearchSheet: React.FC<DishSearchSheetProps> = ({
                   <button
                     type="button"
                     onClick={() => { onAdd(d); if (tapOpensSheet(d.id)) onClose(); }}
-                    className={`mx-3 flex min-h-[52px] w-[calc(100%-1.5rem)] items-center gap-3 rounded-[14px] py-2.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                    className={`mx-3 flex min-h-[52px] w-[calc(100%-1.5rem)] items-center gap-3 rounded-[var(--ds-radius)] py-2.5 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                       d.photo_url ? 'pl-[60px] pr-3' : 'px-3'
                     }`}
                   >
@@ -147,7 +147,7 @@ export const DishSearchSheet: React.FC<DishSearchSheetProps> = ({
                       type="button"
                       onClick={() => setPhotoDish(d)}
                       aria-label={`Foto di ${d.name}`}
-                      className="absolute left-4 top-1/2 h-11 w-11 -translate-y-1/2 overflow-hidden rounded-[12px] bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      className="absolute left-4 top-1/2 h-11 w-11 -translate-y-1/2 overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                     >
                       <img src={d.photo_url} alt="" loading="lazy" className="h-full w-full object-cover" />
                     </button>

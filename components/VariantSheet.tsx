@@ -547,7 +547,7 @@ export const VariantSheet: React.FC<{
                 // legge senza riaprire niente. Per i multipli il conteggio.
                 const singlePick = single ? g.modifiers.find(m => (selected.get(m.id) ?? 0) > 0) : undefined;
                 return (
-                  <div key={g.id} className="overflow-hidden rounded-[16px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+                  <div key={g.id} className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
                     {required ? (
                       <div className="flex min-h-[52px] items-center gap-1.5 px-4">
                         <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
@@ -617,7 +617,7 @@ export const VariantSheet: React.FC<{
         const open = openGroupId === 'vino';
         const calici = pairedWines.reduce((s, w) => s + (wineQty?.(w.id) ?? 0), 0);
         return (
-          <div className="overflow-hidden rounded-[16px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+          <div className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
             <button
               type="button"
               onClick={() => setOpenGroupId(prev => prev === 'vino' ? null : 'vino')}

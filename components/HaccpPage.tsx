@@ -85,7 +85,7 @@ const CardHeader: React.FC<CardHeaderProps> = ({ title, icon, status }) => (
 );
 
 const Card: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <section className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5">
+  <section className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)] sm:p-5">
     {children}
   </section>
 );
@@ -756,7 +756,7 @@ const CleaningRow: React.FC<CleaningRowProps> = ({
           aria-label={done ? 'Segna come non eseguito' : 'Segna come eseguito'}
         >
           <span
-            className={`flex h-6 w-6 items-center justify-center rounded-[8px] transition-colors ${
+            className={`flex h-6 w-6 items-center justify-center rounded-[var(--ds-radius)] transition-colors ${
               done
                 ? 'bg-[var(--ds-seated-solid)] text-white'
                 : 'bg-[var(--ds-surface-row)] text-transparent ring-1 ring-inset ring-[var(--ds-border-strong)]'

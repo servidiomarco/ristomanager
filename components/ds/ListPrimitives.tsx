@@ -127,7 +127,7 @@ export const PaneHeader: React.FC<{
   // Horizontal padding matches the page ramp used elsewhere in the app, so the
   // detail column lines up with everything else rather than hugging its edge.
   <div className="flex-shrink-0 px-4 pb-4 pt-4 sm:px-6 lg:px-8">
-    <div className="flex items-center gap-3 rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
+    <div className="flex items-center gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)]">
       {onBack && (
         <button
           type="button"
@@ -365,7 +365,7 @@ export const SectionHeader: React.FC<{
       // The bottom margin only applies while the group is open, where it buys
       // air before the first card. Collapsed, consecutive headers should stack
       // tightly — an extra gap there would read as a missing group.
-      className={`-mx-1 flex min-h-[44px] w-full items-center gap-2 rounded-[14px] border border-[var(--ds-border)] bg-[var(--ds-surface-row)] px-3 py-1.5 text-left transition-colors hover:border-[var(--ds-border-strong)] hover:bg-[var(--ds-border)] active:bg-[var(--ds-border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+      className={`-mx-1 flex min-h-[44px] w-full items-center gap-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface-row)] px-3 py-1.5 text-left transition-colors hover:border-[var(--ds-border-strong)] hover:bg-[var(--ds-border)] active:bg-[var(--ds-border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
         expanded ? 'mb-2.5' : ''
       }`}
     >
@@ -458,7 +458,7 @@ export const StatStrip: React.FC<{
   return (
     <div
       className={`flex items-stretch overflow-hidden bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] ${
-        stacked ? 'rounded-[20px]' : 'rounded-full'
+        stacked ? 'rounded-[var(--ds-radius)]' : 'rounded-full'
       } ${className}`}
     >
       {stats.map((s, i) => {
@@ -559,7 +559,7 @@ export const Callout: React.FC<{
   className?: string;
   children: React.ReactNode;
 }> = ({ tone, icon: Icon, title, action, className = '', children }) => (
-  <div className={`flex items-start gap-2.5 rounded-[16px] p-4 text-[14px] leading-relaxed ${CALLOUT_TONE[tone]} ${className}`}>
+  <div className={`flex items-start gap-2.5 rounded-[var(--ds-radius)] p-4 text-[14px] leading-relaxed ${CALLOUT_TONE[tone]} ${className}`}>
     {Icon && <Icon className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden />}
     <div className="min-w-0 flex-1">
       {title && <div className="mb-0.5 font-semibold">{title}</div>}
@@ -577,7 +577,7 @@ export const EmptyState: React.FC<{
   children: React.ReactNode;
   action?: React.ReactNode;
 }> = ({ icon: Icon, children, action }) => (
-  <div className="rounded-[20px] bg-[var(--ds-surface)] px-6 py-12 text-center shadow-[var(--ds-shadow-card)]">
+  <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] px-6 py-12 text-center shadow-[var(--ds-shadow-card)]">
     <Icon className="mx-auto mb-3 h-8 w-8 text-[var(--ds-text-subtle)]" aria-hidden />
     <p className="text-[14px] text-[var(--ds-text-muted)]">{children}</p>
     {action && <div className="mt-4 flex justify-center">{action}</div>}

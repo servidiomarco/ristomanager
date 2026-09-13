@@ -168,7 +168,7 @@ export const RowMenu: React.FC<{
           ref={menuRef}
           role="menu"
           style={{ top: at.top, left: at.left, width: MENU_WIDTH }}
-          className="fixed z-[60] overflow-hidden rounded-[16px] bg-[var(--ds-surface)] py-1 shadow-[var(--ds-shadow-raised)]"
+          className="fixed z-[60] overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] py-1 shadow-[var(--ds-shadow-raised)]"
         >
           {onMarkRead && (
             <button type="button" role="menuitem" className={item} onClick={() => { setAt(null); onMarkRead(); }}>
@@ -225,11 +225,11 @@ export const NotificationItem: React.FC<{
         <button
           type="button"
           onClick={() => onOpen(n)}
-          className="flex min-w-0 flex-1 items-start gap-3 rounded-[12px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          className="flex min-w-0 flex-1 items-start gap-3 rounded-[var(--ds-radius)] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
         >
           {/* A read notification keeps its icon but loses its colour — the row
               stays scannable while no longer competing for attention. */}
-          <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[12px] ${
+          <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[var(--ds-radius)] ${
             isUnread ? tile : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)]'
           }`}>
             <Icon className="h-4 w-4" />

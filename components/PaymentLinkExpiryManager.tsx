@@ -135,7 +135,7 @@ export const PaymentLinkExpiryManager: React.FC<Props> = ({ showToast }) => {
                         value={hoursInput}
                         onChange={(e) => setHoursInput(e.target.value)}
                         disabled={!canEdit || saving || !effectiveEnabled}
-                        className="w-24 px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                        className="w-24 px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] font-mono text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                     />
                     <span className="text-[12px] text-[var(--ds-text-muted)]">ore dall'invio</span>
                 </div>
@@ -149,7 +149,7 @@ export const PaymentLinkExpiryManager: React.FC<Props> = ({ showToast }) => {
                     value={effectiveMessage}
                     onChange={(e) => setDraftMessage(e.target.value as 'declined' | 'none')}
                     disabled={!canEdit || saving || !effectiveEnabled}
-                    className="w-full max-w-xs px-3 py-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
+                    className="w-full max-w-xs px-3 py-2 rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[13px] text-[var(--ds-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] disabled:opacity-60"
                 >
                     <option value="declined">Prenotazione non confermata (stessi testi del rifiuto manuale)</option>
                     <option value="none">Nessun messaggio</option>

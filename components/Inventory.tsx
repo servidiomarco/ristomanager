@@ -1034,7 +1034,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                 <div
                   ref={menuRef}
                   role="menu"
-                  className="absolute right-0 top-full z-30 mt-2 w-[264px] overflow-hidden rounded-[20px] bg-[var(--ds-surface)] py-1.5 shadow-[var(--ds-shadow-raised)]"
+                  className="absolute right-0 top-full z-30 mt-2 w-[264px] overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] py-1.5 shadow-[var(--ds-shadow-raised)]"
                 >
                   {manageActions.map(a => (
                     <button
@@ -1219,7 +1219,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                 Nemmeno nelle altre aree.
               </p>
             ) : (
-              <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+              <div className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
                 {crossArea.results.map((p, i) => (
                   <button
                     key={p.id}
@@ -1261,7 +1261,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
 
       {/* The list */}
       {!isLoading && !error && groups.length > 0 && (
-        <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+        <div className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
           {/* Column names, from md up. On a phone the row carries its own
               labels, so a header would be a line of text with nothing under it. */}
           <div className="hidden items-center gap-3 px-5 py-3 text-[13px] text-[var(--ds-text-muted)] md:flex">
@@ -1317,7 +1317,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
           </button>
         }
       >
-        <div className="overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+        <div className="overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
           {manageActions.map((a, i) => (
             <button
               key={a.label}
@@ -1391,7 +1391,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                 onDragOver={(e) => { e.preventDefault(); setDragLoc(d => (d ? { ...d, over: i } : d)); }}
                 onDrop={(e) => { e.preventDefault(); handleDropLocation(i); }}
                 onDragEnd={() => setDragLoc(null)}
-                className={`flex items-center gap-2 rounded-[16px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-colors ${
+                className={`flex items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-colors ${
                   dragLoc?.over === i && dragLoc.from !== i ? 'bg-[var(--ds-arriving-tint)]' : ''
                 }`}
               >
@@ -1513,7 +1513,7 @@ export const Inventory: React.FC<Props> = ({ showToast, autoOpenNewProduct, onAu
                 onDragOver={(e) => { e.preventDefault(); setDragCat(d => (d ? { ...d, over: i } : d)); }}
                 onDrop={(e) => { e.preventDefault(); handleDropCategory(i); }}
                 onDragEnd={() => setDragCat(null)}
-                className={`flex items-center gap-2 rounded-[16px] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-colors ${
+                className={`flex items-center gap-2 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-2 shadow-[var(--ds-shadow-card)] transition-colors ${
                   dragCat?.over === i && dragCat.from !== i ? 'bg-[var(--ds-arriving-tint)]' : ''
                 }`}
               >

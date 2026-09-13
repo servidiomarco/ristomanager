@@ -49,7 +49,7 @@ export const ReasonDialog: React.FC<{
       }
     >
       {partial && (
-        <div className="flex items-center justify-between gap-3 rounded-[14px] bg-[var(--ds-surface-row)] p-2 pl-4">
+        <div className="flex items-center justify-between gap-3 rounded-[var(--ds-radius)] bg-[var(--ds-surface-row)] p-2 pl-4">
           <span className="text-[14px] text-[var(--ds-text-secondary)]">Quantità</span>
           <div className="flex items-center gap-1">
             <button

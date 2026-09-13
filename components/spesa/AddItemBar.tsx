@@ -56,7 +56,7 @@ export const AddItemBar: React.FC<{
   return (
     <div
       aria-hidden={disabled}
-      className={`relative rounded-[20px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)] transition-opacity ${
+      className={`relative rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-card)] transition-opacity ${
         disabled ? 'pointer-events-none opacity-40' : ''
       }`}
     >
@@ -143,7 +143,7 @@ export const AddItemBar: React.FC<{
       </div>
 
       {showSuggestions && !disabled && suggestions.length > 0 && (
-        <div className="absolute inset-x-3 top-full z-20 mt-1 overflow-hidden rounded-[16px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]">
+        <div className="absolute inset-x-3 top-full z-20 mt-1 overflow-hidden rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)]">
           <div className="px-4 pt-3 text-[13px] font-semibold text-[var(--ds-text-muted)]">
             Già in lista in passato
           </div>

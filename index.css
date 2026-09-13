@@ -374,7 +374,7 @@
   position: absolute;
   border: 1px dashed #E24B4A;
   background: rgba(226, 75, 74, 0.07);
-  border-radius: 13px;
+  border-radius: var(--ds-radius);
   opacity: 0;
   pointer-events: none;
 }
@@ -474,7 +474,7 @@ body {
   background: var(--color-brand);
   color: var(--color-brand-fg);
   padding: 8px 16px;
-  border-radius: 8px;
+  border-radius: var(--ds-radius);
   z-index: 1000;
   font-weight: 500;
   font-size: 14px;
@@ -636,7 +636,7 @@ body {
 
 .animate-hover-pulse {
   animation: hover-pulse-ring 1.4s ease-out infinite;
-  border-radius: 12px;
+  border-radius: var(--ds-radius);
 }
 
 @keyframes flash-row {
@@ -753,6 +753,22 @@ body {
    the remaining surfaces adopt them screen by screen during the revamp.
    ========================================================================= */
 :root {
+  /* ---------- Raggio ----------
+     Due soli gradini, per TUTTE le scatole dell'app: schede, pannelli,
+     tessere, campi, fogli, righe. Il tondo pieno (pastiglie, cerchi, avatar,
+     stepper) non passa di qui — quello resta `rounded-full`, perché è una
+     forma, non un raggio.
+
+     Il secondo gradino è per ciò che sta DENTRO una scatola: la pastiglia
+     della quantità in comanda, il quadratino di categoria, la casella di
+     spunta. Un angolo interno allo stesso raggio di quello che lo contiene
+     legge piatto; un filo più stretto e i due si distinguono.
+
+     Token e non valore scritto a mano in ottocento punti: cambiare idea sul
+     numero è una riga, non un'altra passata sull'app. */
+  --ds-radius: 6px;
+  --ds-radius-sm: 4px;
+
   /* Surface depth — canvas is DARKER than cards in light mode */
   --ds-canvas: #ededf1;
   --ds-surface: #ffffff;
@@ -994,7 +1010,7 @@ body {
 
 .ds-live-frame {
   padding: 1.5px;
-  border-radius: 24px;
+  border-radius: var(--ds-radius);
   background: conic-gradient(
     from var(--ds-live-angle),
     var(--ds-border) 0deg,
@@ -1008,7 +1024,7 @@ body {
 }
 
 .ds-live-card {
-  border-radius: 22.5px; /* 24px frame − 1.5px pad */
+  border-radius: calc(var(--ds-radius) - 1.5px); /* cornice − pad */
   background: var(--ds-surface);
 }
 
@@ -1031,7 +1047,7 @@ body {
    decidere, quindi il giro si ferma quando confermi o scarti. */
 .ds-ai-frame {
   padding: 1.5px;
-  border-radius: 14px;
+  border-radius: var(--ds-radius);
   background: conic-gradient(
     from var(--ds-live-angle),
     var(--ds-border) 0deg,
@@ -1044,7 +1060,7 @@ body {
 }
 
 .ds-ai-card {
-  border-radius: 12.5px; /* 14px frame − 1.5px pad */
+  border-radius: calc(var(--ds-radius) - 1.5px); /* cornice − pad */
   background: var(--ds-surface-row);
 }
 
