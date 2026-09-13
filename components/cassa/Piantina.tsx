@@ -60,6 +60,7 @@ export const Piantina: React.FC<PiantinaProps> = ({ rows, room, billByTable, bus
         <RoomCanvas
           room={room}
           tables={tables}
+          zoomable
           statusFor={(t: Table) => GLYPH_STATUS[rowByTable.get(t.id)?.state ?? 'free']}
           partyFor={(t: Table) => rowByTable.get(t.id)?.reservation?.guests}
           disabled={busy}

@@ -3,6 +3,7 @@ import type { Room, Table } from '../../types';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from '../TableGlyph';
 import { RoomShapeLayer } from './RoomShapeLayer';
 import { useFitScale } from './useFitScale';
+import { useZoomPan } from './useZoomPan';
 import { PX_PER_CM, roomHasPlan, realDimsFor, planGlyphBox, legacyCenterToCm, type Box } from './roomGeometry';
 
 // La pianta condivisa: un solo renderer per Cassa, Reception e (a tendere)
@@ -48,6 +49,9 @@ interface RoomCanvasProps {
   maxScale?: number;
   margin?: number;
   emptyLabel?: string;
+  // Pinch-zoom e pan: per le sale grandi sui palmari, dove il fit rende un
+  // tavolo da 60 cm illeggibile. Un dito resta per i tap sui tavoli.
+  zoomable?: boolean;
 }
 
 // Tocco minimo in pixel SCHERMO: sotto scala il bottone si allarga oltre il
@@ -72,6 +76,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
   maxScale = 1,
   margin = 16,
   emptyLabel,
+  zoomable,
 }) => {
   const hasPlan = roomHasPlan(room);
   const plan = room?.plan ?? null;
@@ -124,7 +129,17 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
     return { width: maxRight, height: maxBottom };
   }, [plan, room, boxes]);
 
-  const { containerRef, scale, offset } = useFitScale(extent, { margin, maxScale });
+  const { containerRef, scale: fitScale, offset: fitOffset } = useFitScale(extent, { margin, maxScale });
+  const zp = useZoomPan({
+    enabled: !!zoomable,
+    fitScale,
+    fitOffset,
+    extent,
+    containerRef,
+    resetKey: room?.id,
+  });
+  const scale = fitScale * zp.zoom;
+  const offset = { x: fitOffset.x + zp.pan.x, y: fitOffset.y + zp.pan.y };
 
   if (!room) {
     return (
@@ -137,7 +152,7 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
   const isDisabled = (t: Table) => (typeof disabled === 'function' ? disabled(t) : !!disabled);
 
   return (
-    <div ref={containerRef} className="relative h-full min-h-0 w-full overflow-hidden">
+    <div ref={containerRef} className="relative h-full min-h-0 w-full overflow-hidden" {...zp.handlers}>
       <div
         className={hasPlan ? 'absolute left-0 top-0' : 'absolute left-0 top-0 rounded-[20px] bg-[var(--ds-surface-row)]'}
         style={{
