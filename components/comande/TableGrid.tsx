@@ -320,7 +320,7 @@ export const TableGrid: React.FC<TableGridProps> = ({
           c'è, il colore non porta l'informazione da solo (§4.3). */}
       {paged && roomTabs.length > 1 && (
         <div className="mx-auto w-full max-w-[1400px] flex-shrink-0 px-4 pb-3 pt-2 lg:px-8">
-          <div className="-my-1.5 flex gap-2 overflow-x-auto py-1.5 scrollbar-hide">
+          <div className="-my-6 flex gap-2 overflow-x-auto py-6 scrollbar-hide">
             {roomTabs.map(rm => {
               const active = rm.id === activeRoom;
               const marked = rows.some(r =>

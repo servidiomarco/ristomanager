@@ -32,7 +32,9 @@ export const CourseChips: React.FC<{
 }> = ({ order, cart, course, onCourse, showBar, showDessert, variant = 'pill' }) => (
   // Margine negativo con padding uguale: lo scorrimento orizzontale ritaglia
   // anche in verticale, e senza questo l'ombra sotto le pastiglie esce tagliata.
-  <div className="-my-1.5 flex gap-2 overflow-x-auto py-1.5 scrollbar-hide">
+  // Ventiquattro e non sei: --ds-shadow-card scende 8px e sfuma per 24, quindi
+  // sei ne tagliavano comunque la maggior parte (regola 11).
+  <div className="-my-6 flex gap-2 overflow-x-auto py-6 scrollbar-hide">
     {[
       ...(showBar || course === BAR_COURSE_NO
         || cartForCourse(cart, BAR_COURSE_NO).length > 0

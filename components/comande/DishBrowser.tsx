@@ -371,7 +371,7 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
     // Lo scorrimento orizzontale ritaglia anche in verticale: senza il margine
     // negativo con padding uguale, l'ombra sotto ogni chip esce tagliata di
     // netto e la pista legge come troncata (regola 11, sull'altro asse).
-    <div className="-my-1.5 flex flex-shrink-0 gap-2 overflow-x-auto py-1.5 scrollbar-hide">
+    <div className="-my-6 flex flex-shrink-0 gap-2 overflow-x-auto py-6 scrollbar-hide">
       {categories.map(c => {
         const active = !q && c === category;
         return (
