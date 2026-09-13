@@ -76,14 +76,17 @@ export function collidesWithOthers(
   y: number,
   others: Table[],
   clearance = FLOOR_CLEARANCE,
-  opts?: { labelBand?: number; realFor?: (t: Table) => TableDimensionsCm | null },
+  opts?: { labelBand?: number; realFor?: (t: Table) => TableDimensionsCm | null; posFor?: (t: Table) => { x: number; y: number } },
 ): Table[] {
   const labelBand = opts?.labelBand ?? FLOOR_LABEL_BAND;
   const a = getTableFootprint(table, x, y, clearance, labelBand, opts?.realFor?.(table));
   const hits: Table[] = [];
   for (const o of others) {
     if (o.id === table.id) continue;
-    const b = getTableFootprint(o, o.x, o.y, clearance, labelBand, opts?.realFor?.(o));
+    // Nelle sale con pianta le posizioni vive sono x_cm/y_cm, non i legacy
+    // x/y: il chiamante le risolve con posFor.
+    const p = opts?.posFor?.(o) ?? { x: o.x, y: o.y };
+    const b = getTableFootprint(o, p.x, p.y, clearance, labelBand, opts?.realFor?.(o));
     if (boxesOverlap(a, b)) hits.push(o);
   }
   return hits;
@@ -96,10 +99,13 @@ export function collidesWithOthers(
 export function findOverlappingPairs(
   tables: Table[],
   clearance = FLOOR_CLEARANCE,
-  opts?: { labelBand?: number; realFor?: (t: Table) => TableDimensionsCm | null },
+  opts?: { labelBand?: number; realFor?: (t: Table) => TableDimensionsCm | null; posFor?: (t: Table) => { x: number; y: number } },
 ): Array<[Table, Table]> {
   const labelBand = opts?.labelBand ?? FLOOR_LABEL_BAND;
-  const boxes = tables.map(t => ({ t, box: getTableFootprint(t, t.x, t.y, clearance, labelBand, opts?.realFor?.(t)) }));
+  const boxes = tables.map(t => {
+    const p = opts?.posFor?.(t) ?? { x: t.x, y: t.y };
+    return { t, box: getTableFootprint(t, p.x, p.y, clearance, labelBand, opts?.realFor?.(t)) };
+  });
   const pairs: Array<[Table, Table]> = [];
   for (let i = 0; i < boxes.length; i++) {
     for (let j = i + 1; j < boxes.length; j++) {
