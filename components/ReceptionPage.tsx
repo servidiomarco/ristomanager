@@ -1538,6 +1538,7 @@ const TablePicker: React.FC<TablePickerProps> = ({
             tables={roomTables}
             maxScale={1.6}
             margin={48}
+            zoomable
             statusFor={() => 'libera'}
             disabled={t => busy || decorate(t).disabled}
             onSelectTable={t => decorate(t).onTap()}
@@ -1835,6 +1836,7 @@ const RoomMap: React.FC<RoomMapProps> = ({
             tables={roomTables}
             maxScale={1.6}
             margin={40}
+            zoomable
             /* Shared, time-aware derivation so the room reads exactly like
                the floor plan view (In arrivo pulses, In uscita reads cyan). */
             statusFor={t => deriveTableDisplayStatus(reservationByTableId.get(t.id), { now })}
