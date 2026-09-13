@@ -362,6 +362,21 @@ export const createRoom = async (room: Omit<Room, 'id'>): Promise<Room> => {
   });
 };
 
+// PATCH generico della sala (nome, misure, pianta). Per la pianta il server
+// controlla plan.rev: una rev non più fresca risponde 409 con la sala
+// corrente in err.data.current — il chiamante la mostra come «pianta
+// modificata da un altro dispositivo».
+export const updateRoom = async (
+  id: number,
+  patch: Partial<Pick<Room, 'name' | 'location' | 'width' | 'height' | 'is_closed' | 'plan'>>
+): Promise<Room> => {
+  return apiRequest<Room>(`${API_URL}/rooms/${id}`, {
+    method: 'PATCH',
+    headers: getHeaders(),
+    body: JSON.stringify(patch),
+  });
+};
+
 export const setRoomClosed = async (id: number, is_closed: boolean): Promise<Room> => {
   return apiRequest<Room>(`${API_URL}/rooms/${id}`, {
     method: 'PATCH',
