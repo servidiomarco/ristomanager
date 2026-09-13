@@ -3342,7 +3342,11 @@ const App: React.FC = () => {
             navigazione sotto sarebbe solo un bersaglio per uscire per sbaglio
             dal tavolo aperto. Si torna indietro con la freccia in testata. */}
         <nav
-          className={`fixed left-4 right-4 rounded-[var(--ds-radius)] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] lg:hidden z-30 ${
+          // Stadio pieno, non il raggio delle scatole: questa barra GALLEGGIA
+          // sopra il contenuto invece di appoggiarsi a un bordo, e una forma
+          // chiusa si stacca da ciò che le scorre sotto. A sei pixel sembrava
+          // una scheda ritagliata male.
+          className={`fixed left-4 right-4 rounded-full bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] lg:hidden z-30 ${
             immersive ? 'hidden' : ''
           }`}
           style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
@@ -3382,7 +3386,7 @@ const App: React.FC = () => {
                 type="button"
                 onClick={() => setShowCreateSheet(v => !v)}
                 aria-label="Crea nuovo"
-                className="h-14 w-14 -translate-y-4 rounded-[var(--ds-radius-control)] bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-raised)] flex items-center justify-center active:scale-95 transition-all ring-4 ring-[var(--ds-canvas)]"
+                className="h-14 w-14 -translate-y-4 rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] shadow-[var(--ds-shadow-raised)] flex items-center justify-center active:scale-95 transition-all ring-4 ring-[var(--ds-canvas)]"
               >
                 <Plus className="h-6 w-6 transition-transform duration-200" style={{ transform: showCreateSheet ? 'rotate(45deg)' : 'rotate(0deg)' }} />
               </button>
@@ -3645,7 +3649,10 @@ const BottomNavItem = ({ icon, label, active, onClick, badge }: { icon: React.Re
     onClick={onClick}
     aria-current={active ? 'page' : undefined}
     aria-label={label}
-    className={`pressable flex flex-1 flex-col items-center justify-center gap-1 px-1 py-1.5 max-[420px]:py-[13px] rounded-[var(--ds-radius)] transition-colors ${
+    // Pastiglia dentro lo stadio: la barra è tonda piena, e un rettangolo
+    // smussato appoggiato alla sua curva litiga col bordo. Gli angoli
+    // concentrici si seguono — tondo dentro tondo.
+    className={`pressable flex flex-1 flex-col items-center justify-center gap-1 px-1 py-1.5 max-[420px]:py-[13px] rounded-full transition-colors ${
       active
         ? 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
         : 'text-[var(--ds-text-muted)]'

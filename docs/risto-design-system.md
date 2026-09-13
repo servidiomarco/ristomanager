@@ -236,6 +236,13 @@ rounded:
                    # stacca dal contenitore invece di fonderlo con lui.
   full:    "999px" # SOLO cio' che e' un cerchio e non un controllo: avatar,
                    # pallini di stato, barre di avanzamento, maniglie dei fogli.
+                   # E la barra di navigazione mobile, col suo «+» e la
+                   # pastiglia della scheda attiva: quella barra GALLEGGIA
+                   # sopra il contenuto invece di appoggiarsi a un bordo, e una
+                   # forma chiusa si stacca da cio' che le scorre sotto. A sei
+                   # pixel leggeva come una scheda ritagliata male. Gli angoli
+                   # dentro di lei la seguono: tondo dentro tondo, o il
+                   # rettangolo smussato litiga con la curva che lo contiene.
                    # Non passa dal token: e' una forma, non un raggio. Sui
                    # pezzi minuscoli il CSS limita comunque il raggio a meta'
                    # del lato, quindi un pallino resterebbe tondo comunque —
