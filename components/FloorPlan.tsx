@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { flushSync, createPortal } from 'react-dom';
-import { Table, TableShape, Room, RoomPlan, TableStatus, Reservation, ReservationSource, Shift, TableMerge, TableHiddenOverride, RoomClosedOverride, ArrivalStatus, ReservationStatus, BanquetMenu } from '../types';
-import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic, ChevronDown, Frame } from 'lucide-react';
+import { Table, TableShape, Room, RoomPlan, RoomPlanElement, RoomElementKind, TableStatus, Reservation, ReservationSource, Shift, TableMerge, TableHiddenOverride, RoomClosedOverride, ArrivalStatus, ReservationStatus, BanquetMenu } from '../types';
+import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic, ChevronDown, Frame, Wine, Leaf, Banknote, Circle, Minus } from 'lucide-react';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { deriveTableDisplayStatus, isSeated, TABLE_STATUS_LABEL } from './reservationState';
 import { useNow } from '../hooks/useNow';
@@ -11,9 +11,9 @@ import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 import { buildFloorLabels } from '../utils/labelPlacement';
 import { buildBanquetColorClassMap } from '../utils/banquetColors';
 import { BanquetLabel } from './ReservationCard';
-import { snapToGrid, collidesWithOthers, findOverlappingPairs, getTableFootprint, FLOOR_CLEARANCE, FLOOR_GRID, FLOOR_LABEL_BAND } from '../utils/tableOverlap';
+import { snapToGrid, collidesWithOthers, findOverlappingPairs, getTableFootprint, footprintHitsObstacles, FLOOR_CLEARANCE, FLOOR_GRID, FLOOR_LABEL_BAND } from '../utils/tableOverlap';
 import { RoomShapeLayer } from './floor/RoomShapeLayer';
-import { roomHasPlan, realDimsFor, planGlyphBox, legacyCenterToCm, PLAN_GRID_CM } from './floor/roomGeometry';
+import { roomHasPlan, realDimsFor, planGlyphBox, legacyCenterToCm, PLAN_GRID_CM, snapToPlanGrid, BLOCKING_ELEMENT_KINDS, rotatedElementBox } from './floor/roomGeometry';
 import { toTitleCase, getInitials } from '../utils/text';
 import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, createRoomClosed, deleteRoomClosed, updateRoom } from '../services/apiService';
 import type { ApiError } from '../services/apiError';
@@ -279,6 +279,124 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       setPlanModal(null);
     } catch (err) {
       setAlertModal({ message: (err as ApiError).message || 'Rimozione della pianta non riuscita.', type: 'error' });
+    } finally {
+      setPlanBusy(false);
+    }
+  };
+
+  // ── Elementi fissi della pianta (bancone, muri, colonne…) ────────────────
+  // Bozza locale con Salva esplicito: la rev del plan è la guardia di
+  // concorrenza, quindi gli elementi si salvano tutto-o-niente, mai al drag.
+  const [editTarget, setEditTarget] = useState<'tavoli' | 'sala'>('tavoli');
+  const [draftElements, setDraftElements] = useState<RoomPlanElement[] | null>(null);
+  const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
+  const elementDragRef = useRef<{ id: string; startX: number; startY: number; origX: number; origY: number } | null>(null);
+
+  useEffect(() => {
+    setEditTarget('tavoli');
+    setDraftElements(null);
+    setSelectedElementId(null);
+  }, [activeRoomId]);
+
+  const salaEditing = planActive && canEdit && editTarget === 'sala';
+  const liveElements = draftElements ?? activeRoomPlan?.elements ?? [];
+  const selectedElement = liveElements.find(e => e.id === selectedElementId) ?? null;
+  const draftDirty = draftElements != null
+    && JSON.stringify(draftElements) !== JSON.stringify(activeRoomPlan?.elements ?? []);
+
+  // Gli elementi che bloccano i tavoli, come AABB già ruotati. Piante e porte
+  // non bloccano: decorativa la prima, dentro il muro la seconda.
+  const planObstacles = useMemo(() => {
+    if (!planActive) return [];
+    return liveElements.filter(e => BLOCKING_ELEMENT_KINDS.has(e.kind)).map(rotatedElementBox);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planActive, liveElements]);
+
+  const ELEMENT_DEFAULTS: Record<RoomElementKind, { w: number; h: number; label?: string }> = {
+    bar: { w: 300, h: 60, label: 'Bancone' },
+    wall: { w: 200, h: 12 },
+    column: { w: 40, h: 40 },
+    plant: { w: 50, h: 50 },
+    door: { w: 90, h: 12 },
+    cashier: { w: 120, h: 60, label: 'Cassa' },
+    window: { w: 120, h: 12 },
+    stairs: { w: 120, h: 200, label: 'Scala' },
+    label: { w: 160, h: 30, label: 'Zona' },
+  };
+
+  const beginSalaEditing = () => {
+    setDraftElements((activeRoomPlan?.elements ?? []).map(e => ({ ...e })));
+    setSelectedElementId(null);
+    setEditTarget('sala');
+  };
+
+  const handleCancelElements = () => {
+    setDraftElements(null);
+    setSelectedElementId(null);
+    setEditTarget('tavoli');
+  };
+
+  const handleAddElement = (kind: RoomElementKind) => {
+    if (!activeRoomPlan) return;
+    const d = ELEMENT_DEFAULTS[kind];
+    const el: RoomPlanElement = {
+      id: crypto.randomUUID(),
+      kind,
+      x_cm: Math.max(0, snapToPlanGrid((activeRoomPlan.width_cm - d.w) / 2)),
+      y_cm: Math.max(0, snapToPlanGrid((activeRoomPlan.height_cm - d.h) / 2)),
+      w_cm: d.w,
+      h_cm: d.h,
+      rotation: 0,
+      ...(d.label ? { label: d.label } : {}),
+    };
+    setDraftElements(prev => [...(prev ?? []), el]);
+    setSelectedElementId(el.id);
+  };
+
+  const updateSelectedElement = (patch: Partial<RoomPlanElement>) => {
+    if (!selectedElementId) return;
+    setDraftElements(prev => prev?.map(e => (e.id === selectedElementId ? { ...e, ...patch } : e)) ?? prev);
+  };
+
+  const removeSelectedElement = () => {
+    if (!selectedElementId) return;
+    setDraftElements(prev => prev?.filter(e => e.id !== selectedElementId) ?? prev);
+    setSelectedElementId(null);
+  };
+
+  const startElementDrag = (clientX: number, clientY: number, el: RoomPlanElement) => {
+    elementDragRef.current = { id: el.id, startX: clientX, startY: clientY, origX: el.x_cm, origY: el.y_cm };
+  };
+
+  const applyElementDrag = (clientX: number, clientY: number) => {
+    const st = elementDragRef.current;
+    if (!st || !activeRoomPlan) return;
+    const el = liveElements.find(e => e.id === st.id);
+    if (!el) return;
+    const s = scaleRef.current || 1;
+    let nx = snapToPlanGrid(st.origX + (clientX - st.startX) / s);
+    let ny = snapToPlanGrid(st.origY + (clientY - st.startY) / s);
+    nx = Math.min(Math.max(0, nx), Math.max(0, activeRoomPlan.width_cm - el.w_cm));
+    ny = Math.min(Math.max(0, ny), Math.max(0, activeRoomPlan.height_cm - el.h_cm));
+    setDraftElements(prev => prev?.map(x => (x.id === st.id ? { ...x, x_cm: nx, y_cm: ny } : x)) ?? prev);
+  };
+
+  const handleSaveElements = async () => {
+    if (!activeRoom || !activeRoomPlan || !draftElements) return;
+    setPlanBusy(true);
+    try {
+      await updateRoom(activeRoom.id, {
+        plan: { ...activeRoomPlan, elements: draftElements, rev: activeRoomPlan.rev + 1 },
+      });
+      handleCancelElements();
+    } catch (err) {
+      const apiErr = err as ApiError;
+      setAlertModal({
+        message: apiErr.status === 409
+          ? 'La pianta è stata modificata da un altro dispositivo. Riapri e riprova.'
+          : (apiErr.message || 'Salvataggio della sala non riuscito.'),
+        type: apiErr.status === 409 ? 'warning' : 'error',
+      });
     } finally {
       setPlanBusy(false);
     }
@@ -927,9 +1045,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     }
 
     // Test the dragged table's footprint against the others (at their saved
-    // positions). Use the displayed table for shape/seats/rotation.
+    // positions) and, sulla pianta, contro bancone/muri/colonne.
     const conflict = dragTable
       ? collidesWithOthers(dragTable, candX, candY, currentTables, planClearance, overlapOpts).length > 0
+        || (planActive && footprintHitsObstacles(dragTable, candX, candY, planObstacles, realDimsFor(dragTable)))
       : false;
 
     dragState.candidateX = candX;
@@ -951,11 +1070,13 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    if (elementDragRef.current) { applyElementDrag(e.clientX, e.clientY); return; }
     if (!dragStateRef.current.isDragging) return;
     applyDragMove(e.clientX, e.clientY);
   };
 
   const handleMouseUp = () => {
+    if (elementDragRef.current) { elementDragRef.current = null; return; }
     const dragState = dragStateRef.current;
 
     if (dragState.isDragging && dragState.tableId !== null && canvasRef.current) {
@@ -1068,6 +1189,11 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
+    if (elementDragRef.current) {
+      const t = e.touches[0];
+      applyElementDrag(t.clientX, t.clientY);
+      return;
+    }
     if (!dragStateRef.current.isDragging) return;
     const touch = e.touches[0];
     applyDragMove(touch.clientX, touch.clientY);
@@ -1120,7 +1246,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const editWouldOverlap = (proposed: Table): boolean => {
       if (layoutMode !== 'manual') return false;
       const pos = manualPosFor(proposed);
-      return collidesWithOthers(proposed, pos.x, pos.y, currentTables, planClearance, overlapOpts).length > 0;
+      if (collidesWithOthers(proposed, pos.x, pos.y, currentTables, planClearance, overlapOpts).length > 0) return true;
+      return planActive && footprintHitsObstacles(proposed, pos.x, pos.y, planObstacles, realDimsFor(proposed));
   };
 
   const handleSeatsChange = (newSeats: number) => {
@@ -1261,7 +1388,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     return (
       <div
         key={table.id}
-        className={`absolute select-none ${isInvalidDrag ? 'floor-table-invalid ' : ''}${!canEdit ? 'cursor-default' : table.is_locked || isTempLocked ? 'cursor-not-allowed opacity-90' : isDraggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${isHidden ? 'opacity-40 grayscale' : ''}`}
+        className={`absolute select-none ${salaEditing ? 'pointer-events-none ' : ''}${isInvalidDrag ? 'floor-table-invalid ' : ''}${!canEdit ? 'cursor-default' : table.is_locked || isTempLocked ? 'cursor-not-allowed opacity-90' : isDraggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${isHidden ? 'opacity-40 grayscale' : ''}`}
         style={{
           left: pos.x,
           top: pos.y,
@@ -1522,6 +1649,65 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           >
               <Frame className="h-4 w-4" />
           </button>
+
+          {/* Editing della sala vera: si lavora sui tavoli o sugli elementi
+              fissi, mai su entrambi — gli handle non si rubano i tap. */}
+          {planActive && (
+            <SegmentedControl<'tavoli' | 'sala'>
+              value={editTarget}
+              onChange={v => {
+                if (v === editTarget) return;
+                if (v === 'sala') { beginSalaEditing(); return; }
+                if (draftDirty) {
+                  setAlertModal({ message: 'Salva o annulla le modifiche alla sala prima di tornare ai tavoli.', type: 'warning' });
+                  return;
+                }
+                handleCancelElements();
+              }}
+              ariaLabel="Oggetto della modifica"
+              size="sm"
+              options={[
+                { value: 'tavoli', label: 'Tavoli' },
+                { value: 'sala', label: 'Sala' },
+              ]}
+            />
+          )}
+
+          {salaEditing && (
+            <>
+              {([
+                ['bar', Wine, 'Bancone'],
+                ['wall', Minus, 'Muro'],
+                ['column', Circle, 'Colonna'],
+                ['plant', Leaf, 'Pianta'],
+                ['door', DoorOpen, 'Porta'],
+                ['cashier', Banknote, 'Cassa'],
+              ] as Array<[RoomElementKind, React.ComponentType<{ size?: number | string; className?: string }>, string]>).map(([kind, Icon, label]) => (
+                <button
+                  key={kind}
+                  onClick={() => handleAddElement(kind)}
+                  className={`${dsIconButton} shadow-none bg-[var(--ds-surface-row)]`}
+                  title={`Aggiungi ${label.toLowerCase()}`}
+                >
+                  <Icon className="h-4 w-4" />
+                </button>
+              ))}
+              <button
+                onClick={handleCancelElements}
+                disabled={planBusy}
+                className={`${dsButton.secondary} h-9 px-3 text-[13px]`}
+              >
+                Annulla
+              </button>
+              <button
+                onClick={handleSaveElements}
+                disabled={planBusy || !draftDirty}
+                className={`${dsButton.primary} h-9 px-3 text-[13px]`}
+              >
+                {planBusy ? 'Salvataggio…' : 'Salva sala'}
+              </button>
+            </>
+          )}
 
           {selectedTables.length > 0 && (
               <button
@@ -1836,7 +2022,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       <div
         ref={canvasRef}
         className={`flex-1 bg-[var(--ds-canvas)] rounded-[20px] border border-dashed border-[var(--ds-border-strong)] relative overflow-hidden ${isSelectionMode ? 'cursor-crosshair' : 'cursor-default'}`}
-        onClick={() => !isSelectionMode && setSelectedTables([])}
+        onClick={() => { if (!isSelectionMode) setSelectedTables([]); setSelectedElementId(null); }}
         style={{
             backgroundImage: 'radial-gradient(var(--floor-dot) 1px, transparent 1px)',
             backgroundSize: '20px 20px'
@@ -1851,8 +2037,43 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 transformOrigin: 'top left'
             }}
           >
-            {/* Pianta reale: pavimento, muri ed elementi fissi sotto tutto. */}
-            {planActive && activeRoomPlan && <RoomShapeLayer plan={activeRoomPlan} />}
+            {/* Pianta reale: pavimento, muri ed elementi fissi sotto tutto.
+                In editing sala il layer disegna la bozza, non il salvato. */}
+            {planActive && activeRoomPlan && (
+              <RoomShapeLayer plan={draftElements ? { ...activeRoomPlan, elements: draftElements } : activeRoomPlan} />
+            )}
+            {/* Hit-box degli elementi: trasparenti, sopra i tavoli (che in
+                editing sala sono spenti), trascinabili con snap 10 cm. */}
+            {salaEditing && liveElements.map(el => (
+              <div
+                key={el.id}
+                onMouseDown={e => {
+                  e.stopPropagation();
+                  setSelectedElementId(el.id);
+                  startElementDrag(e.clientX, e.clientY, el);
+                }}
+                onTouchStart={e => {
+                  e.stopPropagation();
+                  setSelectedElementId(el.id);
+                  const t = e.touches[0];
+                  startElementDrag(t.clientX, t.clientY, el);
+                }}
+                onClick={e => e.stopPropagation()}
+                className={`absolute cursor-grab active:cursor-grabbing rounded-[6px] ${
+                  selectedElementId === el.id
+                    ? 'ring-2 ring-[var(--ds-border-focus)]'
+                    : 'hover:ring-1 hover:ring-[var(--ds-border-strong)]'
+                }`}
+                style={{
+                  left: el.x_cm,
+                  top: el.y_cm,
+                  width: el.w_cm,
+                  height: el.h_cm,
+                  transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
+                  zIndex: 40,
+                }}
+              />
+            ))}
             {/* Banquet hulls (behind tables) — tinted per banquet so two events
                 in the same room are visually distinct. */}
             {floorLabels.hulls.map((h, i) => (
@@ -1907,6 +2128,72 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
               </div>
             );
           })()}
+
+          {/* Pannellino dell'elemento selezionato: misure in cm, rotazione,
+              etichetta (dove ha senso) ed eliminazione. */}
+          {salaEditing && selectedElement && (
+            <div
+              className="absolute bottom-4 left-4 z-40 flex flex-wrap items-end gap-2 rounded-[16px] bg-[var(--ds-surface)] p-3 shadow-[var(--ds-shadow-raised)]"
+              onClick={e => e.stopPropagation()}
+              onMouseDown={e => e.stopPropagation()}
+              onTouchStart={e => e.stopPropagation()}
+            >
+              <label className="flex flex-col gap-1 text-[12px] text-[var(--ds-text-muted)]">
+                Larghezza (cm)
+                <input
+                  type="number"
+                  min={5}
+                  max={2000}
+                  value={selectedElement.w_cm}
+                  onChange={e => {
+                    const v = parseInt(e.target.value, 10);
+                    if (Number.isFinite(v) && v >= 5 && v <= 2000) updateSelectedElement({ w_cm: v });
+                  }}
+                  className={`${dsInput} h-9 w-24`}
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-[12px] text-[var(--ds-text-muted)]">
+                Profondità (cm)
+                <input
+                  type="number"
+                  min={5}
+                  max={2000}
+                  value={selectedElement.h_cm}
+                  onChange={e => {
+                    const v = parseInt(e.target.value, 10);
+                    if (Number.isFinite(v) && v >= 5 && v <= 2000) updateSelectedElement({ h_cm: v });
+                  }}
+                  className={`${dsInput} h-9 w-24`}
+                />
+              </label>
+              {(selectedElement.kind === 'bar' || selectedElement.kind === 'cashier' || selectedElement.kind === 'label') && (
+                <label className="flex flex-col gap-1 text-[12px] text-[var(--ds-text-muted)]">
+                  Etichetta
+                  <input
+                    type="text"
+                    maxLength={40}
+                    value={selectedElement.label ?? ''}
+                    onChange={e => updateSelectedElement({ label: e.target.value })}
+                    className={`${dsInput} h-9 w-36`}
+                  />
+                </label>
+              )}
+              <button
+                onClick={() => updateSelectedElement({ rotation: (((selectedElement.rotation || 0) + 15) % 360) })}
+                className={`${dsIconButton} shadow-none bg-[var(--ds-surface-row)]`}
+                title="Ruota di 15°"
+              >
+                <RotateCw className="h-4 w-4" />
+              </button>
+              <button
+                onClick={removeSelectedElement}
+                className={`${dsIconButton} shadow-none bg-[var(--ds-surface-row)] text-[var(--ds-critical-fg)]`}
+                title="Elimina elemento"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          )}
 
           {/* Legend - collapsible */}
           <div className="absolute bottom-4 right-4 z-10 select-none">

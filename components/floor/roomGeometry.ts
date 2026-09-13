@@ -3,7 +3,7 @@
 // di render, mai persistita. Con 1px = 1cm i numeri storici restano sensati:
 // la griglia da 20px è uno snap da 20cm, la sala default 800×600 è un 8×6 m.
 
-import { Room, Table } from '../../types';
+import { Room, RoomPlanElement, RoomElementKind, Table } from '../../types';
 import { getEffectiveDimensionsCm, TableDimensionsCm } from '../../utils/tableDimensions';
 import { getGlyphDimensions } from '../TableGlyph';
 
@@ -60,4 +60,24 @@ export function legacyCenterToCm(table: Table): { x_cm: number; y_cm: number } {
 
 export function snapToPlanGrid(cm: number, grid = PLAN_GRID_CM): number {
   return Math.round(cm / grid) * grid;
+}
+
+// I kind che bloccano i tavoli: un tavolo non può stare dentro il bancone o
+// una colonna. Piante e porte non bloccano (decorative / nel muro).
+export const BLOCKING_ELEMENT_KINDS: ReadonlySet<RoomElementKind> = new Set([
+  'bar', 'wall', 'column', 'cashier', 'stairs',
+] as RoomElementKind[]);
+
+/** AABB dell'elemento ruotato, in px canvas — è l'ostacolo per le collisioni. */
+export function rotatedElementBox(el: RoomPlanElement): Box {
+  const w = el.w_cm * PX_PER_CM;
+  const h = el.h_cm * PX_PER_CM;
+  const cx = (el.x_cm + el.w_cm / 2) * PX_PER_CM;
+  const cy = (el.y_cm + el.h_cm / 2) * PX_PER_CM;
+  const rad = ((el.rotation || 0) * Math.PI) / 180;
+  const cos = Math.abs(Math.cos(rad));
+  const sin = Math.abs(Math.sin(rad));
+  const rw = w * cos + h * sin;
+  const rh = w * sin + h * cos;
+  return { x: cx - rw / 2, y: cy - rh / 2, w: rw, h: rh };
 }
