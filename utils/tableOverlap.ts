@@ -66,6 +66,24 @@ export function boxesOverlap(a: Box, b: Box): boolean {
 }
 
 /**
+ * True se il footprint del tavolo tocca uno degli ostacoli (bancone, muri,
+ * colonne della pianta reale). Gli ostacoli sono AABB già ruotati; il
+ * footprint qui è quello nudo (niente clearance né banda): sulla pianta un
+ * tavolo può accostarsi al muro, non entrarci dentro.
+ */
+export function footprintHitsObstacles(
+  table: Pick<Table, 'shape' | 'seats' | 'rotation'>,
+  x: number,
+  y: number,
+  obstacles: Box[],
+  real?: TableDimensionsCm | null,
+): boolean {
+  if (obstacles.length === 0) return false;
+  const a = getTableFootprint(table, x, y, 0, 0, real);
+  return obstacles.some(o => boxesOverlap(a, o));
+}
+
+/**
  * Returns the subset of `others` whose footprint overlaps `table` placed at
  * (x, y). `others` are tested at their own saved x/y. The table itself (by id)
  * is always skipped.
