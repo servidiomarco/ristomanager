@@ -14,6 +14,11 @@ import React from 'react';
 
 interface LivePillProps {
   connected: boolean;
+  /* NOTA per chi la monta: la pastiglia porta `inline-flex` (e il pallino
+     `flex`) nella propria classe base. Per nasconderla serve una utility CON
+     VARIANTE — `max-md:hidden`, non `hidden` — perche' fra due utility di
+     display semplici vince quella che Tailwind emette dopo, non quella scritta
+     dopo nella stringa. Con `hidden` la pastiglia resta visibile. */
   /** L'ora da mostrare. Chi possiede la pastiglia possiede anche il suo tick. */
   time: Date;
   /** 'pill' è la testata (fondo tinto); 'dot' è il solo pallino del telefono. */

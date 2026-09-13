@@ -2485,7 +2485,14 @@ const App: React.FC = () => {
                   Connected uses the `seated` family; offline uses `critical`.
                   Comande a schermo pieno mostra la stessa pastiglia nella sua
                   chrome, quindi vive in ds/ e non più inline qui. */}
-              <LivePill connected={isConnected} time={currentTime} className="hidden md:inline-flex" />
+              {/* `max-md:hidden` e NON `hidden md:inline-flex`: la pastiglia
+                  porta `inline-flex` nella sua classe base, e fra due utility
+                  di display senza variante vince quella che Tailwind emette
+                  dopo — non quella scritta dopo qui. Con `hidden` la pastiglia
+                  restava visibile anche sul telefono, insieme al pallino.
+                  La variante invece esce dopo le utility semplici, quindi
+                  batte la base sotto md. */}
+              <LivePill connected={isConnected} time={currentTime} className="max-md:hidden" />
 
               {/* Mobile-only status dot */}
               <LivePill connected={isConnected} time={currentTime} variant="dot" className="md:hidden mx-1" />
