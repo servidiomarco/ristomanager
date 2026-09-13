@@ -34,6 +34,15 @@ interface RoomCanvasProps {
   // Contenuto extra per tavolo (importo in Cassa, badge in Reception),
   // renderizzato sotto il glifo dentro il bottone.
   renderTableExtras?: (t: Table, ctx: RoomCanvasTableCtx) => React.ReactNode;
+  // Decorazione del wrapper attorno al glifo (halo ring, opacità, raggio):
+  // il glifo resta com'è, il contesto attorno racconta lo stato della scelta.
+  glyphDecorFor?: (t: Table, ctx: RoomCanvasTableCtx) => { className?: string; style?: React.CSSProperties } | null;
+  // Overlay ancorati al box del glifo (badge «+N», caption): posizionati
+  // absolute dentro il wrapper del glifo. Tutto dentro il transform scala con
+  // la stanza — chi vuole testo a taglia schermo si counter-scala con ctx.scale.
+  overlayFor?: (t: Table, ctx: RoomCanvasTableCtx) => React.ReactNode;
+  buttonClassFor?: (t: Table) => string;
+  titleFor?: (t: Table) => string;
   // Overlay in coordinate stanza (hull banchetti, card prenotazione).
   children?: React.ReactNode;
   maxScale?: number;
@@ -55,6 +64,10 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
   onSelectTable,
   disabled,
   renderTableExtras,
+  glyphDecorFor,
+  overlayFor,
+  buttonClassFor,
+  titleFor,
   children,
   maxScale = 1,
   margin = 16,
@@ -142,6 +155,8 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
           // schermo non scenda mai sotto i 44px, glifo escluso dal ritocco.
           const ex = Math.max(0, (MIN_TAP_PX / scale - box.w) / 2);
           const ey = Math.max(0, (MIN_TAP_PX / scale - box.h) / 2);
+          const ctx: RoomCanvasTableCtx = { scale, box, hasPlan };
+          const decor = glyphDecorFor?.(t, ctx);
           return (
             <button
               key={t.id}
@@ -149,22 +164,26 @@ export const RoomCanvas: React.FC<RoomCanvasProps> = ({
               onClick={onSelectTable ? () => onSelectTable(t) : undefined}
               disabled={isDisabled(t)}
               aria-label={`Tavolo ${t.name}`}
-              className="absolute flex flex-col items-center rounded-[16px] transition-opacity disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              title={titleFor?.(t)}
+              className={`absolute flex flex-col items-center rounded-[16px] transition-opacity disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${buttonClassFor?.(t) ?? ''}`}
               style={{ left: box.x - ex, top: box.y - ey, width: box.w + ex * 2, paddingTop: ey, paddingBottom: ey }}
             >
-              <div style={t.rotation ? { transform: `rotate(${t.rotation}deg)` } : undefined}>
-                <TableGlyph
-                  name={t.name}
-                  seats={t.seats}
-                  shape={t.shape}
-                  status={statusFor(t)}
-                  party={partyFor?.(t)}
-                  isSelected={selectedIds?.has(t.id)}
-                  widthCm={real?.w_cm}
-                  lengthCm={real?.l_cm}
-                />
+              <div className={`relative ${decor?.className ?? ''}`} style={decor?.style}>
+                <div style={t.rotation ? { transform: `rotate(${t.rotation}deg)` } : undefined}>
+                  <TableGlyph
+                    name={t.name}
+                    seats={t.seats}
+                    shape={t.shape}
+                    status={statusFor(t)}
+                    party={partyFor?.(t)}
+                    isSelected={selectedIds?.has(t.id)}
+                    widthCm={real?.w_cm}
+                    lengthCm={real?.l_cm}
+                  />
+                </div>
+                {overlayFor?.(t, ctx)}
               </div>
-              {renderTableExtras?.(t, { scale, box, hasPlan })}
+              {renderTableExtras?.(t, ctx)}
             </button>
           );
         })}

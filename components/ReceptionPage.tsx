@@ -34,6 +34,7 @@ import {
 import { updateReservation, createReservation, swapReservationTables } from '../services/apiService';
 import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
+import { RoomCanvas } from './floor/RoomCanvas';
 import { PulseDot, getReservationState, getTimedReservationState, isSeated, deriveTableDisplayStatus, TABLE_STATUS_LABEL } from './reservationState';
 import { DietaryChips } from './DietaryChips';
 import { stripDietaryNote } from '../utils/dietary';
@@ -1331,8 +1332,6 @@ const TablePicker: React.FC<TablePickerProps> = ({
   // Quando il tavolo toccato ha più prenotazioni, prima si sceglie QUALE
   // scambiare: qui stanno i candidati da mostrare nel chooser.
   const [swapChoices, setSwapChoices] = useState<Reservation[] | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [containerSize, setContainerSize] = useState({ width: 800, height: 600 });
 
   // On phones the floor plan scales down until the glyphs collapse into each
   // other, so the picker switches to a list — same states, same actions.
@@ -1343,43 +1342,9 @@ const TablePicker: React.FC<TablePickerProps> = ({
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const ro = new ResizeObserver(entries => {
-      for (const e of entries) {
-        setContainerSize({ width: e.contentRect.width, height: e.contentRect.height });
-      }
-    });
-    ro.observe(containerRef.current);
-    return () => ro.disconnect();
-  }, [isPhone]);
-
   const visibleRooms = rooms.filter(r => !r.is_closed);
   const activeRoom = visibleRooms.find(r => r.id === activeRoomId) || visibleRooms[0];
   const roomTables = activeRoom ? tables.filter(t => t.room_id === activeRoom.id) : [];
-
-  // Compute the true bounding box from the placed tables (room.width/height
-  // is a stored ceiling but tables can be positioned right at the edge, which
-  // is why earlier versions clipped tables 34 & 36 on the Veranda).
-  const PAD = 48;
-  const extent = useMemo(() => {
-    let maxR = activeRoom?.width || 0;
-    let maxB = activeRoom?.height || 0;
-    for (const t of roomTables) {
-      const { width: w, height: h } = getGlyphDimensions(t.shape, t.seats);
-      maxR = Math.max(maxR, t.x + w);
-      maxB = Math.max(maxB, t.y + h);
-    }
-    return { width: maxR + PAD, height: maxB + PAD };
-  }, [activeRoom, roomTables]);
-
-  const scale = extent.width > 0 && extent.height > 0
-    ? Math.min(
-        (containerSize.width - PAD * 2) / extent.width,
-        (containerSize.height - PAD * 2) / extent.height,
-        1.6 // allow modest upscaling so a sparse room still fills the canvas
-      )
-    : 1;
 
   // Bucket each table for the picker so the host can scan the room in two
   // glances: which ones fit, which ones are out, which one is the current.
@@ -1557,106 +1522,67 @@ const TablePicker: React.FC<TablePickerProps> = ({
           </div>
         </div>
       ) : (
-      /* Canvas. Floor-dot background so the room reads as space, not a card. */
+      /* Canvas. Floor-dot background so the room reads as space, not a card.
+         Il render è il RoomCanvas condiviso; la decorazione resta qui: il
+         glifo sta in 'libera' e il colore lo porta l'halo, non le sedie. */
       <div
-        ref={containerRef}
-        className="mx-4 mb-4 flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-[24px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] sm:mx-6"
+        className="mx-4 mb-4 min-h-0 flex-1 overflow-hidden rounded-[24px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] sm:mx-6"
         style={{
           backgroundImage: 'radial-gradient(var(--floor-dot) 1px, transparent 1px)',
           backgroundSize: '18px 18px',
         }}
       >
         {activeRoom && (
-          <div
-            className="relative"
-            style={{
-              width: extent.width * scale,
-              height: extent.height * scale,
-            }}
-          >
-            {roomTables.map(t => {
-              const { state, swappable, disabled, onTap } = decorate(t);
-              const dim = getGlyphDimensions(t.shape, t.seats);
-              const glyphW = dim.width * scale;
-              const glyphH = dim.height * scale;
-
+          <RoomCanvas
+            room={activeRoom}
+            tables={roomTables}
+            maxScale={1.6}
+            margin={48}
+            statusFor={() => 'libera'}
+            disabled={t => busy || decorate(t).disabled}
+            onSelectTable={t => decorate(t).onTap()}
+            buttonClassFor={t => `transition-all duration-150 ${
+              decorate(t).disabled ? 'cursor-not-allowed' : 'cursor-pointer hover:-translate-y-0.5 hover:z-10'
+            }`}
+            titleFor={t => `${t.name} · ${t.seats} posti${t.max_seats && t.max_seats !== t.seats ? ` (max ${t.max_seats})` : ''}`}
+            glyphDecorFor={t => {
+              const { state, swappable } = decorate(t);
               // Match the natural glyph radius so the halo follows the table
               // shape (circle ≈ pill; rectangle ≈ rounded square).
-              const haloRadius = t.shape === TableShape.CIRCLE ? '9999px' : '20px';
-
-              // Decoration per state. The glyph itself stays in 'libera' so the
-              // room reads as a coherent floor plan — colour is conveyed by the
-              // halo + opacity, not by recolouring the chairs.
-              let haloClass = '';
-              let glyphOpacity = 'opacity-100';
-              let grayscale = '';
-              let badge: { text: string; tone: PillTone } | null = null;
-
-              if (state === 'current') {
-                haloClass = 'ring-2 ring-[var(--ds-arriving-solid)]';
-                badge = { text: 'Attuale', tone: 'info' };
-              } else if (state === 'occupied') {
-                if (swappable) {
-                  haloClass = 'ring-2 ring-[var(--ds-pending-solid)] hover:ring-[3px]';
-                  glyphOpacity = 'opacity-80';
-                  badge = { text: 'Scambia', tone: 'pending' };
-                } else {
-                  haloClass = 'ring-1 ring-[var(--ds-critical-solid)]';
-                  glyphOpacity = 'opacity-50';
-                  badge = { text: 'Occupato', tone: 'critical' };
-                }
-              } else if (state === 'tooSmall') {
-                haloClass = '';
-                glyphOpacity = 'opacity-40';
-                grayscale = 'grayscale';
-                badge = { text: `${t.seats} posti`, tone: 'neutral' };
-              } else if (state === 'ideal') {
-                haloClass = 'ring-2 ring-[var(--ds-seated-solid)] hover:ring-[3px]';
-              } else if (state === 'big') {
-                haloClass = 'ring-1 ring-[var(--ds-border-strong)] hover:ring-2';
+              const style = { borderRadius: t.shape === TableShape.CIRCLE ? '9999px' : '20px' };
+              switch (state) {
+                case 'current': return { className: 'ring-2 ring-[var(--ds-arriving-solid)]', style };
+                case 'occupied': return swappable
+                  ? { className: 'ring-2 ring-[var(--ds-pending-solid)] hover:ring-[3px] opacity-80', style }
+                  : { className: 'ring-1 ring-[var(--ds-critical-solid)] opacity-50', style };
+                case 'tooSmall': return { className: 'opacity-40 grayscale', style };
+                case 'ideal': return { className: 'ring-2 ring-[var(--ds-seated-solid)] hover:ring-[3px]', style };
+                case 'big': return { className: 'ring-1 ring-[var(--ds-border-strong)] hover:ring-2', style };
+                default: return { style };
               }
-
+            }}
+            overlayFor={(t, ctx) => {
+              const { state, swappable } = decorate(t);
+              const badge: { text: string; tone: PillTone } | null =
+                state === 'current' ? { text: 'Attuale', tone: 'info' }
+                : state === 'occupied' ? (swappable ? { text: 'Scambia', tone: 'pending' } : { text: 'Occupato', tone: 'critical' })
+                : state === 'tooSmall' ? { text: `${t.seats} posti`, tone: 'neutral' }
+                : null;
+              if (!badge) return null;
               return (
-                <button
-                  key={t.id}
-                  onClick={onTap}
-                  disabled={busy || disabled}
-                  className={`absolute transition-all duration-150 ${
-                    disabled ? 'cursor-not-allowed' : 'cursor-pointer hover:-translate-y-0.5 hover:z-10'
-                  }`}
-                  style={{
-                    left: t.x * scale,
-                    top: t.y * scale,
-                    width: glyphW,
-                    height: glyphH,
-                  }}
-                  title={`${t.name} · ${t.seats} posti${t.max_seats && t.max_seats !== t.seats ? ` (max ${t.max_seats})` : ''}`}
+                /* Counter-scala: la pill resta a taglia schermo anche quando
+                   la stanza si rimpicciolisce per stare nel contenitore. */
+                <span
+                  className="absolute -bottom-3 left-1/2"
+                  style={{ transform: `translateX(-50%) scale(${1 / ctx.scale})`, transformOrigin: 'top center' }}
                 >
-                  <div
-                    className={`relative ${haloClass} ${glyphOpacity} ${grayscale}`}
-                    style={{ width: glyphW, height: glyphH, borderRadius: haloRadius }}
-                  >
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <TableGlyph
-                        name={t.name}
-                        seats={t.seats}
-                        shape={t.shape}
-                        status="libera"
-                        fit
-                      />
-                    </div>
-                  </div>
-                  {badge && (
-                    <span className="absolute -bottom-3 left-1/2 -translate-x-1/2">
-                      <StatusPill tone={badge.tone} className="h-5 px-2 text-[10px] font-semibold shadow-[var(--ds-shadow-card)]">
-                        {badge.text}
-                      </StatusPill>
-                    </span>
-                  )}
-                </button>
+                  <StatusPill tone={badge.tone} className="h-5 px-2 text-[10px] font-semibold shadow-[var(--ds-shadow-card)]">
+                    {badge.text}
+                  </StatusPill>
+                </span>
               );
-            })}
-          </div>
+            }}
+          />
         )}
       </div>
       )}
@@ -1827,43 +1753,9 @@ const RoomMap: React.FC<RoomMapProps> = ({
   onPickReservation,
   now,
 }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [containerSize, setContainerSize] = useState({ width: 600, height: 600 });
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const ro = new ResizeObserver(entries => {
-      for (const e of entries) {
-        setContainerSize({ width: e.contentRect.width, height: e.contentRect.height });
-      }
-    });
-    ro.observe(containerRef.current);
-    return () => ro.disconnect();
-  }, []);
-
   const visibleRooms = rooms.filter(r => !r.is_closed);
   const activeRoom = visibleRooms.find(r => r.id === activeRoomId) || visibleRooms[0];
   const roomTables = activeRoom ? tables.filter(t => t.room_id === activeRoom.id) : [];
-
-  const PAD = 40;
-  const extent = useMemo(() => {
-    let maxR = activeRoom?.width || 0;
-    let maxB = activeRoom?.height || 0;
-    for (const t of roomTables) {
-      const { width: w, height: h } = getGlyphDimensions(t.shape, t.seats);
-      maxR = Math.max(maxR, t.x + w);
-      maxB = Math.max(maxB, t.y + h);
-    }
-    return { width: maxR + PAD, height: maxB + PAD };
-  }, [activeRoom, roomTables]);
-
-  const scale = extent.width > 0 && extent.height > 0
-    ? Math.min(
-        (containerSize.width - PAD * 2) / extent.width,
-        (containerSize.height - PAD * 2) / extent.height,
-        1.6
-      )
-    : 1;
 
   // Stats for the active room — gives the host a one-glance read on capacity.
   const stats = useMemo(() => {
@@ -1931,128 +1823,99 @@ const RoomMap: React.FC<RoomMapProps> = ({
       </div>
 
       <div
-        ref={containerRef}
-        className="mx-4 mb-4 flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-[24px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] sm:mx-6"
+        className="mx-4 mb-4 min-h-0 flex-1 overflow-hidden rounded-[24px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] sm:mx-6"
         style={{
           backgroundImage: 'radial-gradient(var(--floor-dot) 1px, transparent 1px)',
           backgroundSize: '18px 18px',
         }}
       >
         {activeRoom && (
-          <div
-            className="relative"
-            style={{
-              width: extent.width * scale,
-              height: extent.height * scale,
-            }}
-          >
-            {roomTables.map(t => {
+          <RoomCanvas
+            room={activeRoom}
+            tables={roomTables}
+            maxScale={1.6}
+            margin={40}
+            /* Shared, time-aware derivation so the room reads exactly like
+               the floor plan view (In arrivo pulses, In uscita reads cyan). */
+            statusFor={t => deriveTableDisplayStatus(reservationByTableId.get(t.id), { now })}
+            partyFor={t => reservationByTableId.get(t.id)?.guests}
+            disabled={t => !reservationByTableId.get(t.id)}
+            onSelectTable={t => {
               const res = reservationByTableId.get(t.id);
-              const dim = getGlyphDimensions(t.shape, t.seats);
-              const glyphW = dim.width * scale;
-              const glyphH = dim.height * scale;
-              const haloRadius = t.shape === TableShape.CIRCLE ? '9999px' : '20px';
-
-              // Shared, time-aware derivation so the room reads exactly like
-              // the floor plan view (In arrivo pulses, In uscita reads cyan).
-              const status: TableDisplayStatus = deriveTableDisplayStatus(res, { now });
-              let haloClass = '';
-              let caption: string | null = null;
-
-              // Un tavolo può avere due turni nella stessa serata: la mappa
-              // mostrava solo la prenotazione prioritaria. Contiamo le altre per
-              // segnalarle con un badge "+N" e listarle nel tooltip.
-              const otherAtTable = (reservationsByTableId.get(t.id) ?? []).filter(o => o.id !== res?.id);
-              const extraCount = otherAtTable.length;
-
-              if (res) {
-                const firstName = toTitleCase(res.customer_name)?.split(' ')[0] || 'Ospite';
-                switch (status) {
-                  case 'arrivato':
-                    haloClass = 'ring-2 ring-[var(--ds-seated-solid)]';
-                    caption = `${firstName} · ${res.guests}p`;
-                    break;
-                  case 'uscita':
-                    // Still a seated party, so still the seated family — the
-                    // caption carries the difference, not a fifth colour.
-                    haloClass = 'ring-2 ring-[var(--ds-seated-text)]';
-                    caption = `${TABLE_STATUS_LABEL.uscita} · ${firstName}`;
-                    break;
-                  case 'noshow':
-                    haloClass = 'ring-2 ring-[var(--ds-critical-solid)]';
-                    caption = 'No-show';
-                    break;
-                  case 'inarrivo':
-                  case 'attesa':
-                    haloClass = 'ring-2 ring-[var(--ds-arriving-solid)]';
-                    caption = `${formatHHMM(res.reservation_time)} · ${firstName}`;
-                    break;
-                }
-                // Segnala i turni successivi sullo stesso tavolo.
-                if (caption && extraCount > 0) caption = `${caption} +${extraCount}`;
-              }
-
+              if (res) onPickReservation(res.id);
+            }}
+            buttonClassFor={t => `transition-all duration-150 ${
+              reservationByTableId.get(t.id) ? 'cursor-pointer hover:-translate-y-0.5 hover:z-10' : 'cursor-default'
+            }`}
+            titleFor={t => {
+              const res = reservationByTableId.get(t.id);
+              if (!res) return `${t.name} · libero`;
+              const otherAtTable = (reservationsByTableId.get(t.id) ?? []).filter(o => o.id !== res.id);
               // Tooltip: tutte le prenotazioni del tavolo, in ordine di orario.
-              const titleText = res
-                ? `${t.name} · ${[res, ...otherAtTable]
-                    .sort((x, y) => new Date(x.reservation_time).getTime() - new Date(y.reservation_time).getTime())
-                    .map(x => `${formatHHMM(x.reservation_time)} ${toTitleCase(x.customer_name) || 'Senza nome'} (${x.guests}p)`)
-                    .join(' · ')}`
-                : `${t.name} · libero`;
-
-              const disabled = !res;
-
+              return `${t.name} · ${[res, ...otherAtTable]
+                .sort((x, y) => new Date(x.reservation_time).getTime() - new Date(y.reservation_time).getTime())
+                .map(x => `${formatHHMM(x.reservation_time)} ${toTitleCase(x.customer_name) || 'Senza nome'} (${x.guests}p)`)
+                .join(' · ')}`;
+            }}
+            glyphDecorFor={t => {
+              const res = reservationByTableId.get(t.id);
+              const style = { borderRadius: t.shape === TableShape.CIRCLE ? '9999px' : '20px' };
+              if (!res) return { style };
+              switch (deriveTableDisplayStatus(res, { now })) {
+                case 'arrivato': return { className: 'ring-2 ring-[var(--ds-seated-solid)]', style };
+                // Still a seated party, so still the seated family — the
+                // caption carries the difference, not a fifth colour.
+                case 'uscita': return { className: 'ring-2 ring-[var(--ds-seated-text)]', style };
+                case 'noshow': return { className: 'ring-2 ring-[var(--ds-critical-solid)]', style };
+                case 'inarrivo':
+                case 'attesa': return { className: 'ring-2 ring-[var(--ds-arriving-solid)]', style };
+                default: return { style };
+              }
+            }}
+            overlayFor={(t, ctx) => {
+              const res = reservationByTableId.get(t.id);
+              if (!res) return null;
+              const status = deriveTableDisplayStatus(res, { now });
+              const otherAtTable = (reservationsByTableId.get(t.id) ?? []).filter(o => o.id !== res.id);
+              const extraCount = otherAtTable.length;
+              const firstName = toTitleCase(res.customer_name)?.split(' ')[0] || 'Ospite';
+              let caption: string | null = null;
+              switch (status) {
+                case 'arrivato': caption = `${firstName} · ${res.guests}p`; break;
+                case 'uscita': caption = `${TABLE_STATUS_LABEL.uscita} · ${firstName}`; break;
+                case 'noshow': caption = 'No-show'; break;
+                case 'inarrivo':
+                case 'attesa': caption = `${formatHHMM(res.reservation_time)} · ${firstName}`; break;
+              }
+              // Segnala i turni successivi sullo stesso tavolo.
+              if (caption && extraCount > 0) caption = `${caption} +${extraCount}`;
+              /* Counter-scala: badge e caption restano a taglia schermo anche
+                 quando la stanza si rimpicciolisce nel contenitore. */
               return (
-                <button
-                  key={t.id}
-                  onClick={() => res && onPickReservation(res.id)}
-                  disabled={disabled}
-                  className={`absolute transition-all duration-150 ${
-                    disabled ? 'cursor-default' : 'cursor-pointer hover:-translate-y-0.5 hover:z-10'
-                  }`}
-                  style={{
-                    left: t.x * scale,
-                    top: t.y * scale,
-                    width: glyphW,
-                    height: glyphH,
-                  }}
-                  title={titleText}
-                >
-                  <div
-                    className={`relative ${haloClass}`}
-                    style={{ width: glyphW, height: glyphH, borderRadius: haloRadius }}
-                  >
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <TableGlyph
-                        name={t.name}
-                        seats={t.seats}
-                        shape={t.shape}
-                        status={status}
-                        party={res ? res.guests : undefined}
-                        fit
-                      />
-                    </div>
-                    {/* Badge "+N": turni successivi sullo stesso tavolo (il
-                        conteggio completo è nel tooltip del tavolo). */}
-                    {extraCount > 0 && (
-                      <span
-                        className="absolute -right-1.5 -top-1.5 z-10 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--ds-arriving-solid)] px-1 text-[10px] font-bold text-white shadow-[var(--ds-shadow-card)]"
-                        aria-label={`${extraCount + 1} prenotazioni su questo tavolo`}
-                        title={titleText}
-                      >
-                        +{extraCount}
-                      </span>
-                    )}
-                  </div>
+                <>
+                  {/* Badge "+N": turni successivi sullo stesso tavolo (il
+                      conteggio completo è nel tooltip del tavolo). */}
+                  {extraCount > 0 && (
+                    <span
+                      className="absolute -right-1.5 -top-1.5 z-10 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--ds-arriving-solid)] px-1 text-[10px] font-bold text-white shadow-[var(--ds-shadow-card)]"
+                      style={{ transform: `scale(${1 / ctx.scale})`, transformOrigin: 'bottom left' }}
+                      aria-label={`${extraCount + 1} prenotazioni su questo tavolo`}
+                    >
+                      +{extraCount}
+                    </span>
+                  )}
                   {caption && (
-                    <span className="absolute -bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-[var(--ds-surface)] px-2 py-0.5 text-[10px] font-semibold tabular-nums text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]">
+                    <span
+                      className="absolute -bottom-3 left-1/2 whitespace-nowrap rounded-full bg-[var(--ds-surface)] px-2 py-0.5 text-[10px] font-semibold tabular-nums text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)]"
+                      style={{ transform: `translateX(-50%) scale(${1 / ctx.scale})`, transformOrigin: 'top center' }}
+                    >
                       {caption}
                     </span>
                   )}
-                </button>
+                </>
               );
-            })}
-          </div>
+            }}
+          />
         )}
       </div>
     </div>
