@@ -11,7 +11,9 @@ import { getRomeDatePart, getRomeTimePart } from '../utils/reservationTime';
 import { buildFloorLabels } from '../utils/labelPlacement';
 import { buildBanquetColorClassMap } from '../utils/banquetColors';
 import { BanquetLabel } from './ReservationCard';
-import { snapToGrid, collidesWithOthers, findOverlappingPairs, getTableFootprint, FLOOR_CLEARANCE } from '../utils/tableOverlap';
+import { snapToGrid, collidesWithOthers, findOverlappingPairs, getTableFootprint, FLOOR_CLEARANCE, FLOOR_GRID, FLOOR_LABEL_BAND } from '../utils/tableOverlap';
+import { RoomShapeLayer } from './floor/RoomShapeLayer';
+import { roomHasPlan, realDimsFor, planGlyphBox, legacyCenterToCm, PLAN_GRID_CM } from './floor/roomGeometry';
 import { toTitleCase, getInitials } from '../utils/text';
 import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, createRoomClosed, deleteRoomClosed } from '../services/apiService';
 import { applyMerges } from '../utils/tableMerge';
@@ -160,9 +162,54 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       return saved === 'manual' ? 'manual' : 'auto';
     } catch { return 'auto'; }
   });
+  // La persistenza vive nel toggle (non in un effect): al cambio sala il
+  // default per-sala qui sotto non deve trovare la preferenza della sala
+  // precedente già riscritta sulla chiave nuova.
+  const persistLayoutMode = (roomId: number | null, mode: 'auto' | 'manual') => {
+    try {
+      window.localStorage.setItem('floorPlan.layoutMode', mode);
+      if (roomId) window.localStorage.setItem(`floorPlan.layoutMode.${roomId}`, mode);
+    } catch {}
+  };
+
+  const activeRoom = rooms.find(r => r.id === activeRoomId) ?? null;
+  const activeRoomPlan = activeRoom?.plan ?? null;
+
+  // Una sala con pianta disegnata apre in manuale: le posizioni reali sono il
+  // punto della pianta. La preferenza esplicita per-sala, se c'è, vince.
   useEffect(() => {
-    try { window.localStorage.setItem('floorPlan.layoutMode', layoutMode); } catch {}
-  }, [layoutMode]);
+    if (!activeRoomId) return;
+    try {
+      const saved = window.localStorage.getItem(`floorPlan.layoutMode.${activeRoomId}`);
+      if (saved === 'manual' || saved === 'auto') { setLayoutMode(saved); return; }
+    } catch {}
+    if (activeRoomPlan) setLayoutMode('manual');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRoomId, !!activeRoomPlan]);
+
+  // La pianta reale è viva solo in manuale: in auto le righe ordinate sotto
+  // muri veri sarebbero un falso, quindi fabric e misure reali si spengono.
+  const planActive = layoutMode === 'manual' && !!activeRoomPlan;
+
+  // Posizione manuale di un tavolo in coordinate canvas: sulla pianta è il
+  // box centrato su x_cm/y_cm; un tavolo non ancora piazzato ricava il centro
+  // dai legacy x/y così non salta quando la sala riceve la sua prima pianta.
+  const manualPosFor = (t: Table): { x: number; y: number } => {
+    if (!planActive) return { x: t.x, y: t.y };
+    const placed = planGlyphBox(t);
+    if (placed) return { x: placed.x, y: placed.y };
+    const real = realDimsFor(t);
+    const { width, height } = getGlyphDimensions(t.shape, t.seats, real);
+    const c = legacyCenterToCm(t);
+    return { x: c.x_cm - width / 2, y: c.y_cm - height / 2 };
+  };
+
+  // Sulla pianta i tavoli veri possono toccarsi: niente clearance né banda
+  // etichette, e footprint dalle misure reali.
+  const planClearance = planActive ? 0 : FLOOR_CLEARANCE;
+  const overlapOpts = planActive
+    ? { labelBand: 0, realFor: (t: Table) => realDimsFor(t), posFor: manualPosFor }
+    : undefined;
 
   // Portrait orientation gate (floor-plan only, mobile/touch devices)
   const [isPortrait, setIsPortrait] = useState(() => {
@@ -499,6 +546,11 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     if (layoutMode === 'auto') {
       return { width: autoLayout.width, height: autoLayout.height };
     }
+    // Sulla pianta reale comanda la stanza: l'estensione è il suo rettangolo
+    // in cm, non il bounding box dei tavoli.
+    if (planActive && activeRoomPlan) {
+      return { width: activeRoomPlan.width_cm, height: activeRoomPlan.height_cm };
+    }
     // Manual mode: natural bounding box of the saved positions. Combined with
     // contentOffset=(0,0) and scale≤1 below this matches the pre-PR floor
     // plan: tables render at their real size and only shrink if they overflow
@@ -513,7 +565,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       maxBottom = Math.max(maxBottom, t.y + h);
     }
     return { width: maxRight + PADDING, height: maxBottom + PADDING };
-  }, [layoutMode, autoLayout, currentTables]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layoutMode, autoLayout, currentTables, planActive, activeRoomPlan]);
 
   const scale = useMemo(() => {
     if (canvasSize.width === 0 || canvasSize.height === 0) return 1;
@@ -550,8 +603,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   // we flag them rather than moving anything.
   const overlapPairs = useMemo(() => {
     if (layoutMode !== 'manual') return [];
-    return findOverlappingPairs(currentTables);
-  }, [layoutMode, currentTables]);
+    return findOverlappingPairs(currentTables, planClearance, overlapOpts);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layoutMode, currentTables, planActive]);
 
   // Stable signature of the colliding set so a dismissed banner reappears only
   // when the actual set of overlaps changes.
@@ -657,9 +711,13 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const floorLabels = useMemo(() => {
     const labelTables = currentTables.map(t => {
       const pos = layoutMode === 'manual'
-        ? { x: t.x, y: t.y }
+        ? manualPosFor(t)
         : (autoLayout.positions.get(t.id) || { x: t.x, y: t.y });
-      return { id: t.id, shape: t.shape, seats: t.seats, rotation: t.rotation ?? 0, x: pos.x, y: pos.y };
+      return {
+        id: t.id, shape: t.shape, seats: t.seats, rotation: t.rotation ?? 0,
+        x: pos.x, y: pos.y,
+        real: planActive ? realDimsFor(t) : undefined,
+      };
     });
     const banquetDataById = new Map<number, BanquetMenu>();
     const banquetTableIds = new Map<number, number[]>();
@@ -688,7 +746,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const banquetColorByBanquetId = buildBanquetColorClassMap(banquetGroups.map(b => b.id));
     return { ...result, banquetDataById, banquetGroups, banquetColorByBanquetId };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentTables, autoLayout, layoutMode, banquetByTableId, selectedTables, reservations]);
+  }, [currentTables, autoLayout, layoutMode, planActive, banquetByTableId, selectedTables, reservations]);
 
   const getDynamicTableStatus = (table: Table): TableStatus => {
     const now = Date.now();
@@ -752,6 +810,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     // selects. In manual mode arm a real drag against the saved x/y.
     if (layoutMode !== 'manual') return;
 
+    const startPos = table ? manualPosFor(table) : null;
     dragStateRef.current = {
       isDragging: true,
       tableId: tableId,
@@ -759,9 +818,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       startY: e.clientY,
       currentX: e.clientX,
       currentY: e.clientY,
-      originalPos: table ? { x: table.x, y: table.y } : null,
-      candidateX: table ? table.x : 0,
-      candidateY: table ? table.y : 0,
+      originalPos: startPos,
+      candidateX: startPos?.x ?? 0,
+      candidateY: startPos?.y ?? 0,
       conflict: false
     };
     draggedElementRef.current = element;
@@ -781,15 +840,23 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const deltaX = (clientX - dragState.startX) / s;
     const deltaY = (clientY - dragState.startY) / s;
 
-    // Snap the candidate drop to the grid, then clamp to the canvas.
-    const candX = Math.max(0, snapToGrid(dragState.originalPos.x + deltaX));
-    const candY = Math.max(0, snapToGrid(dragState.originalPos.y + deltaY));
+    const dragTable = currentTables.find(t => t.id === id) || tables.find(t => t.id === id);
+
+    // Snap the candidate drop to the grid, then clamp to the canvas. Sulla
+    // pianta reale lo snap è in cm (10) e il tavolo resta dentro i muri.
+    const grid = planActive ? PLAN_GRID_CM : FLOOR_GRID;
+    let candX = Math.max(0, snapToGrid(dragState.originalPos.x + deltaX, grid));
+    let candY = Math.max(0, snapToGrid(dragState.originalPos.y + deltaY, grid));
+    if (planActive && activeRoomPlan && dragTable) {
+      const { width, height } = getGlyphDimensions(dragTable.shape, dragTable.seats, realDimsFor(dragTable));
+      candX = Math.min(candX, Math.max(0, activeRoomPlan.width_cm - width));
+      candY = Math.min(candY, Math.max(0, activeRoomPlan.height_cm - height));
+    }
 
     // Test the dragged table's footprint against the others (at their saved
     // positions). Use the displayed table for shape/seats/rotation.
-    const dragTable = currentTables.find(t => t.id === id) || tables.find(t => t.id === id);
     const conflict = dragTable
-      ? collidesWithOthers(dragTable, candX, candY, currentTables).length > 0
+      ? collidesWithOthers(dragTable, candX, candY, currentTables, planClearance, overlapOpts).length > 0
       : false;
 
     dragState.candidateX = candX;
@@ -844,7 +911,20 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 }, 240);
             } else {
                 // Valid drop — persist the snapped, clamped candidate position.
-                const updatedTable = { ...table, x: dragState.candidateX, y: dragState.candidateY };
+                // Sulla pianta reale si scrive il CENTRO in cm (x_cm/y_cm) e i
+                // legacy x/y non si toccano: cancellare la pianta deve
+                // ripristinare esattamente la sala di prima.
+                let updatedTable: Table;
+                if (planActive) {
+                    const { width, height } = getGlyphDimensions(table.shape, table.seats, realDimsFor(table));
+                    updatedTable = {
+                        ...table,
+                        x_cm: Math.round(dragState.candidateX + width / 2),
+                        y_cm: Math.round(dragState.candidateY + height / 2),
+                    };
+                } else {
+                    updatedTable = { ...table, x: dragState.candidateX, y: dragState.candidateY };
+                }
                 // Force synchronous update to prevent snap-back
                 flushSync(() => {
                     onUpdateTable(updatedTable);
@@ -897,6 +977,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     if (layoutMode !== 'manual') return;
 
     const touch = e.touches[0];
+    const touchStartPos = table ? manualPosFor(table) : null;
     dragStateRef.current = {
       isDragging: true,
       tableId: tableId,
@@ -904,9 +985,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       startY: touch.clientY,
       currentX: touch.clientX,
       currentY: touch.clientY,
-      originalPos: table ? { x: table.x, y: table.y } : null,
-      candidateX: table ? table.x : 0,
-      candidateY: table ? table.y : 0,
+      originalPos: touchStartPos,
+      candidateX: touchStartPos?.x ?? 0,
+      candidateY: touchStartPos?.y ?? 0,
       conflict: false
     };
     draggedElementRef.current = element;
@@ -965,7 +1046,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   // never overlap, so it's always allowed there.
   const editWouldOverlap = (proposed: Table): boolean => {
       if (layoutMode !== 'manual') return false;
-      return collidesWithOthers(proposed, proposed.x, proposed.y, currentTables).length > 0;
+      const pos = manualPosFor(proposed);
+      return collidesWithOthers(proposed, pos.x, pos.y, currentTables, planClearance, overlapOpts).length > 0;
   };
 
   const handleSeatsChange = (newSeats: number) => {
@@ -1081,14 +1163,15 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       now: nowTick,
     });
 
-    const dims = getGlyphDimensions(table.shape, table.seats);
+    const real = planActive ? realDimsFor(table) : null;
+    const dims = getGlyphDimensions(table.shape, table.seats, real);
     const { width: svgW, height: svgH } = dims;
 
     // Overlap state: this table is being dragged into a colliding position.
     const isInvalidDrag = dragConflictId === table.id;
     // Footprint box (body + chair overhang + clearance), rotation-aware,
     // expressed relative to the glyph box's top-left for the overlay below.
-    const fp = getTableFootprint(table, 0, 0, FLOOR_CLEARANCE);
+    const fp = getTableFootprint(table, 0, 0, planClearance, planActive ? 0 : FLOOR_LABEL_BAND, real);
 
     const rotationRad = ((table.rotation || 0) * Math.PI) / 180;
     const rotatedHalfH = (Math.abs(svgW * Math.sin(rotationRad)) + Math.abs(svgH * Math.cos(rotationRad))) / 2;
@@ -1097,7 +1180,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const accentVar = displayStatus !== 'libera' ? `var(--tg-${displayStatus}-accent)` : undefined;
 
     const pos = layoutMode === 'manual'
-      ? { x: table.x, y: table.y }
+      ? manualPosFor(table)
       : (autoLayout.positions.get(table.id) || { x: table.x, y: table.y });
 
     const isDraggable = canEdit && layoutMode === 'manual' && !table.is_locked && !isTempLocked;
@@ -1133,6 +1216,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
               ? (reservation.reservation_status === ReservationStatus.NO_SHOW ? 0 : reservation.guests)
               : banquet ? (banquet.guests ?? 0) : 0}
             isSelected={isSelected && canEdit}
+            widthCm={real?.w_cm}
+            lengthCm={real?.l_cm}
           />
         </div>
 
@@ -1346,7 +1431,11 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           </button>
 
           <button
-            onClick={() => setLayoutMode(m => m === 'auto' ? 'manual' : 'auto')}
+            onClick={() => setLayoutMode(m => {
+              const next = m === 'auto' ? 'manual' : 'auto';
+              persistLayoutMode(activeRoomId, next);
+              return next;
+            })}
             className={`${dsIconButton} shadow-none ${layoutMode === 'manual' ? TOOL_BUTTON_ON : 'bg-[var(--ds-surface-row)]'}`}
             title={layoutMode === 'manual' ? 'Layout manuale: trascina per posizionare. Clicca per tornare ad auto-tidy.' : 'Layout auto-tidy: posizioni ordinate per numero. Clicca per attivare drag manuale.'}
           >
@@ -1681,6 +1770,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 transformOrigin: 'top left'
             }}
           >
+            {/* Pianta reale: pavimento, muri ed elementi fissi sotto tutto. */}
+            {planActive && activeRoomPlan && <RoomShapeLayer plan={activeRoomPlan} />}
             {/* Banquet hulls (behind tables) — tinted per banquet so two events
                 in the same room are visually distinct. */}
             {floorLabels.hulls.map((h, i) => (
