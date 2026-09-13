@@ -762,7 +762,10 @@ its hour.
 button once there is a value. **Always visible, never behind a toggle:** on a list you filter
 before you scroll, and a hidden search costs a tap plus remembering it exists.
 
-On the canvas it takes `surface` with `elevation.card`, not `surface-row` — see §8.8. Accepts
+Two treatments, by where it sits — the same rule as IconButton below, and DateNavigator's
+`onCanvas` from the other side. On the canvas it takes `surface` with `elevation.card`, not
+`surface-row` (§8.8). **Inside a white bar or card it goes recessed** to `surface-row` with no
+shadow: the canvas treatment there draws a white box on a white box, shadow and all. Accepts
 an optional passive hint parked inside the field (what Enter will do to the last remaining
 match), which never covers the clear button.
 
@@ -1146,11 +1149,17 @@ defect at least once, and each is invisible in review until it renders.
 
 11. **A scroll container clips the other axis too.** `overflow-y: auto` also establishes
     horizontal clipping — and `overflow-x: auto` vertical — so card shadows and focus rings
-    inside come out sliced flat at whichever edges do not scroll. Give the container a small
-    bleed on that axis (negative margin plus equal padding) so elevation has room to render.
+    inside come out sliced flat at whichever edges do not scroll. Give the container a bleed on
+    that axis — negative margin plus equal padding — so elevation has room to render.
+    **Size it against the shadow, not by eye:** the bleed has to clear `offset-y + blur`, which
+    for `elevation.card` (`0 8px 24px`) is about 20px and for `elevation.raised`
+    (`0 20px 48px`) about 44px. 4–8px feels generous and still cuts the shadow in half; if a
+    rail needs `raised`, prefer marking its selection with a ring and keeping `card`, rather
+    than reserving twice the clearance.
     A horizontal chip track is the case that hides longest: every chip keeps its shadow at the
     sides and loses it top and bottom, which reads as a deliberately flat control rather than
-    as a bug.
+    as a bug — and a coloured border on the card hides it completely, until the day the border
+    goes.
 
 12. **A scroll container's own padding is eaten by its scrollbar.** Padding on the scrolling
     element sits *behind* the scrollbar, so content stops short of where the same padding puts
@@ -1252,6 +1261,7 @@ components/
     ListPrimitives.tsx   # SplitPane, PaneHeader, SectionHeader, StatStrip, StatusPill, CountBadge,
                          # SearchField, Avatar, Callout, EmptyState, dsIconButton, useMediaQuery
     Calendar.tsx         # MonthGrid, DayPicker — one month grid for the whole app
+    LivePill.tsx         # connection state + clock, for any chrome that owns its own bar
     AttachmentRow.tsx    # a queued file inside a composer
     SwipeRow.tsx         # swipe actions + first-run hint
     index.ts             # barrel export — import from './ds', never from a file
