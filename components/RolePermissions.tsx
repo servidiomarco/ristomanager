@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { AlertTriangle, Check, Loader2 } from 'lucide-react';
+import { AlertTriangle, Check, Loader2, Lock } from 'lucide-react';
 import { UserRole } from '../types';
 import { Loader } from './Loader';
 import { ModalShell, dsButton } from './ds';
+import { useToast } from '../contexts/ToastContext';
 
 interface FeaturePermissions {
   feature: string;
@@ -55,11 +56,15 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
   const [features, setFeatures] = useState<FeaturePermissions[]>([]);
   const [roles] = useState<string[]>(['OWNER', 'GENERAL_MANAGER', 'MANAGER', 'RECEPTION', 'WAITER', 'KITCHEN']);
   const [rolePermissions, setRolePermissions] = useState<Record<string, string[]>>({});
+  // Permessi riservati alla piattaforma: qui si mostrano col lucchetto e
+  // non si toccano — li amministra il pannello. Il server li congela
+  // comunque, la UI evita solo di promettere un salvataggio che non avverrà.
+  const [locked, setLocked] = useState<string[]>([]);
   const [selectedRole, setSelectedRole] = useState<string>('MANAGER');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const { addToast } = useToast();
 
   const getAuthHeaders = () => {
     const token = localStorage.getItem('ristomanager_access_token');
@@ -92,6 +97,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
       const rolePermsData = await rolePermsRes.json();
 
       setFeatures(permissionsData.features);
+      setLocked(permissionsData.locked || []);
       setRolePermissions(rolePermsData);
     } catch (err) {
       setError('Errore nel caricamento dei permessi');
@@ -102,8 +108,8 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
   };
 
   const handlePermissionToggle = (permission: string) => {
-    if (selectedRole === 'OWNER') {
-      // Prevent modifying OWNER permissions
+    if (selectedRole === 'OWNER' || locked.includes(permission)) {
+      // OWNER non si modifica; un permesso riservato nemmeno.
       return;
     }
 
@@ -123,7 +129,6 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
   const handleSave = async () => {
     setSaving(true);
     setError(null);
-    setSuccessMessage(null);
 
     try {
       const response = await fetch(`${API_BASE_URL}/auth/permissions/roles/${selectedRole}`, {
@@ -137,8 +142,7 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
         throw new Error(data.error || 'Failed to save permissions');
       }
 
-      setSuccessMessage(`Permessi per ${ROLE_LABELS[selectedRole]} salvati con successo`);
-      setTimeout(() => setSuccessMessage(null), 3000);
+      addToast(`Permessi per ${ROLE_LABELS[selectedRole]} salvati`, 'success');
     } catch (err: any) {
       setError(err.message || 'Errore nel salvataggio dei permessi');
     } finally {
@@ -234,40 +238,38 @@ export const RolePermissions: React.FC<RolePermissionsProps> = ({ isOpen, onClos
                 </div>
                 <div className="p-4">
                   <div className="flex flex-wrap gap-2">
-                    {feature.permissions.map(permission => (
-                      <label
-                        key={permission}
-                        className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-full px-3.5 text-[14px] font-medium transition-colors ${
-                          hasPermission(permission)
-                            ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
-                            : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
-                        } ${selectedRole === 'OWNER' ? 'cursor-not-allowed opacity-60' : ''}`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={hasPermission(permission)}
-                          onChange={() => handlePermissionToggle(permission)}
-                          disabled={selectedRole === 'OWNER'}
-                          className="h-4 w-4 rounded accent-[var(--ds-action-bg)]"
-                        />
-                        <span>
-                          {PERMISSION_LABELS[permission] || permission}
-                        </span>
-                      </label>
-                    ))}
+                    {feature.permissions.map(permission => {
+                      const isLocked = locked.includes(permission);
+                      return (
+                        <label
+                          key={permission}
+                          title={isLocked ? 'Riservato alla piattaforma' : undefined}
+                          className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-full px-3.5 text-[14px] font-medium transition-colors ${
+                            hasPermission(permission)
+                              ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                              : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:bg-[var(--ds-border)]'
+                          } ${selectedRole === 'OWNER' || isLocked ? 'cursor-not-allowed opacity-60' : ''}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={hasPermission(permission)}
+                            onChange={() => handlePermissionToggle(permission)}
+                            disabled={selectedRole === 'OWNER' || isLocked}
+                            className="h-4 w-4 rounded accent-[var(--ds-action-bg)]"
+                          />
+                          <span>
+                            {PERMISSION_LABELS[permission] || permission}
+                          </span>
+                          {isLocked && <Lock className="h-3.5 w-3.5 flex-shrink-0" aria-label="Riservato alla piattaforma" />}
+                        </label>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
             ))}
           </div>
 
-          {/* Success message */}
-          {successMessage && (
-            <div role="status" className="mt-6 flex items-center gap-2.5 rounded-[16px] bg-[var(--ds-seated-tint)] p-4 text-[14px] text-[var(--ds-seated-text)]">
-              <Check className="h-4 w-4 flex-shrink-0" aria-hidden />
-              {successMessage}
-            </div>
-          )}
         </>
       )}
     </ModalShell>

@@ -221,6 +221,7 @@ spacing:
 # RADIUS
 # ---------------------------------------------------------------------------
 rounded:
+  xs:    "6px"    # comande: table tile, category card, dish card
   sm:    "8px"    # checkbox
   md:    "12px"   # icon chip, heatmap cell, table badge, input
   lg:    "16px"   # rows, tiles, toast
@@ -1021,9 +1022,16 @@ none`; autoscroll is a rAF loop with 48px hot zones on the single scroller found
 up `overflowY`. Suppress the release click with a flag, or the tap-action fires after every
 drop.
 
-**Toast** [der] — `surface` fill, `rounded.lg`, `border` hairline, `elevation.raised`, at
-`z.toast`. Variants take state families via a leading icon and `tint-border`. Auto-dismiss
-after 5s — **except errors, which persist until dismissed.** Announced via `aria-live="polite"`.
+**Toast** [der] — **every toast is the inverted pill of the Lista della spesa Annulla**:
+`action-bg` fill, `action-fg` text, `elevation.raised`, at `z.toast`. Single-line at
+`rounded.full`; the extended form (title/details) keeps the same fill at wider corners,
+details at 70% opacity. The tone arrives through the leading glyph alone — a tick, a
+triangle, an info dot — never through a palette change: the inversion is what buys five
+seconds of attention on a screen whose content did not visibly change, and it must read the
+same on every surface of the app. A `surface`-filled toast card is a retired variant; do not
+reintroduce it. Auto-dismiss after 5s — **except errors, which persist until dismissed and
+carry the close circle** (`h-9 w-9`, `action-fg`, hover `white/10`). Announced via
+`aria-live="polite"`.
 
 **It stays at the bottom on a phone**, centred and inset, anchored to
 `--ds-bottom-nav-clear` — the same clearance the scroll regions use, so it clears the tab bar
@@ -1035,24 +1043,27 @@ The variable is a constant, not a measurement of the bar, so it does not follow 
 gone away: a toast raised inside a full-screen task (§7.4) floats above empty space. Screens
 that hide the bar pass their own offset.
 
-**A toast carrying a single action is a solid pill, not a card.** The Annulla on Lista della
-spesa: `action-bg` fill at `rounded.full`, `action-fg` text, `elevation.raised`, a leading icon
-naming what happened — a tick, a bin — and the action as a text button at the trailing end. It
-looks like a primary button because it is one with a sentence attached, and the inversion is
-what buys five seconds of attention on a screen whose content did not visibly change. Its
-wrapper takes `pointer-events: none` so the empty strip either side of the pill does not eat
-taps meant for the list underneath.
+**An action rides the trailing end** — Annulla, Ricarica, Estendi — as a text button in
+`action-accent`. The pill looks like a primary button because it is one with a sentence
+attached. Its wrapper takes `pointer-events: none` so the empty strip either side of the pill
+does not eat taps meant for the list underneath; a pill with neither action nor close is
+itself inert to the pointer.
+
+**One piece of news, one toast.** Domains whose writes echo back to the sender over the
+socket (reservations) toast **only** in the socket handler — a local toast next to the call
+is the same news twice, and the dedup window keys on the text precisely so the accidental
+pair collapses. Domains whose echo excludes the sender (`X-Socket-ID`) toast locally instead.
 
 **Undo runs forwards.** The action commits immediately and Annulla issues the compensating
 call. Holding the write until the countdown expires means closing the page mid-timer loses the
 *action*; this way it loses only the chance to undo it, which is the one of the two the user
 can live without.
 
-**The action label has to clear 4.5:1 against the pill in both themes**, and this is where the
-shipped one falls down: amber on the near-black pill is 5.45:1 in light, but the pill inverts to
-near-white in dark and the same amber measures **2.96:1**. Recorded so it is not copied as
-precedent. The fix is a label colour that inverts with the fill, not a darker amber — §3.3 has
-already been down that road.
+**The action label has to clear 4.5:1 against the pill in both themes**, and the first shipped
+pill did not: it hardcoded `pending-solid`, 5.45:1 on the near-black light pill but **2.96:1**
+once the pill inverts to near-white in dark. The label now rides `--ds-action-accent`, a colour
+that inverts with the fill — the reference gold on the dark pill, the light theme's dark gold on
+the light one — not a darker amber, which is the road §3.3 already closed.
 
 **Tooltip** [der] — `surface-inverted` fill, `surface-inverted-fg` text, `rounded.md`,
 `caption` type, max-width 240px. Never the sole carrier of information; touch devices get no

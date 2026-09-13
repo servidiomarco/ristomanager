@@ -25,7 +25,11 @@ export const CourseChips: React.FC<{
   showBar?: boolean;
   /** Pastiglia «Dolci» in coda: stessa regola, per le categorie da dolci. */
   showDessert?: boolean;
-}> = ({ order, cart, course, onCourse, showBar, showDessert }) => (
+  /** 'pill' è la pastiglia del palmare e resta il default. 'card' è la
+   *  tessera dello schermo largo: più alta, nome sopra e pallino sotto,
+   *  tinta dello stato invece dell'ombra. */
+  variant?: 'pill' | 'card';
+}> = ({ order, cart, course, onCourse, showBar, showDessert, variant = 'pill' }) => (
   // Margine negativo con padding uguale: lo scorrimento orizzontale ritaglia
   // anche in verticale, e senza questo l'ombra sotto le pastiglie esce tagliata.
   <div className="-my-1.5 flex gap-2 overflow-x-auto py-1.5 scrollbar-hide">
@@ -45,6 +49,46 @@ export const CourseChips: React.FC<{
       const filled =
         cartForCourse(cart, n).length > 0 ||
         itemsForCourse(order, n).some(i => i.status !== 'VOIDED');
+      const dot = (
+        // Il pallino c'è solo se l'uscita ha qualcosa: è LUI a dire «qui c'è
+        // roba», e un pallino sempre presente che cambia solo colore
+        // affiderebbe l'informazione al colore da solo (§4.3). Lo slot resta
+        // occupato anche da vuoto, così le tessere restano alte uguali.
+        <span className="flex h-1.5 items-center justify-center" aria-hidden>
+          {filled && (
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                sent ? 'bg-[var(--ds-seated-solid)]'
+                : active ? 'bg-[var(--ds-pending-solid)]'
+                : 'bg-[var(--ds-text-muted)]'
+              }`}
+            />
+          )}
+        </span>
+      );
+
+      if (variant === 'card') {
+        return (
+          <button
+            key={n}
+            type="button"
+            onClick={() => onCourse(n)}
+            aria-pressed={active}
+            aria-label={courseLabel(n)}
+            className={`flex min-w-[72px] flex-1 flex-shrink-0 flex-col items-center justify-center gap-1.5 rounded-[12px] px-3 py-2.5 text-[16px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+              active
+                ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                : sent
+                  ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
+                  : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] hover:text-[var(--ds-text-primary)]'
+            }`}
+          >
+            {ordinal(n)}
+            {dot}
+          </button>
+        );
+      }
+
       return (
         <button
           key={n}

@@ -137,9 +137,9 @@ export const ShoppingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     async ({ name, category, supplierId, quantity, unit }: { name: string; category: ShoppingCategory; supplierId?: string | null; quantity?: number | null; unit?: ShoppingUnit | null }) => {
       const trimmed = name.trim();
       if (!trimmed) return;
-      // Don't append locally — the socket echo (including to the sender) handles it.
-      // The 'created' handler dedupes on id, so this is safe even with optimistic UX.
-      await shoppingApiService.createItem({
+      // Il broadcast esclude il mittente (X-Socket-ID), quindi lo stato locale
+      // va aggiornato qui; il dedupe su id nel handler 'created' copre l'eventuale eco.
+      const created = await shoppingApiService.createItem({
         name: trimmed,
         category,
         date: formatLocalDate(new Date()),
@@ -147,6 +147,7 @@ export const ShoppingProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         quantity: quantity ?? null,
         unit: unit ?? null,
       });
+      setItems(prev => (prev.some(i => i.id === created.id) ? prev : [...prev, created]));
     },
     [],
   );

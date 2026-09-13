@@ -5,7 +5,7 @@ import { Reservation, BanquetMenu, ReservationStatus } from '../types';
 import { printShoppingList, shareShoppingList } from '../utils/printShoppingList';
 import { getRomeDatePart } from '../utils/reservationTime';
 import { SupplierManagementModal } from './SupplierManagementModal';
-import { ShoppingCart, Printer, Trash2, X, ListChecks, Send, Share2 } from 'lucide-react';
+import { ShoppingCart, Printer, Trash2, X, ListChecks, Send, Share2, Check } from 'lucide-react';
 import { SkeletonTaskList } from './SkeletonCards';
 import {
   EmptyState, SearchField, SectionHeader, useFirstRunHint, useMediaQuery,
@@ -15,7 +15,7 @@ import { EditItemSheet } from './spesa/EditItemSheet';
 import { ShoppingRow } from './spesa/ShoppingRow';
 import { BreadBanner } from './spesa/BreadBanner';
 import { SupplierPanel } from './spesa/SupplierPanel';
-import { UndoToast, useUndo } from './spesa/UndoToast';
+import { useToast } from '../contexts/ToastContext';
 import {
   ALL_CATEGORIES, CATEGORY_ACCENT, CATEGORY_DOT, CATEGORY_LABELS, CATEGORY_TONE,
   byNewest, itemSummary, parseQty,
@@ -76,7 +76,17 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
   const [selectionMode, setSelectionMode] = useState(false);
   const [supplierModalOpen, setSupplierModalOpen] = useState(false);
 
-  const undo = useUndo();
+  const { addToast } = useToast();
+  /* L'undo corre in avanti (§Toast): la chiamata vera parte subito e la
+     pillola offre l'inversa. La replaceKey tiene un solo undo in piedi —
+     una seconda azione sostituisce il precedente invece di accodarsi. */
+  const offerUndo = (message: string, icon: typeof Check, onUndo: () => void | Promise<void>) => {
+    addToast(message, 'success', {
+      icon,
+      action: { label: 'Annulla', onClick: onUndo },
+      replaceKey: 'spesa-undo',
+    });
+  };
   const swipeHint = useFirstRunHint('ds-swipe-hint-spesa');
   const isDesktop = useMediaQuery('(min-width: 1024px)');
 
@@ -182,9 +192,9 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
      with the one in the other hand across the shop. */
   const handleToggle = async (item: ShoppingItem) => {
     await toggleItem(item.id);
-    undo.offer(
+    offerUndo(
       `${itemSummary(item)} ${item.checked ? 'da acquistare' : 'presa'}`,
-      'done',
+      Check,
       () => toggleItem(item.id),
     );
   };
@@ -192,7 +202,7 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
   const handleDelete = async (item: ShoppingItem) => {
     await deleteItem(item.id);
     setEditing(null);
-    undo.offer(`${itemSummary(item)} eliminata`, 'deleted', () => addItem({
+    offerUndo(`${itemSummary(item)} eliminata`, Trash2, () => addItem({
       name: item.name,
       category: item.category,
       supplierId: item.supplierId ?? null,
@@ -620,8 +630,6 @@ export const ShoppingListPage: React.FC<ShoppingListPageProps> = ({
         onDelete={() => editing && handleDelete(editing)}
         onClose={() => setEditing(null)}
       />
-
-      <UndoToast state={undo.state} onDismiss={undo.dismiss} />
 
       {supplierModalOpen && (
         <SupplierManagementModal

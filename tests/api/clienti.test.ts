@@ -56,6 +56,60 @@ describe('clienti (rubrica)', () => {
         });
     });
 
+    describe('ricerca (?q=)', () => {
+        // Schede di appoggio con nomi e numeri che non compaiono altrove
+        // nella suite, così i filtri non incrociano dati di altri test.
+        beforeAll(async () => {
+            const seeds = [
+                { name: 'Tazio Ricercato', phone: '+39 340 777 6101' },
+                { name: 'Amarcord Bar', phone: '340 777 6102' },
+                { name: 'Marcovaldo Prova', phone: '340 777 6103' },
+            ];
+            for (const s of seeds) {
+                const res = await api().post('/customers').set(bearer(token)).send(s);
+                expect([200, 201]).toContain(res.status);
+            }
+        });
+
+        const cerca = async (q: string) => {
+            const res = await api().get('/customers').query({ q }).set(bearer(token));
+            expect(res.status).toBe(200);
+            return res.body as Array<{ name: string; phone: string }>;
+        };
+
+        it('trova il cliente anche con nome e cognome invertiti', async () => {
+            // La scheda è «Tazio Ricercato»: prima del fix per parole, la
+            // frase intera «ricercato tazio» non era sottostringa e la
+            // rubrica sembrava vuota → nasceva un doppione.
+            const rows = await cerca('ricercato tazio');
+            expect(rows.some(c => c.name === 'Tazio Ricercato')).toBe(true);
+        });
+
+        it('bastano i prefissi delle parole, in qualsiasi ordine', async () => {
+            const rows = await cerca('ricer taz');
+            expect(rows.some(c => c.name === 'Tazio Ricercato')).toBe(true);
+        });
+
+        it('il telefono matcha per sole cifre, ignorando spazi e prefisso', async () => {
+            // In scheda è «+39 340 777 6101»: la ricerca senza spazi né +39
+            // col vecchio LIKE sulla stringa grezza non lo trovava.
+            const rows = await cerca('3407776101');
+            expect(rows.some(c => c.name === 'Tazio Ricercato')).toBe(true);
+        });
+
+        it('chi inizia con la parola digitata viene prima delle sottostringhe', async () => {
+            // «Amarcord Bar» contiene «mar» e alfabeticamente verrebbe prima;
+            // «Marcovaldo Prova» ci INIZIA e deve stare sopra nel dropdown.
+            const rows = await cerca('mar');
+            const nomi = rows.map(c => c.name);
+            const inizia = nomi.indexOf('Marcovaldo Prova');
+            const contiene = nomi.indexOf('Amarcord Bar');
+            expect(inizia).toBeGreaterThanOrEqual(0);
+            expect(contiene).toBeGreaterThanOrEqual(0);
+            expect(inizia).toBeLessThan(contiene);
+        });
+    });
+
     describe('unione schede', () => {
         let sourceId: number;
         let targetId: number;

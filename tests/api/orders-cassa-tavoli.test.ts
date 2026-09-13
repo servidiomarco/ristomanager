@@ -48,6 +48,20 @@ describe('cassa — tavoli con comanda aperta', () => {
         expect(['LUNCH', 'DINNER']).toContain(res.body.service.shift);
     });
 
+    // La tessera della griglia scrive quanto sta spendendo il tavolo e a che
+    // punto è: i due campi arrivano da qui, non da una chiamata per tavolo.
+    it('la comanda porta totale e uscita', async () => {
+        const res = await api().get('/orders/open').set(bearer(token));
+        expect(res.status).toBe(200);
+        const mine = res.body.orders.find((o: any) => o.id === orderId);
+        expect(mine).toBeTruthy();
+        expect(typeof mine.total_cents).toBe('number');
+        // Comanda aperta e ancora intonsa: coperto e servizio non sono
+        // un'uscita, quindi non c'è nessuna uscita da raccontare. Contarli
+        // faceva leggere «1ª in bozza» a un tavolo che non ha ordinato nulla.
+        expect(mine.course).toBeNull();
+    });
+
     it('gli id non si ripetono se un tavolo ha più comande', async () => {
         const res = await api().get('/orders/open').set(bearer(token));
         expect(res.status).toBe(200);

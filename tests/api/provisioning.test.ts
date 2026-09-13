@@ -1,5 +1,6 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import { spawn } from 'node:child_process';
+import net from 'node:net';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { Client } from 'pg';
@@ -21,6 +22,20 @@ const SLUG_EMAIL_DUP = 'osteria-test-d1';
 const OWNER_EMAIL = 'owner.d1@example.com';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Porta libera scelta dal sistema per il secondo server. Era fissa a 3299 e
+// collideva col server principale quando la suite girava con
+// TEST_API_PORT=3299 (il valore consigliato per le sessioni parallele): il
+// figlio moriva in silenzio su EADDRINUSE e le richieste le serviva il
+// server principale — che il token CE L'HA → 200 invece di 503.
+const freePort = (): Promise<number> => new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.once('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+        const port = (srv.address() as net.AddressInfo).port;
+        srv.close(() => resolve(port));
+    });
+});
 
 describe('provisioning tenant (/admin/tenants, Fase D1)', () => {
     let tenantId = 0;
@@ -67,20 +82,25 @@ describe('provisioning tenant (/admin/tenants, Fase D1)', () => {
         const distServer = path.resolve('dist/server.js');
         expect(existsSync(distServer)).toBe(true);
         const dbUrl = process.env.DATABASE_URL || 'postgresql://localhost/ristotest_api';
-        const env = { ...process.env, DATABASE_URL: dbUrl, PORT: '3299', JWT_SECRET: 'test-jwt-secret', JWT_REFRESH_SECRET: 'test-jwt-refresh-secret' };
+        const port = await freePort();
+        const env = { ...process.env, DATABASE_URL: dbUrl, PORT: String(port), JWT_SECRET: 'test-jwt-secret', JWT_REFRESH_SECRET: 'test-jwt-refresh-secret' };
         delete (env as Record<string, unknown>).PLATFORM_ADMIN_TOKEN;
         const child = spawn('node', [distServer], { env, stdio: 'ignore' });
         try {
             const deadline = Date.now() + 20_000;
             for (;;) {
+                // Se il figlio è morto (porta occupata, crash al boot) il
+                // poll su /health parlerebbe con chiunque altro ascolti lì:
+                // meglio fallire subito e con la ragione giusta.
+                if (child.exitCode !== null) throw new Error(`Secondo server uscito subito (exit ${child.exitCode})`);
                 try {
-                    const res = await fetch('http://127.0.0.1:3299/health');
+                    const res = await fetch(`http://127.0.0.1:${port}/health`);
                     if (res.status === 200) break;
                 } catch { /* non ancora in ascolto */ }
                 if (Date.now() > deadline) throw new Error('Secondo server non pronto entro 20s');
                 await sleep(250);
             }
-            const res = await fetch('http://127.0.0.1:3299/admin/tenants', { headers: ADMIN_HEADER });
+            const res = await fetch(`http://127.0.0.1:${port}/admin/tenants`, { headers: ADMIN_HEADER });
             expect(res.status).toBe(503);
             const body = await res.json();
             expect(body.error).toBe('platform_admin_disabled');

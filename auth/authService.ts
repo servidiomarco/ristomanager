@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { queryWithRetry } from '../db.js';
@@ -17,6 +17,16 @@ const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret-change-in-production';
 const JWT_EXPIRES_IN = '6h';
 const JWT_REFRESH_EXPIRES_IN = '7d';
+// Vita della riga in user_sessions: DEVE rispecchiare JWT_REFRESH_EXPIRES_IN
+// (il JWT e la riga scadono insieme; la rotazione rinnova entrambi).
+const SESSION_LIFETIME_SQL = "interval '7 days'";
+// Finestra di grazia della rotazione: dopo un refresh il token PRECEDENTE
+// resta accettato per questo intervallo. Serve al WiFi del ristorante: se la
+// risposta di /auth/refresh si perde, il client resta col token vecchio e
+// senza grazia il suo prossimo tentativo sarebbe un 401 → logout a metà
+// servizio. Due minuti bastano a qualunque retry e tengono minima la
+// finestra di replay di un token rubato.
+const ROTATION_GRACE_SQL = "interval '2 minutes'";
 
 export interface TokenPayload {
   userId: number;
@@ -27,7 +37,22 @@ export interface TokenPayload {
   // normalizza col fallback 1 — corretto per tutti gli utenti esistenti.
   // Il fallback va rimosso prima di accendere il secondo tenant.
   tenantId: number;
+  // Sessione di piattaforma scopata su un tenant: un PLATFORM_ADMIN che
+  // "entra" in un ristorante mantiene la propria identità e ruolo, ma opera
+  // dentro quel tenant (tenantId = scopedTenantId). Il claim distingue la
+  // sessione operativa da quella di pannello: SOLO con lo scope il ruolo
+  // bypassa la matrice permessi del tenant — un token di piattaforma senza
+  // scope resta confinato al pannello, come prima.
+  scopedTenantId?: number;
 }
+
+// Vero solo per una sessione di piattaforma entrata in un tenant. Ogni
+// bypass (matrice permessi, authorize) passa da qui: il ruolo da solo non
+// basta, serve lo scope esplicito nel token.
+export const isPlatformScopedSession = (payload: TokenPayload): boolean =>
+  payload.role === UserRole.PLATFORM_ADMIN
+  && Number.isInteger(payload.scopedTenantId)
+  && (payload.scopedTenantId as number) > 0;
 
 export interface AuthTokens {
   accessToken: string;
@@ -46,30 +71,45 @@ export class AuthService {
     return bcrypt.compare(password, hash);
   }
 
-  // I refresh token sono JWT da ~250 byte, ma bcrypt considera solo i primi
-  // 72: header e inizio payload sono identici per tutti i token dello stesso
-  // utente, quindi il confronto diretto passava per QUALUNQUE token emesso e
-  // la rotazione non revocava niente. Il digest SHA-256 (44 caratteri in
-  // base64) porta l'intero token dentro la finestra di bcrypt.
-  //
-  // Il cambio di formato invalida gli hash già salvati: al primo refresh
-  // dopo il deploy ogni sessione attiva riceve 401 e rifà il login una volta.
+  // Il digest SHA-256 base64 del refresh token è la chiave di lookup in
+  // user_sessions: il token è un JWT firmato ad alta entropia, il digest non
+  // è invertibile e da solo non conia niente (stessa ragione dei reset token).
   private static digestRefreshToken(token: string): string {
     return createHash('sha256').update(token).digest('base64');
   }
 
-  private static async hashRefreshToken(token: string): Promise<string> {
-    return this.hashPassword(this.digestRefreshToken(token));
-  }
-
+  // bcrypt(SHA-256) sopravvive SOLO per il fallback legacy su
+  // users.refresh_token_hash: i dispositivi loggati prima del deploy delle
+  // sessioni per-dispositivo hanno il refresh token in quel formato, e al
+  // primo refresh vengono migrati a una riga di user_sessions invece di
+  // essere sbattuti fuori. (Lo SHA-256 dentro bcrypt c'è perché bcrypt
+  // tronca a 72 byte e i JWT condividono i primi 72 — senza digest qualunque
+  // token dello stesso utente passava il confronto.)
   private static async verifyRefreshTokenHash(token: string, hash: string): Promise<boolean> {
     return this.verifyPassword(this.digestRefreshToken(token), hash);
+  }
+
+  // Registra una nuova sessione (login, cambio email, migrazione legacy) e
+  // approfitta del giro per potare le righe scadute dell'utente.
+  private static async createSession(userId: number, refreshToken: string): Promise<void> {
+    await queryWithRetry(
+      `INSERT INTO user_sessions (user_id, token_digest, expires_at)
+       VALUES ($1, $2, now() + ${SESSION_LIFETIME_SQL})`,
+      [userId, this.digestRefreshToken(refreshToken)]
+    );
+    await queryWithRetry('DELETE FROM user_sessions WHERE user_id = $1 AND expires_at < now()', [userId]);
   }
 
   // Generate access and refresh tokens
   static generateTokens(payload: TokenPayload): AuthTokens {
     const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-    const refreshToken = jwt.sign(payload, JWT_REFRESH_SECRET, { expiresIn: JWT_REFRESH_EXPIRES_IN });
+    // jti casuale: due login dello stesso utente nello stesso secondo
+    // producono altrimenti JWT byte-identici (stesso iat), stesso digest, e
+    // l'INSERT in user_sessions viola la UNIQUE su token_digest.
+    const refreshToken = jwt.sign(payload, JWT_REFRESH_SECRET, {
+      expiresIn: JWT_REFRESH_EXPIRES_IN,
+      jwtid: randomUUID()
+    });
     return { accessToken, refreshToken };
   }
 
@@ -87,6 +127,37 @@ export class AuthService {
       JWT_SECRET,
       { expiresIn: AuthService.IMPERSONATION_TTL_SECONDS }
     );
+  }
+
+  // Sessione di piattaforma scopata su un tenant: a differenza
+  // dell'impersonation è una sessione PIENA (access + refresh, riga in
+  // user_sessions) con l'identità dell'admin — è lo strumento di lavoro
+  // quotidiano del layer di piattaforma, non un intervento di soccorso.
+  // Il refresh preserva lo scope leggendolo dal claim (vedi
+  // refreshAccessToken): ricostruirlo dalla riga utente riporterebbe la
+  // sessione al tenant di casa dell'admin al primo rinnovo.
+  static async createPlatformTenantSession(
+    adminUserId: number,
+    targetTenantId: number
+  ): Promise<{ tokens: AuthTokens; email: string } | null> {
+    const result = await queryWithRetry(
+      'SELECT id, email, role, is_active FROM users WHERE id = $1',
+      [adminUserId]
+    );
+    const row = result.rows[0];
+    if (!row || !row.is_active || row.role !== UserRole.PLATFORM_ADMIN) {
+      return null;
+    }
+    const payload: TokenPayload = {
+      userId: row.id,
+      email: row.email,
+      role: UserRole.PLATFORM_ADMIN,
+      tenantId: targetTenantId,
+      scopedTenantId: targetTenantId
+    };
+    const tokens = this.generateTokens(payload);
+    await this.createSession(row.id, tokens.refreshToken);
+    return { tokens, email: row.email };
   }
 
   // Verify access token
@@ -111,7 +182,7 @@ export class AuthService {
   static async login(email: string, password: string): Promise<{ user: User; tokens: AuthTokens } | { tenantSuspended: true } | null> {
     const result = await queryWithRetry(
       `SELECT u.id, u.email, u.password_hash, u.full_name, u.phone, u.role, u.is_active,
-              u.created_at, u.updated_at, u.last_login, u.preferred_landing_view,
+              u.created_at, u.updated_at, u.last_login, u.preferred_landing_view, u.preferred_orderpad_layout,
               u.tenant_id, t.status AS tenant_status, t.slug AS tenant_slug, t.name AS tenant_name,
               t.onboarding_completed_at IS NULL AS tenant_needs_onboarding
          FROM users u
@@ -154,9 +225,11 @@ export class AuthService {
 
     const tokens = this.generateTokens(payload);
 
-    // Store refresh token hash
-    const refreshTokenHash = await this.hashRefreshToken(tokens.refreshToken);
-    await queryWithRetry('UPDATE users SET refresh_token_hash = $1 WHERE id = $2', [refreshTokenHash, userRow.id]);
+    // Sessione per-dispositivo: il login NON tocca le sessioni esistenti.
+    // Prima viveva tutto in users.refresh_token_hash e ogni login revocava
+    // gli altri dispositivi dello stesso account, che morivano alla prima
+    // scadenza dell'access token — a metà servizio.
+    await this.createSession(userRow.id, tokens.refreshToken);
 
     const user: User = {
       id: userRow.id,
@@ -169,6 +242,7 @@ export class AuthService {
       updated_at: userRow.updated_at,
       last_login: userRow.last_login,
       preferred_landing_view: userRow.preferred_landing_view ?? null,
+      preferred_orderpad_layout: userRow.preferred_orderpad_layout ?? null,
       tenant: {
         id: Number(userRow.tenant_id),
         slug: userRow.tenant_slug,
@@ -203,17 +277,44 @@ export class AuthService {
     }
 
     const userRow = result.rows[0];
+    const digest = this.digestRefreshToken(refreshToken);
 
-    // Dopo il logout l'hash è NULL: senza questo guard bcrypt.compare(token,
-    // null) lancia e una revoca legittima risponde 500 invece di 401.
-    if (!userRow.refresh_token_hash) {
-      return null;
-    }
+    // La sessione del dispositivo: match sul digest corrente, oppure sul
+    // digest precedente entro la finestra di grazia (risposta di refresh
+    // persa in rete: il client ritenta col token appena ruotato).
+    const sessionResult = await queryWithRetry(
+      `SELECT id FROM user_sessions
+        WHERE user_id = $1
+          AND expires_at > now()
+          AND (token_digest = $2
+               OR (prev_token_digest = $2 AND rotated_at > now() - ${ROTATION_GRACE_SQL}))
+        LIMIT 1`,
+      [userRow.id, digest]
+    );
 
-    // Verify refresh token hash matches
-    const isValidRefreshToken = await this.verifyRefreshTokenHash(refreshToken, userRow.refresh_token_hash);
-    if (!isValidRefreshToken) {
-      return null;
+    let sessionId: number | null = sessionResult.rows[0]?.id ?? null;
+
+    if (sessionId === null) {
+      // Fallback legacy: dispositivo loggato prima delle sessioni
+      // per-dispositivo, col suo hash in users.refresh_token_hash. Lo si
+      // migra a una riga di sessione e si consuma l'hash (single-use).
+      // Il guard sul NULL evita che bcrypt.compare(token, null) lanci e
+      // trasformi una revoca legittima in un 500.
+      if (!userRow.refresh_token_hash) {
+        return null;
+      }
+      const isLegacyToken = await this.verifyRefreshTokenHash(refreshToken, userRow.refresh_token_hash);
+      if (!isLegacyToken) {
+        return null;
+      }
+      const migrated = await queryWithRetry(
+        `INSERT INTO user_sessions (user_id, token_digest, expires_at)
+         VALUES ($1, $2, now() + ${SESSION_LIFETIME_SQL})
+         RETURNING id`,
+        [userRow.id, digest]
+      );
+      sessionId = migrated.rows[0].id;
+      await queryWithRetry('UPDATE users SET refresh_token_hash = NULL WHERE id = $1', [userRow.id]);
     }
 
     const newPayload: TokenPayload = {
@@ -223,18 +324,65 @@ export class AuthService {
       tenantId: Number(userRow.tenant_id)
     };
 
+    // Sessione di piattaforma scopata: lo scope vive solo nel claim (la
+    // riga utente punta al tenant di casa dell'admin), quindi va riportato
+    // a mano nel payload nuovo. Il ruolo si ricontrolla dalla riga — un
+    // admin retrocesso perde lo scope al primo rinnovo — e il tenant
+    // bersaglio deve essere ancora attivo: sospenderlo taglia il refresh
+    // esattamente come il join qui sopra fa per il tenant di appartenenza.
+    if (isPlatformScopedSession({ ...payload, role: userRow.role as UserRole })) {
+      const target = await queryWithRetry(
+        `SELECT id FROM tenants WHERE id = $1 AND status = 'active'`,
+        [payload.scopedTenantId]
+      );
+      if (target.rows.length === 0) {
+        return null;
+      }
+      newPayload.tenantId = Number(payload.scopedTenantId);
+      newPayload.scopedTenantId = Number(payload.scopedTenantId);
+    }
+
     const tokens = this.generateTokens(newPayload);
 
-    // Update refresh token hash
-    const newRefreshTokenHash = await this.hashRefreshToken(tokens.refreshToken);
-    await queryWithRetry('UPDATE users SET refresh_token_hash = $1 WHERE id = $2', [newRefreshTokenHash, userRow.id]);
+    // Rotazione con finestra scorrevole: il digest corrente scivola in
+    // prev_token_digest (non quello appena presentato: se due tab dello
+    // stesso dispositivo si sorpassano in grazia, il token dell'altra tab
+    // resta così raggiungibile) e la scadenza riparte da 7 giorni — la
+    // sessione vive finché il dispositivo la usa almeno una volta a settimana.
+    const newDigest = this.digestRefreshToken(tokens.refreshToken);
+    await queryWithRetry(
+      `UPDATE user_sessions
+          SET prev_token_digest = token_digest,
+              rotated_at = now(),
+              token_digest = $1,
+              last_seen_at = now(),
+              expires_at = now() + ${SESSION_LIFETIME_SQL}
+        WHERE id = $2`,
+      [newDigest, sessionId]
+    );
 
     return tokens;
   }
 
-  // Logout user (invalidate refresh token)
-  static async logout(userId: number): Promise<void> {
+  // Logout: col refresh token si spegne SOLO la sessione di quel
+  // dispositivo (gli altri palmari sullo stesso account restano dentro);
+  // senza — o se il token non corrisponde a nessuna sessione, com'è per
+  // quelle legacy pre-deploy — si revoca tutto per non lasciare code.
+  static async logout(userId: number, refreshToken?: string): Promise<void> {
+    if (refreshToken) {
+      const digest = this.digestRefreshToken(refreshToken);
+      const deleted = await queryWithRetry(
+        `DELETE FROM user_sessions
+          WHERE user_id = $1 AND (token_digest = $2 OR prev_token_digest = $2)
+          RETURNING id`,
+        [userId, digest]
+      );
+      if (deleted.rows.length > 0) {
+        return;
+      }
+    }
     await queryWithRetry('UPDATE users SET refresh_token_hash = NULL WHERE id = $1', [userId]);
+    await queryWithRetry('DELETE FROM user_sessions WHERE user_id = $1', [userId]);
   }
 
   // Get user by ID (con il tenant di appartenenza: /auth/me lo espone
@@ -242,7 +390,7 @@ export class AuthService {
   static async getUserById(userId: number): Promise<User | null> {
     const result = await queryWithRetry(
       `SELECT u.id, u.email, u.full_name, u.phone, u.role, u.is_active, u.created_at,
-              u.updated_at, u.last_login, u.preferred_landing_view,
+              u.updated_at, u.last_login, u.preferred_landing_view, u.preferred_orderpad_layout,
               u.tenant_id, t.slug AS tenant_slug, t.name AS tenant_name,
               t.onboarding_completed_at IS NULL AS tenant_needs_onboarding
          FROM users u
@@ -267,6 +415,7 @@ export class AuthService {
       updated_at: row.updated_at,
       last_login: row.last_login,
       preferred_landing_view: row.preferred_landing_view ?? null,
+      preferred_orderpad_layout: row.preferred_orderpad_layout ?? null,
       tenant: {
         id: Number(row.tenant_id),
         slug: row.tenant_slug,
@@ -303,19 +452,35 @@ export class AuthService {
     }));
   }
 
-  // Update only the preferred landing view for a given user. Used by the
-  // self-service /auth/me/preferences endpoint — narrower than updateUser
-  // so non-owners can't accidentally touch role/email/etc.
-  static async updatePreferredLanding(
+  // Update only the self-service preferences for a given user (landing view,
+  // layout comande). Used by /auth/me/preferences — narrower than updateUser
+  // so non-owners can't accidentally touch role/email/etc. `undefined` leaves
+  // a field as it is; `null` clears it.
+  static async updatePreferences(
     userId: number,
-    view: string | null
+    prefs: { preferred_landing_view?: string | null; preferred_orderpad_layout?: string | null }
   ): Promise<User | null> {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+    if (prefs.preferred_landing_view !== undefined) {
+      fields.push(`preferred_landing_view = $${values.length + 1}`);
+      values.push(prefs.preferred_landing_view);
+    }
+    if (prefs.preferred_orderpad_layout !== undefined) {
+      fields.push(`preferred_orderpad_layout = $${values.length + 1}`);
+      values.push(prefs.preferred_orderpad_layout);
+    }
+    if (fields.length === 0) {
+      return this.getUserById(userId);
+    }
+    values.push(userId);
+
     const result = await queryWithRetry(
       `UPDATE users
-       SET preferred_landing_view = $1, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2
-       RETURNING id, email, full_name, phone, role, is_active, created_at, updated_at, last_login, preferred_landing_view`,
-      [view, userId]
+       SET ${fields.join(', ')}, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $${values.length}
+       RETURNING id, email, full_name, phone, role, is_active, created_at, updated_at, last_login, preferred_landing_view, preferred_orderpad_layout`,
+      values
     );
 
     if (result.rows.length === 0) {
@@ -336,7 +501,8 @@ export class AuthService {
       created_at: row.created_at,
       updated_at: row.updated_at,
       last_login: row.last_login,
-      preferred_landing_view: row.preferred_landing_view ?? null
+      preferred_landing_view: row.preferred_landing_view ?? null,
+      preferred_orderpad_layout: row.preferred_orderpad_layout ?? null
     };
   }
 
@@ -531,16 +697,17 @@ export class AuthService {
     }
 
     const newHash = await this.hashPassword(newPassword);
-    // refresh_token_hash a NULL insieme alla password: le altre sessioni
-    // muoiono al primo refresh (l'access token residuo scade da solo entro
-    // 6h). È il comportamento atteso dopo un cambio password — chi lo cambia
-    // di solito lo fa perché teme che qualcun altro abbia la vecchia.
+    // Tutte le sessioni revocate insieme alla password (l'access token
+    // residuo scade da solo entro 6h). È il comportamento atteso dopo un
+    // cambio password — chi lo cambia di solito lo fa perché teme che
+    // qualcun altro abbia la vecchia.
     await queryWithRetry(
       `UPDATE users
        SET password_hash = $1, refresh_token_hash = NULL, updated_at = CURRENT_TIMESTAMP
        WHERE id = $2`,
       [newHash, userId]
     );
+    await queryWithRetry('DELETE FROM user_sessions WHERE user_id = $1', [userId]);
     return 'ok';
   }
 
@@ -589,11 +756,12 @@ export class AuthService {
     };
     const tokens = this.generateTokens(payload);
 
-    // La rotazione dell'hash revoca il refresh token precedente: eventuali
-    // altre sessioni (che portano la vecchia email nel JWT) muoiono al primo
-    // refresh invece di continuare a mentire.
-    const refreshTokenHash = await this.hashRefreshToken(tokens.refreshToken);
-    await queryWithRetry('UPDATE users SET refresh_token_hash = $1 WHERE id = $2', [refreshTokenHash, userId]);
+    // Tutte le altre sessioni revocate: portano la vecchia email nel JWT e
+    // al primo refresh morirebbero comunque invece di continuare a mentire.
+    // Solo questa (coi token appena emessi) riparte pulita.
+    await queryWithRetry('UPDATE users SET refresh_token_hash = NULL WHERE id = $1', [userId]);
+    await queryWithRetry('DELETE FROM user_sessions WHERE user_id = $1', [userId]);
+    await this.createSession(userId, tokens.refreshToken);
 
     const user = await this.getUserById(userId);
     if (!user) {
@@ -646,6 +814,9 @@ export class AuthService {
       return null;
     }
     const row = result.rows[0];
+    // Logout ovunque anche per le sessioni per-dispositivo (il NULL su
+    // refresh_token_hash nell'UPDATE copre solo quelle legacy).
+    await queryWithRetry('DELETE FROM user_sessions WHERE user_id = $1', [row.id]);
     return {
       id: row.id,
       email: row.email,

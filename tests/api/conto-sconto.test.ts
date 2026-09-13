@@ -77,11 +77,17 @@ describe('sconto sul conto', () => {
         });
     });
 
-    it('valida tipo, valore e motivazione come lo sconto di comanda', async () => {
+    it('valida tipo e valore; la motivazione è facoltativa', async () => {
+        // Scelta di Marco (10/09): in cassa si sconta anche senza motivo —
+        // la riga resta a registro con reason nulla.
         const senzaMotivo = await api().post(`/bills/${billId}/discount`).set(bearer(token)).send({
             discount_type: 'PERCENT', discount_value: 10,
         });
-        expect(senzaMotivo.status).toBe(400);
+        expect(senzaMotivo.status).toBe(200);
+        expect(senzaMotivo.body.bill.discount_reason ?? null).toBeNull();
+        // Si toglie subito: i test dopo partono da un conto senza sconto.
+        const pulizia = await api().post(`/bills/${billId}/discount`).set(bearer(token)).send({});
+        expect(pulizia.status).toBe(200);
 
         const oltreCento = await api().post(`/bills/${billId}/discount`).set(bearer(token)).send({
             discount_type: 'PERCENT', discount_value: 120, reason: 'troppo generosi',

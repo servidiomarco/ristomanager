@@ -302,7 +302,9 @@ export interface OpenBillRow {
   total_cents: number;
   covers: number;
   currency: string;
-  items: { name: string; qty: number; unit_price_cents: number }[] | null;
+  items: { name: string; qty: number; unit_price_cents: number; order_item_id?: number }[] | null;
+  /** Unità di ogni riga già coperte da quote ospite o incassi «per piatti». */
+  item_taken_units?: { order_item_id: number; units: number }[];
   status: string;
   share_token: string | null;
   opened_at: string;

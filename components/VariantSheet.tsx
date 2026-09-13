@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Info, Minus, Plus, Utensils } from 'lucide-react';
+import { ChevronDown, CornerDownRight, Info, Minus, Plus, Trash2, Wine } from 'lucide-react';
 import type { Dish } from '../types';
 import type { MenuCatalogue } from '../services/ordersApiService';
 import { Sheet, dsButton, dsInput } from './ds';
@@ -43,7 +43,28 @@ export const VariantSheet: React.FC<{
   confirmLabel?: string;
   onCancel: () => void;
   onConfirm: (entries: { id: number; n: number }[], removedComponentIds: number[], note?: string, weightGrams?: number, qty?: number) => void;
-}> = ({ dish, groups, components = [], initial, initialQty, onDelete, confirmLabel, onCancel, onConfirm }) => {
+  /** «Aggiungi un altro»: batte la riga com'è configurata senza chiudere il
+   *  foglio. Su una battuta nuova azzera le scelte (due bistecche con cotture
+   *  diverse sono due giri); riaprendo una riga in bozza le TIENE — è una
+   *  duplicazione, «un altro come questo». */
+  onAdd?: (entries: { id: number; n: number }[], removedComponentIds: number[], note?: string, weightGrams?: number, qty?: number) => void;
+  /** L'uscita della riga («2ª uscita»), col chip per cambiarla: compare
+   *  riaprendo una riga dalla comanda. Il tocco delega al selettore di
+   *  OrderPad (onCourseTap), che chiude questo foglio — spostare cambia la
+   *  chiave della riga, e un foglio su una riga che non c'è più mente. */
+  courseName?: string;
+  onCourseTap?: () => void;
+  /** I vini abbinati al piatto (curati in scheda): sezione «Vino consigliato»
+   *  col «+» che batte — l'uscita forzata Bar fa il resto. Assenti (Cassa,
+   *  piatto senza abbinamenti) = la sezione non compare. */
+  pairedWines?: Dish[];
+  onAddWine?: (wine: Dish) => void;
+  /** Quanti calici di quel vino sono in comanda (righe lisce): il conteggio
+   *  fra − e + è la comanda vera, non un contatore del foglio — sopravvive
+   *  a chiudere e riaprire. Il «−» corregge senza andare a cercare la riga. */
+  wineQty?: (wineDishId: number) => number;
+  onRemoveWine?: (wine: Dish) => void;
+}> = ({ dish, groups, components = [], initial, initialQty, onDelete, confirmLabel, onCancel, onConfirm, onAdd, courseName, onCourseTap, pairedWines, onAddWine, wineQty, onRemoveWine }) => {
   // Verso per variante, scala d'intensità a 4 gradini (utils/modifierScale):
   // +1 aggiunge a pagamento, +2 «Molta» allo stesso addebito, −1 «Senza» in
   // sconto, −2 «Poca» gratis, 0 = non applicata. Le scelte singole (cotture)
@@ -81,6 +102,15 @@ export const VariantSheet: React.FC<{
   // Guida del gruppo (es. i gradi di cottura spiegati): chiusa di default,
   // il foglio serve a battere — la si apre quando serve ripassarla.
   const [openNotes, setOpenNotes] = useState<Set<number>>(new Set());
+  // I gruppi facoltativi sono pillole sotto «Varianti»: il nome è il
+  // bersaglio, il contenuto si apre sotto con l'ingresso di casa (tileIn).
+  // Fisarmonica a un'anta — aprire un gruppo chiude l'altro: il foglio serve
+  // a battere, non a tenere aperti tre cassetti. Il conteggio sulla pillola
+  // dice quante scelte vivono lì dentro anche da chiusa. Gli obbligatori
+  // restano sezioni sempre aperte, sopra. «Vino consigliato» partecipa alla
+  // stessa anta con la chiave 'vino': è un'offerta, non un passaggio della
+  // battuta, quindi nasce chiusa come gli altri facoltativi.
+  const [openGroupId, setOpenGroupId] = useState<number | 'vino' | null>(null);
   // Quantità della riga (solo in modifica dall'orderpad). Al peso resta 1:
   // due pezzi sono due pesate, quindi due righe.
   const [qty, setQty] = useState<number>(initialQty ?? 1);
@@ -135,42 +165,123 @@ export const VariantSheet: React.FC<{
   const missing = groups.filter(g => g.min_select > 0
     && g.modifiers.filter(m => (selected.get(m.id) ?? 0) > 0).length < g.min_select);
 
+  // Il prezzo vivo del pezzo configurato, per il bottone di conferma: base
+  // (al kg per il peso), più la scala delle varianti, più gli sconti degli
+  // ingredienti tolti, per la quantità. È la stessa anteprima dei delta qui
+  // sopra: il conto vero lo fa il server sul listino battuto.
+  const modById = React.useMemo(
+    () => new Map(groups.flatMap(g => g.modifiers.map(m => [m.id, m] as const))),
+    [groups],
+  );
+  const previewCents = (() => {
+    const base = dish.sold_by_weight ? Math.round(dishCents * grams / 1000) : dishCents;
+    const mods = entries.reduce((s, e) => {
+      const m = modById.get(e.id);
+      return m ? s + signedModifierDelta(deltaOf(m), e.n) : s;
+    }, 0);
+    const removals = [...removed].reduce((s, id) => {
+      const c = components.find(x => x.id === id);
+      return c ? s + c.removal_delta_cents : s;
+    }, 0);
+    return (base + mods + removals) * (dish.sold_by_weight ? 1 : qty);
+  })();
+
+  // Le righe già battute da questo foglio: il contatore è la conferma che
+  // «Aggiungi un altro» ha scritto davvero — senza, l'azzeramento dei chip
+  // sembrerebbe un malfunzionamento.
+  const [added, setAdded] = useState(0);
+  const addAndReset = () => {
+    onAdd?.(entries, [...removed], custom.trim() || undefined,
+      dish.sold_by_weight ? grams : undefined,
+      initialQty != null ? qty : undefined);
+    // Battuta nuova: si azzera per il giro dopo. In modifica di una riga le
+    // scelte restano — «un altro» è un altro COSÌ, non un foglio vuoto.
+    if (initial == null) {
+      setSelected(new Map());
+      setRemoved(new Set());
+      setCustom('');
+      setGrams(wDef);
+      setQty(1);
+    }
+    setAdded(v => v + 1);
+  };
+
   return (
     <Sheet
       open
       onClose={onCancel}
+      // Niente sottotitolo «Varianti»: lo dice già il contenuto tre righe
+      // sotto, e il titolo guadagna respiro (§10).
       title={dish.name}
-      subtitle={
-        <span className="inline-flex items-center gap-1.5">
-          <Utensils size={14} aria-hidden /> Varianti
-        </span>
-      }
       ariaLabel={`Varianti per ${dish.name}`}
       bodyClassName="space-y-5 px-5 py-5 sm:px-6"
       footer={
         <div className="flex flex-col gap-3">
-          {onDelete && (
+          {added > 0 && (
+            <p className="text-center text-[13px] font-medium text-[var(--ds-text-muted)]">
+              {added === 1 ? '1 riga aggiunta' : `${added} righe aggiunte`}
+            </p>
+          )}
+          {onAdd && (
             <button
               type="button"
-              onClick={onDelete}
-              className="self-center text-[13px] font-medium text-[var(--ds-critical-text)] underline decoration-dotted transition-opacity hover:opacity-70"
+              onClick={addAndReset}
+              disabled={missing.length > 0}
+              className={`w-full ${dsButton.quiet}`}
             >
-              elimina riga
+              Aggiungi un altro
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => onConfirm(entries, [...removed], custom.trim() || undefined,
-              dish.sold_by_weight ? grams : undefined,
-              initialQty != null ? qty : undefined)}
-            disabled={missing.length > 0}
-            className={`w-full ${dsButton.primary}`}
-          >
-            {missing.length > 0 ? `Scegli: ${missing.map(g => g.name).join(', ')}` : (confirmLabel ?? 'Aggiungi')}
-          </button>
+          {/* L'elimina è quiet accanto al primario pieno (§7.5): il peso
+              visivo sta su quello che si vuole, non su quello che si
+              potrebbe rimpiangere — stesso cestino tinto delle righe menu. */}
+          <div className="flex items-center gap-2">
+            {onDelete && (
+              <button
+                type="button"
+                onClick={onDelete}
+                aria-label="Elimina riga"
+                title="Elimina riga"
+                className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              >
+                <Trash2 size={16} />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => onConfirm(entries, [...removed], custom.trim() || undefined,
+                dish.sold_by_weight ? grams : undefined,
+                initialQty != null ? qty : undefined)}
+              disabled={missing.length > 0}
+              className={`min-w-0 flex-1 ${dsButton.primary}`}
+            >
+              {/* Il prezzo sul bottone: la conferma è informata, non cieca —
+                  quantità, peso e varianti compresi, vivo mentre si tocca. */}
+              {missing.length > 0
+                ? `Scegli: ${missing.map(g => g.name).join(', ')}`
+                : `${confirmLabel ?? 'Aggiungi'} · ${euro(previewCents)}`}
+            </button>
+          </div>
         </div>
       }
     >
+      {courseName && (
+        <div className="flex items-center gap-3">
+          <div className="text-[13px] font-semibold text-[var(--ds-text-muted)]">Uscita</div>
+          {/* Stesso chip dell'uscita che vive sulle righe del menu: dice dove
+              va la riga e si tocca per spostarla. */}
+          <button
+            type="button"
+            onClick={onCourseTap}
+            disabled={!onCourseTap}
+            aria-label={`Sposta in un'altra uscita (ora ${courseName})`}
+            className="ml-auto inline-flex h-11 items-center gap-1.5 rounded-full bg-[var(--ds-arriving-tint)] px-4 text-[15px] font-semibold text-[var(--ds-arriving-text)] transition-opacity hover:opacity-80 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            <CornerDownRight size={15} aria-hidden />
+            {courseName}
+          </button>
+        </div>
+      )}
       {showQty && (
         <div className="flex items-center gap-3">
           <div className="text-[13px] font-semibold text-[var(--ds-text-muted)]">Quantità</div>
@@ -281,46 +392,32 @@ export const VariantSheet: React.FC<{
         </div>
       )}
 
-      {groups.map(g => {
-        const single = g.max_select <= 1;
-        const chosen = chosenInGroup(g);
-        return (
-          <div key={g.id}>
-            <div className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-[var(--ds-text-muted)]">
-              <span>
-                {g.name}
-                {g.min_select > 0 && (
-                  <span className="text-[var(--ds-critical-text)]"> · obbligatorio</span>
-                )}
-                {/* Il tetto si dice solo quando può mordere: un gruppo con max
-                    pari alle opzioni non ha niente da contare. */}
-                {!single && g.max_select < g.modifiers.length && (
-                  <span className="tabular-nums"> · {chosen}/{g.max_select}</span>
-                )}
-              </span>
-              {g.note && (
-                <button
-                  type="button"
-                  onClick={() => setOpenNotes(prev => {
-                    const next = new Set(prev);
-                    if (next.has(g.id)) next.delete(g.id); else next.add(g.id);
-                    return next;
-                  })}
-                  aria-expanded={openNotes.has(g.id)}
-                  aria-label={`Note su ${g.name}`}
-                  className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
-                >
-                  <Info size={14} aria-hidden />
-                </button>
-              )}
-            </div>
-            {g.note && openNotes.has(g.id) && (
-              <p className="mb-2 whitespace-pre-line rounded-[14px] bg-[var(--ds-surface-row)] px-3 py-2.5 text-[13px] leading-relaxed text-[var(--ds-text-secondary)]">
-                {g.note}
-              </p>
-            )}
-            {single ? (
-              <div className="flex flex-wrap gap-2">
+      {(() => {
+        const noteButton = (g: CatalogueGroups[number]) => g.note ? (
+          <button
+            type="button"
+            onClick={() => setOpenNotes(prev => {
+              const next = new Set(prev);
+              if (next.has(g.id)) next.delete(g.id); else next.add(g.id);
+              return next;
+            })}
+            aria-expanded={openNotes.has(g.id)}
+            aria-label={`Note su ${g.name}`}
+            className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)]"
+          >
+            <Info size={14} aria-hidden />
+          </button>
+        ) : null;
+        const notePanel = (g: CatalogueGroups[number]) => g.note && openNotes.has(g.id) ? (
+          <p className="whitespace-pre-line border-b border-[var(--ds-border)] bg-[var(--ds-surface-row)] px-4 py-2.5 text-[13px] leading-relaxed text-[var(--ds-text-secondary)]">
+            {g.note}
+          </p>
+        ) : null;
+        const groupBody = (g: CatalogueGroups[number]) => {
+          const single = g.max_select <= 1;
+          const chosen = chosenInGroup(g);
+          return single ? (
+              <div className="flex flex-wrap gap-2 p-3">
                 {g.modifiers.map(m => {
                   const active = (selected.get(m.id) ?? 0) > 0;
                   const delta = deltaOf(m);
@@ -357,8 +454,8 @@ export const VariantSheet: React.FC<{
                  «Senza Nduja» (sconto), «Poca Nduja» (gratis). Scala ±2
                  concordata con Marco il 5/09 al posto delle ripetizioni
                  n×prezzo; la regola vive in utils/modifierScale. */
-              <div className="space-y-1.5">
-                {g.modifiers.map(m => {
+              <div>
+                {g.modifiers.map((m, mi) => {
                   const n = selected.get(m.id) ?? 0;
                   const delta = deltaOf(m);
                   const deltaTot = signedModifierDelta(delta, n);
@@ -366,9 +463,9 @@ export const VariantSheet: React.FC<{
                   return (
                     <div
                       key={m.id}
-                      className={`flex min-h-[48px] items-center gap-2 rounded-[14px] px-3 py-1.5 ${
-                        n !== 0 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]' : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]'
-                      }`}
+                      className={`flex min-h-[52px] items-center gap-2 py-1.5 pl-4 pr-3 ${
+                        mi > 0 ? 'border-t border-[var(--ds-border)]' : ''
+                      } ${n !== 0 ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]' : 'text-[var(--ds-text-primary)]'}`}
                     >
                       <span className="min-w-0 flex-1 truncate text-[15px] font-medium">
                         {signedModifierLabel(m.name, n)}
@@ -394,7 +491,7 @@ export const VariantSheet: React.FC<{
                         aria-label={`Togli ${m.name}`}
                         disabled={n <= MODIFIER_N_MIN}
                         className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-35 ${
-                          n !== 0 ? 'bg-white/15 hover:bg-white/25' : 'bg-[var(--ds-surface)] hover:bg-[var(--ds-border)]'
+                          n !== 0 ? 'bg-white/15 hover:bg-white/25' : 'bg-[var(--ds-surface-row)] hover:bg-[var(--ds-border)]'
                         }`}
                       >
                         <Minus size={16} aria-hidden />
@@ -405,7 +502,7 @@ export const VariantSheet: React.FC<{
                         aria-label={`Aggiungi ${m.name}`}
                         disabled={capped || n >= MODIFIER_N_MAX}
                         className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-35 ${
-                          n !== 0 ? 'bg-white/15 hover:bg-white/25' : 'bg-[var(--ds-surface)] hover:bg-[var(--ds-border)]'
+                          n !== 0 ? 'bg-white/15 hover:bg-white/25' : 'bg-[var(--ds-surface-row)] hover:bg-[var(--ds-border)]'
                         }`}
                       >
                         <Plus size={16} aria-hidden />
@@ -414,10 +511,168 @@ export const VariantSheet: React.FC<{
                   );
                 })}
               </div>
+            );
+        };
+
+        if (groups.length === 0) return null;
+
+        /* Una scheda per gruppo: la testata è il bersaglio e le opzioni
+           vivono DENTRO la stessa scheda, divise da hairline — il
+           contenimento che le pillole non davano (il contenuto aperto
+           galleggiava sotto due bottoni sconnessi, e non si capiva di chi
+           fosse). Stesso pattern del menu ⋮ e della vista compatta.
+           Obbligatori sempre aperti; facoltativi a fisarmonica a un'anta,
+           col conteggio delle scelte leggibile anche da chiusi. */
+        return (
+          <div>
+            <div className="mb-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">Varianti</div>
+            <div className="flex flex-col gap-2">
+              {groups.map(g => {
+                const single = g.max_select <= 1;
+                const chosen = chosenInGroup(g);
+                const required = g.min_select > 0;
+                const open = required || openGroupId === g.id;
+                const picked = g.modifiers.filter(m => (selected.get(m.id) ?? 0) !== 0).length;
+                // Il tetto si dice solo quando può mordere: un gruppo con
+                // max pari alle opzioni non ha niente da contare.
+                const cap = !single && g.max_select < g.modifiers.length;
+                // A gruppo chiuso la testata dice COSA è scelto, non solo
+                // quanto: per le scelte singole il valore («Impiattamento ·
+                // Vassoio»), come le righe di Impostazioni — il riepilogo si
+                // legge senza riaprire niente. Per i multipli il conteggio.
+                const singlePick = single ? g.modifiers.find(m => (selected.get(m.id) ?? 0) > 0) : undefined;
+                return (
+                  <div key={g.id} className="overflow-hidden rounded-[16px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+                    {required ? (
+                      <div className="flex min-h-[52px] items-center gap-1.5 px-4">
+                        <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                          {g.name}
+                          <span className="text-[13px] text-[var(--ds-critical-text)]"> · obbligatorio</span>
+                          {cap && (
+                            <span className="text-[13px] font-medium tabular-nums text-[var(--ds-text-muted)]"> · {chosen}/{g.max_select}</span>
+                          )}
+                        </span>
+                        {noteButton(g)}
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setOpenGroupId(prev => prev === g.id ? null : g.id)}
+                        aria-expanded={open}
+                        className="flex min-h-[52px] w-full items-center gap-2 px-4 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)]"
+                      >
+                        <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                          {g.name}
+                          {!open && singlePick ? (
+                            <span className="text-[14px] font-medium text-[var(--ds-text-secondary)]"> · {singlePick.name}</span>
+                          ) : picked > 0 ? (
+                            <span className="text-[13px] font-semibold tabular-nums text-[var(--ds-text-secondary)]"> · {picked}</span>
+                          ) : null}
+                          {open && cap && (
+                            <span className="text-[13px] font-medium tabular-nums text-[var(--ds-text-muted)]"> · {chosen}/{g.max_select}</span>
+                          )}
+                        </span>
+                        <ChevronDown
+                          size={18}
+                          className={`flex-shrink-0 text-[var(--ds-text-muted)] transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+                          aria-hidden
+                        />
+                      </button>
+                    )}
+                    {open && (
+                      <div className="border-t border-[var(--ds-border)]" style={{ animation: 'tileIn 180ms ease-out both' }}>
+                        {/* Obbligatori: la guida resta dietro la ⓘ. Sui
+                            facoltativi si mostra quando il gruppo è aperto —
+                            aprire è già chiedere. */}
+                        {required ? notePanel(g) : g.note ? (
+                          <p className="whitespace-pre-line border-b border-[var(--ds-border)] bg-[var(--ds-surface-row)] px-4 py-2.5 text-[13px] leading-relaxed text-[var(--ds-text-secondary)]">
+                            {g.note}
+                          </p>
+                        ) : null}
+                        {groupBody(g)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {pairedWines && pairedWines.length > 0 && onAddWine && (() => {
+        /* Abbinamenti curati in scheda piatto — icona Wine, non Wand2:
+           qui non parla l'AI, parla la carta. Stessa scheda-fisarmonica dei
+           gruppi facoltativi, chiusa di default: il vino è un'offerta, non
+           un passaggio della battuta. Il conteggio in testata è la somma dei
+           calici in comanda — si legge anche da chiusa. Dentro, stepper come
+           le sotto-righe del menu: il «+» batte (uscita forzata Bar), il
+           conteggio è la comanda vera e il «−» corregge senza cercare la
+           riga. */
+        const open = openGroupId === 'vino';
+        const calici = pairedWines.reduce((s, w) => s + (wineQty?.(w.id) ?? 0), 0);
+        return (
+          <div className="overflow-hidden rounded-[16px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+            <button
+              type="button"
+              onClick={() => setOpenGroupId(prev => prev === 'vino' ? null : 'vino')}
+              aria-expanded={open}
+              className="flex min-h-[52px] w-full items-center gap-2 px-4 text-left transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              <Wine size={15} className="flex-shrink-0 text-[var(--ds-text-muted)]" aria-hidden />
+              <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                Vino consigliato
+                {calici > 0 && (
+                  <span className="text-[13px] font-semibold tabular-nums text-[var(--ds-text-secondary)]"> · {calici}</span>
+                )}
+              </span>
+              <ChevronDown
+                size={18}
+                className={`flex-shrink-0 text-[var(--ds-text-muted)] transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+                aria-hidden
+              />
+            </button>
+            {open && (
+              <div className="border-t border-[var(--ds-border)]" style={{ animation: 'tileIn 180ms ease-out both' }}>
+                {pairedWines.map((w, i) => {
+                  const n = wineQty?.(w.id) ?? 0;
+                  return (
+                    <div key={w.id} className={`flex min-h-[52px] items-center gap-2 py-1 pl-4 pr-3 ${i > 0 ? 'border-t border-[var(--ds-border)]' : ''}`}>
+                      <div className="min-w-0 flex-1">
+                        <span className="block truncate text-[15px] font-medium leading-snug text-[var(--ds-text-primary)]">{w.name}</span>
+                        <span className="block text-[13px] leading-snug tabular-nums text-[var(--ds-text-muted)]">
+                          {euro(Math.round(Number(w.price) * 100))}
+                        </span>
+                      </div>
+                      {n > 0 && onRemoveWine && (
+                        <button
+                          type="button"
+                          onClick={() => onRemoveWine(w)}
+                          aria-label={`Togli ${w.name}`}
+                          className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                        >
+                          <Minus size={16} />
+                        </button>
+                      )}
+                      {n > 0 && (
+                        <span className="w-5 text-center text-[15px] font-semibold tabular-nums text-[var(--ds-text-primary)]">{n}</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => onAddWine(w)}
+                        aria-label={`Aggiungi ${w.name}`}
+                        className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+                      >
+                        <Plus size={16} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         );
-      })}
+      })()}
 
       <label className="block">
         <span className="mb-2 block text-[13px] font-semibold text-[var(--ds-text-muted)]">Variante libera</span>

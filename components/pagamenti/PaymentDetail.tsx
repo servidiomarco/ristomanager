@@ -8,6 +8,7 @@ import {
   paymentsApiService, type PaymentMessage, type PaymentRequest,
 } from '../../services/paymentsApiService';
 import { useAuth } from '../../contexts/AuthContext';
+import { useToast } from '../../contexts/ToastContext';
 import { toTitleCase } from '../../utils/text';
 import { Callout, FormCard, PaneHeader, StatusPill } from '../ds';
 import {
@@ -39,7 +40,10 @@ export const PaymentDetail: React.FC<{
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [reconciling, setReconciling] = useState(false);
-  const [feedback, setFeedback] = useState<{ kind: 'ok' | 'info' | 'err'; text: string } | null>(null);
+  // Gli esiti positivi passano dal toast globale (§Toast); qui resta solo
+  // l'errore, che appartiene al pannello dell'azione fallita.
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const { addToast } = useToast();
   const [refundArmed, setRefundArmed] = useState(false);
   const [refunding, setRefunding] = useState(false);
   const [revokeArmed, setRevokeArmed] = useState(false);
@@ -118,9 +122,9 @@ export const PaymentDetail: React.FC<{
         setPayment(result.payment_request);
         onUpdated?.(result.payment_request);
       }
-      setFeedback({ kind: 'ok', text: 'Link revocato: non è più pagabile' });
+      addToast('Link revocato: non è più pagabile', 'success');
     } catch (err) {
-      setFeedback({ kind: 'err', text: (err as Error).message });
+      setFeedback((err as Error).message);
     } finally {
       setRevoking(false);
     }
@@ -137,17 +141,17 @@ export const PaymentDetail: React.FC<{
         const updated = { ...payment, status: 'REFUNDED' } as PaymentRequest;
         setPayment(updated);
         onUpdated?.(updated);
-        setFeedback({ kind: 'ok', text: result.reopened ? 'Rimborsato — conto riaperto per la parte mancante' : 'Rimborso eseguito' });
+        addToast(result.reopened ? 'Rimborsato — conto riaperto per la parte mancante' : 'Rimborso eseguito', 'success');
       } else {
         const result = await paymentsApiService.refund(payment.id);
         if (result.payment_request) {
           setPayment(result.payment_request);
           onUpdated?.(result.payment_request);
         }
-        setFeedback({ kind: 'ok', text: `Rimborso eseguito su ${provider}` });
+        addToast(`Rimborso eseguito su ${provider}`, 'success');
       }
     } catch (err) {
-      setFeedback({ kind: 'err', text: (err as Error).message });
+      setFeedback((err as Error).message);
     } finally {
       setRefunding(false);
     }
@@ -164,14 +168,14 @@ export const PaymentDetail: React.FC<{
         onUpdated?.(result.payment_request);
       }
       if (result.changed) {
-        setFeedback({ kind: 'ok', text: `Stato aggiornato da ${provider}: ${result.provider_state ?? result.revolut_state ?? '—'}` });
+        addToast(`Stato aggiornato da ${provider}: ${result.provider_state ?? result.revolut_state ?? '—'}`, 'success');
       } else if (result.message) {
-        setFeedback({ kind: 'info', text: result.message });
+        addToast(result.message, 'info');
       } else {
-        setFeedback({ kind: 'info', text: 'Nessun aggiornamento necessario' });
+        addToast('Nessun aggiornamento necessario', 'info');
       }
     } catch (err) {
-      setFeedback({ kind: 'err', text: (err as Error).message });
+      setFeedback((err as Error).message);
     } finally {
       setReconciling(false);
     }
@@ -255,12 +259,7 @@ export const PaymentDetail: React.FC<{
         )}
 
         {feedback && (
-          <Callout
-            tone={feedback.kind === 'err' ? 'critical' : feedback.kind === 'ok' ? 'positive' : 'info'}
-            icon={feedback.kind === 'err' ? AlertCircle : undefined}
-          >
-            {feedback.text}
-          </Callout>
+          <Callout tone="critical" icon={AlertCircle}>{feedback}</Callout>
         )}
 
         {payment.table_bill_id != null && (

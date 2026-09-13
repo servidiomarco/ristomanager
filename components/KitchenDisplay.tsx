@@ -644,16 +644,20 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
   // cotto, non è più lavoro di nessuno. Utile quando le card scorrono fuori
   // schermo: la barra è l'unico posto letto a colpo d'occhio.
   const allDay = useMemo(() => {
-    const totals = new Map<string, { dish: string; mods: string; ahead: number; working: number }>();
+    const totals = new Map<string, { name: string; variants: string; ahead: number; working: number }>();
     for (const r of coming) {
-      // Un chip per pezzatura E per variante: «2× Bistecca · 500 g» e
+      // Una card per pezzatura E per variante: «2× Bistecca · 500 g» e
       // «1× Pasta al pomodoro · fusilli» sono lavori diversi, non conteggi
-      // da sommare. Piatto e variante restano separati per tingere la
-      // variante come la riga «↳» sulla card.
+      // da sommare. Nome e varianti (peso compreso) restano separati: il
+      // nome sta sul primo rigo, le varianti sul secondo nella tinta della
+      // riga «↳» della card.
       const key = chipKey(r.name_snapshot, r.weight_grams, r.modifiers);
       const cur = totals.get(key) ?? {
-        dish: dishKey(r.name_snapshot, r.weight_grams),
-        mods: modsLabel(r.modifiers),
+        name: r.name_snapshot,
+        variants: [
+          r.weight_grams != null ? weightLabel(r.weight_grams) : '',
+          modsLabel(r.modifiers),
+        ].filter(Boolean).join(' · '),
         ahead: 0, working: 0,
       };
       const waiting = r.status === 'QUEUED'
@@ -815,38 +819,46 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
                 scorrimento, sempre visibile a destra qualunque sia la coda. */}
             <div ref={barRef} className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
               {allDay.map(([key, t]) => (
-                // Il chip si tocca: apre i tavoli a cui è destinato il piatto.
+                // La card si tocca: apre i tavoli a cui è destinato il piatto.
+                // Il totale sta in un blocco accent a sinistra, a tutta
+                // altezza: da un metro si legge prima il numero, poi il nome.
                 <button
                   key={key}
                   type="button"
                   data-chip={key}
                   onClick={() => setChipDetail(key)}
                   aria-label={`Dove va ${key}`}
-                  className={`inline-flex flex-shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[14px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                  className={`inline-flex min-h-[48px] flex-shrink-0 items-stretch overflow-hidden rounded-[14px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
                     litChip === key
-                      ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
-                      : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
+                      ? 'bg-[var(--ds-border)] ring-2 ring-[var(--ds-action-bg)]'
+                      : 'bg-[var(--ds-surface-row)] hover:bg-[var(--ds-border)]'
                   }`}
                 >
-                  <span className="tabular-nums">{t.ahead + t.working}×</span>
-                  <span>{t.dish}</span>
-                  {/* La variante nella tinta delle varianti, come la riga
-                      «↳» sulla card; sul chip acceso passa al fg del chip,
-                      o l'ambra sul fondo action non si legge. */}
-                  {t.mods && (
-                    <span className={`text-[13px] font-medium ${
-                      litChip === key ? 'text-[var(--ds-action-fg)]' : 'text-[var(--ds-pending-text)]'
-                    }`}>
-                      {t.mods}
+                  <span className="flex min-w-[40px] items-center justify-center bg-[var(--ds-action-bg)] px-2 text-[18px] font-bold tabular-nums text-[var(--ds-action-fg)]">
+                    {t.ahead + t.working}
+                  </span>
+                  {/* Nome sul primo rigo, varianti (peso e modifiche) sul
+                      secondo nella tinta della riga «↳» — «Bistecca 500 g
+                      ben cotta» tutto in linea non si sfogliava a colpo
+                      d'occhio. Senza varianti il nome si centra da solo. */}
+                  <span className="flex flex-col justify-center px-3 py-1 text-left">
+                    <span className="text-[15px] font-semibold leading-tight text-[var(--ds-text-primary)]">
+                      {t.name}
                     </span>
-                  )}
-                  {/* La quota sul fuoco: tondo ambra pieno che batte come il
-                      pallino della card — si vede anche con la coda lunga.
-                      text SU tint invertiti come coppia bg/fg: contrasto alto
-                      in entrambi i temi (l'oro solid col grigio scuro sopra
-                      leggeva impastato, visto da Marco sul monitor). */}
+                    {t.variants && (
+                      <span className="text-[13px] font-medium leading-tight text-[var(--ds-pending-text)]">
+                        {t.variants}
+                      </span>
+                    )}
+                  </span>
+                  {/* La quota sul fuoco: blocco a destra speculare al totale,
+                      nell'oro del pallino che pulsa sul filo della card
+                      (pending-solid, coppia documentata col fg scuro, 5.80:1)
+                      — e batte come lui. A corpo 18 su blocco pieno l'oro
+                      solid regge, il problema di contrasto era del tondino
+                      piccolo. */}
                   {t.working > 0 && (
-                    <span className="ml-0.5 inline-flex h-5 min-w-5 animate-pulse items-center justify-center rounded-full bg-[var(--ds-pending-text)] px-1 text-[12px] font-bold tabular-nums text-[var(--ds-pending-tint)]">
+                    <span className="flex min-w-[40px] animate-pulse items-center justify-center bg-[var(--ds-pending-solid)] px-2 text-[18px] font-bold tabular-nums text-white">
                       {t.working}
                     </span>
                   )}
@@ -1077,7 +1089,7 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
         open={chipDetail != null}
         onClose={() => setChipDetail(null)}
         title={chipDetail ?? ''}
-        size="sm"
+        size="md"
         closeOnEscape
         bodyClassName="p-5 sm:p-6"
       >
@@ -1087,32 +1099,56 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
           const rows = coming.filter(r => chipKey(r.name_snapshot, r.weight_grams, r.modifiers) === chipDetail);
           const isWaiting = (r: KdsComingItem) => r.status === 'QUEUED'
             || (r.status === 'SENT' && r.station_start_at != null && new Date(r.station_start_at).getTime() > now);
+          // `called`: l'uscita è già partita (SENT) anche se la partita
+          // aspetta il suo scaglionamento — nella colonna «in arrivo» è la
+          // differenza fra «arriverà» e «sta per toccare a te».
           const group = (list: KdsComingItem[]) => {
-            const m = new Map<string, { table: string; course: number; qty: number }>();
+            const m = new Map<string, { table: string; course: number; qty: number; called: boolean }>();
             for (const r of list) {
               const table = r.table_name ?? '—';
               const key = `${table}:${r.course_no}`;
-              const cur = m.get(key) ?? { table, course: r.course_no, qty: 0 };
+              const cur = m.get(key) ?? { table, course: r.course_no, qty: 0, called: false };
               cur.qty += r.qty;
+              cur.called = cur.called || r.status === 'SENT';
               m.set(key, cur);
             }
             return [...m.values()].sort((a, b) => a.table.localeCompare(b.table, undefined, { numeric: true }) || a.course - b.course);
           };
-          const Section = ({ label, dot, list }: { label: string; dot: string; list: { table: string; course: number; qty: number }[] }) => (
+          // Corpi grandi come il resto del monitor: questo modal si legge in
+          // piedi, spesso da un passo di distanza — 13px era misura da
+          // gestionale, non da cucina.
+          const Section = ({ label, dot, courseTone, pulseCalled, list }: { label: string; dot: string; courseTone: string; pulseCalled?: boolean; list: { table: string; course: number; qty: number; called: boolean }[] }) => (
             <div>
-              <div className="mb-1.5 flex items-center gap-2 text-[13px] font-semibold text-[var(--ds-text-muted)]">
-                <span aria-hidden className={`h-2 w-2 rounded-full ${dot}`} />
+              <div className="mb-3 flex items-center gap-3 text-[18px] font-semibold text-[var(--ds-text-muted)]">
+                <span aria-hidden className={`h-3.5 w-3.5 flex-shrink-0 rounded-full ${dot}`} />
                 {label}
               </div>
               {list.length === 0 ? (
-                <p className="text-[13px] text-[var(--ds-text-muted)]">niente</p>
+                <p className="text-[16px] text-[var(--ds-text-muted)]">niente</p>
               ) : (
-                <div className="flex flex-col items-start gap-1.5">
+                // Stessa grammatica delle card della barra: quantità in blocco
+                // accent a sinistra, uscita a destra nel colore del pallino di
+                // timeline della sezione — oro che pulsa per il fuoco, neutro
+                // fermo per il futuro — il tavolo in mezzo.
+                // Card a tutta larghezza di colonna, con i blocchi laterali a
+                // misura fissa: così quantità, tavoli e uscite si incolonnano
+                // fra le righe e fra le due colonne, invece di frastagliarsi
+                // ognuna sulla sua larghezza.
+                <div className="flex flex-col gap-2.5">
                   {list.map(e => (
-                    <span key={`${e.table}-${e.course}`} className="inline-flex items-center gap-1.5 rounded-full bg-[var(--ds-surface-row)] px-3 py-1.5 text-[15px] font-semibold text-[var(--ds-text-primary)]">
-                      <span className="tabular-nums">{e.qty}×</span>
-                      T{e.table}
-                      <span className="text-[13px] font-medium text-[var(--ds-text-muted)]">{courseShort(e.course)}</span>
+                    // Uscita chiamata ma non ancora sul fuoco qui: pulsa la
+                    // card intera — «sta per toccare a te», un gradino sotto
+                    // l'oro della colonna in lavorazione.
+                    <span key={`${e.table}-${e.course}`} className={`flex min-h-[48px] items-stretch overflow-hidden rounded-[14px] bg-[var(--ds-surface-row)] ${pulseCalled && e.called ? 'animate-pulse' : ''}`}>
+                      <span className="flex w-[48px] flex-shrink-0 items-center justify-center bg-[var(--ds-action-bg)] px-2 text-[18px] font-bold tabular-nums text-[var(--ds-action-fg)]">
+                        {e.qty}
+                      </span>
+                      <span className="flex min-w-0 flex-1 items-center px-3.5 text-[18px] font-semibold text-[var(--ds-text-primary)]">
+                        <span className="truncate">T{e.table}</span>
+                      </span>
+                      <span className={`flex w-[72px] flex-shrink-0 items-center justify-center px-2 text-[15px] font-bold ${courseTone}`}>
+                        {isBarCourse(e.course) ? 'Bar' : isDessertCourse(e.course) ? 'Dolci' : `${e.course} Usc.`}
+                      </span>
                     </span>
                   ))}
                 </div>
@@ -1120,12 +1156,23 @@ export const KitchenDisplay: React.FC<KitchenDisplayProps> = ({ globalDate, glob
             </div>
           );
           return rows.length === 0 ? (
-            <p className="text-[14px] text-[var(--ds-text-muted)]">Niente in coda per questo piatto.</p>
+            <p className="text-[16px] text-[var(--ds-text-muted)]">Niente in coda per questo piatto.</p>
           ) : (
             // Due colonne affiancate: il fuoco a sinistra, il futuro a destra.
-            <div className="grid grid-cols-2 gap-4">
-              <Section label="In lavorazione" dot="animate-pulse bg-[var(--ds-pending-solid)]" list={group(rows.filter(r => !isWaiting(r)))} />
-              <Section label="In arrivo" dot="bg-[var(--ds-border-strong)]" list={group(rows.filter(isWaiting))} />
+            <div className="grid grid-cols-2 gap-6">
+              <Section
+                label="In lavorazione / chiamati"
+                dot="animate-pulse bg-[var(--ds-pending-solid)]"
+                courseTone="animate-pulse bg-[var(--ds-pending-solid)] text-white"
+                list={group(rows.filter(r => !isWaiting(r)))}
+              />
+              <Section
+                label="In arrivo / da chiamare"
+                dot="bg-[var(--ds-border-strong)]"
+                courseTone="bg-[var(--ds-border-strong)] text-[var(--ds-text-primary)]"
+                pulseCalled
+                list={group(rows.filter(isWaiting))}
+              />
             </div>
           );
         })()}

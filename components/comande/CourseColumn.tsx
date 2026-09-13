@@ -1,5 +1,6 @@
 import React from 'react';
-import { ArrowUpDown, Ban, ChevronUp, ChevronsUpDown, Loader2, Pencil, Plus, Send, SendHorizontal } from 'lucide-react';
+import { Ban, Check, ChevronUp, ChevronsUpDown, Loader2, Plus, Send, SendHorizontal } from 'lucide-react';
+import { CourseChips } from './CourseChips';
 import type { OrderItem, OrderWithItems } from '../../types';
 import { StatusPill } from '../ds';
 import {
@@ -22,6 +23,10 @@ import { useCourseDrag, type DragPayload } from './useCourseDrag';
 // ---------------------------------------------------------------------------
 
 interface CourseListProps {
+  /** L'indice di categoria del piatto (0-5, ciclico), per tingere la pastiglia
+   *  della quantità come la scheda categoria da cui è stato battuto. Chi la
+   *  passa conosce il catalogo; qui si sa solo che è un numero. */
+  catIndexOf?: (dishId: number | null) => number | null;
   order: OrderWithItems;
   cart: CartLine[];
   course: number;
@@ -64,12 +69,10 @@ interface CourseListProps {
   showDessert?: boolean;
 }
 
-const stepper =
-  'inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]';
-
 export const CourseList: React.FC<CourseListProps> = ({
   order, cart, course, onCourse, busy, onBump, onDrop, onVoid, onRecall, onFire, onEditLine, onUnfire,
   onMoveLine, onMoveItem, onMoveCourse, onDragLine, onDragItem, onDragCourse, showBar, showDessert,
+  catIndexOf,
 }) => {
   const dnd = useCourseDrag({
     disabled: busy,
@@ -79,12 +82,24 @@ export const CourseList: React.FC<CourseListProps> = ({
       else if (p.kind === 'item') onDragItem?.(p.item, to);
       else onDragCourse?.(p.from, to);
     },
+    // Tenuto e rilasciato senza trascinare: il selettore modale — la via a
+    // tocco che prima stava sulle maniglie ⇅.
+    onHoldTap: (p: DragPayload) => {
+      if (p.kind === 'line') { const l = cart.find(x => x.key === p.key); if (l) onMoveLine?.(l); }
+      else if (p.kind === 'item') onMoveItem?.(p.item);
+    },
   });
   // Maniglia solo se il drop ha un gestore: senza, il bottone resta il
   // bottone di sempre.
   const grip = (p: DragPayload) => {
     const wired = p.kind === 'line' ? !!onDragLine : p.kind === 'item' ? !!onDragItem : !!onDragCourse;
     return wired ? dnd.handleProps(p) : {};
+  };
+  // La presa da riga (tocco lungo, useCourseDrag.rowProps): sostituisce le
+  // maniglie ⇅ per riga, che partivano da sole durante lo scroll.
+  const rowGrip = (p: DragPayload) => {
+    const wired = p.kind === 'line' ? !!(onDragLine || onMoveLine) : p.kind === 'item' ? !!(onDragItem || onMoveItem) : false;
+    return wired ? dnd.rowProps(p) : {};
   };
 
   // Il Bar sta in testa: le bibite escono prima degli antipasti. I Dolci in
@@ -161,7 +176,15 @@ export const CourseList: React.FC<CourseListProps> = ({
         <section
           key={n}
           data-course-drop={n}
-          className={`relative rounded-[16px] p-3 pt-4 transition-opacity ${
+          // Tutta la card elegge l'uscita corrente, non solo la pill sul
+          // bordo: il tocco sul fondo o fra le righe fa quello che l'occhio
+          // si aspetta. I controlli interni restano loro — il guard lascia
+          // passare solo i tocchi che non atterrano su un bottone.
+          onClick={e => {
+            if ((e.target as HTMLElement).closest('button, a, input, textarea')) return;
+            onCourse(n);
+          }}
+          className={`relative cursor-pointer rounded-[16px] p-3 pt-4 transition-opacity ${
             fired
               ? 'border-2 border-[var(--ds-arriving-solid)] bg-[var(--ds-arriving-tint)]'
               : sent
@@ -171,42 +194,51 @@ export const CourseList: React.FC<CourseListProps> = ({
             dimmedTarget || isDragSource ? 'opacity-60' : ''
           }`}
         >
-          {/* La maniglia dell'uscita intera, nell'angolo in alto a sinistra:
-              icona ⇕ APPOSTA diversa dal ⇅ di riga (due icone uguali si
-              confondevano al telefono). Tocco = selettore, trascinata = drag. */}
-          {courseMovable && (
+          {/* Maniglia ⇕ e pill dell'uscita, a cavallo del bordo in alto,
+              in un'unica fila ancorata a sinistra. La #546 aveva spostato la
+              pill da centrata a left-3 — la STESSA posizione della maniglia,
+              che le finiva sotto: spostare l'uscita intera era sparito. La
+              fila tiene le due cose affiancate qualunque cosa cambi dopo.
+              Icona ⇕ APPOSTA diversa dal ⇅ di riga (due icone uguali si
+              confondevano al telefono). Tocco = selettore, trascinata = drag;
+              la pill elegge l'uscita corrente, come l'etichetta di prima. */}
+          <span className="absolute left-3 top-0 z-10 inline-flex -translate-y-1/2 items-center gap-1.5">
+            {courseMovable && (
+              <button
+                type="button"
+                onClick={() => onMoveCourse!(n)}
+                disabled={busy}
+                aria-label={`Sposta la ${courseLabel(n)} su un'altra uscita`}
+                title="Tocca per scegliere l'uscita, trascina per spostare l'uscita intera"
+                {...grip({ kind: 'course', from: n, count: draftRows.length + serverRows.filter(i => i.status === 'DRAFT').length })}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] ring-1 ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              >
+                <ChevronsUpDown size={15} />
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => onMoveCourse!(n)}
-              disabled={busy}
-              aria-label={`Sposta la ${courseLabel(n)} su un'altra uscita`}
-              title="Tocca per scegliere l'uscita, trascina per spostare l'uscita intera"
-              {...grip({ kind: 'course', from: n, count: draftRows.length + serverRows.filter(i => i.status === 'DRAFT').length })}
-              className="absolute left-3 top-0 z-10 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] ring-1 ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-border)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+              onClick={() => onCourse(n)}
+              aria-pressed={current}
+              className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-1.5 text-[14px] font-semibold ring-1 ring-inset transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                current
+                  ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] ring-transparent'
+                  : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] ring-[var(--ds-border-strong)]'
+              }`}
             >
-              <ChevronsUpDown size={15} />
+              {/* La spunta sull'uscita servita: quella card è finita, e si
+                  riconosce senza leggere lo stato dall'altra parte. */}
+              {status === 'SERVED' && <Check size={14} aria-hidden />}
+              {courseLabel(n)}
             </button>
-          )}
-          {/* La pill col nome dell'uscita, a cavallo del bordo in alto al
-              centro. Il tocco la elegge uscita corrente, come l'etichetta
-              di prima. */}
-          <button
-            type="button"
-            onClick={() => onCourse(n)}
-            aria-pressed={current}
-            className={`absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full px-3 py-1 text-[12px] font-semibold ring-1 ring-inset transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
-              current
-                ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] ring-transparent'
-                : 'bg-[var(--ds-surface)] text-[var(--ds-text-secondary)] ring-[var(--ds-border-strong)]'
-            }`}
-          >
-            {courseLabel(n)}
-          </button>
-          {(sent || serverRows.length > 0) && (
+          </span>
+          {(sent || serverRows.length > 0 || draftRows.length > 0) && (
             <span className="absolute right-3 top-0 z-10 -translate-y-1/2">
               {sent
                 ? <StatusPill tone={badge.tone}>{badge.text}</StatusPill>
-                : <StatusPill tone="pending">da inviare</StatusPill>}
+                : current
+                  ? <StatusPill tone="neutral">in composizione</StatusPill>
+                  : <StatusPill tone="pending">da inviare</StatusPill>}
             </span>
           )}
 
@@ -269,11 +301,23 @@ export const CourseList: React.FC<CourseListProps> = ({
           {(serverRows.length > 0 || draftRows.length > 0) && (
             <div className={`${hasActions ? 'mt-2' : 'mt-1'} flex flex-col gap-1`}>
               {serverRows.map(i => (
-                <div key={i.id} className={`flex items-center gap-2 text-[15px] transition-opacity ${
-                  dnd.drag?.kind === 'item' && dnd.drag.item.id === i.id ? 'opacity-40' : ''
-                }`}>
-                  <span className="flex-shrink-0 text-[14px] font-semibold tabular-nums text-[var(--ds-text-muted)]">
-                    {i.qty}×
+                <div
+                  key={i.id}
+                  // La riga in bozza si prende col tocco lungo (le altre no:
+                  // una riga già in cucina si storna, non si sposta).
+                  {...(i.status === 'DRAFT' && i.line_kind === 'DISH'
+                    ? rowGrip({ kind: 'item', item: i, from: i.course_no })
+                    : {})}
+                  className={`flex items-center gap-2 text-[17px] transition-opacity ${
+                    dnd.drag?.kind === 'item' && dnd.drag.item.id === i.id ? 'opacity-40' : ''
+                  }`}
+                >
+                  {/* La quantità in una pastiglia invece che col «×»: in una
+                      colonna di righe il numero nudo si perde nel nome del
+                      piatto, e quanti pezzi sono è la prima cosa che la
+                      cucina chiede al telefono. */}
+                  <span className={`inline-flex h-7 min-w-[28px] flex-shrink-0 items-center justify-center rounded-[6px] px-1.5 text-[15px] font-semibold tabular-nums ${qtyChipClass(catIndexOf?.(i.dish_id))}`}>
+                    {i.qty}
                   </span>
                   <span
                     className={`min-w-0 flex-1 truncate ${
@@ -284,18 +328,18 @@ export const CourseList: React.FC<CourseListProps> = ({
                   >
                     {i.name_snapshot}
                     {i.weight_grams != null && (
-                      <span className="text-[13px] tabular-nums text-[var(--ds-text-muted)]"> · {weightLabel(i.weight_grams)}</span>
+                      <span className="text-[14px] tabular-nums text-[var(--ds-text-muted)]"> · {weightLabel(i.weight_grams)}</span>
                     )}
                     {((i.modifiers && i.modifiers.length > 0) || i.note) && (
-                      <span className="text-[13px] text-[var(--ds-text-muted)]">
+                      <span className="text-[14px] text-[var(--ds-text-muted)]">
                         {' · '}{[...(i.modifiers ?? []).map(m => m.name), ...(i.note ? [i.note] : [])].join(', ')}
                       </span>
                     )}
                     {sent && i.status === 'QUEUED' && (
-                      <span className="text-[13px] text-[var(--ds-pending-text)]"> · in coda</span>
+                      <span className="text-[14px] text-[var(--ds-pending-text)]"> · in coda</span>
                     )}
                   </span>
-                  <span className="flex-shrink-0 text-[14px] tabular-nums text-[var(--ds-text-muted)]">
+                  <span className="flex-shrink-0 text-[15px] tabular-nums text-[var(--ds-text-muted)]">
                     {euro(i.line_total_cents ?? 0)}
                   </span>
                   {i.status !== 'VOIDED' && i.line_kind === 'DISH' && (
@@ -309,30 +353,21 @@ export const CourseList: React.FC<CourseListProps> = ({
                       <Ban size={15} />
                     </button>
                   )}
-                  {i.status === 'DRAFT' && i.line_kind === 'DISH' && onMoveItem && (
-                    <button
-                      type="button"
-                      onClick={() => onMoveItem(i)}
-                      disabled={busy}
-                      aria-label={`Sposta ${i.name_snapshot} su un'altra uscita`}
-                      title="Tocca per scegliere l'uscita, trascina per spostare"
-                      {...grip({ kind: 'item', item: i, from: i.course_no })}
-                      className={stepper}
-                    >
-                      <ArrowUpDown size={15} />
-                    </button>
-                  )}
                 </div>
               ))}
 
               {draftRows.map(l => (
-                <div key={l.key} className={`flex items-center gap-2 transition-opacity ${
-                  dnd.drag?.kind === 'line' && dnd.drag.key === l.key ? 'opacity-40' : ''
-                }`}>
-                  {/* La quantità è un prefisso come nelle righe server: lo
-                      stepper in riga non c'è più, si cambia dal foglio. */}
-                  <span className="flex-shrink-0 text-[14px] font-semibold tabular-nums text-[var(--ds-text-muted)]">
-                    {l.qty}×
+                <div
+                  key={l.key}
+                  {...rowGrip({ kind: 'line', key: l.key, label: l.dish.name, qty: l.qty, from: l.course_no })}
+                  className={`flex items-center gap-2 transition-opacity ${
+                    dnd.drag?.kind === 'line' && dnd.drag.key === l.key ? 'opacity-40' : ''
+                  }`}
+                >
+                  {/* Stessa pastiglia delle righe server: lo stepper in riga
+                      non c'è più, si cambia dal foglio. */}
+                  <span className={`inline-flex h-7 min-w-[28px] flex-shrink-0 items-center justify-center rounded-[6px] px-1.5 text-[15px] font-semibold tabular-nums ${qtyChipClass(catIndexOf?.(l.dish.id))}`}>
+                    {l.qty}
                   </span>
                   {/* Le varianti lunghe si troncano: il tocco sul nome apre
                       il foglio varianti della riga, dove si leggono TUTTE e
@@ -346,49 +381,24 @@ export const CourseList: React.FC<CourseListProps> = ({
                     aria-label={`Varianti di ${l.dish.name}`}
                     className="min-w-0 flex-1 rounded-[10px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
                   >
-                    <div className="truncate text-[15px] text-[var(--ds-text-primary)]">
+                    <div className="truncate text-[17px] text-[var(--ds-text-primary)]">
                       {l.dish.name}
                       {l.weight_grams != null && (
-                        <span className="text-[13px] tabular-nums text-[var(--ds-text-muted)]"> · {weightLabel(l.weight_grams)}</span>
+                        <span className="text-[14px] tabular-nums text-[var(--ds-text-muted)]"> · {weightLabel(l.weight_grams)}</span>
                       )}
                     </div>
                     {(l.modifier_labels.length > 0 || l.note) && (
-                      <div className="truncate text-[13px] text-[var(--ds-text-muted)]">
+                      <div className="truncate text-[14px] text-[var(--ds-text-muted)]">
                         ↳ {[...l.modifier_labels, ...(l.note ? [l.note] : [])].join(', ')}
                       </div>
                     )}
                   </button>
-                  <span className="flex-shrink-0 text-[14px] tabular-nums text-[var(--ds-text-muted)]">
+                  <span className="flex-shrink-0 text-[15px] tabular-nums text-[var(--ds-text-muted)]">
                     {euro(cartUnitCents(l) * l.qty)}
                   </span>
-                  <div className="flex flex-shrink-0 items-center gap-1">
-                    {/* Solo matita e maniglia (chiesto da Marco): quantità,
-                        varianti ed elimina vivono nel foglio di riga che la
-                        matita (o il nome) apre — la riga resta al nome. */}
-                    {onEditLine && (
-                      <button
-                        type="button"
-                        onClick={() => onEditLine(l)}
-                        aria-label={`Modifica ${l.dish.name}: quantità, varianti, elimina`}
-                        title="Quantità, varianti, elimina"
-                        className={stepper}
-                      >
-                        <Pencil size={15} />
-                      </button>
-                    )}
-                    {onMoveLine && (
-                      <button
-                        type="button"
-                        onClick={() => onMoveLine(l)}
-                        aria-label={`Sposta ${l.dish.name} su un'altra uscita`}
-                        title="Tocca per scegliere l'uscita, trascina per spostare"
-                        {...grip({ kind: 'line', key: l.key, label: l.dish.name, qty: l.qty, from: l.course_no })}
-                        className={stepper}
-                      >
-                        <ArrowUpDown size={15} />
-                      </button>
-                    )}
-                  </div>
+                  {/* Niente matita e niente maniglia ⇅: il tocco sul nome
+                      apre il foglio di riga, il TOCCO LUNGO sulla riga la
+                      prende per spostarla (rowGrip). */}
                 </div>
               ))}
             </div>
@@ -424,11 +434,50 @@ interface SendFooterProps {
   /** Sul palmare l'etichetta è anche la maniglia della comanda: non c'è una
    *  seconda colonna, e questo è il posto dove la mano è già appoggiata. */
   onExpand?: () => void;
+  /** 'full' è il piede della colonna sullo schermo largo: un bottone che dice
+   *  cosa manda e quanto vale, più «Invia tutto» quando serve. 'compact' (il
+   *  default) è quello del palmare, dove lo spazio è del menu e il totale è
+   *  già la maniglia del foglio comanda — invariato. */
+  variant?: 'compact' | 'full';
 }
 
 export const SendFooter: React.FC<SendFooterProps> = ({
   course, courseCount, courseTotal, allCount, allTotal, busy, onSend, onSendAll, onExpand,
-}) => (
+  variant = 'compact',
+}) => variant === 'full' ? (
+  /* Nessun riepilogo qui sotto. Il totale sta nella barra della pagina,
+     accanto al tavolo, e il dettaglio — coperti, servizio, sconto — nel foglio
+     Conto, che è dove si va per incassare. Ripeterlo costava centocinquanta
+     pixel di comanda e metteva a schermo DUE totali diversi: quello in barra
+     comprende le bozze non ancora inviate, questo no. */
+  <div className="flex flex-col gap-3">
+    {/* Il bottone dice cosa manda e quanto vale: «Invia» e basta costringeva
+        a guardare da un'altra parte per sapere quale uscita stava partendo. */}
+    <button
+      type="button"
+      onClick={onSend}
+      disabled={busy || courseCount === 0}
+      className="inline-flex h-14 w-full items-center justify-center gap-2 rounded-full bg-[var(--ds-action-bg)] px-6 text-[17px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+    >
+      {busy ? <Loader2 size={18} className="animate-spin" aria-hidden /> : <Send size={18} aria-hidden />}
+      {courseCount === 0 ? `Invia ${courseLabel(course)}` : `Invia ${courseLabel(course)} · ${euro(courseTotal)}`}
+    </button>
+    {/* «Invia tutto» resta, e resta alla sua condizione di sempre: compare
+        solo se ci sono bozze FUORI dall'uscita corrente, altrimenti sarebbe
+        lo stesso bottone due volte. */}
+    {allCount > courseCount && (
+      <button
+        type="button"
+        onClick={onSendAll}
+        disabled={busy}
+        className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-[var(--ds-surface)] text-[15px] font-medium text-[var(--ds-text-primary)] ring-1 ring-inset ring-[var(--ds-border-strong)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+      >
+        <SendHorizontal size={16} aria-hidden />
+        Invia tutto · {euro(allTotal)}
+      </button>
+    )}
+  </div>
+) : (
   <div className="flex flex-col gap-1.5">
     {/* Sul palmare la comanda è un foglio ripiegato qui sotto, e lo dice la
         maniglia — la stessa dei fogli aperti. Ad aprirla è lei più tutta la
@@ -499,6 +548,30 @@ export const SendFooter: React.FC<SendFooterProps> = ({
    La colonna di destra su desktop: intestazione, lista che scorre, azioni in
    fondo. Il padding in basso dell'intestazione è portante — sotto c'è una zona
    che scorre e dipinge dopo, e senza quel margine coprirebbe l'ombra. */
+/* La pastiglia della quantità, tinta della categoria del piatto. In una
+   comanda lunga «2» e «1» sono tutti uguali; col colore della categoria la
+   riga si aggancia alla scheda da cui è stata battuta, e un'uscita si legge
+   per composizione — tre verdi e un rosa — prima di leggerne i nomi.
+
+   Sono categorie, cioè cose diverse fra loro, non stati: i --ds-cat-* sono
+   esattamente questo (§3.5). Il numero sta sul TINT e mai sul solid — due dei
+   sei solid cadono sotto AA come testo piccolo. Righe di sistema (coperto,
+   servizio) e piatti senza categoria restano neutri.
+
+   Scritte per intero: Tailwind estrae le classi staticamente. */
+const CAT_QTY = [
+  'bg-[var(--ds-cat-1-tint)] text-[var(--ds-cat-1-text)]',
+  'bg-[var(--ds-cat-2-tint)] text-[var(--ds-cat-2-text)]',
+  'bg-[var(--ds-cat-3-tint)] text-[var(--ds-cat-3-text)]',
+  'bg-[var(--ds-cat-4-tint)] text-[var(--ds-cat-4-text)]',
+  'bg-[var(--ds-cat-5-tint)] text-[var(--ds-cat-5-text)]',
+  'bg-[var(--ds-cat-6-tint)] text-[var(--ds-cat-6-text)]',
+];
+const NEUTRAL_QTY = 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)]';
+
+const qtyChipClass = (n: number | null | undefined): string =>
+  n == null ? NEUTRAL_QTY : CAT_QTY[n % 6];
+
 interface CourseColumnProps extends CourseListProps {
   onSend: () => void;
   onSendAll: () => void;
@@ -519,16 +592,41 @@ export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, o
   const serverCourseTotal = order.items.reduce((s, i) => s + (isServerDraft(i) && i.course_no === course ? i.qty * i.unit_price_cents : 0), 0);
   const serverAllQty = order.items.reduce((s, i) => s + (isServerDraft(i) ? i.qty : 0), 0);
   const serverAllTotal = order.items.reduce((s, i) => s + (isServerDraft(i) ? i.qty * i.unit_price_cents : 0), 0);
+  // Il coperto è una riga di sistema della comanda, non un calcolo: si mostra
+  // com'è battuto. Righe multiple (comande vecchie, coperti ritoccati) si
+  // sommano invece di far vincere la prima.
   return (
-    <div className="flex min-h-0 flex-col overflow-hidden rounded-[20px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
-      <header className="flex flex-shrink-0 items-center gap-2 border-b border-[var(--ds-border)] px-4 py-3">
-        <h2 className="min-w-0 flex-1 truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
-          Comanda{openedBy ? <span className="font-normal text-[var(--ds-text-muted)]"> {openedBy}</span> : null}
-        </h2>
-        <span className="flex-shrink-0 text-[13px] tabular-nums text-[var(--ds-text-muted)]">
-          {rows === 0 ? 'vuota' : rowCountLabel(rows)}
-        </span>
-      </header>
+    <div className="flex min-h-0 flex-col overflow-hidden rounded-[6px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)]">
+      {/* La riga «Comanda · vuota» compare solo quando c'è qualcosa da dire
+          che non sta già sopra: chi ha aperto il tavolo. Il conteggio e il
+          totale li porta la scheda del tavolo, e una fascia che ripete il
+          nome della colonna sotto il titolo della colonna era una riga da
+          saltare per arrivare alle uscite (§10). */}
+      {openedBy && (
+        <header className="flex flex-shrink-0 items-center gap-2 border-b border-[var(--ds-border)] px-4 py-3">
+          <h2 className="min-w-0 flex-1 truncate text-[15px] font-semibold text-[var(--ds-text-primary)]">
+            Comanda<span className="font-normal text-[var(--ds-text-muted)]"> {openedBy}</span>
+          </h2>
+          <span className="flex-shrink-0 text-[13px] tabular-nums text-[var(--ds-text-muted)]">
+            {rows === 0 ? 'vuota' : rowCountLabel(rows)}
+          </span>
+        </header>
+      )}
+      {/* La pista delle uscite resta SEMPRE in vista: a comanda lunga le
+          uscite in fondo alla colonna scorrono via, e selezionarne una
+          voleva dire andarla a cercare. Stessa pista del palmare — pallino
+          «qui c'è roba», verde «già partita». */}
+      <div className="flex-shrink-0 border-b border-[var(--ds-border)] px-3 py-2">
+        <CourseChips
+          order={order}
+          cart={cart}
+          course={course}
+          onCourse={list.onCourse}
+          showBar={list.showBar}
+          showDessert={list.showDessert}
+          variant="card"
+        />
+      </div>
       <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--ds-canvas)] p-3">
         <CourseList {...list} />
       </div>
@@ -542,6 +640,7 @@ export const CourseColumn: React.FC<CourseColumnProps> = ({ onSend, onSendAll, o
           busy={list.busy}
           onSend={onSend}
           onSendAll={onSendAll}
+          variant="full"
         />
       </div>
     </div>

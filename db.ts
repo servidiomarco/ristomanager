@@ -3070,7 +3070,34 @@ export const createSchema = async (retryCount = 0): Promise<void> => {
             ['WAITER', 'orders:view'], ['WAITER', 'orders:take'],
             ['KITCHEN', 'orders:view'], ['KITCHEN', 'orders:kds'], ['KITCHEN', 'orders:expedite'],
         ];
-        for (const [role, permission] of orderPermissions) {
+        // E quelli del modulo cassa, per la stessa ragione — ma con una storia
+        // in più: vivevano SOLO nella migration del modulo (una tantum), così
+        // dopo una revoca di piattaforma poi sbloccata non c'era niente che li
+        // ridesse, e l'OWNER non è modificabile dalla matrice (9/09: Cassa
+        // sparita per tutti al Frantoio anche a lock tolti). Il seed di boot è
+        // il posto che li fa risorgere.
+        const cashPermissions: [string, string][] = [
+            ['OWNER', 'cash:operate'], ['OWNER', 'cash:void_payment'],
+            ['OWNER', 'cash:close_partial'], ['OWNER', 'cash:close_session'],
+            ['GENERAL_MANAGER', 'cash:operate'], ['GENERAL_MANAGER', 'cash:void_payment'],
+            ['GENERAL_MANAGER', 'cash:close_partial'], ['GENERAL_MANAGER', 'cash:close_session'],
+            ['MANAGER', 'cash:operate'], ['MANAGER', 'cash:void_payment'],
+            ['MANAGER', 'cash:close_partial'], ['MANAGER', 'cash:close_session'],
+            ['CASSA', 'cash:operate'], ['CASSA', 'cash:void_payment'],
+        ];
+        // I lock di piattaforma vincono sul seed: un permesso riservato e
+        // revocato non deve risorgere a ogni riavvio. La tabella arriva con
+        // una migration, che gira DOPO createSchema: sul primo boot di un DB
+        // vergine non esiste ancora — e non c'è niente da rispettare.
+        const locksReg = await client.query(`SELECT to_regclass('platform_permission_locks') IS NOT NULL AS ok`);
+        const lockedPerms = new Set<string>(
+            locksReg.rows[0]?.ok
+                ? (await client.query('SELECT permission FROM platform_permission_locks WHERE tenant_id = 1'))
+                    .rows.map((r: { permission: string }) => r.permission)
+                : []
+        );
+        for (const [role, permission] of [...orderPermissions, ...cashPermissions]) {
+            if (lockedPerms.has(permission)) continue;
             await client.query(
                 'INSERT INTO role_permissions (tenant_id, role, permission) VALUES (1, $1, $2) ON CONFLICT DO NOTHING',
                 [role, permission]

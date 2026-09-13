@@ -37,7 +37,47 @@ describe('menu, sala & cucina', () => {
             const found = list.body.find((d: any) => d.id === dishId);
             expect(found).toBeDefined();
             expect(Number(found.price)).toBe(14.5);
-            expect(found.category).toBe('PRIMI');
+            expect(found.category).toBe('Primi');
+        });
+
+        it('i titoli si normalizzano in Title Case, con le denominazioni in sigla', async () => {
+            const created = await api().post('/dishes').set(bearer(token)).send({
+                name: 'BAROLO docg del piemonte',
+                description: null,
+                price: 45,
+                category: 'VINI ROSSI igt',
+                allergens: ['solfiti'],
+            });
+            expect(created.status).toBe(201);
+            expect(created.body.name).toBe('Barolo DOCG del Piemonte');
+            expect(created.body.category).toBe('Vini Rossi IGT');
+            await api().delete(`/dishes/${created.body.id}`).set(bearer(token));
+
+            // Sigle puntate: due o più coppie lettera-punto tornano
+            // maiuscole; l'abbreviazione a coppia singola («mel.») no.
+            // Preposizioni e congiunzioni minuscole quando non aprono il
+            // titolo, elisioni comprese.
+            const puntato = await api().post('/dishes').set(bearer(token)).send({
+                name: 'salumi d.o.p. con polpetta di mel.',
+                description: null,
+                price: 12,
+                category: 'Antipasti',
+                allergens: [],
+            });
+            expect(puntato.status).toBe(201);
+            expect(puntato.body.name).toBe('Salumi D.O.P. con Polpetta di Mel.');
+            await api().delete(`/dishes/${puntato.body.id}`).set(bearer(token));
+
+            const eliso = await api().post('/dishes').set(bearer(token)).send({
+                name: "spaghetti all'aglio e olio",
+                description: null,
+                price: 9,
+                category: 'Primi',
+                allergens: ['glutine'],
+            });
+            expect(eliso.status).toBe(201);
+            expect(eliso.body.name).toBe("Spaghetti all'Aglio e Olio");
+            await api().delete(`/dishes/${eliso.body.id}`).set(bearer(token));
         });
 
         it('il catalogo espone il listino di default del tenant', async () => {
@@ -234,7 +274,7 @@ describe('menu, sala & cucina', () => {
             expect(seconda.status).toBe(200);
 
             const config = await api().get('/sala/config').set(bearer(token));
-            expect(config.body.category_stations['PRIMI']).toBe(stationBisId);
+            expect(config.body.category_stations['Primi']).toBe(stationBisId);
         });
 
         it('rifiuta con 404 una partita inesistente (o di un altro tenant) nella mappa', async () => {

@@ -1,6 +1,6 @@
 import { authApiService } from './authApiService';
 import { socketClient } from './socketClient';
-import type { OrderWithItems } from '../types';
+import type { CourseStatus, OrderWithItems } from '../types';
 import { buildApiError } from './apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://ristomanager-production.up.railway.app';
@@ -218,10 +218,14 @@ export interface MenuCatalogue {
   /** Ingredienti dei piatti composti: pre-inclusi sul foglio varianti, si
    *  battono in negativo (removed_component_ids sulla riga). */
   dish_components: { id: number; dish_id: number; name: string; removal_delta_cents: number; sort_order: number }[];
+  /** Vini abbinati ai piatti (curati in scheda piatto): il cassetto e il
+   *  foglio del palmare li mostrano col «+» che batte nel Bar. */
+  dish_wine_pairings?: { dish_id: number; wine_dish_id: number; sort_order: number }[];
   /** Preferenze delle categorie decise in Menu: ordine (sort), accensione e
    *  le spunte «bar» e «dolci» (i piatti della categoria vanno dritti
-   *  nell'uscita Bar o Dolci). Categoria assente = accesa, in coda, normale. */
-  category_prefs?: Record<string, { enabled: boolean; sort: number; bar?: boolean; dessert?: boolean }>;
+   *  nell'uscita Bar o Dolci); «vino» marca la carta dei vini, l'universo
+   *  degli abbinamenti. Categoria assente = accesa, in coda, normale. */
+  category_prefs?: Record<string, { enabled: boolean; sort: number; bar?: boolean; dessert?: boolean; wine?: boolean }>;
 }
 
 export const getMenuCatalogue = async (): Promise<MenuCatalogue> =>
@@ -231,12 +235,22 @@ export const getMenuCatalogue = async (): Promise<MenuCatalogue> =>
 
 /** Tavoli con una comanda aperta nel servizio, in una chiamata sola.
  *  `shift` assente = entrambi i turni del giorno, come /bills/open. */
+/** Quello che la tessera della griglia racconta di una comanda aperta: il
+ *  totale corrente e l'uscita più avanti, già derivata dal server. `course`
+ *  è null su una comanda ancora intonsa (aperta, niente battuto). */
+export interface OpenOrderSummary {
+  id: number;
+  table_id: number;
+  total_cents: number;
+  course: { course_no: number; status: CourseStatus } | null;
+}
+
 export const getOpenOrderTables = async (
   service?: { date?: string; shift?: 'LUNCH' | 'DINNER' },
 ): Promise<{
   service: { service_date: string; shift: 'LUNCH' | 'DINNER' };
   table_ids: number[];
-  orders: { id: number; table_id: number }[];
+  orders: OpenOrderSummary[];
 }> => {
   const params = new URLSearchParams();
   if (service?.date) params.set('date', service.date);

@@ -2,10 +2,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { chime } from '../utils/chime';
 import { signedModifierLabel, signedModifierDelta } from '../utils/modifierScale';
 import {
-  Check, Loader2, TriangleAlert, Users, X,
+  ArrowLeft, ArrowRight, ChevronDown, Loader2, Trash2, TriangleAlert, Users, X,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import type { Dish, RestaurantMenu, Reservation, Table, TableMerge, OrderWithItems, OrderItem } from '../types';
+import type { Dish, RestaurantMenu, Reservation, Room, Table, TableMerge, OrderWithItems, OrderItem } from '../types';
 import { Shift } from '../types';
 import { getRomeDatePart } from '../utils/reservationTime';
 import { getTableMerges } from '../services/apiService';
@@ -13,17 +13,20 @@ import {
   ordersApiService, getMenuCatalogue, newIdempotencyKey, closeOrder, updateOrder, fireCourse, deleteEmptyOrder, deleteWholeOrder,
   voidItem, setOrderDiscount, transferOrder, getOpenOrderTables,
   type MenuCatalogue, type NewOrderItem, type CloseOrderResult, type SendOrderResult,
+  type OpenOrderSummary,
 } from '../services/ordersApiService';
 import { BillSheet, InvoiceDialog } from './pagamenti/BillSheet';
 import { StampaCopiaButton } from './pagamenti/StampaCopiaButton';
 import { PagamentoSheet } from './cassa/PagamentoSheet';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import { billsApiService, printBill } from '../services/billsApiService';
 
 import { socketClient } from '../services/socketClient';
+import { useSocket } from '../hooks/useSocket';
 import type { ServiceBill } from '../services/ordersApiService';
 import {
-  ModalShell, Callout, SectionHeader, useMediaQuery,
+  ModalShell, Callout, LivePill, SectionHeader, useMediaQuery,
   dsButton,
 } from './ds';
 import { VariantSheet } from './VariantSheet';
@@ -32,6 +35,7 @@ import { OrderTopBar } from './comande/OrderTopBar';
 import { DishBrowser } from './comande/DishBrowser';
 import { DishSearchSheet } from './comande/DishSearchSheet';
 import { CourseChips } from './comande/CourseChips';
+import { PadTabs } from './comande/PadTabs';
 import { CourseColumn, CourseList, SendFooter } from './comande/CourseColumn';
 import { ComandaSheet } from './comande/ComandaSheet';
 import { ReasonDialog } from './comande/ReasonDialog';
@@ -39,7 +43,7 @@ import { DiscountDialog } from './comande/DiscountDialog';
 import { buildRows, buildMergeGroups, makeReservationForTable, type TableFilter } from './comande/tablesView';
 import {
   BAR_COURSE_NO, DESSERT_COURSE_NO, MAX_COURSES, cartForCourse, cartKey, cartSum, courseBadge, courseLabel, euro,
-  isSent, isSystemLine, rowCount,
+  isSent, isSystemLine, rowCount, weightLabel,
   type CartLine, type RepeatLine,
   saveCartDraft, restoreCartDraft, dropCartDraft,
 } from './comande/orderView';
@@ -66,6 +70,10 @@ import {
 // per dispositivo.
 const DENSITY_KEY = 'ristocrm_orderpad_density';
 const SOUND_KEY = 'orderpad.sound';
+// La veste della pagina categorie nella variante a pagine (lista, bottoni 3
+// o 4 per riga): stessa natura della densità, per operatore e dispositivo.
+const CATVIEW_KEY = 'ristocrm_orderpad_catview';
+type CatView = 'list' | 'grid3' | 'grid4';
 
 // Banner di presenza: chi altro sta componendo su questo tavolo. Il tempo
 // solo col nome singolo — con due nomi la riga supera il dato che porta.
@@ -86,6 +94,9 @@ interface OrderPadProps {
    *  comanda i suoi piatti e non le liste banchetti o stagionali. */
   menus: RestaurantMenu[];
   tables: Table[];
+  /** Le sale: nella variante a pagine la griglia tavoli si sfoglia per sala,
+   *  con la pista in basso come le linguette di Passepartout. */
+  rooms?: Room[];
   reservations: Reservation[];
   /** Giorno selezionato nella barra globale — la griglia mostra le
    *  prenotazioni di questo giorno, non fissa "oggi". */
@@ -95,9 +106,21 @@ interface OrderPadProps {
   /** Chiede alla chrome dell'app di togliersi di mezzo: dentro un tavolo il
    *  telefono serve tutto alla comanda. */
   onImmersive?: (on: boolean) => void;
+  /** Il marchio del locale, montato dalla chrome dell'app: Comande a schermo
+   *  pieno se lo porta nella propria testata. */
+  brand?: React.ReactNode;
 }
 
-export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, tables, reservations, globalDate, globalShiftFilter, onImmersive, initialTableId, onInitialTableConsumed }) => {
+export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, tables, rooms = [], reservations, globalDate, globalShiftFilter, onImmersive, initialTableId, onInitialTableConsumed, brand: padBrand }) => {
+  const { isConnected } = useSocket();
+  // L'orologio della pastiglia Live. Un tick al minuto: l'ora al minuto non
+  // ha bisogno di più, e un secondo di intervallo ridisegnerebbe la griglia
+  // sessanta volte al minuto durante il servizio.
+  const [clock, setClock] = useState<Date>(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setClock(new Date()), 60_000);
+    return () => clearInterval(t);
+  }, []);
   const [catalogue, setCatalogue] = useState<MenuCatalogue | null>(null);
   // I piatti spenti restano in anagrafica per lo storico ma non si battono
   // più. Quattro interruttori: is_active della cassa (articolo disattivato
@@ -172,9 +195,23 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     if (next) chime();
     return next;
   });
+  const [catView, setCatView] = useState<CatView>(() => {
+    try {
+      const v = localStorage.getItem(CATVIEW_KEY);
+      return v === 'grid3' || v === 'grid4' ? v : 'list';
+    } catch { return 'list'; }
+  });
+  const pickCatView = (next: CatView) => {
+    setCatView(next);
+    try { localStorage.setItem(CATVIEW_KEY, next); } catch { /* vale per la sessione */ }
+  };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [flash, setFlash] = useState<string | null>(null);
+  // Conferme d'azione: la stessa voce del resto dell'app (toast §Toast, via
+  // ToastProvider), non più un Callout inline duplicato in quattro layout.
+  // Slot esclusivo: la conferma nuova sostituisce la precedente.
+  const { addToast } = useToast();
+  const setFlash = (msg: string) => addToast(msg, 'success', { replaceKey: 'orderpad-flash' });
   const [variantFor, setVariantFor] = useState<Dish | null>(null);
   // Riga in bozza riaperta per leggere/correggere le varianti (le lunghe si
   // troncano in lista): stesso foglio della battitura, precompilato.
@@ -187,13 +224,23 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   const [discountOpen, setDiscountOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [comandaOpen, setComandaOpen] = useState(false);
+  // Il selettore dell'uscita in composizione della variante a pagine: la
+  // pastiglia in basso lo apre, al posto della pista di chip.
+  const [coursePickOpen, setCoursePickOpen] = useState(false);
   // La griglia: che stato guardo e quale tavolo cerco.
   const [gridFilter, setGridFilter] = useState<TableFilter>('ALL');
   const [gridQuery, setGridQuery] = useState('');
+  // La sala sfogliata nella variante a pagine: resta quella anche tornando
+  // dal tavolo — il cameriere lavora una sala per volta.
+  const [gridRoom, setGridRoom] = useState<number | null>(null);
   // Il conto appena aperto: il QR va mostrato subito, non cercato altrove
   // mentre il tavolo aspetta.
   const [justClosed, setJustClosed] = useState<CloseOrderResult['bill'] | null>(null);
   const [openTables, setOpenTables] = useState<Set<number>>(new Set());
+  // Il totale e l'uscita di ogni comanda aperta, per la riga di stato della
+  // tessera. Arrivano dalla stessa chiamata di `openTables`: la griglia non
+  // paga una richiesta in più per dire quanto sta spendendo il tavolo.
+  const [openOrders, setOpenOrders] = useState<Map<number, OpenOrderSummary>>(new Map());
   // Comande CREATE da questo dispositivo: solo queste si disfano uscendo dal
   // tavolo. Un altro palmare stava componendo (il suo carrello è locale, la
   // comanda sul server sembra intonsa): entrare a guardare e tornare indietro
@@ -234,8 +281,19 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     return o.opened_by_name ? `di ${o.opened_by_name}` : null;
   }, [order, user]);
   const billTables = useMemo(() => new Set(serviceBills.keys()), [serviceBills]);
+  // Quanto resta da incassare per tavolo: è il numero che la tessera scrive,
+  // e il residuo (non il totale) è quello che il cassiere deve ancora vedere
+  // arrivare — su un conto già pagato a metà il totale mentirebbe.
+  const billResiduals = useMemo(
+    () => new Map([...serviceBills].map(([id, b]) => [id, b.residual_cents])),
+    [serviceBills]
+  );
 
   const isWide = useMediaQuery('(min-width: 1024px)');
+  // La variante a pagine (stile cassa): preferenza per utente, salvata sul
+  // server come la pagina di partenza — segue l'operatore su ogni palmare.
+  // Solo sul palmare: su schermo largo menu e comanda stanno già affiancati.
+  const pagedPad = !isWide && user?.preferred_orderpad_layout === 'pages';
 
   useEffect(() => {
     getMenuCatalogue().then(setCatalogue).catch(() => setCatalogue(null));
@@ -250,12 +308,6 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     socket.on('catalogue:updated', onCatalogue);
     return () => { socket.off('catalogue:updated', onCatalogue); };
   }, []);
-
-  useEffect(() => {
-    if (!flash) return;
-    const t = setTimeout(() => setFlash(null), 6000);
-    return () => clearTimeout(t);
-  }, [flash]);
 
   // La barra di navigazione torna quando si torna in griglia e quando si esce
   // dalla pagina: il ritorno nel cleanup non è pignoleria, senza quello uscire
@@ -283,9 +335,11 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     });
   }, [dishes, catalogue]);
 
+  // Nella variante a pagine la categoria nulla È la pagina delle categorie:
+  // l'auto-selezione della prima vale solo per la pista di chip.
   useEffect(() => {
-    if (category === null && categories.length > 0) setCategory(categories[0]);
-  }, [categories, category]);
+    if (!pagedPad && category === null && categories.length > 0) setCategory(categories[0]);
+  }, [categories, category, pagedPad]);
 
   // Varianti disponibili per un piatto, risolte dal catalogo.
   const groupsForDish = useCallback((dishId: number) => {
@@ -462,7 +516,10 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       // dell'app (Tav. 3, collaudo del 5/9).
       try {
         const res = await getOpenOrderTables(serviceQuery);
-        if (!cancelled) setOpenTables(new Set(res.table_ids));
+        if (!cancelled) {
+          setOpenTables(new Set(res.table_ids));
+          setOpenOrders(new Map(res.orders.map(o => [o.table_id, o])));
+        }
       } catch { /* ignora: la griglia resta senza l'evidenza comande */ }
     })();
     (async () => {
@@ -525,7 +582,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       ? Math.round(Math.round(Number(dish.price) * 100) * Number(m.price_delta_pct) / 100)
       : m.price_delta_cents;
 
-  const addToCart = (dish: Dish, entries: { id: number; n: number }[] = [], note?: string, removedIds: number[] = [], weightGrams?: number, qty = 1) => {
+  // `courseNo` esplicito: per la duplicazione di una riga dalla comanda, che
+  // va nell'uscita DELLA riga, non in quella in composizione.
+  const addToCart = (dish: Dish, entries: { id: number; n: number }[] = [], note?: string, removedIds: number[] = [], weightGrams?: number, qty = 1, courseNo?: number) => {
     // `single` (gruppo a scelta singola) serve all'etichetta: le cotture
     // restano nome nudo, «+ Media» non significa niente.
     const byId = new Map(groupsForDish(dish.id).flatMap(g =>
@@ -539,7 +598,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       .map(id => comps.find(c => c.id === id))
       .filter((c): c is NonNullable<typeof c> => c != null);
     pushLine(
-      dish, forcedCourse(dish) ?? course, dish.sold_by_weight ? 1 : qty, chosen,
+      dish, courseNo ?? forcedCourse(dish) ?? course, dish.sold_by_weight ? 1 : qty, chosen,
       [...chosen.map(e => signedModifierLabel(byId.get(e.id)!.name, e.n, byId.get(e.id)!.single)), ...removed.map(c => `Senza ${c.name}`)],
       chosen.reduce((s, e) => s + signedModifierDelta(modifierDeltaCents(dish, byId.get(e.id)!), e.n), 0)
         + removed.reduce((s, c) => s + c.removal_delta_cents, 0),
@@ -690,6 +749,9 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   const [moveFor, setMoveFor] = useState<
     | { kind: 'line'; key: string; label: string; from: number }
     | { kind: 'item'; item: OrderItem; from: number }
+    // Dal chip sull'uscita nel menu: TUTTE le bozze locali di quel piatto
+    // nell'uscita di battuta — è il battuto appena fatto, non una riga scelta.
+    | { kind: 'dish'; dishId: number; label: string; from: number }
     | { kind: 'course'; from: number }
     | null
   >(null);
@@ -700,6 +762,68 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     // la riga liscia non può esistere: cottura obbligatoria e peso.
     if (requiresSheetOnTap(dish.id)) setVariantFor(dish);
     else addToCart(dish);
+  };
+
+  // Le combinazioni battute di un piatto, per le sotto-righe del menu: la
+  // struttura che il contatore aggregato nasconde («3×» che in realtà è 2
+  // lisce e una al sangue). TUTTE le uscite, non solo quella in
+  // composizione: cambiando uscita (o spostando una riga) il battuto non
+  // deve sparire dal menu — il chip sulla sotto-riga dice dove sta ognuna
+  // (richiesta di Marco, 10/09). L'etichetta cuoce peso, varianti e nota
+  // insieme; la riga senza niente si chiama «liscia».
+  const draftLinesFor = useCallback((dishId: number) => {
+    return cart
+      .filter(l => l.dish.id === dishId)
+      .map(l => ({
+        key: l.key,
+        qty: l.qty,
+        courseNo: l.course_no,
+        label: [
+          ...(l.weight_grams != null ? [weightLabel(l.weight_grams)] : []),
+          ...l.modifier_labels,
+          ...(l.note ? [l.note] : []),
+        ].join(', ') || 'liscia',
+      }));
+  }, [cart]);
+
+  // I vini abbinati al piatto (curati in scheda piatto, via catalogo):
+  // id → piatto vivo in carta, nell'ordine del sommelier. Un vino spento o
+  // fuori carta sparisce da solo — dishes è già filtrato.
+  const pairedWinesFor = useCallback((dishId: number): Dish[] => {
+    const rows = (catalogue?.dish_wine_pairings ?? []).filter(p => p.dish_id === dishId);
+    if (rows.length === 0) return [];
+    return rows
+      .slice()
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map(p => dishes.find(d => d.id === p.wine_dish_id))
+      .filter((d): d is Dish => d != null);
+  }, [catalogue, dishes]);
+
+  // Il calice in comanda: le righe LISCE di quel vino (niente varianti,
+  // nota o peso — quelle nascono solo dal foglio del vino stesso), su ogni
+  // uscita: contarle tutte è onesto anche se una riga è stata spostata.
+  const wineQtyInCart = useCallback((wineDishId: number): number =>
+    cart.reduce((sum, l) =>
+      l.dish.id === wineDishId && l.modifier_ids.length === 0
+        && (l.removed_component_ids ?? []).length === 0 && !l.note && l.weight_grams == null
+        ? sum + l.qty : sum, 0),
+    [cart]);
+  const removeWine = (w: Dish) => {
+    const plain = cart.filter(l =>
+      l.dish.id === w.id && l.modifier_ids.length === 0
+      && (l.removed_component_ids ?? []).length === 0 && !l.note && l.weight_grams == null);
+    const last = plain[plain.length - 1];
+    if (last) bumpCart(last.key, -1);
+  };
+
+  // Tocco lungo sul menu: su un piatto GIÀ battuto nell'uscita di battuta
+  // riapre la sua riga in bozza («Aggiorna» — aggiungere una variante lì
+  // corregge il battuto, non lo duplica); con più righe si riapre l'ultima
+  // toccata. Su un piatto non battuto resta il foglio di battuta nuova.
+  const onDishLongPress = (dish: Dish) => {
+    const target = forcedCourse(dish) ?? course;
+    const line = [...cart].reverse().find(l => l.dish.id === dish.id && l.course_no === target);
+    if (line) setEditLine(line); else setVariantFor(dish);
   };
 
   const bumpCart = (key: string, delta: number) => {
@@ -729,12 +853,22 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   // quella. Con più righe (due cotture diverse) non decide nessuno: si toglie
   // dalla comanda, dove le righe sono distinte. Il peso resta fuori (una riga
   // per pezzo, si toglie dalla comanda).
-  const removeFromCart = (dish: Dish) => {
+  /** La riga che un «−» sul piatto scalerebbe, o null se non è chiaro quale.
+   *  Una sola fonte per il gesto e per il bottone: prima il «−» si mostrava
+   *  sui piatti «senza foglio», che è un'altra domanda — sulla Grigliata (che
+   *  ha la cottura obbligatoria) il bottone spariva anche con una riga sola,
+   *  e quella riga non si poteva più togliere dal menu. */
+  const removableKey = (dish: Dish): string | null => {
     const to = forcedCourse(dish) ?? course;
     const plainKey = cartKey(dish.id, to, []);
-    if (cart.some(l => l.key === plainKey)) { bumpCart(plainKey, -1); return; }
+    if (cart.some(l => l.key === plainKey)) return plainKey;
     const lines = cart.filter(l => l.dish.id === dish.id && l.course_no === to && l.weight_grams == null);
-    if (lines.length === 1) bumpCart(lines[0].key, -1);
+    return lines.length === 1 ? lines[0].key : null;
+  };
+
+  const removeFromCart = (dish: Dish) => {
+    const key = removableKey(dish);
+    if (key) bumpCart(key, -1);
   };
 
   /** Ripete una riga già ordinata nell'uscita in composizione. Non tocca il
@@ -768,8 +902,28 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   };
 
   const clearDrafts = () => {
+    // Svuotare è distruttivo e solo locale: l'inversa è rimettere in bozza
+    // le stesse righe, quindi la conferma offre Annulla invece di chiedere
+    // conferma prima. Chiavata sulla comanda aperta al momento dello svuoto:
+    // se nel frattempo si è cambiato tavolo, le righe non vanno ripristinate
+    // nella comanda sbagliata.
+    const cleared = cart;
+    const orderIdAtClear = openOrderIdRef.current;
     setCart([]);
-    setFlash('Righe non inviate svuotate');
+    addToast('Righe non inviate svuotate', 'success', {
+      icon: Trash2,
+      action: {
+        label: 'Annulla',
+        onClick: () => {
+          if (openOrderIdRef.current !== orderIdAtClear) {
+            addToast('Comanda cambiata, righe non ripristinate', 'info');
+            return;
+          }
+          setCart(prev => [...cleared, ...prev]);
+        },
+      },
+      replaceKey: 'orderpad-flash',
+    });
   };
 
   const courseLines = cartForCourse(cart, course);
@@ -1312,7 +1466,6 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   const notices = (
     <>
       {error && <ErrorBar message={error} onDismiss={() => setError(null)} />}
-      {flash && <Callout tone="positive" icon={Check}>{flash}</Callout>}
       {tableMates.length > 0 && (
         <Callout tone="info" icon={Users}>
           {presenceLabel(tableMates)}
@@ -1520,19 +1673,64 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     </>
   );
 
+  // L'indice di categoria di un piatto, nell'ORDINE delle schede categoria:
+  // la pastiglia della quantità in comanda deve avere la tinta della scheda da
+  // cui il piatto è stato battuto, o il colore non vuol dire niente.
+  const catIndexByDish = useMemo(() => {
+    const order = new Map(categories.map((c, i) => [c, i]));
+    const out = new Map<number, number>();
+    for (const d of dishes) {
+      const i = d.category ? order.get(d.category) : undefined;
+      if (i != null) out.set(d.id, i);
+    }
+    return out;
+  }, [dishes, categories]);
+  const catIndexOf = useCallback(
+    (dishId: number | null) => (dishId == null ? null : catIndexByDish.get(dishId) ?? null),
+    [catIndexByDish],
+  );
+
+  // Quanti piatti ha ogni categoria, per il sottotitolo delle schede. Conta i
+  // piatti BATTIBILI (già filtrati sopra): scrivere «15 piatti» e aprirne
+  // undici è peggio che non scrivere niente.
+  //
+  // SOPRA il return della griglia, non sotto: da lì in giù siamo dopo un'uscita
+  // anticipata, e un hook che gira solo col tavolo aperto fa contare a React
+  // più hook del render precedente — schermata bianca al primo tavolo aperto.
+  const dishCountByCategory = useMemo(() => {
+    const out = new Map<string, number>();
+    for (const d of dishes) {
+      if (!d.category) continue;
+      out.set(d.category, (out.get(d.category) ?? 0) + 1);
+    }
+    return out;
+  }, [dishes]);
+
   // ---------------- selezione tavolo ----------------
   if (!tableId || !order) {
     return (
       <>
         <TableGrid
-          rows={buildRows(tables, openTables, billTables, reservationForTable, mergeGroupByTable, globalShiftFilter)}
+          rows={buildRows(
+            tables, openTables, billTables, reservationForTable, mergeGroupByTable, globalShiftFilter,
+            openOrders, billResiduals,
+          )}
           filter={gridFilter}
           onFilter={setGridFilter}
           query={gridQuery}
           onQuery={setGridQuery}
           busy={busy}
           onPick={loadTable}
-          notice={(error || flash || serviceBills.size > 0) ? (
+          paged={pagedPad}
+          rooms={rooms}
+          room={gridRoom}
+          // −1 è «Tutte» della pista sullo schermo largo: la pista a pagine non
+          // lo emette mai (lì si sta sempre dentro una sala).
+          onRoom={(id) => setGridRoom(id === -1 ? null : id)}
+          wide={isWide}
+          brand={isWide ? padBrand : undefined}
+          live={isWide ? <LivePill connected={isConnected} time={clock} /> : undefined}
+          notice={(error || serviceBills.size > 0) ? (
             <div className="flex flex-col gap-2">
               {notices}
               {serviceBills.size > 0 && (
@@ -1553,7 +1751,6 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
   const allergens = reservation?.customer_dietary_notes?.trim();
   const rows = rowCount(order, cart);
   const displayTotal = order.total_cents + cartTotal;
-  const sentCourses = order.courses.filter(c => isSent(c.status)).length;
 
   // Quante righe sparirebbero chiudendo ora: le bozze locali più quelle
   // rimaste in bozza sul server dopo un invio interrotto.
@@ -1587,6 +1784,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     onDragLine: moveCartLine,
     onDragItem: moveServerItem,
     onDragCourse: moveCourseTo,
+    catIndexOf,
   };
 
   const browser = (
@@ -1603,29 +1801,56 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
       tapOpensSheet={requiresSheetOnTap}
       onAdd={onDishTap}
       onRemove={removeFromCart}
-      onLongPress={setVariantFor}
+      canRemove={d => removableKey(d) != null}
+      courseOf={d => forcedCourse(d) ?? course}
+      onCourseTap={d => setMoveFor({ kind: 'dish', dishId: d.id, label: d.name, from: forcedCourse(d) ?? course })}
+      onLongPress={onDishLongPress}
       layout={isWide ? 'grid' : 'list'}
-      // Sul palmare la ricerca sta nella testata del tavolo (lente), non qui.
+      // Sul palmare la ricerca sta nella testata del tavolo (lente), non qui;
+      // sullo schermo largo il campo è già inline sopra la griglia piatti.
       showSearch={false}
+      catStyle={isWide ? 'cards' : 'chips'}
+      gridStyle={isWide ? 'photos' : 'rows'}
+      countByCategory={dishCountByCategory}
       density={density}
+      nav={pagedPad ? 'pages' : 'chips'}
+      onCategoryBack={() => setCategory(null)}
+      catView={catView}
+      barCategories={barCategories}
+      dessertCategories={dessertCategories}
+      course={course}
+      draftLinesFor={draftLinesFor}
+      onBumpLine={bumpCart}
+      onTapLine={(key) => { const l = cart.find(x => x.key === key); if (l) setEditLine(l); }}
+      onLineCourseTap={(key) => {
+        const l = cart.find(x => x.key === key);
+        if (l) setMoveFor({ kind: 'line', key: l.key, label: l.dish.name, from: l.course_no });
+      }}
     />
   );
 
   const topBar = (
     <OrderTopBar
+      showBack={!isWide}
+      inBar={isWide}
       tableName={table?.name ?? String(tableId)}
       guestName={reservation?.customer_name ?? null}
       totalCents={displayTotal}
       rows={rows}
       covers={order.order.covers}
-      sentCourses={sentCourses}
       busy={busy}
       billDisabled={displayTotal === 0 && rows === 0}
       clearDisabled={cart.length === 0}
       wide={isWide}
       onSearch={isWide ? undefined : () => setDishSearchOpen(true)}
       densityCompact={density === 'compact'}
-      onToggleDensity={isWide ? undefined : toggleDensity}
+      // Nella variante a pagine la lista piatti è già la scheda a righe:
+      // la densità non avrebbe effetto, quindi la voce non compare — al suo
+      // posto ci sono le tre viste della pagina categorie.
+      onToggleDensity={isWide || pagedPad ? undefined : toggleDensity}
+      paged={pagedPad}
+      catView={catView}
+      onCatView={pagedPad ? pickCatView : undefined}
       soundOn={sound}
       onToggleSound={toggleSound}
       onBack={leaveTable}
@@ -1758,7 +1983,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           onClose={() => setMoveFor(null)}
           title={moveFor.kind === 'course'
             ? `Sposta la ${courseLabel(moveFor.from)}`
-            : `Sposta ${moveFor.kind === 'line' ? moveFor.label : moveFor.item.name_snapshot}`}
+            : `Sposta ${moveFor.kind === 'item' ? moveFor.item.name_snapshot : moveFor.label}`}
           subtitle={moveFor.kind === 'course'
             ? 'Tutte le righe non ancora inviate cambiano uscita'
             : 'In quale uscita va?'}
@@ -1786,6 +2011,11 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
                   onClick={() => {
                     if (moveFor.kind === 'line') moveCartLine(moveFor.key, n);
                     else if (moveFor.kind === 'item') moveServerItem(moveFor.item, n);
+                    else if (moveFor.kind === 'dish') {
+                      for (const l of cart.filter(l => l.dish.id === moveFor.dishId && l.course_no === moveFor.from)) {
+                        moveCartLine(l.key, n);
+                      }
+                    }
                     else moveCourseTo(moveFor.from, n);
                     setMoveFor(null);
                   }}
@@ -1812,6 +2042,12 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           initialQty={1}
           onCancel={() => setVariantFor(null)}
           onConfirm={(entries, removedIds, note, weightGrams, qty) => { addToCart(variantFor, entries, note, removedIds, weightGrams, qty ?? 1); setVariantFor(null); }}
+          onAdd={(entries, removedIds, note, weightGrams, qty) => addToCart(variantFor, entries, note, removedIds, weightGrams, qty ?? 1)}
+          pairedWines={pairedWinesFor(variantFor.id)}
+          // Il calice batte da solo: forcedCourse lo instrada nel Bar.
+          onAddWine={(w) => addToCart(w)}
+          wineQty={wineQtyInCart}
+          onRemoveWine={removeWine}
         />
       )}
       {editLine && (
@@ -1830,6 +2066,22 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
           confirmLabel="Aggiorna"
           onCancel={() => setEditLine(null)}
           onConfirm={(entries, removedIds, note, weightGrams, qty) => { updateLine(editLine.key, entries, note, removedIds, weightGrams, qty); setEditLine(null); }}
+          // «Un altro come questo»: una riga nuova con la configurazione del
+          // foglio, nell'uscita DELLA riga. Qty 1: il gesto dice «un altro».
+          onAdd={(entries, removedIds, note, weightGrams) =>
+            addToCart(editLine.dish, entries, note, removedIds, weightGrams, 1, editLine.course_no)}
+          courseName={courseLabel(editLine.course_no)}
+          // Spostare cambia la chiave della riga: il foglio si chiude e la
+          // scelta passa al selettore «dove va la riga».
+          onCourseTap={() => {
+            const l = editLine;
+            setEditLine(null);
+            setMoveFor({ kind: 'line', key: l.key, label: l.dish.name, from: l.course_no });
+          }}
+          pairedWines={pairedWinesFor(editLine.dish.id)}
+          onAddWine={(w) => addToCart(w)}
+          wineQty={wineQtyInCart}
+          onRemoveWine={removeWine}
         />
       )}
 
@@ -1837,21 +2089,104 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
     </>
   );
 
+  // I due fogli del palmare, condivisi fra layout classico e variante a
+  // pagine: la ricerca dalla lente in testata, la comanda dal totale o
+  // dalla barra inferiore.
+  const searchSheet = (
+    <DishSearchSheet
+      open={dishSearchOpen}
+      dishes={dishes}
+      qtyInCourse={qtyInCourse}
+      hasVariants={hasVariantSheet}
+      tapOpensSheet={requiresSheetOnTap}
+      onAdd={onDishTap}
+      onClose={() => setDishSearchOpen(false)}
+    />
+  );
+
+  const comandaSheet = (
+    <ComandaSheet
+      showBar={showBar}
+      showDessert={showDessert}
+      // Nella variante a pagine la Comanda è una sezione della barra, non un
+      // cassetto: copre lo schermo intero, come la pagina del menu — e in
+      // testa dice tavolo e cameriere, perché la testata spoglia non li
+      // dice più lei.
+      fullPage={pagedPad}
+      tableName={table?.name ?? String(tableId)}
+      open={comandaOpen}
+      onClose={() => setComandaOpen(false)}
+      order={order}
+      cart={cart}
+      dishes={dishes}
+      categories={categories}
+      course={course}
+      onCourse={setCourse}
+      busy={busy}
+      onBump={bumpCart}
+      onDrop={dropLine}
+      onVoid={i => setVoidTarget(i)}
+      onRecall={recall}
+      onFire={fire}
+      onEditLine={(l) => setEditLine(l)}
+      onUnfire={unfire}
+      onMoveLine={listProps.onMoveLine}
+      onMoveItem={listProps.onMoveItem}
+      onMoveCourse={listProps.onMoveCourse}
+      onDragLine={moveCartLine}
+      onDragItem={moveServerItem}
+      onDragCourse={moveCourseTo}
+      openedBy={openedByOther}
+      onSend={() => submit('course')}
+      onSendAll={() => submit('all')}
+      onRepeat={repeatLine}
+      onRepeatAll={repeatAll}
+    />
+  );
+
   // ---------------- schermo largo: menu e comanda affiancati ----------------
+  // La testata del tavolo vive DENTRO la colonna del menu, non a tutta
+  // larghezza: la Comanda sale fino alla barra globale e guadagna una riga
+  // di uscite — la testata parla del comporre (coperti, conto), che è
+  // mestiere della colonna sinistra.
+  // Le distanze della schermata sono tutte da 20px: fra la barra della pagina e
+  // quello che c'è sotto, fra il menu e la comanda, e dentro la colonna fra
+  // categorie, filetto, ricerca e piatti. A 12px erano zone diverse incollate
+  // che si leggevano come una fascia sola.
   if (isWide) {
     return (
-      <div className="flex h-full min-h-0 flex-col gap-3 bg-[var(--ds-canvas)] p-4">
-        <div className="flex-shrink-0">{topBar}</div>
-        {(allergens || error || flash) && (
-          <div className="flex flex-shrink-0 flex-col gap-2">
-            {allergens && (
-              <Callout tone="critical" icon={TriangleAlert}>{allergens}</Callout>
-            )}
-            {notices}
+      <div className="flex h-full min-h-0 flex-col gap-5 bg-[var(--ds-canvas)] p-4">
+        {/* La chrome della pagina, come sulla griglia: il ritorno ai tavoli a
+            sinistra, il Live a destra. La scheda del tavolo non sta più qui —
+            è passata in testa alla colonna della comanda, dove stanno i
+            coperti e il conto di cui parla. */}
+        <div className="flex flex-shrink-0 items-center gap-3">
+          {padBrand}
+          <div className="flex min-w-0 flex-1 items-center gap-3 rounded-[28px] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)]">
+            <button
+              type="button"
+              onClick={leaveTable}
+              aria-label="Torna alla scelta del tavolo"
+              className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] transition-colors hover:bg-[var(--ds-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              <ArrowLeft size={20} aria-hidden />
+            </button>
+            {topBar}
+            <LivePill connected={isConnected} time={clock} />
           </div>
-        )}
-        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_380px] gap-3 xl:grid-cols-[minmax(0,1fr)_420px]">
-          {browser}
+        </div>
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_380px] gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
+          <div className="flex min-h-0 flex-col gap-4">
+            {(allergens || error) && (
+              <div className="flex flex-shrink-0 flex-col gap-2">
+                {allergens && (
+                  <Callout tone="critical" icon={TriangleAlert}>{allergens}</Callout>
+                )}
+                {notices}
+              </div>
+            )}
+            {browser}
+          </div>
           <CourseColumn
             {...listProps}
             openedBy={openedByOther}
@@ -1859,6 +2194,130 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
             onSendAll={() => submit('all')}
           />
         </div>
+        {dialogs}
+      </div>
+    );
+  }
+
+  // ------------- palmare, variante a pagine: la geografia della cassa -------
+  // Menu per pagine (categorie → piatti), barra inferiore Tavoli · Comanda ·
+  // Menu, uscita in composizione e «Segue» sotto il pollice. La logica è la
+  // stessa del layout classico — cambia solo dove stanno le cose, perché è
+  // lì che le cerca chi arriva dall'app di Passepartout.
+  if (pagedPad) {
+    const courseFilled =
+      courseLines.length > 0 ||
+      order.items.some(i => i.course_no === course && i.status !== 'VOIDED');
+    // «Segue»: l'uscita dopo, come sulla cassa. Da Bar e Dolci si torna
+    // alla 1ª — sono fuori sequenza, non hanno un «dopo».
+    const segueTarget =
+      course >= 1 && course < MAX_COURSES ? course + 1
+      : course === BAR_COURSE_NO || course === DESSERT_COURSE_NO ? 1
+      : null;
+    // Il polso di quello che si sta battendo, senza cambiare scheda: bozze
+    // locali più quelle rimaste in bozza sul server — gli stessi numeri
+    // dell'«Invia tutto» della Comanda.
+    const draftCount = cart.reduce((s, l) => s + l.qty, 0)
+      + order.items.reduce((s, i) => s + (i.status === 'DRAFT' && !isSystemLine(i) ? i.qty : 0), 0);
+    const draftTotal = cartTotal
+      + order.items.reduce((s, i) => s + (i.status === 'DRAFT' && !isSystemLine(i) ? i.unit_price_cents * i.qty : 0), 0);
+    return (
+      <div className="flex h-full min-h-0 flex-col bg-[var(--ds-canvas)] px-4 pt-[max(0.75rem,env(safe-area-inset-top))]">
+        <div className="flex-shrink-0">{topBar}</div>
+
+        {(allergens || error) && (
+          <div className="mt-3 flex flex-shrink-0 flex-col gap-2">
+            {allergens && <Callout tone="critical" icon={TriangleAlert}>{allergens}</Callout>}
+            {notices}
+          </div>
+        )}
+
+        <div className="mt-3 flex min-h-0 flex-1 flex-col">{browser}</div>
+
+        <div className="flex flex-shrink-0 items-center gap-2 pb-2 pt-2">
+          <button
+            type="button"
+            onClick={() => setCoursePickOpen(true)}
+            className="inline-flex h-11 flex-shrink-0 items-center gap-1.5 rounded-full bg-[var(--ds-action-bg)] px-4 text-[16px] font-semibold text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            {courseLabel(course)}
+            {courseFilled && <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--ds-action-fg)]" aria-hidden />}
+            <ChevronDown size={16} aria-hidden />
+          </button>
+          <button
+            type="button"
+            onClick={() => { if (segueTarget != null) setCourse(segueTarget); }}
+            disabled={segueTarget == null}
+            className="inline-flex h-11 flex-shrink-0 items-center gap-2 rounded-full bg-[var(--ds-surface)] px-[18px] text-[16px] font-semibold text-[var(--ds-text-primary)] shadow-[var(--ds-shadow-card)] transition-colors hover:bg-[var(--ds-surface-row)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+          >
+            Segue
+            <ArrowRight size={16} aria-hidden />
+          </button>
+          {/* Il numero che mancava alla pagina: quanto c'è da inviare.
+              Quieto, a destra, e il tocco porta dove si invia. */}
+          {draftCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setComandaOpen(true)}
+              aria-label={`Apri la comanda: ${draftCount === 1 ? '1 riga' : `${draftCount} righe`} da inviare, ${euro(draftTotal)}`}
+              className="ml-auto min-w-0 rounded-[10px] px-1.5 py-1 text-right transition-colors hover:bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+            >
+              <span className="block truncate text-[12px] leading-tight text-[var(--ds-text-muted)]">
+                {draftCount === 1 ? '1 riga da inviare' : `${draftCount} righe da inviare`}
+              </span>
+              <span className="block text-[15px] font-semibold leading-tight tabular-nums text-[var(--ds-text-primary)]">
+                {euro(draftTotal)}
+              </span>
+            </button>
+          )}
+        </div>
+
+        <PadTabs
+          onTables={leaveTable}
+          onComanda={() => setComandaOpen(true)}
+          onMenu={() => setCategory(null)}
+          comandaMarked={cart.length > 0}
+        />
+
+        {searchSheet}
+        {comandaSheet}
+
+        {/* Il selettore dell'uscita in composizione: stessi bersagli del
+            «dove va la riga», ma qui si sceglie dove si batte adesso. */}
+        <ModalShell
+          open={coursePickOpen}
+          onClose={() => setCoursePickOpen(false)}
+          title="Uscita in composizione"
+          size="sm"
+          closeOnEscape
+          bodyClassName="p-5 sm:p-6"
+        >
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              ...(showBar ? [BAR_COURSE_NO] : []),
+              ...Array.from({ length: MAX_COURSES }, (_, i) => i + 1),
+              ...(showDessert ? [DESSERT_COURSE_NO] : []),
+            ].map(n => {
+              const active = n === course;
+              return (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => { setCourse(n); setCoursePickOpen(false); }}
+                  aria-pressed={active}
+                  className={`flex h-16 flex-col items-center justify-center gap-0.5 rounded-[16px] text-[15px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${
+                    active
+                      ? 'bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)]'
+                      : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-primary)] hover:bg-[var(--ds-border)]'
+                  }`}
+                >
+                  {courseLabel(n)}
+                </button>
+              );
+            })}
+          </div>
+        </ModalShell>
+
         {dialogs}
       </div>
     );
@@ -1881,7 +2340,7 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         </div>
       </div>
 
-      {(allergens || error || flash) && (
+      {(allergens || error) && (
         <div className="mt-3 flex flex-shrink-0 flex-col gap-2">
           {allergens && <Callout tone="critical" icon={TriangleAlert}>{allergens}</Callout>}
           {notices}
@@ -1916,48 +2375,8 @@ export const OrderPad: React.FC<OrderPadProps> = ({ dishes: allDishes, menus, ta
         </div>
       </div>
 
-      <DishSearchSheet
-        open={dishSearchOpen}
-        dishes={dishes}
-        qtyInCourse={qtyInCourse}
-        hasVariants={hasVariantSheet}
-        tapOpensSheet={requiresSheetOnTap}
-        onAdd={onDishTap}
-        onClose={() => setDishSearchOpen(false)}
-      />
-
-      <ComandaSheet
-        showBar={showBar}
-        showDessert={showDessert}
-        open={comandaOpen}
-        onClose={() => setComandaOpen(false)}
-        order={order}
-        cart={cart}
-        dishes={dishes}
-        categories={categories}
-        course={course}
-        onCourse={setCourse}
-        busy={busy}
-        onBump={bumpCart}
-        onDrop={dropLine}
-        onVoid={i => setVoidTarget(i)}
-        onRecall={recall}
-        onFire={fire}
-        onEditLine={(l) => setEditLine(l)}
-        onUnfire={unfire}
-        onMoveLine={listProps.onMoveLine}
-        onMoveItem={listProps.onMoveItem}
-        onMoveCourse={listProps.onMoveCourse}
-        onDragLine={moveCartLine}
-        onDragItem={moveServerItem}
-        onDragCourse={moveCourseTo}
-        openedBy={openedByOther}
-        onSend={() => submit('course')}
-        onSendAll={() => submit('all')}
-        onRepeat={repeatLine}
-        onRepeatAll={repeatAll}
-      />
-
+      {searchSheet}
+      {comandaSheet}
       {dialogs}
     </div>
   );

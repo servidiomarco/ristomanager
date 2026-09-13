@@ -74,6 +74,10 @@ export interface Dish {
   /** Solo nel salvataggio: gli ingredienti del piatto composto. Con id =
    *  ritocco (l'id resta stabile), senza id = nuovo, assente = eliminato. */
   components?: { id?: number; name: string; removal_delta_cents?: number }[];
+  /** Vini abbinati (id di piatti delle categorie «vino»), in ordine di
+   *  preferenza. Semantica menu_ids: assente = non toccare, presente =
+   *  sostituisce l'insieme. L'AI li propone, il ristoratore li salva. */
+  paired_wine_dish_ids?: number[];
   /** Vendita al peso: il prezzo è AL KG e la riga di comanda porta i grammi
    *  (weight_grams). Un solo articolo «Bistecca» al posto delle grammature. */
   sold_by_weight?: boolean;
@@ -950,6 +954,10 @@ export interface User {
   updated_at?: string;
   last_login?: string;
   preferred_landing_view?: string | null;
+  // Layout della presa comanda sul palmare: 'pages' = variante a pagine
+  // (stile cassa, per chi arriva da Passepartout), null = classico.
+  // Per utente e non per dispositivo: la scelta segue l'operatore.
+  preferred_orderpad_layout?: string | null;
   // Account nell'allowlist REPORTS_ADMIN_EMAILS (env backend): vede la
   // Reportistica anche senza reports:view in matrice. Serve al lancio
   // ristretto — i permessi di ruolo restano la via ordinaria.

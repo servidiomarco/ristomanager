@@ -46,6 +46,17 @@ interface SheetProps {
   footer?: React.ReactNode;
   /** Ships with no padding of its own — pass it here, as with ModalShell. */
   bodyClassName?: string;
+  /** Sul telefono il foglio copre l'intero schermo — angoli vivi, niente
+   *  maniglia: è una pagina, non un cassetto, e si chiude con la ×. Serve
+   *  dove il foglio È la vista (la Comanda della variante a pagine), non un
+   *  dettaglio col contesto dietro. Da sm in su non cambia nulla: il
+   *  pannello laterale resta il pannello laterale. La × qui è piena in
+   *  accent, come la freccia indietro del palmare: su una pagina è IL gesto
+   *  di ritorno, non un congedo discreto. */
+  fullPage?: boolean;
+  /** Controlli accanto alla ×, allineati a lei: un interruttore di vista,
+   *  un'azione della testata. Pochi e compatti — la testata non è una barra. */
+  headerExtra?: React.ReactNode;
   ariaLabel?: string;
   children: React.ReactNode;
 }
@@ -59,6 +70,8 @@ export const Sheet: React.FC<SheetProps> = ({
   subheader,
   footer,
   bodyClassName = '',
+  fullPage = false,
+  headerExtra,
   ariaLabel,
   children,
 }) => {
@@ -93,13 +106,19 @@ export const Sheet: React.FC<SheetProps> = ({
           in from the right on a phone both read as the wrong gesture. */}
       <div
         onClick={e => e.stopPropagation()}
-        className="ds-sheet absolute inset-x-0 bottom-0 flex max-h-[92dvh] flex-col overflow-hidden rounded-t-[24px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] sm:inset-y-0 sm:left-auto sm:right-0 sm:max-h-none sm:w-[min(30rem,100vw)] sm:rounded-none sm:rounded-l-[24px]"
+        className={`ds-sheet absolute inset-x-0 bottom-0 flex flex-col overflow-hidden bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] sm:inset-y-0 sm:left-auto sm:right-0 sm:max-h-none sm:w-[min(30rem,100vw)] sm:rounded-none sm:rounded-l-[24px] ${
+          // Toccando il bordo alto, la pagina deve rispettare il notch da sé.
+          fullPage ? 'top-0 rounded-none pt-[env(safe-area-inset-top)] sm:pt-0' : 'max-h-[92dvh] rounded-t-[24px]'
+        }`}
       >
         {/* Grab handle — phone only. It is the affordance that says this panel
-            came from the bottom edge and goes back there. */}
-        <div className="flex flex-shrink-0 justify-center pt-2.5 sm:hidden" aria-hidden>
-          <span className="h-1 w-9 rounded-full bg-[var(--ds-border-strong)]" />
-        </div>
+            came from the bottom edge and goes back there; a full page has no
+            edge to go back to, so it carries none. */}
+        {!fullPage && (
+          <div className="flex flex-shrink-0 justify-center pt-2.5 sm:hidden" aria-hidden>
+            <span className="h-1 w-9 rounded-full bg-[var(--ds-border-strong)]" />
+          </div>
+        )}
 
         <header className="flex flex-shrink-0 items-start justify-between gap-4 px-5 pb-4 pt-4 sm:px-6 sm:pt-6">
           <div className="min-w-0">
@@ -111,14 +130,19 @@ export const Sheet: React.FC<SheetProps> = ({
             )}
             {meta && <div className="mt-3 flex flex-wrap items-center gap-2">{meta}</div>}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Chiudi"
-            className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex flex-shrink-0 items-center gap-2">
+            {headerExtra}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Chiudi"
+              className={fullPage
+                ? 'inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-action-bg)] text-[var(--ds-action-fg)] transition-colors hover:bg-[var(--ds-action-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]'
+                : 'inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface-row)] text-[var(--ds-text-secondary)] transition-colors hover:bg-[var(--ds-border)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]'}
+            >
+              <X className={fullPage ? 'h-[18px] w-[18px]' : 'h-4 w-4'} />
+            </button>
+          </div>
         </header>
 
         {subheader && (

@@ -84,8 +84,8 @@ describe('menu: visibilità e ordinamento CRM', () => {
         let pub = await api().get('/public/menu');
         expect(pub.status).toBe(200);
         let nomi = pub.body.piatti.map((p: any) => p.name);
-        expect(nomi).not.toContain('Alfa test');
-        expect(nomi).toContain('Beta test');
+        expect(nomi).not.toContain('Alfa Test');
+        expect(nomi).toContain('Beta Test');
 
         // Categoria spenta: spariscono tutti.
         const cats = (await api().get('/menu/categories').set(bearer(token))).body.categories;
@@ -95,7 +95,7 @@ describe('menu: visibilità e ordinamento CRM', () => {
         expect(put.status).toBe(200);
         pub = await api().get('/public/menu');
         nomi = pub.body.piatti.map((p: any) => p.name);
-        expect(nomi).not.toContain('Beta test');
+        expect(nomi).not.toContain('Beta Test');
         expect(nomi).not.toContain('Gamma test');
 
         // Riaccesa: tornano (Alfa resta spento dal toggle piatto).
@@ -104,8 +104,8 @@ describe('menu: visibilità e ordinamento CRM', () => {
         });
         pub = await api().get('/public/menu');
         nomi = pub.body.piatti.map((p: any) => p.name);
-        expect(nomi).toContain('Beta test');
-        expect(nomi).not.toContain('Alfa test');
+        expect(nomi).toContain('Beta Test');
+        expect(nomi).not.toContain('Alfa Test');
     });
 
     it("l'ordine delle categorie arriva al menu pubblico in categorie_ordine", async () => {
@@ -123,5 +123,35 @@ describe('menu: visibilità e ordinamento CRM', () => {
 
         const after = (await api().get('/menu/categories').set(bearer(token))).body.categories;
         expect(after[0].name).toBe(CAT);
+    });
+
+    it('il riordino non cancella le spunte dessert, wine e bar della categoria', async () => {
+        // L'incidente del 12/09: il PUT riscriveva il blob riportando solo
+        // bar e manual — dessert e wine sparivano a ogni riordino, e con
+        // loro l'uscita Dolci del palmare e l'universo della carta vini.
+        const dessertOn = await api().put('/menu/category-dessert').set(bearer(token))
+            .send({ category: CAT, dessert: true });
+        expect(dessertOn.status).toBe(200);
+        const wineOn = await api().put('/menu/category-wine').set(bearer(token))
+            .send({ category: CAT, wine: true });
+        expect(wineOn.status).toBe(200);
+        const barOn = await api().put('/menu/category-bar').set(bearer(token))
+            .send({ category: CAT, bar: true });
+        expect(barOn.status).toBe(200);
+
+        const cats = (await api().get('/menu/categories').set(bearer(token))).body.categories;
+        await api().put('/menu/categories').set(bearer(token))
+            .send({ categories: cats.map((c: any) => ({ name: c.name, enabled: c.enabled })) });
+
+        const after = (await api().get('/menu/categories').set(bearer(token))).body.categories;
+        const mine = after.find((c: any) => c.name === CAT);
+        expect(mine.dessert).toBe(true);
+        expect(mine.wine).toBe(true);
+        expect(mine.bar).toBe(true);
+
+        // Pulizia: le spunte non devono sporcare i file successivi.
+        await api().put('/menu/category-dessert').set(bearer(token)).send({ category: CAT, dessert: false });
+        await api().put('/menu/category-wine').set(bearer(token)).send({ category: CAT, wine: false });
+        await api().put('/menu/category-bar').set(bearer(token)).send({ category: CAT, bar: false });
     });
 });

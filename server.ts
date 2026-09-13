@@ -55,12 +55,13 @@ import {
 } from './services/passepartoutBridge.js';
 import type { PassepartoutComanda, EsitoChiusuraComanda, PassepartoutArticolo } from './services/passepartoutService.js';
 import { MENU_LANGS, isMenuTranslationConfigured, translateMenuEntries } from './services/menuTranslationService.js';
+import { isWinePairingConfigured, suggestWinePairings } from './services/aiWinePairingService.js';
 import { Shift, PaymentStatus, UserRole } from './types.js';
 import authRoutes from './auth/authRoutes.js';
 import logRoutes from './activityLogs/logRoutes.js';
 import { authenticate, authorize, requirePermission, requireAnyPermission } from './auth/authMiddleware.js';
 import { AuthService } from './auth/authService.js';
-import { RolePermissionService, isReportsAdmin } from './auth/permissionService.js';
+import { RolePermissionService, isReportsAdmin, ALL_PERMISSIONS, ALL_PERMISSION_KEYS, type Permission } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
 import { isPushConfigured, getVapidPublicKey, sendToUser as pushSendToUser, sendToRoles as pushSendToRoles, sendToPlatformAdmins as pushSendToPlatformAdmins } from './services/pushService.js';
@@ -175,7 +176,7 @@ import {
     type BlacklistPolicyMap,
     type BlacklistSource,
 } from './services/blacklistPolicy.js';
-import { toTitleCase } from './utils/text.js';
+import { toTitleCase, toMenuTitleCase } from './utils/text.js';
 import { clampModifierN, signedModifierLabel, signedModifierDelta } from './utils/modifierScale.js';
 import { BAR_COURSE_NO, DESSERT_COURSE_NO, isOffSequenceCourse } from './utils/courses.js';
 import { getRomeDatePart, getRomeTimePart } from './utils/reservationTime.js';
@@ -2159,8 +2160,12 @@ const buildConflictMessage = (conflicts: TableConflict[]): string => {
     return parts.join('; ');
 };
 
-// Reservations - require authentication
-app.get('/reservations', authenticate, async (req, res) => {
+// Reservations. La lista era l'unica della famiglia col solo authenticate
+// (scritture su reservations:full, letture puntuali su reservations:view):
+// ogni ruolo di default ha reservations:view, quindi il gate non toglie
+// niente a nessuno — ma senza, la matrice (e i permessi riservati della
+// piattaforma, Fase B) su questa route non mordevano.
+app.get('/reservations', authenticate, requirePermission('reservations:view'), async (req, res) => {
     try {
         // Finestra opzionale (?from=YYYY-MM-DD&to=YYYY-MM-DD, estremi inclusi,
         // giorni Europe/Rome). Il boot dell'app carica prima la finestra
@@ -3597,7 +3602,10 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
             if ((a.tipo === 'Variante' || a.tipo === 'VarianteModificatore') && a.attivo
                 && a.codice && String(a.descrizione ?? '').trim() !== '') {
                 varByCode.set(String(a.codice).trim().toLowerCase(), {
-                    nome: String(a.descrizione).trim(),
+                    // Title Case qui, così etichetta del gruppo e varianti
+                    // inserite/aggiornate lo ereditano tutte insieme (il
+                    // match con le righe esistenti è già su LOWER(name)).
+                    nome: toMenuTitleCase(String(a.descrizione).trim()),
                     delta: Number.isFinite(Number(a.prezzo)) ? Math.round(Number(a.prezzo) * 100) : 0,
                 });
             }
@@ -3628,18 +3636,27 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
                 refs.push(ref);
                 const iva = a.ivaPercento != null && Number.isInteger(a.ivaPercento)
                     && a.ivaPercento >= 0 && a.ivaPercento <= 100 ? a.ivaPercento : null;
+                // Title Case sui titoli della cassa (spesso URLATI): stessa
+                // forma della migration titoli-menu-title-case e delle
+                // scritture CRM, o i confronti esatti per categoria mancano.
+                const nomePiatto = toMenuTitleCase(String(a.descrizione).trim());
+                const categoriaPiatto = toMenuTitleCase(String(a.categoria ?? '').trim()) || 'Senza Categoria';
                 const up = await client.query(
+                    // category_locked: la categoria è stata curata dal CRM
+                    // (es. la carta dei vini divisa per colore, che la cassa
+                    // non conosce) — il sync non la riscrive. Tutto il resto
+                    // resta della cassa.
                     `INSERT INTO dishes (tenant_id, name, price, category, allergens, vat_rate, external_ref, is_active)
                      VALUES ($1, $2, $3, $4, '{}', COALESCE($5, 10), $6, $7)
                      ON CONFLICT (tenant_id, external_ref) WHERE external_ref IS NOT NULL
                      DO UPDATE SET name = EXCLUDED.name, price = EXCLUDED.price,
-                                   category = EXCLUDED.category,
+                                   category = CASE WHEN dishes.category_locked THEN dishes.category ELSE EXCLUDED.category END,
                                    vat_rate = COALESCE($5, dishes.vat_rate),
                                    is_active = EXCLUDED.is_active
                      RETURNING id, (xmax = 0) AS inserted`,
-                    [req.tenantId!, String(a.descrizione).trim(),
+                    [req.tenantId!, nomePiatto,
                      Number.isFinite(Number(a.prezzo)) ? Number(a.prezzo) : 0,
-                     String(a.categoria ?? 'Senza categoria').trim() || 'Senza categoria',
+                     categoriaPiatto,
                      iva, ref, a.attivo === true]
                 );
                 if (up.rows[0]?.inserted) creati++; else aggiornati++;
@@ -3661,7 +3678,7 @@ app.post('/menu/import/passepartout', authenticate, requirePermission('menu:full
                          SELECT $1, $2, m.id FROM menus m
                          WHERE m.tenant_id = $1 AND m.id = ANY($3::int[])
                          ON CONFLICT DO NOTHING`,
-                        [req.tenantId!, dishId, menusForCategory(String(a.categoria ?? 'Senza categoria'))]
+                        [req.tenantId!, dishId, menusForCategory(categoriaPiatto)]
                     );
                 }
 
@@ -3831,7 +3848,10 @@ const MENU_CAT_PREFS_KEY = 'menu_category_prefs';
 // la spunta in modale applica in blocco e ogni piatto resta libero dopo.
 // manual: categoria creata a mano dalla modale — esiste anche senza piatti,
 // e la pulizia dei fantasmi nel PUT non deve toccarla.
-type MenuCategoryPref = { enabled: boolean; sort: number; menu_ids?: number[]; modifier_group_ids?: number[]; manual?: boolean; bar?: boolean; dessert?: boolean };
+// wine: la categoria è carta dei vini — è l'universo da cui pescano gli
+// abbinamenti vino–piatto (scheda piatto e AI). Ortogonale a bar (che decide
+// l'uscita forzata): una categoria vino di solito è anche bar.
+type MenuCategoryPref = { enabled: boolean; sort: number; menu_ids?: number[]; modifier_group_ids?: number[]; manual?: boolean; bar?: boolean; dessert?: boolean; wine?: boolean };
 
 async function getMenuCategoryPrefs(tenantId: number): Promise<Record<string, MenuCategoryPref>> {
     const rs = await queryWithRetry(
@@ -3904,6 +3924,8 @@ app.get('/menu/categories', authenticate, async (req, res) => {
                 // Categoria da dolci: come il bar, ma nell'uscita Dolci in
                 // coda al servizio.
                 dessert: prefs[name]?.dessert === true,
+                // Carta dei vini: l'universo degli abbinamenti vino–piatto.
+                wine: prefs[name]?.wine === true,
             })),
         });
     } catch (err: any) {
@@ -3927,11 +3949,20 @@ app.put('/menu/categories', authenticate, requirePermission('menu:full'), async 
         const existing = await getMenuCategoryPrefs(req.tenantId!);
         const prefs: Record<string, MenuCategoryPref> = {};
         input.forEach((c: any, i: number) => {
-            const name = c.name.trim();
+            // Title Case anche sulla chiave del blob: deve combaciare byte
+            // per byte con dishes.category, o menu di categoria e stazioni
+            // smettono di agganciarsi.
+            const name = toMenuTitleCase(c.name.trim());
             prefs[name] = { enabled: c.enabled !== false, sort: i };
             if (Array.isArray(existing[name]?.menu_ids)) prefs[name].menu_ids = existing[name].menu_ids;
             if (Array.isArray(existing[name]?.modifier_group_ids)) prefs[name].modifier_group_ids = existing[name].modifier_group_ids;
+            // OGNI flag della categoria va riportato, non solo bar: dessert e
+            // wine mancavano da questa lista e un riordino dalla modale li
+            // cancellava in silenzio — l'uscita Dolci sparita dal palmare e
+            // le categorie vino smarcate in produzione (12/09) vengono da qui.
             if (existing[name]?.bar) prefs[name].bar = true;
+            if (existing[name]?.dessert) prefs[name].dessert = true;
+            if (existing[name]?.wine) prefs[name].wine = true;
             if (existing[name]?.manual) prefs[name].manual = true;
         });
         // Le categorie manuali sopravvivono anche a un client che non le
@@ -3967,7 +3998,7 @@ const menuCategoryExists = async (tenantId: number, name: string): Promise<boole
 // Nuova categoria, anche vuota: vive nel blob finché non ha piatti.
 app.post('/menu/categories', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const name = String(req.body?.name ?? '').trim();
+        const name = toMenuTitleCase(String(req.body?.name ?? '').trim());
         if (!name || name.length > 60) return res.status(400).json({ error: 'name deve essere 1..60 caratteri' });
         if (await menuCategoryExists(req.tenantId!, name)) {
             return res.status(409).json({ error: 'Categoria già esistente' });
@@ -3991,8 +4022,8 @@ app.post('/menu/categories', authenticate, requirePermission('menu:full'), async
 // prossimo import — il server rinomina comunque, l'avviso sta nella modale.
 app.put('/menu/categories/rename', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const from = String(req.body?.from ?? '').trim();
-        const to = String(req.body?.to ?? '').trim();
+        const from = toMenuTitleCase(String(req.body?.from ?? '').trim());
+        const to = toMenuTitleCase(String(req.body?.to ?? '').trim());
         if (!from || !to || to.length > 60) return res.status(400).json({ error: 'servono from e to (1..60 caratteri)' });
         if (from === to) return res.status(400).json({ error: 'Il nome è già questo' });
         if (!(await menuCategoryExists(req.tenantId!, from))) {
@@ -4037,7 +4068,7 @@ app.put('/menu/categories/rename', authenticate, requirePermission('menu:full'),
 // orfane o cancellerebbe anagrafica — prima si spostano i piatti.
 app.delete('/menu/categories', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const name = String(req.query?.name ?? '').trim();
+        const name = toMenuTitleCase(String(req.query?.name ?? '').trim());
         if (!name) return res.status(400).json({ error: 'serve name' });
         const cnt = await queryWithRetry(
             'SELECT count(*)::int AS n FROM dishes WHERE tenant_id = $1 AND category = $2',
@@ -4072,7 +4103,7 @@ app.delete('/menu/categories', authenticate, requirePermission('menu:full'), asy
 // riapplica in blocco, com'è giusto per un'azione dichiarata "in blocco".
 app.put('/menu/category-menus', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const category = typeof req.body?.category === 'string' ? req.body.category : '';
+        const category = typeof req.body?.category === 'string' ? toMenuTitleCase(req.body.category.trim()) : '';
         const menuId = Number(req.body?.menu_id);
         const member = req.body?.member;
         if (!category.trim() || !Number.isInteger(menuId) || typeof member !== 'boolean') {
@@ -4168,7 +4199,7 @@ app.put('/menu/category-menus', authenticate, requirePermission('menu:full'), as
 // la prossima spunta di categoria riapplica in blocco.
 app.put('/menu/category-modifier-groups', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const category = typeof req.body?.category === 'string' ? req.body.category : '';
+        const category = typeof req.body?.category === 'string' ? toMenuTitleCase(req.body.category.trim()) : '';
         const groupId = Number(req.body?.group_id);
         const member = req.body?.member;
         if (!category.trim() || !Number.isInteger(groupId) || typeof member !== 'boolean') {
@@ -4261,7 +4292,7 @@ app.put('/menu/category-modifier-groups', authenticate, requirePermission('menu:
 // le altre proprietà di categoria; il palmare la riceve dal catalogue.
 app.put('/menu/category-bar', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const category = typeof req.body?.category === 'string' ? req.body.category.trim() : '';
+        const category = typeof req.body?.category === 'string' ? toMenuTitleCase(req.body.category.trim()) : '';
         const bar = req.body?.bar;
         if (!category || typeof bar !== 'boolean') {
             return res.status(400).json({ error: 'servono category e bar (true/false)' });
@@ -4292,12 +4323,46 @@ app.put('/menu/category-bar', authenticate, requirePermission('menu:full'), asyn
     }
 });
 
+// La spunta «vino» su una categoria: come «bar», ma non tocca le uscite —
+// dice solo «questa è carta dei vini», l'universo da cui pescano gli
+// abbinamenti vino–piatto (scheda piatto, AI, cassetto del palmare).
+app.put('/menu/category-wine', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        const category = typeof req.body?.category === 'string' ? toMenuTitleCase(req.body.category.trim()) : '';
+        const wine = req.body?.wine;
+        if (!category || typeof wine !== 'boolean') {
+            return res.status(400).json({ error: 'servono category e wine (true/false)' });
+        }
+        if (!(await menuCategoryExists(req.tenantId!, category))) {
+            return res.status(404).json({ error: 'Categoria non trovata' });
+        }
+        const prefs = await getMenuCategoryPrefs(req.tenantId!);
+        const next: MenuCategoryPref = prefs[category] ?? { enabled: true, sort: Number.MAX_SAFE_INTEGER };
+        if (wine) next.wine = true; else delete next.wine;
+        prefs[category] = next;
+        await saveMenuCategoryPrefs(req.tenantId!, prefs);
+        try { socketService?.broadcastToAll(req.tenantId!, 'dish:synced', { categoria: category, wine }); } catch (_) {}
+        emitCatalogueUpdated(req.tenantId!, { categoria: category, wine });
+        if (req.user) {
+            LogService.logActivity(
+                req.tenantId!, req.user.userId, req.user.email, req.user.email,
+                ActivityAction.UPDATE, ResourceType.DISH, 0, category,
+                { category_wine: wine }
+            ).catch(() => {});
+        }
+        res.json({ ok: true });
+    } catch (err: any) {
+        console.error('PUT /menu/category-wine error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // La spunta «dolci» su una categoria: come la spunta «bar», ma i piatti
 // vanno nell'uscita Dolci — l'altra uscita fuori numerazione, in coda al
 // servizio, che parte senza chiamata.
 app.put('/menu/category-dessert', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const category = typeof req.body?.category === 'string' ? req.body.category.trim() : '';
+        const category = typeof req.body?.category === 'string' ? toMenuTitleCase(req.body.category.trim()) : '';
         const dessert = req.body?.dessert;
         if (!category || typeof dessert !== 'boolean') {
             return res.status(400).json({ error: 'servono category e dessert (true/false)' });
@@ -4433,7 +4498,7 @@ const parseVariantNote = (raw: any, max: number): { value: string | null } | { e
 
 app.post('/menu/modifier-groups', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const name = String(req.body?.name ?? '').trim();
+        const name = toMenuTitleCase(String(req.body?.name ?? '').trim());
         if (!name || name.length > 100) return res.status(400).json({ error: 'name deve essere 1..100 caratteri' });
         const minSelect = req.body?.min_select === undefined ? 0 : Number(req.body.min_select);
         const maxSelect = req.body?.max_select === undefined ? 1 : Number(req.body.max_select);
@@ -4447,7 +4512,7 @@ app.post('/menu/modifier-groups', authenticate, requirePermission('menu:full'), 
         if (req.body?.modifiers !== undefined) {
             if (!Array.isArray(req.body.modifiers)) return res.status(400).json({ error: 'modifiers deve essere una lista' });
             for (const m of req.body.modifiers) {
-                const mName = String(m?.name ?? '').trim();
+                const mName = toMenuTitleCase(String(m?.name ?? '').trim());
                 if (!mName || mName.length > 100) return res.status(400).json({ error: 'ogni variante deve avere un nome di 1..100 caratteri' });
                 const delta = parseModifierDelta(m);
                 if ('error' in delta) return res.status(400).json({ error: delta.error });
@@ -4537,7 +4602,7 @@ app.put('/menu/modifier-groups/:id', authenticate, requirePermission('menu:full'
             return res.status(409).json({ error: 'Il massimo di questo gruppo lo decide la cassa' });
         }
 
-        const name = req.body?.name === undefined ? null : String(req.body.name).trim();
+        const name = req.body?.name === undefined ? null : toMenuTitleCase(String(req.body.name).trim());
         if (name !== null && (!name || name.length > 100)) return res.status(400).json({ error: 'name deve essere 1..100 caratteri' });
         const minSelect = req.body?.min_select === undefined ? null : Number(req.body.min_select);
         if (minSelect !== null && (!Number.isInteger(minSelect) || minSelect < 0)) return res.status(400).json({ error: 'min_select deve essere un intero >= 0' });
@@ -4641,7 +4706,7 @@ app.post('/menu/modifier-groups/:id/modifiers', authenticate, requirePermission(
         if (!Number.isInteger(groupId)) return res.status(400).json({ error: 'id non valido' });
         const guard = await loadManualGroup(req.tenantId!, groupId);
         if (guard.status !== 200) return res.status(guard.status).json({ error: guard.error });
-        const name = String(req.body?.name ?? '').trim();
+        const name = toMenuTitleCase(String(req.body?.name ?? '').trim());
         if (!name || name.length > 100) return res.status(400).json({ error: 'name deve essere 1..100 caratteri' });
         const delta = parseModifierDelta(req.body);
         if ('error' in delta) return res.status(400).json({ error: delta.error });
@@ -4704,7 +4769,7 @@ app.put('/menu/modifiers/:id', authenticate, requirePermission('menu:full'), asy
         if (isPPGroupRef(cur.rows[0].external_ref)) {
             return res.status(409).json({ error: 'Le opzioni di questo gruppo arrivano dalla cassa' });
         }
-        const name = req.body?.name === undefined ? null : String(req.body.name).trim();
+        const name = req.body?.name === undefined ? null : toMenuTitleCase(String(req.body.name).trim());
         if (name !== null && (!name || name.length > 100)) return res.status(400).json({ error: 'name deve essere 1..100 caratteri' });
         const isActive = req.body?.is_active === undefined ? null : Boolean(req.body.is_active);
 
@@ -4908,6 +4973,114 @@ app.post('/menu/translate', authenticate, requirePermission('menu:full'), async 
     }
 });
 
+// ── Abbinamenti vino: l'AI propone dai vini in carta, il ristoratore cura ──
+// L'universo dei vini: piatti attivi delle categorie marcate «vino»; senza
+// spunte vino si ripiega sulle categorie «bar» (bibite comprese — meglio un
+// universo largo che nessun universo, e comunque decide il ristoratore).
+const wineListForTenant = async (tenantId: number): Promise<{ id: number; name: string; category: string | null; description: string | null }[]> => {
+    const prefs = await getMenuCategoryPrefs(tenantId);
+    let cats = Object.entries(prefs).filter(([, p]) => p?.wine === true).map(([c]) => c);
+    if (cats.length === 0) cats = Object.entries(prefs).filter(([, p]) => p?.bar === true).map(([c]) => c);
+    if (cats.length === 0) return [];
+    const rs = await queryWithRetry(
+        `SELECT id, name, category, description FROM dishes
+         WHERE tenant_id = $1 AND is_active AND crm_enabled AND category = ANY($2::text[])
+         ORDER BY category, sort_order NULLS LAST, name`,
+        [tenantId, cats]
+    );
+    return rs.rows;
+};
+
+const trackWinePairingUsage = (tenantId: number, userEmail: string | null, prompt: number, output: number) => {
+    if (prompt + output === 0) return;
+    queryWithRetry(
+        `INSERT INTO ai_token_usage (provider, feature, model, prompt_tokens, output_tokens, total_tokens, user_email, tenant_id)
+         VALUES ('anthropic', 'wine_pairing', 'claude-opus-5', $1, $2, $3, $4, $5)`,
+        [prompt, output, prompt + output, userEmail, tenantId]
+    ).catch(err => console.error('ai_token_usage insert (wine_pairing) failed:', err));
+};
+
+// Proposta per UN piatto, senza salvare: la scheda la mostra pre-selezionata
+// e si salva solo col Salva del form — l'AI non scrive mai da sola qui.
+app.post('/dishes/:id/suggest-pairings', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        if (!(await getFeatureFlag(req.tenantId!, 'ai_wine_pairing_enabled', false))) {
+            return res.status(503).json({ error: 'ai_disabled' });
+        }
+        if (!isWinePairingConfigured()) {
+            return res.status(503).json({ error: 'not_configured', message: 'ANTHROPIC_API_KEY non configurata sul backend' });
+        }
+        const dishId = parseInt(req.params.id, 10);
+        if (!Number.isFinite(dishId)) return res.status(400).json({ error: 'id non valido' });
+        const dishRs = await queryWithRetry(
+            `SELECT id, name, category, description FROM dishes WHERE id = $1 AND tenant_id = $2`,
+            [dishId, req.tenantId!]
+        );
+        if (!dishRs.rows[0]) return res.status(404).json({ error: 'Piatto non trovato' });
+        const vini = await wineListForTenant(req.tenantId!);
+        if (vini.length === 0) {
+            return res.status(409).json({ error: 'no_wines', message: 'Nessuna categoria «vino» (né «bar») con piatti attivi' });
+        }
+        let prompt = 0, output = 0;
+        const mappa = await suggestWinePairings([dishRs.rows[0]], vini, (p, o) => { prompt += p; output += o; });
+        trackWinePairingUsage(req.tenantId!, req.user?.email || null, prompt, output);
+        res.json({ wine_dish_ids: mappa.get(dishId) ?? [] });
+    } catch (err: any) {
+        console.error('POST /dishes/:id/suggest-pairings error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
+// Abbina la carta intera: come /menu/translate — idempotente, riempie SOLO i
+// piatti senza abbinamenti (rifarne uno = svuotarlo in scheda e rilanciare).
+// Qui l'AI scrive in tabella perché il bulk È la curatela di partenza: ogni
+// piatto resta poi correggibile dalla scheda.
+app.post('/menu/pair-wines', authenticate, requirePermission('menu:full'), async (req, res) => {
+    try {
+        if (!(await getFeatureFlag(req.tenantId!, 'ai_wine_pairing_enabled', false))) {
+            return res.status(503).json({ error: 'ai_disabled' });
+        }
+        if (!isWinePairingConfigured()) {
+            return res.status(503).json({ error: 'not_configured', message: 'ANTHROPIC_API_KEY non configurata sul backend' });
+        }
+        const vini = await wineListForTenant(req.tenantId!);
+        if (vini.length === 0) {
+            return res.status(409).json({ error: 'no_wines', message: 'Nessuna categoria «vino» (né «bar») con piatti attivi' });
+        }
+        // Da abbinare: piatti attivi di cucina (fuori dalle categorie
+        // vino/bar/dolci — un vino non si abbina a un vino) ancora senza
+        // abbinamenti.
+        const prefs = await getMenuCategoryPrefs(req.tenantId!);
+        const escluse = Object.entries(prefs)
+            .filter(([, p]) => p?.wine === true || p?.bar === true || p?.dessert === true)
+            .map(([c]) => c);
+        const daAbbinare = await queryWithRetry(
+            `SELECT id, name, category, description FROM dishes d
+             WHERE tenant_id = $1 AND is_active AND crm_enabled
+               AND NOT (COALESCE(category, '') = ANY($2::text[]))
+               AND NOT EXISTS (SELECT 1 FROM dish_wine_pairings wp WHERE wp.tenant_id = $1 AND wp.dish_id = d.id)
+             ORDER BY category, sort_order NULLS LAST, name`,
+            [req.tenantId!, escluse]
+        );
+        let prompt = 0, output = 0;
+        const mappa = await suggestWinePairings(daAbbinare.rows, vini, (p, o) => { prompt += p; output += o; });
+        trackWinePairingUsage(req.tenantId!, req.user?.email || null, prompt, output);
+        let abbinati = 0;
+        for (const [dishId, wineIds] of mappa) {
+            await replaceDishWinePairings(req.tenantId!, dishId, wineIds);
+            abbinati++;
+        }
+        if (abbinati > 0) {
+            try { socketService?.broadcastToAll(req.tenantId!, 'dish:synced', { abbinati }); } catch (_) {}
+            emitCatalogueUpdated(req.tenantId!, { abbinati });
+        }
+        res.json({ abbinati, candidati: daAbbinare.rows.length, tokens: prompt + output });
+    } catch (err: any) {
+        console.error('POST /menu/pair-wines error:', err);
+        res.status(500).json({ error: 'Internal server error', detail: err?.message });
+    }
+});
+
 // Dati del menu per la pagina pubblica: piatti attivi con traduzioni e
 // categorie tradotte. Niente id interni, niente campi gestionali.
 const handlePublicMenu = async (tenantId: number, _req: express.Request, res: express.Response) => {
@@ -4919,7 +5092,10 @@ const handlePublicMenu = async (tenantId: number, _req: express.Request, res: ex
     // E solo i piatti del menu Alla carta: il QR al tavolo mostra ciò che si
     // può ordinare, non le liste banchetti o i menu stagionali.
     const dishesRs = await queryWithRetry(
-        `SELECT d.name, d.description, d.price, d.category, d.allergens, d.photo_url, d.translations
+        `SELECT d.name, d.description, d.price, d.category, d.allergens, d.photo_url, d.translations,
+                COALESCE((SELECT array_agg(w.name ORDER BY wp.sort_order, w.name)
+                          FROM dish_wine_pairings wp JOIN dishes w ON w.id = wp.wine_dish_id
+                          WHERE wp.dish_id = d.id AND w.is_active AND w.crm_enabled), '{}') AS abbinati
          FROM dishes d WHERE d.tenant_id = $1 AND d.is_active AND d.crm_enabled
            AND EXISTS (SELECT 1 FROM dish_menus dm JOIN menus m ON m.id = dm.menu_id
                        WHERE dm.dish_id = d.id AND m.system_key = 'ALLA_CARTA')
@@ -4945,6 +5121,9 @@ const handlePublicMenu = async (tenantId: number, _req: express.Request, res: ex
             allergens: Array.isArray(d.allergens) ? d.allergens : [],
             photo_url: d.photo_url || null,
             translations: d.translations || null,
+            // I nomi dei vini abbinati: vetrina, nessuna azione. Nomi propri,
+            // quindi niente traduzione.
+            abbinati: Array.isArray(d.abbinati) ? d.abbinati : [],
         })),
     });
 };
@@ -5429,6 +5608,18 @@ function parseStaffBillPayment(raw: any): { method: string; amount_cents: number
         return { error: 'amount_cents must be a positive integer' };
     }
     const meta = raw?.meta && typeof raw.meta === 'object' && !Array.isArray(raw.meta) ? raw.meta : null;
+    // meta.item_units = [{order_item_id, units}]: quali piatti copre questo
+    // incasso (quota «per piatti» della cassa). Solo memoria per non
+    // riproporli al giro dopo — il denaro resta l'amount, come sempre.
+    if (meta && meta.item_units !== undefined) {
+        const ius = Array.isArray(meta.item_units) ? meta.item_units : null;
+        if (!ius || ius.some((u: any) =>
+            !u || !Number.isInteger(Number(u.order_item_id)) || Number(u.order_item_id) <= 0
+               || !Number.isInteger(Number(u.units)) || Number(u.units) <= 0)) {
+            return { error: 'meta.item_units must be an array of {order_item_id, units} with positive integers' };
+        }
+        meta.item_units = ius.map((u: any) => ({ order_item_id: Number(u.order_item_id), units: Number(u.units) }));
+    }
     return { method, amount_cents: amount, meta };
 }
 
@@ -5787,11 +5978,10 @@ app.post('/bills/:id/discount', authenticate, requirePermission('orders:void'), 
             if (type === 'PERCENT' && value > 100) {
                 return res.status(400).json({ error: 'Uno sconto percentuale non può superare il 100%' });
             }
+            // Motivazione facoltativa (scelta di Marco, 10/09): in cassa si
+            // sconta anche al volo. Se c'è, resta a registro come prima.
             const raw = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
-            if (raw.length < 3) {
-                return res.status(400).json({ error: 'Serve una motivazione (almeno 3 caratteri)' });
-            }
-            reason = raw.slice(0, 300);
+            reason = raw.length > 0 ? raw.slice(0, 300) : null;
         }
 
         await client.query('BEGIN');
@@ -7832,6 +8022,18 @@ app.get('/pay/:token', publicPayLimiter, async (req, res) => runAsPlatform(async
         for (const r of claimedItemRows.rows) {
             for (const id of (Array.isArray(r.item_ids) ? r.item_ids : [])) takenItemIds.add(Number(id));
         }
+        // Anche i piatti coperti da un incasso staff (quota «per piatti» in
+        // cassa) sono presi — pure a riga parziale: la quota dal QR prende la
+        // riga intera e farebbe ripagare la parte già incassata.
+        const staffItemRows = await queryWithRetry(
+            `SELECT meta->'item_units' AS item_units FROM table_bill_payments
+             WHERE table_bill_id = $1 AND voided_at IS NULL
+               AND jsonb_typeof(meta->'item_units') = 'array'`,
+            [bill.id]
+        );
+        for (const r of staffItemRows.rows) {
+            for (const u of (Array.isArray(r.item_units) ? r.item_units : [])) takenItemIds.add(Number(u?.order_item_id));
+        }
         const billItems: any[] = Array.isArray(bill.items) ? bill.items : [];
         const itemsSum = billItems.reduce(
             (n: number, i: any) => n + Number(i.unit_price_cents || 0) * Number(i.qty || 0), 0
@@ -8068,6 +8270,17 @@ app.post('/pay/:token/claim', publicPayLimiter, publicPayClaimLimiter, async (re
             const taken = new Set<number>();
             for (const r of takenRs.rows) {
                 for (const id of (Array.isArray(r.item_ids) ? r.item_ids : [])) taken.add(Number(id));
+            }
+            // …e nemmeno un piatto già coperto (anche in parte) da un incasso
+            // staff: la quota dal QR prende la riga intera.
+            const staffTakenRs = await client.query(
+                `SELECT meta->'item_units' AS item_units FROM table_bill_payments
+                 WHERE table_bill_id = $1 AND voided_at IS NULL
+                   AND jsonb_typeof(meta->'item_units') = 'array'`,
+                [bill.id]
+            );
+            for (const r of staffTakenRs.rows) {
+                for (const u of (Array.isArray(r.item_units) ? r.item_units : [])) taken.add(Number(u?.order_item_id));
             }
             const conflict = requested.filter((id: number) => taken.has(id));
             if (conflict.length > 0) {
@@ -11815,6 +12028,43 @@ const replaceDishModifierGroups = async (tenantId: number, dishId: number, group
     return rows.rows.map((r: any) => Number(r.group_id));
 };
 
+// Vini abbinati al piatto: sostituzione piena (a differenza dei gruppi
+// varianti qui non c'è un source da preservare) con sort_order = posizione
+// nell'array — l'ordine è la preferenza del sommelier. Il SELECT scarta id
+// fantasma o di altri tenant senza far saltare la FK.
+// Sempre in risposta come menu_ids: il broadcast dish:updated sostituisce il
+// piatto per intero nei client — un campo assente cancellerebbe gli
+// abbinamenti in memoria a ogni modifica non correlata.
+const dishWinePairingIds = async (dishId: number): Promise<number[]> => {
+    const rs = await queryWithRetry(
+        `SELECT wine_dish_id FROM dish_wine_pairings WHERE dish_id = $1 ORDER BY sort_order, wine_dish_id`,
+        [dishId]
+    );
+    return rs.rows.map((r: any) => Number(r.wine_dish_id));
+};
+
+const replaceDishWinePairings = async (tenantId: number, dishId: number, wineIds: number[]): Promise<number[]> => {
+    const wanted = [...new Set(wineIds.map(Number).filter(n => Number.isInteger(n) && n !== dishId))];
+    await queryWithRetry(
+        `DELETE FROM dish_wine_pairings
+         WHERE tenant_id = $1 AND dish_id = $2 AND NOT (wine_dish_id = ANY($3::int[]))`,
+        [tenantId, dishId, wanted]
+    );
+    for (let i = 0; i < wanted.length; i++) {
+        await queryWithRetry(
+            `INSERT INTO dish_wine_pairings (tenant_id, dish_id, wine_dish_id, sort_order)
+             SELECT $1, $2, d.id, $4 FROM dishes d WHERE d.tenant_id = $1 AND d.id = $3
+             ON CONFLICT (tenant_id, dish_id, wine_dish_id) DO UPDATE SET sort_order = EXCLUDED.sort_order`,
+            [tenantId, dishId, wanted[i], i]
+        );
+    }
+    const rows = await queryWithRetry(
+        'SELECT wine_dish_id FROM dish_wine_pairings WHERE tenant_id = $1 AND dish_id = $2 ORDER BY sort_order, wine_dish_id',
+        [tenantId, dishId]
+    );
+    return rows.rows.map((r: any) => Number(r.wine_dish_id));
+};
+
 // Ingredienti del piatto composto: upsert per id — update dei presenti,
 // insert dei nuovi, delete dei mancanti. Il keep-by-id tiene stabili gli id
 // che i palmari hanno nel catalogue: rigenerarli a ogni salvataggio
@@ -11823,7 +12073,8 @@ const replaceDishModifierGroups = async (tenantId: number, dishId: number, group
 const replaceDishComponents = async (tenantId: number, dishId: number, components: any[]) => {
     const parsed: { id: number | null; name: string; delta: number }[] = [];
     for (const c of components) {
-        const name = String(c?.name ?? '').trim();
+        // Title Case come ogni titolo del menu (migration titoli-menu).
+        const name = toMenuTitleCase(String(c?.name ?? '').trim());
         if (!name || name.length > 100) return { error: 'ogni ingrediente deve avere un nome di 1..100 caratteri' };
         const delta = c?.removal_delta_cents === undefined || c?.removal_delta_cents === null
             ? 0 : Number(c.removal_delta_cents);
@@ -11975,7 +12226,9 @@ app.get('/dishes', authenticate, async (req, res) => {
         // /menu/categories: qui le righe restano solo raggruppate.
         const result = await queryWithRetry(
             `SELECT d.*, COALESCE((SELECT array_agg(dm.menu_id ORDER BY dm.menu_id)
-                                   FROM dish_menus dm WHERE dm.dish_id = d.id), '{}') AS menu_ids
+                                   FROM dish_menus dm WHERE dm.dish_id = d.id), '{}') AS menu_ids,
+                    COALESCE((SELECT array_agg(wp.wine_dish_id ORDER BY wp.sort_order, wp.wine_dish_id)
+                              FROM dish_wine_pairings wp WHERE wp.dish_id = d.id), '{}') AS paired_wine_dish_ids
              FROM dishes d WHERE d.tenant_id = $1 ORDER BY d.category, d.sort_order NULLS LAST, d.name`,
             [req.tenantId!]
         );
@@ -12040,7 +12293,10 @@ const syncDefaultListPrice = async (
 
 app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
-        const { name, description, price, category, allergens, photo_url } = req.body;
+        const { description, price, allergens, photo_url } = req.body;
+        // Titoli sempre in Title Case, come la migration e il sync cassa.
+        const name = toMenuTitleCase(String(req.body?.name ?? '').trim());
+        const category = req.body?.category ? toMenuTitleCase(String(req.body.category).trim()) : req.body?.category;
         const station = await resolveDishStation(req.tenantId!, req.body?.station_id);
         if ('error' in station) return res.status(400).json({ error: station.error });
         const vatRate = req.body?.vat_rate == null
@@ -12089,7 +12345,12 @@ app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, re
             if ('error' in out) return res.status(400).json({ error: out.error });
             newDish.components = out.components;
         }
-        if (wantedGroups != null || Array.isArray(req.body?.components)) {
+        // Un piatto nuovo nasce senza abbinamenti: campo sempre presente,
+        // come menu_ids, così i client non lo vedono mai sparire.
+        newDish.paired_wine_dish_ids = Array.isArray(req.body?.paired_wine_dish_ids)
+            ? await replaceDishWinePairings(req.tenantId!, newDish.id, req.body.paired_wine_dish_ids)
+            : [];
+        if (wantedGroups != null || Array.isArray(req.body?.components) || Array.isArray(req.body?.paired_wine_dish_ids)) {
             // dish:created non trasporta legami né ingredienti: vivono nel
             // catalogue, e i palmari lo ricaricano su questo evento.
             emitCatalogueUpdated(req.tenantId!, { piatto: newDish.id });
@@ -12147,7 +12408,13 @@ app.post('/dishes', authenticate, requirePermission('menu:full'), async (req, re
 app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, description, price, category, allergens, photo_url } = req.body;
+        const { description, price, allergens, photo_url } = req.body;
+        // Titoli sempre in Title Case, come la migration e il sync cassa.
+        // Nota: il lucchetto categoria scatta su $4 IS DISTINCT FROM category,
+        // e la forma normalizzata è la stessa dell'import — un semplice
+        // re-invio del form non lo alza.
+        const name = toMenuTitleCase(String(req.body?.name ?? '').trim());
+        const category = req.body?.category ? toMenuTitleCase(String(req.body.category).trim()) : req.body?.category;
         const vatRate = parseVatRate(req.body?.vat_rate);
         if (req.body?.vat_rate != null && vatRate == null) return res.status(400).json({ error: 'vat_rate deve essere un intero fra 0 e 100' });
         const dishType = req.body?.dish_type == null ? null : String(req.body.dish_type);
@@ -12170,7 +12437,12 @@ app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req,
             // station_id, stessa semantica ma via resolveDishStation: il null
             // esplicito significa "torna a seguire la categoria", quindi
             // niente COALESCE — serve il flag touched.
-            `UPDATE dishes SET name = $1, description = $2, price = $3, category = $4, allergens = $5, photo_url = $6,
+            // Il lucchetto si alza da solo: cambiare a mano la categoria di un
+            // piatto della cassa è una curatela del CRM, e da quel momento il
+            // sync non la riscrive più (vedi l'upsert dell'import).
+            `UPDATE dishes SET name = $1, description = $2, price = $3,
+                    category_locked = CASE WHEN $4 IS DISTINCT FROM category AND external_ref LIKE 'pp:%' THEN true ELSE category_locked END,
+                    category = $4, allergens = $5, photo_url = $6,
                     vat_rate = COALESCE($9, vat_rate), dish_type = COALESCE($10, dish_type), sold_by_weight = COALESCE($11, sold_by_weight),
                     weight_min_grams = CASE WHEN $12 THEN $13 ELSE weight_min_grams END,
                     weight_max_grams = CASE WHEN $14 THEN $15 ELSE weight_max_grams END,
@@ -12206,7 +12478,11 @@ app.put('/dishes/:id', authenticate, requirePermission('menu:full'), async (req,
             if ('error' in out) return res.status(400).json({ error: out.error });
             updatedDish.components = out.components;
         }
-        if (Array.isArray(req.body?.modifier_group_ids) || Array.isArray(req.body?.components)) {
+        // Vini abbinati: stessa semantica di menu_ids (assente = non toccare).
+        updatedDish.paired_wine_dish_ids = Array.isArray(req.body?.paired_wine_dish_ids)
+            ? await replaceDishWinePairings(req.tenantId!, updatedDish.id, req.body.paired_wine_dish_ids)
+            : await dishWinePairingIds(updatedDish.id);
+        if (Array.isArray(req.body?.modifier_group_ids) || Array.isArray(req.body?.components) || Array.isArray(req.body?.paired_wine_dish_ids)) {
             emitCatalogueUpdated(req.tenantId!, { piatto: updatedDish.id });
         }
 
@@ -13366,7 +13642,40 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
                 = right(regexp_replace(COALESCE(c.phone, ''), '\\D', '', 'g'), 10)
         ) AS no_show_count`;
         if (q && q.trim()) {
-            const term = `%${q.trim().toLowerCase()}%`;
+            const trimmed = q.trim().toLowerCase();
+            // Ricerca per PAROLE, non per frase intera: ogni parola digitata
+            // deve comparire nel nome (o nell'email), in qualsiasi ordine.
+            // Il vecchio LIKE sull'intera frase non trovava «Servidio Marco»
+            // quando la scheda era «Marco Servidio»: la rubrica sembrava
+            // vuota e il cliente veniva salvato una seconda volta con un
+            // altro numero — doppione che il vincolo sul telefono non può
+            // intercettare.
+            const tokens = trimmed.split(/\s+/).filter(Boolean);
+            const params: (string | number)[] = [];
+            const add = (v: string | number) => { params.push(v); return `$${params.length}`; };
+            const nameEmailCond = tokens.map((t) => {
+                const p = add(`%${t}%`);
+                return `(LOWER(name) LIKE ${p} OR LOWER(COALESCE(email, '')) LIKE ${p})`;
+            }).join(' AND ');
+            const conds = [`(${nameEmailCond})`];
+            // Telefono confrontato per sole cifre: «333 1234567» trova anche
+            // «+39 333 1234567». Il vecchio LIKE sulla stringa grezza falliva
+            // su spazi e prefisso. Sotto le 3 cifre il filtro direbbe sì a
+            // mezza rubrica, quindi non scatta.
+            const qDigits = trimmed.replace(/\D/g, '');
+            if (qDigits.length >= 3) {
+                conds.push(`regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') LIKE ${add(`%${qDigits}%`)}`);
+            }
+            // Prefissi prima delle sottostringhe: con 6 posti nel dropdown
+            // del form prenotazione, «mar» deve proporre «Marco …» prima di
+            // «Gennaro Marfella». Fascia 0: il nome inizia con la frase
+            // digitata; fascia 1: una parola del nome inizia con la prima
+            // parola digitata; fascia 2: il resto. A parità, alfabetico.
+            const rankPhrase = add(`${trimmed}%`);
+            const rankTokStart = add(`${tokens[0]}%`);
+            const rankTokWord = add(`% ${tokens[0]}%`);
+            const capParam = add(cap);
+            const tenantParam = add(req.tenantId!);
             const result = await queryWithRetry(
                 `SELECT id, name, phone, email, address, city, postal_code, notes, created_at, updated_at,
                         preferred_table_id, preferences_notes, dietary_notes, is_vip,
@@ -13374,12 +13683,17 @@ app.get('/customers', authenticate, requirePermission('customers:view'), async (
                         consent_marketing, consent_marketing_updated_at, language, billing,
                         ${noShowSubquery}
                  FROM customers c
-                 WHERE c.tenant_id = $3
+                 WHERE c.tenant_id = ${tenantParam}
                    AND phone IS NOT NULL AND TRIM(phone) <> ''
-                   AND (LOWER(name) LIKE $1 OR LOWER(phone) LIKE $1 OR LOWER(COALESCE(email, '')) LIKE $1)
-                 ORDER BY name
-                 LIMIT $2`,
-                [term, cap, req.tenantId!]
+                   AND (${conds.join(' OR ')})
+                 ORDER BY CASE
+                     WHEN LOWER(name) LIKE ${rankPhrase} THEN 0
+                     WHEN LOWER(name) LIKE ${rankTokStart} OR LOWER(name) LIKE ${rankTokWord} THEN 1
+                     ELSE 2
+                   END,
+                   name
+                 LIMIT ${capParam}`,
+                params
             );
             return res.json(result.rows);
         }
@@ -21623,8 +21937,8 @@ app.post('/voice-calls/sync', authenticate, requireFeature('voice'), voiceCallsA
 // directly — the endpoints they gate are low-volume (a handful per minute
 // at most), so caching isn't worth the complexity.
 
-type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'digital_menu_enabled' | 'passe_enabled';
-const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'voice_double_seating_enabled', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'digital_menu_enabled', 'passe_enabled'];
+type FeatureFlagKey = 'public_bookings_enabled' | 'voice_agent_enabled' | 'voice_bookings_suspended' | 'voice_double_seating_enabled' | 'pay_at_table_enabled' | 'table_orders_enabled' | 'ai_messages_enabled' | 'ai_wine_pairing_enabled' | 'digital_menu_enabled' | 'passe_enabled';
+const FEATURE_FLAG_KEYS: FeatureFlagKey[] = ['public_bookings_enabled', 'voice_agent_enabled', 'voice_bookings_suspended', 'voice_double_seating_enabled', 'pay_at_table_enabled', 'table_orders_enabled', 'ai_messages_enabled', 'ai_wine_pairing_enabled', 'digital_menu_enabled', 'passe_enabled'];
 
 async function getFeatureFlag(tenantId: number, key: FeatureFlagKey, fallback: boolean): Promise<boolean> {
     try {
@@ -21660,6 +21974,9 @@ const FEATURE_FLAG_DEFAULTS: Record<FeatureFlagKey, boolean> = {
     // Spento finché il gestore non scrive le regole della casa: senza base di
     // conoscenza il modello non avrebbe da cosa rispondere.
     ai_messages_enabled: false,
+    // Spento finché il ristoratore non marca la carta dei vini: senza
+    // universo, il sommelier AI non ha da cosa pescare.
+    ai_wine_pairing_enabled: false,
     // Acceso di default: è il flusso storico (il passe lancia e serve). Nei
     // ristoranti senza passe si spegne da Impostazioni → Sala e cucina: la
     // pagina Passe sparisce dal menu e i verbi chiama/servito passano alla
@@ -23659,6 +23976,125 @@ app.post('/admin/tenants/:id/impersonate', platformAdminAuth, async (req, res) =
     } catch (err) {
         console.error('POST /admin/tenants/:id/impersonate error:', err);
         res.status(500).json({ error: 'Failed to impersonate tenant' });
+    }
+});
+
+// Sessione di piattaforma scopata (layer sopra l'OWNER): l'admin entra nel
+// tenant CON LA PROPRIA identità e ruolo — sessione piena (access + refresh),
+// claim scopedTenantId nel token. Dentro il tenant bypassa la matrice
+// permessi (vedi requirePermission), quindi mantiene anche ciò che la
+// piattaforma riserverà a sé; l'impersonation qui sopra resta per il
+// soccorso ("vedo quello che vede il titolare"). Richiede un account
+// PLATFORM_ADMIN vero: il token env di bootstrap non ha un'identità da
+// mettere in sessione né nell'audit.
+app.post('/admin/tenants/:id/enter', platformAdminAuth, async (req, res) => {
+    const tenantId = Number(req.params.id);
+    if (!Number.isInteger(tenantId) || tenantId <= 0) {
+        return res.status(400).json({ error: 'invalid_tenant_id' });
+    }
+    if (!req.user) {
+        return res.status(403).json({ error: 'jwt_required', message: 'Serve un account PLATFORM_ADMIN: il token env non ha identità.' });
+    }
+    try {
+        const tenantRes = await queryWithRetry('SELECT id, slug, name, status FROM tenants WHERE id = $1', [tenantId]);
+        if (tenantRes.rows.length === 0) {
+            return res.status(404).json({ error: 'tenant_not_found' });
+        }
+        // Solo tenant attivi: in uno sospeso non si opera (il refresh lo
+        // rifiuterebbe comunque — vedi refreshAccessToken).
+        if (tenantRes.rows[0].status !== 'active') {
+            return res.status(409).json({ error: 'tenant_not_active', message: 'Il tenant è sospeso: riattivalo prima di entrare.' });
+        }
+        const session = await AuthService.createPlatformTenantSession(req.user.userId, tenantId);
+        if (!session) {
+            return res.status(403).json({ error: 'not_platform_admin' });
+        }
+        // user_id NULL come per l'impersonation: l'admin non è un utente del
+        // tenant, ma l'ingresso resta nell'activity log del tenant bersaglio.
+        await LogService.logActivity(
+            tenantId,
+            null,
+            session.email,
+            'Platform admin',
+            ActivityAction.LOGIN,
+            ResourceType.AUTH,
+            req.user.userId,
+            session.email,
+            { platform_session: true, admin_email: session.email }
+        );
+        res.json({
+            accessToken: session.tokens.accessToken,
+            refreshToken: session.tokens.refreshToken,
+            tenant: { id: tenantId, slug: tenantRes.rows[0].slug, name: tenantRes.rows[0].name },
+        });
+    } catch (err) {
+        console.error('POST /admin/tenants/:id/enter error:', err);
+        res.status(500).json({ error: 'Failed to enter tenant' });
+    }
+});
+
+// Permessi riservati alla piattaforma (Fase B del layer sopra l'OWNER): un
+// permesso bloccato qui sparisce dal controllo del tenant — la matrice lo
+// mostra col lucchetto e il PUT della matrice lo congela (vedi authRoutes).
+// La GET risponde anche il catalogo raggruppato, così il pannello disegna
+// l'editor senza una seconda chiamata.
+app.get('/admin/tenants/:id/permission-locks', platformAdminAuth, async (req, res) => {
+    const tenantId = Number(req.params.id);
+    if (!Number.isInteger(tenantId) || tenantId <= 0) {
+        return res.status(400).json({ error: 'invalid_tenant_id' });
+    }
+    try {
+        const exists = await queryWithRetry('SELECT id FROM tenants WHERE id = $1', [tenantId]);
+        if (exists.rows.length === 0) {
+            return res.status(404).json({ error: 'tenant_not_found' });
+        }
+        res.json({
+            locks: await RolePermissionService.getLockedPermissions(tenantId),
+            features: ALL_PERMISSIONS,
+        });
+    } catch (err) {
+        console.error('GET /admin/tenants/:id/permission-locks error:', err);
+        res.status(500).json({ error: 'Failed to fetch permission locks' });
+    }
+});
+
+app.put('/admin/tenants/:id/permission-locks', platformAdminAuth, async (req, res) => {
+    const tenantId = Number(req.params.id);
+    if (!Number.isInteger(tenantId) || tenantId <= 0) {
+        return res.status(400).json({ error: 'invalid_tenant_id' });
+    }
+    const { locks, revoke } = req.body ?? {};
+    if (!Array.isArray(locks) || locks.some(p => typeof p !== 'string')) {
+        return res.status(400).json({ error: 'invalid_locks', message: 'locks deve essere un array di permessi.' });
+    }
+    const unknown = locks.filter(p => !ALL_PERMISSION_KEYS.includes(p as Permission));
+    if (unknown.length > 0) {
+        return res.status(400).json({ error: 'unknown_permission', message: `Permessi sconosciuti: ${unknown.join(', ')}` });
+    }
+    try {
+        const exists = await queryWithRetry('SELECT id FROM tenants WHERE id = $1', [tenantId]);
+        if (exists.rows.length === 0) {
+            return res.status(404).json({ error: 'tenant_not_found' });
+        }
+        const deduped = [...new Set(locks as Permission[])];
+        await RolePermissionService.setLockedPermissions(tenantId, deduped, revoke === true);
+        // Nell'activity log del tenant, come l'ingresso: il titolare vede
+        // che la piattaforma ha cambiato il perimetro, e cosa.
+        await LogService.logActivity(
+            tenantId,
+            null,
+            req.user?.email ?? 'env-token',
+            'Platform admin',
+            ActivityAction.UPDATE,
+            ResourceType.SETTINGS,
+            undefined,
+            'permessi riservati',
+            { permission_locks: deduped, revoked: revoke === true }
+        );
+        res.json({ locks: await RolePermissionService.getLockedPermissions(tenantId) });
+    } catch (err) {
+        console.error('PUT /admin/tenants/:id/permission-locks error:', err);
+        res.status(500).json({ error: 'Failed to update permission locks' });
     }
 });
 
@@ -26792,7 +27228,7 @@ app.post('/orders', authenticate, requirePermission('orders:take'), async (req, 
 // Sta sotto /menu e non sotto /orders per non collidere con /orders/:id.
 app.get('/menu/catalogue', authenticate, requirePermission('orders:view'), async (req, res) => {
     try {
-        const [lists, stations, groups, mods, links, components, catPrefs] = await Promise.all([
+        const [lists, stations, groups, mods, links, components, winePairs, catPrefs] = await Promise.all([
             queryWithRetry(`SELECT id, name, is_default, is_active, sort_order FROM menu_price_lists WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
             queryWithRetry(`SELECT id, name, color, sort_order, is_active FROM stations WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
             // Solo gruppi accesi: un gruppo spento in gestione non deve né
@@ -26803,6 +27239,7 @@ app.get('/menu/catalogue', authenticate, requirePermission('orders:view'), async
             queryWithRetry(`SELECT id, group_id, name, price_delta_cents, price_delta_pct, is_active, sort_order, note, name_en FROM modifiers WHERE tenant_id = $1 AND is_active ORDER BY sort_order, id`, [req.tenantId!]),
             queryWithRetry(`SELECT dish_id, group_id FROM dish_modifier_groups WHERE tenant_id = $1`, [req.tenantId!]),
             queryWithRetry(`SELECT id, dish_id, name, removal_delta_cents, sort_order FROM dish_components WHERE tenant_id = $1 ORDER BY sort_order, id`, [req.tenantId!]),
+            queryWithRetry(`SELECT dish_id, wine_dish_id, sort_order FROM dish_wine_pairings WHERE tenant_id = $1 ORDER BY dish_id, sort_order`, [req.tenantId!]),
             getMenuCategoryPrefs(req.tenantId!),
         ]);
         res.json({
@@ -26816,6 +27253,9 @@ app.get('/menu/catalogue', authenticate, requirePermission('orders:view'), async
             // Ingredienti dei piatti composti: pre-inclusi sul foglio, si
             // battono in negativo (removed_component_ids).
             dish_components: components.rows,
+            // Vini abbinati (curati in scheda piatto): il cassetto e il
+            // foglio del palmare li mostrano col «+» verso il Bar.
+            dish_wine_pairings: winePairs.rows,
             // Ordine e accensione delle categorie decisi in Menu: il palmare
             // li applica alle chip e nasconde le categorie spente.
             category_prefs: catPrefs,
@@ -26859,7 +27299,7 @@ app.get('/orders/open', authenticate, requirePermission('orders:view'), async (r
         const service = { service_date: filterDate ?? now.service_date, shift: filterShift ?? now.shift };
 
         const rows = await queryWithRetry(
-            `SELECT o.id, o.table_id
+            `SELECT o.id, o.table_id, o.discount_type, o.discount_value
                FROM orders o
               WHERE o.tenant_id = $1 AND o.status = 'OPEN'
                 AND o.service_date = $2::date
@@ -26868,10 +27308,57 @@ app.get('/orders/open', authenticate, requirePermission('orders:view'), async (r
               ORDER BY o.id`,
             [req.tenantId!, filterDate ?? now.service_date, filterShift]
         );
+
+        // Quanto sta spendendo il tavolo e a che punto è, per la tessera della
+        // griglia: prima si scopriva aprendo il tavolo uno per uno. Una query
+        // sola per tutta la sala — sessanta tessere non possono essere sessanta
+        // chiamate. Le righe passano dagli stessi helper del resto del modulo
+        // (lineTotalCents, applyDiscount, deriveCourseStatus): una seconda
+        // aritmetica del totale diverge dal conto al primo sconto.
+        const orderIds = rows.rows.map((r: any) => Number(r.id));
+        const itemsByOrder = new Map<number, any[]>();
+        if (orderIds.length > 0) {
+            const items = await queryWithRetry(
+                `SELECT order_id, course_no, status, qty, unit_price_cents, modifiers, line_kind, queued_at, fired_at
+                   FROM order_items
+                  WHERE order_id = ANY($1::int[]) AND tenant_id = $2`,
+                [orderIds, req.tenantId!]
+            );
+            for (const it of items.rows) {
+                const list = itemsByOrder.get(Number(it.order_id));
+                if (list) list.push(it); else itemsByOrder.set(Number(it.order_id), [it]);
+            }
+        }
+
+        // L'uscita che la tessera racconta: la PIÙ AVANTI fra quelle di cucina,
+        // non l'ultima toccata. Bar e Dolci vincono solo se non c'è nient'altro
+        // — un amaro servito non deve coprire la 2ª che è ancora in cucina.
+        const topCourse = (list: any[]): { course_no: number; status: string } | null => {
+            // Coperto e servizio non sono un'uscita: una comanda appena aperta
+            // ha già le sue righe di sistema, e contarle faceva leggere «1ª in
+            // bozza» a un tavolo che non ha ancora ordinato niente.
+            const live = list.filter(i => i.status !== 'VOIDED' && (i.line_kind ?? 'DISH') === 'DISH');
+            if (live.length === 0) return null;
+            const numbers = [...new Set(live.map(i => Number(i.course_no)))];
+            const kitchen = numbers.filter(n => !isOffSequenceCourse(n));
+            const pick = kitchen.length > 0 ? Math.max(...kitchen) : Math.min(...numbers);
+            return { course_no: pick, status: deriveCourseStatus(live.filter(i => Number(i.course_no) === pick)) };
+        };
+
         res.json({
             service,
             table_ids: [...new Set(rows.rows.map((r: any) => Number(r.table_id)))],
-            orders: rows.rows.map((r: any) => ({ id: Number(r.id), table_id: Number(r.table_id) })),
+            orders: rows.rows.map((r: any) => {
+                const list = itemsByOrder.get(Number(r.id)) ?? [];
+                const subtotal = list.filter(i => i.status !== 'VOIDED')
+                                     .reduce((sum, i) => sum + lineTotalCents(i), 0);
+                return {
+                    id: Number(r.id),
+                    table_id: Number(r.table_id),
+                    total_cents: applyDiscount(subtotal, r.discount_type, r.discount_value),
+                    course: topCourse(list),
+                };
+            }),
         });
     } catch (err: any) {
         console.error('GET /orders/open error:', err);
@@ -29763,7 +30250,7 @@ app.post('/orders/items/:id/void', authenticate, requirePermission('orders:void'
     }
 });
 
-// Sconto sulla comanda, con motivazione obbligatoria e traccia di chi l'ha
+// Sconto sulla comanda, con motivazione facoltativa e traccia di chi l'ha
 // concesso. Passa da `orders:void`, non da `orders:take`: regalare soldi non
 // è la stessa cosa che prendere una comanda.
 app.post('/orders/:id/discount', authenticate, requirePermission('orders:void'), async (req, res) => {
@@ -29789,11 +30276,10 @@ app.post('/orders/:id/discount', authenticate, requirePermission('orders:void'),
             if (type === 'PERCENT' && value > 100) {
                 return res.status(400).json({ error: 'Uno sconto percentuale non può superare il 100%' });
             }
+            // Motivazione facoltativa (scelta di Marco, 10/09): in cassa si
+            // sconta anche al volo. Se c'è, resta a registro come prima.
             const raw = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
-            if (raw.length < 3) {
-                return res.status(400).json({ error: 'Serve una motivazione (almeno 3 caratteri)' });
-            }
-            reason = raw.slice(0, 300);
+            reason = raw.length > 0 ? raw.slice(0, 300) : null;
         }
 
         const upd = await queryWithRetry(
@@ -30327,10 +30813,53 @@ app.get('/bills/open', authenticate, requirePermission('payments:view'), async (
             [staleDate, staleShift, req.tenantId!]
         );
 
+        // Piatti già coperti, per conto: dalle quote ospite con item_ids (la
+        // riga intera) e dagli incassi staff con meta.item_units (anche a
+        // unità). Il dividi conto «per piatti» li legge per non riproporre
+        // quello che è già stato pagato.
+        const billIds = rows.rows.map((b: any) => b.id);
+        const takenByBill = new Map<number, Map<number, number>>();
+        const addTaken = (billId: number, oid: number, units: number) => {
+            if (!Number.isFinite(oid) || !Number.isFinite(units) || units <= 0) return;
+            const m = takenByBill.get(billId) ?? new Map<number, number>();
+            m.set(oid, (m.get(oid) ?? 0) + units);
+            takenByBill.set(billId, m);
+        };
+        if (billIds.length > 0) {
+            const staffUnits = await queryWithRetry(
+                `SELECT table_bill_id, meta->'item_units' AS item_units
+                 FROM table_bill_payments
+                 WHERE table_bill_id = ANY($1::int[]) AND tenant_id = $2 AND voided_at IS NULL
+                   AND jsonb_typeof(meta->'item_units') = 'array'`,
+                [billIds, req.tenantId!]
+            );
+            for (const r of staffUnits.rows) {
+                for (const u of (Array.isArray(r.item_units) ? r.item_units : [])) {
+                    addTaken(r.table_bill_id, Number(u?.order_item_id), Number(u?.units));
+                }
+            }
+            const splitUnits = await queryWithRetry(
+                `SELECT table_bill_id, item_ids FROM table_bill_splits
+                 WHERE table_bill_id = ANY($1::int[]) AND tenant_id = $2
+                   AND status IN ('CLAIMED','PAID') AND item_ids IS NOT NULL`,
+                [billIds, req.tenantId!]
+            );
+            const itemsByBill = new Map<number, any[]>(rows.rows.map((b: any) => [b.id, Array.isArray(b.items) ? b.items : []]));
+            for (const r of splitUnits.rows) {
+                const snapshot = itemsByBill.get(r.table_bill_id) ?? [];
+                for (const id of (Array.isArray(r.item_ids) ? r.item_ids : [])) {
+                    const it = snapshot.find((i: any) => Number(i.order_item_id) === Number(id));
+                    addTaken(r.table_bill_id, Number(id), Number(it?.qty ?? 1));
+                }
+            }
+        }
+
         res.json({
             service,
             bills: rows.rows.map((b: any) => ({
                 ...b,
+                item_taken_units: [...(takenByBill.get(b.id) ?? new Map())]
+                    .map(([order_item_id, units]) => ({ order_item_id, units })),
                 service_date: b.service_date instanceof Date
                     ? b.service_date.toISOString().slice(0, 10)
                     : b.service_date,
@@ -31480,7 +32009,7 @@ app.get('/sala/config', authenticate, async (req, res) => {
 // esplicita sul singolo piatto).
 app.put('/sala/category-stations', authenticate, requirePermission('settings:full'), async (req, res) => {
     try {
-        const category = typeof req.body?.category === 'string' ? req.body.category.trim() : '';
+        const category = typeof req.body?.category === 'string' ? toMenuTitleCase(req.body.category.trim()) : '';
         if (!category || category.length > 100) return res.status(400).json({ error: 'Categoria non valida' });
         const stationId = req.body?.station_id != null ? Number(req.body.station_id) : null;
         if (stationId === null) {

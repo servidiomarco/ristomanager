@@ -8,13 +8,14 @@ import {
     disablePushNotifications,
     sendTestPush,
 } from '../services/pushClient';
+import { useToast } from '../contexts/ToastContext';
 
 export const PushNotificationsCard: React.FC = () => {
     const [supported, setSupported] = useState(false);
     const [enabled, setEnabled] = useState(false);
     const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>('default');
     const [busy, setBusy] = useState(false);
-    const [feedback, setFeedback] = useState<{ kind: 'success' | 'error' | 'info'; message: string } | null>(null);
+    const { addToast } = useToast();
 
     useEffect(() => {
         const ok = isPushSupported();
@@ -28,20 +29,19 @@ export const PushNotificationsCard: React.FC = () => {
     const handleToggle = async () => {
         if (!supported) return;
         setBusy(true);
-        setFeedback(null);
         try {
             if (enabled) {
                 await disablePushNotifications();
                 setEnabled(false);
-                setFeedback({ kind: 'info', message: 'Notifiche push disattivate.' });
+                addToast('Notifiche push disattivate.', 'info');
             } else {
                 await enablePushNotifications();
                 setEnabled(true);
                 setPermission(getNotificationPermission());
-                setFeedback({ kind: 'success', message: 'Notifiche push attivate.' });
+                addToast('Notifiche push attivate.', 'success');
             }
         } catch (err: any) {
-            setFeedback({ kind: 'error', message: err?.message || 'Operazione fallita' });
+            addToast(err?.message || 'Operazione fallita', 'error');
             setPermission(getNotificationPermission());
         } finally {
             setBusy(false);
@@ -50,12 +50,11 @@ export const PushNotificationsCard: React.FC = () => {
 
     const handleTest = async () => {
         setBusy(true);
-        setFeedback(null);
         try {
             await sendTestPush();
-            setFeedback({ kind: 'success', message: 'Notifica di test inviata.' });
+            addToast('Notifica di test inviata.', 'success');
         } catch (err: any) {
-            setFeedback({ kind: 'error', message: err?.message || 'Invio fallito' });
+            addToast(err?.message || 'Invio fallito', 'error');
         } finally {
             setBusy(false);
         }
@@ -127,16 +126,6 @@ export const PushNotificationsCard: React.FC = () => {
                             Invia notifica di test
                         </button>
                     </div>
-                )}
-
-                {feedback && (
-                    <p className={`mt-3 text-xs rounded-md px-2.5 py-1.5 border ${
-                        feedback.kind === 'success' ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)] border-[var(--ds-seated-solid)]'
-                        : feedback.kind === 'error' ? 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)] border-[var(--ds-critical-solid)]'
-                        : 'bg-[var(--ds-surface-row)] text-[var(--ds-text-muted)] border-[var(--ds-border)]'
-                    }`}>
-                        {feedback.message}
-                    </p>
                 )}
             </div>
         </section>

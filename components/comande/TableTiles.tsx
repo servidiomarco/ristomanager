@@ -1,7 +1,10 @@
 import React from 'react';
 import { getRomeTimePart } from '../../utils/reservationTime';
 import { SectionHeader } from '../ds';
-import { TABLE_CAPTION, TABLE_GROUPS, TABLE_TILE, type TableRow } from './tablesView';
+import {
+  TABLE_CAPTION, TABLE_GROUPS, TABLE_TILE, TABLE_TILE_WIDE, TABLE_DOT,
+  tableNameLine, tableStatusLine, type TableRow,
+} from './tablesView';
 
 /* ── I tavoli raggruppati per stato ───────────────────────────────────────
    Estratto da TableGrid perché Cassa mostra la stessa griglia dentro un'altra
@@ -23,6 +26,16 @@ interface TableTilesProps {
   busy?: boolean;
   /** Cosa va sotto il nome del tavolo. Il default è quello di Comande. */
   renderMeta?: (row: TableRow) => React.ReactNode;
+  /** false: niente sezioni per stato — una griglia sola nell'ordine dato.
+   *  È la sala della variante a pagine: lì il gruppo è la sala, e lo stato
+   *  lo dicono già la tinta e la didascalia della tessera. */
+  grouped?: boolean;
+  /** 'square' è la tessera storica (numero al centro, meta sotto) e resta il
+   *  default: Cassa monta questo stesso componente e non deve cambiare.
+   *  'wide' è la tessera di Comande — numero e pallino in testa, chi è al
+   *  tavolo, quanto sta spendendo e a che punto è. `renderMeta` non vale per
+   *  la wide: lì il contenuto È la riga di stato, non un'aggiunta. */
+  variant?: 'square' | 'wide';
 }
 
 /** Il meta di Comande: quanti coperti, in che stato, e per chi è tenuto. */
@@ -49,35 +62,85 @@ export const defaultTableMeta = (row: TableRow): React.ReactNode => {
 };
 
 export const TableTiles: React.FC<TableTilesProps> = ({
-  rows, onPick, busy, renderMeta = defaultTableMeta,
-}) => (
-  <>
-    {TABLE_GROUPS.map(group => {
-      const group_rows = rows.filter(r => r.state === group.state);
-      if (group_rows.length === 0) return null;
-      return (
-        <section key={group.state} className="mt-4 first:mt-0">
-          <SectionHeader tone={group.tone} meta={String(group_rows.length)}>
-            {group.label}
-          </SectionHeader>
-          <div className="mt-2 grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-7 xl:grid-cols-9">
-            {group_rows.map(row => (
-              <button
-                key={row.table.id}
-                type="button"
-                onClick={() => onPick(row.pickId ?? row.table.id)}
-                disabled={busy}
-                className={`flex aspect-square flex-col items-center justify-center gap-0.5 rounded-[20px] p-1 shadow-[var(--ds-shadow-card)] transition-shadow disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${TABLE_TILE[row.state]}`}
-              >
-                <span className={`${row.groupLabel ? 'text-[18px]' : 'text-[24px]'} max-w-full truncate font-semibold tracking-[-0.02em] text-[var(--ds-text-primary)]`}>
-                  {row.groupLabel ?? row.table.name}
-                </span>
-                {renderMeta(row)}
-              </button>
-            ))}
-          </div>
-        </section>
-      );
-    })}
-  </>
-);
+  rows, onPick, busy, renderMeta = defaultTableMeta, grouped = true, variant = 'square',
+}) => {
+  const squareTile = (row: TableRow) => (
+    <button
+      key={row.table.id}
+      type="button"
+      onClick={() => onPick(row.pickId ?? row.table.id)}
+      disabled={busy}
+      className={`flex aspect-square flex-col items-center justify-center gap-0.5 rounded-[20px] p-1 shadow-[var(--ds-shadow-card)] transition-shadow disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${TABLE_TILE[row.state]}`}
+    >
+      <span className={`${row.groupLabel ? 'text-[18px]' : 'text-[24px]'} max-w-full truncate font-semibold tracking-[-0.02em] text-[var(--ds-text-primary)]`}>
+        {row.groupLabel ?? row.table.name}
+      </span>
+      {renderMeta(row)}
+    </button>
+  );
+
+  /* La tessera di Comande. Quattro righe in ordine di quanto servono a chi
+     guarda: quale tavolo, quanti sono, chi è, a che punto sta.
+
+     La riga di stato VA A CAPO invece di troncare. «140,00 € da incass…» e
+     «3ª in cuci…» erano tagliate già nel mockup, e sono esattamente le due
+     tessere che qualcuno deve leggere di fretta: un conto grosso da riscuotere
+     e un'uscita ancora in cucina. */
+  const wideTile = (row: TableRow) => (
+    <button
+      key={row.table.id}
+      type="button"
+      onClick={() => onPick(row.pickId ?? row.table.id)}
+      disabled={busy}
+      className={`flex min-h-[132px] flex-col items-start gap-0.5 rounded-[6px] px-3 py-2.5 text-left shadow-[var(--ds-shadow-card)] transition-shadow disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${TABLE_TILE_WIDE[row.state]}`}
+    >
+      <span className="flex w-full items-start justify-between gap-2">
+        <span className={`${row.groupLabel ? 'text-[19px]' : 'text-[26px]'} min-w-0 truncate font-semibold leading-tight tracking-[-0.02em] ${TABLE_CAPTION[row.state]}`}>
+          {row.groupLabel ?? row.table.name}
+        </span>
+        <span className={`mt-1.5 h-2 w-2 flex-shrink-0 rounded-full ${TABLE_DOT[row.state]}`} aria-hidden />
+      </span>
+      <span className="text-[12px] tabular-nums text-[var(--ds-text-muted)]">
+        {row.groupSeats ?? row.table.seats} cop.
+      </span>
+      <span className="mt-auto w-full truncate pt-1 text-[13px] font-medium text-[var(--ds-text-primary)]">
+        {tableNameLine(row)}
+      </span>
+      <span className={`w-full text-[11px] font-semibold leading-tight ${TABLE_CAPTION[row.state]}`}>
+        {tableStatusLine(row)}
+      </span>
+    </button>
+  );
+
+  const tile = variant === 'wide' ? wideTile : squareTile;
+  const gridClass = variant === 'wide'
+    ? 'grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7'
+    : 'grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-7 xl:grid-cols-9';
+
+  if (!grouped) {
+    return (
+      <div className={gridClass}>
+        {rows.map(tile)}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {TABLE_GROUPS.map(group => {
+        const group_rows = rows.filter(r => r.state === group.state);
+        if (group_rows.length === 0) return null;
+        return (
+          <section key={group.state} className="mt-4 first:mt-0">
+            <SectionHeader tone={group.tone} meta={String(group_rows.length)}>
+              {group.label}
+            </SectionHeader>
+            <div className={`mt-2 ${gridClass}`}>
+              {group_rows.map(tile)}
+            </div>
+          </section>
+        );
+      })}
+    </>
+  );
+};

@@ -15,13 +15,16 @@ import { getRomeTimePart } from '../../utils/reservationTime';
    fallito» — il pagamento è andato, il tavolo è libero, e dire il contrario
    manderebbe il cassiere a richiedere denaro già incassato. */
 
-export type Esito = 'saldato' | 'da-verificare' | 'proforma';
+export type Esito = 'saldato' | 'da-verificare' | 'proforma' | 'parziale';
 
 export const esitoOf = (
   bill: Pick<TableBill, 'status'>,
   fiscalStatus: string | null | undefined,
   docType: string | null | undefined,
 ): Esito => {
+  // Quota incassata, residuo ancora sul conto: dire «chiuso» col totale del
+  // tavolo manderebbe il cassiere a credere che sia tutto pagato.
+  if (bill.status === 'SETTLED_PARTIAL') return 'parziale';
   if (fiscalStatus === 'FAILED') return 'da-verificare';
   if (docType === 'PROFORMA' || !fiscalStatus) return 'proforma';
   return 'saldato';
@@ -30,6 +33,9 @@ export const esitoOf = (
 interface EsitoChiusuraProps {
   esito: Esito;
   totalCents: number;
+  /** Esito «parziale»: quanto è entrato con QUESTO incasso e quanto resta. */
+  paidNowCents?: number | null;
+  residualCents?: number | null;
   tableName: string | null;
   closedAt: string | null;
   docNumber: string | null;
@@ -58,30 +64,40 @@ const HEAD: Record<Esito, { label: string; tone: 'positive' | 'pending' | 'neutr
   saldato: { label: 'Saldato', tone: 'positive' },
   'da-verificare': { label: 'Pagato · da verificare fiscale', tone: 'pending' },
   proforma: { label: 'Chiuso con proforma', tone: 'neutral' },
+  parziale: { label: 'Incassata una parte', tone: 'pending' },
 };
 
 export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
-  esito, totalCents, tableName, closedAt, docNumber, receiptToken, onPrintReceipt, onPrintProforma, busy,
+  esito, totalCents, paidNowCents = null, residualCents = null, tableName, closedAt, docNumber, receiptToken, onPrintReceipt, onPrintProforma, busy,
   onRetryDocument, onMarkProforma, onIssueReceipt, onIssueInvoice, onReopen, onBackToQueue,
 }) => {
   const head = HEAD[esito];
+  const residuo = Math.max(0, residualCents ?? 0);
+  // In grande c'è quello che è entrato ADESSO, non il totale del tavolo.
+  const bigCents = esito === 'parziale'
+    ? (paidNowCents ?? Math.max(0, totalCents - residuo))
+    : totalCents;
 
   const body =
     esito === 'saldato'
       ? `Tavolo ${tableName ?? '—'} liberato${closedAt ? ` alle ${getRomeTimePart(closedAt)}` : ''}.${docNumber ? ` Scontrino emesso, numero ${docNumber}.` : ' Scontrino emesso.'}`
       : esito === 'da-verificare'
         ? 'I soldi sono incassati e il tavolo è libero. Lo scontrino non è partito: si ritenta da qui o da Pagamenti.'
-        : 'Nessun documento fiscale. Scontrino e fattura restano emettibili dal conto, anche nei giorni successivi.';
+        : esito === 'parziale'
+          ? `Restano ${euro(residuo)} su ${euro(totalCents)}. Il conto resta fra quelli da incassare; scontrino o fattura si emettono a saldo.`
+          : 'Nessun documento fiscale. Scontrino e fattura restano emettibili dal conto, anche nei giorni successivi.';
 
   const secondary =
     esito === 'saldato'
       ? [{ label: 'Apri il conto', onClick: onReopen }]
       : esito === 'da-verificare'
         ? [{ label: 'Chiudi con proforma', onClick: onMarkProforma }]
-        : [
-            { label: 'Emetti scontrino', onClick: onIssueReceipt },
-            { label: 'Emetti fattura', onClick: onIssueInvoice },
-          ];
+        : esito === 'parziale'
+          ? [{ label: 'Riapri e continua', onClick: onReopen }]
+          : [
+              { label: 'Emetti scontrino', onClick: onIssueReceipt },
+              { label: 'Emetti fattura', onClick: onIssueInvoice },
+            ];
 
   return (
     <div className="flex h-full min-h-0 items-center justify-center px-4 py-8">
@@ -89,7 +105,7 @@ export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
         <StatusPill tone={head.tone}>{head.label}</StatusPill>
 
         <div className="mt-3 text-[40px] font-semibold leading-none tabular-nums tracking-[-0.02em] text-[var(--ds-text-primary)]">
-          {euro(totalCents)}
+          {euro(bigCents)}
         </div>
 
         <p className="mt-3 text-[14px] leading-relaxed text-[var(--ds-text-secondary)]">{body}</p>
@@ -112,7 +128,7 @@ export const EsitoChiusura: React.FC<EsitoChiusuraProps> = ({
           </div>
         )}
 
-        {esito === 'proforma' && onPrintProforma && (
+        {(esito === 'proforma' || esito === 'parziale') && onPrintProforma && (
           <StampaCopiaButton
             onPrint={onPrintProforma}
             label="Stampa proforma"

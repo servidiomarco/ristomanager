@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, CheckCircle, AlertTriangle, Info, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3 } from 'lucide-react';
-import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, Toast, UserRole, ReservationSource, ReservationStatus } from './types';
+import { LayoutDashboard, Grid, Settings, ChevronRight, ChevronDown, ChevronUp, ChefHat, PanelLeft, Calendar, CalendarDays, Bell, X, AlertTriangle, LogOut, Users, UserCheck, FileText, UsersRound, Sun, Moon, Sunset, MoreHorizontal, Search, UtensilsCrossed, Plus, BookUser, Boxes, Clock, ShoppingCart, ListChecks, ShieldCheck, Phone, ConciergeBell, Zap, PartyPopper, DoorClosed, StickyNote, CreditCard, MessageCircle, Mail, Kanban, ClipboardList, CookingPot, BellRing, MessagesSquare, Gauge, Building2, Milestone, Ban, Sparkles, Landmark, Percent, Calculator, BarChart3 } from 'lucide-react';
+import { ViewState, Room, Table, Dish, RestaurantMenu, Reservation, TableStatus, TableShape, BanquetMenu, PaymentStatus, Notification, Shift, UserRole, ReservationSource, ReservationStatus } from './types';
 import { Dashboard } from './components/Dashboard';
 import { FloorPlan } from './components/FloorPlan';
 import { MenuManager } from './components/MenuManager';
@@ -9,7 +9,9 @@ import { LoginPage } from './components/LoginPage';
 import { ProfiloSheet } from './components/ProfiloSheet';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { BookingChannelsManager } from './components/BookingChannelsManager';
-import { PlatformPanel, ImpersonationBanner } from './components/PlatformPanel';
+import { PlatformPanel, ImpersonationBanner, decodeJwtPayload } from './components/PlatformPanel';
+import { authApiService } from './services/authApiService';
+import { useToast } from './contexts/ToastContext';
 import { Loader } from './components/Loader';
 import { UserManagement } from './components/UserManagement';
 import { RolePermissions } from './components/RolePermissions';
@@ -26,7 +28,7 @@ import { HaccpPage } from './components/HaccpPage';
 import ConversazioniPage from './components/ConversazioniPage';
 import InboxPage from './components/InboxPage';
 import StaffChatPage from './components/StaffChatPage';
-import { SegmentedControl, StatusPill, useMediaQuery, dsSelect } from './components/ds';
+import { LivePill, SegmentedControl, StatusPill, useMediaQuery, dsSelect } from './components/ds';
 import { NotificationsPanel } from './components/NotificationsPanel';
 import EmailPage from './components/EmailPage';
 import NotifichePage from './components/NotifichePage';
@@ -85,7 +87,7 @@ import { notificationsApiService } from './services/notificationsApiService';
 import { useAuth } from './contexts/AuthContext';
 import { sortRooms } from './utils/roomOrder';
 import { toTitleCase } from './utils/text';
-import { getRomeDatePart, getRomeTimePart } from './utils/reservationTime';
+import { getRomeDatePart } from './utils/reservationTime';
 
 import {
   getReservations,
@@ -116,6 +118,13 @@ import {
   tenantLogoSrc,
 } from './services/apiService';
 import { swrConfig } from './services/configCache';
+
+// Sessione di piattaforma scopata su un tenant («Entra» dal pannello): il
+// claim scopedTenantId nel token la distingue da quella di pannello. Si
+// legge dal JWT e non dal profilo perché /auth/me non lo espone — e il
+// token è comunque l'unica verità sulla sessione corrente.
+const isPlatformScopedToken = (): boolean =>
+  !!decodeJwtPayload(authApiService.getAccessToken())?.scopedTenantId;
 
 // ---------------------------------------------------------------------------
 // Navigation taxonomy — single source of truth for the desktop sidebar AND the
@@ -372,6 +381,12 @@ const App: React.FC = () => {
   // NAV_ITEMS.sidebarCollapse. La linguetta è l'override manuale nel mezzo, e
   // quello che sceglie viene persistito: al riavvio si riparte da lì, finché
   // la prima navigazione non applica di nuovo il default della vista.
+  // Comande sullo schermo largo si prende la pagina: la sidebar si ritira in
+  // un bollo col marchio, e il chevron la rimette al suo posto accanto ai
+  // tavoli (che si stringono). È una preferenza di sessione, non per
+  // dispositivo: chi la apre per cambiare pagina se la ritrova aperta finché
+  // non la richiude.
+  const [comandeNavHidden, setComandeNavHidden] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
@@ -789,6 +804,35 @@ const App: React.FC = () => {
     return `${y}-${m}-${day}`;
   };
   const globalDateStr = formatLocalDateGlobal(globalDate);
+  // Il bollo vive solo dove la sidebar si ritira: Comande sullo schermo largo.
+  // Sotto lg la sidebar non c'è comunque (c'è la barra in basso), quindi la
+  // bandiera non deve spegnere niente lì.
+  const comandeNavStubbed = view === ViewState.COMANDE && comandeNavHidden;
+  // Il marchio col chevron che richiama il menu. Sta nella barra della pagina
+  // di Comande, al posto esatto dove stava la sidebar: il bersaglio non si
+  // sposta, si assottiglia.
+  // Marchio e chevron in FILA, non impilati: la stessa struttura della barra
+  // accanto (px-3 py-2.5 attorno a un corpo da 44px) le fa venire alte uguali
+  // da sole, senza numeri magici da tenere allineati a mano. Impilato il bollo
+  // era più alto della barra e le sporgeva sotto.
+  const comandeBrand = (
+    <div className="animate-view-in flex flex-shrink-0 items-center gap-1 rounded-[28px] bg-[var(--ds-surface)] px-3 py-2.5 shadow-[var(--ds-shadow-card)]">
+      <div className="inline-flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-[14px] bg-[var(--ds-action-bg)]">
+        <ChefHat className="h-5 w-5 text-[var(--ds-action-fg)]" />
+      </div>
+      <button
+        type="button"
+        onClick={() => setComandeNavHidden(false)}
+        aria-expanded={false}
+        aria-controls="sidebar-nav"
+        title="Apri menu"
+        aria-label="Apri menu"
+        className="pressable inline-flex h-11 w-8 flex-shrink-0 items-center justify-center rounded-full text-[var(--ds-text-muted)] hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)]"
+      >
+        <ChevronDown size={16} />
+      </button>
+    </div>
+  );
 
   // Auto-switch from 'ALL' when navigating away from Dashboard
   useEffect(() => {
@@ -869,7 +913,9 @@ const App: React.FC = () => {
     // Il platform admin parte dal pannello: la sua giornata sta sopra i
     // tenant, non nel servizio di uno di essi. Un preferred_landing_view
     // esplicito o un deep-link ?view= vincono comunque (gestiti sopra).
-    if (!appliedPreferredLandingRef.current && user.role === UserRole.PLATFORM_ADMIN && accessibleViews.includes(ViewState.PLATFORM)) {
+    // La sessione scopata («Entra» su un tenant) invece atterra come un
+    // utente del ristorante: sta lì per lavorarci.
+    if (!appliedPreferredLandingRef.current && user.role === UserRole.PLATFORM_ADMIN && !isPlatformScopedToken() && accessibleViews.includes(ViewState.PLATFORM)) {
       setView(ViewState.PLATFORM);
       appliedPreferredLandingRef.current = true;
       return;
@@ -1109,8 +1155,9 @@ const App: React.FC = () => {
     return null;
   };
 
-  // Toast/Snackbar State
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  // Dedup, timer e rendering vivono nel ToastProvider (contexts/ToastContext):
+  // qui resta solo il nome, che continua a scendere per props ai figli.
+  const { addToast } = useToast();
 
   // User management modal state
   const [showRolePermissions, setShowRolePermissions] = useState(false);
@@ -1233,12 +1280,13 @@ const App: React.FC = () => {
   };
 
   const fetchData = async () => {
-    // L'admin piattaforma non opera il CRM del tenant: per scelta (D2) non ha
-    // righe nella matrice permessi, quindi questi cinque endpoint gli
-    // risponderebbero 403 — il toast "insufficient permissions" a ogni login.
-    // Atterra sulla vista Piattaforma; i dati di un ristorante li vede solo
-    // impersonando, con un token da OWNER di quel tenant.
-    if (user?.role === UserRole.PLATFORM_ADMIN) {
+    // L'admin piattaforma SENZA scope non opera il CRM del tenant: per
+    // scelta (D2) non ha righe nella matrice permessi, quindi questi cinque
+    // endpoint gli risponderebbero 403 — il toast "insufficient permissions"
+    // a ogni login. Atterra sulla vista Piattaforma. Con lo scope invece
+    // (claim scopedTenantId: è entrato in un tenant con «Entra») la sessione
+    // è operativa e i dati vanno caricati come per chiunque altro.
+    if (user?.role === UserRole.PLATFORM_ADMIN && !isPlatformScopedToken()) {
       setIsInitialDataLoading(false);
       return;
     }
@@ -1293,54 +1341,6 @@ const App: React.FC = () => {
     // interattiva. `to` = windowFrom incluso: un giorno di sovrapposizione
     // col primo tempo, il dedup per id lo assorbe.
     if (!archiveLoadedRef.current) void loadReservationsArchive(windowFrom);
-  };
-
-  // Dedup guard: same message+type+title emitted within this window are
-  // collapsed to a single toast. Fires all the time we do "handler +
-  // socket:event" (both trigger the same feedback) or when React StrictMode
-  // double-invokes an effect in dev. 2500ms covers the typical socket
-  // roundtrip while staying short enough to not swallow legitimate repeat
-  // actions ("Salva" clicked twice on purpose).
-  const TOAST_DEDUP_WINDOW_MS = 2500;
-  const lastToastAtRef = useRef<Map<string, number>>(new Map());
-
-  const addToast = (
-    message: string,
-    type: 'success' | 'error' | 'info' = 'info',
-    options?: { title?: string; details?: string[]; duration?: number; action?: { label: string; onClick: () => void } }
-  ) => {
-      const dedupKey = `${type}|${options?.title ?? ''}|${message}`;
-      const now = Date.now();
-      const lastAt = lastToastAtRef.current.get(dedupKey);
-      if (lastAt !== undefined && now - lastAt < TOAST_DEDUP_WINDOW_MS) {
-          // Suppressed duplicate. Refresh the timestamp so back-to-back
-          // triggers keep the suppression alive instead of leaking through
-          // right after the window expires.
-          lastToastAtRef.current.set(dedupKey, now);
-          return;
-      }
-      lastToastAtRef.current.set(dedupKey, now);
-      // Periodic cleanup so the map doesn't grow unbounded during long
-      // sessions. Anything older than the window is safe to drop.
-      for (const [k, ts] of lastToastAtRef.current) {
-          if (now - ts > TOAST_DEDUP_WINDOW_MS * 4) lastToastAtRef.current.delete(k);
-      }
-
-      const id = Math.random().toString(36).substr(2, 9);
-      const duration = options?.duration ?? (options?.details?.length ? 6000 : 3000);
-      setToasts(prev => [...prev, {
-          id,
-          message,
-          type,
-          title: options?.title,
-          details: options?.details,
-          duration,
-          action: options?.action,
-      }]);
-
-      setTimeout(() => {
-          setToasts(prev => prev.filter(t => t.id !== id));
-      }, duration);
   };
 
   useTokenExpiryWarning({ isAuthenticated, showToast: addToast });
@@ -1400,7 +1400,10 @@ const App: React.FC = () => {
     socket.on('reservation:deleted', (id: number) => {
       const deleted = reservationsRef.current.find(r => r.id === id);
       setReservations(prev => prev.filter(r => r.id !== id));
-      addToast('Prenotazione eliminata', 'info');
+      // Unica voce per l'eliminazione: le prenotazioni broadcastano anche al
+      // mittente (riga autoritativa lato server), quindi questo toast arriva
+      // pure a chi ha eliminato — niente doppione nel handler locale.
+      addToast(deleted ? `Prenotazione eliminata: ${toTitleCase(deleted.customer_name)}` : 'Prenotazione eliminata', 'info');
       if (deleted) addReservationNotification(deleted, 'deleted');
     });
 
@@ -1541,7 +1544,9 @@ const App: React.FC = () => {
       // the connection was down. Otherwise stay quiet (first connect,
       // brief reconnect that never reached the toast timer).
       if (disconnectToastShownRef.current) {
-        addToast('Connessione ristabilita', 'success');
+        // Stessa replaceKey dell'avviso di caduta: il ripristino lo
+        // sostituisce invece di lasciarlo appeso (gli errori persistono).
+        addToast('Connessione ristabilita', 'success', { replaceKey: 'connessione' });
         disconnectToastShownRef.current = false;
       }
 
@@ -1582,7 +1587,7 @@ const App: React.FC = () => {
         clearTimeout(disconnectToastTimerRef.current);
       }
       disconnectToastTimerRef.current = window.setTimeout(() => {
-        addToast('Connessione persa - le modifiche verranno sincronizzate al ripristino', 'error');
+        addToast('Connessione persa - le modifiche verranno sincronizzate al ripristino', 'error', { replaceKey: 'connessione' });
         disconnectToastShownRef.current = true;
         disconnectToastTimerRef.current = null;
       }, 2500);
@@ -1819,40 +1824,13 @@ const App: React.FC = () => {
   };
 
   // --- Reservation Logic ---
-  const buildReservationDetails = (res: Reservation): string[] => {
-    // Post write-path fix + migration the DB returns reservation_time as a
-    // proper UTC ISO ("2026-07-21T18:00:00.000Z" = 20:00 in Europe/Rome).
-    // Splitting on 'T' would grab the UTC hour and show 18:00 for a 20:00
-    // booking — the classic 2h CEST shift. Convert via the helpers instead.
-    const romeDate = getRomeDatePart(res.reservation_time);
-    const timeLabel = getRomeTimePart(res.reservation_time) || '00:00';
-    const [yStr, mStr, dStr] = (romeDate || '').split('-');
-    const dateLabelSource = new Date(
-      Number(yStr),
-      Number(mStr) - 1,
-      Number(dStr),
-    );
-    const dateLabel = dateLabelSource.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
-    const shiftLabel = res.shift === Shift.LUNCH ? 'Pranzo' : 'Cena';
-    const tableName = res.table_id ? tables.find(t => t.id === res.table_id)?.name : null;
-
-    const details = [
-      `${toTitleCase(res.customer_name)} · ${res.guests} ${res.guests === 1 ? 'ospite' : 'ospiti'}`,
-      `${dateLabel} · ${timeLabel} (${shiftLabel})`,
-      tableName ? `Tavolo ${tableName}` : 'Tavolo non assegnato',
-    ];
-    if (res.phone) details.push(res.phone);
-    return details;
-  };
 
   const handleUpdateReservation = async (updatedRes: Reservation) => {
     try {
       const returnedRes = await updateReservation(updatedRes.id as number, updatedRes);
       setReservations(prev => prev.map(r => r.id === returnedRes.id ? returnedRes : r));
-      addToast('Prenotazione aggiornata', 'success', {
-        title: 'Modifica Prenotazione',
-        details: buildReservationDetails(returnedRes),
-      });
+      // Il toast arriva dall'eco socket reservation:updated (anche al
+      // mittente): niente doppione qui.
     } catch (error: any) {
       console.error("Error updating reservation:", error);
       addToast(error?.message || 'Errore aggiornamento prenotazione', 'error');
@@ -1915,10 +1893,8 @@ const App: React.FC = () => {
       // handler (see Socket.IO effect) — that path covers all channels
       // uniformly and dedupes against the local optimistic path.
 
-      addToast('Prenotazione inserita con successo', 'success', {
-        title: 'Nuova Prenotazione',
-        details: buildReservationDetails(returnedRes),
-      });
+      // Nessun toast qui: l'eco socket reservation:created arriva anche al
+      // mittente («Nuova prenotazione: NOME») ed è l'unica voce.
       return returnedRes;
     } catch (error: any) {
       console.error("Error adding reservation:", error);
@@ -1932,11 +1908,8 @@ const App: React.FC = () => {
     try {
       await deleteReservation(id);
       setReservations(prev => prev.filter(r => r.id !== id));
-      // The bell notification is added by the reservation:deleted socket
-      // handler (see Socket.IO effect).
-      addToast('Prenotazione cancellata', 'info', targetRes
-        ? { title: 'Prenotazione Cancellata', details: buildReservationDetails(targetRes) }
-        : undefined);
+      // Toast e campanella arrivano dal handler socket reservation:deleted
+      // (l'eco raggiunge anche il mittente): niente doppione qui.
     } catch (error) {
       console.error("Error deleting reservation:", error);
       addToast('Error deleting reservation', 'error');
@@ -2114,8 +2087,20 @@ const App: React.FC = () => {
           stacco fra le due card contro i 16px dei margini esterni: il
           contenuto risultava spinto a destra. Con mr-0 il corridoio torna a
           16px ed è uguale a tutti gli altri lati. */}
+      {/* La larghezza si anima, non si spegne: `display:none` non ha stati
+          intermedi, e in Comande la sidebar spariva e ricompariva di scatto.
+          Ritirata resta nell'albero a larghezza zero — margine e contenuto
+          compresi, o i 16px del margine terrebbero il posto di una colonna
+          che non c'è — e torna scorrendo insieme ai tavoli che si stringono.
+          `invisible` toglie il focus ai link mentre è via: una tabulazione
+          non deve finire dentro un menu che nessuno vede. */}
       <aside
-        className={`hidden lg:flex ${sidebarCollapsed ? 'w-[76px]' : 'w-[250px]'} m-4 mr-0 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] flex-col transition-[width] duration-200 z-20 relative`}
+        className={`hidden lg:flex ${
+          comandeNavStubbed
+            ? 'w-0 m-0 opacity-0 invisible pointer-events-none'
+            : `${sidebarCollapsed ? 'w-[76px]' : 'w-[250px]'} m-4 mr-0 opacity-100`
+        } overflow-hidden rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] flex-col transition-[width,margin,opacity] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none z-20 relative`}
+        aria-hidden={comandeNavStubbed}
         aria-label="Navigazione principale"
       >
         {/* Intestazione — logo e comando apri/chiudi sulla stessa riga, come
@@ -2193,14 +2178,17 @@ const App: React.FC = () => {
           </div>
           <button
             type="button"
-            onClick={toggleSidebar}
-            aria-expanded={!sidebarCollapsed}
+            onClick={view === ViewState.COMANDE ? () => setComandeNavHidden(true) : toggleSidebar}
+            aria-expanded={view === ViewState.COMANDE ? true : !sidebarCollapsed}
             aria-controls="sidebar-nav"
-            title={sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
-            aria-label={sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
+            title={view === ViewState.COMANDE ? 'Nascondi menu' : sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
+            aria-label={view === ViewState.COMANDE ? 'Nascondi menu' : sidebarCollapsed ? 'Apri menu' : 'Chiudi menu'}
             className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-[12px] text-[var(--ds-text-muted)] transition-colors hover:bg-[var(--ds-surface-row)] hover:text-[var(--ds-text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-border-focus)] ${sidebarCollapsed ? '' : 'ml-auto'}`}
           >
-            <PanelLeft size={18} />
+            {/* In Comande il verso conta: il chevron su rimette via il menu da
+                dove il chevron giù l'ha tirato fuori. Altrove resta il
+                pannello, che non è una freccia ma un interruttore. */}
+            {view === ViewState.COMANDE ? <ChevronUp size={18} /> : <PanelLeft size={18} />}
           </button>
         </div>
 
@@ -2395,7 +2383,18 @@ const App: React.FC = () => {
             In Cucina sparisce del tutto: data-picker, turno, ricerca globale
             e «+» lì non servono, e lo spazio è delle comande — la topbar del
             monitor porta da sola data, orologio e i suoi controlli. */}
-        <header className={`flex-shrink-0 h-16 md:h-[72px] m-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] z-10 md:z-30 items-center justify-between px-3 md:px-4 ${view === ViewState.CUCINA ? 'hidden' : immersive ? 'hidden lg:flex' : 'flex'}`}>
+        <header className={`flex-shrink-0 h-16 md:h-[72px] m-4 rounded-[28px] bg-[var(--ds-surface)] shadow-[var(--ds-shadow-card)] z-10 md:z-30 items-center justify-between px-3 md:px-4 ${
+          view === ViewState.CUCINA ? 'hidden'
+          // Comande sullo schermo largo si prende la pagina: la sua testata è
+          // dentro la pagina (ricerca, imbuto, Live) e questa sopra sarebbe
+          // una seconda barra che dice le stesse cose. Giorno e turno vivono
+          // nell'imbuto della griglia. La sidebar resta — ridotta a rail come
+          // già fa Comande — o non si andrebbe più da nessuna parte.
+          // Sul telefono non cambia niente: lì la testata c'è finché non si
+          // entra in un tavolo, come sempre.
+          : view === ViewState.COMANDE ? (immersive ? 'hidden' : 'flex lg:hidden')
+          : immersive ? 'hidden lg:flex' : 'flex'
+        }`}>
            {/* `pl-2` sopra al `px-3` della testata: il marchio ha aria propria
                dentro l'immagine solo sopra e sotto, ai lati arriva al bordo, e
                attaccato alla curva della card sembrava scivolato fuori. */}
@@ -2484,47 +2483,12 @@ const App: React.FC = () => {
 
               {/* Connection state + current time, merged into one pill.
                   Connected uses the `seated` family; offline uses `critical`.
-                  The dot pulses, but under prefers-reduced-motion it becomes a
-                  steady colour — the signal is never removed, only the motion. */}
-              <div
-                className={`hidden md:inline-flex items-center gap-2 pl-2.5 pr-3 h-10 rounded-full text-[15px] font-medium ${
-                  isConnected
-                    ? 'bg-[var(--ds-seated-tint)] text-[var(--ds-seated-text)]'
-                    : 'bg-[var(--ds-critical-tint)] text-[var(--ds-critical-text)]'
-                }`}
-                role="status"
-                aria-live={isConnected ? 'polite' : 'assertive'}
-                aria-label={isConnected ? 'Connesso' : 'Non connesso'}
-              >
-                <span className="relative flex h-2 w-2" aria-hidden>
-                  {isConnected && (
-                    <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--ds-seated-solid)] opacity-60 animate-ping motion-reduce:hidden"></span>
-                  )}
-                  <span className={`relative inline-flex h-2 w-2 rounded-full ${isConnected ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-critical-solid)]'}`}></span>
-                </span>
-                <span className="whitespace-nowrap tabular-nums">
-                  {isConnected
-                    ? `Live ${currentTime.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`
-                    : 'Offline'}
-                </span>
-              </div>
+                  Comande a schermo pieno mostra la stessa pastiglia nella sua
+                  chrome, quindi vive in ds/ e non più inline qui. */}
+              <LivePill connected={isConnected} time={currentTime} className="hidden md:inline-flex" />
 
               {/* Mobile-only status dot */}
-              <span
-                className="md:hidden relative flex h-2.5 w-2.5 mx-1"
-                role="status"
-                aria-live={isConnected ? 'polite' : 'assertive'}
-                aria-label={isConnected ? 'Connesso' : 'Non connesso'}
-                title={isConnected ? 'Connesso' : 'Non connesso'}
-              >
-                {isConnected && (
-                  <span className="absolute inline-flex h-full w-full rounded-full bg-[var(--ds-seated-solid)] opacity-60 animate-ping motion-reduce:hidden" aria-hidden></span>
-                )}
-                <span
-                  className={`relative inline-flex h-2.5 w-2.5 rounded-full ${isConnected ? 'bg-[var(--ds-seated-solid)]' : 'bg-[var(--ds-critical-solid)]'}`}
-                  aria-hidden
-                ></span>
-              </span>
+              <LivePill connected={isConnected} time={currentTime} variant="dot" className="md:hidden mx-1" />
 
               {/* Global search — opens the command palette. Same button surface
                   as the bell so it stays reachable on mobile, where ⌘K does not apply. */}
@@ -2916,7 +2880,19 @@ const App: React.FC = () => {
 
         {view === ViewState.COMANDE && (
           <CardErrorBoundary label="Comande">
-            <OrderPad dishes={dishes} menus={menus} tables={tables} reservations={reservations} globalDate={globalDate} globalShiftFilter={globalShiftFilter} onImmersive={setImmersive} initialTableId={pendingComandeTableId} onInitialTableConsumed={() => setPendingComandeTableId(null)} />
+            <OrderPad
+              dishes={dishes}
+              menus={menus}
+              tables={tables}
+              rooms={rooms}
+              reservations={reservations}
+              globalDate={globalDate}
+              globalShiftFilter={globalShiftFilter}
+              onImmersive={setImmersive}
+              initialTableId={pendingComandeTableId}
+              onInitialTableConsumed={() => setPendingComandeTableId(null)}
+              brand={comandeNavStubbed ? comandeBrand : undefined}
+            />
           </CardErrorBoundary>
         )}
 
@@ -3082,6 +3058,35 @@ const App: React.FC = () => {
                       <option key={v} value={v}>{labels[v]}</option>
                     );
                   })}
+                </select>
+              </div>
+              {/* Layout della presa comanda: 'pages' è la variante a pagine
+                  stile cassa, per chi arriva dall'app di Passepartout e
+                  naviga il menu a memoria muscolare. Per account, non per
+                  dispositivo: la scelta segue l'operatore su ogni palmare. */}
+              <div className="rounded-[20px] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+                <label htmlFor="preferred-orderpad-layout" className="mb-1 block text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                  Comande sul palmare
+                </label>
+                <p className="mb-3 text-[13px] text-[var(--ds-text-muted)]">
+                  La forma del menu quando si batte una comanda. Vale su ogni palmare.
+                </p>
+                <select
+                  id="preferred-orderpad-layout"
+                  value={user?.preferred_orderpad_layout ?? ''}
+                  onChange={async (e) => {
+                    const v = e.target.value || null;
+                    try {
+                      await updatePreferences({ preferred_orderpad_layout: v });
+                      addToast('Layout comande aggiornato', 'success');
+                    } catch (err: any) {
+                      addToast(err?.message || 'Errore aggiornamento preferenze', 'error');
+                    }
+                  }}
+                  className={`${dsSelect} sm:max-w-sm`}
+                >
+                  <option value="">Classico</option>
+                  <option value="pages">A pagine, come la cassa</option>
                 </select>
               </div>
                 <PushNotificationsCard />
@@ -3595,83 +3600,7 @@ const App: React.FC = () => {
           }}
         />
 
-        {/* Global Toasts */}
-        <div
-          className="fixed bottom-20 lg:bottom-4 left-4 right-auto lg:left-auto lg:right-4 z-50 flex flex-col gap-2 max-w-[calc(100vw-6rem)] sm:max-w-md"
-          role="region"
-          aria-label="Notifiche"
-          aria-live="polite"
-        >
-            {toasts.map(toast => {
-                const hasDetails = toast.details && toast.details.length > 0;
-                const accent = toast.type === 'success'
-                    ? { iconText: 'text-[var(--ds-seated-text)]' }
-                    : toast.type === 'error'
-                    ? { iconText: 'text-[var(--ds-critical-text)]' }
-                    : { iconText: 'text-[var(--ds-text-primary)]' };
-                return (
-                    <div
-                        key={toast.id}
-                        role={toast.type === 'error' ? 'alert' : undefined}
- className={`bg-[var(--ds-surface)] shadow-[var(--ds-shadow-raised)] border border-[var(--ds-border)] rounded-lg duration-300 ${
-                            hasDetails ? 'p-3.5 min-w-[300px] sm:min-w-[360px]' : 'flex items-center gap-2.5 px-3.5 py-2.5'
-                        }`}
-                    >
-                        {hasDetails ? (
-                            <div className="flex items-start gap-3">
-                                <div className={`p-1.5 rounded-md bg-[var(--ds-surface-row)] ${accent.iconText} flex-shrink-0`}>
-                                    {toast.type === 'success' && <CheckCircle className="h-4 w-4" />}
-                                    {toast.type === 'error' && <AlertTriangle className="h-4 w-4" />}
-                                    {toast.type === 'info' && <Info className="h-4 w-4" />}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                    {toast.title && (
-                                        <p className="text-[13px] font-semibold text-[var(--ds-text-primary)] mb-0.5">{toast.title}</p>
-                                    )}
-                                    <p className="text-sm font-medium text-[var(--ds-text-primary)] mb-1">{toast.message}</p>
-                                    <ul className="space-y-0.5">
-                                        {toast.details!.map((d, i) => (
-                                            <li key={i} className="text-[13px] text-[var(--ds-text-muted)] leading-snug">{d}</li>
-                                        ))}
-                                    </ul>
-                                    {toast.action && (
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                toast.action!.onClick();
-                                                setToasts(prev => prev.filter(t => t.id !== toast.id));
-                                            }}
-                                            className={`mt-2 px-3 py-1.5 text-xs font-semibold rounded-md bg-[var(--ds-surface-row)] ${accent.iconText} hover:opacity-80`}
-                                        >
-                                            {toast.action.label}
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
-                        ) : (
-                            <>
-                                {toast.type === 'success' && <CheckCircle className={`h-4 w-4 ${accent.iconText} shrink-0`} />}
-                                {toast.type === 'error' && <AlertTriangle className={`h-4 w-4 ${accent.iconText} shrink-0`} />}
-                                {toast.type === 'info' && <Info className={`h-4 w-4 ${accent.iconText} shrink-0`} />}
-                                <span className="text-[13px] font-medium text-[var(--ds-text-primary)] flex-1">{toast.message}</span>
-                                {toast.action && (
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            toast.action!.onClick();
-                                            setToasts(prev => prev.filter(t => t.id !== toast.id));
-                                        }}
-                                        className={`px-3 py-1 text-xs font-semibold rounded-md bg-[var(--ds-surface-row)] ${accent.iconText} hover:opacity-80 flex-shrink-0`}
-                                    >
-                                        {toast.action.label}
-                                    </button>
-                                )}
-                            </>
-                        )}
-                    </div>
-                );
-            })}
-        </div>
+        {/* I toast globali sono renderizzati dal ToastProvider (portal). */}
       </main>
     </div>
   );

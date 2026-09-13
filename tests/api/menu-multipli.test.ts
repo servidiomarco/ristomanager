@@ -103,8 +103,8 @@ describe('menu multipli e stato banchetti', () => {
         const res = await api().get('/public/menu');
         expect(res.status).toBe(200);
         const names = res.body.piatti.map((p: any) => p.name);
-        expect(names).toContain('Piatto default menu');       // in Alla carta
-        expect(names).not.toContain('Piatto due menu');       // solo in Banchetti
+        expect(names).toContain('Piatto Default Menu');       // in Alla carta
+        expect(names).not.toContain('Piatto Due Menu');       // solo in Banchetti
     });
 
     it('la spunta di menu su una categoria applica in blocco e fa da default per i piatti nuovi', async () => {

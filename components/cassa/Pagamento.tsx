@@ -32,6 +32,9 @@ interface PagamentoProps {
   fiscalReady: boolean;
   /** Importo scelto in «Dividi conto»: precompila il campo. */
   quotaCents: number | null;
+  /** Piatti spuntati per quella quota («per piatti»): viaggiano col
+   *  movimento che la paga, in meta.item_units. */
+  quotaItemUnits?: { order_item_id: number; units: number }[] | null;
   onBack: () => void;
   onSettle: (opts: SettleOpts, meta?: { invoiceIntent?: boolean }) => void;
   onSplit: () => void;
@@ -55,7 +58,7 @@ interface PagamentoProps {
 }
 
 export const Pagamento: React.FC<PagamentoProps> = ({
-  bill, busy, error, fiscalReady, quotaCents, onBack, onSettle, onSplit, onShowQr, onEdit, onDiscount, embedded = false, paymentPulse = 0,
+  bill, busy, error, fiscalReady, quotaCents, quotaItemUnits = null, onBack, onSettle, onSplit, onShowQr, onEdit, onDiscount, embedded = false, paymentPulse = 0,
 }) => {
   const residual = bill.residual_cents;
   // Feedback "pagamento ricevuto": lampeggio one-shot + suono + vibrazione al
@@ -107,8 +110,16 @@ export const Pagamento: React.FC<PagamentoProps> = ({
   };
 
   const confirm = () => {
+    // La spunta dei piatti segue il movimento che paga esattamente la quota
+    // scelta in «per piatti»: se l'importo è stato ritoccato non si sa più
+    // cosa copre, e non si marca niente.
+    let payments = settlePayments(movements, method, math.applied);
+    if (quotaItemUnits && quotaItemUnits.length > 0 && quotaCents != null) {
+      const ix = payments.findIndex(p => p.amount_cents === quotaCents && !p.meta);
+      if (ix >= 0) payments = payments.map((p, i) => i === ix ? { ...p, meta: { item_units: quotaItemUnits } } : p);
+    }
     onSettle({
-      payments: settlePayments(movements, method, math.applied),
+      payments,
       tip_cents: tipCents,
       // «Fattura» chiude comunque senza scontrino: il documento si emette poi
       // dal conto, dove ci sono i dati del cessionario.
