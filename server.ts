@@ -56,11 +56,11 @@ import {
 import type { PassepartoutComanda, EsitoChiusuraComanda, PassepartoutArticolo } from './services/passepartoutService.js';
 import { MENU_LANGS, isMenuTranslationConfigured, translateMenuEntries } from './services/menuTranslationService.js';
 import { isWinePairingConfigured, suggestWinePairings } from './services/aiWinePairingService.js';
-import { Shift, PaymentStatus, UserRole } from './types.js';
+import { Shift, PaymentStatus, UserRole, ROOM_ELEMENT_KINDS } from './types.js';
 import authRoutes from './auth/authRoutes.js';
 import logRoutes from './activityLogs/logRoutes.js';
 import { authenticate, authorize, requirePermission, requireAnyPermission } from './auth/authMiddleware.js';
-import { AuthService } from './auth/authService.js';
+import { AuthService, isPlatformScopedSession } from './auth/authService.js';
 import { RolePermissionService, isReportsAdmin, ALL_PERMISSIONS, ALL_PERMISSION_KEYS, type Permission } from './auth/permissionService.js';
 import { canAssignToRole } from './auth/permissions.js';
 import { LogService, ActivityAction, ResourceType } from './activityLogs/logService.js';
@@ -11272,7 +11272,21 @@ app.put('/tables/:id', authenticate, requirePermission('floorplan:update_status'
         const values: any[] = [];
         let paramIndex = 1;
 
-        const allowedFields = ['name', 'shape', 'seats', 'x', 'y', 'room_id', 'status', 'is_locked', 'merged_with', 'temp_lock_expires_at', 'rotation', 'width_cm', 'length_cm', 'notes'];
+        // Il gate della route è floorplan:update_status, pensato per il
+        // cameriere che gira lo stato del tavolo. I campi di layout però
+        // ridisegnano la sala: senza questo split chi può segnare "sporco"
+        // può anche spostare, rinominare o ridimensionare un tavolo.
+        const STATUS_FIELDS = ['status', 'is_locked', 'merged_with', 'temp_lock_expires_at'];
+        const LAYOUT_FIELDS = ['name', 'shape', 'seats', 'x', 'y', 'x_cm', 'y_cm', 'room_id', 'rotation', 'width_cm', 'length_cm', 'notes'];
+        const allowedFields = [...STATUS_FIELDS, ...LAYOUT_FIELDS];
+
+        const touchesLayout = LAYOUT_FIELDS.some(field => req.body.hasOwnProperty(field));
+        if (touchesLayout && req.user && !isPlatformScopedSession(req.user)) {
+            const canEditLayout = await RolePermissionService.hasPermission(req.user.tenantId, req.user.role, 'floorplan:full');
+            if (!canEditLayout) {
+                return res.status(403).json({ error: 'Insufficient permissions' });
+            }
+        }
 
         allowedFields.forEach(field => {
             if (req.body.hasOwnProperty(field)) {
@@ -11844,12 +11858,56 @@ app.get('/rooms', authenticate, async (req, res) => {
     }
 });
 
+// La pianta arriva dal client come blob JSONB: si valida per intero prima
+// di scriverla, perché un plan malformato romperebbe il render su ogni
+// superficie che lo legge (Sala, Reception, Cassa). Ritorna il messaggio
+// d'errore o null se il blob è sano. Tutto in centimetri.
+function validateRoomPlan(plan: any): string | null {
+    if (typeof plan !== 'object' || plan === null || Array.isArray(plan)) return 'plan must be an object';
+    if (plan.version !== 1) return 'plan.version must be 1';
+    if (!Number.isInteger(plan.rev) || plan.rev < 1) return 'plan.rev must be a positive integer';
+    for (const dim of ['width_cm', 'height_cm'] as const) {
+        if (!Number.isFinite(plan[dim]) || plan[dim] < 100 || plan[dim] > 10000) {
+            return `plan.${dim} must be a number between 100 and 10000`;
+        }
+    }
+    if (plan.perimeter !== undefined) {
+        if (!Array.isArray(plan.perimeter) || plan.perimeter.length < 3 || plan.perimeter.length > 64) {
+            return 'plan.perimeter must be an array of 3-64 points';
+        }
+        for (const p of plan.perimeter) {
+            if (!p || !Number.isFinite(p.x_cm) || !Number.isFinite(p.y_cm)) {
+                return 'plan.perimeter points must have finite x_cm/y_cm';
+            }
+        }
+    }
+    if (!Array.isArray(plan.elements) || plan.elements.length > 200) {
+        return 'plan.elements must be an array of at most 200 elements';
+    }
+    for (const el of plan.elements) {
+        if (!el || typeof el.id !== 'string' || !el.id) return 'plan element without id';
+        if (!ROOM_ELEMENT_KINDS.includes(el.kind)) return `unknown plan element kind: ${el.kind}`;
+        for (const n of ['x_cm', 'y_cm', 'w_cm', 'h_cm', 'rotation'] as const) {
+            if (!Number.isFinite(el[n])) return `plan element ${el.id}: ${n} must be a finite number`;
+        }
+        if (el.w_cm <= 0 || el.h_cm <= 0) return `plan element ${el.id}: w_cm/h_cm must be positive`;
+        if (el.label !== undefined && (typeof el.label !== 'string' || el.label.length > 100)) {
+            return `plan element ${el.id}: label must be a string of at most 100 chars`;
+        }
+    }
+    return null;
+}
+
 app.post('/rooms', authenticate, requirePermission('floorplan:full'), async (req, res) => {
     try {
-        const { name, width, height } = req.body;
+        const { name, width, height, plan } = req.body;
+        if (plan != null) {
+            const planError = validateRoomPlan(plan);
+            if (planError) return res.status(400).json({ error: planError });
+        }
         const result = await queryWithRetry(
-            'INSERT INTO rooms (tenant_id, name, width, height) VALUES ($4, $1, $2, $3) RETURNING *',
-            [name, width, height, req.tenantId!]
+            'INSERT INTO rooms (tenant_id, name, width, height, plan) VALUES ($4, $1, $2, $3, $5) RETURNING *',
+            [name, width, height, req.tenantId!, plan != null ? JSON.stringify(plan) : null]
         );
         const newRoom = result.rows[0];
 
@@ -11881,17 +11939,66 @@ app.post('/rooms', authenticate, requirePermission('floorplan:full'), async (req
 app.patch('/rooms/:id', authenticate, requirePermission('floorplan:full'), async (req, res) => {
     try {
         const { id } = req.params;
-        const { is_closed } = req.body;
-        if (typeof is_closed !== 'boolean') {
-            return res.status(400).json({ error: 'is_closed must be boolean' });
+
+        // Update dinamico come PUT /tables/:id: la route è nata per il solo
+        // is_closed ma ora porta anche nome, posizione e la pianta reale.
+        const allowedFields = ['is_closed', 'name', 'location', 'width', 'height', 'plan'];
+        const fields: string[] = [];
+        const values: any[] = [];
+        let paramIndex = 1;
+        let planRev: number | null = null;
+
+        for (const field of allowedFields) {
+            if (!req.body.hasOwnProperty(field)) continue;
+            const value = req.body[field];
+            if (field === 'is_closed' && typeof value !== 'boolean') {
+                return res.status(400).json({ error: 'is_closed must be boolean' });
+            }
+            if (field === 'name' && (typeof value !== 'string' || !value.trim())) {
+                return res.status(400).json({ error: 'name must be a non-empty string' });
+            }
+            if (field === 'location' && value !== null && value !== 'INDOOR' && value !== 'OUTDOOR') {
+                return res.status(400).json({ error: 'location must be INDOOR, OUTDOOR or null' });
+            }
+            if ((field === 'width' || field === 'height') && (!Number.isInteger(value) || value <= 0)) {
+                return res.status(400).json({ error: `${field} must be a positive integer` });
+            }
+            if (field === 'plan' && value !== null) {
+                const planError = validateRoomPlan(value);
+                if (planError) return res.status(400).json({ error: planError });
+                planRev = value.rev;
+            }
+            fields.push(`${field} = $${paramIndex}`);
+            values.push(field === 'plan' && value !== null ? JSON.stringify(value) : field === 'name' ? value.trim() : value);
+            paramIndex++;
+        }
+
+        if (fields.length === 0) {
+            return res.status(400).json({ error: 'No fields to update' });
+        }
+
+        values.push(id);
+        values.push(req.tenantId!);
+        // plan.rev è la difesa dal salvataggio incrociato: due editor aperti
+        // sulla stessa sala non devono sovrascriversi senza accorgersene.
+        // Una rev non più fresca non aggiorna la riga e diventa un 409 che
+        // il client mostra come «pianta modificata da un altro dispositivo».
+        let revGuard = '';
+        if (planRev !== null) {
+            values.push(planRev);
+            revGuard = ` AND (plan IS NULL OR (plan->>'rev')::int < $${paramIndex + 2})`;
         }
         const result = await queryWithRetry(
-            'UPDATE rooms SET is_closed = $1 WHERE id = $2 AND tenant_id = $3 RETURNING *',
-            [is_closed, id, req.tenantId!]
+            `UPDATE rooms SET ${fields.join(', ')} WHERE id = $${paramIndex} AND tenant_id = $${paramIndex + 1}${revGuard} RETURNING *`,
+            values
         );
         const updatedRoom = result.rows[0];
         if (!updatedRoom) {
-            return res.status(404).json({ error: 'Room not found' });
+            const existing = await queryWithRetry('SELECT * FROM rooms WHERE id = $1 AND tenant_id = $2', [id, req.tenantId!]);
+            if (existing.rowCount === 0) {
+                return res.status(404).json({ error: 'Room not found' });
+            }
+            return res.status(409).json({ error: 'plan_conflict', current: existing.rows[0] });
         }
 
         if (req.user) {
@@ -11904,7 +12011,7 @@ app.patch('/rooms/:id', authenticate, requirePermission('floorplan:full'), async
                 ResourceType.ROOM,
                 parseInt(id, 10),
                 updatedRoom.name,
-                { is_closed }
+                { changed: allowedFields.filter(f => req.body.hasOwnProperty(f)) }
             );
         }
 
