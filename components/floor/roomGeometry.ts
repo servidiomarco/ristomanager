@@ -3,7 +3,7 @@
 // di render, mai persistita. Con 1px = 1cm i numeri storici restano sensati:
 // la griglia da 20px è uno snap da 20cm, la sala default 800×600 è un 8×6 m.
 
-import { Room, RoomPlanElement, RoomElementKind, Table } from '../../types';
+import { Room, RoomPlan, RoomPlanElement, RoomElementKind, Table } from '../../types';
 import { getEffectiveDimensionsCm, TableDimensionsCm } from '../../utils/tableDimensions';
 import { getGlyphDimensions } from '../TableGlyph';
 
@@ -67,6 +67,63 @@ export function snapToPlanGrid(cm: number, grid = PLAN_GRID_CM): number {
 export const BLOCKING_ELEMENT_KINDS: ReadonlySet<RoomElementKind> = new Set([
   'bar', 'wall', 'column', 'cashier', 'stairs',
 ] as RoomElementKind[]);
+
+// Segmenti-muro del perimetro (poligono se c'è, altrimenti i quattro lati
+// del rettangolo). Servono all'aggancio delle porte.
+interface WallSegment { x1: number; y1: number; x2: number; y2: number }
+
+function perimeterSegments(plan: RoomPlan): WallSegment[] {
+  if (plan.perimeter && plan.perimeter.length >= 3) {
+    return plan.perimeter.map((p, i) => {
+      const q = plan.perimeter![(i + 1) % plan.perimeter!.length];
+      return { x1: p.x_cm, y1: p.y_cm, x2: q.x_cm, y2: q.y_cm };
+    });
+  }
+  const W = plan.width_cm;
+  const H = plan.height_cm;
+  return [
+    { x1: 0, y1: 0, x2: W, y2: 0 },
+    { x1: W, y1: 0, x2: W, y2: H },
+    { x1: W, y1: H, x2: 0, y2: H },
+    { x1: 0, y1: H, x2: 0, y2: 0 },
+  ];
+}
+
+/**
+ * Una porta vive NEL muro: dato il centro trascinato, la aggancia al muro
+ * più vicino, la fa scorrere solo lungo di esso (snap ai 10 cm) e la orienta
+ * come il muro. Ritorna top-left + rotation per l'elemento.
+ */
+export function snapDoorToWall(
+  plan: RoomPlan,
+  el: Pick<RoomPlanElement, 'w_cm' | 'h_cm'>,
+  cx: number,
+  cy: number,
+): { x_cm: number; y_cm: number; rotation: number } {
+  let best: { d2: number; px: number; py: number; horizontal: boolean } | null = null;
+  for (const s of perimeterSegments(plan)) {
+    const dx = s.x2 - s.x1;
+    const dy = s.y2 - s.y1;
+    const len2 = dx * dx + dy * dy;
+    if (len2 === 0) continue;
+    const t = Math.max(0, Math.min(1, ((cx - s.x1) * dx + (cy - s.y1) * dy) / len2));
+    const px = s.x1 + t * dx;
+    const py = s.y1 + t * dy;
+    const d2 = (cx - px) ** 2 + (cy - py) ** 2;
+    if (!best || d2 < best.d2) {
+      best = { d2, px, py, horizontal: Math.abs(dx) >= Math.abs(dy) };
+    }
+  }
+  if (!best) return { x_cm: cx - el.w_cm / 2, y_cm: cy - el.h_cm / 2, rotation: 0 };
+  // Scorrimento lungo il muro con snap; il centro resta sulla mezzeria.
+  const px = best.horizontal ? snapToPlanGrid(best.px) : best.px;
+  const py = best.horizontal ? best.py : snapToPlanGrid(best.py);
+  return {
+    x_cm: px - el.w_cm / 2,
+    y_cm: py - el.h_cm / 2,
+    rotation: best.horizontal ? 0 : 90,
+  };
+}
 
 /** AABB dell'elemento ruotato, in px canvas — è l'ostacolo per le collisioni. */
 export function rotatedElementBox(el: RoomPlanElement): Box {
