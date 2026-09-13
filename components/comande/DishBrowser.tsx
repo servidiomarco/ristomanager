@@ -174,6 +174,16 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
   // frantoio?»): si apre dal tocco sulla miniatura, non dal tap sul piatto —
   // quello batte o apre il cassetto, e un menu senza foto non cambia gesti.
   const [photoDish, setPhotoDish] = useState<Dish | null>(null);
+  // Le foto VERTICALI (le bottiglie della carta vini) nel riquadro 16:10
+  // vanno in `contain`, non in `cover`: il ritaglio centrato mostrerebbe la
+  // pancia della bottiglia senza collo né etichetta. L'orientamento si
+  // scopre solo a immagine caricata (onLoad), quindi vive in stato.
+  const [portraitPhotos, setPortraitPhotos] = useState<Set<number>>(() => new Set());
+  const notePortrait = (dishId: number, img: HTMLImageElement) => {
+    if (img.naturalHeight > img.naturalWidth && !portraitPhotos.has(dishId)) {
+      setPortraitPhotos(prev => new Set(prev).add(dishId));
+    }
+  };
 
   const courseTagShort = (n: number): string =>
     isBarCourse(n) ? 'Bar' : isDessertCourse(n) ? 'Dolci' : ordinal(n);
@@ -823,19 +833,31 @@ export const DishBrowser: React.FC<DishBrowserProps> = ({
                   {/* La foto è un bersaglio suo: si porge il telefono al
                       cliente senza battere il piatto per sbaglio. Senza foto
                       resta il riquadro col glifo — la scheda non cambia
-                      altezza, o la griglia balla riga per riga. */}
+                      altezza, o la griglia balla riga per riga.
+                      L'immagine sta in ABSOLUTE dentro il riquadro: lasciata
+                      nel flusso, una foto verticale (le bottiglie) stirava il
+                      riquadro oltre il 16:10 — aspect-ratio è un suggerimento,
+                      il contenuto più alto vince — e la griglia ballava.
+                      Verticale = contain (la bottiglia intera su fondo row),
+                      orizzontale = cover come prima. */}
                   <button
                     type="button"
                     onClick={() => { if (d.photo_url) setPhotoDish(d); }}
                     tabIndex={d.photo_url ? 0 : -1}
                     aria-label={d.photo_url ? `Guarda la foto di ${d.name}` : undefined}
                     aria-hidden={d.photo_url ? undefined : true}
-                    className={`flex aspect-[16/10] w-full items-center justify-center bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] ${
+                    className={`relative flex aspect-[16/10] w-full items-center justify-center overflow-hidden bg-[var(--ds-surface-row)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-border-focus)] ${
                       d.photo_url ? 'cursor-zoom-in' : 'cursor-default'
                     }`}
                   >
                     {d.photo_url ? (
-                      <img src={d.photo_url} alt="" className="h-full w-full object-cover" />
+                      <img
+                        src={d.photo_url}
+                        alt=""
+                        loading="lazy"
+                        onLoad={e => notePortrait(d.id, e.currentTarget)}
+                        className={`absolute inset-0 h-full w-full ${portraitPhotos.has(d.id) ? 'object-contain' : 'object-cover'}`}
+                      />
                     ) : (
                       <ImageIcon size={28} className="text-[var(--ds-text-muted)] opacity-50" aria-hidden />
                     )}
