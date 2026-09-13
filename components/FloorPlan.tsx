@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { flushSync, createPortal } from 'react-dom';
-import { Table, TableShape, Room, TableStatus, Reservation, ReservationSource, Shift, TableMerge, TableHiddenOverride, RoomClosedOverride, ArrivalStatus, ReservationStatus, BanquetMenu } from '../types';
-import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic, ChevronDown } from 'lucide-react';
+import { Table, TableShape, Room, RoomPlan, TableStatus, Reservation, ReservationSource, Shift, TableMerge, TableHiddenOverride, RoomClosedOverride, ArrivalStatus, ReservationStatus, BanquetMenu } from '../types';
+import { Plus, Move, Armchair, Trash2, Combine, Scissors, Save, MousePointer2, CheckSquare, Lock, Unlock, Users, X, Clock, Timer, User, Check, Layout, CaseSensitive, AlertTriangle, Sun, Sunset, Loader2, Info, RotateCw, Ruler, StickyNote, Eye, EyeOff, DoorClosed, DoorOpen, BookOpen, Mic, ChevronDown, Frame } from 'lucide-react';
 import { TableGlyph, getGlyphDimensions, type TableDisplayStatus } from './TableGlyph';
 import { deriveTableDisplayStatus, isSeated, TABLE_STATUS_LABEL } from './reservationState';
 import { useNow } from '../hooks/useNow';
@@ -15,7 +15,8 @@ import { snapToGrid, collidesWithOthers, findOverlappingPairs, getTableFootprint
 import { RoomShapeLayer } from './floor/RoomShapeLayer';
 import { roomHasPlan, realDimsFor, planGlyphBox, legacyCenterToCm, PLAN_GRID_CM } from './floor/roomGeometry';
 import { toTitleCase, getInitials } from '../utils/text';
-import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, createRoomClosed, deleteRoomClosed } from '../services/apiService';
+import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, createRoomClosed, deleteRoomClosed, updateRoom } from '../services/apiService';
+import type { ApiError } from '../services/apiError';
 import { applyMerges } from '../utils/tableMerge';
 import { useSocket } from '../hooks/useSocket';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
@@ -210,6 +211,78 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const overlapOpts = planActive
     ? { labelBand: 0, realFor: (t: Table) => realDimsFor(t), posFor: manualPosFor }
     : undefined;
+
+  // Modale «pianta sala»: misure interne in metri. Alla prima pianta i tavoli
+  // vengono piazzati dove già stavano (centro dai legacy x/y) e la sala passa
+  // a manuale; rimuovere la pianta ripristina la sala di prima.
+  const [planModal, setPlanModal] = useState<{ widthM: string; heightM: string; removeArmed: boolean } | null>(null);
+  const [planBusy, setPlanBusy] = useState(false);
+
+  const openPlanModal = () => {
+    setPlanModal({
+      widthM: activeRoomPlan ? String(activeRoomPlan.width_cm / 100) : '',
+      heightM: activeRoomPlan ? String(activeRoomPlan.height_cm / 100) : '',
+      removeArmed: false,
+    });
+  };
+
+  const handleSavePlan = async () => {
+    if (!planModal || !activeRoom) return;
+    const widthM = parseFloat(planModal.widthM.replace(',', '.'));
+    const heightM = parseFloat(planModal.heightM.replace(',', '.'));
+    const width_cm = Math.round(widthM * 100);
+    const height_cm = Math.round(heightM * 100);
+    if (!Number.isFinite(width_cm) || !Number.isFinite(height_cm) || width_cm < 100 || height_cm < 100 || width_cm > 10000 || height_cm > 10000) {
+      setAlertModal({ message: 'Le misure della sala vanno da 1 a 100 metri.', type: 'warning' });
+      return;
+    }
+    setPlanBusy(true);
+    try {
+      const prev = activeRoom.plan ?? null;
+      const nextPlan: RoomPlan = prev
+        ? { ...prev, width_cm, height_cm, rev: prev.rev + 1 }
+        : { version: 1, rev: 1, width_cm, height_cm, elements: [] };
+      await updateRoom(activeRoom.id, { plan: nextPlan });
+      if (!prev) {
+        // Prima pianta: conversione una-tantum px→cm, centro dentro i muri.
+        for (const t of tables.filter(t => t.room_id === activeRoom.id && (t.x_cm == null || t.y_cm == null))) {
+          const { width, height } = getGlyphDimensions(t.shape, t.seats, realDimsFor(t));
+          const c = legacyCenterToCm(t);
+          onUpdateTable({
+            ...t,
+            x_cm: Math.round(Math.min(Math.max(c.x_cm, width / 2), Math.max(width / 2, width_cm - width / 2))),
+            y_cm: Math.round(Math.min(Math.max(c.y_cm, height / 2), Math.max(height / 2, height_cm - height / 2))),
+          });
+        }
+        setLayoutMode('manual');
+        persistLayoutMode(activeRoom.id, 'manual');
+      }
+      setPlanModal(null);
+    } catch (err) {
+      const apiErr = err as ApiError;
+      setAlertModal({
+        message: apiErr.status === 409
+          ? 'La pianta è stata modificata da un altro dispositivo. Riapri e riprova.'
+          : (apiErr.message || 'Salvataggio della pianta non riuscito.'),
+        type: apiErr.status === 409 ? 'warning' : 'error',
+      });
+    } finally {
+      setPlanBusy(false);
+    }
+  };
+
+  const handleRemovePlan = async () => {
+    if (!activeRoom) return;
+    setPlanBusy(true);
+    try {
+      await updateRoom(activeRoom.id, { plan: null });
+      setPlanModal(null);
+    } catch (err) {
+      setAlertModal({ message: (err as ApiError).message || 'Rimozione della pianta non riuscita.', type: 'error' });
+    } finally {
+      setPlanBusy(false);
+    }
+  };
 
   // Portrait orientation gate (floor-plan only, mobile/touch devices)
   const [isPortrait, setIsPortrait] = useState(() => {
@@ -1442,6 +1515,14 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
               {layoutMode === 'manual' ? <Move className="h-4 w-4" /> : <Layout className="h-4 w-4" />}
           </button>
 
+          <button
+            onClick={openPlanModal}
+            className={`${dsIconButton} shadow-none ${planActive ? TOOL_BUTTON_ON : 'bg-[var(--ds-surface-row)]'}`}
+            title={activeRoomPlan ? 'Pianta sala: misure reali' : 'Disegna la pianta reale della sala'}
+          >
+              <Frame className="h-4 w-4" />
+          </button>
+
           {selectedTables.length > 0 && (
               <button
                 onClick={() => setSelectedTables([])}
@@ -1888,6 +1969,74 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
               }`} />
             </div>
             <p className="text-[15px] leading-relaxed text-[var(--ds-text-secondary)]">{alertModal.message}</p>
+          </div>
+        </ModalShell>
+      )}
+
+      {planModal && (
+        <ModalShell
+          open={!!planModal}
+          onClose={() => { if (!planBusy) setPlanModal(null); }}
+          title="Pianta sala"
+          size="sm"
+          bodyClassName="p-5 sm:p-6"
+          closeOnEscape
+          footer={
+            <div className="flex w-full items-center gap-2">
+              {activeRoomPlan && (
+                <button
+                  onClick={() => planModal.removeArmed ? handleRemovePlan() : setPlanModal({ ...planModal, removeArmed: true })}
+                  disabled={planBusy}
+                  className={`${dsButton.secondary} text-[var(--ds-critical-fg)]`}
+                >
+                  {planModal.removeArmed ? 'Confermi la rimozione?' : 'Rimuovi pianta'}
+                </button>
+              )}
+              <button
+                onClick={handleSavePlan}
+                disabled={planBusy}
+                className={`${dsButton.primary} flex-1`}
+              >
+                {planBusy ? 'Salvataggio…' : 'Salva'}
+              </button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            <p className="text-[14px] text-[var(--ds-text-secondary)]">
+              Misure interne di {activeRoom?.name ?? 'questa sala'}. I tavoli restano dove sono.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Larghezza (m)">
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min={1}
+                  max={100}
+                  step={0.1}
+                  value={planModal.widthM}
+                  onChange={e => setPlanModal({ ...planModal, widthM: e.target.value })}
+                  className={dsInput}
+                />
+              </Field>
+              <Field label="Profondità (m)">
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min={1}
+                  max={100}
+                  step={0.1}
+                  value={planModal.heightM}
+                  onChange={e => setPlanModal({ ...planModal, heightM: e.target.value })}
+                  className={dsInput}
+                />
+              </Field>
+            </div>
+            {activeRoomPlan && (
+              <p className="text-[13px] text-[var(--ds-text-muted)]">
+                Rimuovendo la pianta la sala torna alla disposizione precedente.
+              </p>
+            )}
           </div>
         </ModalShell>
       )}

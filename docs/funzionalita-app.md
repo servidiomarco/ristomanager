@@ -190,6 +190,7 @@ Postazione "alla porta" per la gestione degli arrivi.
 Editor della piantina e stato della sala in tempo reale.
 
 - Disegno sale e tavoli: forme diverse, trascinamento con mouse **e touch**, rotazione, rinomina, numero coperti, blocco posizione, rilevazione sovrapposizioni.
+- **Pianta reale della sala**: dall'editor si impostano le misure vere in metri («Pianta sala») e la stanza si disegna com'è — muri, tavoli in scala reale (dalle misure in cm della scheda tavolo, o stimate dai posti), trascinamento con snap ai 10 cm e tavoli sempre dentro i muri. La stessa pianta si vede identica in Reception e in Cassa; le sale senza pianta restano come prima, e rimuovere la pianta ripristina la disposizione precedente.
 - **Unione tavoli** per il turno (e divisione), con le unioni visibili identiche su ogni schermo dell'app.
 - **Tavoli nascosti per turno** e **chiusura di una sala per turno** (o estesa), programmabili anche in anticipo dalle Impostazioni.
 - Legenda colori coerente con gli stati delle prenotazioni; ogni cambiamento si propaga live a tutti i dispositivi.
@@ -602,6 +603,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-13 | Sale & Tavoli | Pianta reale della sala: misure vere in metri dall'editor, tavoli in scala reale dentro i muri (snap 10 cm), stessa pianta su editor, Reception e Cassa; le sale senza pianta restano come prima. |
 | 2026-09-13 | Comande, Cucina e Passe | La nota tecnica delle varianti (es. temperature di cottura) non compare più nel foglio varianti del cameriere: la mostra solo il monitor cucina accanto alla variante scelta. |
 | 2026-09-13 | Comande, Cucina e Passe | Griglia piatti con foto: il riquadro 16:10 non si stira più con le foto verticali (le bottiglie della carta vini si vedono intere, in contain; i piatti restano ritagliati in cover) — la griglia non balla. |
 | 2026-09-12 | Comande, Cucina e Passe | Comande a schermo intero sul desktop: sidebar ritirata in un bollo col marchio (il chevron la richiama), barra di pagina con ricerca, imbuto (solo stato) e pastiglia Live; griglia tavoli piatta per numero con le sale in pista e la riga di stato sulla tessera (totale e uscita in corso); menu a schede categoria tinte e griglia piatti con foto e stepper; comanda nella colonna di destra col riepilogo del conto e «Invia <uscita> · <totale>». Telefono e Cassa invariati. |
