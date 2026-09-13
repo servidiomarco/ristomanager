@@ -856,6 +856,17 @@ const App: React.FC = () => {
   }, [theme]);
   const toggleTheme = () => setTheme(t => (t === 'dark' ? 'light' : 'dark'));
 
+  // Stile dell'interfaccia (classico / squadrato): i token dei raggi in
+  // index.css leggono data-design sul root. A differenza del tema la scelta
+  // vive su users (preferred_design_style) e segue l'operatore su ogni
+  // dispositivo; al logout user torna null e l'attributo cade, così la
+  // pagina di login è sempre nello stile classico.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (user?.preferred_design_style === 'squadrato') root.dataset.design = 'squadrato';
+    else delete root.dataset.design;
+  }, [user?.preferred_design_style]);
+
   // Redirect to first accessible view when user changes or doesn't have access to current view.
   // Also honors a ?view= query param so a notification click that opens a fresh tab lands on
   // the right view (e.g. /?view=RESERVATIONS from a "new reservation" notification).
@@ -3094,6 +3105,36 @@ const App: React.FC = () => {
                 >
                   <option value="">Classico</option>
                   <option value="pages">A pagine, come la cassa</option>
+                </select>
+              </div>
+              {/* Stile dell'interfaccia: 'squadrato' è il redesign dei raggi
+                  (angoli netti, un raggio solo), null il look di sempre.
+                  Cambia solo i tre token in index.css via data-design sul
+                  root — colori e spaziature restano gli stessi. Per account,
+                  come il layout comande: segue l'operatore ovunque. */}
+              <div className="rounded-[var(--ds-radius)] bg-[var(--ds-surface)] p-4 shadow-[var(--ds-shadow-card)]">
+                <label htmlFor="preferred-design-style" className="mb-1 block text-[15px] font-semibold text-[var(--ds-text-primary)]">
+                  Stile dell'interfaccia
+                </label>
+                <p className="mb-3 text-[13px] text-[var(--ds-text-muted)]">
+                  La forma di scatole e bottoni, su tutte le pagine.
+                </p>
+                <select
+                  id="preferred-design-style"
+                  value={user?.preferred_design_style ?? ''}
+                  onChange={async (e) => {
+                    const v = e.target.value || null;
+                    try {
+                      await updatePreferences({ preferred_design_style: v });
+                      addToast('Stile aggiornato', 'success');
+                    } catch (err: any) {
+                      addToast(err?.message || 'Errore aggiornamento preferenze', 'error');
+                    }
+                  }}
+                  className={`${dsSelect} sm:max-w-sm`}
+                >
+                  <option value="">Classico, angoli morbidi</option>
+                  <option value="squadrato">Squadrato, angoli netti</option>
                 </select>
               </div>
                 <PushNotificationsCard />

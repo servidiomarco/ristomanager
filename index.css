@@ -765,20 +765,27 @@ body {
      legge piatto; un filo più stretto e i due si distinguono.
 
      Token e non valore scritto a mano in ottocento punti: cambiare idea sul
-     numero è una riga, non un'altra passata sull'app. */
-  --ds-radius: 6px;
-  --ds-radius-sm: 4px;
+     numero è una riga, non un'altra passata sull'app.
+
+     I VALORI qui sotto sono lo stile «classico» — l'aspetto che l'app ha
+     sempre avuto: scatole morbide, controlli a pillola. Lo stile «squadrato»
+     (6/4/8px) è una preferenza per utente: App.tsx mette
+     data-design="squadrato" sul root quando l'operatore lo sceglie da
+     Impostazioni → Profilo, e il blocco più sotto riassegna i tre token.
+     È lo stesso rapporto tema/`.dark`: la scelta vive su users, non qui. */
+  --ds-radius: 16px;
+  --ds-radius-sm: 8px;
 
   /* Il raggio dei CONTROLLI: bottoni, campi, pastiglie, chip, segmenti.
-     Più tondo delle scatole di proposito — un controllo si tocca, e l'angolo
-     più morbido lo separa dal contenitore che lo ospita invece di fonderlo
-     con lui.
+     Distinto dalle scatole di proposito — un controllo si tocca, e la forma
+     diversa lo separa dal contenitore che lo ospita invece di fonderlo
+     con lui. Nel classico è la pillola piena; nello squadrato 8px.
 
      Resta `rounded-full` solo ciò che è davvero un cerchio e non un controllo:
      avatar, pallini di stato, barre di avanzamento. Su quelli il CSS limita
      comunque il raggio a metà del lato, quindi un pallino da 6px resterebbe
      tondo in ogni caso — ma scriverlo `full` dice perché. */
-  --ds-radius-control: 8px;
+  --ds-radius-control: 9999px;
 
   /* Surface depth — canvas is DARKER than cards in light mode */
   --ds-canvas: #ededf1;
@@ -871,6 +878,19 @@ body {
 
   --ds-shadow-card: 0 1px 2px rgba(16, 17, 25, 0.04), 0 8px 24px rgba(16, 17, 25, 0.05);
   --ds-shadow-raised: 0 4px 8px rgba(16, 17, 25, 0.06), 0 20px 48px rgba(16, 17, 25, 0.10);
+}
+
+/* Stile «squadrato»: un raggio solo — 6px le scatole, 8px i controlli.
+   Preferenza per utente (users.preferred_design_style = 'squadrato'),
+   applicata da App.tsx come data-attribute sul root. Solo i tre token dei
+   raggi: colori, ombre e spaziature sono gli stessi nei due stili, quindi
+   nessuna dichiarazione qui oltre a queste tre — se un domani lo stile
+   dovesse toccare altro, il posto è questo blocco. Vale identico in .dark:
+   i raggi non sono a tema. */
+:root[data-design='squadrato'] {
+  --ds-radius: 6px;
+  --ds-radius-sm: 4px;
+  --ds-radius-control: 8px;
 }
 
 .dark {

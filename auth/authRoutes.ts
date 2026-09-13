@@ -191,17 +191,19 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
 
 // PUT /auth/me/preferences - Update current user's own preferences
 // Self-service: any authenticated user can update *their own* preferences only.
-// Exposes preferred_landing_view and preferred_orderpad_layout; a field left
-// out of the body stays as it is, null clears it.
+// Exposes preferred_landing_view, preferred_orderpad_layout and
+// preferred_design_style; a field left out of the body stays as it is,
+// null clears it.
 router.put('/me/preferences', authenticate, async (req: Request, res: Response) => {
   try {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated' });
     }
 
-    const { preferred_landing_view, preferred_orderpad_layout } = req.body as {
+    const { preferred_landing_view, preferred_orderpad_layout, preferred_design_style } = req.body as {
       preferred_landing_view?: string | null;
       preferred_orderpad_layout?: string | null;
+      preferred_design_style?: string | null;
     };
 
     // Validate against the ViewState enum so this stays in sync with the
@@ -217,9 +219,16 @@ router.put('/me/preferences', authenticate, async (req: Request, res: Response) 
       return res.status(400).json({ error: 'Invalid preferred_orderpad_layout' });
     }
 
+    // Catalogo chiuso anche qui: 'squadrato' è l'unico stile alternativo;
+    // null/assente = classico (scatole morbide, controlli a pillola).
+    if (preferred_design_style !== null && preferred_design_style !== undefined && preferred_design_style !== 'squadrato') {
+      return res.status(400).json({ error: 'Invalid preferred_design_style' });
+    }
+
     const updated = await AuthService.updatePreferences(req.user.userId, {
       ...(preferred_landing_view !== undefined ? { preferred_landing_view } : {}),
       ...(preferred_orderpad_layout !== undefined ? { preferred_orderpad_layout } : {}),
+      ...(preferred_design_style !== undefined ? { preferred_design_style } : {}),
     });
 
     if (!updated) {

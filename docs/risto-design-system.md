@@ -224,6 +224,18 @@ spacing:
 # ma una forma. La scala a otto gradini e' stata ritirata: otto valori per la
 # stessa domanda ("quanto e' tondo questo angolo?") si sceglievano a occhio, e
 # a fine giro l'app aveva schede a 16, 20 e 24px una accanto all'altra.
+#
+# I VALORI dei tre token dipendono dallo stile scelto dall'operatore
+# (users.preferred_design_style, card in Impostazioni → Profilo):
+#   classico  (default) — box 16px, inner 8px, control pillola (9999px):
+#                         l'aspetto storico dell'app.
+#   squadrato           — box 6px, inner 4px, control 8px: i valori qui sotto.
+# index.css tiene il classico su :root e lo squadrato su
+# :root[data-design='squadrato']; App.tsx mette l'attributo quando l'utente
+# e' caricato. Le REGOLE di questo capitolo (cosa e' box, cosa e' control,
+# cosa resta full) valgono identiche nei due stili: nel classico control e
+# full coincidono di valore, ma un controllo si scrive comunque col token —
+# e' la sola cosa che permette ai due stili di convivere.
 rounded:
   box:     "6px"   # var(--ds-radius) — schede, pannelli, tessere, fogli, righe
   inner:   "4px"   # var(--ds-radius-sm) — cio' che sta DENTRO una scatola:
