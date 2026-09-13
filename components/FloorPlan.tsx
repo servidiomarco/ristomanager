@@ -13,7 +13,7 @@ import { buildBanquetColorClassMap } from '../utils/banquetColors';
 import { BanquetLabel } from './ReservationCard';
 import { snapToGrid, collidesWithOthers, findOverlappingPairs, getTableFootprint, footprintHitsObstacles, FLOOR_CLEARANCE, FLOOR_GRID, FLOOR_LABEL_BAND } from '../utils/tableOverlap';
 import { RoomShapeLayer } from './floor/RoomShapeLayer';
-import { roomHasPlan, realDimsFor, planGlyphBox, legacyCenterToCm, PLAN_GRID_CM, snapToPlanGrid, BLOCKING_ELEMENT_KINDS, rotatedElementBox } from './floor/roomGeometry';
+import { roomHasPlan, realDimsFor, planGlyphBox, legacyCenterToCm, PLAN_GRID_CM, snapToPlanGrid, BLOCKING_ELEMENT_KINDS, rotatedElementBox, snapDoorToWall } from './floor/roomGeometry';
 import { toTitleCase, getInitials } from '../utils/text';
 import { getTableMerges, getTableHidden, createTableHidden, deleteTableHidden, getRoomClosed, createRoomClosed, deleteRoomClosed, updateRoom } from '../services/apiService';
 import type { ApiError } from '../services/apiError';
@@ -349,6 +349,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       rotation: 0,
       ...(d.label ? { label: d.label } : {}),
     };
+    // Una porta nasce già nel muro: in basso al centro, poi si fa scorrere.
+    if (kind === 'door') {
+      Object.assign(el, snapDoorToWall(activeRoomPlan, el, activeRoomPlan.width_cm / 2, activeRoomPlan.height_cm));
+    }
     setDraftElements(prev => [...(prev ?? []), el]);
     setSelectedElementId(el.id);
   };
@@ -374,6 +378,18 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const el = liveElements.find(e => e.id === st.id);
     if (!el) return;
     const s = scaleRef.current || 1;
+    if (el.kind === 'door') {
+      // La porta scorre solo lungo il muro più vicino e ne prende
+      // l'orientamento: vive nel muro, non in mezzo alla sala.
+      const snapped = snapDoorToWall(
+        activeRoomPlan,
+        el,
+        st.origX + el.w_cm / 2 + (clientX - st.startX) / s,
+        st.origY + el.h_cm / 2 + (clientY - st.startY) / s,
+      );
+      setDraftElements(prev => prev?.map(x => (x.id === st.id ? { ...x, ...snapped } : x)) ?? prev);
+      return;
+    }
     let nx = snapToPlanGrid(st.origX + (clientX - st.startX) / s);
     let ny = snapToPlanGrid(st.origY + (clientY - st.startY) / s);
     nx = Math.min(Math.max(0, nx), Math.max(0, activeRoomPlan.width_cm - el.w_cm));
