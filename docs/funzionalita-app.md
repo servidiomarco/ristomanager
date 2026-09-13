@@ -601,6 +601,7 @@ Pagina unica a blocchi, con chip-àncora per saltare alla sezione. Blocchi e con
 
 | Data | Sezione | Modifica |
 |---|---|---|
+| 2026-09-13 | Comande, Cucina e Passe | La nota tecnica delle varianti (es. temperature di cottura) non compare più nel foglio varianti del cameriere: la mostra solo il monitor cucina accanto alla variante scelta. |
 | 2026-09-13 | Comande, Cucina e Passe | Griglia piatti con foto: il riquadro 16:10 non si stira più con le foto verticali (le bottiglie della carta vini si vedono intere, in contain; i piatti restano ritagliati in cover) — la griglia non balla. |
 | 2026-09-12 | Comande, Cucina e Passe | Comande a schermo intero sul desktop: sidebar ritirata in un bollo col marchio (il chevron la richiama), barra di pagina con ricerca, imbuto (solo stato) e pastiglia Live; griglia tavoli piatta per numero con le sale in pista e la riga di stato sulla tessera (totale e uscita in corso); menu a schede categoria tinte e griglia piatti con foto e stepper; comanda nella colonna di destra col riepilogo del conto e «Invia <uscita> · <totale>». Telefono e Cassa invariati. |
 | 2026-09-12 | Comande, Cucina e Passe | Il «Vino consigliato» nel foglio varianti diventa una scheda a fisarmonica chiusa di default (stessa anta unica dei gruppi facoltativi), con la somma dei calici in comanda in testata. |

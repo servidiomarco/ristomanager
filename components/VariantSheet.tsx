@@ -439,9 +439,13 @@ export const VariantSheet: React.FC<{
                           {delta > 0 ? '+' : '−'}{euro(Math.abs(delta))}
                         </span>
                       )}
-                      {(m.name_en || m.note) && (
+                      {/* Solo la traduzione: la nota tecnica (le temperature
+                          di cottura) parla alla cucina, non alla sala — la
+                          mostra il KDS accanto alla variante, qui è rumore
+                          fra il cameriere e la battuta. */}
+                      {m.name_en && (
                         <span className="ml-1.5 text-[12px] opacity-60">
-                          {[m.name_en, m.note].filter(Boolean).join(' · ')}
+                          {m.name_en}
                         </span>
                       )}
                     </button>
@@ -479,9 +483,10 @@ export const VariantSheet: React.FC<{
                             {delta > 0 ? '+' : '−'}{euro(Math.abs(delta))}
                           </span>
                         )}
-                        {(m.name_en || m.note) && (
+                        {/* Come sopra: la nota tecnica resta alla cucina. */}
+                        {m.name_en && (
                           <span className="ml-1.5 text-[12px] opacity-60">
-                            {[m.name_en, m.note].filter(Boolean).join(' · ')}
+                            {m.name_en}
                           </span>
                         )}
                       </span>
